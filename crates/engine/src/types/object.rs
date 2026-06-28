@@ -1,5 +1,5 @@
 use crate::types::card::CardDefinition;
-use crate::types::counter::CounterKind;
+use crate::types::counter::CounterSet;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, SequenceNo};
 use crate::types::zone::ZoneKind;
 
@@ -15,6 +15,12 @@ pub struct VisibilityPolicy {
     /// Visible to all players regardless of zone default (e.g. battlefield objects).
     pub public: bool,
     pub visible_to: Vec<PlayerId>,
+}
+
+impl VisibilityPolicy {
+    pub fn is_visible_to(&self, player: PlayerId) -> bool {
+        todo!()
+    }
 }
 
 /// Mutable runtime instance of a card, token, or emblem. Copiable values are
@@ -38,10 +44,29 @@ pub struct GameObject {
     pub face_down: bool,
     pub phased_out: bool,
     pub damage_marked: u32,
-    pub counters: Vec<(CounterKind, i32)>,
+    pub counters: CounterSet,
     pub attachments: Vec<ObjectId>,
     pub attached_to: Option<ObjectId>,
     /// For layer/dependency timestamp ordering (CR 613).
     pub timestamp: SequenceNo,
     pub visibility: VisibilityPolicy,
+}
+
+impl GameObject {
+    pub fn new(
+        object_id: ObjectId,
+        definition: CardDefinition,
+        owner: PlayerId,
+        zone: ZoneKind,
+        timestamp: SequenceNo,
+    ) -> Self {
+        todo!()
+    }
+
+    /// `zone == Battlefield`. A permanent is the only state a `GameObject`
+    /// can have continuous effects/static abilities active from (CR 110.1).
+    pub fn is_permanent(&self) -> bool {
+        todo!()
+    }
+
 }

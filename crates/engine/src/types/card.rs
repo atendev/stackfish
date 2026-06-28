@@ -13,6 +13,14 @@ pub enum PTValue {
     CharacteristicDefining(String),
 }
 
+impl PTValue {
+    /// `Some` only for `Fixed` — a CDA's number isn't known without running
+    /// its script callback against current game state, which this can't do.
+    pub fn as_fixed(&self) -> Option<i32> {
+        todo!()
+    }
+}
+
 bitflags! {
     /// Bitmask of `CardType`. A card can be multiple types at once (e.g.
     /// artifact creature).
@@ -71,6 +79,16 @@ pub enum Supertype {
 /// distinction from arbitrary `String`s, not to enumerate every value.
 pub struct Subtype(pub String);
 
+impl Subtype {
+    pub fn new(name: impl Into<String>) -> Self {
+        todo!()
+    }
+
+    pub fn as_str(&self) -> &str {
+        todo!()
+    }
+}
+
 pub enum ScriptReference {
     /// Lookup key into the external card-database project's script registry.
     ByKey(String),
@@ -102,4 +120,24 @@ pub struct CardDefinition {
     /// Stub: battle defense, unused v1.
     pub defense: Option<PTValue>,
     pub script_ref: ScriptReference,
+}
+
+impl CardDefinition {
+    /// Per CR 105.2a: color comes from mana cost symbols and/or an explicit
+    /// `color_indicator`, not stored as its own redundant field.
+    pub fn colors(&self) -> ColorSet {
+        todo!()
+    }
+
+    pub fn has_type(&self, card_type: CardType) -> bool {
+        todo!()
+    }
+
+    pub fn has_supertype(&self, supertype: Supertype) -> bool {
+        todo!()
+    }
+
+    pub fn has_subtype(&self, subtype: &str) -> bool {
+        todo!()
+    }
 }

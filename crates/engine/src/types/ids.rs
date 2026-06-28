@@ -22,3 +22,23 @@ pub struct SequenceNo(pub u64);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CommandId(pub u64);
+
+/// Anything that can legally be targeted, attacked, or dealt damage:
+/// permanents/spells/abilities (`Object`) or a player directly (`Player`).
+/// Battles and planeswalkers are still `Object` — they're `GameObject`s like
+/// any other permanent; `Player` only covers the one addressable thing in
+/// the game that *isn't* a `GameObject`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Target {
+    Object(ObjectId),
+    Player(PlayerId),
+}
+
+/// Opaque reference to one loaded Lua callback (a condition/cost/target/
+/// operation function, a continuous-effect predicate, a replacement
+/// pattern-matcher, etc) inside a `ScriptRuntime`. A plain handle rather
+/// than holding an `mlua::Function` directly so data types (`ContinuousEffect`,
+/// `ReplacementEffect`, `RegisteredAbility`) can reference "which script"
+/// without themselves depending on `mlua` or holding VM-tied state.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ScriptHandle(pub u64);

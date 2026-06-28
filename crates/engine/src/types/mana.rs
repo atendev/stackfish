@@ -31,6 +31,14 @@ pub enum AtomicManaSymbol {
     Phyrexian(Color),
 }
 
+impl AtomicManaSymbol {
+    /// Colors this atom contributes to a card's color (CR 202.2) — empty for
+    /// `Generic`/`Colorless`/`Snow`.
+    pub fn colors(&self) -> ColorSet {
+        todo!()
+    }
+}
+
 /// One symbol within a mana cost string. Hybrid is always exactly two
 /// atoms, "pay either one" — covers color/color (`{W/U}`), generic/color
 /// (`{2/W}`), and hybrid Phyrexian (`{W/P}` paired with a second color,
@@ -47,8 +55,42 @@ pub enum ManaSymbol {
     X,
 }
 
+impl ManaSymbol {
+    /// Union of colors contributed by this symbol's atom(s) — for `Hybrid`,
+    /// a hybrid symbol is all of its component colors (CR 107.4e/f), not
+    /// just one.
+    pub fn colors(&self) -> ColorSet {
+        todo!()
+    }
+}
+
 pub struct ManaCost {
     pub symbols: Vec<ManaSymbol>,
+}
+
+impl ManaCost {
+    pub fn from_symbols(symbols: Vec<ManaSymbol>) -> Self {
+        todo!()
+    }
+
+    pub fn from_pool(pool: &ManaPool) -> Self {
+        todo!()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        todo!()
+    }
+
+    /// Sum of all `Generic`/numeric components. Doesn't include colored or
+    /// `X` symbols.
+    pub fn generic_total(&self) -> u32 {
+        todo!()
+    }
+
+    /// Union of colors across all symbols (CR 202.2).
+    pub fn colors(&self) -> ColorSet {
+        todo!()
+    }
 }
 
 /// A player's floating mana pool. Cleared at the end of each step/phase per CR 106.4.
@@ -59,4 +101,24 @@ pub struct ManaPool {
     pub red: u32,
     pub green: u32,
     pub colorless: u32,
+}
+
+impl ManaPool {
+    pub fn empty() -> Self {
+        todo!()
+    }
+
+    pub fn add(&mut self, symbol: AtomicManaSymbol, amount: u32) {
+        todo!()
+    }
+
+    /// Total mana of any type/color currently floating.
+    pub fn total(&self) -> u32 {
+        todo!()
+    }
+
+    /// Cleared at the end of each step/phase per CR 106.4.
+    pub fn clear(&mut self) {
+        todo!()
+    }
 }

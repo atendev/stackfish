@@ -1,5 +1,5 @@
 use crate::types::cost::CostPayment;
-use crate::types::ids::{ObjectId, PlayerId};
+use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::object::GameObject;
 
 pub enum StackEntryKind {
@@ -19,7 +19,24 @@ pub struct StackObject {
     pub source_lki: Option<GameObject>,
     pub controller: PlayerId,
     pub chosen_modes: Vec<u32>,
-    pub targets: Vec<ObjectId>,
+    pub targets: Vec<Target>,
     pub x_value: Option<u32>,
     pub costs_paid: Vec<CostPayment>,
+    /// Which script callback to invoke on resolution. Present in the
+    /// original adaptation doc's `StackObject` spec ("resolution callback
+    /// reference") but dropped in Phase 1 before the script bridge existed
+    /// to give it a concrete type — restored now as a `ScriptHandle`.
+    pub operation: ScriptHandle,
+}
+
+impl StackObject {
+    pub fn new(
+        stack_id: ObjectId,
+        kind: StackEntryKind,
+        source: ObjectId,
+        controller: PlayerId,
+        operation: ScriptHandle,
+    ) -> Self {
+        todo!()
+    }
 }

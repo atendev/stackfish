@@ -28,3 +28,34 @@ pub struct Zone {
     pub owner: Option<PlayerId>,
     pub contents: VecDeque<ObjectId>,
 }
+
+impl Zone {
+    pub fn new(kind: ZoneKind, owner: Option<PlayerId>) -> Self {
+        todo!()
+    }
+
+    pub fn push_top(&mut self, object: ObjectId) {
+        todo!()
+    }
+
+    pub fn push_bottom(&mut self, object: ObjectId) {
+        todo!()
+    }
+
+    /// Removes `object` from wherever it sits in `contents`, if present.
+    pub fn remove(&mut self, object: ObjectId) -> Option<ObjectId> {
+        todo!()
+    }
+
+    pub fn contains(&self, object: ObjectId) -> bool {
+        todo!()
+    }
+
+    pub fn len(&self) -> usize {
+        todo!()
+    }
+
+    pub fn top(&self) -> Option<ObjectId> {
+        todo!()
+    }
+}

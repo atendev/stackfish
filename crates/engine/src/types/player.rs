@@ -1,4 +1,4 @@
-use crate::types::counter::CounterKind;
+use crate::types::counter::CounterSet;
 use crate::types::ids::{ObjectId, PlayerId};
 use crate::types::mana::ManaPool;
 
@@ -15,15 +15,42 @@ pub struct Emblem {
     pub ability_text: String,
 }
 
+impl Emblem {
+    pub fn new(emblem_id: ObjectId, source: ObjectId, ability_text: impl Into<String>) -> Self {
+        todo!()
+    }
+}
+
 pub struct PlayerState {
     pub player_id: PlayerId,
     pub life: i32,
     pub mana_pool: ManaPool,
     /// Player-level counters: poison, energy, experience, etc. (CR 121.5).
-    pub counters: Vec<(CounterKind, i32)>,
+    pub counters: CounterSet,
     pub emblems: Vec<Emblem>,
     /// Commander-specific: cumulative combat damage taken from each commander
     /// source. 21+ from a single source means this player loses (CR 903.10a).
     pub commander_damage_taken: Vec<(ObjectId, u32)>,
     pub eliminated: bool,
+}
+
+impl PlayerState {
+    pub fn new(player_id: PlayerId, starting_life: i32) -> Self {
+        todo!()
+    }
+
+    pub fn lose_life(&mut self, amount: i32) {
+        todo!()
+    }
+
+    pub fn gain_life(&mut self, amount: i32) {
+        todo!()
+    }
+
+    /// Commander damage from a single source reaching 21 means this player
+    /// loses (CR 903.10a) — exposed as a query so the SBA loop can check it
+    /// without duplicating the threshold elsewhere.
+    pub fn commander_damage_from(&self, source: ObjectId) -> u32 {
+        todo!()
+    }
 }

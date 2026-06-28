@@ -1,5 +1,5 @@
 use crate::types::cost::PaymentPlan;
-use crate::types::ids::{CommandId, ObjectId, PlayerId};
+use crate::types::ids::{CommandId, ObjectId, PlayerId, Target};
 
 /// `EngineCommand` deliberately mirrors `PlayerActionKind` 1:1 rather than
 /// decomposing into a lower tier ("pay cost", "push onto stack", ...). The
@@ -23,19 +23,29 @@ use crate::types::ids::{CommandId, ObjectId, PlayerId};
 /// information choices must always arrive as an explicit `PlayerAction`,
 /// never as an implicit default chosen by the engine.
 pub enum PlayerActionKind {
-    CastSpell { card: ObjectId, modes: Vec<u32>, targets: Vec<ObjectId>, x_value: Option<u32> },
-    ActivateAbility { source: ObjectId, ability_index: u32, targets: Vec<ObjectId> },
+    CastSpell { card: ObjectId, modes: Vec<u32>, targets: Vec<Target>, x_value: Option<u32> },
+    ActivateAbility { source: ObjectId, ability_index: u32, targets: Vec<Target> },
     PlayLand { card: ObjectId },
     PassPriority,
-    DeclareAttackers { attackers: Vec<ObjectId>, defending_players: Vec<PlayerId> },
+    /// Each attacker paired with what it's attacking — a player, or a
+    /// planeswalker/battle permanent (CR 506.4). Not split into a separate
+    /// "defending players" list: which defender goes with which attacker is
+    /// the declaration itself, not derivable from two parallel lists.
+    DeclareAttackers { attackers: Vec<(ObjectId, Target)> },
     DeclareBlockers { blocks: Vec<(ObjectId, ObjectId)> },
     SubmitPayment { plan: PaymentPlan },
-    MakeChoice { description: String, selection: Vec<ObjectId> },
+    MakeChoice { description: String, selection: Vec<Target> },
 }
 
 pub struct PlayerAction {
     pub player: PlayerId,
     pub kind: PlayerActionKind,
+}
+
+impl PlayerAction {
+    pub fn new(player: PlayerId, kind: PlayerActionKind) -> Self {
+        todo!()
+    }
 }
 
 /// Fully specified, validated executable unit produced from a `PlayerAction`.

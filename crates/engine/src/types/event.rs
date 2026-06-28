@@ -1,5 +1,5 @@
 use crate::types::counter::CounterKind;
-use crate::types::ids::{CommandId, EventId, ObjectId, PlayerId, SequenceNo};
+use crate::types::ids::{CommandId, EventId, ObjectId, PlayerId, SequenceNo, Target};
 use crate::types::zone::ZoneKind;
 
 /// Ledger granularity (DESIGN.md open question): logs every micro-step, not
@@ -10,7 +10,7 @@ use crate::types::zone::ZoneKind;
 pub enum GameEventKind {
     ZoneChange { object: ObjectId, from: ZoneKind, to: ZoneKind },
     LifeChanged { player: PlayerId, delta: i32 },
-    DamageDealt { source: ObjectId, target: ObjectId, amount: u32 },
+    DamageDealt { source: ObjectId, target: Target, amount: u32 },
     CounterAdded { object: ObjectId, kind: CounterKind, amount: i32 },
     ManaAdded { player: PlayerId, amount: crate::mana::ManaCost },
     PrioritySet { player: PlayerId },
@@ -34,4 +34,10 @@ pub struct GameEvent {
     pub kind: GameEventKind,
     pub caused_by_command: Option<CommandId>,
     pub parent_event: Option<EventId>,
+}
+
+impl GameEvent {
+    pub fn new(event_id: EventId, sequence_no: SequenceNo, kind: GameEventKind) -> Self {
+        todo!()
+    }
 }

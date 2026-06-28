@@ -1,4 +1,4 @@
-use crate::{CardTypeSet, Subtype, SupertypeSet, ObjectId, SequenceNo, ColorSet, ManaCost};
+use crate::{CardTypeSet, Subtype, SupertypeSet, ObjectId, SequenceNo, ColorSet, ManaCost, GameObject, GameEventKind, ScriptHandle};
 
 /// CR 613.1 layers, with sublayers for layer 7 (power/toughness).
 pub enum Layer {
@@ -32,16 +32,26 @@ pub enum EffectDuration {
     Custom(String),
 }
 
-/// A registered continuous effect. `predicate`/`apply` are descriptions here;
-/// concrete representation (closure vs script callback handle) is decided
-/// in Phase 2.
+/// A registered continuous effect. `affected_predicate` is a `ScriptHandle`
+/// into the card's loaded Lua script (resolved via `ScriptRuntime` — see
+/// `script.rs`) — decided in Phase 2's script-bridge pass; Phase 1 had this
+/// as a `String` placeholder.
 pub struct ContinuousEffect {
     pub source: ObjectId,
     pub layer: Layer,
-    /// Description of which objects this effect affects, refined at bind time.
-    pub affected_predicate: String,
+    pub affected_predicate: ScriptHandle,
     pub timestamp: SequenceNo,
     pub duration: EffectDuration,
+}
+
+impl ContinuousEffect {
+    /// Whether `object` is in this effect's affected set. Calling
+    /// `affected_predicate` requires a `ScriptRuntime` — this signature will
+    /// need one threaded through (or to move to `layers.rs` as a free
+    /// function taking `&ScriptRuntime`) once that wiring is settled.
+    pub fn applies_to(&self, object: &GameObject) -> bool {
+        todo!()
+    }
 }
 
 /// Consumption policy for a replacement/prevention effect (CR 614, 615).
@@ -54,9 +64,16 @@ pub enum ConsumptionPolicy {
 
 pub struct ReplacementEffect {
     pub source: ObjectId,
-    /// Description of which event(s) this matches, refined at bind time.
-    pub event_pattern: String,
+    /// `ScriptHandle` into the card's loaded Lua script, same as
+    /// `ContinuousEffect::affected_predicate` above.
+    pub event_pattern: ScriptHandle,
     pub consumption: ConsumptionPolicy,
+}
+
+impl ReplacementEffect {
+    pub fn matches(&self, event: &GameEventKind) -> bool {
+        todo!()
+    }
 }
 
 /// The live, in-game characteristics of an object — output shape of the

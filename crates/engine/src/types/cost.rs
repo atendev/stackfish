@@ -1,4 +1,4 @@
-use crate::{CardTypeSet, ManaCost, ObjectId};
+use crate::{CardTypeSet, GameObject, ManaCost, ObjectId};
 
 /// Structured stand-in for "filter described in oracle text" — e.g.
 /// "sacrifice a creature", "discard a card at random", "tap an untapped
@@ -11,6 +11,15 @@ pub struct FilterSpec {
     pub controller: Option<FilterController>,
     pub random: bool,
     pub extra: Option<String>,
+}
+
+impl FilterSpec {
+    /// Whether `object` satisfies this filter. Resolving `extra` (if set)
+    /// requires the script bridge, so this needs more context than just the
+    /// object once that's wired up — signature may grow.
+    pub fn matches(&self, object: &GameObject) -> bool {
+        todo!()
+    }
 }
 
 pub enum FilterController {
@@ -38,6 +47,12 @@ pub struct CostSpec {
     pub alternative: Vec<AlternativeCost>,
 }
 
+impl CostSpec {
+    pub fn mana_only(cost: ManaCost) -> Self {
+        todo!()
+    }
+}
+
 pub enum CostPayment {
     Mana(ManaCost),
     Sacrifice(ObjectId),
@@ -62,4 +77,14 @@ pub enum CostPayment {
 /// `PaymentPlan` is paid or none of it is.
 pub struct PaymentPlan {
     pub payments: Vec<CostPayment>,
+}
+
+impl PaymentPlan {
+    /// Validates this plan atomically against `spec` (every cost present,
+    /// nothing extra, mana actually affordable). Returning `bool` here as a
+    /// placeholder — real version will likely return a `Result` with a
+    /// reason once validation failure modes are designed.
+    pub fn validate(&self, spec: &CostSpec) -> bool {
+        todo!()
+    }
 }

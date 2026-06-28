@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::types::ability::RegisteredAbility;
 use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::ids::{ObjectId, PlayerId};
@@ -7,7 +8,7 @@ use crate::types::object::GameObject;
 use crate::types::player::PlayerState;
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
-use crate::types::zone::Zone;
+use crate::types::zone::{Zone, ZoneKind};
 
 /// Seeded once at game start. Every draw is itself a logged `GameEvent`
 /// (`RngDrawn`), not an ambient side effect, so replay is exact.
@@ -42,11 +43,39 @@ pub struct GameState {
     pub stack: Vec<StackObject>,
     pub continuous_effects: Vec<ContinuousEffect>,
     pub replacement_effects: Vec<ReplacementEffect>,
+    /// Every card's registered triggered/activated/static abilities, flat —
+    /// same reasoning as `continuous_effects`/`replacement_effects` above.
+    pub abilities: Vec<RegisteredAbility>,
     pub ledger: Vec<GameEvent>,
     pub rng: RngState,
 }
 
-/// Result of one `engine.step()` call. Concrete shape (what callers can
-/// observe/act on) is defined in Phase 2 — this is a placeholder marker type
-/// so `GameState` ownership boundaries are visible now.
-pub struct StepResult;
+impl GameState {
+    pub fn object(&self, id: ObjectId) -> Option<&GameObject> {
+        todo!()
+    }
+
+    pub fn object_mut(&mut self, id: ObjectId) -> Option<&mut GameObject> {
+        todo!()
+    }
+
+    pub fn player(&self, id: PlayerId) -> Option<&PlayerState> {
+        todo!()
+    }
+
+    pub fn player_mut(&mut self, id: PlayerId) -> Option<&mut PlayerState> {
+        todo!()
+    }
+
+    /// Looks up the one `Zone` matching `kind`/`owner` in `zones`. Panics-
+    /// worthy if more than one matches — that'd mean `zones` was built
+    /// wrong (e.g. two battlefields) — but that invariant isn't enforced
+    /// yet (Phase 6).
+    pub fn zone(&self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&Zone> {
+        todo!()
+    }
+
+    pub fn zone_mut(&mut self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&mut Zone> {
+        todo!()
+    }
+}
