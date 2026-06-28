@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2"
+mlua = { version = "0.9", features = ["lua54", "vendored"] }
