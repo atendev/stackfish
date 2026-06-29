@@ -779,6 +779,64 @@ separate deliberate task.
 `cargo test --workspace` reconfirmed green after the change (no behavior touched, only ledger
 event size grew slightly via the new field).
 
+## Phase 5: phase5/play-land slice (merged to master)
+
+Branch `phase5/play-land`, off master. Same "kept, reviewed, merged `--no-ff`" treatment as
+`phase5/pass-priority-loop`. Slice scope: `PlayerActionKind::PlayLand` (CR 305.1) as the first real
+caller of the zone-manipulation helpers (`Zone::remove`/`push_bottom`,
+`GameState::object`/`object_mut`/`zone`/`zone_mut`), all `todo!()` since Phase 1. Reuses the
+existing `ReplacementCheck`→`CommitEvents`→`SbaLoop`→`CollectTriggers`→`PutTriggersApnap` pipeline
+proven generic by the PassPriority slice — no new pipeline wiring needed, just a new producer.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` green both pre-merge (on the branch) and
+post-merge (on master) — 9 tests in `crates/engine/tests/phase5_play_land.rs`, 1 new in-crate unit
+test (`types::game::tests::zone_helpers_roundtrip`), plus the pre-existing 3+8+1 suites unaffected.
+
+**What got implemented:**
+- `Zone::remove`/`push_bottom`, `GameState::object`/`object_mut`/`zone`/`zone_mut` — straight
+  one-line fills, exactly matching the TODO comments already on each. `Zone::new`/`push_top`/
+  `contains`/`len`/`top` and `GameState::player`/`player_mut` deliberately left `todo!()` — not
+  needed by this slice.
+- `commands::execute_command`'s `PlayLand` arm: validates the card is actually a `Land`
+  (`CardTypeSet::LAND`) and actually sits in the actor's hand under the actor's control, snapshots
+  it for `ZoneChange::last_known_info` (CR 603.10), moves it hand→battlefield via the helpers
+  above, sets `GameObject.zone` to match (single source of truth for *order* is still the zone
+  `VecDeque`; this field is just the classification, kept in sync by hand here since nothing else
+  does it for this code path yet). `broke_pass_chain: true`, `priority_handoff: Unchanged`.
+- Mid-review, the human flagged that the original implementation skipped CR 305.1/305.2/305.3
+  entirely (priority+main-phase+empty-stack timing, and the one-land-per-turn limit) — caught
+  before merge, not after. Added `commands::is_sorcery_speed(state, player)` as a standalone
+  predicate (priority held + actor's own turn + `Phase::Main` + empty stack), called from
+  `PlayLand` and documented as the thing `CastSpell`/`ActivateAbility` will need too once real.
+  Added `GameState.lands_played_this_turn: HashMap<PlayerId, u32>`, incremented by `PlayLand`,
+  cleared in `engine::Engine::advance_turn_step`'s Cleanup→next-turn transition (same trigger as
+  `postcombat_main`'s reset).
+
+**STRUCT DEVIATIONS:**
+- `GameState` needed `lands_played_this_turn: HashMap<PlayerId, u32>` — not anticipated until the
+  human's sorcery-speed/land-limit review pass; same "verification tooling has to track new
+  fields" ripple as `postcombat_main` before it (every existing `GameState` struct literal across
+  `engine.rs`, both `tests/phase5_*.rs` files, `crates/scenario/src/lib.rs`, and `game.rs`'s own
+  test module needed the field threaded through).
+
+**INTERFACE DEVIATIONS:**
+- `commands::is_sorcery_speed` — new private fn, not anticipated in the original slice plan (which
+  only called for the bare hand→battlefield move). Added in direct response to the human's comp-
+  rules review, not part of the original acceptance criteria.
+
+**SCOPE DEVIATIONS:**
+- `engine::Engine::advance_turn_step`'s Cleanup arm — one new line (`lands_played_this_turn.clear()`)
+  alongside the existing `postcombat_main = false` reset. Not in the original TODO list for this
+  slice; needed once the land-limit tracking existed at all.
+
+**UNRESOLVED (flagged with explicit `TODO` comments in `commands.rs`, not just here):**
+- `is_sorcery_speed` doesn't consult `state.continuous_effects`/`abilities` for rules-text timing
+  permissions (flash-granting effects, "play lands as though it were your main phase," etc.) —
+  there's no query API on `continuous_effects` yet (`layers.rs` is still mostly `todo!()`).
+- The land-limit check is hardcoded against the literal `1`, ignoring any continuous effect that
+  would raise a player's allowed land-plays-per-turn (e.g. "you may play an additional land each
+  turn") — same blocker as above.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
