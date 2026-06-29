@@ -619,15 +619,18 @@ Three related structural gaps, fixed together:
    push for `ordered` is still a TODO there, blocked on the same script-bridge gap as everywhere
    else, but the pipeline-end transition itself is no longer ad hoc).
 
-## Phase 5: Dry Run #2 — pass-priority-loop slice
+## Phase 5: Dry Run #2 — pass-priority-loop slice (merged to master)
 
 Branch `phase5/pass-priority-loop`, off master. Per the human's explicit instruction this time,
-the branch is **not** discarded after verification (contrast Dry Run #1, which was deleted) — kept
-around for review, to be merged once approved. Slice scope: finish the minimal loop back to
-`PriorityWindow` that the `ProcessState` correctness pass (above) left structurally wired but
-leaf-`todo!()`'d — `PassPriority` execution, all-pass detection's two branches
-(`AdvanceTurnStep`/`ResolveStackTop`), and the empty-trigger no-op path through
-`CollectTriggers`/`PutTriggersApnap`.
+the branch was **not** discarded after verification (contrast Dry Run #1, which was deleted) —
+kept around for review, then merged to master (`--no-ff`) once approved, including a follow-up
+verification pass (ordering/pass-chain/pipeline-context/trigger-permutation checks, second commit
+on the branch) before the merge. Unlike Dry Run #1, master now actually carries this
+implementation — treat everything below as real, current behavior, not a discarded experiment.
+Slice scope: finish the minimal loop back to `PriorityWindow` that the `ProcessState` correctness
+pass (above) left structurally wired but leaf-`todo!()`'d — `PassPriority` execution, all-pass
+detection's two branches (`AdvanceTurnStep`/`ResolveStackTop`), and the empty-trigger no-op path
+through `CollectTriggers`/`PutTriggersApnap`.
 
 **VERIFICATION RESULT:** Pass. `cargo test --workspace` — 7 new tests in
 `crates/engine/tests/phase5_pass_priority_loop.rs` plus the existing `scenarios.rs` harness (now
@@ -715,6 +718,33 @@ via `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/pass_priority.t
   empty-registry-only fast path are both real no-ops *today* (nothing registered in any scenario
   this slice tests), but neither is closer to the actual CR 614-616/704.5 logic than before — purely
   "doesn't block the pipeline from terminating," not partial progress on either subsystem.
+
+**Follow-up verification pass (same branch, second commit, before merge):** the human asked for a
+targeted re-check against five specific risks before merging. Found and fixed one real gap, added
+coverage for the rest:
+- `submit_trigger_order` only checked `chosen_order.len() == group.len()` — same length doesn't
+  rule out a substituted, dropped+duplicated, or repeated `PendingTrigger`. Added a real
+  `is_permutation` multiset check (remove-and-match, no `Ord` needed) and a new
+  `TriggerOrderError::NotAPermutation`. Required adding `PartialEq, Eq` to `PendingTrigger`. Unit
+  tests live in `engine.rs` itself (`#[cfg(test)] mod tests`), not the integration test file —
+  exercising this needs to set `Engine::process_state` directly, which is private outside the crate.
+- Ordering (`Vec::pop()` vs `VecDeque::pop_front()`): audited, no bugs found. `state.stack.pop()` is
+  correctly LIFO (intentional — last object pushed resolves first); `ReplacementCheck::remaining`
+  and `PutTriggersApnap::pending_groups` both correctly use `pop_front` (FIFO) — the Dry Run #1
+  reversal bug (commit `e3fd3ba`) was already fixed before this slice started.
+- "Non-pass action resets pass chain": real implementation only had `PassPriority` to exercise this
+  with (every other `PlayerActionKind` still `todo!()`), so added a minimal `MakeChoice` stub in
+  `commands.rs` (`events: Vec::new()`, `broke_pass_chain: true`, `priority_handoff: Unchanged`) —
+  not a real implementation of `MakeChoice` itself, exists solely so the reset wiring has a
+  non-PassPriority command to test against. New test: `non_pass_action_breaks_pass_chain`.
+- `pipeline_context` clearing: the existing test only checked the post-condition (`None` after
+  drain) — strengthened to also assert it's `Some` immediately after the first `step()` of a run,
+  so the test can't pass trivially from a context that was never set in the first place.
+- All-pass+empty-stack / all-pass+non-empty-stack branches: already covered by Dry Run #2's
+  original tests, re-confirmed correct on re-read, no changes needed.
+
+**MERGE:** `--no-ff` into master. Both `phase5/pass-priority-loop` commits (`9cb46d6`,
+`23350de`) landed; `cargo test --workspace` re-confirmed green on master post-merge.
 
 ## Mistakes caught (don't repeat)
 
