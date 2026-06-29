@@ -139,6 +139,21 @@ pub enum ManaUnit {
 }
 
 impl ManaPool {
+    /// Inverse of `cost::spend` (`cost.rs`) — adds one literal unit instead
+    /// of removing one. Used by CR 605 mana abilities, which add exact
+    /// units to the pool rather than a `ManaCost`-shaped amount (see
+    /// `ManaUnit`'s own doc comment for why this is the narrower vocabulary).
+    pub fn add_unit(&mut self, unit: ManaUnit) {
+        match unit {
+            ManaUnit::Colored(Color::White) => self.white += 1,
+            ManaUnit::Colored(Color::Blue) => self.blue += 1,
+            ManaUnit::Colored(Color::Black) => self.black += 1,
+            ManaUnit::Colored(Color::Red) => self.red += 1,
+            ManaUnit::Colored(Color::Green) => self.green += 1,
+            ManaUnit::Colorless => self.colorless += 1,
+        }
+    }
+
     pub fn empty() -> Self {
         // TODO: all fields zero.
         todo!()

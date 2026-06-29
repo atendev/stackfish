@@ -26,7 +26,14 @@ pub enum GameEventKind {
     LifeChanged { player: PlayerId, delta: i32 },
     DamageDealt { source: ObjectId, target: Target, amount: u32 },
     CounterAdded { object: ObjectId, kind: CounterKind, amount: i32 },
-    ManaAdded { player: PlayerId, amount: crate::mana::ManaCost },
+    /// First real tap producer (CR 602.5a's tap-cost activation, e.g. a
+    /// mana ability) — nothing minted this event before now.
+    Tapped { object: ObjectId },
+    /// `units`: the exact literal mana added (CR 605), same "literal
+    /// units, not a cost shape" vocabulary `CostPaid`/`CostPayment::Mana`
+    /// already use — retargeted from a `ManaCost`-shaped `amount` (unused
+    /// anywhere until this slice) for consistency.
+    ManaAdded { player: PlayerId, units: Vec<crate::mana::ManaUnit> },
     /// CR 601.2i/118: `payer` committed a `PaymentPlan` covering
     /// `stack_id`'s cost - the ledger fact that completes the cast process
     /// `CastSpell`'s own events started (card moved to stack), distinct from

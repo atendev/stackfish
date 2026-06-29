@@ -1154,6 +1154,79 @@ payment (a colored-pip-only `ManaUnit` can't represent paying a Phyrexian pip wi
 instance — that's still a real gap, just not this slice's), CR 601.6 (failed payment leaves the
 engine stuck in `AwaitingPayment` rather than unwinding the cast).
 
+## Phase 5: phase5/activate-ability-mana slice
+
+Branch `phase5/activate-ability-mana`, off master. Slice scope: baseline `ActivateAbility` (CR
+602), implemented far enough for one concrete case end-to-end: a mana ability (CR 605) that taps
+its source and adds mana to the pool. CR 605.3b's mana-ability exception (no target, never uses
+the stack, resolves immediately as part of activation) is the whole point of this slice — it's
+the first `PlayerActionKind` variant that deliberately does *not* follow the cast-a-spell-shaped
+pipeline (no stack push, no `AwaitingPayment` pause). Non-mana activated abilities get structural
+lookup/validation only; effect resolution stays `todo!()` (same script-bridge gap as everywhere
+else).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 8 new tests in
+`crates/engine/tests/phase5_activate_ability_mana.rs`, all 40 prior tests unaffected. 48 tests
+total, 0 failed.
+
+**What got implemented:**
+- `ability.rs`: `AbilityEffect::AddMana(Vec<ManaUnit>)` — structural stand-in for "this ability's
+  effect is exactly CR 605 mana addition," reusing `ManaUnit` (the same "literal units, not a cost
+  shape" vocabulary `CostPayment::Mana` already uses). `RegisteredAbility` gained `effect:
+  Option<AbilityEffect>`. `AbilityKind` gained `Clone, Copy, PartialEq, Eq, Debug` — needed to
+  compare/match it for the first time.
+- `mana.rs`: `ManaPool::add_unit` — real body, the inverse of `cost::spend`.
+- `event.rs`: new `GameEventKind::Tapped { object }` (first real tap producer in the codebase).
+  `GameEventKind::ManaAdded` retargeted from `amount: ManaCost` (unused anywhere) to `units:
+  Vec<ManaUnit>`, matching `CostPaid`/`CostPayment::Mana`'s convention instead of introducing a
+  second, inconsistent mana vocabulary.
+- `commands.rs`'s `execute_command`: new `ActivateAbility` arm. Validates, in order: actor holds
+  priority (CR 117.3c) → source exists and actor controls it → the `ability_index`th ability on
+  that source exists and is `AbilityKind::Activated`. Branches on `ability.effect`:
+  `Some(AddMana(units))` rejects a non-empty `targets` (CR 605.1a), rejects an already-tapped
+  source, then taps the source and adds `units` to the actor's pool — `broke_pass_chain: true`,
+  `priority_handoff: Unchanged`, `requires_payment: None`, no `StackObject` ever created. `None`
+  (a non-mana ability) falls through to `todo!()` after the same structural checks.
+- `triggers.rs`'s `collect_triggers`: the no-op fast path widened from "`state.abilities` is
+  empty" to "`state.abilities` has no `Triggered`-kind entry" — see Fix below, this slice's tests
+  are the first ever to populate `state.abilities` with anything, and the old guard didn't
+  distinguish ability kind.
+
+**STRUCT DEVIATIONS:** None beyond `AbilityEffect`/`RegisteredAbility.effect` (exactly as scoped).
+
+**INTERFACE DEVIATIONS:** None — `ManaPool::add_unit`'s signature matched the plan as drafted.
+
+**SCOPE DEVIATIONS:**
+- `triggers.rs` (not in the original TODO list for this slice) — see the Fix below.
+
+**Fix: `collect_triggers`'s no-op guard didn't distinguish ability kind.** `collect_triggers`
+already had an explicit "no-op when `state.abilities` is empty" fast path (added in the
+pass-priority-loop slice, with a comment saying it'd need replacing "the moment any ability
+actually exists"). This slice is the first to ever populate `state.abilities` with something
+*non*-`Triggered` (an `Activated` mana ability) — the guard's `is_empty()` check doesn't care about
+kind, so simply registering a mana ability tripped the `todo!()` below it on every `step()` that
+reaches `CollectTriggers`, even though there's still genuinely nothing triggered to scan for.
+Fixed by checking for at least one `Triggered`-kind entry instead of mere non-emptiness — same
+"no-op when there's truly nothing to match against" rationale the original guard already
+documented, just widened to the case this slice newly exercises. Real condition evaluation (the
+actual `todo!()` underneath) is untouched.
+
+**UNRESOLVED (flagged with explicit `TODO` comments in `commands.rs`, not just here):**
+- CR 602.5a (summoning sickness for tap-cost abilities) — not checked; `GameObject` has no
+  "controlled since" timestamp to check against, flagged in the original slice scope as
+  out-of-scope.
+- Non-mana activated abilities (`ability.effect == None`) — structural lookup/validation is real,
+  but everything past that (cost determination beyond "tap," target validation, pushing a
+  `StackObject`, resolving via `operation`) is `todo!()`, blocked on the script bridge like every
+  other ability/operation gap in this codebase.
+- `ability_index` is "the nth `Activated`/whatever-kind ability on this source by registration
+  order in `state.abilities`," not a stable id — fine for this slice's single-mana-ability-per-card
+  test fixtures, but will need revisiting once a card can have abilities added/removed at runtime
+  (e.g. a granted ability) without shifting every other ability's index.
+- No TOML scenario yet exercising this through the CLI — needs a new `ActionSpec`/setup hook to
+  register a `RegisteredAbility` on a card from TOML, itself needing its own scoping (per the
+  original slice plan, deliberately deferred rather than improvised here).
+
 ## Next slice
 
 ## Mistakes caught (don't repeat)
