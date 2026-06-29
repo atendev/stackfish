@@ -1,7 +1,9 @@
+use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::PlayerId;
+use crate::types::zone::ZoneKind;
 
 /// Carrying out an already-validated `EngineCommand` failed partway —
 /// distinct from `ActionError` (engine.rs), which rejects an action before
@@ -105,6 +107,44 @@ pub fn execute_command(
                 priority_handoff: PriorityHandoff::Unchanged,
             });
         }
+        PlayerActionKind::PlayLand { card } => {
+            // CR 305.1: lands aren't spells, so this goes straight to the
+            // battlefield - no stack object, no cost/timing beyond "is it
+            // actually a Land, and is it actually in this player's hand."
+            let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
+            if !object.definition.card_types.contains(CardTypeSet::LAND) {
+                return Err(CommandError::IllegalAction("card is not a Land".to_string()));
+            }
+            if object.zone != ZoneKind::Hand || object.controller != command.actor {
+                return Err(CommandError::IllegalAction(
+                    "card is not in actor's hand".to_string(),
+                ));
+            }
+            // Snapshot before the move - CR 603.10's last_known_info (see
+            // GameEventKind::ZoneChange's doc comment).
+            let last_known_info = object.clone();
+
+            state
+                .zone_mut(ZoneKind::Hand, Some(command.actor))
+                .ok_or_else(|| CommandError::IllegalAction("actor has no hand zone".to_string()))?
+                .remove(card);
+            state
+                .zone_mut(ZoneKind::Battlefield, None)
+                .ok_or_else(|| CommandError::IllegalAction("no battlefield zone".to_string()))?
+                .push_bottom(card);
+            state.object_mut(card).expect("looked up above").zone = ZoneKind::Battlefield;
+
+            return Ok(CommandOutcome {
+                events: vec![GameEventKind::ZoneChange {
+                    object: card,
+                    from: ZoneKind::Hand,
+                    to: ZoneKind::Battlefield,
+                    last_known_info: Some(last_known_info),
+                }],
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+            });
+        }
         _ => {}
     }
     // TODO: match command.action (PlayerActionKind) and handle each variant:
@@ -118,11 +158,8 @@ pub fn execute_command(
     //     only the ability goes on the stack, look up the RegisteredAbility
     //     by source+ability_index in state.abilities.
     //     broke_pass_chain = true, priority_handoff = Unchanged.
-    //   PlayLand: move card to battlefield directly, no stack involved
-    //     (CR 305.1 - lands aren't spells). broke_pass_chain = true,
-    //     priority_handoff = Unchanged.
-    //   PassPriority is implemented above (the match arm before this
-    //     comment block) - everything else here is still unimplemented.
+    //   PassPriority/PlayLand are implemented above (the match arms before
+    //     this comment block) - everything else here is still unimplemented.
     //   DeclareAttackers/DeclareBlockers: validate legality (CR 508/509)
     //     and record the declarations into combat state - GameState doesn't
     //     have a dedicated combat-state field yet, may need one.

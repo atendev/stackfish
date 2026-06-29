@@ -91,13 +91,11 @@ impl GameState {
     }
 
     pub fn object(&self, id: ObjectId) -> Option<&GameObject> {
-        // TODO: self.objects.get(&id).
-        todo!()
+        self.objects.get(&id)
     }
 
     pub fn object_mut(&mut self, id: ObjectId) -> Option<&mut GameObject> {
-        // TODO: self.objects.get_mut(&id).
-        todo!()
+        self.objects.get_mut(&id)
     }
 
     pub fn player(&self, id: PlayerId) -> Option<&PlayerState> {
@@ -116,15 +114,69 @@ impl GameState {
     /// wrong (e.g. two battlefields) — but that invariant isn't enforced
     /// yet (Phase 6).
     pub fn zone(&self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&Zone> {
-        // TODO: self.zones.iter().find(|z| z.kind == kind && z.owner ==
-        // owner) - note ZoneKind already derives PartialEq (zone.rs); the
-        // "more than one matches" invariant check is Phase 6 (Invariants),
-        // not this phase - leave find() returning the first match for now.
-        todo!()
+        self.zones.iter().find(|z| z.kind == kind && z.owner == owner)
     }
 
     pub fn zone_mut(&mut self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&mut Zone> {
-        // TODO: same as zone() but iter_mut().
-        todo!()
+        self.zones.iter_mut().find(|z| z.kind == kind && z.owner == owner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ids::ObjectId;
+    use std::collections::VecDeque;
+
+    /// Direct unit test against `Zone::remove`/`push_bottom` and
+    /// `GameState::zone_mut`/`object_mut` themselves, isolated from the
+    /// command layer (`PlayLand` in commands.rs exercises the same helpers
+    /// through a real command, but this pins down the helpers' own
+    /// behavior independently).
+    #[test]
+    fn zone_helpers_roundtrip() {
+        let hand = PlayerId(0);
+        let mut state = GameState {
+            players: Vec::new(),
+            turn_order: vec![hand],
+            active_player: hand,
+            turn_number: 1,
+            phase: crate::types::turn::Phase::PreGame,
+            step: crate::types::turn::Step::Untap,
+            priority_player: hand,
+            consecutive_passes: 0,
+            postcombat_main: false,
+            objects: HashMap::new(),
+            zones: vec![
+                Zone { kind: ZoneKind::Hand, owner: Some(hand), contents: VecDeque::new() },
+                Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
+            ],
+            stack: Vec::new(),
+            continuous_effects: Vec::new(),
+            replacement_effects: Vec::new(),
+            abilities: Vec::new(),
+            ledger: Vec::new(),
+            rng: RngState { seed: 1, draws_consumed: 0 },
+            next_event_id: 0,
+            next_sequence_no: 0,
+        };
+
+        let card = ObjectId(0);
+        state.zone_mut(ZoneKind::Hand, Some(hand)).unwrap().push_bottom(card);
+        assert!(state.zone(ZoneKind::Hand, Some(hand)).unwrap().contents.contains(&card));
+
+        let removed = state.zone_mut(ZoneKind::Hand, Some(hand)).unwrap().remove(card);
+        assert_eq!(removed, Some(card));
+        assert!(!state.zone(ZoneKind::Hand, Some(hand)).unwrap().contents.contains(&card));
+
+        state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(card);
+        assert!(state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&card));
+
+        // Nonexistent zone (no command zone registered here) -> None, not a panic.
+        assert!(state.zone_mut(ZoneKind::Command, Some(hand)).is_none());
+
+        // object()/object_mut() round-trip against an absent id.
+        assert!(state.object(card).is_none());
+        assert!(state.object_mut(card).is_none());
     }
 }

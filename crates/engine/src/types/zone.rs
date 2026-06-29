@@ -43,15 +43,13 @@ impl Zone {
     }
 
     pub fn push_bottom(&mut self, object: ObjectId) {
-        // TODO: self.contents.push_back(object).
-        todo!()
+        self.contents.push_back(object);
     }
 
     /// Removes `object` from wherever it sits in `contents`, if present.
     pub fn remove(&mut self, object: ObjectId) -> Option<ObjectId> {
-        // TODO: find object's position in self.contents, remove it there
-        // (VecDeque::remove(index)), return it if found else None.
-        todo!()
+        let idx = self.contents.iter().position(|&id| id == object)?;
+        self.contents.remove(idx)
     }
 
     pub fn contains(&self, object: ObjectId) -> bool {
