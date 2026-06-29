@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::types::ability::RegisteredAbility;
 use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
-use crate::types::ids::{ObjectId, PlayerId};
+use crate::types::ids::{EventId, ObjectId, PlayerId};
 use crate::types::object::GameObject;
 use crate::types::player::PlayerState;
 use crate::types::stack::StackObject;
@@ -28,6 +28,13 @@ pub struct GameState {
     pub turn_number: u32,
     pub phase: Phase,
     pub step: Step,
+    /// Folded in from the Phase 5 PassPriority dry run (see
+    /// docs/implementation.md) — neither field existed in Phase 1.
+    /// `turn_order`/`active_player` alone don't tell you who currently has
+    /// priority or how many players in a row have passed it (CR 117.3a,
+    /// 117.4).
+    pub priority_player: PlayerId,
+    pub consecutive_passes: u32,
     /// Object store — single source of truth for object data, looked up by
     /// id. `zones` below holds only ids in order; that's the single source
     /// of truth for *order*, so order is never duplicated on the object
@@ -48,9 +55,21 @@ pub struct GameState {
     pub abilities: Vec<RegisteredAbility>,
     pub ledger: Vec<GameEvent>,
     pub rng: RngState,
+    /// Dedicated monotonic counter for `EventId` allocation — deliberately
+    /// not derived from `ledger.len()` (that broke as soon as more than one
+    /// event could be in flight before all of them land in the ledger, or
+    /// events get generated somewhere other than the exact moment of the
+    /// push). See `allocate_event_id`.
+    pub next_event_id: u64,
 }
 
 impl GameState {
+    pub fn allocate_event_id(&mut self) -> EventId {
+        let id = EventId(self.next_event_id);
+        self.next_event_id += 1;
+        id
+    }
+
     pub fn object(&self, id: ObjectId) -> Option<&GameObject> {
         // TODO: self.objects.get(&id).
         todo!()

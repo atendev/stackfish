@@ -334,6 +334,8 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         turn_number: 1,
         phase: Phase::PreGame,
         step: Step::Untap,
+        priority_player: active_player,
+        consecutive_passes: 0,
         objects,
         zones,
         stack: Vec::new(),
@@ -342,6 +344,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState { seed: file.seed, draws_consumed: 0 },
+        next_event_id: 0,
     };
 
     (state, card_ids)
@@ -426,6 +429,10 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
 pub enum StepOutcome {
     Ran,
     NotImplemented(String),
+    /// The engine accepted the action but a command failed mid-pipeline
+    /// (`StepStatus::Error`) — distinct from a panic (`NotImplemented`):
+    /// this means real code ran and rejected the action on purpose.
+    Errored(String),
 }
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -441,19 +448,23 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 /// Drives one action through `engine`, catching any `todo!()` panic
 /// (expected until Phase 5/7) rather than letting it abort the whole run.
 fn run_action(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
-    let result = panic::catch_unwind(AssertUnwindSafe(|| {
-        engine.submit_action(action)?;
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
+        if let Err(err) = engine.submit_action(action) {
+            return StepOutcome::Errored(format!("{err:?}"));
+        }
         loop {
             let result = engine.step();
             match result.status {
                 StepStatus::Progressed => continue,
-                StepStatus::AwaitingAction { .. } | StepStatus::GameOver { .. } => break,
+                StepStatus::AwaitingAction { .. } | StepStatus::GameOver { .. } => {
+                    return StepOutcome::Ran;
+                }
+                StepStatus::Error(err) => return StepOutcome::Errored(format!("{err:?}")),
             }
         }
-        Ok::<(), ActionError>(())
     }));
     match result {
-        Ok(_) => StepOutcome::Ran,
+        Ok(outcome) => outcome,
         Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
     }
 }

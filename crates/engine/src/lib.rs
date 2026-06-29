@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod engine;
+pub mod engine_context;
 pub mod layers;
 pub mod replacement;
 pub mod sba;

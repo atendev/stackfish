@@ -14,7 +14,7 @@ use crate::types::game::GameState;
 /// needs to return a choice request in the ambiguous case rather than
 /// always a resolved event; left as a single resolved-event return for this
 /// first pass, expect this signature to change once that's worked out.
-pub fn apply_replacements(state: &GameState, proposed: GameEventKind) -> GameEventKind {
+pub fn apply_replacements(state: &mut GameState, proposed: GameEventKind) -> GameEventKind {
     // TODO: 1. Find every ReplacementEffect in state.replacement_effects
     //          where ReplacementEffect::matches(&proposed) is true (not
     //          implementable yet - needs a ScriptRuntime, see effect.rs).
@@ -28,5 +28,12 @@ pub fn apply_replacements(state: &GameState, proposed: GameEventKind) -> GameEve
     //       5. After any rewrite, re-run matching against the new form in
     //          case it matches a different replacement (CR 616's
     //          stabilization requirement) - loop until no further match.
+    //
+    // `state` is `&mut` (was `&` in the Phase 2 draft): a replacement can
+    // consume a one-shot shield (CR 614.13's "use up" effects, e.g. a
+    // damage prevention shield with a counter budget) or otherwise mark
+    // itself used (ConsumptionPolicy::LimitedUses) as a side effect of
+    // applying it, which means mutating the matched ReplacementEffect's
+    // state in `state.replacement_effects`, not just reading from it.
     todo!()
 }

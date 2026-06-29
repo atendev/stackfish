@@ -6,6 +6,7 @@ use crate::types::game::GameState;
 /// it's even accepted. Reaching a `CommandError` mid-execution should be
 /// rare/exceptional once cost/target validation happens up front; this
 /// exists mainly for cases validation can't fully rule out ahead of time.
+#[derive(Debug)]
 pub enum CommandError {
     CostNotPaid,
     InvalidTarget,
@@ -30,8 +31,17 @@ pub fn execute_command(state: &mut GameState, command: EngineCommand) -> Result<
     //     by source+ability_index in state.abilities.
     //   PlayLand: move card to battlefield directly, no stack involved
     //     (CR 305.1 - lands aren't spells).
-    //   PassPriority: append a PriorityPassed event; turn/phase advancement
-    //     consequences belong in engine.rs's step(), not here.
+    //   PassPriority: append a PriorityPassed event, increment
+    //     state.consecutive_passes, rotate state.priority_player to the
+    //     next player in turn_order. CONTRACT engine.rs's PendingAction
+    //     handling relies on: every OTHER successful variant below must
+    //     reset state.consecutive_passes to 0 (CR 117.3c - taking an
+    //     action other than passing breaks the consecutive-pass count),
+    //     since engine.rs decides "did everyone just pass" purely by
+    //     checking consecutive_passes >= turn_order.len() after whatever
+    //     this function did - it doesn't know which variant ran.
+    //     Turn/phase advancement consequences belong in engine.rs's
+    //     ProcessState::AdvanceTurnStep, not here.
     //   DeclareAttackers/DeclareBlockers: validate legality (CR 508/509)
     //     and record the declarations into combat state - GameState doesn't
     //     have a dedicated combat-state field yet, may need one.

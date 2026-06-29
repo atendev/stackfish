@@ -386,6 +386,144 @@ string — no mana-cost-string parser exists anywhere, this sidesteps needing on
 `SubmitPayment` actions aren't supported yet — `PaymentPlan`'s `CostPayment` shapes are more
 involved and the cost system itself isn't implemented either. Both are easy to extend later.
 
+## Phase 5: Dry Run #1 — PassPriority slice
+
+Branch `phase5/pass-priority`, off master. Slice: a player calls `PassPriority` with an empty
+stack; the engine should accept it, log it, hand priority to the next player in turn order, and
+once everyone in a row has passed, reset the pass count and advance the step. Implemented,
+verified via `crates/engine/tests/scenarios/phase5_pass_priority.toml` + `cargo run -p
+stackfish-cli`, then discarded (commit `acb3dae`, not merged — branch deleted after this report
+was written). Master never carried the implementation.
+
+**VERIFICATION RESULT:** Pass. Both `PassPriority` actions in the verification scenario reported
+`ran` (not `NotImplemented`), and the `ledger_len == 2` assertion held. Confirmed via both the CLI
+(`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_pass_priority.toml`) and
+`cargo test --workspace` before reverting.
+
+**STRUCT DEVIATIONS:**
+- `GameState` needed two fields Phase 1 didn't have: `priority_player: PlayerId` and
+  `consecutive_passes: u32`. `turn_order` + `active_player` alone don't carry "who currently has
+  priority" or "how many players in a row have passed" — both are needed to detect CR 117.4's
+  "everyone passed, move on" condition.
+- `Engine` (Phase 2 interface) needed a field beyond its only documented one (`state`):
+  `pending_action: Option<PlayerAction>`, so `step()` has somewhere to find what `submit_action`
+  queued. The split between the two methods doesn't work without it.
+- `Phase` and `Step` (turn.rs) had zero derives in Phase 1. Step-advancement logic needs to
+  compare current phase/step, so both needed `Clone, Copy, PartialEq, Eq`.
+- `CommandError` needed `Debug` to satisfy `.expect()` — incidental, not a modeling gap.
+
+**INTERFACE DEVIATIONS:** None beyond the `Engine` field above — `submit_action`/`step`/
+`execute_command`'s signatures as drafted in Phase 2 didn't need to change shape, only gain
+internal state to actually do their job.
+
+**SCOPE DEVIATIONS:**
+- `crates/scenario`'s `build_initial_state` had to be updated to populate the two new `GameState`
+  fields — not an engine file, but necessary for the verification tooling to keep compiling. Not
+  covered by any Phase 3 TODO since it didn't exist when Phase 3 ran.
+- Step advancement itself only handles one hardcoded transition (Beginning phase, Untap ->
+  Upkeep) via a private helper in `engine.rs`, not a general mechanism — confirms the Phase 3
+  prediction that `Step`/`Phase` can't answer "what's next" about themselves; the engine loop
+  needs full phase-aware logic, which is real, undone work, not a quick TODO.
+- Implementing `PassPriority` for real changed the *observable behavior* of pre-existing scenario
+  fixtures that assumed nothing was implemented yet: `schema_check.toml`'s `ledger_len == 0`
+  assertion broke, because its first action (`PassPriority`) now genuinely runs and appends an
+  event. Not a bug — confirms the implementation was real — but worth knowing: fixtures written
+  against an all-`todo!()` baseline can become stale as soon as any one path gets implemented.
+  Those fixtures didn't need fixing here since the branch was discarded, but Phase 7 will need to
+  go back and tighten assertions like that one as each path stops being a stub.
+
+**UNRESOLVED:** Nothing blocked the slice itself. The combat-state gap, the
+ReplacementEffect-has-no-rewrite-callback gap, the script-bridge gaps, etc (all flagged in Phase
+3) remain exactly as documented — this slice didn't touch any of them.
+
+**Takeaway for Phase 6/7:** the `GameState`/`Engine` struct additions above are real, not
+speculative — they should go into the actual implementation directly rather than being
+rediscovered slice by slice. Worth doing a small "fold in confirmed Phase 5 deviations" pass on
+`GameState`/`Engine` before running more dry-run slices, so each new slice isn't re-deriving the
+same priority-tracking fields.
+
+## Post-dry-run interface update: explicit `ProcessState`
+
+Not a dry run — a real, committed interface change to `engine.rs`, prompted by the human
+proposing an explicit pipeline-stage enum (COLLECT_ACTIONS/PUSH_STACK_OBJECT/PASS_LOOP/
+RESOLVE_STACK_TOP/REPLACEMENT_CHECK/COMMIT_EVENTS/SBA_LOOP/COLLECT_TRIGGERS/PUT_TRIGGERS_APNAP)
+instead of the implicit control flow `step()`'s TODO comment described in prose. It mapped
+cleanly onto modules already split out (`replacement.rs`/`sba.rs`/`triggers.rs`/`commands.rs`
+basically *are* those stages) — what was missing was naming them as an explicit state `Engine`
+sits in, which is also exactly the fine-grained per-stage `step()` granularity DESIGN.md wanted
+for replay scrubbing.
+
+Added `ProcessState` enum to `engine.rs`: `PriorityWindow`, `PendingAction(PlayerAction)`,
+`ResolveStackTop`, `ReplacementCheck { proposed }`, `CommitEvents { checked }`, `SbaLoop`,
+`CollectTriggers { since }`, `PutTriggersApnap { triggers }`. `Engine` now holds
+`process_state: ProcessState` instead of the dry run's ad-hoc `pending_action` field — this
+subsumes it. `COLLECT_ACTIONS`/`PRIORITY_WINDOW` merged into one `PriorityWindow` variant since
+there's no `Engine::legal_actions()` yet to make a real "collect" stage out of.
+
+Also folded in for real (not as a dry-run throwaway) the two `GameState` fields the PassPriority
+dry run found necessary: `priority_player`, `consecutive_passes`. `crates/scenario`'s
+`build_initial_state` updated to match. `CommandError` gained `Debug` (needed for `.expect()`).
+
+**What's real vs. still stubbed:** the *transitions* between stages are real code now
+(`PendingAction` -> build `EngineCommand` -> `execute_command` -> `SbaLoop`; `ReplacementCheck` ->
+`apply_replacements` per event -> `CommitEvents`; `SbaLoop` -> `check_state_based_actions`,
+re-entering itself until empty -> `CollectTriggers`). The *work* each stage delegates to
+(`commands::execute_command`, `replacement::apply_replacements`, `sba::check_state_based_actions`,
+`triggers::collect_triggers`/`order_apnap`) is still exactly as stubbed as Phase 3 left it —
+running anything through `Engine` still bottoms out at the same `todo!()`s as before, just
+reached through real pipeline plumbing instead of nonexistent plumbing. `ResolveStackTop` and
+`PutTriggersApnap`'s bodies are themselves still `todo!()` (script invocation, APNAP ordering +
+stack push respectively).
+
+**Known incompleteness, flagged rather than silently wrong:**
+- `PendingAction` always transitions to `SbaLoop` unconditionally. The original PASS_LOOP
+  branching ("did everyone just pass with a non-empty stack? -> `ResolveStackTop` instead") isn't
+  wired in yet — every action currently behaves as if the stack were empty.
+- `SbaLoop`'s transition to `CollectTriggers { since: 0 }` hardcodes `since: 0` instead of the
+  ledger position from before the current action/resolution started — needs threading through
+  from `PendingAction`/`ResolveStackTop`, not invented at the `SbaLoop` boundary.
+- `PutTriggersApnap`'s eventual return to `PriorityWindow` needs to reset priority to
+  `active_player` (CR 117.3b — priority after any stack action goes to the active player, not
+  whoever held it last), not implemented yet since that transition itself is still `todo!()`.
+
+## `ProcessState` correctness pass (human review of the above)
+
+The human reviewed the `ProcessState` wiring and found 7 real issues, all fixed:
+
+1. **`since: 0` was a correctness bug, not just a TODO.** Added `engine_context.rs`:
+   `PipelineContext { since_ledger, caused_by_command, parent_event }`, set when a pipeline run
+   begins (`PendingAction`; `ResolveStackTop` still needs to set it too, noted in its TODO),
+   consumed by `CommitEvents` (causal refs) and `SbaLoop`'s transition to `CollectTriggers` (real
+   `since` instead of a hardcoded 0).
+2. **No more panicking on command failure.** `StepStatus::Error(CommandError)` replaces the
+   `.expect()`. Documented choice: on error, `Engine` resets to `PriorityWindow` rather than
+   attempting rollback — `execute_command` doesn't guarantee atomicity, so there's nothing
+   trustworthy to roll back to yet. Real fix is making `execute_command` atomic, not engine.rs's
+   job.
+3. **Pass-with-empty-stack vs pass-with-non-empty-stack.** `PendingAction`'s handling now checks
+   `consecutive_passes >= turn_order.len()` after `execute_command` runs, branching to
+   `ResolveStackTop` (non-empty stack) or `AdvanceTurnStep` (empty) via a new `PipelineExit` enum
+   (`engine_context.rs`) consumed once trigger placement finishes. Documented the contract this
+   relies on directly on `commands::execute_command`: every variant *other* than `PassPriority`
+   must reset `consecutive_passes` to 0 (CR 117.3c) — `engine.rs` can't tell which variant ran, it
+   can only read the aftermath.
+4. **Causality preserved.** `CommitEvents` now fills `caused_by_command`/`parent_event` from
+   `pipeline_context` instead of hardcoding `None`.
+5. **`apply_replacements` takes `&mut GameState`.** A replacement can consume a one-shot shield or
+   mark a `ConsumptionPolicy::LimitedUses` effect as used — that's a mutation, not a read.
+6. **Added `ProcessState::AdvanceTurnStep`.** Explicit stage for turn/phase/step advancement,
+   still `todo!()` (needs the general CR 500-514 version, not the dry run's hardcoded
+   Untap->Upkeep), but now has a real place to live instead of being implied.
+7. **`CommandId`/`EventId` no longer derived from `ledger.len()`.** `Engine` got
+   `next_command_id: u64` + `allocate_command_id()`; `GameState` got `next_event_id: u64` +
+   `allocate_event_id()`. Both dedicated monotonic counters, independent of ledger contents.
+
+Side effects of the fix: `StepOutcome` (scenario crate) gained an `Errored(String)` variant
+alongside `Ran`/`NotImplemented`, and `run_action` got rewritten — it was silently swallowing
+`ActionError`/`StepStatus::Error` as `Ran` before (`catch_unwind`'s `Ok(_)` arm matched
+`Ok(Err(_))` too, since `catch_unwind` only distinguishes panic-vs-no-panic, not success-vs-
+returned-error). `ActionError` and `CommandError` both needed `Debug` derives along the way.
+
 ## Open items carried into Phase 2
 
 - `StepResult` (`game.rs`) is a placeholder marker type with no fields yet — its real shape (what

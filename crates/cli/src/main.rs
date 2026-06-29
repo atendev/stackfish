@@ -29,6 +29,7 @@ fn main() -> ExitCode {
         match outcome {
             StepOutcome::Ran => println!("  [{i}] ran"),
             StepOutcome::NotImplemented(msg) => println!("  [{i}] not yet implemented ({msg})"),
+            StepOutcome::Errored(msg) => println!("  [{i}] errored ({msg})"),
         }
     }
 
