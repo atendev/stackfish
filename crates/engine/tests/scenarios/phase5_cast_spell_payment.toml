@@ -51,7 +51,9 @@ card = "bear"
 [[actions]]
 type = "submit_payment"
 player = 0
-mana = { generic_cost = 2, colors = ["G"] }
+# 1 green for the {G} pip, 2 colorless covering the {2} (CR 118.13a's
+# payment choice - mana_payment_choice slice).
+mana = { units = ["G", "C", "C"] }
 
 # Resolves the stack (CR 608.2m: a permanent type goes to the battlefield) -
 # solo player's pass is again "everyone passed", now with a nonempty stack.

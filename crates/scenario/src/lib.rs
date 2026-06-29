@@ -225,23 +225,25 @@ impl ActionSpec {
                     "make_choice(player={player}, description={description:?}, selection=[{selection}])"
                 )
             }
-            ActionSpec::SubmitPayment { player, mana } => format!(
-                "submit_payment(player={player}, generic_cost={}, colors={:?})",
-                mana.generic_cost, mana.colors
-            ),
+            ActionSpec::SubmitPayment { player, mana } => {
+                format!("submit_payment(player={player}, units={:?})", mana.units)
+            }
         }
     }
 }
 
-/// Same simplified shape as `CardSpec`'s `generic_cost`/`colors` (no hybrid/
-/// Phyrexian/X — not modeled by `PaymentPlan::validate` yet either), reused
-/// here for what a `SubmitPayment` action is paying *with*.
+/// What a `SubmitPayment` action pays *with* — CR 118.13a's payment choice:
+/// a flat list of literal mana units actually spent (`"W"`/`"U"`/`"B"`/
+/// `"R"`/`"G"` for a colored unit, `"C"` for colorless), one entry per unit,
+/// covering both colored pips and whatever the payer chose to spend on the
+/// generic component. Not split into separate "pip" vs "generic" fields —
+/// `PaymentPlan::validate` (`cost.rs`) figures out which units satisfy which
+/// requirement from the flat list itself; the scenario author just states
+/// what came out of the pool, same as a real player/UI would.
 #[derive(Deserialize, Default)]
 pub struct ManaPaymentSpec {
     #[serde(default)]
-    pub generic_cost: u32,
-    #[serde(default)]
-    pub colors: Vec<String>,
+    pub units: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -325,9 +327,11 @@ fn parse_color(letter: &str) -> Color {
     }
 }
 
-/// Shared between `CardSpec`'s `mana_cost` (what a spell costs) and
-/// `ManaPaymentSpec` (what a `SubmitPayment` action pays with) - same
-/// simplified generic+colors shape either way.
+/// `CardSpec`'s simplified generic+colors cost shape, as `ManaSymbol`s.
+/// `ManaPaymentSpec` (what `SubmitPayment` pays *with*) deliberately does
+/// NOT share this helper - a payment is a flat list of literal units (CR
+/// 118.13a's choice), not an echo of the cost's shape. See `parse_mana_unit`
+/// and `build_payment_plan` for that side.
 fn mana_symbols(generic_cost: u32, colors: &[String]) -> Vec<ManaSymbol> {
     let mut symbols = Vec::new();
     if generic_cost > 0 {
@@ -337,6 +341,17 @@ fn mana_symbols(generic_cost: u32, colors: &[String]) -> Vec<ManaSymbol> {
         symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Colored(parse_color(color_letter))));
     }
     symbols
+}
+
+/// One entry from `ManaPaymentSpec.units` - `"W"`/`"U"`/`"B"`/`"R"`/`"G"`
+/// reuse `parse_color`, `"C"` is colorless (the one case `parse_color`
+/// itself doesn't handle, since a card's printed cost colors never include
+/// colorless mana symbols the way a payment can spend colorless units).
+fn parse_mana_unit(letter: &str) -> ManaUnit {
+    match letter {
+        "C" => ManaUnit::Colorless,
+        other => ManaUnit::Colored(parse_color(other)),
+    }
 }
 
 fn parse_zone_kind(name: &str) -> ZoneKind {
@@ -609,17 +624,17 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
     PlayerAction { player: PlayerId(player), kind }
 }
 
-/// `mana`'s symbols, as a `PaymentPlan` - empty `colors`/`generic_cost`
-/// (the default) produces the empty plan CR 118.5a requires for a `{0}`
-/// cost; anything else produces the single `CostPayment::Mana` entry
-/// `PaymentPlan::validate` expects (see cost.rs's doc comment on why it's
-/// exactly one entry, not per-color).
+/// `mana.units`, as a `PaymentPlan` - an empty `units` (the default)
+/// produces the empty plan CR 118.5a requires for a `{0}` cost; anything
+/// else produces the single `CostPayment::Mana` entry `PaymentPlan::validate`
+/// expects (see cost.rs's doc comment on why it's exactly one entry, not
+/// per-color).
 fn build_payment_plan(mana: &ManaPaymentSpec) -> PaymentPlan {
-    let symbols = mana_symbols(mana.generic_cost, &mana.colors);
-    if symbols.is_empty() {
+    if mana.units.is_empty() {
         PaymentPlan { payments: Vec::new() }
     } else {
-        PaymentPlan { payments: vec![CostPayment::Mana(ManaCost { symbols })] }
+        let units = mana.units.iter().map(|s| parse_mana_unit(s)).collect();
+        PaymentPlan { payments: vec![CostPayment::Mana(units)] }
     }
 }
 

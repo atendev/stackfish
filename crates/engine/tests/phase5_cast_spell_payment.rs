@@ -6,6 +6,13 @@
 //! No mana abilities/tapping exist yet (CR 605, its own future slice) - test
 //! fixtures hand-set `PlayerState.mana_pool` directly, fake pre-seeded
 //! floating mana.
+//!
+//! `CostPayment::Mana` takes a `Vec<ManaUnit>` - the exact literal units
+//! spent (CR 118.13a's payment choice), not an echo of the cost's shape.
+//! A colored pip must be paid with that exact color; the generic component
+//! can be paid with any leftover units (extra of a required color, a
+//! different color entirely, or colorless) - see cost.rs's `PaymentPlan::
+//! validate` doc comment.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -141,7 +148,7 @@ fn affordable_payment_succeeds_and_debits_pool() {
         ],
     };
     let mut state = state_with_pool(ManaPool { green: 1, colorless: 2, ..empty_pool() });
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost.clone()), p0, ZoneKind::Hand));
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
@@ -152,8 +159,11 @@ fn affordable_payment_succeeds_and_debits_pool() {
         other => panic!("expected AwaitingPayment, got {other:?}"),
     };
 
+    // 1 green for the {G} pip, 2 colorless covering the {2} - the payer's
+    // explicit choice (CR 118.13a), not an echo of the cost's shape.
+    let units = vec![ManaUnit::Colored(Color::Green), ManaUnit::Colorless, ManaUnit::Colorless];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(mana_cost)] })
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] })
         .expect("pool covers the cost exactly");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
@@ -164,7 +174,10 @@ fn affordable_payment_succeeds_and_debits_pool() {
     assert!(!engine.state().stack[0].costs_paid.is_empty(), "costs_paid recorded");
 }
 
-/// Test case 2: pool short on generic - rejected, pool unchanged.
+/// Test case 2: pool short on generic - rejected, pool unchanged. Submits a
+/// correctly-*shaped* plan (1 green pip + 2 generic-covering units, matching
+/// the cost exactly) so this tests real unaffordability, not a malformed
+/// plan - the pool just doesn't have a second unit to spare.
 #[test]
 fn short_on_generic_is_rejected_and_pool_unchanged() {
     let p0 = PlayerId(0);
@@ -177,16 +190,17 @@ fn short_on_generic_is_rejected_and_pool_unchanged() {
     };
     // Only 1 colorless floating - 1 short of the required 2 generic.
     let mut state = state_with_pool(ManaPool { green: 1, colorless: 1, ..empty_pool() });
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost.clone()), p0, ZoneKind::Hand));
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast(&mut engine, p0, card);
     drain(&mut engine);
 
-    let err = engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(mana_cost)] })
-        .unwrap_err();
+    // Shape is correct (1 green pip + 2 generic-covering units) but the
+    // pool has no second unit to spend on the second one.
+    let units = vec![ManaUnit::Colored(Color::Green), ManaUnit::Colorless, ManaUnit::Colored(Color::Blue)];
+    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] }).unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
     let pool = &engine.state().player(p0).unwrap().mana_pool;
     assert_eq!((pool.green, pool.colorless), (1, 1), "no partial deduction on a rejected plan");
@@ -201,18 +215,70 @@ fn wrong_color_is_rejected() {
     let card = ObjectId(0);
     let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Green))] };
     let mut state = state_with_pool(ManaPool { blue: 1, ..empty_pool() });
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost.clone()), p0, ZoneKind::Hand));
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast(&mut engine, p0, card);
     drain(&mut engine);
 
-    let err = engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(mana_cost)] })
-        .unwrap_err();
+    let units = vec![ManaUnit::Colored(Color::Green)];
+    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] }).unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "pool untouched");
+}
+
+/// CR 118.13a: a colored pip can't be substituted by another color, even
+/// when the *total* unit count would otherwise line up with the cost
+/// (1 pip + 1 generic = 2 units here, and 2 blue units are offered) - the
+/// {G} pip specifically must be paid with green.
+#[test]
+fn colored_pip_cannot_be_substituted_by_a_different_color() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost = ManaCost {
+        symbols: vec![
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Green)),
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+        ],
+    };
+    let mut state = state_with_pool(ManaPool { blue: 2, green: 1, ..empty_pool() });
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    drain(&mut engine);
+
+    let units = vec![ManaUnit::Colored(Color::Blue), ManaUnit::Colored(Color::Blue)];
+    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] }).unwrap_err();
+    assert!(matches!(err, PaymentError::InvalidPlan));
+    let pool = &engine.state().player(p0).unwrap().mana_pool;
+    assert_eq!((pool.blue, pool.green), (2, 1), "pool untouched");
+}
+
+/// CR 118.13a's actual choice: the generic component can be covered by
+/// *any* leftover units, including a mix of different colors and colorless
+/// in the same payment - not just "one type of leftover."
+#[test]
+fn generic_can_be_paid_with_a_mix_of_colors() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(2))] };
+    let mut state = state_with_pool(ManaPool { white: 1, blue: 1, ..empty_pool() });
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    drain(&mut engine);
+
+    let units = vec![ManaUnit::Colored(Color::White), ManaUnit::Colored(Color::Blue)];
+    engine
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] })
+        .expect("a {2} generic cost can be paid with any mix of colors");
+    let pool = &engine.state().player(p0).unwrap().mana_pool;
+    assert_eq!((pool.white, pool.blue), (0, 0), "both units spent");
 }
 
 /// Test case 4: a {0}-cost spell still needs an explicit empty payment -
@@ -252,15 +318,18 @@ fn exact_amount_drains_pool_to_zero() {
         ],
     };
     let mut state = state_with_pool(ManaPool { red: 2, white: 1, ..empty_pool() });
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost.clone()), p0, ZoneKind::Hand));
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast(&mut engine, p0, card);
     drain(&mut engine);
 
+    // 2 red for the two {R} pips, the spare white covering the {1}.
+    let units =
+        vec![ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::White)];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(mana_cost)] })
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] })
         .expect("2 red + 1 generic from the leftover white covers it exactly");
     let pool = &engine.state().player(p0).unwrap().mana_pool;
     assert_eq!((pool.red, pool.white), (0, 0), "pool drained to exactly zero");
@@ -277,8 +346,9 @@ fn submit_payment_while_not_awaiting_is_rejected() {
     let _ = p0;
 }
 
-/// Test case 7: a plan that doesn't match the `CostSpec` (extra payment
-/// beyond what's owed) is rejected, pool untouched.
+/// Test case 7: a plan that spends more units than the cost requires (extra
+/// payment beyond what's owed) is rejected, pool untouched - even though the
+/// pool could easily afford it.
 #[test]
 fn mismatched_plan_with_extra_payment_is_rejected() {
     let p0 = PlayerId(0);
@@ -292,9 +362,9 @@ fn mismatched_plan_with_extra_payment_is_rejected() {
     cast(&mut engine, p0, card);
     drain(&mut engine);
 
-    // Echoes back {3} instead of the actual {1} cost - more than owed, not
-    // just "affordable from a big pool".
-    let overpay = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(3))] };
+    // 3 colorless units for a {1} cost - more than owed, not just
+    // "affordable from a big pool".
+    let overpay = vec![ManaUnit::Colorless, ManaUnit::Colorless, ManaUnit::Colorless];
     let err =
         engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(overpay)] }).unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
@@ -310,13 +380,15 @@ fn paid_cast_still_resolves_to_graveyard() {
     let card = ObjectId(0);
     let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(1))] };
     let mut state = state_with_pool(ManaPool { colorless: 1, ..empty_pool() });
-    state.objects.insert(card, card_object(card, spell_definition(mana_cost.clone()), p0, ZoneKind::Hand));
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
     cast(&mut engine, p0, card);
     drain(&mut engine);
-    engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(mana_cost)] }).unwrap();
+    engine
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(vec![ManaUnit::Colorless])] })
+        .unwrap();
     drain(&mut engine);
 
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();

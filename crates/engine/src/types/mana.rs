@@ -123,6 +123,21 @@ pub struct ManaPool {
     pub colorless: u32,
 }
 
+/// One literal unit of floating mana, as it actually exists in a `ManaPool`
+/// — deliberately a narrower type than `AtomicManaSymbol`: that type also
+/// has `Generic`/`Snow`/`Phyrexian` variants, which describe *cost shapes*
+/// or *payment choices*, not things that can sit in a pool waiting to be
+/// spent (`ManaPool` itself has no snow-mana field, for instance). Used by
+/// `CostPayment::Mana` to record exactly which units a `PaymentPlan` spends
+/// — see that type's doc comment in `cost.rs` for why this replaced an
+/// earlier design that only recorded the cost's *shape*, not the payer's
+/// actual choice of units (CR 118.13a).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ManaUnit {
+    Colored(Color),
+    Colorless,
+}
+
 impl ManaPool {
     pub fn empty() -> Self {
         // TODO: all fields zero.

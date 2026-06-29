@@ -1,4 +1,7 @@
-use crate::{AtomicManaSymbol, CardTypeSet, Color, GameObject, ManaCost, ManaPool, ManaSymbol, ObjectId};
+use crate::{
+    AtomicManaSymbol, CardTypeSet, Color, GameObject, ManaCost, ManaPool, ManaSymbol, ManaUnit,
+    ObjectId,
+};
 
 /// Structured stand-in for "filter described in oracle text" — e.g.
 /// "sacrifice a creature", "discard a card at random", "tap an untapped
@@ -92,54 +95,46 @@ fn colored_and_generic(symbols: &[ManaSymbol]) -> Option<([u32; 5], u32)> {
     Some((colored, generic))
 }
 
-/// Whether `a` and `b` are the same multiset of symbols (any order, each
-/// used exactly once) — same shape of check as `engine::is_permutation`,
-/// duplicated locally rather than shared since `ManaSymbol` and
-/// `PendingTrigger` are unrelated types.
-fn is_symbol_multiset_equal(a: &[ManaSymbol], b: &[ManaSymbol]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut remaining: Vec<ManaSymbol> = b.to_vec();
-    for item in a {
-        match remaining.iter().position(|candidate| candidate == item) {
-            Some(idx) => {
-                remaining.remove(idx);
-            }
-            None => return false,
+/// Tallies `units` into per-color spent counts and total colorless spent —
+/// the payer's-side mirror of `colored_and_generic`, but over literal
+/// `ManaUnit`s rather than cost-shape `ManaSymbol`s (there's no "generic
+/// unit"; every unit spent is some specific color or colorless).
+fn spent_tally(units: &[ManaUnit]) -> ([u32; 5], u32) {
+    let mut colored = [0u32; 5];
+    let mut colorless = 0u32;
+    for unit in units {
+        match unit {
+            ManaUnit::Colored(c) => colored[color_index(*c)] += 1,
+            ManaUnit::Colorless => colorless += 1,
         }
     }
-    true
+    (colored, colorless)
 }
 
-/// Deducts `spec`'s mana requirement from `pool` (CR 118.3a) — colored
-/// requirements come off their matching field exactly, then the generic
-/// remainder comes off whatever's left, colorless first (CR 118.13a's
-/// "any combination" — exact order doesn't matter since this slice never
-/// tracks per-unit provenance, only totals). Only call this after
-/// `PaymentPlan::validate` has confirmed the pool can actually cover it —
-/// this function trusts that and does not re-check, so calling it on an
-/// unaffordable pool would silently under/over-subtract.
-pub(crate) fn spend(spec: &CostSpec, pool: &mut ManaPool) {
-    let Some(symbols) = spec.mana.as_ref().map(|m| m.symbols.as_slice()) else { return };
-    let Some((colored, generic)) = colored_and_generic(symbols) else { return };
-    pool.white -= colored[0];
-    pool.blue -= colored[1];
-    pool.black -= colored[2];
-    pool.red -= colored[3];
-    pool.green -= colored[4];
-    let mut remaining = generic;
-    for field in
-        [&mut pool.colorless, &mut pool.white, &mut pool.blue, &mut pool.black, &mut pool.red, &mut pool.green]
-    {
-        let take = remaining.min(*field);
-        *field -= take;
-        remaining -= take;
+/// Deducts exactly `units` from `pool` (CR 118.3a) — no priority order, no
+/// inference: `units` already says precisely which mana came out, because
+/// that's what `PaymentPlan::validate` required it to declare (CR 118.13a's
+/// payment choice). Only call this after `validate` has confirmed the pool
+/// can actually cover it — this function trusts that and does not re-check,
+/// so calling it against a pool that doesn't hold `units` would underflow.
+pub(crate) fn spend(units: &[ManaUnit], pool: &mut ManaPool) {
+    for unit in units {
+        match unit {
+            ManaUnit::Colored(Color::White) => pool.white -= 1,
+            ManaUnit::Colored(Color::Blue) => pool.blue -= 1,
+            ManaUnit::Colored(Color::Black) => pool.black -= 1,
+            ManaUnit::Colored(Color::Red) => pool.red -= 1,
+            ManaUnit::Colored(Color::Green) => pool.green -= 1,
+            ManaUnit::Colorless => pool.colorless -= 1,
+        }
     }
 }
 
 pub enum CostPayment {
-    Mana(ManaCost),
+    /// The exact literal units spent (CR 118.13a) — not an echo of the
+    /// cost's shape. See `cost.rs`'s `PaymentPlan` doc comment for why this
+    /// is the payer's *choice*, not a restatement of what was owed.
+    Mana(Vec<ManaUnit>),
     Sacrifice(ObjectId),
     Discard(ObjectId),
     Tap(ObjectId),
@@ -174,13 +169,22 @@ impl PaymentPlan {
     /// instead — there's no real tapping path yet, so the pool is the only
     /// state this needs to read).
     ///
+    /// CR 118.13a's payment choice: a colored pip must be paid with that
+    /// *exact* color — no substitution — but the generic component can be
+    /// paid with any leftover units, including extra units of a color that
+    /// also satisfied a colored pip (e.g. paying `{1}{G}` with three green
+    /// units: one for the `{G}` pip, two covering the `{1}`). The `units`
+    /// list inside the single `CostPayment::Mana` entry must total *exactly*
+    /// the cost — every pip accounted for by the right color, every leftover
+    /// unit summing to exactly the generic amount, no more, no less.
+    ///
     /// Out of scope this slice (returns `false`, doesn't attempt to honor
     /// them): `spec.additional`/`spec.alternative` costs, and any mana
-    /// symbol shape other than plain colored/generic (`Colorless`/`Snow`/
-    /// `Phyrexian`/`Hybrid`/`X` — CR 118.13a's payment-choice isn't modeled).
-    /// Returning `bool` here as a placeholder — real version will likely
-    /// return a `Result` with a reason once validation failure modes are
-    /// designed.
+    /// symbol shape other than plain colored/generic on the *cost* side
+    /// (`Colorless`/`Snow`/`Phyrexian`/`Hybrid`/`X` requirements aren't
+    /// modeled — see `colored_and_generic`). Returning `bool` here as a
+    /// placeholder — real version will likely return a `Result` with a
+    /// reason once validation failure modes are designed.
     pub fn validate(&self, spec: &CostSpec, pool: &ManaPool) -> bool {
         if !spec.additional.is_empty() || !spec.alternative.is_empty() {
             return false;
@@ -192,17 +196,33 @@ impl PaymentPlan {
             // so the only valid plan is one with no payments in it either.
             return self.payments.is_empty();
         }
-        let [CostPayment::Mana(paid)] = self.payments.as_slice() else { return false };
-        if !is_symbol_multiset_equal(&paid.symbols, required) {
+        let [CostPayment::Mana(units)] = self.payments.as_slice() else { return false };
+        let Some((required_colored, generic_needed)) = colored_and_generic(required) else {
+            return false;
+        };
+        let (spent_colored, spent_colorless) = spent_tally(units);
+
+        // Every colored pip must be paid with that exact color - no
+        // substitution, checked before anything about totals.
+        if required_colored.iter().zip(spent_colored).any(|(need, have)| have < *need) {
             return false;
         }
-        let Some((colored, generic)) = colored_and_generic(required) else { return false };
+        // Whatever's spent beyond each pip's exact requirement, plus any
+        // colorless spent, must cover the generic component exactly.
+        let leftover: u32 = spent_colored
+            .iter()
+            .zip(required_colored)
+            .map(|(have, need)| have - need)
+            .sum::<u32>()
+            + spent_colorless;
+        if leftover != generic_needed {
+            return false;
+        }
+        // Finally, the pool must actually hold what's being spent.
         let pool_colored = [pool.white, pool.blue, pool.black, pool.red, pool.green];
-        if colored.iter().zip(pool_colored).any(|(need, have)| *need > have) {
+        if spent_colored.iter().zip(pool_colored).any(|(spent, have)| *spent > have) {
             return false;
         }
-        let leftover: u32 =
-            pool_colored.iter().zip(colored).map(|(have, used)| have - used).sum::<u32>() + pool.colorless;
-        leftover >= generic
+        spent_colorless <= pool.colorless
     }
 }
