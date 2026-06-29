@@ -245,6 +245,18 @@ equals = "pre_combat_main"
 `step` always holds a meaningful, non-stale value while `phase == "main"` instead of leaking
 whatever the previous real step happened to be (CR 505.1's "Main happens twice per turn").
 
+```toml
+[[assertions]]
+type = "active_player"
+equals = 0    # u32, matches a [[players]] id
+```
+
+```toml
+[[assertions]]
+type = "priority_player"
+equals = 0    # u32, matches a [[players]] id
+```
+
 These read `GameState` fields directly (not through the engine's own accessor methods), so they
 work regardless of which inherent methods are implemented yet.
 

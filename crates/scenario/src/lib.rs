@@ -197,6 +197,8 @@ pub enum AssertionSpec {
     ManaPool { player: u32, color: String, equals: u32 },
     Phase { equals: String },
     Step { equals: String },
+    ActivePlayer { equals: u32 },
+    PriorityPlayer { equals: u32 },
 }
 
 // ---------------------------------------------------------------------
@@ -687,6 +689,28 @@ fn check_assertion(
                 AssertionOutcome::Passed
             } else {
                 AssertionOutcome::Failed { expected: equals.clone(), actual: format!("{:?}", state.step) }
+            }
+        }
+        AssertionSpec::ActivePlayer { equals } => {
+            let expected = PlayerId(*equals);
+            if state.active_player == expected {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: format!("{:?}", state.active_player),
+                }
+            }
+        }
+        AssertionSpec::PriorityPlayer { equals } => {
+            let expected = PlayerId(*equals);
+            if state.priority_player == expected {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed {
+                    expected: equals.to_string(),
+                    actual: format!("{:?}", state.priority_player),
+                }
             }
         }
     }
