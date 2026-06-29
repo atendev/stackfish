@@ -6,11 +6,14 @@ use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement::{self, ReplacementOutcome};
 use crate::sba;
 use crate::triggers::{self, PendingTrigger};
+use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerAction};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::{CommandId, ObjectId, PlayerId};
+use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId};
+use crate::types::stack::StackEntryKind;
 use crate::types::turn::{Phase, Step};
+use crate::types::zone::ZoneKind;
 
 /// Why `submit_action` rejected a `PlayerAction` outright (wrong player has
 /// priority, action doesn't match what's currently legal, etc). Distinct
@@ -441,16 +444,72 @@ impl Engine {
                 self.pipeline_exit = PipelineExit::BackToPriority;
                 // TODO: real resolution should look up top.operation
                 // (ScriptHandle) and invoke it via
-                // ScriptRuntime::invoke_operation - blocked on the script
-                // bridge like every other script-shaped gap. This produces a
-                // mock/provisional StackObjectResolved event instead, just so
-                // the rest of the pipeline (replacement/commit/SBA/triggers)
-                // has something real to run on.
-                self.process_state = ProcessState::ReplacementCheck {
-                    remaining: vec![GameEventKind::StackObjectResolved { stack_id: top.stack_id }]
-                        .into(),
-                    checked: Vec::new(),
-                };
+                // ScriptRuntime::invoke_operation to actually carry out
+                // whatever the spell/ability says - blocked on the script
+                // bridge like every other script-shaped gap. What follows is
+                // only CR 608.2m's zone-change half of resolution (a spell's
+                // card moves off the stack once it resolves) - it does not
+                // run any spell effect.
+                let mut events = Vec::new();
+                if matches!(top.kind, StackEntryKind::Spell) {
+                    // Defensive: the spell's GameObject should always still
+                    // be at top.stack_id (nothing else removes it while on
+                    // the stack) - None here would mean some other path
+                    // already mutated it unexpectedly. Skip the zone move
+                    // rather than panic, same defensive stance as the empty-
+                    // stack branch above.
+                    if let Some(spell_object) = self.state.object(top.stack_id) {
+                        let last_known_info = spell_object.clone();
+                        // CR 608.2m: a permanent type goes to the
+                        // battlefield as a permanent; an instant or sorcery
+                        // (the only other types castable as a spell - see
+                        // CastSpell's land rejection in commands.rs) goes to
+                        // its owner's graveyard instead.
+                        let is_permanent = !last_known_info
+                            .definition
+                            .card_types
+                            .intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY);
+                        let destination = if is_permanent {
+                            ZoneKind::Battlefield
+                        } else {
+                            ZoneKind::Graveyard
+                        };
+                        let destination_owner =
+                            if is_permanent { None } else { Some(last_known_info.owner) };
+
+                        // CR 400.7: another zone change, another new id -
+                        // same convention as PlayLand/CastSpell's hand moves.
+                        let new_id = self.state.allocate_object_id();
+                        let mut new_object = last_known_info.clone();
+                        new_object.object_id = new_id;
+                        new_object.lineage = ObjectLineage { previous: Some(top.stack_id) };
+                        new_object.zone = destination;
+                        new_object.timestamp = self.state.allocate_sequence_no();
+
+                        self.state.objects.remove(&top.stack_id);
+                        if let Some(zone) = self.state.zone_mut(destination, destination_owner) {
+                            zone.push_bottom(new_id);
+                            self.state.objects.insert(new_id, new_object);
+                        }
+                        // else: no such zone registered - defensive no-op,
+                        // same stance as PlayLand's zone_mut lookups, just
+                        // without a CommandError to return from here.
+
+                        events.push(GameEventKind::ZoneChange {
+                            object: new_id,
+                            from: ZoneKind::Stack,
+                            to: destination,
+                            last_known_info: Some(last_known_info),
+                        });
+                    }
+                }
+                // ActivatedAbility/TriggeredAbility/Copy: nothing on a zone
+                // moves when these resolve (CR 608's ability-resolution path
+                // doesn't involve a card) - only the Spell branch above
+                // produces a ZoneChange.
+                events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
+                self.process_state =
+                    ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
                 StepStatus::Progressed
             }
 
