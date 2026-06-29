@@ -746,6 +746,39 @@ coverage for the rest:
 **MERGE:** `--no-ff` into master. Both `phase5/pass-priority-loop` commits (`9cb46d6`,
 `23350de`) landed; `cargo test --workspace` re-confirmed green on master post-merge.
 
+## Fix: `ZoneChange` had no last-known-information slot (CR 603.10)
+
+Found while discussing what a future landfall trigger's condition would actually have to check.
+`GameEventKind::ZoneChange` was `{ object: ObjectId, from: ZoneKind, to: ZoneKind }` — just an id,
+no snapshot of what `object` looked like in `from`. `collect_triggers` (still `todo!()`, but this
+would block it the moment it's real) would have to look `object` up live in `GameState.objects` to
+evaluate a leaves-the-battlefield condition — except a battlefield -> graveyard move mints a *new*
+`ObjectId` (`ObjectLineage`), so the old id may not resolve to anything, or whatever does resolve
+already lost characteristics it only had up to the moment it left (e.g. an ability granted by an
+aura that left in the same SBA batch). Same class of bug `StackObject.source_lki` (CR 608.2b)
+already exists to prevent on the stack side — `ZoneChange` had no equivalent.
+
+Fixed: added `last_known_info: Option<GameObject>` to `ZoneChange`, to be populated by whoever
+produces the event (a snapshot of `object` taken before the move, not after). No real producer
+exists yet (`PlayLand`/etc are still `todo!()` in `execute_command`, and nothing in
+`crates/scenario` constructs `GameEventKind` directly) — this is a type-level fix ahead of the
+first real producer landing, not a behavior change. `triggers::collect_triggers`'s TODO updated
+to flag that leaves-a-zone conditions must prefer this field over a live `state.object()` lookup
+once that function is real.
+
+**STRUCT DEVIATIONS:** `GameObject` needed `Clone` to be embeddable in an event, which cascaded
+`Clone` (plus `Debug`, added alongside for free) down its whole field chain: `CardDefinition`,
+`ScriptReference`, `Subtype`, `PTValue`, `ManaCost`, `ManaSymbol`, `AtomicManaSymbol`, `Color`,
+`CounterSet`, `CounterKind`, `VisibilityPolicy`, `ObjectLineage`, plus `Debug` on the three
+bitflags sets (`CardTypeSet`/`SupertypeSet`/`ColorSet`) so `CardDefinition`'s own `Debug` derive
+compiles. Mechanical derives only, no logic changes. Side benefit: `CounterKind` also picked up
+`PartialEq, Eq` — a gap flagged back in Phase 3 ("`CounterSet::count`/`add` can't compare kinds
+without it") that hadn't been fixed yet; fixed here as a side effect of the same pass, not a
+separate deliberate task.
+
+`cargo test --workspace` reconfirmed green after the change (no behavior touched, only ledger
+event size grew slightly via the new field).
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

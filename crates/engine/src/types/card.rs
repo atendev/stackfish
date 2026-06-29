@@ -8,6 +8,7 @@ use crate::types::mana::{ColorSet, ManaCost};
 /// "base star plus offset" case to represent) are characteristic-defining
 /// abilities: the number isn't known until the script callback runs against
 /// current game state, so it can't be stored as a plain `i32`.
+#[derive(Clone, Debug)]
 pub enum PTValue {
     Fixed(i32),
     CharacteristicDefining(String),
@@ -25,7 +26,7 @@ impl PTValue {
 bitflags! {
     /// Bitmask of `CardType`. A card can be multiple types at once (e.g.
     /// artifact creature).
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct CardTypeSet: u16 {
         const ARTIFACT     = 1 << 0;
         const CREATURE     = 1 << 1;
@@ -57,7 +58,7 @@ pub enum CardType {
 
 bitflags! {
     /// Bitmask of `Supertype`, per CR 205.4a.
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct SupertypeSet: u8 {
         const BASIC     = 1 << 0;
         const LEGENDARY = 1 << 1;
@@ -78,6 +79,7 @@ pub enum Supertype {
 /// creature types are added over time), so this stays string-backed rather
 /// than a fixed enum — the wrapper exists for type-fill/compile-time
 /// distinction from arbitrary `String`s, not to enumerate every value.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Subtype(pub String);
 
 impl Subtype {
@@ -92,6 +94,7 @@ impl Subtype {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum ScriptReference {
     /// Lookup key into the external card-database project's script registry.
     ByKey(String),
@@ -101,6 +104,7 @@ pub enum ScriptReference {
 
 /// Immutable, shared. Sourced from the external card database project — this
 /// engine consumes it, does not author or update it.
+#[derive(Clone, Debug)]
 pub struct CardDefinition {
     /// External DB's stable card identifier.
     pub definition_id: u64,

@@ -33,6 +33,15 @@ pub fn collect_triggers(state: &GameState, event: &GameEvent) -> Vec<PendingTrig
     // pattern as every other script-condition gap in this codebase).
     // Also needs once-per-turn/range/timing legality checks (CR 603.2-603.3)
     // that aren't designed yet beyond the condition callback itself.
+    //
+    // IMPORTANT (CR 603.10): a condition checking "did this object leave a
+    // zone" must consult event.kind's ZoneChange::last_known_info (if
+    // Some) instead of looking `object` up live via state.object() - by the
+    // time this runs (post-CommitEvents/SbaLoop), a live lookup can miss
+    // characteristics the object only had at the moment it left (e.g. an
+    // ability granted by an aura that left in the same batch), or the id
+    // may not resolve to anything at all if the move minted a new
+    // ObjectId. See event.rs's doc comment on ZoneChange for the full case.
     todo!()
 }
 

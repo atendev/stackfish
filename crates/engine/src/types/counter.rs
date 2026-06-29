@@ -2,6 +2,7 @@
 /// +1/+1 on a creature vs. poison/energy/experience on a player). Common
 /// kinds with direct rules significance get a variant; the long tail of
 /// flavor-named counters (CR 122.3 lists 100+) falls back to `Custom`.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum CounterKind {
     PlusOnePlusOne,
     MinusOneMinusOne,
@@ -17,6 +18,7 @@ pub enum CounterKind {
 /// (count of a given kind, adjusting a kind's count) lived as duplicate
 /// methods over a duplicate `Vec<(CounterKind, i32)>` field on each. Pulled
 /// out once, here, so both just hold one `CounterSet` field instead.
+#[derive(Clone, Debug)]
 pub struct CounterSet {
     counters: Vec<(CounterKind, i32)>,
 }

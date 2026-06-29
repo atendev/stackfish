@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Color {
     White,
     Blue,
@@ -10,7 +11,7 @@ pub enum Color {
 
 bitflags! {
     /// WUBRG bitmask. Used for color identity, color indicators, etc.
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct ColorSet: u8 {
         const WHITE = 1 << 0;
         const BLUE  = 1 << 1;
@@ -22,6 +23,7 @@ bitflags! {
 
 /// A single indivisible mana symbol — the smallest unit a hybrid symbol
 /// chooses between. Not itself a full cost symbol (see `ManaSymbol`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AtomicManaSymbol {
     Colored(Color),
     Generic(u32),
@@ -52,6 +54,7 @@ impl AtomicManaSymbol {
 /// ways to pay without needing a third slot. Plain Phyrexian (`{W/P}` on
 /// its own, pay color or 2 life, no second color involved) is a single
 /// `Atom(Phyrexian(_))`, not a hybrid at all.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ManaSymbol {
     Atom(AtomicManaSymbol),
     Hybrid(AtomicManaSymbol, AtomicManaSymbol),
@@ -70,6 +73,7 @@ impl ManaSymbol {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct ManaCost {
     pub symbols: Vec<ManaSymbol>,
 }

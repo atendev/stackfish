@@ -9,6 +9,7 @@ pub struct PlayerId(pub u32);
 pub struct ObjectId(pub u64);
 
 /// Links a new `ObjectId` back to the object it succeeded, if any.
+#[derive(Clone, Copy, Debug)]
 pub struct ObjectLineage {
     pub previous: Option<ObjectId>,
 }
