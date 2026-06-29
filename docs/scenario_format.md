@@ -226,6 +226,25 @@ color = "green"            # one of white/blue/black/red/green/colorless
 equals = 0
 ```
 
+```toml
+[[assertions]]
+type = "phase"
+equals = "main"     # pre_game / beginning / main / combat / ending
+```
+
+```toml
+[[assertions]]
+type = "step"
+equals = "pre_combat_main"
+# one of: untap / upkeep / draw / pre_combat_main / beginning_of_combat /
+# declare_attackers / declare_blockers / combat_damage / end_of_combat /
+# post_combat_main / end / cleanup
+```
+
+`pre_combat_main`/`post_combat_main` aren't real CR 500.4 steps (Main has none) — they exist so
+`step` always holds a meaningful, non-stale value while `phase == "main"` instead of leaking
+whatever the previous real step happened to be (CR 505.1's "Main happens twice per turn").
+
 These read `GameState` fields directly (not through the engine's own accessor methods), so they
 work regardless of which inherent methods are implemented yet.
 
@@ -335,6 +354,14 @@ equals = 0
 type = "object_zone"
 card = "bear"
 equals = "battlefield"
+
+[[assertions]]
+type = "phase"
+equals = "main"
+
+[[assertions]]
+type = "step"
+equals = "pre_combat_main"
 ```
 
 ## Extending the format

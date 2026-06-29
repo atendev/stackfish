@@ -1065,6 +1065,43 @@ battlefield. Confirmed directly via `cargo run -p stackfish-cli -- crates/engine
 phase5_cast_spell_payment.toml` (not just the test harness) — output: 7/7 actions ran, 3/3 assertions
 passed.
 
+## Fix: `state.step` left stale during Main phase (CR 500.4/505.1)
+
+Found while adding `phase`/`step` assertions to the scenario format (human asked for these directly
+after asking why a solo-player TOML scenario needs explicit `pass_priority` actions through
+`PreGame`/`Untap` — answer: `PreGame` is engine-only bootstrap with no priority concept, and CR
+502.1's "no priority during Untap" was never modeled, both flagged already in the pass-priority-loop
+slice's UNRESOLVED list; `ProcessState::PriorityWindow` has no way out except a real `PlayerAction`
+either way). Writing a `step = "untap"` assertion against the cast-spell-payment fixture failed —
+got `Draw` instead. Real bug, not a doc gap: `engine::Engine::advance_turn_step`'s `(Phase::Beginning,
+Step::Draw) => { phase = Main; ... }` arm (and the symmetric `(Phase::Combat, Step::EndOfCombat) =>
+{ phase = Main; ... }` arm) never touched `state.step` — `Step` had no variant for "in Main," so
+whatever the prior real step was just sat there stale for the entire Main phase, because nothing
+needed to read `step` during Main until now.
+
+**Human's fix, taken as-is:** add `Step::PreCombatMain`/`Step::PostCombatMain` and set them on
+entering Main, rather than reading the existing `GameState.postcombat_main: bool` (added back in the
+original AdvanceTurnStep slice) to disambiguate. This subsumes that field entirely — `Step` itself
+now encodes CR 505.1's "Main happens twice per turn" ambiguity that field existed to resolve, so
+`postcombat_main` was removed from `GameState` rather than kept alongside the new `Step` variants
+(two fields saying the same thing would just be the `zone_position` mistake again — see that note
+near the top of this doc).
+
+**STRUCT DEVIATIONS:** `GameState.postcombat_main: bool` removed — rippled into every `GameState`
+struct-literal site (`game.rs`'s own test, `engine.rs`'s test, `crates/scenario/src/lib.rs`, all four
+`tests/phase5_*.rs` files) the same way every prior field addition/removal has.
+
+**SCOPE DEVIATIONS:** `crates/scenario/src/lib.rs`'s `parse_step` needed `"pre_combat_main"`/
+`"post_combat_main"` added (new `Step` variants need TOML names); `docs/scenario_format.md`'s `step`
+assertion docs/example updated to match (the example's step assertion was about to document the
+*old*, stale-on-purpose behavior — caught before that shipped, fixed to assert the new real value
+instead).
+
+**VERIFICATION:** `cargo test --workspace` still 38/38. Re-ran `cargo run -p stackfish-cli --
+crates/engine/tests/scenarios/phase5_cast_spell_payment.toml` with its `step` assertion now asserting
+`"pre_combat_main"` (previously would have needed to assert the stale `"draw"` to pass) — 3/3
+assertions pass for real, not against the bug's behavior.
+
 ## Next slice
 
 ## Mistakes caught (don't repeat)

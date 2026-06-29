@@ -75,3 +75,11 @@ equals = 0
 type = "object_zone"
 card = "bear"
 equals = "battlefield"
+
+[[assertions]]
+type = "phase"
+equals = "main"
+
+[[assertions]]
+type = "step"
+equals = "pre_combat_main"

@@ -195,6 +195,8 @@ pub enum AssertionSpec {
     /// `green`/`colorless`) - the way to confirm a `SubmitPayment` action
     /// actually debited what was expected.
     ManaPool { player: u32, color: String, equals: u32 },
+    Phase { equals: String },
+    Step { equals: String },
 }
 
 // ---------------------------------------------------------------------
@@ -266,6 +268,35 @@ fn parse_zone_kind(name: &str) -> ZoneKind {
         "exile" => ZoneKind::Exile,
         "command" => ZoneKind::Command,
         other => panic!("unknown zone in scenario file: {other}"),
+    }
+}
+
+fn parse_phase(name: &str) -> Phase {
+    match name {
+        "pre_game" => Phase::PreGame,
+        "beginning" => Phase::Beginning,
+        "main" => Phase::Main,
+        "combat" => Phase::Combat,
+        "ending" => Phase::Ending,
+        other => panic!("unknown phase in scenario file: {other}"),
+    }
+}
+
+fn parse_step(name: &str) -> Step {
+    match name {
+        "untap" => Step::Untap,
+        "upkeep" => Step::Upkeep,
+        "draw" => Step::Draw,
+        "pre_combat_main" => Step::PreCombatMain,
+        "beginning_of_combat" => Step::BeginningOfCombat,
+        "declare_attackers" => Step::DeclareAttackers,
+        "declare_blockers" => Step::DeclareBlockers,
+        "combat_damage" => Step::CombatDamage,
+        "end_of_combat" => Step::EndOfCombat,
+        "post_combat_main" => Step::PostCombatMain,
+        "end" => Step::End,
+        "cleanup" => Step::Cleanup,
+        other => panic!("unknown step in scenario file: {other}"),
     }
 }
 
@@ -399,7 +430,6 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         step: Step::Untap,
         priority_player: active_player,
         consecutive_passes: 0,
-        postcombat_main: false,
         lands_played_this_turn: HashMap::new(),
         objects,
         zones,
@@ -641,6 +671,22 @@ fn check_assertion(
                 AssertionOutcome::Passed
             } else {
                 AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+            }
+        }
+        AssertionSpec::Phase { equals } => {
+            let expected = parse_phase(equals);
+            if state.phase == expected {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.clone(), actual: format!("{:?}", state.phase) }
+            }
+        }
+        AssertionSpec::Step { equals } => {
+            let expected = parse_step(equals);
+            if state.step == expected {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.clone(), actual: format!("{:?}", state.step) }
             }
         }
     }

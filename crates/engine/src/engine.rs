@@ -814,16 +814,18 @@ impl Engine {
     }
 
     /// Deterministic CR 500-514 phase/step transition table for this slice:
-    /// advances `state.phase`/`step`/`turn_number`/`active_player`/
-    /// `postcombat_main` and returns the log events for it. Does NOT carry
-    /// out any of the actual rules work a step triggers (untapping
-    /// permanents, drawing a card, etc.) - that's separate, larger work
-    /// still gated on other todo!()s (layers.rs, zone manipulation); this
-    /// only answers "what step comes next."
+    /// advances `state.phase`/`step`/`turn_number`/`active_player` and
+    /// returns the log events for it. Does NOT carry out any of the actual
+    /// rules work a step triggers (untapping permanents, drawing a card,
+    /// etc.) - that's separate, larger work still gated on other `todo!()`s
+    /// (layers.rs, zone manipulation); this only answers "what step comes
+    /// next."
     ///
-    /// `postcombat_main` resolves CR 505.1's "Main happens twice" ambiguity
-    /// that `Phase` alone can't (see turn.rs's `Phase` doc) - added to
-    /// `GameState` for this slice.
+    /// CR 505.1's "Main happens twice per turn" ambiguity (`Phase` alone
+    /// can't tell which - see turn.rs's `Phase` doc) is resolved by `Step`
+    /// itself now (`PreCombatMain`/`PostCombatMain`), not a separate
+    /// `postcombat_main: bool` this table has to remember to flip - see
+    /// turn.rs's `Step` doc for why that field was folded in here instead.
     fn advance_turn_step(&mut self) -> Vec<GameEventKind> {
         let starting_new_turn = match (self.state.phase, self.state.step) {
             (Phase::PreGame, _) => {
@@ -841,10 +843,10 @@ impl Engine {
             }
             (Phase::Beginning, Step::Draw) => {
                 self.state.phase = Phase::Main;
-                self.state.postcombat_main = false;
+                self.state.step = Step::PreCombatMain;
                 false
             }
-            (Phase::Main, _) if !self.state.postcombat_main => {
+            (Phase::Main, Step::PreCombatMain) => {
                 self.state.phase = Phase::Combat;
                 self.state.step = Step::BeginningOfCombat;
                 false
@@ -867,12 +869,10 @@ impl Engine {
             }
             (Phase::Combat, Step::EndOfCombat) => {
                 self.state.phase = Phase::Main;
-                self.state.postcombat_main = true;
+                self.state.step = Step::PostCombatMain;
                 false
             }
-            // postcombat_main == true here, since the guarded Main arm above
-            // already claimed the precombat case.
-            (Phase::Main, _) => {
+            (Phase::Main, Step::PostCombatMain) => {
                 self.state.phase = Phase::Ending;
                 self.state.step = Step::End;
                 false
@@ -893,9 +893,7 @@ impl Engine {
                 self.state.turn_number += 1;
                 self.state.phase = Phase::Beginning;
                 self.state.step = Step::Untap;
-                self.state.postcombat_main = false;
-                // CR 305.2's per-turn land-drop count resets with the turn,
-                // same trigger as postcombat_main above.
+                // CR 305.2's per-turn land-drop count resets with the turn.
                 self.state.lands_played_this_turn.clear();
                 true
             }
@@ -947,7 +945,6 @@ mod tests {
             step: Step::Untap,
             priority_player: p0,
             consecutive_passes: 0,
-            postcombat_main: false,
             lands_played_this_turn: HashMap::new(),
             objects: HashMap::new(),
             zones: Vec::new(),

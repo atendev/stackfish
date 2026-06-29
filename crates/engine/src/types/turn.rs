@@ -19,20 +19,30 @@ pub enum Phase {
 }
 
 /// CR 500-514. No `next()` helper here on purpose: step order isn't linear
-/// independent of `Phase` (Main has no steps at all; which step follows
-/// which depends on which phase you're in), so "next step" is a question
-/// the engine loop has to answer with both `Phase` and `Step` in hand, not
-/// something `Step` can answer about itself.
+/// independent of `Phase` (which step follows which depends on which phase
+/// you're in), so "next step" is a question the engine loop has to answer
+/// with both `Phase` and `Step` in hand, not something `Step` can answer
+/// about itself.
+///
+/// `PreCombatMain`/`PostCombatMain` aren't real CR 500.4 "steps" (Main has
+/// none) — added so `Step` itself disambiguates CR 505.1's "Main happens
+/// twice per turn" instead of leaving `GameState.step` holding a stale
+/// leftover value (whatever the prior real step was) while `Phase::Main` is
+/// current. Previously resolved by a separate `GameState.postcombat_main:
+/// bool` field; folded into `Step` instead so there's one place encoding
+/// "where in the turn am I," not two fields that have to be kept in sync.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Step {
     Untap,
     Upkeep,
     Draw,
+    PreCombatMain,
     BeginningOfCombat,
     DeclareAttackers,
     DeclareBlockers,
     CombatDamage,
     EndOfCombat,
+    PostCombatMain,
     End,
     Cleanup,
 }

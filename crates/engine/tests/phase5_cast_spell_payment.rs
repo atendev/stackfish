@@ -74,7 +74,6 @@ fn state_with_pool(pool: ManaPool) -> GameState {
         step: Step::Untap,
         priority_player: p0,
         consecutive_passes: 0,
-        postcombat_main: false,
         lands_played_this_turn: HashMap::new(),
         objects: HashMap::new(),
         zones: vec![
