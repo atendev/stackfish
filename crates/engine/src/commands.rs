@@ -2,7 +2,8 @@ use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectLineage, PlayerId};
+use crate::types::ids::{ObjectLineage, PlayerId, ScriptHandle};
+use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::turn::Phase;
 use crate::types::zone::ZoneKind;
 
@@ -207,15 +208,114 @@ pub fn execute_command(
                 priority_handoff: PriorityHandoff::Unchanged,
             });
         }
+        PlayerActionKind::CastSpell { card, modes, targets, x_value } => {
+            let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
+            if object.definition.card_types.contains(CardTypeSet::LAND) {
+                return Err(CommandError::IllegalAction(
+                    "lands aren't cast as spells - use PlayLand".to_string(),
+                ));
+            }
+            if object.zone != ZoneKind::Hand || object.controller != command.actor {
+                return Err(CommandError::IllegalAction(
+                    "card is not in actor's hand".to_string(),
+                ));
+            }
+            // TODO(CR 117.1a/602's flash, not modeled here yet): instants
+            // may be cast any time the actor holds priority; anything else
+            // castable as a spell needs the full sorcery-speed window
+            // (is_sorcery_speed already covers "holds priority" as one of
+            // its four conditions, so the instant branch below only adds
+            // the priority check on its own rather than duplicating it).
+            // Cards with flash (or effects granting flash) aren't
+            // represented on CardDefinition/continuous_effects yet, so they
+            // incorrectly fall into the non-instant branch below - same
+            // class of gap is_sorcery_speed already flags for PlayLand.
+            let is_instant = object.definition.card_types.contains(CardTypeSet::INSTANT);
+            if is_instant {
+                if state.priority_player != command.actor {
+                    return Err(CommandError::IllegalAction(
+                        "actor does not hold priority".to_string(),
+                    ));
+                }
+            } else if !is_sorcery_speed(state, command.actor) {
+                return Err(CommandError::IllegalAction(
+                    "this spell can only be cast at sorcery speed: actor's turn, a main \
+                     phase, actor holding priority, and an empty stack"
+                        .to_string(),
+                ));
+            }
+
+            // TODO(CR 601.2b-h): modes/targets/x_value are accepted and
+            // stored on the resulting StackObject below, but none of them
+            // are validated for legality yet - no mode-legality check, no
+            // target-legality check (range/restriction/count per CR
+            // 601.2c), no division/distribution step (CR 601.2d), and no
+            // legality recheck (CR 601.2e). Cost is stubbed to free
+            // entirely - no CostSpec is built, no SubmitPayment round trip
+            // happens (see cost.rs's PaymentPlan flow) - real cost
+            // determination+payment is deliberately deferred to a later
+            // slice; this one only proves the cast -> stack -> resolve
+            // shape works end to end with a free spell.
+
+            // Snapshot before the move - CR 603.10's last_known_info (see
+            // GameEventKind::ZoneChange's doc comment).
+            let last_known_info = object.clone();
+
+            // CR 400.7/601.2a: casting moves the card to the stack, which is
+            // a zone change that mints a new ObjectId (same convention
+            // PlayLand uses for hand->battlefield) - see ObjectLineage.
+            let new_id = state.allocate_object_id();
+            let mut new_object = last_known_info.clone();
+            new_object.object_id = new_id;
+            new_object.lineage = ObjectLineage { previous: Some(card) };
+            new_object.zone = ZoneKind::Stack;
+            new_object.timestamp = state.allocate_sequence_no();
+
+            state
+                .zone_mut(ZoneKind::Hand, Some(command.actor))
+                .ok_or_else(|| CommandError::IllegalAction("actor has no hand zone".to_string()))?
+                .remove(card);
+            state.objects.remove(&card);
+            state.objects.insert(new_id, new_object);
+
+            // TODO(script bridge): `operation` should be the card's
+            // registered cast/resolution callback (looked up via its
+            // ScriptReference) - no such lookup exists yet, same gap as
+            // every other ScriptHandle placeholder in this codebase.
+            // ScriptHandle(0) here is a stand-in with nothing real bound to
+            // it; resolving this StackObject can't actually run spell
+            // effects until the script bridge fills this in for real.
+            state.stack.push(StackObject::new(
+                new_id,
+                StackEntryKind::Spell,
+                new_id,
+                command.actor,
+                modes,
+                targets,
+                x_value,
+                ScriptHandle(0),
+            ));
+
+            return Ok(CommandOutcome {
+                events: vec![
+                    GameEventKind::ZoneChange {
+                        object: new_id,
+                        from: ZoneKind::Hand,
+                        to: ZoneKind::Stack,
+                        last_known_info: Some(last_known_info),
+                    },
+                    GameEventKind::StackObjectPushed { stack_id: new_id },
+                ],
+                // CR 601.2i: the controller already held priority before
+                // casting (checked above), so they keep it - it doesn't move.
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+            });
+        }
         _ => {}
     }
     // TODO: match command.action (PlayerActionKind) and handle each variant:
-    //   CastSpell: move card ObjectId from hand to stack zone, create a
-    //     StackObject (needs the card's registered "cast" operation
-    //     ScriptHandle - where that comes from for a plain card-as-spell,
-    //     not just abilities, isn't settled yet), deduct cost (after
-    //     SubmitPayment has separately validated/paid it).
-    //     broke_pass_chain = true, priority_handoff = Unchanged.
+    //   CastSpell is implemented above.
     //   ActivateAbility: similar, but source stays where it is (CR 602) -
     //     only the ability goes on the stack, look up the RegisteredAbility
     //     by source+ability_index in state.abilities.

@@ -30,20 +30,36 @@ pub struct StackObject {
 }
 
 impl StackObject {
+    /// `chosen_modes`/`targets`/`x_value` are taken as params (rather than
+    /// always starting empty/`None`) since the first real caller
+    /// (`commands::execute_command`'s `CastSpell` arm) already has these
+    /// from `PlayerActionKind::CastSpell` by the time it builds a
+    /// `StackObject` — deferring them to a separate mutation step would just
+    /// mean constructing this in a momentarily-inconsistent state.
     pub fn new(
         stack_id: ObjectId,
         kind: StackEntryKind,
         source: ObjectId,
         controller: PlayerId,
+        chosen_modes: Vec<u32>,
+        targets: Vec<Target>,
+        x_value: Option<u32>,
         operation: ScriptHandle,
     ) -> Self {
-        // TODO: source_lki: None at construction (only captured if/when
-        // source actually leaves its zone before resolution - that's a
-        // later mutation, not part of new()); chosen_modes/targets/
-        // costs_paid: empty Vecs, filled in by whatever building logic
-        // collects player choices before pushing to the stack; x_value:
-        // None unless caller passes it (signature may need an x_value
-        // param once the cast-with-X flow is designed).
-        todo!()
+        StackObject {
+            stack_id,
+            kind,
+            source,
+            // Not captured at construction - only meaningful once `source`
+            // might actually leave its zone before this resolves (CR
+            // 608.2b), which is a later mutation, not part of building this.
+            source_lki: None,
+            controller,
+            chosen_modes,
+            targets,
+            x_value,
+            costs_paid: Vec::new(),
+            operation,
+        }
     }
 }
