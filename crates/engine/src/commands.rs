@@ -1,3 +1,5 @@
+use crate::types::ability::AbilityEffect;
+use crate::types::ability::AbilityKind;
 use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::cost::CostSpec;
@@ -349,14 +351,102 @@ pub fn execute_command(
                 }),
             });
         }
+        PlayerActionKind::ActivateAbility { source, ability_index, targets } => {
+            // CR 602.2a/117.3c: activating an ability follows the same
+            // process as casting a spell - the activator must hold priority
+            // to begin with.
+            if state.priority_player != command.actor {
+                return Err(CommandError::IllegalAction(
+                    "actor does not hold priority".to_string(),
+                ));
+            }
+
+            let controller = state.object(source).ok_or(CommandError::InvalidTarget)?.controller;
+            if controller != command.actor {
+                return Err(CommandError::IllegalAction(
+                    "actor does not control the ability's source".to_string(),
+                ));
+            }
+
+            let ability = state
+                .abilities
+                .iter()
+                .filter(|a| a.source == source)
+                .nth(ability_index as usize)
+                .ok_or_else(|| {
+                    CommandError::IllegalAction("no such ability on source".to_string())
+                })?;
+            if ability.kind != AbilityKind::Activated {
+                return Err(CommandError::IllegalAction(
+                    "ability is not an activated ability".to_string(),
+                ));
+            }
+            let effect = ability.effect.clone();
+
+            // TODO(CR 602.5a): tap-cost abilities need a summoning-sickness
+            // check (actor must have controlled source continuously since
+            // their most recent turn began) - no "controlled since"
+            // timestamp exists on GameObject yet, so this isn't checked.
+            match effect {
+                Some(AbilityEffect::AddMana(units)) => {
+                    // CR 605.1a: a mana ability never has a target.
+                    if !targets.is_empty() {
+                        return Err(CommandError::IllegalAction(
+                            "a mana ability cannot have targets".to_string(),
+                        ));
+                    }
+                    let already_tapped =
+                        state.object(source).ok_or(CommandError::InvalidTarget)?.tapped;
+                    if already_tapped {
+                        return Err(CommandError::IllegalAction(
+                            "source is already tapped".to_string(),
+                        ));
+                    }
+
+                    state.object_mut(source).ok_or(CommandError::InvalidTarget)?.tapped = true;
+                    let pool = &mut state
+                        .player_mut(command.actor)
+                        .ok_or_else(|| {
+                            CommandError::IllegalAction("actor has no player state".to_string())
+                        })?
+                        .mana_pool;
+                    for unit in &units {
+                        pool.add_unit(*unit);
+                    }
+
+                    // CR 605.3b: a mana ability resolves immediately as part
+                    // of activation - it never uses the stack.
+                    return Ok(CommandOutcome {
+                        events: vec![
+                            GameEventKind::Tapped { object: source },
+                            GameEventKind::ManaAdded { player: command.actor, units },
+                        ],
+                        broke_pass_chain: true,
+                        priority_handoff: PriorityHandoff::Unchanged,
+                        requires_payment: None,
+                    });
+                }
+                None => {
+                    // TODO(script bridge): a non-mana activated ability
+                    // needs cost/target/operation script callbacks to
+                    // determine its real cost, validate targets, push a
+                    // StackObject (CR 602.2a-b mirrors casting a spell), and
+                    // eventually resolve via its operation - none of that
+                    // exists yet (same gap every other ability/operation
+                    // hits). Structural lookup/validation above (source
+                    // exists, actor controls it, the ability exists and is
+                    // Activated) is real; everything past here needs the
+                    // script bridge.
+                    todo!()
+                }
+            }
+        }
         _ => {}
     }
     // TODO: match command.action (PlayerActionKind) and handle each variant:
     //   CastSpell is implemented above.
-    //   ActivateAbility: similar, but source stays where it is (CR 602) -
-    //     only the ability goes on the stack, look up the RegisteredAbility
-    //     by source+ability_index in state.abilities.
-    //     broke_pass_chain = true, priority_handoff = Unchanged.
+    //   ActivateAbility (mana-ability case) is implemented above; non-mana
+    //     abilities fall through to todo!() pending the script bridge.
     //   PassPriority/PlayLand are implemented above (the match arms before
     //     this comment block) - everything else here is still unimplemented.
     //   DeclareAttackers/DeclareBlockers: validate legality (CR 508/509)

@@ -53,10 +53,12 @@ mana_pool = { green = 1, colorless = 2 }   # optional, all six fields default 0
 One zone each of Library/Hand/Graveyard/Command is created per player automatically. Battlefield
 and Exile are shared (created once, not per player).
 
-**`mana_pool` is fake, pre-seeded floating mana.** CR 605 mana abilities (tapping a land, etc)
-don't exist yet — there's no way for an action sequence to *produce* mana, so a scenario that needs
-to pay a cost has to seed the pool directly at setup time instead. `[players.mana_pool]` can be
-omitted entirely (defaults to all-zero).
+**`mana_pool` is fake, pre-seeded floating mana**, for cases where a scenario needs mana before its
+action sequence could plausibly produce any (or doesn't want to bother with a `mana_ability` card
+just to pay one cost). `[players.mana_pool]` can be omitted entirely (defaults to all-zero). CR 605
+mana abilities now exist for the tap-a-permanent-for-mana case (see `mana_ability` under
+`[[cards]]`) — a scenario can produce real mana via `activate_ability` instead of seeding the pool,
+if that's what it's testing.
 
 ## `[[cards]]`
 
@@ -72,7 +74,18 @@ colors = ["G"]                # one entry PER PIP (repeats included), default []
 types = ["Creature"]          # required - see Card types below
 power = 2                     # optional i32
 toughness = 2                  # optional i32
+mana_ability = ["G"]           # optional, default [] - see Mana abilities below
 ```
+
+**`mana_ability` (CR 605):** if non-empty, every instance of this card gets one
+`RegisteredAbility { kind: Activated, effect: AddMana(...) }` set up automatically — activate it via
+`activate_ability` with `ability_index = 0`. Each entry is one literal unit added (same letters as
+`mana.units`, see below) — `["G"]` models `{T}: Add {G}`; `["G", "G"]` would model adding two green
+in one activation. Only one mana ability per card this way, and the tap cost is implicit/hardcoded
+(this is the only cost shape mana abilities support right now — see `commands.rs`'s
+`ActivateAbility` arm). A card with no `mana_ability` entries can still be referenced by an
+`activate_ability` action, but it has no registered abilities, so `ability_index = 0` will be
+rejected ("no such ability on source").
 
 A `{2}{G}{G}` cost is `generic_cost = 2, colors = ["G", "G"]` — two list entries for the two green
 pips, not `["G"]` with an implied count. `submit_payment`'s `mana.units` field (see that action's
@@ -285,6 +298,16 @@ player = 0
 color = "green"            # one of white/blue/black/red/green/colorless
 equals = 0
 ```
+
+```toml
+[[assertions]]
+type = "tapped"
+card = "forest"
+equals = true
+```
+
+Checks `GameObject.tapped` — the way to confirm an `activate_ability` action (e.g. CR 605's
+tap-for-mana case) actually tapped its source.
 
 ```toml
 [[assertions]]

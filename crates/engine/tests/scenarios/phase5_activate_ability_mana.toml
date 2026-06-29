@@ -1,0 +1,38 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "forest"
+name = "Test Forest"
+types = ["Land"]
+mana_ability = ["G"]   # {T}: Add {G} - ability_index = 0 on this card
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "forest"
+
+[[actions]]
+type = "activate_ability"
+player = 0
+source = "forest"
+ability_index = 0
+targets = []
+
+[[assertions]]
+type = "tapped"
+card = "forest"
+equals = true
+
+[[assertions]]
+type = "mana_pool"
+player = 0
+color = "green"
+equals = 1
+
+[[assertions]]
+type = "ledger_len"
+equals = 2

@@ -96,6 +96,16 @@ pub struct CardSpec {
     pub types: Vec<String>,
     pub power: Option<i32>,
     pub toughness: Option<i32>,
+    /// CR 605: if non-empty, every instance of this card is set up with one
+    /// `RegisteredAbility { kind: Activated, effect: Some(AddMana(...)) }` —
+    /// `ability_index = 0` in an `activate_ability` action. Each entry is one
+    /// literal unit added when activated (same letters as `mana.units` on a
+    /// `submit_payment` action, see `parse_mana_unit`) — e.g. `["G"]` for
+    /// `{T}: Add {G}`. Only one mana ability per card this way; a card
+    /// needing more than one (or a non-mana ability) needs `CardSpec`
+    /// extended further.
+    #[serde(default)]
+    pub mana_ability: Vec<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -256,6 +266,9 @@ pub enum AssertionSpec {
     /// `green`/`colorless`) - the way to confirm a `SubmitPayment` action
     /// actually debited what was expected.
     ManaPool { player: u32, color: String, equals: u32 },
+    /// Checks `GameObject.tapped` — the way to confirm an `activate_ability`
+    /// action (CR 605's tap-for-mana case) actually tapped its source.
+    Tapped { card: String, equals: bool },
     Phase { equals: String },
     Step { equals: String },
     ActivePlayer { equals: u32 },
@@ -274,6 +287,7 @@ impl AssertionSpec {
             AssertionSpec::ManaPool { player, color, equals } => {
                 format!("mana_pool(player={player}, color={color}) == {equals}")
             }
+            AssertionSpec::Tapped { card, equals } => format!("tapped(card={card:?}) == {equals}"),
             AssertionSpec::Phase { equals } => format!("phase == {equals:?}"),
             AssertionSpec::Step { equals } => format!("step == {equals:?}"),
             AssertionSpec::ActivePlayer { equals } => format!("active_player == {equals}"),
@@ -446,6 +460,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         file.cards.iter().map(|c| (c.key.as_str(), c)).collect();
 
     let mut objects: HashMap<ObjectId, GameObject> = HashMap::new();
+    let mut abilities: Vec<RegisteredAbility> = Vec::new();
 
     for entry in &file.setup {
         let spec = card_specs
@@ -506,6 +521,19 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
             .unwrap_or_else(|| panic!("no zone {entry:?} matches in this scenario's player set"));
         zone.contents.push_back(object_id);
 
+        if !spec.mana_ability.is_empty() {
+            let units = spec.mana_ability.iter().map(|s| parse_mana_unit(s)).collect();
+            abilities.push(RegisteredAbility {
+                source: object_id,
+                kind: AbilityKind::Activated,
+                condition: None,
+                cost: None,
+                target: None,
+                operation: ScriptHandle(0),
+                effect: Some(AbilityEffect::AddMana(units)),
+            });
+        }
+
         objects.insert(object_id, object);
         card_ids.insert(entry.card.clone(), object_id);
     }
@@ -532,7 +560,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         stack: Vec::new(),
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
-        abilities: Vec::new(),
+        abilities,
         ledger: Vec::new(),
         rng: RngState { seed: file.seed, draws_consumed: 0 },
         next_event_id: 0,
@@ -776,6 +804,15 @@ fn check_assertion(
                 "colorless" => pool.colorless,
                 other => panic!("unknown mana_pool color in scenario file: {other}"),
             });
+            if actual == Some(*equals) {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+            }
+        }
+        AssertionSpec::Tapped { card, equals } => {
+            let object_id = resolve_card(card, card_ids);
+            let actual = state.object(object_id).map(|o| o.tapped);
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {

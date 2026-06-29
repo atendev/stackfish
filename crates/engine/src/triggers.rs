@@ -1,3 +1,4 @@
+use crate::types::ability::AbilityKind;
 use crate::types::event::GameEvent;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId};
@@ -20,10 +21,13 @@ pub struct PendingTrigger {
 /// Order in the returned `Vec` is not yet APNAP order; see `group_apnap`.
 pub fn collect_triggers(state: &GameState, event: &GameEvent) -> Vec<PendingTrigger> {
     let _ = event;
-    if state.abilities.is_empty() {
+    if !state.abilities.iter().any(|a| a.kind == AbilityKind::Triggered) {
         // Genuinely nothing to match against - safe to no-op rather than
-        // hit the todo!() below, which only bites once a RegisteredAbility
-        // actually exists.
+        // hit the todo!() below, which only bites once a *triggered*
+        // RegisteredAbility actually exists. Activated/static abilities
+        // (e.g. CR 605 mana abilities, added in the activate-ability-mana
+        // slice) don't fire off events at all, so their presence alone
+        // shouldn't force this function past its no-op path.
         return Vec::new();
     }
     // TODO: scan state.abilities for RegisteredAbility entries where kind
