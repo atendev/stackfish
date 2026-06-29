@@ -348,6 +348,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         rng: RngState { seed: file.seed, draws_consumed: 0 },
         next_event_id: 0,
         next_sequence_no: 0,
+        next_object_id,
     };
 
     (state, card_ids)

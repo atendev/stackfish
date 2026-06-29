@@ -766,6 +766,7 @@ mod tests {
             rng: crate::types::game::RngState { seed: 1, draws_consumed: 0 },
             next_event_id: 0,
             next_sequence_no: 0,
+            next_object_id: 0,
         }
     }
 

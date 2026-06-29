@@ -54,6 +54,7 @@ fn two_player_state() -> GameState {
         rng: RngState { seed: 1, draws_consumed: 0 },
         next_event_id: 0,
         next_sequence_no: 0,
+        next_object_id: 0,
     }
 }
 

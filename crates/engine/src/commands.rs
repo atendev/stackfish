@@ -2,7 +2,7 @@ use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
-use crate::types::ids::PlayerId;
+use crate::types::ids::{ObjectLineage, PlayerId};
 use crate::types::turn::Phase;
 use crate::types::zone::ZoneKind;
 
@@ -171,20 +171,34 @@ pub fn execute_command(
             // GameEventKind::ZoneChange's doc comment).
             let last_known_info = object.clone();
 
+            // CR 400.7: this zone change creates a new object - mint a fresh
+            // ObjectId rather than reusing `card`'s, and link back to it via
+            // ObjectLineage. `card`'s entry in state.objects is removed
+            // entirely once moved; anything that still needs to know what it
+            // looked like in the hand must use `last_known_info` above, not
+            // a live lookup by the old id.
+            let new_id = state.allocate_object_id();
+            let mut new_object = last_known_info.clone();
+            new_object.object_id = new_id;
+            new_object.lineage = ObjectLineage { previous: Some(card) };
+            new_object.zone = ZoneKind::Battlefield;
+            new_object.timestamp = state.allocate_sequence_no();
+
             state
                 .zone_mut(ZoneKind::Hand, Some(command.actor))
                 .ok_or_else(|| CommandError::IllegalAction("actor has no hand zone".to_string()))?
                 .remove(card);
+            state.objects.remove(&card);
             state
                 .zone_mut(ZoneKind::Battlefield, None)
                 .ok_or_else(|| CommandError::IllegalAction("no battlefield zone".to_string()))?
-                .push_bottom(card);
-            state.object_mut(card).expect("looked up above").zone = ZoneKind::Battlefield;
+                .push_bottom(new_id);
+            state.objects.insert(new_id, new_object);
             *state.lands_played_this_turn.entry(command.actor).or_insert(0) += 1;
 
             return Ok(CommandOutcome {
                 events: vec![GameEventKind::ZoneChange {
-                    object: card,
+                    object: new_id,
                     from: ZoneKind::Hand,
                     to: ZoneKind::Battlefield,
                     last_known_info: Some(last_known_info),

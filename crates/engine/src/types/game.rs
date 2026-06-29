@@ -83,6 +83,12 @@ pub struct GameState {
     /// different batching of `CommitEvents` calls could reorder/reuse
     /// sequence numbers. See `allocate_sequence_no`.
     pub next_sequence_no: u64,
+    /// Dedicated monotonic counter for `ObjectId` allocation. Same rationale
+    /// as `next_event_id`/`next_sequence_no` — needed because CR 400.7
+    /// requires a zone change that creates a "new object" to mint a fresh
+    /// `ObjectId` rather than reuse the old one (see `ObjectLineage`). See
+    /// `allocate_object_id`.
+    pub next_object_id: u64,
 }
 
 impl GameState {
@@ -96,6 +102,12 @@ impl GameState {
         let seq = SequenceNo(self.next_sequence_no);
         self.next_sequence_no += 1;
         seq
+    }
+
+    pub fn allocate_object_id(&mut self) -> ObjectId {
+        let id = ObjectId(self.next_object_id);
+        self.next_object_id += 1;
+        id
     }
 
     pub fn object(&self, id: ObjectId) -> Option<&GameObject> {
@@ -168,6 +180,7 @@ mod tests {
             rng: RngState { seed: 1, draws_consumed: 0 },
             next_event_id: 0,
             next_sequence_no: 0,
+            next_object_id: 1,
         };
 
         let card = ObjectId(0);

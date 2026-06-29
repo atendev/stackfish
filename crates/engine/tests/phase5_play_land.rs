@@ -123,6 +123,22 @@ fn two_player_state() -> GameState {
         rng: RngState { seed: 1, draws_consumed: 0 },
         next_event_id: 0,
         next_sequence_no: 0,
+        // Deliberately not 0/1 - those collide with the literal ObjectIds
+        // (0, 1, 99) the tests below assign to fixture cards/stack objects.
+        // A clearly distinct starting value makes a real id-collision bug
+        // visible instead of accidentally passing.
+        next_object_id: 1000,
+    }
+}
+
+/// CR 400.7: `PlayLand` mints a new `ObjectId` for the permanent rather than
+/// reusing the hand card's id (see commands.rs). Tests that need to find the
+/// moved object afterward can't look it up by the original id - they read it
+/// back from the `ZoneChange` event `PlayLand` produces instead.
+fn moved_object_id(engine: &Engine) -> ObjectId {
+    match engine.state().ledger.last().expect("expected a ledger entry").kind {
+        GameEventKind::ZoneChange { object, .. } => object,
+        _ => panic!("expected a ZoneChange event"),
     }
 }
 
@@ -151,9 +167,11 @@ fn play_land_moves_card_hand_to_battlefield() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Battlefield);
+    let new_id = moved_object_id(&engine);
+    assert!(engine.state().object(card).is_none(), "old id retired per CR 400.7");
+    assert_eq!(engine.state().object(new_id).unwrap().zone, ZoneKind::Battlefield);
     assert!(!engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.contains(&card));
-    assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&card));
+    assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&new_id));
 }
 
 #[test]
@@ -308,7 +326,9 @@ fn play_land_rejects_second_land_same_turn() {
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: first } })
         .unwrap();
     drain(&mut engine);
-    assert_eq!(engine.state().object(first).unwrap().zone, ZoneKind::Battlefield);
+    let first_new_id = moved_object_id(&engine);
+    assert!(engine.state().object(first).is_none(), "old id retired per CR 400.7");
+    assert_eq!(engine.state().object(first_new_id).unwrap().zone, ZoneKind::Battlefield);
 
     engine
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: second } })
@@ -338,8 +358,10 @@ fn play_land_event_gets_causal_ids() {
     assert!(event.caused_by_command.is_some());
     assert!(event.parent_event.is_none());
     assert!(matches!(
-        event.kind,
-        GameEventKind::ZoneChange { object, from: ZoneKind::Hand, to: ZoneKind::Battlefield, last_known_info: Some(_) }
-            if object == card
+        &event.kind,
+        GameEventKind::ZoneChange { object, from: ZoneKind::Hand, to: ZoneKind::Battlefield, last_known_info: Some(lki) }
+            // CR 400.7: `object` is the new battlefield-side id, not `card` -
+            // the old id is only recoverable via the last_known_info snapshot.
+            if *object != card && lki.object_id == card
     ));
 }
