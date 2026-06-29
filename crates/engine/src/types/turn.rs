@@ -9,6 +9,7 @@
 /// Main -> Ending) — the same `Phase` value, two different "next"s depending
 /// on where in the turn you are. That position isn't recoverable from
 /// `Phase` alone, so turn advancement has to be the engine loop's job.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Phase {
     PreGame,
     Beginning,
@@ -22,6 +23,7 @@ pub enum Phase {
 /// which depends on which phase you're in), so "next step" is a question
 /// the engine loop has to answer with both `Phase` and `Step` in hand, not
 /// something `Step` can answer about itself.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Step {
     Untap,
     Upkeep,

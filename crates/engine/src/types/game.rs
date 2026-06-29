@@ -35,6 +35,13 @@ pub struct GameState {
     /// 117.4).
     pub priority_player: PlayerId,
     pub consecutive_passes: u32,
+    /// CR 505.1: `Main` happens twice per turn (precombat/postcombat) as the
+    /// same `Phase::Main` value with different successors - `Phase` alone
+    /// can't tell which one this is (see turn.rs's `Phase` doc). Added for
+    /// the Phase 5 AdvanceTurnStep slice (docs/implementation.md) since the
+    /// deterministic transition table needs to disambiguate. Reset to
+    /// `false` whenever a new turn begins (Beginning/Untap).
+    pub postcombat_main: bool,
     /// Object store — single source of truth for object data, looked up by
     /// id. `zones` below holds only ids in order; that's the single source
     /// of truth for *order*, so order is never duplicated on the object

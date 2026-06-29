@@ -1,6 +1,9 @@
 # Parser smoke test for docs/scenario_format.md's documented action shapes.
 # Not meant to pass any real gameplay assertions yet - just proves every
-# documented action/target shape actually deserializes.
+# documented action/target shape actually deserializes. PassPriority is now
+# implemented (Phase 5 pass-priority-loop slice), so its action genuinely
+# logs an event - ledger_len below reflects that one real event, not the
+# all-todo!() baseline of 0 from before.
 seed = 3
 
 [[players]]
@@ -82,4 +85,4 @@ selection = [1]
 
 [[assertions]]
 type = "ledger_len"
-equals = 0
+equals = 1

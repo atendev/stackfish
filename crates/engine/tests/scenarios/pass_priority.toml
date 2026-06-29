@@ -1,6 +1,5 @@
-# Demonstrates the not-yet-implemented path: submit_action/step are
-# todo!() until Phase 5/7, so this action reports NotImplemented rather
-# than failing the whole run.
+# PassPriority is implemented (Phase 5 pass-priority-loop slice) - this
+# action now actually runs and logs one PriorityPassed event.
 seed = 2
 
 [[players]]
@@ -14,3 +13,7 @@ life = 20
 [[actions]]
 type = "pass_priority"
 player = 0
+
+[[assertions]]
+type = "ledger_len"
+equals = 1

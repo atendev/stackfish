@@ -619,6 +619,103 @@ Three related structural gaps, fixed together:
    push for `ordered` is still a TODO there, blocked on the same script-bridge gap as everywhere
    else, but the pipeline-end transition itself is no longer ad hoc).
 
+## Phase 5: Dry Run #2 — pass-priority-loop slice
+
+Branch `phase5/pass-priority-loop`, off master. Per the human's explicit instruction this time,
+the branch is **not** discarded after verification (contrast Dry Run #1, which was deleted) — kept
+around for review, to be merged once approved. Slice scope: finish the minimal loop back to
+`PriorityWindow` that the `ProcessState` correctness pass (above) left structurally wired but
+leaf-`todo!()`'d — `PassPriority` execution, all-pass detection's two branches
+(`AdvanceTurnStep`/`ResolveStackTop`), and the empty-trigger no-op path through
+`CollectTriggers`/`PutTriggersApnap`.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 7 new tests in
+`crates/engine/tests/phase5_pass_priority_loop.rs` plus the existing `scenarios.rs` harness (now
+covering the updated `pass_priority.toml`/`schema_check.toml` fixtures), all green. Also confirmed
+via `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/pass_priority.toml`.
+
+**What got implemented (real, not stubbed further than necessary):**
+- `commands::execute_command`: `PlayerActionKind::PassPriority` arm only — appends
+  `PriorityPassed`, resolves the next player in `turn_order` via `PriorityHandoff::To`,
+  `broke_pass_chain: false`. Every other `PlayerActionKind` variant is still `todo!()`, untouched.
+- `engine::Engine::advance()`'s `ResolveStackTop`: pops `state.stack`, sets priority to
+  `active_player` (CR 117.3b), feeds a mock `GameEventKind::StackObjectResolved { stack_id }`
+  through the existing `ReplacementCheck` pipeline. Real resolution (invoking
+  `StackObject::operation` via the script bridge) is still a TODO — this only proves the pipeline
+  plumbing around a stack-object resolution is wired correctly.
+- `engine::Engine::advance()`'s `CollectTriggers`: now actually scans `state.ledger[since..]` and
+  calls `triggers::collect_triggers`/`group_apnap` for real, instead of `todo!()`.
+- `engine::Engine::advance()`'s `AdvanceTurnStep` + new private `advance_turn_step()`: a
+  deterministic CR 500-514 phase/step transition table (Untap→Upkeep→Draw→Main→Combat's five
+  steps→Main→End→Cleanup→next turn's Untap), resetting priority to `active_player` afterward. Does
+  **not** perform any of the actual rules work a step triggers (untapping permanents, drawing a
+  card) — answers "what step comes next," nothing else.
+- `triggers::collect_triggers`: returns `Vec::new()` when `state.abilities` is empty (true no-op,
+  not a hidden gap) — still `todo!()` the moment any ability actually exists, since real condition
+  evaluation needs the script bridge.
+- `triggers::group_apnap`: fully real now (no script dependency needed) — rotates `turn_order` to
+  start at `active_player`, partitions by controller, returns empty for empty input.
+- `replacement::apply_replacements` / `sba::check_state_based_actions`: both given the same
+  "no-op when genuinely nothing is registered to check" treatment — `Resolved(proposed)` unchanged
+  when `state.replacement_effects` is empty; `Vec::new()` always for SBA (no SBA *can* apply with
+  no creatures/damage tracking machinery existing yet — not a shortcut around real logic, there's
+  nothing real to detect). Both still `todo!()`/no-op respectively beyond that, by design — full
+  CR 614-616 and CR 704.5 implementations are out of this slice's scope.
+
+**STRUCT DEVIATIONS:**
+- `GameState` needed `postcombat_main: bool` — `Phase` alone can't tell CR 505.1's precombat Main
+  from postcombat Main apart (flagged as a known gap in `turn.rs`'s own doc comment since Phase 1).
+  Reset to `false` on every Beginning/Untap transition (new turn or game start).
+- `Phase`/`Step` (turn.rs) had zero derives still on master (the Dry Run #1 branch that added
+  `Clone, Copy, PartialEq, Eq` was discarded, never merged) — re-added those plus `Debug`, needed
+  for `advance_turn_step`'s `match (phase, step)` and test assertions.
+- `PlayerId`/`ObjectId`/`EventId`/`SequenceNo`/`CommandId`/`ScriptHandle`/`Target` (ids.rs) all
+  gained `Debug` — needed for `assert_eq!`/panic-message formatting in the new integration tests;
+  harmless, every other derive on these was already present.
+- `PendingTrigger` (triggers.rs) gained `Debug` for the same reason.
+- `engine::StepStatus` gained `Debug` — same reason; `CommandError`/`ActionError` already had it.
+
+**INTERFACE DEVIATIONS:**
+- `Engine` gained a new public method, `pipeline_context_active(&self) -> bool` — a diagnostic for
+  tests/replay tooling to confirm `pipeline_context` is `None` once back at `PriorityWindow`. Not
+  in any prior phase's interface list; added because there was no other way for an external test to
+  observe that the documented "MUST clear `pipeline_context`" invariant (see the `pipeline_context`
+  field doc, and the "Fix: pipeline_context lifecycle" note above) actually holds.
+
+**SCOPE DEVIATIONS:**
+- `crates/scenario/src/lib.rs`'s `build_initial_state` needed `postcombat_main: false` added to its
+  `GameState` literal — same "verification tooling has to track new fields" pattern as Dry Run #1's
+  `priority_player`/`consecutive_passes` addition.
+- `tests/scenarios/pass_priority.toml` and `tests/scenarios/schema_check.toml` both had stale
+  `ledger_len` assertions/comments written against the all-`todo!()` baseline (`0` events expected).
+  Now that `PassPriority` genuinely runs and commits an event, both were updated to the real
+  resulting count (`1` in each case) — same kind of observable-behavior change Dry Run #1 flagged
+  for `schema_check.toml`, except this time the branch isn't being discarded, so the fixtures
+  needed to actually be fixed rather than just noted.
+- Wrote a new test file, `crates/engine/tests/phase5_pass_priority_loop.rs`, rather than only TOML
+  scenarios — the acceptance criteria for this slice (StepStatus alternation, pipeline_context
+  clearing between runs, exact ledger contents/order) need direct `Engine` access that the
+  TOML-driven `stackfish_scenario` harness intentionally abstracts away (it only loops until
+  `AwaitingAction`/etc, collapsing intermediate `Progressed` steps). Builds `GameState`/`StackObject`
+  via struct literals directly, same pattern `stackfish_scenario::build_initial_state` already
+  established for the same reason (engine constructors are still `todo!()` past `PassPriority`).
+
+**UNRESOLVED:**
+- `ResolveStackTop` sets `priority_player = active_player` immediately upon popping the stack,
+  rather than only after SBA/triggers settle — a simplification for this slice; CR-accurate timing
+  would assign priority only once the whole resolution (including any triggers it causes) has fully
+  resolved. Harmless today since nothing between here and `PriorityWindow` reads/depends on a
+  different value, but flag before anything starts caring about priority *during* a stack
+  resolution's SBA/trigger sub-steps.
+- `AdvanceTurnStep`'s untap/upkeep/draw/combat steps don't perform any of the real rules work CR
+  500-514 actually requires there (untapping permanents, drawing a card, etc.) — only phase/step
+  bookkeeping. CR 502.1's "players don't get priority during untap" special case also isn't
+  modeled; this slice grants priority uniformly at every step, Untap included.
+- `check_state_based_actions` returning unconditional `Vec::new()` and `apply_replacements`'s
+  empty-registry-only fast path are both real no-ops *today* (nothing registered in any scenario
+  this slice tests), but neither is closer to the actual CR 614-616/704.5 logic than before — purely
+  "doesn't block the pipeline from terminating," not partial progress on either subsystem.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
