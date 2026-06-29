@@ -43,6 +43,8 @@ fn two_player_state() -> GameState {
         priority_player: p0,
         consecutive_passes: 0,
         lands_played_this_turn: HashMap::new(),
+        combat: None,
+        last_active_turn_number: HashMap::new(),
         objects: HashMap::new(),
         zones: Vec::new(),
         stack: Vec::new(),

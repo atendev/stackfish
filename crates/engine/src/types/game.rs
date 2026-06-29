@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::types::ability::RegisteredAbility;
+use crate::types::combat::CombatState;
 use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::ids::{EventId, ObjectId, PlayerId, SequenceNo};
@@ -42,6 +43,18 @@ pub struct GameState {
     /// they have already played this turn"). Reset to all-zero whenever a
     /// new turn begins (Beginning/Untap).
     pub lands_played_this_turn: HashMap<PlayerId, u32>,
+    /// CR 506-509: `None` outside combat, `Some` from `DeclareAttackers`
+    /// onward, cleared at `EndOfCombat` (`engine::Engine::advance_turn_step`)
+    /// so it never leaks into the next turn's combat.
+    pub combat: Option<CombatState>,
+    /// CR 302.6/602.5a's "controller's most recent turn" — the
+    /// `turn_number` recorded the moment each player most recently became
+    /// the active player. Written by `advance_turn_step` whenever
+    /// `active_player` rotates (plus once for the very first turn, from
+    /// `PreGame`). Consulted by `commands::has_summoning_sickness` against
+    /// `GameObject.controlled_since_turn` — see that field's doc comment
+    /// for why this is a derived comparison rather than a stored bool.
+    pub last_active_turn_number: HashMap<PlayerId, u32>,
     /// Object store — single source of truth for object data, looked up by
     /// id. `zones` below holds only ids in order; that's the single source
     /// of truth for *order*, so order is never duplicated on the object
@@ -155,6 +168,8 @@ mod tests {
             priority_player: hand,
             consecutive_passes: 0,
             lands_played_this_turn: HashMap::new(),
+            combat: None,
+            last_active_turn_number: HashMap::new(),
             objects: HashMap::new(),
             zones: vec![
                 Zone { kind: ZoneKind::Hand, owner: Some(hand), contents: VecDeque::new() },

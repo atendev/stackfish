@@ -113,6 +113,14 @@ pub struct SetupEntry {
     pub player: u32,
     pub zone: String,
     pub card: String,
+    /// CR 302.6/602.5a's summoning-sickness clock. Defaults to `0`, which is
+    /// always less than any real `turn_number` (the game's first turn seeds
+    /// `last_active_turn_number` at `1`) - i.e. by default a setup card is
+    /// never summoning sick. Set this to the scenario's current/future
+    /// `turn_number` to build a fixture that *is* sick (a creature that just
+    /// entered the battlefield this turn).
+    #[serde(default)]
+    pub controlled_since_turn: u32,
 }
 
 #[derive(Deserialize, Clone)]
@@ -511,6 +519,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
             attachments: Vec::new(),
             attached_to: None,
             timestamp: SequenceNo(0),
+            controlled_since_turn: entry.controlled_since_turn,
             visibility: VisibilityPolicy { public, visible_to: Vec::new() },
         };
 
@@ -555,6 +564,13 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         priority_player: active_player,
         consecutive_passes: 0,
         lands_played_this_turn: HashMap::new(),
+        combat: None,
+        // CR 302.6/602.5a: mirrors what engine::Engine::advance_turn_step's
+        // PreGame arm seeds on a real first step() - this harness builds
+        // GameState directly rather than stepping through that transition,
+        // so it has to seed the same fact itself or every setup card would
+        // look summoning sick by default.
+        last_active_turn_number: HashMap::from([(active_player, 1)]),
         objects,
         zones,
         stack: Vec::new(),

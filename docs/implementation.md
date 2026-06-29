@@ -1235,6 +1235,97 @@ actual `todo!()` underneath) is untouched.
   (`ability_index` is hardcoded to 0 by convention, not a list) — fine for this slice's scope, would
   need a real per-card abilities list in `CardSpec` to support more.
 
+## Phase 5: phase5/declare-attackers-blockers slice
+
+Branch `phase5/declare-attackers-blockers`, off master. Slice scope: baseline
+`DeclareAttackers`/`DeclareBlockers` (CR 508.1/509.1, declarations only - no combat damage, no
+triggered-ability collection beyond the new events themselves), plus CR 302.6/602.5a summoning
+sickness folded in as planned (gates attacking here; retrofits the mana-ability tap-cost path from
+the previous slice).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 22 new tests in
+`crates/engine/tests/phase5_combat_declarations.rs`, 1 new regression test in
+`phase5_activate_ability_mana.rs` (summoning sickness now gates that slice's mana ability too,
+closing the TODO it left open), all prior suites unaffected. Confirmed via the real CLI too:
+`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_combat_declarations.toml` (16/16
+actions ran, 3/3 assertions passed).
+
+**Summoning sickness, as planned (derived fact, not a bool):**
+- `GameObject.controlled_since_turn: u32` — set at creation (test/scenario fixtures set it
+  directly; no "gain control" effect exists yet to retrofit, flagged TODO same as everywhere else).
+- `GameState.last_active_turn_number: HashMap<PlayerId, u32>` — written by
+  `engine::Engine::advance_turn_step` whenever active player rotates, plus once for the very first
+  turn (the `PreGame` arm).
+- `commands::has_summoning_sickness(state, object) -> bool` — pure predicate, `controlled_since_turn
+  >= last_active_turn_number[controller]`. `None` (no recorded turn start) treated as sick, not as
+  "unknown, so allow it." No haste override — not modeled in this engine yet, so this is the entire
+  check.
+- Consulted by both `DeclareAttackers` (CR 508.1a) and the existing `ActivateAbility` mana-ability
+  arm (CR 602.5a) — one predicate, two call sites, as planned.
+
+**`DeclareAttackers`/`DeclareBlockers`, as planned:**
+- New `CombatState { attackers, blocks, blockers_declared }` (`types/combat.rs`), reusing the exact
+  tuple shapes `PlayerActionKind::DeclareAttackers`/`DeclareBlockers` already carried since Phase 2
+  — no separate wrapper type needed. Lives as `GameState.combat: Option<CombatState>`.
+- `DeclareAttackers`: validates the whole batch before mutating anything (CR 508.1's atomicity) —
+  actor is active player, correct step, no re-declaration, each attacker controlled/creature/
+  not-a-battle/untapped/not-sick, each target a valid opponent or their planeswalker/battle. Then
+  taps every attacker and records `CombatState`. New `GameEventKind::AttackerDeclared` per attacker
+  (alongside the existing `Tapped`).
+- `DeclareBlockers`: same atomicity discipline — actor is the defending player (2-player only;
+  multiplayer's "which defending player" ambiguity isn't modeled), correct step, attackers already
+  declared and blockers not yet declared this combat, each blocker controlled/creature/not-a-battle/
+  untapped, no blocker assigned twice, each referenced attacker actually attacking this defender.
+  New `GameEventKind::BlockerDeclared` per pairing. Blocking doesn't tap.
+- `advance_turn_step`'s `EndOfCombat` arm clears `state.combat = None` (CR 506.4) so it never leaks
+  into the next combat.
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice plan called for (`CombatState`,
+`GameObject.controlled_since_turn`, `GameState.combat`/`last_active_turn_number`) — this *is* the
+plan, not a deviation from it.
+
+**INTERFACE DEVIATIONS — one real, unplanned fix:** `Engine::submit_action`'s blanket "actor must
+hold priority" gate turned out to be wrong for these two actions. CR 508.1/509.1 explicitly call
+them turn-based actions that "don't use the stack" — they aren't a priority decision at all. The
+defending player has no reason to hold priority when the declare-blockers step opens (508.2: the
+active player keeps priority through the declare-attackers step) — discovered when every
+`DeclareBlockers` test failed with `NotYourTurn` despite `execute_command`'s own actor check being
+correct. Fixed by special-casing `DeclareAttackers`/`DeclareBlockers` in `submit_action` to skip the
+priority check, leaving `execute_command`'s active-player/defending-player check as the sole gate.
+Documented as a deliberate simplification, not the fully correct model — CR-accurate behavior would
+have these fire automatically on entering their step, before any priority window opens, which this
+engine's `ProcessState` pipeline has no stage for (every step currently opens a generic priority
+window, combat steps included).
+
+**SCOPE DEVIATIONS:**
+- `crates/scenario/src/lib.rs`: `SetupEntry.controlled_since_turn: u32` (default `0`, always
+  "not sick" since the first turn seeds `last_active_turn_number` to `1`) and `GameState.combat`/
+  `last_active_turn_number` added to `build_initial_state` — same "harness has to track new fields"
+  ripple as every prior slice, plus the harness has to seed `last_active_turn_number` itself since
+  it builds `GameState` directly rather than stepping through `PreGame`'s real transition.
+- Every existing `GameObject` struct literal (4 test files + scenario crate) and `GameState` literal
+  (5 test files + scenario crate + `game.rs`/`engine.rs`'s own unit tests) needed the new fields
+  threaded through — anticipated ripple, not a surprise (flagged in the pre-slice scoping).
+- `docs/scenario_format.md` updated: `controlled_since_turn` under `[[setup]]`, real (not
+  "unimplemented") behavior documented for `declare_attackers`/`declare_blockers`, and the
+  no-priority-required note.
+
+**UNRESOLVED (flagged with explicit `TODO`/doc comments in the code, not just here — all called out
+in the pre-slice scoping, none new):**
+- Combat damage resolution (CR 510), first/double strike extra damage step.
+- Triggered abilities actually firing on attack/block declaration — same `collect_triggers`
+  script-bridge gap as everywhere else; `AttackerDeclared`/`BlockerDeclared` exist so that future
+  pass has something to match against.
+- Costs to attack/block (508.1g-j/509.1d-f), banding (508.1e), reselecting attack target (508.7).
+- Restrictions/requirements on attacking or blocking — needs a `continuous_effects` query API that
+  doesn't exist (`is_sorcery_speed` already flags this same gap for `PlayLand`).
+- Multiplayer (attack-multiple-players, range of influence) — 2-player only.
+- Haste — sickness check has no override.
+- Step-skip on zero attackers (CR 508.8) — `advance_turn_step` stays an unconditional table,
+  doesn't skip `DeclareBlockers`/`CombatDamage` even with no attackers.
+- `controlled_since_turn` is never updated past object creation — no "gain control" effect exists
+  in this engine yet to retrofit it.
+
 ## Next slice
 
 ## Mistakes caught (don't repeat)

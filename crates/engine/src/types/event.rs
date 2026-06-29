@@ -34,6 +34,14 @@ pub enum GameEventKind {
     /// already use — retargeted from a `ManaCost`-shaped `amount` (unused
     /// anywhere until this slice) for consistency.
     ManaAdded { player: PlayerId, units: Vec<crate::mana::ManaUnit> },
+    /// CR 508.1m/508.2a: one per creature declared as an attacker. Exists
+    /// so a future trigger-collection pass has something concrete to match
+    /// "whenever X attacks"-style conditions against — `collect_triggers`
+    /// itself stays `todo!()` for `Triggered`-kind abilities regardless
+    /// (same script-bridge gap as everywhere else).
+    AttackerDeclared { attacker: ObjectId, target: Target },
+    /// CR 509.1i: one per blocker/attacker pairing declared.
+    BlockerDeclared { blocker: ObjectId, attacker: ObjectId },
     /// CR 601.2i/118: `payer` committed a `PaymentPlan` covering
     /// `stack_id`'s cost - the ledger fact that completes the cast process
     /// `CastSpell`'s own events started (card moved to stack), distinct from

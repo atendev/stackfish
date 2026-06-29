@@ -64,6 +64,7 @@ fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: 
         attachments: Vec::new(),
         attached_to: None,
         timestamp: SequenceNo(0),
+        controlled_since_turn: 0,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -108,6 +109,8 @@ fn two_player_state() -> GameState {
         priority_player: p0,
         consecutive_passes: 0,
         lands_played_this_turn: HashMap::new(),
+        combat: None,
+        last_active_turn_number: HashMap::new(),
         objects: HashMap::new(),
         zones: vec![
             Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
