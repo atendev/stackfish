@@ -270,8 +270,13 @@ equals = 3
 [[assertions]]
 type = "object_zone"
 card = "bear"
-equals = "graveyard"   # any zone name from the Zones list above
+equals = "graveyard"   # any zone name from the Zones list above, "stack" included
 ```
+
+`equals = "stack"` works too, despite the stack not being one of `state.zones` — the assertion
+falls back to checking `state.stack` directly (a card on the stack has a `StackObject`, not a slot
+in any `Zone.contents`). Useful for checking a spell mid-cast, before it resolves off the stack —
+e.g. right after a `cast_spell` action and before any `pass_priority` that would resolve it.
 
 ```toml
 [[assertions]]

@@ -744,7 +744,20 @@ fn check_assertion(
         AssertionSpec::ObjectZone { card, equals } => {
             let object_id = resolve_card(card, card_ids);
             let expected_kind = parse_zone_kind(equals);
-            let actual_kind = state.zones.iter().find(|z| z.contents.contains(&object_id)).map(|z| z.kind);
+            // The stack isn't one of state.zones (it needs StackObject
+            // metadata - targets/modes/costs - not just an id list, see
+            // docs/implementation.md's zone notes), so a card sitting on
+            // the stack would never be found by the state.zones lookup
+            // alone. Fall back to state.stack so `equals = "stack"`
+            // actually means something here.
+            let actual_kind = state
+                .zones
+                .iter()
+                .find(|z| z.contents.contains(&object_id))
+                .map(|z| z.kind)
+                .or_else(|| {
+                    state.stack.iter().any(|s| s.stack_id == object_id).then_some(ZoneKind::Stack)
+                });
             if actual_kind == Some(expected_kind) {
                 AssertionOutcome::Passed
             } else {
