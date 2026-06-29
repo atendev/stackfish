@@ -906,8 +906,9 @@ not a surprise mid-slice.
 test file.
 
 **UNRESOLVED (flagged with explicit `TODO` comments in `commands.rs`/`engine.rs`, not just here):**
-- Cost determination/payment (CR 601.2f-h) — entirely stubbed free. Carried into the next slice,
-  see below.
+- Cost determination/payment (CR 601.2f-h) — entirely stubbed free at the time this slice merged.
+  Implemented in the very next slice — see "Phase 5: phase5/cast-spell-payment slice (merged to
+  master)" below.
 - Mode legality, target legality/count, division/distribution, legality recheck (CR 601.2b-e) —
   `modes`/`targets`/`x_value` are accepted and stored on the `StackObject`, never validated.
 - Flash/timing permissions beyond the base instant-or-not split (continuous effects granting
@@ -919,13 +920,20 @@ test file.
 - No SBA checks, no countering/fizzling on illegal-target-by-resolution-time — resolution is
   unconditional once reached.
 
-## Next slice: cost determination + payment (CR 601.2f-h)
+## Phase 5: phase5/cast-spell-payment slice (merged to master)
 
-Not started yet — scoped out with the human ahead of time so the next session (likely a fresh
-chat) has a concrete plan instead of re-deriving one. Branch name not yet chosen (something like
-`phase5/cast-spell-payment`).
+Branch `phase5/cast-spell-payment`, off master. Same "kept, reviewed, merged `--no-ff`" treatment
+as every real slice before it. Slice scope: cost determination + payment (CR 601.2f-h) for
+`PlayerActionKind::CastSpell` — the free-cost stub from the cast-spell slice above is replaced with
+a real `CostSpec` built from the card's `mana_cost`, and the pipeline now genuinely pauses for
+payment instead of assuming it's free.
 
-**Design decision (made, not open):** CR 601.2a puts the spell on the stack *before* cost is
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 8 new tests in
+`crates/engine/tests/phase5_cast_spell_payment.rs`, plus 4 of the 9 pre-existing
+`phase5_cast_spell.rs` tests updated (see SCOPE DEVIATIONS) since they now pause where they
+previously ran straight through. 38 tests total, 0 failed, both pre-merge and post-merge.
+
+**Design decision that held as planned:** CR 601.2a puts the spell on the stack *before* cost is
 determined/paid (601.2f-h) — casting is genuinely mid-process while uncosted. Decided to model
 that with a new pipeline pause rather than deducting mana synchronously inside the `CastSpell` arm:
 `ProcessState::AwaitingPayment { stack_id, cost }`, a `StepStatus::AwaitingPayment`, and a new
@@ -948,55 +956,116 @@ pre-seeded floating mana, no land/tap path produces it for real. `CostPayment::M
 stays provenance-free (no "which land was tapped" — there's no real tapping happening to attribute
 the mana to).
 
-**Requirements (CR-sourced):**
-1. CR 601.2f: total cost = the card's `mana_cost` only — no additional/alternative costs, no
-   reductions (all TODO stubs, see below). "Locked in" is trivially true since nothing can change
-   it yet.
-2. CR 118.3a: paying mana = removing it from `ManaPool`. No mana-ability execution (see above) —
-   pool must already hold what's needed.
-3. CR 118.3/601.2h: can't pay without resources — validate the pool has enough of each required
-   color plus enough left over for generic, atomically, before deducting anything. No partial
-   payment.
-4. `CostSpec::mana_only` (`cost.rs:60`, `todo!()`) needs a real body — trivial fill.
-5. `PaymentPlan::validate` (`cost.rs:97`, `todo!()`) needs a real body — match colored requirements
-   against the matching `ManaPool` fields, generic against whatever's left over. No hybrid/
-   Phyrexian symbol handling this slice (CR 118.13a's "choose how to pay" isn't modeled — keep
-   hybrid/Phyrexian mana costs out of this slice's test fixtures).
-6. CR 118.5/118.5a: a `{0}`-cost spell still goes through the full cast process and still needs an
-   explicit "pay" acknowledgment (an empty `PaymentPlan` that trivially validates) — it doesn't
-   auto-cast.
-7. A "commit a validated `PaymentPlan`" step doesn't exist yet — needs to deduct from `ManaPool` and
-   fill `StackObject.costs_paid`.
-8. A `PaymentError`-ish enum and gating logic mirroring `ReplacementChoiceError`/`TriggerOrderError`
-   (only legal while `AwaitingPayment`, reject mismatched plans without mutating state).
+**What got implemented (matches the planned requirements list 1:1):**
+- `CostSpec::mana_only` and `PaymentPlan::validate` (`cost.rs`) filled for real. `validate` takes
+  `(&self, spec: &CostSpec, pool: &ManaPool)` exactly as planned — checks colored requirements
+  against matching `ManaPool` fields, generic against whatever's left over, rejects anything with
+  `spec.additional`/`spec.alternative` set or a non-colored/generic symbol (Colorless/Snow/
+  Phyrexian/Hybrid/X) since those aren't modeled this slice. A `{0}` cost only validates against an
+  *empty* `payments` vec — explicit acknowledgment, not "nothing to check."
+- New `pub(crate) cost::spend(&CostSpec, &mut ManaPool)` — the commit-side mirror of `validate`'s
+  accounting (colored off first, generic off the leftover, colorless prioritized). Not in the
+  original requirements list (which only said "needs to deduct from `ManaPool`") but written as its
+  own function so deduction can't drift from what validation just proved affordable.
+- `commands::execute_command`'s `CastSpell` arm now builds `CostSpec::mana_only(card's mana_cost)`
+  and returns it via `CommandOutcome::requires_payment` instead of assuming free.
+- `engine::Engine` gained `ProcessState::AwaitingPayment`, `StepStatus::AwaitingPayment`,
+  `PaymentError`, and `Engine::submit_payment` exactly as planned — `CommitEvents` checks a new
+  `pending_payment` field (set in `PendingAction` from the command outcome) to decide whether to
+  pause here or fall through to `SbaLoop` as before.
+- `GameState::player`/`player_mut` (`game.rs`) filled for real — were deliberately left `todo!()` in
+  the `PlayLand` slice ("not needed by this slice"); payment needs them to reach the payer's
+  `mana_pool`.
+- Added `GameEventKind::CostPaid { stack_id, payer }` — the ledger fact that completes the cast
+  process, not in the original event list.
 
-**TODO stubs to leave behind, explicitly:**
-- Additional costs (`AdditionalCost` enum already exists in `cost.rs`, unused so far).
-- Alternative costs (flashback/escape-style).
-- Cost reductions/increases (CR 118.7 family).
-- Hybrid/Phyrexian payment-choice (CR 118.13a).
-- Mana abilities / tapping lands for mana (CR 605) — see above, its own future slice.
-- `{X}` value folding into the mana cost's generic component (`x_value` already flows through
-  `CastSpell`/`StackObject`, but `ManaCost::generic_total`/`CostSpec` don't account for it) — skip
-  X-cost spells in this slice's fixtures rather than half-implementing it.
-- CR 601.6 (can't pay → casting is illegal, game returns to before it was proposed) — a real gap
-  either way the design decision above goes: decide whether a failed payment un-pushes the stack
-  object and moves the card back to hand, or errors out some other way that still leaves state
-  consistent. Flag explicitly, don't silently leave it ambiguous.
+**STRUCT DEVIATIONS:**
+- `CommandOutcome` gained `requires_payment: Option<PendingPaymentRequest>` (new struct:
+  `stack_id`/`payer`/`cost`) — every pre-existing arm needed `requires_payment: None` added.
+- `Engine` gained a private `pending_payment` field, separate from `pipeline_context` — different
+  lifetime (one command's outcome, not "this pipeline run" in general); `ResolveStackTop` runs never
+  set it, so they fall through `CommitEvents` to `SbaLoop` unaffected.
 
-**Test cases planned:**
-1. Affordable cost, pool has enough → succeeds, pool debited the right amounts, spell proceeds to
-   stack/resolves same as the cast-spell slice already covers.
-2. Pool short on generic → rejected, pool unchanged (no partial deduction).
-3. Pool has enough total mana but wrong colors (needs `{G}`, pool only has `{U}`) → rejected.
-4. `{0}`-cost spell → succeeds via an explicit empty payment (not skipped automatically).
-5. Exact affordable amount (pool fully drained to 0) → succeeds.
-6. Submitting a payment while not `AwaitingPayment` → rejected, same shape as
-   `ReplacementChoiceError::NotAwaitingChoice`.
-7. Submitting a plan that doesn't match the `CostSpec` (missing/extra payment) → rejected, pool
-   untouched.
-8. Resolution after a paid cast still lands on battlefield/GY correctly — cheap regression check
-   against the cast-spell slice's existing coverage.
+**INTERFACE DEVIATIONS:** None beyond what requirement 5 above already anticipated
+(`PaymentPlan::validate` gaining the `pool` param) — `Engine::submit_payment`'s shape matched the
+design note as drafted.
+
+**SCOPE DEVIATIONS:**
+- `crates/scenario/src/lib.rs`'s `run_action` needed `StepStatus::AwaitingPayment` added to its
+  pause-handling match arm — same "verification tooling has to track new states" pattern as every
+  prior slice's `GameState` field additions.
+- `phase5_cast_spell.rs`'s 9 pre-existing tests all use empty-`mana_cost` fixtures. CR 118.5a's
+  "even a `{0}` cost needs an explicit pay" meant 4 of those 9 now stop at `AwaitingPayment` instead
+  of running straight through to `AwaitingAction`. Added a `pay_free_and_drain` test helper and
+  updated those 4 call sites — the same "fixtures go stale the moment a path stops being a stub"
+  pattern `implementation.md` has flagged repeatedly (`schema_check.toml`, `pass_priority.toml`).
+
+**UNRESOLVED (flagged with explicit `TODO`/doc comments in the code, not just here):**
+- Additional costs, alternative costs, cost reductions/increases (CR 118.7), hybrid/Phyrexian
+  payment-choice (CR 118.13a), `{X}` folding into the generic component — all exactly the stubs the
+  pre-slice plan called out, left untouched.
+- Mana abilities / tapping lands for mana (CR 605) — still no way to get mana into a pool other than
+  a test fixture hand-setting it directly. Its own future slice, underneath this one.
+- CR 601.6 (can't pay → casting is illegal, game returns to before it was proposed) — `submit_payment`
+  rejecting a plan leaves the engine sitting in `AwaitingPayment` indefinitely; nothing un-pushes the
+  stack object or returns the card to hand on failure. Flagged as a real gap, not silently papered
+  over — same status as when the pre-slice plan first called it out.
+
+## Fix: scenario crate (TOML)/CLI hadn't been kept current for payment/casting
+
+The human asked directly whether the TOML scenario format had been kept updated through the last
+couple of merged slices (CastSpell, then cost+payment) so they could write their own `.toml` fixtures
+to exercise casting and payment by hand. It hadn't — `crates/scenario/src/lib.rs` still had a
+deliberate "SubmitPayment intentionally omitted for v1" comment from Phase 4, predating both slices,
+and nothing had gone back to revisit it. Concretely, three gaps in `crates/scenario/src/lib.rs`:
+
+1. No `SubmitPayment` `ActionSpec` — no TOML shape could answer a `ProcessState::AwaitingPayment`
+   pause at all.
+2. `PlayerSpec` had no mana pool field — `build_initial_state` hardcoded every player's `mana_pool`
+   to all-zero, so even if `SubmitPayment` existed, there was nothing to pay *with* (CR 605 mana
+   abilities don't exist yet — see the cast-spell-payment slice's own notes on why fixtures must
+   pre-seed the pool directly).
+3. No assertion could read a `ManaPool` field, so a payment's debit couldn't be checked from TOML
+   either.
+
+**Fixed**, plus the CLI was checked and needs no changes — `crates/cli/src/main.rs` only iterates
+`report.action_outcomes`/`assertion_outcomes` generically by index; it has no per-action-type logic,
+so a new `ActionSpec`/`AssertionSpec` variant is invisible to it by construction.
+
+- Added `PlayerSpec.mana_pool: ManaPoolSpec` (new struct, defaults to all-zero) — wired into
+  `build_initial_state`'s `PlayerState` literal.
+- Added `ActionSpec::SubmitPayment { player, mana: ManaPaymentSpec }` (new struct, same simplified
+  generic+colors shape `CardSpec` already uses for a card's cost). Deliberately NOT routed through
+  `to_player_action`/`run_action`/`submit_action` — `Engine::submit_payment` is its own entry point
+  (mirrors `submit_replacement_choice`/`submit_trigger_order`), so `run()` intercepts this variant
+  before `to_player_action` ever sees it and calls a new `run_payment` (parallel to `run_action`,
+  sharing a new `drain` helper extracted from both).
+- Added `AssertionSpec::ManaPool { player, color, equals }` to verify debits.
+- Factored the generic+colors → `Vec<ManaSymbol>` logic (previously inline in `build_initial_state`)
+  into a shared `mana_symbols` helper, used by both `CardSpec` and the new `ManaPaymentSpec`.
+
+**Second gap found while smoke-testing the fix through the real CLI** (not just `cargo test`):
+writing an actual TOML scenario that casts and pays for a spell exposed that `ObjectZone` assertions
+silently broke the moment the tracked card changed zones. Reason: `PlayLand`/`CastSpell`/resolution
+all mint a *new* `ObjectId` per move (CR 400.7) — `card_ids` (the TOML-key → `ObjectId` map, built
+once at setup) was never updated afterward, so a key like `"bear"` kept pointing at a hand-zone id
+that no longer existed once the card moved to the stack. This wasn't a side effect of this slice's
+own changes — `PlayLand`/`CastSpell` were never exercised via a TOML scenario before now (only via
+direct Rust integration tests, which track the new id themselves) — but it directly blocks the
+human's stated goal, so fixed in the same pass: added `remap_moved_card_ids`, called in `run()`
+after every action, which scans that action's newly-added ledger slice for `ZoneChange` events and
+follows each one's `last_known_info` (the old id) forward to its replacement in `card_ids`.
+
+**VERIFICATION:** `cargo test --workspace` still 38/38 (the new fixture is picked up automatically by
+`tests/scenarios.rs`'s directory scan). Added `tests/scenarios/phase5_cast_spell_payment.toml` —
+seeds a player's `mana_pool`, passes priority 4× to reach `Phase::Main` (CastSpell's non-instant
+branch needs sorcery speed), casts a real-cost creature, pays it via `SubmitPayment`, passes once
+more to resolve the stack, and asserts the pool is debited to 0 and the card landed on the
+battlefield. Confirmed directly via `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/
+phase5_cast_spell_payment.toml` (not just the test harness) — output: 7/7 actions ran, 3/3 assertions
+passed.
+
+## Next slice
 
 ## Mistakes caught (don't repeat)
 

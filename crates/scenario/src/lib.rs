@@ -53,6 +53,31 @@ pub struct ScenarioFile {
 pub struct PlayerSpec {
     pub id: u32,
     pub life: i32,
+    /// Fake, pre-seeded floating mana — CR 605 mana abilities (tapping a
+    /// land, etc) don't exist yet, so this is the only way a scenario can
+    /// give a player something to pay a cost with. See
+    /// docs/implementation.md's cast-spell-payment slice notes.
+    #[serde(default)]
+    pub mana_pool: ManaPoolSpec,
+}
+
+/// Mirrors `ManaPool`'s six fields one-to-one — kept separate (rather than
+/// deriving `Deserialize` on `ManaPool` itself) so the engine's own type
+/// doesn't need to depend on `serde`.
+#[derive(Deserialize, Default)]
+pub struct ManaPoolSpec {
+    #[serde(default)]
+    pub white: u32,
+    #[serde(default)]
+    pub blue: u32,
+    #[serde(default)]
+    pub black: u32,
+    #[serde(default)]
+    pub red: u32,
+    #[serde(default)]
+    pub green: u32,
+    #[serde(default)]
+    pub colorless: u32,
 }
 
 /// Simplified mana cost shape for test fixtures — `generic_cost` + a list of
@@ -136,9 +161,28 @@ pub enum ActionSpec {
         #[serde(default)]
         selection: Vec<TargetSpec>,
     },
-    // SubmitPayment intentionally omitted for v1 - PaymentPlan's CostPayment
-    // shapes are more involved and the cost system itself isn't
-    // implemented yet either; add a TOML shape once that's worth testing.
+    /// CR 601.2f-h: answers a pending `ProcessState::AwaitingPayment` pause.
+    /// Deliberately NOT routed through `to_player_action`/`submit_action` -
+    /// `Engine::submit_payment` is its own entry point (see engine.rs), so
+    /// `run()` intercepts this variant before `to_player_action` ever sees
+    /// it. `mana` defaults to empty, which is the correct shape for paying
+    /// a `{0}` cost (CR 118.5a still requires an explicit empty plan).
+    SubmitPayment {
+        player: u32,
+        #[serde(default)]
+        mana: ManaPaymentSpec,
+    },
+}
+
+/// Same simplified shape as `CardSpec`'s `generic_cost`/`colors` (no hybrid/
+/// Phyrexian/X — not modeled by `PaymentPlan::validate` yet either), reused
+/// here for what a `SubmitPayment` action is paying *with*.
+#[derive(Deserialize, Default)]
+pub struct ManaPaymentSpec {
+    #[serde(default)]
+    pub generic_cost: u32,
+    #[serde(default)]
+    pub colors: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -147,6 +191,10 @@ pub enum AssertionSpec {
     Life { player: u32, equals: i32 },
     LedgerLen { equals: usize },
     ObjectZone { card: String, equals: String },
+    /// Checks one `ManaPool` field by name (`white`/`blue`/`black`/`red`/
+    /// `green`/`colorless`) - the way to confirm a `SubmitPayment` action
+    /// actually debited what was expected.
+    ManaPool { player: u32, color: String, equals: u32 },
 }
 
 // ---------------------------------------------------------------------
@@ -194,6 +242,20 @@ fn parse_color(letter: &str) -> Color {
     }
 }
 
+/// Shared between `CardSpec`'s `mana_cost` (what a spell costs) and
+/// `ManaPaymentSpec` (what a `SubmitPayment` action pays with) - same
+/// simplified generic+colors shape either way.
+fn mana_symbols(generic_cost: u32, colors: &[String]) -> Vec<ManaSymbol> {
+    let mut symbols = Vec::new();
+    if generic_cost > 0 {
+        symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Generic(generic_cost)));
+    }
+    for color_letter in colors {
+        symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Colored(parse_color(color_letter))));
+    }
+    symbols
+}
+
 fn parse_zone_kind(name: &str) -> ZoneKind {
     match name {
         "library" => ZoneKind::Library,
@@ -227,7 +289,14 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         players.push(PlayerState {
             player_id: PlayerId(p.id),
             life: p.life,
-            mana_pool: ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 },
+            mana_pool: ManaPool {
+                white: p.mana_pool.white,
+                blue: p.mana_pool.blue,
+                black: p.mana_pool.black,
+                red: p.mana_pool.red,
+                green: p.mana_pool.green,
+                colorless: p.mana_pool.colorless,
+            },
             counters: CounterSet::new(),
             emblems: Vec::new(),
             commander_damage_taken: Vec::new(),
@@ -259,13 +328,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         let object_id = ObjectId(next_object_id);
         next_object_id += 1;
 
-        let mut symbols = Vec::new();
-        if spec.generic_cost > 0 {
-            symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Generic(spec.generic_cost)));
-        }
-        for color_letter in &spec.colors {
-            symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Colored(parse_color(color_letter))));
-        }
+        let symbols = mana_symbols(spec.generic_cost, &spec.colors);
 
         let definition = CardDefinition {
             definition_id: object_id.0,
@@ -426,8 +489,27 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                 selection: selection.iter().map(|t| resolve_target(t, card_ids)).collect(),
             },
         ),
+        // SubmitPayment never reaches here - run() intercepts it and calls
+        // Engine::submit_payment directly (see that variant's doc comment).
+        ActionSpec::SubmitPayment { .. } => {
+            unreachable!("SubmitPayment is handled in run(), before to_player_action")
+        }
     };
     PlayerAction { player: PlayerId(player), kind }
+}
+
+/// `mana`'s symbols, as a `PaymentPlan` - empty `colors`/`generic_cost`
+/// (the default) produces the empty plan CR 118.5a requires for a `{0}`
+/// cost; anything else produces the single `CostPayment::Mana` entry
+/// `PaymentPlan::validate` expects (see cost.rs's doc comment on why it's
+/// exactly one entry, not per-color).
+fn build_payment_plan(mana: &ManaPaymentSpec) -> PaymentPlan {
+    let symbols = mana_symbols(mana.generic_cost, &mana.colors);
+    if symbols.is_empty() {
+        PaymentPlan { payments: Vec::new() }
+    } else {
+        PaymentPlan { payments: vec![CostPayment::Mana(ManaCost { symbols })] }
+    }
 }
 
 pub enum StepOutcome {
@@ -449,6 +531,27 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+/// Steps `engine` until it pauses for the next player decision (or errors/
+/// ends the game) - shared by `run_action` (after `submit_action`) and
+/// `run_payment` (after `submit_payment`), since both resume the same
+/// pipeline-stepping loop once their respective submission succeeds.
+fn drain(engine: &mut Engine) -> StepOutcome {
+    loop {
+        let result = engine.step();
+        match result.status {
+            StepStatus::Progressed => continue,
+            StepStatus::AwaitingAction { .. }
+            | StepStatus::AwaitingReplacementChoice { .. }
+            | StepStatus::AwaitingTriggerOrderChoice { .. }
+            | StepStatus::AwaitingPayment { .. }
+            | StepStatus::GameOver { .. } => {
+                return StepOutcome::Ran;
+            }
+            StepStatus::Error(err) => return StepOutcome::Errored(format!("{err:?}")),
+        }
+    }
+}
+
 /// Drives one action through `engine`, catching any `todo!()` panic
 /// (expected until Phase 5/7) rather than letting it abort the whole run.
 fn run_action(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
@@ -456,20 +559,24 @@ fn run_action(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
         if let Err(err) = engine.submit_action(action) {
             return StepOutcome::Errored(format!("{err:?}"));
         }
-        loop {
-            let result = engine.step();
-            match result.status {
-                StepStatus::Progressed => continue,
-                StepStatus::AwaitingAction { .. }
-                | StepStatus::AwaitingReplacementChoice { .. }
-                | StepStatus::AwaitingTriggerOrderChoice { .. }
-                | StepStatus::AwaitingPayment { .. }
-                | StepStatus::GameOver { .. } => {
-                    return StepOutcome::Ran;
-                }
-                StepStatus::Error(err) => return StepOutcome::Errored(format!("{err:?}")),
-            }
+        drain(engine)
+    }));
+    match result {
+        Ok(outcome) => outcome,
+        Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
+    }
+}
+
+/// Same shape as `run_action`, but for the `SubmitPayment` action - answers
+/// a `ProcessState::AwaitingPayment` pause via `Engine::submit_payment`
+/// rather than `submit_action` (see `ActionSpec::SubmitPayment`'s doc
+/// comment for why it can't go through `to_player_action`/`run_action`).
+fn run_payment(engine: &mut Engine, plan: PaymentPlan) -> StepOutcome {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
+        if let Err(err) = engine.submit_payment(plan) {
+            return StepOutcome::Errored(format!("{err:?}"));
         }
+        drain(engine)
     }));
     match result {
         Ok(outcome) => outcome,
@@ -518,6 +625,24 @@ fn check_assertion(
                 AssertionOutcome::Failed { expected: equals.clone(), actual: format!("{actual_kind:?}") }
             }
         }
+        AssertionSpec::ManaPool { player, color, equals } => {
+            let pid = PlayerId(*player);
+            let pool = state.players.iter().find(|p| p.player_id == pid).map(|p| &p.mana_pool);
+            let actual = pool.map(|pool| match color.as_str() {
+                "white" => pool.white,
+                "blue" => pool.blue,
+                "black" => pool.black,
+                "red" => pool.red,
+                "green" => pool.green,
+                "colorless" => pool.colorless,
+                other => panic!("unknown mana_pool color in scenario file: {other}"),
+            });
+            if actual == Some(*equals) {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+            }
+        }
     }
 }
 
@@ -535,14 +660,44 @@ impl ScenarioReport {
     }
 }
 
+/// CR 400.7: `PlayLand`/`CastSpell`/resolution all mint a *new* `ObjectId`
+/// for the moved object rather than reusing the old one - so a card's entry
+/// in `card_ids` (keyed by its TOML key, set once at setup time) goes stale
+/// the moment that card changes zones. Without this, any scenario action or
+/// assertion referencing a card by key after it's been cast/played would
+/// silently resolve to the wrong (or a now-nonexistent) id. Scans the ledger
+/// events `engine` just produced and follows each `ZoneChange`'s
+/// `last_known_info` (the pre-move snapshot, which still carries the old
+/// id) forward to its replacement.
+fn remap_moved_card_ids(card_ids: &mut HashMap<String, ObjectId>, new_events: &[GameEvent]) {
+    for event in new_events {
+        if let GameEventKind::ZoneChange { object: new_id, last_known_info: Some(old), .. } =
+            &event.kind
+        {
+            for tracked_id in card_ids.values_mut() {
+                if *tracked_id == old.object_id {
+                    *tracked_id = *new_id;
+                }
+            }
+        }
+    }
+}
+
 pub fn run(file: &ScenarioFile) -> ScenarioReport {
-    let (state, card_ids) = build_initial_state(file);
+    let (state, mut card_ids) = build_initial_state(file);
     let mut engine = Engine::new(state);
 
     let mut action_outcomes = Vec::new();
     for action_spec in &file.actions {
-        let action = to_player_action(action_spec, &card_ids);
-        action_outcomes.push(run_action(&mut engine, action));
+        let ledger_before = engine.state().ledger.len();
+        let outcome = match action_spec {
+            ActionSpec::SubmitPayment { mana, .. } => {
+                run_payment(&mut engine, build_payment_plan(mana))
+            }
+            other => run_action(&mut engine, to_player_action(other, &card_ids)),
+        };
+        remap_moved_card_ids(&mut card_ids, &engine.state().ledger[ledger_before..]);
+        action_outcomes.push(outcome);
     }
 
     let assertion_outcomes = file

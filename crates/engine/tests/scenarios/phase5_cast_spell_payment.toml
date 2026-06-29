@@ -1,0 +1,77 @@
+# Cast a real-cost sorcery, pay it for real from a pre-seeded mana pool, and
+# confirm it resolves to the battlefield with the pool correctly debited.
+# Exercises the cast-spell-payment slice's TOML hooks (PlayerSpec.mana_pool,
+# the SubmitPayment action, the ManaPool assertion) end to end.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+mana_pool = { green = 1, colorless = 2 }
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+generic_cost = 2
+colors = ["G"]
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bear"
+
+# A solo player's first PassPriority always counts as "everyone passed"
+# (consecutive_passes >= turn_order.len() == 1), so each of these advances
+# one turn/phase/step (CR 500-514) - PreGame -> Untap -> Upkeep -> Draw ->
+# Main. CastSpell's non-instant branch needs Phase::Main (sorcery speed).
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "cast_spell"
+player = 0
+card = "bear"
+
+[[actions]]
+type = "submit_payment"
+player = 0
+mana = { generic_cost = 2, colors = ["G"] }
+
+# Resolves the stack (CR 608.2m: a permanent type goes to the battlefield) -
+# solo player's pass is again "everyone passed", now with a nonempty stack.
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[assertions]]
+type = "mana_pool"
+player = 0
+color = "green"
+equals = 0
+
+[[assertions]]
+type = "mana_pool"
+player = 0
+color = "colorless"
+equals = 0
+
+[[assertions]]
+type = "object_zone"
+card = "bear"
+equals = "battlefield"
