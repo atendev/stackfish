@@ -1,7 +1,10 @@
+use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::PlayerId;
+use crate::types::turn::Phase;
+use crate::types::zone::ZoneKind;
 
 /// Carrying out an already-validated `EngineCommand` failed partway —
 /// distinct from `ActionError` (engine.rs), which rejects an action before
@@ -52,6 +55,29 @@ pub struct CommandOutcome {
     /// See `PriorityHandoff`. `engine.rs` applies this to
     /// `state.priority_player` itself.
     pub priority_handoff: PriorityHandoff,
+}
+
+/// CR 117.1a's "sorcery speed" window — `player` may take an action that
+/// requires it (playing a land, casting a sorcery, most activated
+/// abilities) only when all of: they hold priority, it's their own turn
+/// (CR 305.3), it's a main phase of that turn (CR 305.1), and the stack is
+/// empty (CR 307.1/305.1). Pulled out as a standalone predicate rather than
+/// inlined into `PlayLand` alone, since `CastSpell`'s sorcery-timing branch
+/// and (most) `ActivateAbility` checks will need the exact same condition
+/// once they're real.
+///
+/// TODO: doesn't account for effects that grant timing permission beyond
+/// the base rule (e.g. "you may play an additional land," "you may cast
+/// this spell as though it had flash," "you may play lands as though it
+/// were a main phase") - those are all CR 113.6-style rules-text
+/// permissions layered on top of this base check, and nothing here
+/// consults state.continuous_effects/abilities for them yet. Revisit once
+/// such an effect needs representing.
+fn is_sorcery_speed(state: &GameState, player: PlayerId) -> bool {
+    state.priority_player == player
+        && state.active_player == player
+        && state.phase == Phase::Main
+        && state.stack.is_empty()
 }
 
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
@@ -105,6 +131,68 @@ pub fn execute_command(
                 priority_handoff: PriorityHandoff::Unchanged,
             });
         }
+        PlayerActionKind::PlayLand { card } => {
+            // CR 305.1: lands aren't spells, so this goes straight to the
+            // battlefield - no stack object. Playing a land is still
+            // restricted to sorcery speed (CR 305.1/305.3, via
+            // is_sorcery_speed) and to once per turn (CR 305.2).
+            if !is_sorcery_speed(state, command.actor) {
+                return Err(CommandError::IllegalAction(
+                    "a land can only be played at sorcery speed: actor's turn, a main phase, \
+                     actor holding priority, and an empty stack"
+                        .to_string(),
+                ));
+            }
+            // TODO(CR 305.2): hardcoded against the literal `1` - doesn't
+            // read state.continuous_effects for anything that raises a
+            // player's land-plays-per-turn limit (e.g. "you may play an
+            // additional land each turn"). continuous_effects has no query
+            // API yet (layers.rs is still mostly todo!()) - once it does,
+            // this needs "limit = 1 + sum of applicable continuous
+            // effects" instead of the bare literal below.
+            let already_played =
+                *state.lands_played_this_turn.get(&command.actor).unwrap_or(&0);
+            if already_played >= 1 {
+                return Err(CommandError::IllegalAction(
+                    "actor has already played their land for this turn".to_string(),
+                ));
+            }
+
+            let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
+            if !object.definition.card_types.contains(CardTypeSet::LAND) {
+                return Err(CommandError::IllegalAction("card is not a Land".to_string()));
+            }
+            if object.zone != ZoneKind::Hand || object.controller != command.actor {
+                return Err(CommandError::IllegalAction(
+                    "card is not in actor's hand".to_string(),
+                ));
+            }
+            // Snapshot before the move - CR 603.10's last_known_info (see
+            // GameEventKind::ZoneChange's doc comment).
+            let last_known_info = object.clone();
+
+            state
+                .zone_mut(ZoneKind::Hand, Some(command.actor))
+                .ok_or_else(|| CommandError::IllegalAction("actor has no hand zone".to_string()))?
+                .remove(card);
+            state
+                .zone_mut(ZoneKind::Battlefield, None)
+                .ok_or_else(|| CommandError::IllegalAction("no battlefield zone".to_string()))?
+                .push_bottom(card);
+            state.object_mut(card).expect("looked up above").zone = ZoneKind::Battlefield;
+            *state.lands_played_this_turn.entry(command.actor).or_insert(0) += 1;
+
+            return Ok(CommandOutcome {
+                events: vec![GameEventKind::ZoneChange {
+                    object: card,
+                    from: ZoneKind::Hand,
+                    to: ZoneKind::Battlefield,
+                    last_known_info: Some(last_known_info),
+                }],
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+            });
+        }
         _ => {}
     }
     // TODO: match command.action (PlayerActionKind) and handle each variant:
@@ -118,11 +206,8 @@ pub fn execute_command(
     //     only the ability goes on the stack, look up the RegisteredAbility
     //     by source+ability_index in state.abilities.
     //     broke_pass_chain = true, priority_handoff = Unchanged.
-    //   PlayLand: move card to battlefield directly, no stack involved
-    //     (CR 305.1 - lands aren't spells). broke_pass_chain = true,
-    //     priority_handoff = Unchanged.
-    //   PassPriority is implemented above (the match arm before this
-    //     comment block) - everything else here is still unimplemented.
+    //   PassPriority/PlayLand are implemented above (the match arms before
+    //     this comment block) - everything else here is still unimplemented.
     //   DeclareAttackers/DeclareBlockers: validate legality (CR 508/509)
     //     and record the declarations into combat state - GameState doesn't
     //     have a dedicated combat-state field yet, may need one.

@@ -337,6 +337,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         priority_player: active_player,
         consecutive_passes: 0,
         postcombat_main: false,
+        lands_played_this_turn: HashMap::new(),
         objects,
         zones,
         stack: Vec::new(),

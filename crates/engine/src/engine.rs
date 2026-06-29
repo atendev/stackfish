@@ -701,6 +701,9 @@ impl Engine {
                 self.state.phase = Phase::Beginning;
                 self.state.step = Step::Untap;
                 self.state.postcombat_main = false;
+                // CR 305.2's per-turn land-drop count resets with the turn,
+                // same trigger as postcombat_main above.
+                self.state.lands_played_this_turn.clear();
                 true
             }
             (phase, step) => unreachable!(
@@ -752,6 +755,7 @@ mod tests {
             priority_player: p0,
             consecutive_passes: 0,
             postcombat_main: false,
+            lands_played_this_turn: HashMap::new(),
             objects: HashMap::new(),
             zones: Vec::new(),
             stack: Vec::new(),
