@@ -25,21 +25,27 @@ fn main() -> ExitCode {
     let report = stackfish_scenario::run_path(&path);
 
     println!("\n-- actions --");
-    for (i, outcome) in report.action_outcomes.iter().enumerate() {
+    for (i, (desc, outcome)) in
+        report.action_descriptions.iter().zip(report.action_outcomes.iter()).enumerate()
+    {
         match outcome {
-            StepOutcome::Ran => println!("  [{i}] ran"),
-            StepOutcome::NotImplemented(msg) => println!("  [{i}] not yet implemented ({msg})"),
-            StepOutcome::Errored(msg) => println!("  [{i}] errored ({msg})"),
+            StepOutcome::Ran => println!("  [{i}] ran - {desc}"),
+            StepOutcome::NotImplemented(msg) => {
+                println!("  [{i}] not yet implemented - {desc} ({msg})")
+            }
+            StepOutcome::Errored(msg) => println!("  [{i}] errored - {desc} ({msg})"),
         }
     }
 
     println!("\n-- assertions --");
     let mut hard_failures = 0;
-    for (i, outcome) in report.assertion_outcomes.iter().enumerate() {
+    for (i, (desc, outcome)) in
+        report.assertion_descriptions.iter().zip(report.assertion_outcomes.iter()).enumerate()
+    {
         match outcome {
-            AssertionOutcome::Passed => println!("  [{i}] PASS"),
+            AssertionOutcome::Passed => println!("  [{i}] PASS - {desc}"),
             AssertionOutcome::Failed { expected, actual } => {
-                println!("  [{i}] FAIL - expected {expected}, got {actual}");
+                println!("  [{i}] FAIL - {desc} (expected {expected}, got {actual})");
                 hard_failures += 1;
             }
         }

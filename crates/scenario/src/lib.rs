@@ -174,6 +174,65 @@ pub enum ActionSpec {
     },
 }
 
+fn describe_target(target: &TargetSpec) -> String {
+    match target {
+        TargetSpec::Player(id) => format!("player {id}"),
+        TargetSpec::Card(key) => format!("{key:?}"),
+    }
+}
+
+impl ActionSpec {
+    /// Human-readable one-liner for CLI/log output - written directly off
+    /// the TOML-facing fields (card keys, raw player ids), not the engine's
+    /// own ids, so it reads the same as the scenario file itself.
+    pub fn describe(&self) -> String {
+        match self {
+            ActionSpec::PassPriority { player } => format!("pass_priority(player={player})"),
+            ActionSpec::PlayLand { player, card } => {
+                format!("play_land(player={player}, card={card:?})")
+            }
+            ActionSpec::CastSpell { player, card, targets, modes, x_value } => {
+                let targets = targets.iter().map(describe_target).collect::<Vec<_>>().join(", ");
+                format!(
+                    "cast_spell(player={player}, card={card:?}, targets=[{targets}], modes={modes:?}, x_value={x_value:?})"
+                )
+            }
+            ActionSpec::ActivateAbility { player, source, ability_index, targets } => {
+                let targets = targets.iter().map(describe_target).collect::<Vec<_>>().join(", ");
+                format!(
+                    "activate_ability(player={player}, source={source:?}, ability_index={ability_index}, targets=[{targets}])"
+                )
+            }
+            ActionSpec::DeclareAttackers { player, attackers } => {
+                let attackers = attackers
+                    .iter()
+                    .map(|a| format!("{:?} -> {}", a.attacker, describe_target(&a.target)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("declare_attackers(player={player}, attackers=[{attackers}])")
+            }
+            ActionSpec::DeclareBlockers { player, blocks } => {
+                let blocks = blocks
+                    .iter()
+                    .map(|b| format!("{:?} blocks {:?}", b.blocker, b.attacker))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("declare_blockers(player={player}, blocks=[{blocks}])")
+            }
+            ActionSpec::MakeChoice { player, description, selection } => {
+                let selection = selection.iter().map(describe_target).collect::<Vec<_>>().join(", ");
+                format!(
+                    "make_choice(player={player}, description={description:?}, selection=[{selection}])"
+                )
+            }
+            ActionSpec::SubmitPayment { player, mana } => format!(
+                "submit_payment(player={player}, generic_cost={}, colors={:?})",
+                mana.generic_cost, mana.colors
+            ),
+        }
+    }
+}
+
 /// Same simplified shape as `CardSpec`'s `generic_cost`/`colors` (no hybrid/
 /// Phyrexian/X — not modeled by `PaymentPlan::validate` yet either), reused
 /// here for what a `SubmitPayment` action is paying *with*.
@@ -199,6 +258,26 @@ pub enum AssertionSpec {
     Step { equals: String },
     ActivePlayer { equals: u32 },
     PriorityPlayer { equals: u32 },
+}
+
+impl AssertionSpec {
+    /// Human-readable one-liner, same rationale as `ActionSpec::describe`.
+    pub fn describe(&self) -> String {
+        match self {
+            AssertionSpec::Life { player, equals } => format!("life(player={player}) == {equals}"),
+            AssertionSpec::LedgerLen { equals } => format!("ledger_len == {equals}"),
+            AssertionSpec::ObjectZone { card, equals } => {
+                format!("object_zone(card={card:?}) == {equals:?}")
+            }
+            AssertionSpec::ManaPool { player, color, equals } => {
+                format!("mana_pool(player={player}, color={color}) == {equals}")
+            }
+            AssertionSpec::Phase { equals } => format!("phase == {equals:?}"),
+            AssertionSpec::Step { equals } => format!("step == {equals:?}"),
+            AssertionSpec::ActivePlayer { equals } => format!("active_player == {equals}"),
+            AssertionSpec::PriorityPlayer { equals } => format!("priority_player == {equals}"),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -718,7 +797,14 @@ fn check_assertion(
 
 pub struct ScenarioReport {
     pub action_outcomes: Vec<StepOutcome>,
+    /// `ActionSpec::describe()` for each entry in `action_outcomes`, same
+    /// index - lets a caller (the CLI) say what actually ran, not just that
+    /// something at index N did.
+    pub action_descriptions: Vec<String>,
     pub assertion_outcomes: Vec<AssertionOutcome>,
+    /// `AssertionSpec::describe()` for each entry in `assertion_outcomes`,
+    /// same index.
+    pub assertion_descriptions: Vec<String>,
 }
 
 impl ScenarioReport {
@@ -758,6 +844,7 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
     let mut engine = Engine::new(state);
 
     let mut action_outcomes = Vec::new();
+    let mut action_descriptions = Vec::new();
     for action_spec in &file.actions {
         let ledger_before = engine.state().ledger.len();
         let outcome = match action_spec {
@@ -768,6 +855,7 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
         };
         remap_moved_card_ids(&mut card_ids, &engine.state().ledger[ledger_before..]);
         action_outcomes.push(outcome);
+        action_descriptions.push(action_spec.describe());
     }
 
     let assertion_outcomes = file
@@ -775,8 +863,9 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
         .iter()
         .map(|a| check_assertion(a, engine.state(), &card_ids))
         .collect();
+    let assertion_descriptions = file.assertions.iter().map(|a| a.describe()).collect();
 
-    ScenarioReport { action_outcomes, assertion_outcomes }
+    ScenarioReport { action_outcomes, action_descriptions, assertion_outcomes, assertion_descriptions }
 }
 
 pub fn run_path(path: &std::path::Path) -> ScenarioReport {

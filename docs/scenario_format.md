@@ -16,6 +16,19 @@ Actions that hit not-yet-implemented engine code report `not yet implemented` ra
 crashing the run — that's expected pre-Phase 7, not a failure. Only an assertion that actually ran
 and got the wrong answer counts as a hard failure.
 
+The CLI's output describes each action/assertion next to its result (`ActionSpec::describe`/
+`AssertionSpec::describe` in `crates/scenario/src/lib.rs`), e.g.:
+
+```
+-- actions --
+  [4] ran - cast_spell(player=0, card="bear", targets=[], modes=[], x_value=None)
+  [5] ran - submit_payment(player=0, generic_cost=2, colors=["G"])
+
+-- assertions --
+  [3] PASS - phase == "main"
+  [4] FAIL - step == "untap" (expected untap, got PreCombatMain)
+```
+
 ## Top-level fields
 
 ```toml
