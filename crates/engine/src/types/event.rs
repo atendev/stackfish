@@ -27,6 +27,12 @@ pub enum GameEventKind {
     DamageDealt { source: ObjectId, target: Target, amount: u32 },
     CounterAdded { object: ObjectId, kind: CounterKind, amount: i32 },
     ManaAdded { player: PlayerId, amount: crate::mana::ManaCost },
+    /// CR 601.2i/118: `payer` committed a `PaymentPlan` covering
+    /// `stack_id`'s cost - the ledger fact that completes the cast process
+    /// `CastSpell`'s own events started (card moved to stack), distinct from
+    /// those since payment is its own decision point (see command.rs's
+    /// `SubmitPayment` doc).
+    CostPaid { stack_id: ObjectId, payer: PlayerId },
     PrioritySet { player: PlayerId },
     PriorityPassed { player: PlayerId },
     StackObjectPushed { stack_id: ObjectId },

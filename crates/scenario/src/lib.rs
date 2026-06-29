@@ -463,6 +463,7 @@ fn run_action(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
                 StepStatus::AwaitingAction { .. }
                 | StepStatus::AwaitingReplacementChoice { .. }
                 | StepStatus::AwaitingTriggerOrderChoice { .. }
+                | StepStatus::AwaitingPayment { .. }
                 | StepStatus::GameOver { .. } => {
                     return StepOutcome::Ran;
                 }

@@ -1,8 +1,9 @@
 use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerActionKind};
+use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectLineage, PlayerId, ScriptHandle};
+use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle};
 use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::turn::Phase;
 use crate::types::zone::ZoneKind;
@@ -56,6 +57,24 @@ pub struct CommandOutcome {
     /// See `PriorityHandoff`. `engine.rs` applies this to
     /// `state.priority_player` itself.
     pub priority_handoff: PriorityHandoff,
+    /// CR 601.2a puts a spell on the stack *before* its cost is determined/
+    /// paid (601.2f-h) — set by `CastSpell` once it's pushed `stack_id` onto
+    /// `state.stack`, so `engine.rs` can pause the rest of this pipeline run
+    /// on `ProcessState::AwaitingPayment` until `Engine::submit_payment`
+    /// answers, rather than this function deducting mana synchronously
+    /// (which would assume the cost is always payable/free, and skip the
+    /// CR 118.5a "must explicitly acknowledge a {0} cost" requirement).
+    /// `None` for every other variant — nothing else here puts something on
+    /// the stack pending payment.
+    pub requires_payment: Option<PendingPaymentRequest>,
+}
+
+/// See `CommandOutcome::requires_payment`'s doc comment for why this exists
+/// as its own pause rather than a synchronous deduction.
+pub struct PendingPaymentRequest {
+    pub stack_id: ObjectId,
+    pub payer: PlayerId,
+    pub cost: CostSpec,
 }
 
 /// CR 117.1a's "sorcery speed" window — `player` may take an action that
@@ -116,6 +135,7 @@ pub fn execute_command(
                 events: vec![GameEventKind::PriorityPassed { player: command.actor }],
                 broke_pass_chain: false,
                 priority_handoff: PriorityHandoff::To(state.turn_order[next_idx]),
+                requires_payment: None,
             });
         }
         PlayerActionKind::MakeChoice { .. } => {
@@ -130,6 +150,7 @@ pub fn execute_command(
                 events: Vec::new(),
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
+                requires_payment: None,
             });
         }
         PlayerActionKind::PlayLand { card } => {
@@ -206,6 +227,7 @@ pub fn execute_command(
                 }],
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
+                requires_payment: None,
             });
         }
         PlayerActionKind::CastSpell { card, modes, targets, x_value } => {
@@ -250,12 +272,14 @@ pub fn execute_command(
             // are validated for legality yet - no mode-legality check, no
             // target-legality check (range/restriction/count per CR
             // 601.2c), no division/distribution step (CR 601.2d), and no
-            // legality recheck (CR 601.2e). Cost is stubbed to free
-            // entirely - no CostSpec is built, no SubmitPayment round trip
-            // happens (see cost.rs's PaymentPlan flow) - real cost
-            // determination+payment is deliberately deferred to a later
-            // slice; this one only proves the cast -> stack -> resolve
-            // shape works end to end with a free spell.
+            // legality recheck (CR 601.2e).
+
+            // CR 601.2f: total cost = the card's printed mana_cost only -
+            // no additional/alternative costs, no reductions yet (see
+            // CostSpec::mana_only's own doc, and PaymentPlan::validate's
+            // "out of scope" list). x_value isn't folded into the generic
+            // component yet either - same gap CostSpec/ManaCost flag.
+            let cost = CostSpec::mana_only(object.definition.mana_cost.clone());
 
             // Snapshot before the move - CR 603.10's last_known_info (see
             // GameEventKind::ZoneChange's doc comment).
@@ -310,6 +334,15 @@ pub fn execute_command(
                 // casting (checked above), so they keep it - it doesn't move.
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
+                // CR 601.2f-h: cost isn't paid yet just by being on the
+                // stack - engine.rs pauses on AwaitingPayment until
+                // Engine::submit_payment answers, even for a {0} cost (CR
+                // 118.5a still requires an explicit empty acknowledgment).
+                requires_payment: Some(PendingPaymentRequest {
+                    stack_id: new_id,
+                    payer: command.actor,
+                    cost,
+                }),
             });
         }
         _ => {}
@@ -326,8 +359,12 @@ pub fn execute_command(
     //     and record the declarations into combat state - GameState doesn't
     //     have a dedicated combat-state field yet, may need one.
     //     broke_pass_chain = true, priority_handoff = Unchanged.
-    //   SubmitPayment: validate via PaymentPlan::validate, commit if valid.
-    //     broke_pass_chain = true, priority_handoff = Unchanged.
+    //   SubmitPayment is NOT handled here, deliberately - see
+    //     Engine::submit_payment (engine.rs) and CommandOutcome::
+    //     requires_payment's doc comment above. Payment answers
+    //     ProcessState::AwaitingPayment, a mid-pipeline pause, the same way
+    //     submit_replacement_choice/submit_trigger_order answer their own
+    //     pauses - never goes through submit_action/execute_command at all.
     //   MakeChoice: generic - depends entirely on what asked for the
     //     choice. broke_pass_chain = true, priority_handoff = Unchanged.
     // Every branch ends in returning

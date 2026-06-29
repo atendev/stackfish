@@ -178,6 +178,22 @@ fn drain(engine: &mut Engine) -> StepStatus {
     }
 }
 
+/// Every fixture card in this file has an empty `mana_cost` - this pays it
+/// via the explicit empty `PaymentPlan` CR 118.5a still requires (no
+/// auto-cast), then drains the rest of that pipeline run. Asserts the
+/// engine was actually sitting in `AwaitingPayment` first, so a test that
+/// stops calling this after a future cost-bearing fixture lands doesn't
+/// silently start asserting against the wrong pause.
+fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
+    let status = drain(engine);
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the cast's (free) cost, got {status:?}"
+    );
+    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    drain(engine)
+}
+
 /// Reads the most recent `ZoneChange` event off the ledger (in `(object,
 /// from, to)` form) - `CastSpell`/resolution mint a new `ObjectId` per move
 /// (CR 400.7), so tests can't look the moved object up by its original id.
@@ -210,7 +226,7 @@ fn cast_spell_moves_card_hand_to_stack() {
             },
         })
         .expect("p0 holds priority, spell is in hand");
-    let status = drain(&mut engine);
+    let status = pay_free_and_drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     let (new_id, from, to) = last_zone_change(&engine);
@@ -398,7 +414,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
             },
         })
         .expect("p0 holds priority - instant can be cast despite combat phase + nonempty stack");
-    let status = drain(&mut engine);
+    let status = pay_free_and_drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().stack.len(), 2);
 }
@@ -428,7 +444,7 @@ fn cast_instant_resolves_to_owners_graveyard() {
             },
         })
         .unwrap();
-    drain(&mut engine);
+    pay_free_and_drain(&mut engine);
     let (stack_id, ..) = last_zone_change(&engine);
     assert_eq!(engine.state().stack.len(), 1);
 
@@ -470,7 +486,7 @@ fn cast_creature_resolves_to_battlefield() {
             },
         })
         .unwrap();
-    drain(&mut engine);
+    pay_free_and_drain(&mut engine);
 
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(&mut engine);
