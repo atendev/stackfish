@@ -65,6 +65,14 @@ pub struct CommandOutcome {
 /// inlined into `PlayLand` alone, since `CastSpell`'s sorcery-timing branch
 /// and (most) `ActivateAbility` checks will need the exact same condition
 /// once they're real.
+///
+/// TODO: doesn't account for effects that grant timing permission beyond
+/// the base rule (e.g. "you may play an additional land," "you may cast
+/// this spell as though it had flash," "you may play lands as though it
+/// were a main phase") - those are all CR 113.6-style rules-text
+/// permissions layered on top of this base check, and nothing here
+/// consults state.continuous_effects/abilities for them yet. Revisit once
+/// such an effect needs representing.
 fn is_sorcery_speed(state: &GameState, player: PlayerId) -> bool {
     state.priority_player == player
         && state.active_player == player
@@ -127,11 +135,7 @@ pub fn execute_command(
             // CR 305.1: lands aren't spells, so this goes straight to the
             // battlefield - no stack object. Playing a land is still
             // restricted to sorcery speed (CR 305.1/305.3, via
-            // is_sorcery_speed) and to once per turn absent a continuous
-            // effect raising the limit (CR 305.2 - that increase isn't
-            // modeled yet, so this only ever compares against the literal
-            // 1; revisit once continuous_effects can grant extra land
-            // drops).
+            // is_sorcery_speed) and to once per turn (CR 305.2).
             if !is_sorcery_speed(state, command.actor) {
                 return Err(CommandError::IllegalAction(
                     "a land can only be played at sorcery speed: actor's turn, a main phase, \
@@ -139,6 +143,13 @@ pub fn execute_command(
                         .to_string(),
                 ));
             }
+            // TODO(CR 305.2): hardcoded against the literal `1` - doesn't
+            // read state.continuous_effects for anything that raises a
+            // player's land-plays-per-turn limit (e.g. "you may play an
+            // additional land each turn"). continuous_effects has no query
+            // API yet (layers.rs is still mostly todo!()) - once it does,
+            // this needs "limit = 1 + sum of applicable continuous
+            // effects" instead of the bare literal below.
             let already_played =
                 *state.lands_played_this_turn.get(&command.actor).unwrap_or(&0);
             if already_played >= 1 {
