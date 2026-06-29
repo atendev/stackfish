@@ -181,9 +181,26 @@ This is the most important phase. Implement the full feature, verify it works us
 
 **You move on when:** The human has reviewed the deviation report and decided whether to update phases 1–3 to fix the gaps, or accept the deviations and carry them into Phase 7.
 
+**At project scale (multiple subsystems, not one isolated feature):** if phases 1–4 were run
+across an entire system rather than a single narrow feature (as happened on this project — the
+whole engine, not one feature), doing Phase 5 literally ("implement everything, verify, revert
+everything") stops being a cheap diagnostic and becomes Phase 7 with extra steps. Instead:
+
+- Pick one narrow, concrete vertical slice through the system per dry run — small enough to
+  implement in one sitting, big enough to exercise the plan end to end (e.g. "a player passes
+  priority with an empty stack and the engine advances to the next step," not "implement combat").
+- Do the slice's implement/verify/revert/report cycle on its own branch, created off whatever the
+  current trunk is. Implement the slice there, verify, write the deviation report, then discard
+  the branch (or reset it) rather than hand-reverting files — cleaner and harder to leave partial
+  state behind by accident. Trunk never sees the throwaway implementation.
+- Repeat with a new slice/branch for the next part of the system. Phase 5 becomes "run this loop
+  several times," not "run it once for everything."
+
 ```agent-note
 This phase is a diagnostic, not a delivery. The implementation will be thrown away.
 Do not skip the revert step. The codebase must be clean after this phase — no partial implementation left behind.
+Prefer doing the implement/verify step on its own branch and discarding the branch over hand-reverting files in place — less error-prone, and trunk is never even briefly in a half-implemented state.
+If the project's phases 1–4 covered multiple subsystems rather than one feature, scope each Phase 5 run to a single narrow vertical slice (its own branch), and expect to repeat the cycle per slice rather than running it once for everything.
 Use the exact verification command established in Phase 4. Do not substitute a different check.
 Your deviation report is the primary output of this phase. Be exhaustive. Small deviations matter.
 Format the report clearly:
