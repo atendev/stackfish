@@ -7,7 +7,7 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::sba;
 use crate::triggers::{self, PendingTrigger};
 use crate::types::card::CardTypeSet;
-use crate::types::command::{EngineCommand, PlayerAction};
+use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{self, CostPayment, CostSpec, PaymentPlan};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
@@ -293,6 +293,19 @@ impl Engine {
     /// it this player's priority" (CR 117.3a). Cost/target/timing legality
     /// beyond that isn't designed yet — see `commands::execute_command`'s
     /// TODOs for where that has to land.
+    ///
+    /// CR 508.1/509.1 exception: `DeclareAttackers`/`DeclareBlockers` are
+    /// turn-based actions that explicitly "don't use the stack" and aren't
+    /// a priority decision at all - the defending player has no reason to
+    /// hold priority when blockers are declared (508.2: priority stays with
+    /// the active player through the declare-attackers step). Skipping the
+    /// priority check for these two and leaving the actor check entirely to
+    /// `execute_command` (active player / defending player, per CR 506.2)
+    /// is a deliberate simplification - the fully correct model would have
+    /// these fire automatically on entering their step, before any priority
+    /// window opens, which this engine doesn't have a pipeline stage for
+    /// yet (`ProcessState`/`AdvanceTurnStep` only open a generic priority
+    /// window on every step, combat steps included).
     pub fn submit_action(&mut self, action: PlayerAction) -> Result<(), ActionError> {
         match self.process_state {
             ProcessState::PriorityWindow => {}
@@ -302,7 +315,11 @@ impl Engine {
                 ));
             }
         }
-        if action.player != self.state.priority_player {
+        let is_combat_declaration = matches!(
+            action.kind,
+            PlayerActionKind::DeclareAttackers { .. } | PlayerActionKind::DeclareBlockers { .. }
+        );
+        if !is_combat_declaration && action.player != self.state.priority_player {
             return Err(ActionError::NotYourTurn);
         }
         self.process_state = ProcessState::PendingAction(action);
@@ -832,6 +849,14 @@ impl Engine {
             (Phase::PreGame, _) => {
                 self.state.phase = Phase::Beginning;
                 self.state.step = Step::Untap;
+                // CR 302.6/602.5a: seeds the active player's first
+                // "most recent turn began at" mark - without this,
+                // has_summoning_sickness's None branch would treat every
+                // object as sick forever, since no rotation has happened
+                // yet to set it.
+                self.state
+                    .last_active_turn_number
+                    .insert(self.state.active_player, self.state.turn_number);
                 true
             }
             (Phase::Beginning, Step::Untap) => {
@@ -871,6 +896,9 @@ impl Engine {
             (Phase::Combat, Step::EndOfCombat) => {
                 self.state.phase = Phase::Main;
                 self.state.step = Step::PostCombatMain;
+                // CR 506.4: attacking/blocking status ends with the combat
+                // phase - clear it so it doesn't leak into the next combat.
+                self.state.combat = None;
                 false
             }
             (Phase::Main, Step::PostCombatMain) => {
@@ -896,6 +924,11 @@ impl Engine {
                 self.state.step = Step::Untap;
                 // CR 305.2's per-turn land-drop count resets with the turn.
                 self.state.lands_played_this_turn.clear();
+                // CR 302.6/602.5a: the new active player's most recent
+                // turn now begins at this turn_number.
+                self.state
+                    .last_active_turn_number
+                    .insert(self.state.active_player, self.state.turn_number);
                 true
             }
             (phase, step) => unreachable!(
@@ -947,6 +980,8 @@ mod tests {
             priority_player: p0,
             consecutive_passes: 0,
             lands_played_this_turn: HashMap::new(),
+            combat: None,
+            last_active_turn_number: HashMap::new(),
             objects: HashMap::new(),
             zones: Vec::new(),
             stack: Vec::new(),

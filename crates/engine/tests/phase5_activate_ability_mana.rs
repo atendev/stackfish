@@ -47,6 +47,11 @@ fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -
         attachments: Vec::new(),
         attached_to: None,
         timestamp: SequenceNo(0),
+        // Controlled well before turn 1 started - state_with_source seeds
+        // last_active_turn_number to 1, so this is never summoning sick by
+        // default. Tests exercising sickness itself override this field
+        // directly on the object after construction.
+        controlled_since_turn: 0,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -72,6 +77,8 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
         priority_player: controller,
         consecutive_passes: 0,
         lands_played_this_turn: HashMap::new(),
+        combat: None,
+        last_active_turn_number: { let mut m = HashMap::new(); m.insert(controller, 1); m },
         objects: {
             let mut objects = HashMap::new();
             objects.insert(source, permanent_object(source, land_definition(), controller));
@@ -186,6 +193,26 @@ fn reject_when_source_already_tapped() {
     let mut engine = Engine::new(state);
     let status = activate_and_drain(&mut engine, p0, source, Vec::new());
     assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0, "no mana added");
+}
+
+/// CR 602.5a: closes the TODO the activate-ability-mana slice left open -
+/// a creature that entered the battlefield this turn can't tap for mana
+/// either (same summoning-sickness check `DeclareAttackers` uses).
+#[test]
+fn reject_when_source_has_summoning_sickness() {
+    let p0 = PlayerId(0);
+    let source = ObjectId(0);
+    let mut state = state_with_source(source, p0, source);
+    // last_active_turn_number[p0] == 1 (state_with_source's default) - a
+    // source controlled since turn 1 (the current turn) hasn't been
+    // controlled since the turn *began*, so it's sick.
+    state.object_mut(source).unwrap().controlled_since_turn = 1;
+
+    let mut engine = Engine::new(state);
+    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
+    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0, "no mana added");
 }
 

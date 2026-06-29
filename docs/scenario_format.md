@@ -112,7 +112,14 @@ Places one card instance into one zone for one player at game start.
 player = 0          # u32, matches a [[players]] id
 zone = "battlefield" # see Zones below
 card = "bear"         # matches a [[cards]] key
+controlled_since_turn = 0   # optional u32, default 0 - see Summoning sickness below
 ```
+
+**Summoning sickness (CR 302.6/602.5a):** `controlled_since_turn` defaults to `0`, which is always
+less than any real `turn_number` (the game's first turn seeds `last_active_turn_number` to `1` at
+setup time) - so a setup card is **never** summoning sick by default. To build a fixture that *is*
+sick (a creature that just entered the battlefield this turn), set this to the scenario's current
+`turn_number`. No haste override exists - haste isn't modeled in this engine yet.
 
 Each `[[setup]]` entry creates a new object instance — list the same card key twice to get two
 copies on the battlefield, each with its own `ObjectId`. Visibility defaults to CR's normal zone
@@ -177,6 +184,13 @@ attackers = [
 ]
 ```
 
+CR 508.1: the active player declares attackers, only during the declare attackers step, only once
+per combat. Each attacker must be a creature (not also a battle) controlled by `player`, untapped,
+and not summoning sick (see `controlled_since_turn` above - no haste override). Each `target` must
+be an opponent (player) or a permanent they control that's a planeswalker or battle. Validates the
+whole list before tapping anything - one illegal entry rejects the entire declaration (no partial
+taps). Tapping the attackers and recording them happens immediately, no stack object involved.
+
 ```toml
 [[actions]]
 type = "declare_blockers"
@@ -185,6 +199,22 @@ blocks = [
   { blocker = "wall", attacker = "bear" },
 ]
 ```
+
+CR 509.1: the defending player (in this engine: whichever player in `turn_order` isn't
+`active_player` - multiplayer's "which defending player" ambiguity isn't modeled) declares
+blockers, only during the declare blockers step, only once per combat, only after attackers have
+been declared. Each blocker must be a creature controlled by `player`, untapped, and can't appear
+twice in the same `blocks` list. Each referenced `attacker` must actually be attacking that
+defending player (or their planeswalker/battle).
+
+**Neither action requires `player` to hold priority** - CR 508.1/509.1 call these turn-based
+actions that explicitly don't use the stack, so they're exempt from the priority check every other
+action goes through (`Engine::submit_action`). `execute_command`'s own active-player/
+defending-player checks are the real gate. See
+`crates/engine/tests/scenarios/phase5_combat_declarations.toml` for a full worked example, including
+the pass-priority sequence needed to reach the declare attackers/blockers steps with two players
+(every step transition needs *both* players to pass in a row, not just one, unlike the solo-player
+examples elsewhere in this doc).
 
 ```toml
 [[actions]]

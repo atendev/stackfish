@@ -54,8 +54,21 @@ pub struct GameObject {
     pub counters: CounterSet,
     pub attachments: Vec<ObjectId>,
     pub attached_to: Option<ObjectId>,
-    /// For layer/dependency timestamp ordering (CR 613).
+    /// For layer/dependency timestamp ordering (CR 613). Deliberately
+    /// separate from `controlled_since_turn` below — that field answers a
+    /// different question (summoning sickness), and conflating the two
+    /// would be the same "one field doing two jobs" mistake `ZoneChange`'s
+    /// `Zone`-vs-`ZoneKind` bug already taught this codebase to avoid (see
+    /// docs/implementation.md).
     pub timestamp: SequenceNo,
+    /// CR 302.6/602.5a (summoning sickness): the global `GameState.
+    /// turn_number` at the moment this object's current controller most
+    /// recently gained control of it — set at creation, and (not modeled
+    /// yet — no "gain control" effect exists in this engine) whenever
+    /// `controller` changes. Consulted via `commands::has_summoning_sickness`
+    /// rather than stored as a bool, since a bool would need imperative
+    /// upkeep at every untap-step/control-change site to avoid drifting.
+    pub controlled_since_turn: u32,
     pub visibility: VisibilityPolicy,
 }
 
@@ -73,10 +86,13 @@ impl GameObject {
         // constructor or a lineage param - not covered by this signature
         // yet); tapped/flipped/face_down/phased_out: false; damage_marked:
         // 0; counters: CounterSet::new(); attachments: empty;
-        // attached_to: None; visibility: needs a sensible default tied to
-        // `zone`'s default (e.g. fully public if zone == Battlefield, owner-
-        // only otherwise) - VisibilityPolicy doesn't have a zone-aware
-        // constructor yet, may need one.
+        // attached_to: None; controlled_since_turn: needs the current
+        // GameState.turn_number, which this signature has no way to read -
+        // this constructor will need a turn_number param (or a &GameState)
+        // before it can set this field correctly; visibility: needs a
+        // sensible default tied to `zone`'s default (e.g. fully public if
+        // zone == Battlefield, owner-only otherwise) - VisibilityPolicy
+        // doesn't have a zone-aware constructor yet, may need one.
         todo!()
     }
 

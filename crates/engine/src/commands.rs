@@ -1,13 +1,15 @@
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
 use crate::types::card::CardTypeSet;
+use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle};
+use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
+use crate::types::object::GameObject;
 use crate::types::stack::{StackEntryKind, StackObject};
-use crate::types::turn::Phase;
+use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
 /// Carrying out an already-validated `EngineCommand` failed partway —
@@ -100,6 +102,24 @@ fn is_sorcery_speed(state: &GameState, player: PlayerId) -> bool {
         && state.active_player == player
         && state.phase == Phase::Main
         && state.stack.is_empty()
+}
+
+/// CR 302.6/602.5a's summoning sickness check: `object` is sick unless it's
+/// been under its current controller's control since their most recent
+/// turn began. Derived from `GameObject.controlled_since_turn` against
+/// `GameState.last_active_turn_number` rather than a stored bool - see
+/// those fields' doc comments for why. No haste override - haste isn't
+/// modeled in this engine yet, so this is the entire check, not just the
+/// base case haste would bypass.
+pub(crate) fn has_summoning_sickness(state: &GameState, object: &GameObject) -> bool {
+    match state.last_active_turn_number.get(&object.controller) {
+        Some(&since) => object.controlled_since_turn >= since,
+        // The controller has no recorded turn start at all - shouldn't
+        // happen past the very first turn (PreGame seeds this), but "no
+        // record" isn't evidence of long-standing control either, so treat
+        // it as sick rather than silently allowing it.
+        None => true,
+    }
 }
 
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
@@ -383,10 +403,6 @@ pub fn execute_command(
             }
             let effect = ability.effect.clone();
 
-            // TODO(CR 602.5a): tap-cost abilities need a summoning-sickness
-            // check (actor must have controlled source continuously since
-            // their most recent turn began) - no "controlled since"
-            // timestamp exists on GameObject yet, so this isn't checked.
             match effect {
                 Some(AbilityEffect::AddMana(units)) => {
                     // CR 605.1a: a mana ability never has a target.
@@ -395,11 +411,18 @@ pub fn execute_command(
                             "a mana ability cannot have targets".to_string(),
                         ));
                     }
-                    let already_tapped =
-                        state.object(source).ok_or(CommandError::InvalidTarget)?.tapped;
-                    if already_tapped {
+                    let source_object = state.object(source).ok_or(CommandError::InvalidTarget)?;
+                    if source_object.tapped {
                         return Err(CommandError::IllegalAction(
                             "source is already tapped".to_string(),
+                        ));
+                    }
+                    // CR 602.5a: this is a {T}-cost ability (the only shape
+                    // this slice's mana abilities model), so summoning
+                    // sickness gates it.
+                    if has_summoning_sickness(state, source_object) {
+                        return Err(CommandError::IllegalAction(
+                            "source has summoning sickness".to_string(),
                         ));
                     }
 
@@ -441,6 +464,212 @@ pub fn execute_command(
                 }
             }
         }
+        PlayerActionKind::DeclareAttackers { attackers } => {
+            // CR 508.1: a turn-based action of the active player, only
+            // during the declare attackers step, and only once per combat.
+            if command.actor != state.active_player {
+                return Err(CommandError::IllegalAction(
+                    "only the active player declares attackers".to_string(),
+                ));
+            }
+            if state.phase != Phase::Combat || state.step != Step::DeclareAttackers {
+                return Err(CommandError::IllegalAction(
+                    "attackers can only be declared during the declare attackers step"
+                        .to_string(),
+                ));
+            }
+            if state.combat.is_some() {
+                return Err(CommandError::IllegalAction(
+                    "attackers have already been declared this combat".to_string(),
+                ));
+            }
+
+            // CR 508.1: "if at any point ... unable to comply ... the
+            // declaration is illegal" - validate every attacker before
+            // mutating anything, so an illegal batch taps nobody.
+            for (attacker, target) in &attackers {
+                let object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
+                if object.controller != command.actor {
+                    return Err(CommandError::IllegalAction(
+                        "actor does not control a chosen attacker".to_string(),
+                    ));
+                }
+                if !object.definition.card_types.contains(CardTypeSet::CREATURE)
+                    || object.definition.card_types.contains(CardTypeSet::BATTLE)
+                {
+                    return Err(CommandError::IllegalAction(
+                        "a chosen attacker is not a creature, or is also a battle".to_string(),
+                    ));
+                }
+                if object.tapped {
+                    return Err(CommandError::IllegalAction(
+                        "a chosen attacker is already tapped".to_string(),
+                    ));
+                }
+                // CR 508.1a/302.6: no haste override - not modeled yet.
+                if has_summoning_sickness(state, object) {
+                    return Err(CommandError::IllegalAction(
+                        "a chosen attacker has summoning sickness".to_string(),
+                    ));
+                }
+                match target {
+                    Target::Player(pid) => {
+                        if *pid == command.actor || !state.turn_order.contains(pid) {
+                            return Err(CommandError::IllegalAction(
+                                "an attacker's target must be an opponent".to_string(),
+                            ));
+                        }
+                    }
+                    Target::Object(target_id) => {
+                        let target_object =
+                            state.object(*target_id).ok_or(CommandError::InvalidTarget)?;
+                        if target_object.controller == command.actor {
+                            return Err(CommandError::IllegalAction(
+                                "an attacker's target permanent must be controlled by an \
+                                 opponent"
+                                    .to_string(),
+                            ));
+                        }
+                        if !target_object
+                            .definition
+                            .card_types
+                            .intersects(CardTypeSet::PLANESWALKER | CardTypeSet::BATTLE)
+                        {
+                            return Err(CommandError::IllegalAction(
+                                "an attacker's target permanent must be a planeswalker or \
+                                 battle"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // CR 508.1f: tapping an attacker isn't a cost - attacking
+            // simply causes it.
+            let mut events = Vec::with_capacity(attackers.len() * 2);
+            for (attacker, target) in &attackers {
+                state.object_mut(*attacker).expect("validated above").tapped = true;
+                events.push(GameEventKind::Tapped { object: *attacker });
+                events
+                    .push(GameEventKind::AttackerDeclared { attacker: *attacker, target: *target });
+            }
+            state.combat =
+                Some(CombatState { attackers, blocks: Vec::new(), blockers_declared: false });
+
+            return Ok(CommandOutcome {
+                events,
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+                requires_payment: None,
+            });
+        }
+        PlayerActionKind::DeclareBlockers { blocks } => {
+            // CR 509.1: a turn-based action of the defending player. This
+            // engine only models 2-player combat (CR 506.2's nonactive
+            // player is the defending player) - multiplayer's "which
+            // defending player" ambiguity (CR 508.5a) isn't representable
+            // yet.
+            let defending_player = state
+                .turn_order
+                .iter()
+                .copied()
+                .find(|p| *p != state.active_player)
+                .ok_or_else(|| {
+                    CommandError::IllegalAction("no defending player exists".to_string())
+                })?;
+            if command.actor != defending_player {
+                return Err(CommandError::IllegalAction(
+                    "only the defending player declares blockers".to_string(),
+                ));
+            }
+            if state.phase != Phase::Combat || state.step != Step::DeclareBlockers {
+                return Err(CommandError::IllegalAction(
+                    "blockers can only be declared during the declare blockers step".to_string(),
+                ));
+            }
+            let combat = state.combat.as_ref().ok_or_else(|| {
+                CommandError::IllegalAction("no attackers have been declared this combat".to_string())
+            })?;
+            if combat.blockers_declared {
+                return Err(CommandError::IllegalAction(
+                    "blockers have already been declared this combat".to_string(),
+                ));
+            }
+
+            // CR 509.1a: "the defending player chooses one creature for it
+            // to block" - a blocker can only appear once across this
+            // declaration.
+            let mut seen_blockers = Vec::with_capacity(blocks.len());
+            for (blocker, attacker) in &blocks {
+                if seen_blockers.contains(blocker) {
+                    return Err(CommandError::IllegalAction(
+                        "the same blocker can't be assigned to block twice".to_string(),
+                    ));
+                }
+                seen_blockers.push(*blocker);
+
+                let blocker_object = state.object(*blocker).ok_or(CommandError::InvalidTarget)?;
+                if blocker_object.controller != command.actor {
+                    return Err(CommandError::IllegalAction(
+                        "actor does not control a chosen blocker".to_string(),
+                    ));
+                }
+                if !blocker_object.definition.card_types.contains(CardTypeSet::CREATURE)
+                    || blocker_object.definition.card_types.contains(CardTypeSet::BATTLE)
+                {
+                    return Err(CommandError::IllegalAction(
+                        "a chosen blocker is not a creature, or is also a battle".to_string(),
+                    ));
+                }
+                if blocker_object.tapped {
+                    return Err(CommandError::IllegalAction(
+                        "a chosen blocker is already tapped".to_string(),
+                    ));
+                }
+
+                let (_, attacking) = combat
+                    .attackers
+                    .iter()
+                    .find(|(id, _)| id == attacker)
+                    .ok_or_else(|| {
+                        CommandError::IllegalAction(
+                            "a chosen attacker isn't actually attacking this combat".to_string(),
+                        )
+                    })?;
+                let attacking_this_defender = match attacking {
+                    Target::Player(pid) => *pid == command.actor,
+                    Target::Object(target_id) => state
+                        .object(*target_id)
+                        .is_some_and(|o| o.controller == command.actor),
+                };
+                if !attacking_this_defender {
+                    return Err(CommandError::IllegalAction(
+                        "a chosen attacker isn't attacking this defending player, their \
+                         planeswalker, or their battle"
+                            .to_string(),
+                    ));
+                }
+            }
+
+            let mut events = Vec::with_capacity(blocks.len());
+            for (blocker, attacker) in &blocks {
+                events.push(GameEventKind::BlockerDeclared {
+                    blocker: *blocker,
+                    attacker: *attacker,
+                });
+            }
+            let combat = state.combat.as_mut().expect("checked Some above");
+            combat.blocks = blocks;
+            combat.blockers_declared = true;
+
+            return Ok(CommandOutcome {
+                events,
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+                requires_payment: None,
+            });
+        }
         _ => {}
     }
     // TODO: match command.action (PlayerActionKind) and handle each variant:
@@ -449,10 +678,10 @@ pub fn execute_command(
     //     abilities fall through to todo!() pending the script bridge.
     //   PassPriority/PlayLand are implemented above (the match arms before
     //     this comment block) - everything else here is still unimplemented.
-    //   DeclareAttackers/DeclareBlockers: validate legality (CR 508/509)
-    //     and record the declarations into combat state - GameState doesn't
-    //     have a dedicated combat-state field yet, may need one.
-    //     broke_pass_chain = true, priority_handoff = Unchanged.
+    //   DeclareAttackers/DeclareBlockers are implemented above (declarations
+    //     only - no combat damage resolution, no triggered-ability
+    //     collection beyond the AttackerDeclared/BlockerDeclared events
+    //     themselves, no costs-to-attack/block, no restrictions check).
     //   SubmitPayment is NOT handled here, deliberately - see
     //     Engine::submit_payment (engine.rs) and CommandOutcome::
     //     requires_payment's doc comment above. Payment answers

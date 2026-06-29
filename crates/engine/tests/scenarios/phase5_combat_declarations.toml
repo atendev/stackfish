@@ -1,0 +1,110 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "wall"
+name = "Wall"
+types = ["Creature"]
+power = 0
+toughness = 4
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "wall"
+
+# Two players, so every step transition needs both to pass in a row
+# (CR 117.4) - 6 step transitions to reach the declare attackers step:
+# PreGame -> Untap -> Upkeep -> Draw -> PreCombatMain -> BeginningOfCombat
+# -> DeclareAttackers, 2 passes each.
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+
+[[actions]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bear", target = 1 },
+]
+
+# One more pair of passes to reach the declare blockers step.
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+
+[[actions]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "wall", attacker = "bear" },
+]
+
+[[assertions]]
+type = "tapped"
+card = "bear"
+equals = true
+
+[[assertions]]
+type = "step"
+equals = "declare_blockers"
+
+[[assertions]]
+type = "tapped"
+card = "wall"
+equals = false
