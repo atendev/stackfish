@@ -1,0 +1,44 @@
+# Setup + assertions only, no actions - exercises the Phase 1 data model end
+# to end with zero todo!() panics. This is the Phase 4 baseline smoke test.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+generic_cost = 1
+colors = ["G"]
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[assertions]]
+type = "life"
+player = 0
+equals = 20
+
+[[assertions]]
+type = "life"
+player = 1
+equals = 20
+
+[[assertions]]
+type = "ledger_len"
+equals = 0
+
+[[assertions]]
+type = "object_zone"
+card = "bear"
+equals = "battlefield"

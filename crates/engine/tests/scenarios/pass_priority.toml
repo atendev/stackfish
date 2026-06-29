@@ -1,0 +1,16 @@
+# Demonstrates the not-yet-implemented path: submit_action/step are
+# todo!() until Phase 5/7, so this action reports NotImplemented rather
+# than failing the whole run.
+seed = 2
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[actions]]
+type = "pass_priority"
+player = 0

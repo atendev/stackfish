@@ -23,10 +23,18 @@ pub struct CounterSet {
 
 impl CounterSet {
     pub fn new() -> Self {
-        todo!()
+        // Implemented ahead of phase order: the Phase 4 scenario tooling
+        // needs this to construct PlayerState/GameObject without going
+        // through their own (still todo!()) constructors, and `counters`
+        // is the one private field blocking a plain struct literal from
+        // outside this module. See crates/scenario's module doc.
+        CounterSet { counters: Vec::new() }
     }
 
     pub fn count(&self, kind: &CounterKind) -> i32 {
+        // TODO: find self.counters entry matching kind (note: CounterKind
+        // needs PartialEq derived/implemented for this to compile -
+        // currently missing), return its count or 0 if absent.
         todo!()
     }
 
@@ -34,6 +42,10 @@ impl CounterSet {
     /// CR 121.3-121.4 style annihilation is handled elsewhere; this just
     /// adjusts the named kind's count).
     pub fn add(&mut self, kind: CounterKind, amount: i32) {
+        // TODO: find or insert the (kind, count) entry, add amount. Decide
+        // whether a count reaching 0 should remove the entry or just sit at
+        // 0 - matters for CounterSet::count's "absent" vs "present at 0"
+        // distinction if that's ever observable.
         todo!()
     }
 }

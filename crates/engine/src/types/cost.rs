@@ -18,6 +18,15 @@ impl FilterSpec {
     /// requires the script bridge, so this needs more context than just the
     /// object once that's wired up — signature may grow.
     pub fn matches(&self, object: &GameObject) -> bool {
+        // TODO: card_types: if Some(set), object.definition.card_types must
+        // intersect set. controller: if Some(c), compare against whatever
+        // "you"/"opponent" resolves to for the player running this filter
+        // (needs that player passed in - signature will likely need a
+        // `viewer: PlayerId` param). random: doesn't affect matching itself,
+        // only which matching object gets picked - irrelevant here. extra:
+        // requires the script bridge (ScriptRuntime), not available from
+        // this signature yet - matches() will need to grow a context param
+        // once that's wired up, same caveat as ContinuousEffect::applies_to.
         todo!()
     }
 }
@@ -49,6 +58,7 @@ pub struct CostSpec {
 
 impl CostSpec {
     pub fn mana_only(cost: ManaCost) -> Self {
+        // TODO: CostSpec { mana: Some(cost), additional: vec![], alternative: vec![] }.
         todo!()
     }
 }
@@ -85,6 +95,16 @@ impl PaymentPlan {
     /// placeholder — real version will likely return a `Result` with a
     /// reason once validation failure modes are designed.
     pub fn validate(&self, spec: &CostSpec) -> bool {
+        // TODO: every cost in spec.mana/additional/alternative (accounting
+        // for alternative-cost substitution) has a matching CostPayment in
+        // self.payments, with no unaccounted-for extra payments; mana
+        // payments need to check actual affordability against the payer's
+        // ManaPool (not available from this signature - needs &GameState
+        // or &PlayerState threaded through, flagging the same as
+        // FilterSpec::matches above). Per the doc above, this should
+        // probably become Result<(), ValidationError> instead of bool once
+        // failure reasons matter to the caller (e.g. surfacing to the UI
+        // why a payment was rejected).
         todo!()
     }
 }

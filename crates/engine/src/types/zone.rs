@@ -6,7 +6,7 @@ use crate::{ObjectId, PlayerId};
 /// The Stack is the one exception not represented as a `Zone` here — it
 /// needs `StackObject` metadata (targets, modes, costs paid), not just an
 /// ordered id list, so it's tracked separately on `GameState`.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ZoneKind {
     Library,
     Hand,
@@ -31,31 +31,42 @@ pub struct Zone {
 
 impl Zone {
     pub fn new(kind: ZoneKind, owner: Option<PlayerId>) -> Self {
+        // TODO: Zone { kind, owner, contents: VecDeque::new() }.
         todo!()
     }
 
     pub fn push_top(&mut self, object: ObjectId) {
+        // TODO: self.contents.push_front(object). "Top" = the end drawn
+        // from/seen first (library top, e.g.) — confirm this convention
+        // matches whatever draw/peek logic ends up reading from this.
         todo!()
     }
 
     pub fn push_bottom(&mut self, object: ObjectId) {
+        // TODO: self.contents.push_back(object).
         todo!()
     }
 
     /// Removes `object` from wherever it sits in `contents`, if present.
     pub fn remove(&mut self, object: ObjectId) -> Option<ObjectId> {
+        // TODO: find object's position in self.contents, remove it there
+        // (VecDeque::remove(index)), return it if found else None.
         todo!()
     }
 
     pub fn contains(&self, object: ObjectId) -> bool {
+        // TODO: self.contents.contains(&object).
         todo!()
     }
 
     pub fn len(&self) -> usize {
+        // TODO: self.contents.len().
         todo!()
     }
 
     pub fn top(&self) -> Option<ObjectId> {
+        // TODO: self.contents.front().copied() — keep consistent with
+        // whichever end push_top uses above.
         todo!()
     }
 }

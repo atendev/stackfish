@@ -18,6 +18,13 @@ pub struct PendingTrigger {
 /// legal to trigger (timing, once-per-turn, range, etc — CR 603.2-603.3).
 /// Order in the returned `Vec` is not yet APNAP order; see `order_apnap`.
 pub fn collect_triggers(state: &GameState, event: &GameEvent) -> Vec<PendingTrigger> {
+    // TODO: scan state.abilities for RegisteredAbility entries where kind
+    // == AbilityKind::Triggered and condition (if Some) evaluates true
+    // against event (needs ScriptRuntime to invoke the condition
+    // ScriptHandle - signature will need one threaded through, same
+    // pattern as every other script-condition gap in this codebase).
+    // Also needs once-per-turn/range/timing legality checks (CR 603.2-603.3)
+    // that aren't designed yet beyond the condition callback itself.
     todo!()
 }
 
@@ -26,5 +33,12 @@ pub fn collect_triggers(state: &GameState, event: &GameEvent) -> Vec<PendingTrig
 /// turn order, generalized over `state.turn_order` rather than hardcoded
 /// to two players.
 pub fn order_apnap(state: &GameState, triggers: Vec<PendingTrigger>) -> Vec<PendingTrigger> {
+    // TODO: partition triggers by controller, ordered by state.turn_order
+    // starting at state.active_player (active player's triggers first).
+    // Within one controller's own triggers, CR 603.3b leaves the order up
+    // to that player to choose - this function can't make that choice
+    // itself; either needs to return groups for the engine to ask about,
+    // or take an already-player-chosen intra-group order as input. Not
+    // fully resolvable with this signature alone.
     todo!()
 }

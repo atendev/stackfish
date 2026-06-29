@@ -37,6 +37,13 @@ impl StackObject {
         controller: PlayerId,
         operation: ScriptHandle,
     ) -> Self {
+        // TODO: source_lki: None at construction (only captured if/when
+        // source actually leaves its zone before resolution - that's a
+        // later mutation, not part of new()); chosen_modes/targets/
+        // costs_paid: empty Vecs, filled in by whatever building logic
+        // collects player choices before pushing to the stack; x_value:
+        // None unless caller passes it (signature may need an x_value
+        // param once the cast-with-X flow is designed).
         todo!()
     }
 }

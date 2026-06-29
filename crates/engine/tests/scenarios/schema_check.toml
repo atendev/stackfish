@@ -1,0 +1,85 @@
+# Parser smoke test for docs/scenario_format.md's documented action shapes.
+# Not meant to pass any real gameplay assertions yet - just proves every
+# documented action/target shape actually deserializes.
+seed = 3
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+generic_cost = 1
+colors = ["G"]
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "shock"
+name = "Test Shock"
+generic_cost = 1
+colors = ["R"]
+types = ["Instant"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "shock"
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "play_land"
+player = 0
+card = "bear"
+
+[[actions]]
+type = "cast_spell"
+player = 0
+card = "shock"
+targets = [1, "bear"]
+modes = []
+
+[[actions]]
+type = "activate_ability"
+player = 0
+source = "bear"
+ability_index = 0
+targets = []
+
+[[actions]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bear", target = 1 },
+]
+
+[[actions]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "bear", attacker = "bear" },
+]
+
+[[actions]]
+type = "make_choice"
+player = 0
+description = "choose a player"
+selection = [1]
+
+[[assertions]]
+type = "ledger_len"
+equals = 0

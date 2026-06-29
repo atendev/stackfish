@@ -17,6 +17,7 @@ impl PTValue {
     /// `Some` only for `Fixed` — a CDA's number isn't known without running
     /// its script callback against current game state, which this can't do.
     pub fn as_fixed(&self) -> Option<i32> {
+        // TODO: match self; Fixed(n) -> Some(*n), CharacteristicDefining(_) -> None.
         todo!()
     }
 }
@@ -81,10 +82,12 @@ pub struct Subtype(pub String);
 
 impl Subtype {
     pub fn new(name: impl Into<String>) -> Self {
+        // TODO: wrap name.into() in Subtype(_).
         todo!()
     }
 
     pub fn as_str(&self) -> &str {
+        // TODO: return self.0.as_str().
         todo!()
     }
 }
@@ -126,18 +129,26 @@ impl CardDefinition {
     /// Per CR 105.2a: color comes from mana cost symbols and/or an explicit
     /// `color_indicator`, not stored as its own redundant field.
     pub fn colors(&self) -> ColorSet {
+        // TODO: CR 105.2a: if color_indicator is Some, use it as-is.
+        // Otherwise union mana_cost.colors() across all symbols (delegate to
+        // ManaCost::colors, mana.rs). A card with no colored symbols and no
+        // indicator is colorless (empty ColorSet), not an error.
         todo!()
     }
 
     pub fn has_type(&self, card_type: CardType) -> bool {
+        // TODO: map card_type to its CardTypeSet bit and check
+        // self.card_types.contains(that bit).
         todo!()
     }
 
     pub fn has_supertype(&self, supertype: Supertype) -> bool {
+        // TODO: same pattern as has_type, against self.supertypes.
         todo!()
     }
 
     pub fn has_subtype(&self, subtype: &str) -> bool {
+        // TODO: self.subtypes.iter().any(|s| s.as_str() == subtype).
         todo!()
     }
 }

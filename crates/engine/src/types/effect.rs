@@ -50,6 +50,11 @@ impl ContinuousEffect {
     /// need one threaded through (or to move to `layers.rs` as a free
     /// function taking `&ScriptRuntime`) once that wiring is settled.
     pub fn applies_to(&self, object: &GameObject) -> bool {
+        // TODO: invoke ScriptRuntime::invoke_condition (or a dedicated
+        // predicate-invocation method) with self.affected_predicate and a
+        // ScriptContext built from object/self.source - needs a
+        // &ScriptRuntime parameter added to this signature, not available
+        // from &self/&GameObject alone. See script.rs's invoke_* methods.
         todo!()
     }
 }
@@ -72,6 +77,10 @@ pub struct ReplacementEffect {
 
 impl ReplacementEffect {
     pub fn matches(&self, event: &GameEventKind) -> bool {
+        // TODO: same shape of gap as ContinuousEffect::applies_to above -
+        // needs a &ScriptRuntime to invoke self.event_pattern against
+        // event. Called from replacement::apply_replacements (replacement.rs)
+        // once that wiring exists.
         todo!()
     }
 }

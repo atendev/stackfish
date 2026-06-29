@@ -27,6 +27,13 @@ pub fn register_triggered_ability(
     target: Option<ScriptHandle>,
     operation: ScriptHandle,
 ) {
+    // TODO: state.abilities.push(RegisteredAbility { source, kind: ...,
+    // condition, cost, target, operation }). `kind` isn't a parameter here
+    // despite the function registering Triggered/Activated/Static
+    // abilities per its own doc comment above - signature needs an
+    // AbilityKind param added, or three separate Game.Register* entry
+    // points after all (revisit the "one entry point" call made in the
+    // doc comment if this turns out awkward from the Lua-author side).
     todo!()
 }
 
@@ -38,11 +45,22 @@ pub fn add_continuous_effect(
     predicate: ScriptHandle,
     duration: EffectDuration,
 ) {
+    // TODO: state.continuous_effects.push(ContinuousEffect { source, layer,
+    // affected_predicate: predicate, timestamp: <current SequenceNo - needs
+    // a source for "current", e.g. state.ledger.len() or a dedicated
+    // counter, not decided yet>, duration }).
     todo!()
 }
 
 /// `Game.ReplaceEvent`.
 pub fn replace_event(state: &mut GameState, source: ObjectId, pattern: ScriptHandle) {
+    // TODO: state.replacement_effects.push(ReplacementEffect { source,
+    // event_pattern: pattern, consumption: <not a parameter here, but
+    // ReplacementEffect requires one - same kind of gap as
+    // register_triggered_ability's missing AbilityKind param>}). Also note
+    // ReplacementEffect has no "what to rewrite the event into" callback
+    // field at all yet (see replacement.rs's TODO) - this function can
+    // register the matcher but not what it actually does.
     todo!()
 }
 
@@ -53,11 +71,20 @@ pub fn replace_event(state: &mut GameState, source: ObjectId, pattern: ScriptHan
 /// checks; `free` skips the mana cost specifically — other additional
 /// costs still apply unless the card's own effect says otherwise.
 pub fn cast_spell(state: &mut GameState, card: ObjectId, controller: PlayerId, free: bool) -> Result<(), CommandError> {
+    // TODO: build the equivalent of a CastSpell EngineCommand (modes/
+    // targets/x_value need defaults or params - "cast target spell" effects
+    // usually specify these themselves, so this signature is likely
+    // incomplete) and run it through commands::execute_command, skipping
+    // mana cost collection if free.
     todo!()
 }
 
 /// `Game.PayCost`.
 pub fn pay_cost(state: &mut GameState, payer: PlayerId, plan: PaymentPlan) -> Result<(), CommandError> {
+    // TODO: validate plan against whatever CostSpec it's paying (not a
+    // parameter here - needs one added, PaymentPlan::validate takes a
+    // &CostSpec and this function doesn't have one to pass it), commit if
+    // valid via the same path SubmitPayment uses in commands.rs.
     todo!()
 }
 
@@ -73,5 +100,10 @@ pub fn select_targets(
     filter: FilterSpec,
     count: u32,
 ) -> Vec<Target> {
+    // TODO: blocked on the same coroutine design as
+    // ScriptRuntime::invoke_target (script.rs) - don't implement
+    // synchronously. Once that exists, this presents the filtered legal
+    // target set to controller, suspends, and resumes with their choice on
+    // a later Engine::step().
     todo!()
 }

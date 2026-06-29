@@ -19,6 +19,11 @@ pub struct VisibilityPolicy {
 
 impl VisibilityPolicy {
     pub fn is_visible_to(&self, player: PlayerId) -> bool {
+        // TODO: self.public || self.visible_to.contains(&player). Note this
+        // struct only covers the override layer (see doc comment above) -
+        // callers needing the *effective* visibility (zone default plus
+        // this override) need to combine both, probably in GameState/
+        // layers.rs, not here.
         todo!()
     }
 }
@@ -60,13 +65,23 @@ impl GameObject {
         zone: ZoneKind,
         timestamp: SequenceNo,
     ) -> Self {
+        // TODO: controller defaults to owner at creation (CR 110.2);
+        // lineage: ObjectLineage { previous: None } for a brand-new object
+        // (vs. a zone-change successor, which needs a different
+        // constructor or a lineage param - not covered by this signature
+        // yet); tapped/flipped/face_down/phased_out: false; damage_marked:
+        // 0; counters: CounterSet::new(); attachments: empty;
+        // attached_to: None; visibility: needs a sensible default tied to
+        // `zone`'s default (e.g. fully public if zone == Battlefield, owner-
+        // only otherwise) - VisibilityPolicy doesn't have a zone-aware
+        // constructor yet, may need one.
         todo!()
     }
 
     /// `zone == Battlefield`. A permanent is the only state a `GameObject`
     /// can have continuous effects/static abilities active from (CR 110.1).
     pub fn is_permanent(&self) -> bool {
+        // TODO: self.zone == ZoneKind::Battlefield.
         todo!()
     }
-
 }

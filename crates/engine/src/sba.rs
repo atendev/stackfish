@@ -14,5 +14,24 @@ use crate::types::game::GameState;
 /// function itself, so a caller stepping through ledger entries one at a
 /// time can observe each pass separately rather than the loop being opaque.
 pub fn check_state_based_actions(state: &mut GameState) -> Vec<GameEvent> {
+    // TODO: check each CR 704.5 SBA against current state and collect the
+    // ones that apply (simultaneously, not short-circuiting on the first
+    // found):
+    //   - player at 0 or less life loses (704.5a)
+    //   - player who attempted to draw from an empty library loses (704.5b)
+    //   - player with 10+ poison counters loses (704.5c)
+    //   - creature with toughness 0 (via effective_characteristics,
+    //     layers.rs) goes to graveyard (704.5f)
+    //   - creature with damage_marked >= effective toughness, or that's
+    //     been dealt deathtouch damage, is destroyed (704.5g/h)
+    //   - legend rule: two+ legendary permanents with the same name under
+    //     one controller, owner chooses one to keep (704.5j)
+    //   - planeswalker with loyalty 0 goes to graveyard (704.5i) - not v1
+    //     scope per DESIGN.md non-goals, skip until planeswalkers exist
+    //   - commander damage >= 21 from a single source - PlayerState::
+    //     commander_damage_from already exposed for this exact check
+    // Apply all simultaneously (mutate state for each), build a GameEvent
+    // for each action taken, return them. Caller (engine.rs) loops this
+    // until it returns empty (CR 704.3).
     todo!()
 }

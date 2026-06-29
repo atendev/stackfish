@@ -17,6 +17,7 @@ pub struct Emblem {
 
 impl Emblem {
     pub fn new(emblem_id: ObjectId, source: ObjectId, ability_text: impl Into<String>) -> Self {
+        // TODO: Emblem { emblem_id, source, ability_text: ability_text.into() }.
         todo!()
     }
 }
@@ -36,14 +37,22 @@ pub struct PlayerState {
 
 impl PlayerState {
     pub fn new(player_id: PlayerId, starting_life: i32) -> Self {
+        // TODO: PlayerState { player_id, life: starting_life, mana_pool:
+        // ManaPool::empty(), counters: CounterSet::new(), emblems: vec![],
+        // commander_damage_taken: vec![], eliminated: false }.
         todo!()
     }
 
     pub fn lose_life(&mut self, amount: i32) {
+        // TODO: self.life -= amount. CR 119: life can't go below... it can,
+        // actually (negative life isn't special-cased in the rules text
+        // itself) - 0-or-less life is what the CR 704.5a SBA checks for, so
+        // this just subtracts; no clamping to 0 here.
         todo!()
     }
 
     pub fn gain_life(&mut self, amount: i32) {
+        // TODO: self.life += amount.
         todo!()
     }
 
@@ -51,6 +60,8 @@ impl PlayerState {
     /// loses (CR 903.10a) — exposed as a query so the SBA loop can check it
     /// without duplicating the threshold elsewhere.
     pub fn commander_damage_from(&self, source: ObjectId) -> u32 {
+        // TODO: find self.commander_damage_taken entry matching source,
+        // return its u32 or 0 if absent.
         todo!()
     }
 }

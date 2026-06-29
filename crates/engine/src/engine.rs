@@ -43,17 +43,29 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(state: GameState) -> Self {
-        todo!()
+        // Implemented ahead of phase order, same reason as CounterSet::new
+        // (counter.rs) - `state` is Engine's only field and it's private,
+        // so the Phase 4 scenario tooling has no way to construct an
+        // Engine at all without this existing for real.
+        Engine { state }
     }
 
     pub fn state(&self) -> &GameState {
-        todo!()
+        &self.state
     }
 
     /// Validates `action` is legal right now (right player, matches what's
     /// actually available) and queues it for the next `step()` to act on.
     /// Does not itself advance the ledger — `step()` does that.
     pub fn submit_action(&mut self, action: PlayerAction) -> Result<(), ActionError> {
+        // TODO: needs an internal "pending action" slot on Engine that
+        // doesn't exist yet (this struct currently only holds `state`) -
+        // check action.player matches whoever GameState says currently has
+        // priority/is expected to act, check action.kind is one of the
+        // currently-legal options, then store it for step() to consume.
+        // Validation itself depends on the legality logic this whole crate
+        // is building toward (cost-affordability, target legality, etc) -
+        // not implementable until those pieces exist.
         todo!()
     }
 
@@ -62,6 +74,24 @@ impl Engine {
     /// until `AwaitingAction`/`GameOver`; a replay viewer calls it once per
     /// UI "step".
     pub fn step(&mut self) -> StepResult {
+        // TODO: this is the orchestration point nothing currently wires
+        // together. Rough shape per DESIGN.md/adaptation doc's pipeline:
+        //   1. If a pending action is queued (from submit_action), turn it
+        //      into an EngineCommand and run commands::execute_command.
+        //   2. Run replacement::apply_replacements on any newly-proposed
+        //      event before it commits (CR 614-616).
+        //   3. Loop sba::check_state_based_actions until it returns empty
+        //      (CR 704.3's fixed-point requirement - check_state_based_actions
+        //      itself is one pass only, see sba.rs).
+        //   4. For each event produced, triggers::collect_triggers +
+        //      triggers::order_apnap, then push resulting PendingTriggers
+        //      onto state.stack as StackObjects.
+        //   5. Advance turn/phase/step/priority per CR 500-514, 117 once
+        //      the stack is empty and all players have passed.
+        //   6. Return StepResult with the right events_added range and
+        //      StepStatus (Progressed / AwaitingAction / GameOver).
+        // None of steps 1-5 have a home yet beyond their own modules' single
+        // entry points - this function is where they need to be sequenced.
         todo!()
     }
 }

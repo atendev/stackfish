@@ -52,18 +52,23 @@ pub struct GameState {
 
 impl GameState {
     pub fn object(&self, id: ObjectId) -> Option<&GameObject> {
+        // TODO: self.objects.get(&id).
         todo!()
     }
 
     pub fn object_mut(&mut self, id: ObjectId) -> Option<&mut GameObject> {
+        // TODO: self.objects.get_mut(&id).
         todo!()
     }
 
     pub fn player(&self, id: PlayerId) -> Option<&PlayerState> {
+        // TODO: self.players.iter().find(|p| p.player_id == id) - note
+        // PlayerId needs PartialEq, which it already derives (ids.rs).
         todo!()
     }
 
     pub fn player_mut(&mut self, id: PlayerId) -> Option<&mut PlayerState> {
+        // TODO: same as player() but iter_mut().
         todo!()
     }
 
@@ -72,10 +77,15 @@ impl GameState {
     /// wrong (e.g. two battlefields) — but that invariant isn't enforced
     /// yet (Phase 6).
     pub fn zone(&self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&Zone> {
+        // TODO: self.zones.iter().find(|z| z.kind == kind && z.owner ==
+        // owner) - note ZoneKind already derives PartialEq (zone.rs); the
+        // "more than one matches" invariant check is Phase 6 (Invariants),
+        // not this phase - leave find() returning the first match for now.
         todo!()
     }
 
     pub fn zone_mut(&mut self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&mut Zone> {
+        // TODO: same as zone() but iter_mut().
         todo!()
     }
 }

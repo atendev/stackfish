@@ -15,5 +15,18 @@ use crate::types::game::GameState;
 /// always a resolved event; left as a single resolved-event return for this
 /// first pass, expect this signature to change once that's worked out.
 pub fn apply_replacements(state: &GameState, proposed: GameEventKind) -> GameEventKind {
+    // TODO: 1. Find every ReplacementEffect in state.replacement_effects
+    //          where ReplacementEffect::matches(&proposed) is true (not
+    //          implementable yet - needs a ScriptRuntime, see effect.rs).
+    //       2. If zero match, return proposed unchanged.
+    //       3. If exactly one matches, apply its rewrite (needs an
+    //          "apply"/operation-equivalent callback on ReplacementEffect,
+    //          which doesn't exist yet - only event_pattern (the matcher)
+    //          is modeled so far, not the rewrite itself).
+    //       4. If more than one matches: CR 616.1 gap noted in the doc
+    //          comment above - needs player choice, can't resolve here yet.
+    //       5. After any rewrite, re-run matching against the new form in
+    //          case it matches a different replacement (CR 616's
+    //          stabilization requirement) - loop until no further match.
     todo!()
 }
