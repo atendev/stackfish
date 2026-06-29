@@ -336,6 +336,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         step: Step::Untap,
         priority_player: active_player,
         consecutive_passes: 0,
+        postcombat_main: false,
         objects,
         zones,
         stack: Vec::new(),

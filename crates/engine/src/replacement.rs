@@ -30,6 +30,12 @@ pub enum ReplacementOutcome {
 /// form matches a *different* replacement (CR 616.1's rewrite-stabilization
 /// requirement).
 pub fn apply_replacements(state: &mut GameState, proposed: GameEventKind) -> ReplacementOutcome {
+    if state.replacement_effects.is_empty() {
+        // Genuinely nothing registered to match against - safe to resolve
+        // unchanged rather than hit the todo!() below, which only bites once
+        // a ReplacementEffect actually exists.
+        return ReplacementOutcome::Resolved(proposed);
+    }
     // TODO: 1. Find every ReplacementEffect in state.replacement_effects
     //          where ReplacementEffect::matches(&proposed) is true (not
     //          implementable yet - needs a ScriptRuntime, see effect.rs).

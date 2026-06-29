@@ -14,6 +14,7 @@ use crate::types::game::GameState;
 /// function itself, so a caller stepping through ledger entries one at a
 /// time can observe each pass separately rather than the loop being opaque.
 pub fn check_state_based_actions(state: &mut GameState) -> Vec<GameEvent> {
+    let _ = state;
     // TODO: check each CR 704.5 SBA against current state and collect the
     // ones that apply (simultaneously, not short-circuiting on the first
     // found):
@@ -30,8 +31,11 @@ pub fn check_state_based_actions(state: &mut GameState) -> Vec<GameEvent> {
     //     scope per DESIGN.md non-goals, skip until planeswalkers exist
     //   - commander damage >= 21 from a single source - PlayerState::
     //     commander_damage_from already exposed for this exact check
-    // Apply all simultaneously (mutate state for each), build a GameEvent
-    // for each action taken, return them. Caller (engine.rs) loops this
-    // until it returns empty (CR 704.3).
-    todo!()
+    // None of these are implemented yet - each needs machinery (layers.rs,
+    // combat-damage tracking) that doesn't exist. Returning empty is
+    // correct for now (no SBA can actually apply with no creatures/damage
+    // ever tracked), not a shortcut around real logic - revisit once any
+    // prerequisite above lands. Caller (engine.rs) loops this until it
+    // returns empty (CR 704.3).
+    Vec::new()
 }

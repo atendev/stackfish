@@ -1,4 +1,4 @@
-use crate::types::command::EngineCommand;
+use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::PlayerId;
@@ -70,6 +70,43 @@ pub fn execute_command(
     state: &mut GameState,
     command: EngineCommand,
 ) -> Result<CommandOutcome, CommandError> {
+    match command.action {
+        PlayerActionKind::PassPriority => {
+            // CR 117.3c: priority moves to the next player in turn_order
+            // after whoever just passed. Read-only against turn_order -
+            // does not touch state.priority_player/consecutive_passes,
+            // both of which engine.rs owns (see PriorityHandoff/
+            // broke_pass_chain doc comments above).
+            let current_idx = state
+                .turn_order
+                .iter()
+                .position(|p| *p == command.actor)
+                .ok_or_else(|| {
+                    CommandError::IllegalAction("actor not in turn_order".to_string())
+                })?;
+            let next_idx = (current_idx + 1) % state.turn_order.len();
+            return Ok(CommandOutcome {
+                events: vec![GameEventKind::PriorityPassed { player: command.actor }],
+                broke_pass_chain: false,
+                priority_handoff: PriorityHandoff::To(state.turn_order[next_idx]),
+            });
+        }
+        PlayerActionKind::MakeChoice { .. } => {
+            // Real choice application is genuinely generic - "depends
+            // entirely on what asked for the choice" (see the TODO block
+            // below) - no fixed event shape exists yet, so this produces
+            // none. Exists as a minimal non-PassPriority stub so
+            // broke_pass_chain's reset wiring (CR 117.3c) has something
+            // other than PassPriority to exercise in tests; not a real
+            // implementation of MakeChoice itself.
+            return Ok(CommandOutcome {
+                events: Vec::new(),
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+            });
+        }
+        _ => {}
+    }
     // TODO: match command.action (PlayerActionKind) and handle each variant:
     //   CastSpell: move card ObjectId from hand to stack zone, create a
     //     StackObject (needs the card's registered "cast" operation
@@ -84,14 +121,8 @@ pub fn execute_command(
     //   PlayLand: move card to battlefield directly, no stack involved
     //     (CR 305.1 - lands aren't spells). broke_pass_chain = true,
     //     priority_handoff = Unchanged.
-    //   PassPriority: append a PriorityPassed event, resolve the next
-    //     player in turn_order (read-only - do not mutate
-    //     state.priority_player here) and return it via
-    //     PriorityHandoff::To. broke_pass_chain = false - this is the only
-    //     variant that doesn't break the pass chain. Does NOT touch
-    //     state.consecutive_passes (engine.rs owns that) or decide
-    //     turn/phase advancement (engine.rs's ProcessState::AdvanceTurnStep
-    //     handles that once it sees the chain complete).
+    //   PassPriority is implemented above (the match arm before this
+    //     comment block) - everything else here is still unimplemented.
     //   DeclareAttackers/DeclareBlockers: validate legality (CR 508/509)
     //     and record the declarations into combat state - GameState doesn't
     //     have a dedicated combat-state field yet, may need one.

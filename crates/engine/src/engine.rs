@@ -5,11 +5,12 @@ use crate::commands::{self, CommandError, PriorityHandoff};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement::{self, ReplacementOutcome};
 use crate::sba;
-use crate::triggers::PendingTrigger;
+use crate::triggers::{self, PendingTrigger};
 use crate::types::command::{EngineCommand, PlayerAction};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{CommandId, ObjectId, PlayerId};
+use crate::types::turn::{Phase, Step};
 
 /// Why `submit_action` rejected a `PlayerAction` outright (wrong player has
 /// priority, action doesn't match what's currently legal, etc). Distinct
@@ -40,9 +41,35 @@ pub enum TriggerOrderError {
     /// `chosen_order`'s length doesn't match the offered group's — caller
     /// must supply a reordering of the exact group, not a different set.
     WrongLength,
+    /// Same length as the offered group, but not the same multiset of
+    /// `PendingTrigger`s — length matching alone doesn't rule out the caller
+    /// substituting/dropping/duplicating a trigger while keeping the count
+    /// right, so this is checked separately (see `is_permutation`).
+    NotAPermutation,
+}
+
+/// Whether `chosen` is a reordering of `group` — same `PendingTrigger`s
+/// (by value), each used exactly once, any order. Used by
+/// `submit_trigger_order` to reject a same-length answer that isn't
+/// actually a permutation (swapped-in trigger, duplicate, etc).
+fn is_permutation(chosen: &[PendingTrigger], group: &[PendingTrigger]) -> bool {
+    if chosen.len() != group.len() {
+        return false;
+    }
+    let mut remaining: Vec<PendingTrigger> = group.to_vec();
+    for item in chosen {
+        match remaining.iter().position(|candidate| candidate == item) {
+            Some(idx) => {
+                remaining.remove(idx);
+            }
+            None => return false,
+        }
+    }
+    true
 }
 
 /// What happened on one `step()` call, and what the engine needs next.
+#[derive(Debug)]
 pub enum StepStatus {
     /// Made progress; safe to call `step()` again immediately.
     Progressed,
@@ -197,6 +224,15 @@ impl Engine {
         &self.state
     }
 
+    /// Diagnostic for tests/replay tooling: whether `pipeline_context` is
+    /// currently set. Should be `false` whenever `process_state` is
+    /// `PriorityWindow` - `end_pipeline_run` is the only place that clears
+    /// it, and `PriorityWindow` is only ever reached through there (or
+    /// `AdvanceTurnStep`, which also doesn't set it).
+    pub fn pipeline_context_active(&self) -> bool {
+        self.pipeline_context.is_some()
+    }
+
     fn allocate_command_id(&mut self) -> CommandId {
         let id = CommandId(self.next_command_id);
         self.next_command_id += 1;
@@ -271,9 +307,9 @@ impl Engine {
         if chosen_order.len() != group.len() {
             return Err(TriggerOrderError::WrongLength);
         }
-        // TODO: validate chosen_order is actually a permutation of `group`
-        // (same multiset of PendingTrigger, just reordered) rather than
-        // trusting the caller blindly.
+        if !is_permutation(&chosen_order, group) {
+            return Err(TriggerOrderError::NotAPermutation);
+        }
         let ProcessState::AwaitTriggerOrderChoice { mut ordered, pending_groups, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
@@ -385,17 +421,37 @@ impl Engine {
             }
 
             ProcessState::ResolveStackTop => {
-                // TODO: pop self.state.stack, look up the popped
-                // StackObject's `operation` ScriptHandle, invoke it via
+                let Some(top) = self.state.stack.pop() else {
+                    // Shouldn't happen - pipeline_exit only routes here when
+                    // the all-pass check saw a non-empty stack. Defensive
+                    // fallback rather than a panic, since nothing downstream
+                    // depends on this path being unreachable yet.
+                    self.process_state = ProcessState::PriorityWindow;
+                    return StepStatus::Progressed;
+                };
+                // CR 117.3b: once the stack object finishes resolving (after
+                // SBA/triggers settle below), priority returns to the active
+                // player. Set directly now rather than threading it through
+                // PipelineExit - simpler for this minimal slice, and nothing
+                // between here and PriorityWindow needs a different value.
+                self.state.priority_player = self.state.active_player;
+                let since_ledger = self.state.ledger.len();
+                self.pipeline_context =
+                    Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
+                self.pipeline_exit = PipelineExit::BackToPriority;
+                // TODO: real resolution should look up top.operation
+                // (ScriptHandle) and invoke it via
                 // ScriptRuntime::invoke_operation - blocked on the script
-                // bridge the same as every other script-shaped gap.
-                // Should set self.pipeline_context (since_ledger = current
-                // ledger length, caused_by_command = None since this isn't
-                // triggered by a fresh player command, parent_event = None)
-                // then transition to ProcessState::ReplacementCheck
-                // { remaining: <produced events>, checked: Vec::new() },
-                // same as PendingAction does above.
-                todo!()
+                // bridge like every other script-shaped gap. This produces a
+                // mock/provisional StackObjectResolved event instead, just so
+                // the rest of the pipeline (replacement/commit/SBA/triggers)
+                // has something real to run on.
+                self.process_state = ProcessState::ReplacementCheck {
+                    remaining: vec![GameEventKind::StackObjectResolved { stack_id: top.stack_id }]
+                        .into(),
+                    checked: Vec::new(),
+                };
+                StepStatus::Progressed
             }
 
             ProcessState::ReplacementCheck { mut remaining, mut checked } => {
@@ -491,18 +547,14 @@ impl Engine {
             }
 
             ProcessState::CollectTriggers { since } => {
-                // TODO: scan self.state.ledger[since..] and call
-                // triggers::collect_triggers per event, accumulating
-                // PendingTriggers, then triggers::group_apnap them and move
-                // to ProcessState::PutTriggersApnap { ordered: Vec::new(),
-                // pending_groups: <grouped>.into() } (group_apnap returns a
-                // Vec; collect into the VecDeque here). `since` is now
-                // correctly
-                // threaded through from pipeline_context (no longer
-                // hardcoded to 0) - but collect_triggers itself is still
-                // todo!(), so wiring further wouldn't get past it.
-                let _ = since;
-                todo!()
+                let mut pending = Vec::new();
+                for event in &self.state.ledger[since..] {
+                    pending.extend(triggers::collect_triggers(&self.state, event));
+                }
+                let groups = triggers::group_apnap(&self.state, pending);
+                self.process_state =
+                    ProcessState::PutTriggersApnap { ordered: Vec::new(), pending_groups: groups.into() };
+                StepStatus::Progressed
             }
 
             ProcessState::PutTriggersApnap { mut ordered, mut pending_groups } => {
@@ -547,14 +599,212 @@ impl Engine {
             }
 
             ProcessState::AdvanceTurnStep => {
-                // TODO: advance state.step/state.phase/state.turn_number
-                // per CR 500-514 (the general version - the PassPriority
-                // dry run only had a hardcoded Beginning-phase Untap->Upkeep
-                // transition, see docs/implementation.md). Once advanced,
-                // reset priority to state.active_player (CR 117.3b) and
-                // transition to ProcessState::PriorityWindow.
-                todo!()
+                let events = self.advance_turn_step();
+                for kind in events {
+                    let event_id = self.state.allocate_event_id();
+                    let sequence_no = self.state.allocate_sequence_no();
+                    self.state.ledger.push(GameEvent {
+                        event_id,
+                        sequence_no,
+                        kind,
+                        caused_by_command: None,
+                        parent_event: None,
+                    });
+                }
+                // CR 117.3b: priority opens to the active player at the
+                // start of each step/phase.
+                self.state.priority_player = self.state.active_player;
+                self.process_state = ProcessState::PriorityWindow;
+                StepStatus::Progressed
             }
         }
+    }
+
+    /// Deterministic CR 500-514 phase/step transition table for this slice:
+    /// advances `state.phase`/`step`/`turn_number`/`active_player`/
+    /// `postcombat_main` and returns the log events for it. Does NOT carry
+    /// out any of the actual rules work a step triggers (untapping
+    /// permanents, drawing a card, etc.) - that's separate, larger work
+    /// still gated on other todo!()s (layers.rs, zone manipulation); this
+    /// only answers "what step comes next."
+    ///
+    /// `postcombat_main` resolves CR 505.1's "Main happens twice" ambiguity
+    /// that `Phase` alone can't (see turn.rs's `Phase` doc) - added to
+    /// `GameState` for this slice.
+    fn advance_turn_step(&mut self) -> Vec<GameEventKind> {
+        let starting_new_turn = match (self.state.phase, self.state.step) {
+            (Phase::PreGame, _) => {
+                self.state.phase = Phase::Beginning;
+                self.state.step = Step::Untap;
+                true
+            }
+            (Phase::Beginning, Step::Untap) => {
+                self.state.step = Step::Upkeep;
+                false
+            }
+            (Phase::Beginning, Step::Upkeep) => {
+                self.state.step = Step::Draw;
+                false
+            }
+            (Phase::Beginning, Step::Draw) => {
+                self.state.phase = Phase::Main;
+                self.state.postcombat_main = false;
+                false
+            }
+            (Phase::Main, _) if !self.state.postcombat_main => {
+                self.state.phase = Phase::Combat;
+                self.state.step = Step::BeginningOfCombat;
+                false
+            }
+            (Phase::Combat, Step::BeginningOfCombat) => {
+                self.state.step = Step::DeclareAttackers;
+                false
+            }
+            (Phase::Combat, Step::DeclareAttackers) => {
+                self.state.step = Step::DeclareBlockers;
+                false
+            }
+            (Phase::Combat, Step::DeclareBlockers) => {
+                self.state.step = Step::CombatDamage;
+                false
+            }
+            (Phase::Combat, Step::CombatDamage) => {
+                self.state.step = Step::EndOfCombat;
+                false
+            }
+            (Phase::Combat, Step::EndOfCombat) => {
+                self.state.phase = Phase::Main;
+                self.state.postcombat_main = true;
+                false
+            }
+            // postcombat_main == true here, since the guarded Main arm above
+            // already claimed the precombat case.
+            (Phase::Main, _) => {
+                self.state.phase = Phase::Ending;
+                self.state.step = Step::End;
+                false
+            }
+            (Phase::Ending, Step::End) => {
+                self.state.step = Step::Cleanup;
+                false
+            }
+            (Phase::Ending, Step::Cleanup) => {
+                let current_idx = self
+                    .state
+                    .turn_order
+                    .iter()
+                    .position(|p| *p == self.state.active_player)
+                    .unwrap_or(0);
+                let next_idx = (current_idx + 1) % self.state.turn_order.len();
+                self.state.active_player = self.state.turn_order[next_idx];
+                self.state.turn_number += 1;
+                self.state.phase = Phase::Beginning;
+                self.state.step = Step::Untap;
+                self.state.postcombat_main = false;
+                true
+            }
+            (phase, step) => unreachable!(
+                "invalid Phase/Step combination {phase:?}/{step:?} - Step values are only \
+                 meaningful within the Phase they belong to (CR 500-514); reaching this means \
+                 state held a combination that doesn't correspond to any real turn position"
+            ),
+        };
+
+        let mut events =
+            vec![GameEventKind::PhaseStarted { phase: self.state.phase }, GameEventKind::StepStarted {
+                step: self.state.step,
+            }];
+        if starting_new_turn {
+            events.push(GameEventKind::TurnStarted {
+                player: self.state.active_player,
+                turn_number: self.state.turn_number,
+            });
+        }
+        events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::counter::CounterSet;
+    use crate::types::mana::ManaPool;
+    use crate::types::player::PlayerState;
+    use std::collections::HashMap;
+
+    fn minimal_state() -> GameState {
+        let p0 = PlayerId(0);
+        GameState {
+            players: vec![PlayerState {
+                player_id: p0,
+                life: 20,
+                mana_pool: ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 },
+                counters: CounterSet::new(),
+                emblems: Vec::new(),
+                commander_damage_taken: Vec::new(),
+                eliminated: false,
+            }],
+            turn_order: vec![p0],
+            active_player: p0,
+            turn_number: 1,
+            phase: Phase::PreGame,
+            step: Step::Untap,
+            priority_player: p0,
+            consecutive_passes: 0,
+            postcombat_main: false,
+            objects: HashMap::new(),
+            zones: Vec::new(),
+            stack: Vec::new(),
+            continuous_effects: Vec::new(),
+            replacement_effects: Vec::new(),
+            abilities: Vec::new(),
+            ledger: Vec::new(),
+            rng: crate::types::game::RngState { seed: 1, draws_consumed: 0 },
+            next_event_id: 0,
+            next_sequence_no: 0,
+        }
+    }
+
+    fn trigger(id: u64, controller: PlayerId) -> PendingTrigger {
+        PendingTrigger { source: ObjectId(id), controller, ability_index: 0 }
+    }
+
+    #[test]
+    fn is_permutation_accepts_reorderings_and_rejects_substitutions() {
+        let group = vec![trigger(1, PlayerId(0)), trigger(2, PlayerId(0))];
+        // A true reordering (same elements, different sequence) must pass.
+        assert!(is_permutation(&[group[1], group[0]], &group));
+        // Same length but a substituted element must be rejected - length
+        // alone can't catch this.
+        assert!(!is_permutation(&[group[0], trigger(3, PlayerId(0))], &group));
+        // A duplicate of one element instead of using both must be rejected.
+        assert!(!is_permutation(&[group[0], group[0]], &group));
+        // Wrong length, caught the same way as before.
+        assert!(!is_permutation(&[group[0]], &group));
+    }
+
+    #[test]
+    fn submit_trigger_order_rejects_non_permutation_and_accepts_real_reordering() {
+        let player = PlayerId(0);
+        let group = vec![trigger(1, player), trigger(2, player)];
+
+        let mut engine = Engine::new(minimal_state());
+        engine.process_state = ProcessState::AwaitTriggerOrderChoice {
+            player,
+            group: group.clone(),
+            ordered: Vec::new(),
+            pending_groups: VecDeque::new(),
+        };
+        let substituted = vec![group[0], trigger(99, player)];
+        let err = engine.submit_trigger_order(substituted).unwrap_err();
+        assert!(matches!(err, TriggerOrderError::NotAPermutation));
+
+        // Engine must still be sitting in AwaitTriggerOrderChoice - a
+        // rejected answer must not have consumed the pending state.
+        assert!(matches!(engine.process_state, ProcessState::AwaitTriggerOrderChoice { .. }));
+
+        let reordered = vec![group[1], group[0]];
+        engine.submit_trigger_order(reordered).expect("a true reordering must be accepted");
+        assert!(matches!(engine.process_state, ProcessState::PutTriggersApnap { .. }));
     }
 }

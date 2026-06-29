@@ -8,7 +8,7 @@ use crate::types::ids::{ObjectId, PlayerId};
 /// stack), and not part of `GameState` (it's transient process state
 /// between "trigger matched" and "pushed to stack", not part of the
 /// authoritative game state model).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingTrigger {
     pub source: ObjectId,
     pub controller: PlayerId,
@@ -19,6 +19,13 @@ pub struct PendingTrigger {
 /// legal to trigger (timing, once-per-turn, range, etc — CR 603.2-603.3).
 /// Order in the returned `Vec` is not yet APNAP order; see `group_apnap`.
 pub fn collect_triggers(state: &GameState, event: &GameEvent) -> Vec<PendingTrigger> {
+    let _ = event;
+    if state.abilities.is_empty() {
+        // Genuinely nothing to match against - safe to no-op rather than
+        // hit the todo!() below, which only bites once a RegisteredAbility
+        // actually exists.
+        return Vec::new();
+    }
     // TODO: scan state.abilities for RegisteredAbility entries where kind
     // == AbilityKind::Triggered and condition (if Some) evaluates true
     // against event (needs ScriptRuntime to invoke the condition
@@ -42,9 +49,32 @@ pub fn group_apnap(
     state: &GameState,
     triggers: Vec<PendingTrigger>,
 ) -> Vec<(PlayerId, Vec<PendingTrigger>)> {
-    // TODO: partition triggers by controller, ordered by state.turn_order
-    // starting at state.active_player (active player's triggers first).
-    // Do NOT attempt to resolve intra-group order here - that's
-    // engine.rs/AwaitTriggerOrderChoice's job.
-    todo!()
+    if triggers.is_empty() {
+        return Vec::new();
+    }
+    // Rotate turn_order to start at active_player (APNAP order), then
+    // partition triggers by controller in that order. Intra-group order is
+    // deliberately left as collect_triggers produced it - that's the
+    // controller's choice (CR 603.3b), resolved by
+    // engine.rs/AwaitTriggerOrderChoice, not here.
+    let mut order: Vec<PlayerId> = Vec::new();
+    match state.turn_order.iter().position(|p| *p == state.active_player) {
+        Some(start) => {
+            order.extend(state.turn_order[start..].iter().copied());
+            order.extend(state.turn_order[..start].iter().copied());
+        }
+        None => order.extend(state.turn_order.iter().copied()),
+    }
+    order
+        .into_iter()
+        .filter_map(|pid| {
+            let group: Vec<PendingTrigger> =
+                triggers.iter().copied().filter(|t| t.controller == pid).collect();
+            if group.is_empty() {
+                None
+            } else {
+                Some((pid, group))
+            }
+        })
+        .collect()
 }
