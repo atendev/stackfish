@@ -42,6 +42,23 @@ pub fn collect_triggers(state: &GameState, event: &GameEvent) -> Vec<PendingTrig
     // ability granted by an aura that left in the same batch), or the id
     // may not resolve to anything at all if the move minted a new
     // ObjectId. See event.rs's doc comment on ZoneChange for the full case.
+    //
+    // IMPORTANT (CR 601.2i): a "whenever you cast a spell" condition must
+    // NOT match on GameEventKind::StackObjectPushed alone - that event
+    // represents CR 601.2a's *proposal* (card moved to stack), not the
+    // spell actually becoming cast, which only happens once its cost is
+    // paid (601.2i). There's no dedicated "spell was cast" event yet -
+    // either add one (e.g. emitted alongside/after GameEventKind::CostPaid
+    // in engine.rs's submit_payment, only for StackEntryKind::Spell), or
+    // have this condition check require both StackObjectPushed AND a
+    // matching CostPaid for the same stack_id before it's considered a
+    // completed cast. Timing happens to work out correctly today regardless
+    // (this function isn't invoked until CollectTriggers, which never runs
+    // until after the ProcessState::AwaitingPayment pause resolves - see
+    // engine.rs) - but matching the wrong event would still be semantically
+    // wrong (e.g. would also incorrectly fire for a spell whose cost was
+    // never actually paid, if 601.6's rollback gap ever gets fixed and a
+    // proposed-but-uncast spell becomes representable).
     todo!()
 }
 

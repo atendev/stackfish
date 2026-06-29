@@ -272,7 +272,11 @@ pub fn execute_command(
             // are validated for legality yet - no mode-legality check, no
             // target-legality check (range/restriction/count per CR
             // 601.2c), no division/distribution step (CR 601.2d), and no
-            // legality recheck (CR 601.2e).
+            // legality recheck (CR 601.2e). Also no splice (CR 601.2b/
+            // 702.47) - a player revealing other cards in hand to splice
+            // their text onto this spell isn't modeled at all; PlayerAction
+            // has nowhere to carry "which cards I'm splicing," and
+            // StackObject has nowhere to record it either.
 
             // CR 601.2f: total cost = the card's printed mana_cost only -
             // no additional/alternative costs, no reductions yet (see
