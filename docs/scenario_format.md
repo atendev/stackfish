@@ -34,10 +34,16 @@ seed = 1          # u64, required - seeds GameState.rng
 [[players]]
 id = 0       # u32, becomes PlayerId(id)
 life = 20    # i32, starting life
+mana_pool = { green = 1, colorless = 2 }   # optional, all six fields default 0
 ```
 
 One zone each of Library/Hand/Graveyard/Command is created per player automatically. Battlefield
 and Exile are shared (created once, not per player).
+
+**`mana_pool` is fake, pre-seeded floating mana.** CR 605 mana abilities (tapping a land, etc)
+don't exist yet — there's no way for an action sequence to *produce* mana, so a scenario that needs
+to pay a cost has to seed the pool directly at setup time instead. `[players.mana_pool]` can be
+omitted entirely (defaults to all-zero).
 
 ## `[[cards]]`
 
@@ -156,9 +162,26 @@ description = "choose a player"
 selection = [1]
 ```
 
-**Not yet supported:** `SubmitPayment`. `PaymentPlan`'s `CostPayment` shapes are more involved and
-the cost system itself isn't implemented yet either — add an `ActionSpec::SubmitPayment` variant
-once that's worth testing.
+```toml
+[[actions]]
+type = "submit_payment"
+player = 0
+mana = { generic_cost = 2, colors = ["G"] }   # optional, default {} (an empty plan)
+```
+
+Answers a pending `ProcessState::AwaitingPayment` pause (CR 601.2f-h) — i.e. the action right
+after a `cast_spell`/`activate_ability` that has a real cost. `mana` uses the same simplified
+generic+colors shape as `[[cards]]`'s cost fields, and must echo the spell's actual cost exactly
+(no overpay, no underpay — see `PaymentPlan::validate`'s doc comment in `cost.rs`). Omit `mana`
+entirely (or write `mana = {}`) to pay a `{0}` cost — CR 118.5a still requires this explicit empty
+acknowledgment, casting never auto-pays. Deliberately **not** routed through `submit_action` like
+every other action above — it answers `Engine::submit_payment` directly (mirrors how a replacement-
+ordering or trigger-ordering choice would, if those ever got a TOML shape too).
+
+**Not yet supported in `mana`:** hybrid, Phyrexian, colorless (`{C}`), or X-cost payment — same
+simplification `[[cards]]`'s cost fields already have. Also unsupported: additional costs
+(sacrifice/discard/etc) and alternative costs (flashback/escape) — `PaymentPlan::validate` rejects
+any `CostSpec` that has either set, and nothing in this slice constructs one.
 
 ### Targets
 
@@ -195,8 +218,23 @@ card = "bear"
 equals = "graveyard"   # any zone name from the Zones list above
 ```
 
+```toml
+[[assertions]]
+type = "mana_pool"
+player = 0
+color = "green"            # one of white/blue/black/red/green/colorless
+equals = 0
+```
+
 These read `GameState` fields directly (not through the engine's own accessor methods), so they
 work regardless of which inherent methods are implemented yet.
+
+**A card's key keeps resolving correctly across zone moves.** `play_land`/`cast_spell`/resolution
+all mint a *new* `ObjectId` for the moved object (CR 400.7) instead of reusing the old one — every
+`[[setup]]` card key is tracked and automatically re-pointed at its new id after each action that
+moves it (`remap_moved_card_ids` in `crates/scenario/src/lib.rs`), so `object_zone`/later actions
+referencing `"bear"` keep working after it's been cast, resolved, etc. You don't need to do anything
+for this — just keep using the same key from `[[setup]]` throughout the file.
 
 ## Example: full file
 
@@ -229,6 +267,69 @@ card = "bear"
 type = "life"
 player = 0
 equals = 20
+
+[[assertions]]
+type = "object_zone"
+card = "bear"
+equals = "battlefield"
+```
+
+## Example: casting and paying for a spell
+
+A solo player's first `pass_priority` always counts as "everyone passed" (1 player ≥
+`turn_order.len() == 1`), so each one advances exactly one turn/phase/step (CR 500-514) —
+`Untap → Upkeep → Draw → Main`. `cast_spell`'s non-instant branch needs `Phase::Main` (sorcery
+speed), so reaching it from the game's `PreGame` start takes 4 passes; one more pass after paying
+resolves the spell off the stack (CR 608.2m). See
+`crates/engine/tests/scenarios/phase5_cast_spell_payment.toml` for this exact file, runnable as-is.
+
+```toml
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+mana_pool = { green = 1, colorless = 2 }
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+generic_cost = 2
+colors = ["G"]
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bear"
+
+[[actions]]
+type = "pass_priority"
+player = 0
+# (x4 total - PreGame -> Untap -> Upkeep -> Draw -> Main)
+
+[[actions]]
+type = "cast_spell"
+player = 0
+card = "bear"
+
+[[actions]]
+type = "submit_payment"
+player = 0
+mana = { generic_cost = 2, colors = ["G"] }
+
+[[actions]]
+type = "pass_priority"
+player = 0
+# resolves the stack now that everyone's passed again
+
+[[assertions]]
+type = "mana_pool"
+player = 0
+color = "green"
+equals = 0
 
 [[assertions]]
 type = "object_zone"
