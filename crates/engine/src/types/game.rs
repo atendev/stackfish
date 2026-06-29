@@ -42,6 +42,14 @@ pub struct GameState {
     /// deterministic transition table needs to disambiguate. Reset to
     /// `false` whenever a new turn begins (Beginning/Untap).
     pub postcombat_main: bool,
+    /// CR 305.2: a player can normally play one land per turn (continuous
+    /// effects raising that limit aren't modeled yet — see `PlayLand`'s
+    /// TODO in commands.rs). Keyed by player rather than a single counter
+    /// since CR 305.2a's comparison is per-player ("the number of lands
+    /// they have already played this turn"). Reset to all-zero whenever a
+    /// new turn begins (Beginning/Untap) — same trigger as
+    /// `postcombat_main` above.
+    pub lands_played_this_turn: HashMap<PlayerId, u32>,
     /// Object store — single source of truth for object data, looked up by
     /// id. `zones` below holds only ids in order; that's the single source
     /// of truth for *order*, so order is never duplicated on the object
@@ -146,6 +154,7 @@ mod tests {
             priority_player: hand,
             consecutive_passes: 0,
             postcombat_main: false,
+            lands_played_this_turn: HashMap::new(),
             objects: HashMap::new(),
             zones: vec![
                 Zone { kind: ZoneKind::Hand, owner: Some(hand), contents: VecDeque::new() },

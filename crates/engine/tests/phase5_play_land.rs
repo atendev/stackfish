@@ -98,11 +98,17 @@ fn two_player_state() -> GameState {
         turn_order: vec![p0, p1],
         active_player: p0,
         turn_number: 1,
-        phase: Phase::PreGame,
+        // PlayLand is sorcery-speed only (CR 305.1/305.3) - a main phase of
+        // the actor's own turn, stack empty, actor holding priority. Default
+        // to Main so callers don't have to set it per test; the rejection
+        // tests below still test their own intended failure (non-Land,
+        // not-in-hand), not an incidental timing failure.
+        phase: Phase::Main,
         step: Step::Untap,
         priority_player: p0,
         consecutive_passes: 0,
         postcombat_main: false,
+        lands_played_this_turn: HashMap::new(),
         objects: HashMap::new(),
         zones: vec![
             Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
@@ -155,6 +161,10 @@ fn play_land_breaks_pass_chain() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
+    // CR 305.3: a land can only be played on the actor's own turn - p1 is
+    // the one playing the land below, so p1 must be the active player. p0
+    // still passes first (passing priority has no turn restriction).
+    state.active_player = p1;
     let land = ObjectId(0);
     state.objects.insert(land, card_object(land, land_definition(), p1, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p1)).unwrap().push_bottom(land);
@@ -209,6 +219,104 @@ fn play_land_rejects_card_not_in_hand() {
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Battlefield, "state untouched");
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&card));
     assert_eq!(engine.state().ledger.len(), 0);
+}
+
+#[test]
+fn play_land_rejects_outside_main_phase() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    state.phase = Phase::Combat;
+    state.objects.insert(card, card_object(card, land_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } })
+        .unwrap();
+    let status = drain(&mut engine);
+
+    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
+}
+
+#[test]
+fn play_land_rejects_nonempty_stack() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    state.stack.push(StackObject {
+        stack_id: ObjectId(99),
+        kind: StackEntryKind::Spell,
+        source: ObjectId(99),
+        source_lki: None,
+        controller: p0,
+        chosen_modes: Vec::new(),
+        targets: Vec::new(),
+        x_value: None,
+        costs_paid: Vec::new(),
+        operation: ScriptHandle(0),
+    });
+    state.objects.insert(card, card_object(card, land_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } })
+        .unwrap();
+    let status = drain(&mut engine);
+
+    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
+}
+
+#[test]
+fn play_land_rejects_not_actors_turn() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    // It's p1's turn, but p0 (who currently holds priority) tries to play
+    // a land they own - CR 305.3.
+    state.active_player = p1;
+    let card = ObjectId(0);
+    state.objects.insert(card, card_object(card, land_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } })
+        .unwrap();
+    let status = drain(&mut engine);
+
+    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
+}
+
+#[test]
+fn play_land_rejects_second_land_same_turn() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let first = ObjectId(0);
+    let second = ObjectId(1);
+    state.objects.insert(first, card_object(first, land_definition(), p0, ZoneKind::Hand));
+    state.objects.insert(second, card_object(second, land_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(first);
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(second);
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: first } })
+        .unwrap();
+    drain(&mut engine);
+    assert_eq!(engine.state().object(first).unwrap().zone, ZoneKind::Battlefield);
+
+    engine
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: second } })
+        .unwrap();
+    let status = drain(&mut engine);
+
+    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert_eq!(engine.state().object(second).unwrap().zone, ZoneKind::Hand, "second land untouched");
 }
 
 #[test]

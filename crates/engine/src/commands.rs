@@ -3,6 +3,7 @@ use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::PlayerId;
+use crate::types::turn::Phase;
 use crate::types::zone::ZoneKind;
 
 /// Carrying out an already-validated `EngineCommand` failed partway —
@@ -54,6 +55,21 @@ pub struct CommandOutcome {
     /// See `PriorityHandoff`. `engine.rs` applies this to
     /// `state.priority_player` itself.
     pub priority_handoff: PriorityHandoff,
+}
+
+/// CR 117.1a's "sorcery speed" window — `player` may take an action that
+/// requires it (playing a land, casting a sorcery, most activated
+/// abilities) only when all of: they hold priority, it's their own turn
+/// (CR 305.3), it's a main phase of that turn (CR 305.1), and the stack is
+/// empty (CR 307.1/305.1). Pulled out as a standalone predicate rather than
+/// inlined into `PlayLand` alone, since `CastSpell`'s sorcery-timing branch
+/// and (most) `ActivateAbility` checks will need the exact same condition
+/// once they're real.
+fn is_sorcery_speed(state: &GameState, player: PlayerId) -> bool {
+    state.priority_player == player
+        && state.active_player == player
+        && state.phase == Phase::Main
+        && state.stack.is_empty()
 }
 
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
@@ -109,8 +125,28 @@ pub fn execute_command(
         }
         PlayerActionKind::PlayLand { card } => {
             // CR 305.1: lands aren't spells, so this goes straight to the
-            // battlefield - no stack object, no cost/timing beyond "is it
-            // actually a Land, and is it actually in this player's hand."
+            // battlefield - no stack object. Playing a land is still
+            // restricted to sorcery speed (CR 305.1/305.3, via
+            // is_sorcery_speed) and to once per turn absent a continuous
+            // effect raising the limit (CR 305.2 - that increase isn't
+            // modeled yet, so this only ever compares against the literal
+            // 1; revisit once continuous_effects can grant extra land
+            // drops).
+            if !is_sorcery_speed(state, command.actor) {
+                return Err(CommandError::IllegalAction(
+                    "a land can only be played at sorcery speed: actor's turn, a main phase, \
+                     actor holding priority, and an empty stack"
+                        .to_string(),
+                ));
+            }
+            let already_played =
+                *state.lands_played_this_turn.get(&command.actor).unwrap_or(&0);
+            if already_played >= 1 {
+                return Err(CommandError::IllegalAction(
+                    "actor has already played their land for this turn".to_string(),
+                ));
+            }
+
             let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
             if !object.definition.card_types.contains(CardTypeSet::LAND) {
                 return Err(CommandError::IllegalAction("card is not a Land".to_string()));
@@ -133,6 +169,7 @@ pub fn execute_command(
                 .ok_or_else(|| CommandError::IllegalAction("no battlefield zone".to_string()))?
                 .push_bottom(card);
             state.object_mut(card).expect("looked up above").zone = ZoneKind::Battlefield;
+            *state.lands_played_this_turn.entry(command.actor).or_insert(0) += 1;
 
             return Ok(CommandOutcome {
                 events: vec![GameEventKind::ZoneChange {
