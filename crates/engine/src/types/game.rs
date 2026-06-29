@@ -119,14 +119,11 @@ impl GameState {
     }
 
     pub fn player(&self, id: PlayerId) -> Option<&PlayerState> {
-        // TODO: self.players.iter().find(|p| p.player_id == id) - note
-        // PlayerId needs PartialEq, which it already derives (ids.rs).
-        todo!()
+        self.players.iter().find(|p| p.player_id == id)
     }
 
     pub fn player_mut(&mut self, id: PlayerId) -> Option<&mut PlayerState> {
-        // TODO: same as player() but iter_mut().
-        todo!()
+        self.players.iter_mut().find(|p| p.player_id == id)
     }
 
     /// Looks up the one `Zone` matching `kind`/`owner` in `zones`. Panics-
