@@ -533,6 +533,92 @@ returned-error). `ActionError` and `CommandError` both needed `Debug` derives al
   description fields are placeholders for whatever that representation turns out to be.
 - mlua <-> Rust hidden-information boundary still unresolved (also tracked in `DESIGN.md`).
 
+## Fix: double-writing ledger events
+
+`commands::execute_command`'s doc previously said it appends to `state.ledger` directly, while
+`engine.rs` separately had `ReplacementCheck -> CommitEvents` also appending ledger entries —
+two write paths into the same ledger, only one of which (`CommitEvents`) actually ran
+replacement/prevention checks (CR 614-616) first. Picked one model: `execute_command` now
+returns `Result<Vec<GameEventKind>, CommandError>` (proposed events) and mutates only
+non-ledger `GameState` fields (zones, `consecutive_passes`, `priority_player`, etc.);
+`engine.rs`'s `PendingAction` branch feeds that `Vec` into `ProcessState::ReplacementCheck`
+instead of going straight to `SbaLoop`. `engine.rs` is now the only place that allocates
+`EventId`/`SequenceNo` and pushes onto `state.ledger`. Updated `commands.rs`'s doc comments to
+match (no more "appends to ledger" claim).
+
+## Fix: pass-chain logic location
+
+`execute_command` previously had an implicit CONTRACT comment: every variant except
+`PassPriority` had to remember to reset `state.consecutive_passes` to 0, and `engine.rs` inferred
+"did everyone just pass" purely by reading that counter afterward — brittle, since a future
+variant could forget the reset with no compile-time signal. Replaced with `commands::
+CommandOutcome { events: Vec<GameEventKind>, broke_pass_chain: bool }`: `execute_command` returns
+this explicitly (`broke_pass_chain = false` only for `PassPriority`) instead of touching
+`consecutive_passes` itself. `engine.rs`'s `PendingAction` branch now owns
+`state.consecutive_passes` entirely — increments it on `false`, resets on `true` — so there's one
+place that both mutates and reads the counter.
+
+## Fix: pipeline_context lifecycle (TODO note, not yet implemented)
+
+`pipeline_context` gets set at the start of a pipeline run (`PendingAction`/`ResolveStackTop`) but
+`PutTriggersApnap` — the run's last stage — is still `todo!()`, so nothing clears it back to
+`None` yet. Left as-is would leak stale `since_ledger`/`caused_by_command`/`parent_event` into the
+next run's `CommitEvents`/`CollectTriggers`. Documented as a MUST on both the `pipeline_context`
+field doc and inside `PutTriggersApnap`'s TODO so whoever implements that stage doesn't skip it.
+
+## Fix: ReplacementCheck needs a real await-choice state (CR 616.1)
+
+`apply_replacements` was `&GameState -> GameEventKind` (well, `&mut GameState ->
+GameEventKind`), and `engine.rs`'s `ReplacementCheck` did a blind `proposed.into_iter().map(...).
+collect()`. That has no way to represent CR 616.1: when more than one `ReplacementEffect`
+matches the same event, the *affected player* — not the engine — picks which applies first.
+A pure transform can't make that call, and a `.map()` can't pause partway through a batch.
+
+Changed `replacement::apply_replacements` to return `ReplacementOutcome::{Resolved(GameEventKind),
+NeedsOrderingChoice { affected_player, event, candidates: Vec<ObjectId> }}` (candidates identified
+by `ReplacementEffect::source`, since there's no dedicated id type). `engine.rs`'s
+`ReplacementCheck` now processes `remaining` one event at a time instead of mapping the whole
+`Vec` at once, so it can stop cleanly on `NeedsOrderingChoice` and move into a new
+`ProcessState::AwaitingReplacementChoice { affected_player, pending_event, candidates, remaining,
+checked }` — carrying the rest of that `ReplacementCheck` run's progress across the pause.
+Added `StepStatus::AwaitingReplacementChoice` (mirrors `AwaitingAction`, but for this) and a
+separate `Engine::submit_replacement_choice` entry point — deliberately not folded into
+`submit_action`, since this isn't a `PlayerAction`/priority decision and `submit_action` only
+accepts those while sitting in `PriorityWindow`.
+
+Both `apply_replacements`'s replacement-resolution body and `submit_replacement_choice`'s
+apply-the-chosen-rewrite body are still `todo!()` — blocked on `ReplacementEffect` not having an
+"apply" callback yet (only `event_pattern`, the matcher, is modeled). This fix is the structural
+piece: the *shape* of the pause/resume now exists so that gap can be filled in without another
+signature change.
+
+## Fix: trigger-order pause, explicit priority handoff, centralized pipeline-end
+
+Three related structural gaps, fixed together:
+
+1. **`ProcessState::AwaitTriggerOrderChoice { player, group, ... }`** (CR 603.3b). Same shape of
+   gap as the CR 616.1 replacement-ordering fix: `triggers::order_apnap` couldn't decide a
+   controller's intra-group trigger order itself — that's a player choice. Renamed it to
+   `group_apnap` (now returns `Vec<(PlayerId, Vec<PendingTrigger>)>`, grouped by controller in
+   APNAP order, intra-group order left untouched) and reworked `ProcessState::PutTriggersApnap`
+   to walk one group per `step()` instead of ordering+pushing everything in one shot, pausing
+   into `AwaitTriggerOrderChoice` whenever a group has more than one trigger. Added
+   `StepStatus::AwaitingTriggerOrderChoice` and `Engine::submit_trigger_order` mirroring the
+   replacement-choice pair. `PendingTrigger` gained `Clone, Copy` so it's cheap to clone for the
+   status struct, same as `ReplacementOutcome::candidates` does for `ObjectId`.
+2. **`commands::PriorityHandoff`**. `execute_command` used to rotate `state.priority_player`
+   directly inside its `PassPriority` handling. Replaced with `CommandOutcome::priority_handoff:
+   PriorityHandoff` (`Unchanged` or `To(PlayerId)`) — `execute_command` resolves *who* priority
+   should go to but doesn't write the field; `engine.rs`'s `PendingAction` branch applies it.
+   Same reasoning as the earlier `broke_pass_chain` fix: one place writes the field, one place
+   decides the value, and they're not silently coupled through a mutation buried in a match arm.
+3. **`Engine::end_pipeline_run`**. The "consume `pipeline_exit`, clear `pipeline_context`, pick
+   the next `ProcessState`" transition was previously sketched only as a TODO comment inside
+   `PutTriggersApnap`. Pulled out into its own method so there's exactly one place that performs
+   it — `PutTriggersApnap`'s now-empty-`pending_groups` branch calls it (the actual `StackObject`
+   push for `ordered` is still a TODO there, blocked on the same script-bridge gap as everywhere
+   else, but the pipeline-end transition itself is no longer ad hoc).
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

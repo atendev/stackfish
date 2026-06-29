@@ -345,6 +345,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         ledger: Vec::new(),
         rng: RngState { seed: file.seed, draws_consumed: 0 },
         next_event_id: 0,
+        next_sequence_no: 0,
     };
 
     (state, card_ids)
@@ -456,7 +457,10 @@ fn run_action(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
             let result = engine.step();
             match result.status {
                 StepStatus::Progressed => continue,
-                StepStatus::AwaitingAction { .. } | StepStatus::GameOver { .. } => {
+                StepStatus::AwaitingAction { .. }
+                | StepStatus::AwaitingReplacementChoice { .. }
+                | StepStatus::AwaitingTriggerOrderChoice { .. }
+                | StepStatus::GameOver { .. } => {
                     return StepOutcome::Ran;
                 }
                 StepStatus::Error(err) => return StepOutcome::Errored(format!("{err:?}")),

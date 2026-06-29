@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::types::ability::RegisteredAbility;
 use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
-use crate::types::ids::{EventId, ObjectId, PlayerId};
+use crate::types::ids::{EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
 use crate::types::player::PlayerState;
 use crate::types::stack::StackObject;
@@ -61,6 +61,13 @@ pub struct GameState {
     /// events get generated somewhere other than the exact moment of the
     /// push). See `allocate_event_id`.
     pub next_event_id: u64,
+    /// Dedicated monotonic counter for `SequenceNo` allocation. Same
+    /// rationale as `next_event_id` — `ledger.len()` at commit time isn't a
+    /// stable source: it depends on how many events from the same batch
+    /// already landed, so replaying the same command stream against a
+    /// different batching of `CommitEvents` calls could reorder/reuse
+    /// sequence numbers. See `allocate_sequence_no`.
+    pub next_sequence_no: u64,
 }
 
 impl GameState {
@@ -68,6 +75,12 @@ impl GameState {
         let id = EventId(self.next_event_id);
         self.next_event_id += 1;
         id
+    }
+
+    pub fn allocate_sequence_no(&mut self) -> SequenceNo {
+        let seq = SequenceNo(self.next_sequence_no);
+        self.next_sequence_no += 1;
+        seq
     }
 
     pub fn object(&self, id: ObjectId) -> Option<&GameObject> {

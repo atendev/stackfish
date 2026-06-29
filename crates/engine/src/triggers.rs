@@ -8,6 +8,7 @@ use crate::types::ids::{ObjectId, PlayerId};
 /// stack), and not part of `GameState` (it's transient process state
 /// between "trigger matched" and "pushed to stack", not part of the
 /// authoritative game state model).
+#[derive(Clone, Copy)]
 pub struct PendingTrigger {
     pub source: ObjectId,
     pub controller: PlayerId,
@@ -16,7 +17,7 @@ pub struct PendingTrigger {
 
 /// Finds every triggered ability that matches `event` and is currently
 /// legal to trigger (timing, once-per-turn, range, etc — CR 603.2-603.3).
-/// Order in the returned `Vec` is not yet APNAP order; see `order_apnap`.
+/// Order in the returned `Vec` is not yet APNAP order; see `group_apnap`.
 pub fn collect_triggers(state: &GameState, event: &GameEvent) -> Vec<PendingTrigger> {
     // TODO: scan state.abilities for RegisteredAbility entries where kind
     // == AbilityKind::Triggered and condition (if Some) evaluates true
@@ -28,17 +29,22 @@ pub fn collect_triggers(state: &GameState, event: &GameEvent) -> Vec<PendingTrig
     todo!()
 }
 
-/// Reorders `triggers` into APNAP order (CR 603.3b): the active player's
-/// triggers first, in their own chosen order, then each other player's in
-/// turn order, generalized over `state.turn_order` rather than hardcoded
-/// to two players.
-pub fn order_apnap(state: &GameState, triggers: Vec<PendingTrigger>) -> Vec<PendingTrigger> {
+/// Groups `triggers` by controller in APNAP order (CR 603.3b): the active
+/// player's triggers first, then each other player's in turn order,
+/// generalized over `state.turn_order` rather than hardcoded to two
+/// players. Each group is still in `collect_triggers`'s original (arbitrary)
+/// order — within one controller's own triggers, CR 603.3b leaves the
+/// order up to that player to choose, which this function can't resolve on
+/// its own. `engine.rs`'s `ProcessState::PutTriggersApnap` walks the
+/// returned groups in order, pausing on `AwaitTriggerOrderChoice` for any
+/// group with more than one trigger so the controller can choose.
+pub fn group_apnap(
+    state: &GameState,
+    triggers: Vec<PendingTrigger>,
+) -> Vec<(PlayerId, Vec<PendingTrigger>)> {
     // TODO: partition triggers by controller, ordered by state.turn_order
     // starting at state.active_player (active player's triggers first).
-    // Within one controller's own triggers, CR 603.3b leaves the order up
-    // to that player to choose - this function can't make that choice
-    // itself; either needs to return groups for the engine to ask about,
-    // or take an already-player-chosen intra-group order as input. Not
-    // fully resolvable with this signature alone.
+    // Do NOT attempt to resolve intra-group order here - that's
+    // engine.rs/AwaitTriggerOrderChoice's job.
     todo!()
 }
