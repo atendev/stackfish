@@ -1223,9 +1223,17 @@ actual `todo!()` underneath) is untouched.
   order in `state.abilities`," not a stable id — fine for this slice's single-mana-ability-per-card
   test fixtures, but will need revisiting once a card can have abilities added/removed at runtime
   (e.g. a granted ability) without shifting every other ability's index.
-- No TOML scenario yet exercising this through the CLI — needs a new `ActionSpec`/setup hook to
-  register a `RegisteredAbility` on a card from TOML, itself needing its own scoping (per the
-  original slice plan, deliberately deferred rather than improvised here).
+- ~~No TOML scenario yet exercising this through the CLI~~ — added in a follow-up pass (same
+  branch): `CardSpec.mana_ability: Vec<String>` (`crates/scenario/src/lib.rs`) registers one
+  `RegisteredAbility { kind: Activated, effect: AddMana(...) }` per card instance with a non-empty
+  `mana_ability` list, activated via the existing `activate_ability` `ActionSpec` at
+  `ability_index = 0`. New `AssertionSpec::Tapped { card, equals }` checks `GameObject.tapped`.
+  `crates/engine/tests/scenarios/phase5_activate_ability_mana.toml` exercises it end-to-end —
+  confirmed via `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/
+  phase5_activate_ability_mana.toml` (1/1 actions ran, 3/3 assertions passed), not just `cargo
+  test`. `docs/scenario_format.md` updated to match. Only one mana ability per card this way
+  (`ability_index` is hardcoded to 0 by convention, not a list) — fine for this slice's scope, would
+  need a real per-card abilities list in `CardSpec` to support more.
 
 ## Next slice
 
