@@ -67,12 +67,17 @@ Define just enough of a card to exercise what a scenario needs.
 [[cards]]
 key = "bear"                # string, referenced by [[setup]]/[[actions]]/[[assertions]] below
 name = "Test Bear"
-generic_cost = 1             # u32, default 0
-colors = ["G"]                # list of "W"/"U"/"B"/"R"/"G", default []
+generic_cost = 1             # u32, default 0 - the whole generic component as one number
+colors = ["G"]                # one entry PER PIP (repeats included), default []
 types = ["Creature"]          # required - see Card types below
 power = 2                     # optional i32
 toughness = 2                  # optional i32
 ```
+
+A `{2}{G}{G}` cost is `generic_cost = 2, colors = ["G", "G"]` — two list entries for the two green
+pips, not `["G"]` with an implied count. This is the same shape `submit_payment`'s `mana` field
+uses (see that action's docs below) — and not a coincidence: a `submit_payment` paying this card's
+cost has to reproduce these two fields exactly.
 
 **Simplification:** mana cost is `generic_cost` + `colors`, not a parsed cost string like
 `"{2}{R}"` — no mana-cost-string parser exists anywhere yet. Can't currently express hybrid,
@@ -183,18 +188,52 @@ mana = { generic_cost = 2, colors = ["G"] }   # optional, default {} (an empty p
 ```
 
 Answers a pending `ProcessState::AwaitingPayment` pause (CR 601.2f-h) — i.e. the action right
-after a `cast_spell`/`activate_ability` that has a real cost. `mana` uses the same simplified
-generic+colors shape as `[[cards]]`'s cost fields, and must echo the spell's actual cost exactly
-(no overpay, no underpay — see `PaymentPlan::validate`'s doc comment in `cost.rs`). Omit `mana`
-entirely (or write `mana = {}`) to pay a `{0}` cost — CR 118.5a still requires this explicit empty
-acknowledgment, casting never auto-pays. Deliberately **not** routed through `submit_action` like
-every other action above — it answers `Engine::submit_payment` directly (mirrors how a replacement-
-ordering or trigger-ordering choice would, if those ever got a TOML shape too).
+after a `cast_spell`/`activate_ability` that has a real cost. Deliberately **not** routed through
+`submit_action` like every other action above — it answers `Engine::submit_payment` directly
+(mirrors how a replacement-ordering or trigger-ordering choice would, if those ever got a TOML
+shape too).
 
-**Not yet supported in `mana`:** hybrid, Phyrexian, colorless (`{C}`), or X-cost payment — same
-simplification `[[cards]]`'s cost fields already have. Also unsupported: additional costs
-(sacrifice/discard/etc) and alternative costs (flashback/escape) — `PaymentPlan::validate` rejects
-any `CostSpec` that has either set, and nothing in this slice constructs one.
+#### `mana`'s two fields, exactly
+
+`mana` is a `ManaPaymentSpec` — the same two fields as `[[cards]]`'s cost fields
+(`generic_cost`/`colors`), and it has to be built the same way:
+
+- **`generic_cost`** (`u32`, default `0`) — the cost's *entire* generic component as one number,
+  not one entry per point. A `{2}` cost is `generic_cost = 2`, not `[1, 1]` — there's no list form
+  for this field.
+- **`colors`** (list of `"W"`/`"U"`/`"B"`/`"R"`/`"G"`, default `[]`) — one entry **per colored
+  pip**, repeats included. A `{G}{G}` cost is `colors = ["G", "G"]`, two entries, not `["G"]` with
+  some implied count. `{W}{U}` is `colors = ["W", "U"]`. Order doesn't matter (`["W", "U"]` and
+  `["U", "W"]` are equivalent), but the *count* per letter does.
+
+**The two must match the spell's own cost fields exactly — same `generic_cost` number, same
+`colors` multiset (same letters, same count each).** `PaymentPlan::validate` (`cost.rs`) checks
+this by literally rebuilding both into mana symbols and comparing them as a multiset — not "covers
+the cost," not "less than or equal," an exact match. Examples, all rejected even with a large
+enough pool:
+
+```toml
+# Card costs generic_cost = 2, colors = ["G", "G"] ({2}{G}{G})
+mana = { generic_cost = 3, colors = ["G", "G"] }   # too much generic -> rejected
+mana = { generic_cost = 2, colors = ["G"] }        # missing a G pip -> rejected
+mana = { generic_cost = 2, colors = ["G", "G", "G"] } # extra G pip -> rejected
+mana = { generic_cost = 2, colors = ["G", "G"] }   # exact match -> accepted (if pool covers it)
+```
+
+Whether the *pool* can actually cover the (correctly-shaped) plan is checked separately, and that
+check does allow the pool to hold more than the cost — only the exact amount the cost needs comes
+out (`cost::spend`); any floating mana beyond that is left untouched.
+
+Omit `mana` entirely (or write `mana = {}`) to pay a `{0}` cost — CR 118.5a still requires this
+explicit empty acknowledgment, casting never auto-pays. An empty `mana` against a *non-zero* cost
+is also rejected (not a shortcut for "pay nothing and hope") — `colors`/`generic_cost` must be
+literally empty/zero only when the spell's own cost is.
+
+**Not yet supported in `mana`:** hybrid, Phyrexian, colorless (`{C}`), snow, or X-cost payment —
+same simplification `[[cards]]`'s cost fields already have, so a card using any of those can't be
+fully paid via this action either way. Also unsupported: additional costs (sacrifice/discard/etc)
+and alternative costs (flashback/escape) — `PaymentPlan::validate` rejects any `CostSpec` that has
+either set, and nothing in this slice constructs one.
 
 ### Targets
 
