@@ -837,6 +837,167 @@ test (`types::game::tests::zone_helpers_roundtrip`), plus the pre-existing 3+8+1
   would raise a player's allowed land-plays-per-turn (e.g. "you may play an additional land each
   turn") — same blocker as above.
 
+## Fix: PlayLand reused the hand card's ObjectId instead of minting a new one (CR 400.7)
+
+`ids.rs`'s own doc comment on `ObjectId`/`ObjectLineage` says a zone change that creates a "new
+object" mints a fresh id rather than reusing the old one — but the merged `PlayLand` slice above
+actually reused `card`'s id across the hand→battlefield move, just flipping `GameObject.zone`.
+Caught while scoping the next slice (`CastSpell`, which does the same kind of move twice over:
+hand→stack→battlefield/GY) — needed one consistent convention before writing a second mover, and
+the doc-intent was the more correct of the two to standardize on (matters for real once continuous
+effects/auras need to ask "is this still the same object that was targeted/granted-an-effect").
+
+Fixed on master directly (not its own dry-run branch — a correctness fix to already-merged code,
+not a new vertical slice): added `GameState.next_object_id: u64` + `allocate_object_id()` (mirrors
+`allocate_event_id`/`allocate_sequence_no`). `PlayLand`'s arm now mints a new id, sets
+`ObjectLineage.previous = Some(old_id)`, gives the new `GameObject` a fresh timestamp, and removes
+the old id from `state.objects` entirely. `ZoneChange.object` now carries the new id;
+`last_known_info` still snapshots the old one — that field is genuinely load-bearing now, not just
+defensive, since the old id no longer resolves to anything afterward.
+
+**STRUCT DEVIATIONS:** `GameState.next_object_id` (above) — rippled into all 5 `GameState` struct-
+literal call sites (`game.rs`'s own test, `engine.rs`'s test, `crates/scenario/src/lib.rs`, both
+`tests/phase5_*.rs` files) needing the field threaded through, same pattern as every prior
+`GameState` field addition.
+
+**SCOPE DEVIATIONS:** 3 assertions in `phase5_play_land.rs` assumed id-reuse and had to be rewritten
+to read the new id back off the `ZoneChange` ledger event instead of looking it up by the original
+id (added a `moved_object_id()` test helper for this). `cargo test --workspace` reconfirmed green
+after.
+
+## Phase 5: phase5/cast-spell slice (merged to master)
+
+Branch `phase5/cast-spell`, off master. Same "kept, reviewed, merged `--no-ff`" treatment as the
+prior two real slices. Slice scope: `PlayerActionKind::CastSpell` (CR 601) with cost stubbed to
+free (no `CostSpec`/`PaymentPlan` flow at all this slice — deliberate, payment is its own next
+slice, see below), plus the CR 608.2m resolution half: a resolved permanent-type spell becomes a
+battlefield permanent, a resolved instant/sorcery goes to its owner's graveyard. Reuses the existing
+pipeline end to end — `ResolveStackTop`'s body went from a pure mock event to doing the real
+stack→battlefield/GY move, the first real work that stage has ever done.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` green both pre-merge and post-merge — 9
+tests in `crates/engine/tests/phase5_cast_spell.rs`, all prior suites (21 tests + scenarios)
+unaffected. 30 tests total, 0 failed.
+
+**What got implemented:**
+- `StackObject::new` — real body, signature grew to take `chosen_modes`/`targets`/`x_value` as
+  params (its own doc comment had already flagged this as likely).
+- `commands::execute_command`'s `CastSpell` arm: rejects lands (CR 305.1 — lands use `PlayLand`,
+  never go through this path) and cards not in the actor's hand under their control. Timing
+  branches on card type: instants only need the actor to hold priority (CR 601.3 "any time" via
+  flash-equivalent base rule); everything else needs the full `is_sorcery_speed` window (same
+  predicate `PlayLand` uses). Mints a new `ObjectId` for the hand→stack move (CR 400.7, same
+  convention as the `PlayLand` fix above), builds a real `StackObject` with `costs_paid: vec![]`
+  (the free-cost stub), pushes it onto `state.stack`. `broke_pass_chain: true`,
+  `priority_handoff: Unchanged` (CR 601.2i — the caster already held priority, so it doesn't move).
+- `engine::Engine`'s `ResolveStackTop`: for `StackEntryKind::Spell` only, looks up the spell's
+  `GameObject` by `stack_id`, checks whether its `CardTypeSet` intersects `INSTANT | SORCERY` to
+  decide battlefield (permanent) vs. owner's graveyard (instant/sorcery), mints another new
+  `ObjectId` for that move, emits a second `ZoneChange`. Non-`Spell` stack entries
+  (`ActivatedAbility`/`TriggeredAbility`/`Copy`) correctly produce no `ZoneChange` — nothing on a
+  zone moves when an ability resolves.
+
+**STRUCT DEVIATIONS:** None beyond the `next_object_id` fix already folded in above.
+
+**INTERFACE DEVIATIONS:** `StackObject::new` gaining 3 params — anticipated by its own doc comment,
+not a surprise mid-slice.
+
+**SCOPE DEVIATIONS:** None — touched exactly `stack.rs`, `commands.rs`, `engine.rs`, plus the new
+test file.
+
+**UNRESOLVED (flagged with explicit `TODO` comments in `commands.rs`/`engine.rs`, not just here):**
+- Cost determination/payment (CR 601.2f-h) — entirely stubbed free. Carried into the next slice,
+  see below.
+- Mode legality, target legality/count, division/distribution, legality recheck (CR 601.2b-e) —
+  `modes`/`targets`/`x_value` are accepted and stored on the `StackObject`, never validated.
+- Flash/timing permissions beyond the base instant-or-not split (continuous effects granting
+  flash, e.g. "you may cast this as though it had flash") — not modeled, same shape of gap
+  `is_sorcery_speed` already flags for `PlayLand`.
+- `operation: ScriptHandle(0)` on the pushed `StackObject` — no real script bound yet (same
+  script-bridge gap as everywhere else). Resolution moves the card between zones for real but runs
+  no actual spell effect.
+- No SBA checks, no countering/fizzling on illegal-target-by-resolution-time — resolution is
+  unconditional once reached.
+
+## Next slice: cost determination + payment (CR 601.2f-h)
+
+Not started yet — scoped out with the human ahead of time so the next session (likely a fresh
+chat) has a concrete plan instead of re-deriving one. Branch name not yet chosen (something like
+`phase5/cast-spell-payment`).
+
+**Design decision (made, not open):** CR 601.2a puts the spell on the stack *before* cost is
+determined/paid (601.2f-h) — casting is genuinely mid-process while uncosted. Decided to model
+that with a new pipeline pause rather than deducting mana synchronously inside the `CastSpell` arm:
+`ProcessState::AwaitingPayment { stack_id, cost }`, a `StepStatus::AwaitingPayment`, and a new
+`Engine::submit_payment(plan)` entry point, mirroring how `AwaitingReplacementChoice`/
+`AwaitTriggerOrderChoice` already pause-and-resume mid-pipeline. Matches the design note already in
+`command.rs`'s doc comment (`SubmitPayment` exists as its own `PlayerActionKind` *because* payment
+is its own decision point, decoupled from `CastSpell`) and sets up the right shape for later
+additional-cost decisions (sacrifice-a-creature-as-a-cost needs to ask "which one?") and for real
+mana abilities once those exist. The cheaper synchronous-deduction alternative was considered and
+rejected — same reasoning as picking the more-correct `ObjectId` convention over the cheaper one in
+the fix above.
+
+**Mana abilities (CR 605) are explicitly NOT part of this slice.** Tapping a land for mana
+(`{T}: Add {C}`) is itself a CR 605.1a mana ability — an activated ability that doesn't go on the
+stack and resolves immediately (605.3b). That needs real `RegisteredAbility` activation (CR 602)
+running through the script bridge, neither of which exists yet (`state.abilities` sits empty,
+there's no `activate_ability` execution path at all). That's its own future slice, underneath this
+one. For payment, test fixtures will just hand-set `PlayerState.mana_pool` directly — fake,
+pre-seeded floating mana, no land/tap path produces it for real. `CostPayment::Mana(ManaCost)`
+stays provenance-free (no "which land was tapped" — there's no real tapping happening to attribute
+the mana to).
+
+**Requirements (CR-sourced):**
+1. CR 601.2f: total cost = the card's `mana_cost` only — no additional/alternative costs, no
+   reductions (all TODO stubs, see below). "Locked in" is trivially true since nothing can change
+   it yet.
+2. CR 118.3a: paying mana = removing it from `ManaPool`. No mana-ability execution (see above) —
+   pool must already hold what's needed.
+3. CR 118.3/601.2h: can't pay without resources — validate the pool has enough of each required
+   color plus enough left over for generic, atomically, before deducting anything. No partial
+   payment.
+4. `CostSpec::mana_only` (`cost.rs:60`, `todo!()`) needs a real body — trivial fill.
+5. `PaymentPlan::validate` (`cost.rs:97`, `todo!()`) needs a real body — match colored requirements
+   against the matching `ManaPool` fields, generic against whatever's left over. No hybrid/
+   Phyrexian symbol handling this slice (CR 118.13a's "choose how to pay" isn't modeled — keep
+   hybrid/Phyrexian mana costs out of this slice's test fixtures).
+6. CR 118.5/118.5a: a `{0}`-cost spell still goes through the full cast process and still needs an
+   explicit "pay" acknowledgment (an empty `PaymentPlan` that trivially validates) — it doesn't
+   auto-cast.
+7. A "commit a validated `PaymentPlan`" step doesn't exist yet — needs to deduct from `ManaPool` and
+   fill `StackObject.costs_paid`.
+8. A `PaymentError`-ish enum and gating logic mirroring `ReplacementChoiceError`/`TriggerOrderError`
+   (only legal while `AwaitingPayment`, reject mismatched plans without mutating state).
+
+**TODO stubs to leave behind, explicitly:**
+- Additional costs (`AdditionalCost` enum already exists in `cost.rs`, unused so far).
+- Alternative costs (flashback/escape-style).
+- Cost reductions/increases (CR 118.7 family).
+- Hybrid/Phyrexian payment-choice (CR 118.13a).
+- Mana abilities / tapping lands for mana (CR 605) — see above, its own future slice.
+- `{X}` value folding into the mana cost's generic component (`x_value` already flows through
+  `CastSpell`/`StackObject`, but `ManaCost::generic_total`/`CostSpec` don't account for it) — skip
+  X-cost spells in this slice's fixtures rather than half-implementing it.
+- CR 601.6 (can't pay → casting is illegal, game returns to before it was proposed) — a real gap
+  either way the design decision above goes: decide whether a failed payment un-pushes the stack
+  object and moves the card back to hand, or errors out some other way that still leaves state
+  consistent. Flag explicitly, don't silently leave it ambiguous.
+
+**Test cases planned:**
+1. Affordable cost, pool has enough → succeeds, pool debited the right amounts, spell proceeds to
+   stack/resolves same as the cast-spell slice already covers.
+2. Pool short on generic → rejected, pool unchanged (no partial deduction).
+3. Pool has enough total mana but wrong colors (needs `{G}`, pool only has `{U}`) → rejected.
+4. `{0}`-cost spell → succeeds via an explicit empty payment (not skipped automatically).
+5. Exact affordable amount (pool fully drained to 0) → succeeds.
+6. Submitting a payment while not `AwaitingPayment` → rejected, same shape as
+   `ReplacementChoiceError::NotAwaitingChoice`.
+7. Submitting a plan that doesn't match the `CostSpec` (missing/extra payment) → rejected, pool
+   untouched.
+8. Resolution after a paid cast still lands on battlefield/GY correctly — cheap regression check
+   against the cast-spell slice's existing coverage.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
