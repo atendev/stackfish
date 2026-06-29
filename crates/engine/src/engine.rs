@@ -8,7 +8,7 @@ use crate::sba;
 use crate::triggers::{self, PendingTrigger};
 use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerAction};
-use crate::types::cost::{self, CostSpec, PaymentPlan};
+use crate::types::cost::{self, CostPayment, CostSpec, PaymentPlan};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId};
@@ -394,18 +394,19 @@ impl Engine {
         if !valid {
             return Err(PaymentError::InvalidPlan);
         }
-        let ProcessState::AwaitingPayment { stack_id, cost, .. } =
+        let ProcessState::AwaitingPayment { stack_id, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
 
-        // CR 118.3a: commit the deduction now that it's proven affordable -
-        // mirrors validate's own colored-then-leftover-generic accounting,
-        // see cost::spend's doc comment for why it trusts that rather than
-        // re-checking.
-        if let Some(player) = self.state.player_mut(payer) {
-            cost::spend(&cost, &mut player.mana_pool);
+        // CR 118.3a/118.13a: commit exactly the units the plan declared -
+        // see cost::spend's doc comment for why this trusts validate's
+        // affordability check rather than re-deriving an amount to spend.
+        if let Some(CostPayment::Mana(units)) = plan.payments.first() {
+            if let Some(player) = self.state.player_mut(payer) {
+                cost::spend(units, &mut player.mana_pool);
+            }
         }
         if let Some(stack_object) = self.state.stack.iter_mut().find(|s| s.stack_id == stack_id) {
             stack_object.costs_paid = plan.payments;

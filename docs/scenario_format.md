@@ -22,7 +22,7 @@ The CLI's output describes each action/assertion next to its result (`ActionSpec
 ```
 -- actions --
   [4] ran - cast_spell(player=0, card="bear", targets=[], modes=[], x_value=None)
-  [5] ran - submit_payment(player=0, generic_cost=2, colors=["G"])
+  [5] ran - submit_payment(player=0, units=["G", "C", "C"])
 
 -- assertions --
   [3] PASS - phase == "main"
@@ -75,9 +75,10 @@ toughness = 2                  # optional i32
 ```
 
 A `{2}{G}{G}` cost is `generic_cost = 2, colors = ["G", "G"]` — two list entries for the two green
-pips, not `["G"]` with an implied count. This is the same shape `submit_payment`'s `mana` field
-uses (see that action's docs below) — and not a coincidence: a `submit_payment` paying this card's
-cost has to reproduce these two fields exactly.
+pips, not `["G"]` with an implied count. `submit_payment`'s `mana.units` field (see that action's
+docs below) pays this with a *different* shape on purpose — a flat list of literal units, not an
+echo of this cost shape, since which mana actually pays the generic component is the payer's
+choice (CR 118.13a), not implied by the cost.
 
 **Simplification:** mana cost is `generic_cost` + `colors`, not a parsed cost string like
 `"{2}{R}"` — no mana-cost-string parser exists anywhere yet. Can't currently express hybrid,
@@ -184,7 +185,7 @@ selection = [1]
 [[actions]]
 type = "submit_payment"
 player = 0
-mana = { generic_cost = 2, colors = ["G"] }   # optional, default {} (an empty plan)
+mana = { units = ["G", "C", "C"] }   # optional, default {} (an empty plan)
 ```
 
 Answers a pending `ProcessState::AwaitingPayment` pause (CR 601.2f-h) — i.e. the action right
@@ -193,47 +194,49 @@ after a `cast_spell`/`activate_ability` that has a real cost. Deliberately **not
 (mirrors how a replacement-ordering or trigger-ordering choice would, if those ever got a TOML
 shape too).
 
-#### `mana`'s two fields, exactly
+#### `mana.units`: the exact literal mana spent
 
-`mana` is a `ManaPaymentSpec` — the same two fields as `[[cards]]`'s cost fields
-(`generic_cost`/`colors`), and it has to be built the same way:
+`mana` is a `ManaPaymentSpec` with one field, `units` — a **flat list of literal mana units**, one
+entry per unit actually spent, not a cost-shape echo:
 
-- **`generic_cost`** (`u32`, default `0`) — the cost's *entire* generic component as one number,
-  not one entry per point. A `{2}` cost is `generic_cost = 2`, not `[1, 1]` — there's no list form
-  for this field.
-- **`colors`** (list of `"W"`/`"U"`/`"B"`/`"R"`/`"G"`, default `[]`) — one entry **per colored
-  pip**, repeats included. A `{G}{G}` cost is `colors = ["G", "G"]`, two entries, not `["G"]` with
-  some implied count. `{W}{U}` is `colors = ["W", "U"]`. Order doesn't matter (`["W", "U"]` and
-  `["U", "W"]` are equivalent), but the *count* per letter does.
+- `"W"`/`"U"`/`"B"`/`"R"`/`"G"` — one colored unit of that color.
+- `"C"` — one colorless unit.
+- There's no `generic_cost`-style combined number here — every unit, whether it's covering a
+  colored pip or the generic component, gets its own list entry.
 
-**The two must match the spell's own cost fields exactly — same `generic_cost` number, same
-`colors` multiset (same letters, same count each).** `PaymentPlan::validate` (`cost.rs`) checks
-this by literally rebuilding both into mana symbols and comparing them as a multiset — not "covers
-the cost," not "less than or equal," an exact match. Examples, all rejected even with a large
-enough pool:
+This is CR 118.13a's actual payment choice: a colored pip **must** be paid with that exact color
+(no substitution), but the generic component can be covered by **any** combination of leftover
+units — extra of a color that also paid a pip, a completely different color, or colorless.
+`PaymentPlan::validate` (`cost.rs`) works out which units satisfy which requirement from the flat
+list itself; you just state what came out of the pool.
 
 ```toml
 # Card costs generic_cost = 2, colors = ["G", "G"] ({2}{G}{G})
-mana = { generic_cost = 3, colors = ["G", "G"] }   # too much generic -> rejected
-mana = { generic_cost = 2, colors = ["G"] }        # missing a G pip -> rejected
-mana = { generic_cost = 2, colors = ["G", "G", "G"] } # extra G pip -> rejected
-mana = { generic_cost = 2, colors = ["G", "G"] }   # exact match -> accepted (if pool covers it)
+mana = { units = ["G", "G", "C", "C"] }        # 2 green pips, generic paid with colorless
+mana = { units = ["G", "G", "W", "U"] }        # same pips, generic paid with 2 other colors instead - also valid
+mana = { units = ["G", "G", "G", "C"] }        # an extra green covers part of the generic too - also valid
+mana = { units = ["U", "U", "C", "C"] }        # WRONG color for the G pips -> rejected, no substitution
+mana = { units = ["G", "G", "C"] }             # one short -> rejected
+mana = { units = ["G", "G", "C", "C", "C"] }   # one too many -> rejected, even with a huge pool
 ```
 
-Whether the *pool* can actually cover the (correctly-shaped) plan is checked separately, and that
-check does allow the pool to hold more than the cost — only the exact amount the cost needs comes
-out (`cost::spend`); any floating mana beyond that is left untouched.
+The total list must sum to **exactly** the cost — every colored pip covered by its exact color,
+and the remaining units summing to exactly the generic amount, no more, no less. Whether the
+*pool* can actually cover a correctly-shaped list is checked separately (and does allow the pool
+to hold more than the cost — only the units actually listed come out; everything else floating is
+left untouched).
 
 Omit `mana` entirely (or write `mana = {}`) to pay a `{0}` cost — CR 118.5a still requires this
 explicit empty acknowledgment, casting never auto-pays. An empty `mana` against a *non-zero* cost
-is also rejected (not a shortcut for "pay nothing and hope") — `colors`/`generic_cost` must be
-literally empty/zero only when the spell's own cost is.
+is also rejected (not a shortcut for "pay nothing and hope") — `units` must be empty only when the
+spell's own cost has no mana component at all.
 
-**Not yet supported in `mana`:** hybrid, Phyrexian, colorless (`{C}`), snow, or X-cost payment —
-same simplification `[[cards]]`'s cost fields already have, so a card using any of those can't be
-fully paid via this action either way. Also unsupported: additional costs (sacrifice/discard/etc)
-and alternative costs (flashback/escape) — `PaymentPlan::validate` rejects any `CostSpec` that has
-either set, and nothing in this slice constructs one.
+**Not yet supported in `mana.units`:** there's no way to express paying with Phyrexian mana (life
+instead of a color), snow mana, or an X-cost payment — `[[cards]]` itself can't express those costs
+either, so a card using any of those can't be paid via this action regardless. Also unsupported:
+additional costs (sacrifice/discard/etc) and alternative costs (flashback/escape) —
+`PaymentPlan::validate` rejects any `CostSpec` that has either set, and nothing in this slice
+constructs one.
 
 ### Targets
 
@@ -401,7 +404,7 @@ card = "bear"
 [[actions]]
 type = "submit_payment"
 player = 0
-mana = { generic_cost = 2, colors = ["G"] }
+mana = { units = ["G", "C", "C"] }
 
 [[actions]]
 type = "pass_priority"

@@ -1102,6 +1102,58 @@ crates/engine/tests/scenarios/phase5_cast_spell_payment.toml` with its `step` as
 `"pre_combat_main"` (previously would have needed to assert the stale `"draw"` to pass) — 3/3
 assertions pass for real, not against the bug's behavior.
 
+## Phase 5: phase5/mana-payment-choice slice
+
+Branch `phase5/mana-payment-choice`, off master. Slice scope: CR 118.13a's actual payment choice —
+which floating mana pays a colored pip vs. the generic component is the *payer's* decision, not the
+engine's. Came up directly from the human asking how the previous slice's hardcoded
+colorless-then-WUBRG spend order could instead be a real choice; the answer (discussed before any
+code changed) was that `PaymentPlan` should record the payer's literal choice of units, not an echo
+of the cost's shape — this slice is that design, implemented.
+
+**What changed:**
+- New `ManaUnit { Colored(Color), Colorless }` (`mana.rs`) — deliberately narrower than
+  `AtomicManaSymbol`: only the things that can actually sit in a `ManaPool` (no `Generic`/`Snow`/
+  `Phyrexian`, which describe cost shapes or payment-choice mechanics, not pool contents).
+- `CostPayment::Mana(ManaCost)` → `CostPayment::Mana(Vec<ManaUnit>)` — a flat list of the exact
+  units spent, one entry per unit, covering both colored pips and whatever was chosen to cover the
+  generic component.
+- `PaymentPlan::validate` (`cost.rs`) rewritten: every colored pip must be paid by that exact color
+  (no substitution — checked first), then whatever's spent *beyond* each pip's exact requirement
+  (extra of a required color, a different color, or colorless) must sum to *exactly* the generic
+  amount, then the pool must actually hold what's being spent. `is_symbol_multiset_equal` (the old
+  "echo the cost's shape" check) is gone — superseded by this.
+- `cost::spend` rewritten: no priority order anymore (colorless-then-WUBRG is gone entirely) — it
+  just decrements the pool by literally what `units` says, since the payer already chose.
+- `engine::Engine::submit_payment` updated to extract `units` from the plan's single
+  `CostPayment::Mana` entry and pass it to `spend`, instead of passing the `CostSpec`.
+
+**STRUCT/INTERFACE DEVIATIONS:** None beyond the deliberate `CostPayment::Mana` shape change above
+— this *is* the slice, not a deviation from it.
+
+**SCOPE DEVIATIONS:**
+- `crates/scenario/src/lib.rs`'s `ManaPaymentSpec` (the `SubmitPayment` TOML action's `mana` field)
+  redesigned from `{ generic_cost, colors }` to a single flat `units: Vec<String>` field (`"W"`/
+  `"U"`/`"B"`/`"R"`/`"G"`/`"C"`) — mirrors the new `CostPayment::Mana` shape directly. New
+  `parse_mana_unit` helper.
+- `phase5_cast_spell_payment.rs`'s 8 existing tests all constructed `CostPayment::Mana(ManaCost {
+  ..})` directly — every one needed rewriting to build explicit `Vec<ManaUnit>` payments instead.
+  Added 2 new tests demonstrating the actual feature this slice adds:
+  `colored_pip_cannot_be_substituted_by_a_different_color` and
+  `generic_can_be_paid_with_a_mix_of_colors`.
+- `tests/scenarios/phase5_cast_spell_payment.toml` and `docs/scenario_format.md`'s worked example
+  both updated to the new `mana = { units = [...] }` shape.
+
+**VERIFICATION:** `cargo test --workspace` — 40 tests, 0 failed (38 prior + 2 new). Re-confirmed via
+`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_cast_spell_payment.toml` after
+the TOML schema change — 7/7 actions ran, 5/5 assertions passed.
+
+**UNRESOLVED (unchanged from the prior slice, not touched here):** mana abilities (CR 605, still no
+real way to get mana into a pool), additional/alternative costs, hybrid/Phyrexian/snow/X-cost
+payment (a colored-pip-only `ManaUnit` can't represent paying a Phyrexian pip with life, for
+instance — that's still a real gap, just not this slice's), CR 601.6 (failed payment leaves the
+engine stuck in `AwaitingPayment` rather than unwinding the cast).
+
 ## Next slice
 
 ## Mistakes caught (don't repeat)
