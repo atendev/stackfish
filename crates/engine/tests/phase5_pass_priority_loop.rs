@@ -196,14 +196,55 @@ fn pipeline_context_clears_between_separate_runs() {
     engine
         .submit_action(PlayerAction { player: PlayerId(0), kind: PlayerActionKind::PassPriority })
         .unwrap();
-    drain(&mut engine);
+    // First step() call moves PendingAction -> ReplacementCheck, which is
+    // where pipeline_context gets set - check it's actually populated
+    // mid-run, not just (trivially) absent the whole time.
+    let first = engine.step();
+    assert!(matches!(first.status, StepStatus::Progressed));
+    assert!(engine.pipeline_context_active(), "context must be set once a pipeline run begins");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { .. }));
     assert!(!engine.pipeline_context_active(), "first run's context must be cleared once it ends");
 
     engine
         .submit_action(PlayerAction { player: PlayerId(1), kind: PlayerActionKind::PassPriority })
         .unwrap();
+    let first2 = engine.step();
+    assert!(matches!(first2.status, StepStatus::Progressed));
+    assert!(engine.pipeline_context_active(), "second run's context must be set too, fresh");
     drain(&mut engine);
     assert!(!engine.pipeline_context_active(), "second run's context must also be cleared");
+}
+
+#[test]
+fn non_pass_action_breaks_pass_chain() {
+    let mut engine = Engine::new(two_player_state());
+
+    engine
+        .submit_action(PlayerAction { player: PlayerId(0), kind: PlayerActionKind::PassPriority })
+        .unwrap();
+    drain(&mut engine);
+    assert_eq!(engine.state().consecutive_passes, 1, "one pass recorded, not yet all-pass");
+    assert_eq!(engine.state().priority_player, PlayerId(1));
+
+    // Player 1 (who now holds priority) takes a non-pass action. CR 117.3c:
+    // any action other than passing breaks the chain immediately, even
+    // though the count hadn't reached turn_order.len() yet.
+    engine
+        .submit_action(PlayerAction {
+            player: PlayerId(1),
+            kind: PlayerActionKind::MakeChoice { description: "test".to_string(), selection: Vec::new() },
+        })
+        .unwrap();
+    drain(&mut engine);
+
+    assert_eq!(engine.state().consecutive_passes, 0, "non-pass action must reset the chain");
+    assert_eq!(
+        engine.state().priority_player,
+        PlayerId(1),
+        "PriorityHandoff::Unchanged - priority stays with whoever just acted"
+    );
+    assert_eq!(engine.state().phase, Phase::PreGame, "chain reset, not all-pass - no turn advance");
 }
 
 #[test]

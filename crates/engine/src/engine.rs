@@ -41,6 +41,31 @@ pub enum TriggerOrderError {
     /// `chosen_order`'s length doesn't match the offered group's — caller
     /// must supply a reordering of the exact group, not a different set.
     WrongLength,
+    /// Same length as the offered group, but not the same multiset of
+    /// `PendingTrigger`s — length matching alone doesn't rule out the caller
+    /// substituting/dropping/duplicating a trigger while keeping the count
+    /// right, so this is checked separately (see `is_permutation`).
+    NotAPermutation,
+}
+
+/// Whether `chosen` is a reordering of `group` — same `PendingTrigger`s
+/// (by value), each used exactly once, any order. Used by
+/// `submit_trigger_order` to reject a same-length answer that isn't
+/// actually a permutation (swapped-in trigger, duplicate, etc).
+fn is_permutation(chosen: &[PendingTrigger], group: &[PendingTrigger]) -> bool {
+    if chosen.len() != group.len() {
+        return false;
+    }
+    let mut remaining: Vec<PendingTrigger> = group.to_vec();
+    for item in chosen {
+        match remaining.iter().position(|candidate| candidate == item) {
+            Some(idx) => {
+                remaining.remove(idx);
+            }
+            None => return false,
+        }
+    }
+    true
 }
 
 /// What happened on one `step()` call, and what the engine needs next.
@@ -282,9 +307,9 @@ impl Engine {
         if chosen_order.len() != group.len() {
             return Err(TriggerOrderError::WrongLength);
         }
-        // TODO: validate chosen_order is actually a permutation of `group`
-        // (same multiset of PendingTrigger, just reordered) rather than
-        // trusting the caller blindly.
+        if !is_permutation(&chosen_order, group) {
+            return Err(TriggerOrderError::NotAPermutation);
+        }
         let ProcessState::AwaitTriggerOrderChoice { mut ordered, pending_groups, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
@@ -696,5 +721,90 @@ impl Engine {
             });
         }
         events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::counter::CounterSet;
+    use crate::types::mana::ManaPool;
+    use crate::types::player::PlayerState;
+    use std::collections::HashMap;
+
+    fn minimal_state() -> GameState {
+        let p0 = PlayerId(0);
+        GameState {
+            players: vec![PlayerState {
+                player_id: p0,
+                life: 20,
+                mana_pool: ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 },
+                counters: CounterSet::new(),
+                emblems: Vec::new(),
+                commander_damage_taken: Vec::new(),
+                eliminated: false,
+            }],
+            turn_order: vec![p0],
+            active_player: p0,
+            turn_number: 1,
+            phase: Phase::PreGame,
+            step: Step::Untap,
+            priority_player: p0,
+            consecutive_passes: 0,
+            postcombat_main: false,
+            objects: HashMap::new(),
+            zones: Vec::new(),
+            stack: Vec::new(),
+            continuous_effects: Vec::new(),
+            replacement_effects: Vec::new(),
+            abilities: Vec::new(),
+            ledger: Vec::new(),
+            rng: crate::types::game::RngState { seed: 1, draws_consumed: 0 },
+            next_event_id: 0,
+            next_sequence_no: 0,
+        }
+    }
+
+    fn trigger(id: u64, controller: PlayerId) -> PendingTrigger {
+        PendingTrigger { source: ObjectId(id), controller, ability_index: 0 }
+    }
+
+    #[test]
+    fn is_permutation_accepts_reorderings_and_rejects_substitutions() {
+        let group = vec![trigger(1, PlayerId(0)), trigger(2, PlayerId(0))];
+        // A true reordering (same elements, different sequence) must pass.
+        assert!(is_permutation(&[group[1], group[0]], &group));
+        // Same length but a substituted element must be rejected - length
+        // alone can't catch this.
+        assert!(!is_permutation(&[group[0], trigger(3, PlayerId(0))], &group));
+        // A duplicate of one element instead of using both must be rejected.
+        assert!(!is_permutation(&[group[0], group[0]], &group));
+        // Wrong length, caught the same way as before.
+        assert!(!is_permutation(&[group[0]], &group));
+    }
+
+    #[test]
+    fn submit_trigger_order_rejects_non_permutation_and_accepts_real_reordering() {
+        let player = PlayerId(0);
+        let group = vec![trigger(1, player), trigger(2, player)];
+
+        let mut engine = Engine::new(minimal_state());
+        engine.process_state = ProcessState::AwaitTriggerOrderChoice {
+            player,
+            group: group.clone(),
+            ordered: Vec::new(),
+            pending_groups: VecDeque::new(),
+        };
+        let substituted = vec![group[0], trigger(99, player)];
+        let err = engine.submit_trigger_order(substituted).unwrap_err();
+        assert!(matches!(err, TriggerOrderError::NotAPermutation));
+
+        // Engine must still be sitting in AwaitTriggerOrderChoice - a
+        // rejected answer must not have consumed the pending state.
+        assert!(matches!(engine.process_state, ProcessState::AwaitTriggerOrderChoice { .. }));
+
+        let reordered = vec![group[1], group[0]];
+        engine.submit_trigger_order(reordered).expect("a true reordering must be accepted");
+        assert!(matches!(engine.process_state, ProcessState::PutTriggersApnap { .. }));
     }
 }

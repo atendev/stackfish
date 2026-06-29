@@ -8,7 +8,7 @@ use crate::types::ids::{ObjectId, PlayerId};
 /// stack), and not part of `GameState` (it's transient process state
 /// between "trigger matched" and "pushed to stack", not part of the
 /// authoritative game state model).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendingTrigger {
     pub source: ObjectId,
     pub controller: PlayerId,

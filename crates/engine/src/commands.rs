@@ -91,6 +91,20 @@ pub fn execute_command(
                 priority_handoff: PriorityHandoff::To(state.turn_order[next_idx]),
             });
         }
+        PlayerActionKind::MakeChoice { .. } => {
+            // Real choice application is genuinely generic - "depends
+            // entirely on what asked for the choice" (see the TODO block
+            // below) - no fixed event shape exists yet, so this produces
+            // none. Exists as a minimal non-PassPriority stub so
+            // broke_pass_chain's reset wiring (CR 117.3c) has something
+            // other than PassPriority to exercise in tests; not a real
+            // implementation of MakeChoice itself.
+            return Ok(CommandOutcome {
+                events: Vec::new(),
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+            });
+        }
         _ => {}
     }
     // TODO: match command.action (PlayerActionKind) and handle each variant:
