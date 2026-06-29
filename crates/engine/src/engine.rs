@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ops::Range;
 
 use crate::commands::{self, CommandError, PriorityHandoff};
@@ -103,8 +104,11 @@ pub enum ProcessState {
     /// Proposed events waiting on replacement/prevention checks (CR
     /// 614-616) before they're allowed to commit. `checked` accumulates
     /// events already resolved by earlier iterations of this same
-    /// `ReplacementCheck` run; `remaining` is what's still unprocessed.
-    ReplacementCheck { remaining: Vec<GameEventKind>, checked: Vec<GameEventKind> },
+    /// `ReplacementCheck` run; `remaining` is what's still unprocessed — a
+    /// `VecDeque` so it can be drained front-to-back (`pop_front`) in the
+    /// order it was built, rather than a `Vec`'s `pop()` silently reversing
+    /// processing order.
+    ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
     /// CR 616.1: paused mid-`ReplacementCheck` because `pending_event`
     /// matched more than one `ReplacementEffect` (`candidates`, identified
     /// by `source` `ObjectId`) and `affected_player` must choose which
@@ -115,7 +119,7 @@ pub enum ProcessState {
         affected_player: PlayerId,
         pending_event: GameEventKind,
         candidates: Vec<ObjectId>,
-        remaining: Vec<GameEventKind>,
+        remaining: VecDeque<GameEventKind>,
         checked: Vec<GameEventKind>,
     },
     /// Checked events ready to become real `GameEvent`s in the ledger.
@@ -130,9 +134,12 @@ pub enum ProcessState {
     /// `ordered` accumulates groups already finalized (each in that
     /// controller's chosen intra-group order); `pending_groups` is what's
     /// left, still in APNAP order.
+    /// `pending_groups` is a `VecDeque` for the same reason
+    /// `ReplacementCheck::remaining` is: drained front-to-back in APNAP
+    /// order, not reversed by a `Vec::pop()`.
     PutTriggersApnap {
         ordered: Vec<PendingTrigger>,
-        pending_groups: Vec<(PlayerId, Vec<PendingTrigger>)>,
+        pending_groups: VecDeque<(PlayerId, Vec<PendingTrigger>)>,
     },
     /// CR 603.3b: paused mid-`PutTriggersApnap` because `group` (all
     /// controlled by `player`) has more than one trigger and `player` must
@@ -143,7 +150,7 @@ pub enum ProcessState {
         player: PlayerId,
         group: Vec<PendingTrigger>,
         ordered: Vec<PendingTrigger>,
-        pending_groups: Vec<(PlayerId, Vec<PendingTrigger>)>,
+        pending_groups: VecDeque<(PlayerId, Vec<PendingTrigger>)>,
     },
     /// All players passed with an empty stack — advance turn/phase/step
     /// (CR 500-514) before priority reopens.
@@ -370,8 +377,10 @@ impl Engine {
                     };
                 }
 
-                self.process_state =
-                    ProcessState::ReplacementCheck { remaining: outcome.events, checked: Vec::new() };
+                self.process_state = ProcessState::ReplacementCheck {
+                    remaining: outcome.events.into(),
+                    checked: Vec::new(),
+                };
                 StepStatus::Progressed
             }
 
@@ -397,7 +406,7 @@ impl Engine {
                 // AwaitingReplacementChoice, not get silently dropped or
                 // resolved without the player. `checked`/`remaining` carry
                 // this run's progress across that pause.
-                let Some(event) = remaining.pop() else {
+                let Some(event) = remaining.pop_front() else {
                     self.process_state = ProcessState::CommitEvents { checked };
                     return StepStatus::Progressed;
                 };
@@ -486,7 +495,9 @@ impl Engine {
                 // triggers::collect_triggers per event, accumulating
                 // PendingTriggers, then triggers::group_apnap them and move
                 // to ProcessState::PutTriggersApnap { ordered: Vec::new(),
-                // pending_groups: <grouped> }. `since` is now correctly
+                // pending_groups: <grouped>.into() } (group_apnap returns a
+                // Vec; collect into the VecDeque here). `since` is now
+                // correctly
                 // threaded through from pipeline_context (no longer
                 // hardcoded to 0) - but collect_triggers itself is still
                 // todo!(), so wiring further wouldn't get past it.
@@ -502,7 +513,7 @@ impl Engine {
                 // intra-group order (CR 603.3b), which has to pause the
                 // whole run on AwaitTriggerOrderChoice, not get resolved
                 // without them.
-                let Some((player, group)) = pending_groups.pop() else {
+                let Some((player, group)) = pending_groups.pop_front() else {
                     // TODO: push each trigger in `ordered` onto
                     // self.state.stack as a StackObject (needs StackObject
                     // construction from PendingTrigger - blocked on the
