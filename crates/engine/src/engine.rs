@@ -294,18 +294,21 @@ impl Engine {
     /// beyond that isn't designed yet — see `commands::execute_command`'s
     /// TODOs for where that has to land.
     ///
-    /// CR 508.1/509.1 exception: `DeclareAttackers`/`DeclareBlockers` are
-    /// turn-based actions that explicitly "don't use the stack" and aren't
-    /// a priority decision at all - the defending player has no reason to
-    /// hold priority when blockers are declared (508.2: priority stays with
-    /// the active player through the declare-attackers step). Skipping the
-    /// priority check for these two and leaving the actor check entirely to
-    /// `execute_command` (active player / defending player, per CR 506.2)
-    /// is a deliberate simplification - the fully correct model would have
-    /// these fire automatically on entering their step, before any priority
-    /// window opens, which this engine doesn't have a pipeline stage for
-    /// yet (`ProcessState`/`AdvanceTurnStep` only open a generic priority
-    /// window on every step, combat steps included).
+    /// CR 508.1/509.1/510.1 exception: `DeclareAttackers`/`DeclareBlockers`/
+    /// `AssignCombatDamage` are turn-based actions that explicitly "don't
+    /// use the stack" and aren't a priority decision at all - the defending
+    /// player has no reason to hold priority when blockers are declared
+    /// (508.2: priority stays with the active player through the declare-
+    /// attackers step), and combat damage is dealt automatically as the
+    /// combat damage step opens (510.1/510.2), not in response to a
+    /// priority window. Skipping the priority check for these three and
+    /// leaving the actor check entirely to `execute_command` (active player
+    /// / defending player, per CR 506.2) is a deliberate simplification -
+    /// the fully correct model would have these fire automatically on
+    /// entering their step, before any priority window opens, which this
+    /// engine doesn't have a pipeline stage for yet (`ProcessState`/
+    /// `AdvanceTurnStep` only open a generic priority window on every step,
+    /// combat steps included).
     pub fn submit_action(&mut self, action: PlayerAction) -> Result<(), ActionError> {
         match self.process_state {
             ProcessState::PriorityWindow => {}
@@ -315,11 +318,13 @@ impl Engine {
                 ));
             }
         }
-        let is_combat_declaration = matches!(
+        let is_combat_turn_based_action = matches!(
             action.kind,
-            PlayerActionKind::DeclareAttackers { .. } | PlayerActionKind::DeclareBlockers { .. }
+            PlayerActionKind::DeclareAttackers { .. }
+                | PlayerActionKind::DeclareBlockers { .. }
+                | PlayerActionKind::AssignCombatDamage { .. }
         );
-        if !is_combat_declaration && action.player != self.state.priority_player {
+        if !is_combat_turn_based_action && action.player != self.state.priority_player {
             return Err(ActionError::NotYourTurn);
         }
         self.process_state = ProcessState::PendingAction(action);
@@ -908,6 +913,17 @@ impl Engine {
             }
             (Phase::Ending, Step::End) => {
                 self.state.step = Step::Cleanup;
+                // CR 514.2: all damage marked on permanents is removed as a
+                // turn-based action of the cleanup step. The combat-damage
+                // slice is the first real damage_marked producer in this
+                // engine - without this, marked damage would persist across
+                // turns and falsely re-trigger the lethal-damage SBA next
+                // turn.
+                for object in self.state.objects.values_mut() {
+                    if object.zone == ZoneKind::Battlefield {
+                        object.damage_marked = 0;
+                    }
+                }
                 false
             }
             (Phase::Ending, Step::Cleanup) => {

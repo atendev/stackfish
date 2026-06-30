@@ -33,6 +33,19 @@ pub enum PlayerActionKind {
     /// the declaration itself, not derivable from two parallel lists.
     DeclareAttackers { attackers: Vec<(ObjectId, Target)> },
     DeclareBlockers { blocks: Vec<(ObjectId, ObjectId)> },
+    /// CR 510.1/510.2: assign + deal combat damage, collapsed into one
+    /// action (510.2 - "no priority window between assign and deal"). Only
+    /// the active player ever submits a real choice under this engine's
+    /// block model (`CombatState.blocks` is one blocker/one attacker, no
+    /// banding) - a blocker always deals 100% of its power to the one
+    /// attacker it blocks (510.1d, never ambiguous), and an attacker with
+    /// 0 or 1 blockers has nowhere to split either (510.1b/c). The only
+    /// real choice is an attacker with 2+ blockers splitting its damage
+    /// among them (510.1c) - `assignments` covers exactly that subset,
+    /// attacker -> (blocker, amount) pairs summing to the attacker's power
+    /// (510.1e atomicity). Engine computes every other attacker's and every
+    /// blocker's damage automatically.
+    AssignCombatDamage { assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)> },
     SubmitPayment { plan: PaymentPlan },
     MakeChoice { description: String, selection: Vec<Target> },
 }

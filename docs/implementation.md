@@ -1402,12 +1402,93 @@ the shape.
   boundary the original TODO already drew ("PlayerEliminated exists so a future trigger-collection
   pass has something to match against" — ditto here for whatever ends the game).
 
-## Next slice
+## Phase 5: phase5/combat-damage slice
 
-Combat damage step (CR 510) — now that `check_state_based_actions` does real work, a creature
-taking real combat damage will actually die. See the UNRESOLVED list on this slice's own scoping
-discussion for the open design question (one batch `AssignCombatDamage`-style action per player,
-mirroring `DeclareAttackers`/`DeclareBlockers`'s atomicity, vs. per-attacker) before starting.
+Branch `phase5/combat-damage`, off master. Slice scope: combat damage (CR 510) — assign and deal,
+collapsed into one `PlayerActionKind::AssignCombatDamage` (510.2 explicitly forbids a priority
+window between assign and deal, so there's no reason to split them into two actions). Now that
+`check_state_based_actions` does real work (the prior slice), a lethally-damaged creature actually
+dies in the same `step()` call that dealt the damage.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 10 new tests in
+`crates/engine/tests/phase5_combat_damage.rs`, all 81 prior tests unaffected. 91 tests total, 0
+failed. Confirmed via the real CLI too: `cargo run -p stackfish-cli -- crates/engine/tests/
+scenarios/phase5_combat_damage.toml` — 19/19 actions ran, 5/5 assertions passed (attack, double
+block, explicit split, lethal/non-lethal outcomes, defending player untouched).
+
+**Design finding that shaped the whole slice (confirmed before writing code, not after):**
+re-examined CR 510.1 against this engine's existing block model — `CombatState.blocks: Vec<(ObjectId,
+ObjectId)>` is one blocker/one attacker, no banding (already locked in by the declare-blockers
+slice). Consequence: the defending player never has a real combat-damage choice under this model.
+510.1c (an attacker splitting its damage across 2+ blockers) is the *only* real choice anywhere in
+this step — 0 blockers sends everything to the original target, exactly 1 blocker sends everything
+there, and 510.1d (a blocker splitting across what it blocks) is never ambiguous since a blocker can
+only ever block one attacker. So `AssignCombatDamage { assignments: Vec<(ObjectId, Vec<(ObjectId,
+u32)>)> }` is submitted by the active player only, covering *only* attackers with 2+ blockers — the
+engine computes every other attacker's and every blocker's damage automatically. One action, not two
+(per-attacker was the alternative considered and rejected — this is simpler and matches
+`DeclareAttackers`/`DeclareBlockers`'s own "validate the whole batch atomically" precedent).
+
+**What got implemented:**
+- `command.rs`: new `PlayerActionKind::AssignCombatDamage` variant, doc comment explains the
+  one-action-not-two reasoning above.
+- `player.rs`: `PlayerState::lose_life` — real body (`self.life -= amount`), exactly matching its
+  own pre-existing TODO. Not clamped to 0 - CR 119 doesn't special-case negative life, and 0-or-less
+  is what the 704.5a SBA already checks for.
+- `commands.rs`'s `execute_command`: new `AssignCombatDamage` arm. Validates (in order): actor is
+  active player, correct phase/step, combat declared. Computes `blockers_by_attacker` from
+  `combat.blocks`, derives the multi-blocked subset (2+ blockers), and requires `assignments` to
+  cover *exactly* that subset (510.1e atomicity — no extra entries for a 0/1-blocker attacker, no
+  missing entry for one that needs a split). For each submitted split: every blocker named is
+  actually blocking that attacker, no blocker repeated, every one of the attacker's blockers is
+  named exactly once, amounts sum to exactly the attacker's power. Only after every multi-blocked
+  attacker's split validates does it build events and mutate state — an illegal batch marks nothing
+  (same atomicity discipline `DeclareAttackers` already established). CDA power
+  (`PTValue::CharacteristicDefining`) is skipped, not guessed, same stance `sba.rs`'s toughness
+  check already takes. Damage to a player target calls the now-real `lose_life`; damage to an
+  object target marks `damage_marked` only if the target is a creature (planeswalker/battle damage
+  is a structurally-allowed `Target::Object` that does nothing yet — see UNRESOLVED).
+- `engine.rs`'s `submit_action`: `AssignCombatDamage` added to the same priority-check exemption
+  `DeclareAttackers`/`DeclareBlockers` already have (CR 510.1 is a turn-based action, not a priority
+  decision either) — renamed the local `is_combat_declaration` flag to `is_combat_turn_based_action`
+  since it now covers a non-declaration action too.
+- `engine.rs`'s `advance_turn_step`: the `(Phase::Ending, Step::End) => { step = Cleanup }` arm now
+  zeroes `damage_marked` on every battlefield object (CR 514.2) — this slice is the first real
+  `damage_marked` producer in the codebase, so without this fix marked damage would persist across
+  turns and falsely re-trigger the lethal-damage SBA the following turn. Placed on entering Cleanup
+  (not leaving it) since 514.2 is itself one of cleanup's turn-based actions, not a next-turn reset
+  (contrast `lands_played_this_turn.clear()`, which correctly lives on the Cleanup->next-Untap
+  transition since CR 305.2's count resets with the *turn*, not within cleanup itself).
+
+**STRUCT DEVIATIONS:** None — `GameObject.damage_marked`, `PlayerState.life`,
+`GameEventKind::DamageDealt` were all already in place from earlier phases, just unused/stubbed
+until this slice gave them a real producer/consumer.
+
+**INTERFACE DEVIATIONS:** None beyond `PlayerActionKind::AssignCombatDamage` itself, which the
+pre-slice design finding already anticipated exactly as implemented.
+
+**SCOPE DEVIATIONS:**
+- `crates/scenario/src/lib.rs`: `ActionSpec::AssignCombatDamage { player, assignments }` (new
+  `DamageAssignmentSpec`/`DamageSplitSpec` structs, mirroring `AttackerSpec`/`BlockSpec`'s shape) —
+  needed so a TOML scenario could exercise the double-block-with-a-split case end-to-end.
+  `docs/scenario_format.md` updated to match (new action's worked example + semantics, referencing
+  the new TOML fixture).
+
+**UNRESOLVED (flagged with explicit `TODO` comments in `commands.rs`, not just here — all called
+out in the pre-slice scoping, none new):**
+- First/double strike (CR 702.7) — no extra early-damage step, no keyword-ability system to gate it.
+- Deathtouch (CR 702.2) — not modeled; `apply_creature_death` (sba.rs) is still plain-lethal-only.
+- CDA power — skipped (not guessed) same as CDA toughness already is, blocked on the same
+  `layers.rs::effective_characteristics` gap.
+- Continuous-effect power pump (CR 613 layer 7c) — printed base power only, `layers.rs` still
+  mostly `todo!()`.
+- Damage prevention/replacement (CR 615/616) — `replacement.rs` is still mostly `todo!()`, damage
+  applies unconditionally.
+- Planeswalker/battle as a damage target — `Target`/`AssignCombatDamage` already allow it
+  structurally (an unblocked attacker can target one), but nothing converts that damage into
+  loyalty/defense loss — only player and creature targets are functional this slice.
+- Multiplayer (an attacker facing more than one defending player) — 2-player only, same restriction
+  every combat slice so far has carried.
 
 ## Mistakes caught (don't repeat)
 

@@ -44,11 +44,10 @@ impl PlayerState {
     }
 
     pub fn lose_life(&mut self, amount: i32) {
-        // TODO: self.life -= amount. CR 119: life can't go below... it can,
-        // actually (negative life isn't special-cased in the rules text
-        // itself) - 0-or-less life is what the CR 704.5a SBA checks for, so
-        // this just subtracts; no clamping to 0 here.
-        todo!()
+        // CR 119: negative life isn't special-cased in the rules text - 0-or-
+        // less life is what the CR 704.5a SBA checks for, so this just
+        // subtracts; no clamping to 0 here.
+        self.life -= amount;
     }
 
     pub fn gain_life(&mut self, amount: i32) {

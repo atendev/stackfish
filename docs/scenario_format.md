@@ -226,6 +226,35 @@ examples elsewhere in this doc).
 
 ```toml
 [[actions]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "bear", splits = [
+    { blocker = "wall1", amount = 3 },
+    { blocker = "wall2", amount = 2 },
+  ] },
+]
+```
+
+CR 510.1/510.2: the active player assigns and deals all combat damage in one turn-based action,
+only during the combat damage step (also exempt from the priority check, same as
+`declare_attackers`/`declare_blockers` above). `assignments` only needs an entry for an attacker
+with **two or more** blockers - this engine's block model is one blocker/one attacker (no banding),
+so an unblocked attacker always sends its full power to its original target, and a single-blocked
+attacker/its lone blocker always send their full power to each other; neither has a real choice to
+submit. An `assignments` entry must cover *exactly* the attackers that are actually double(+)-
+blocked (no extra entries for 0/1-blocker attackers, no missing entries for one that needs a split),
+each `splits` list must name every one of that attacker's blockers exactly once, and the `amount`s
+must sum to exactly the attacker's power (CR 510.1e - an illegal split rejects the whole action,
+nothing gets marked). Damage is marked on creature targets and converted to life loss on player
+targets in the same pass - no damage prevention/replacement check yet (CR 615/616), and damage to a
+planeswalker/battle target doesn't do anything yet (no loyalty/defense-damage path wired up - only
+player and creature targets are functional this slice). See
+`crates/engine/tests/scenarios/phase5_combat_damage.toml` for a full worked example (attack, double
+block, explicit split, lethal/non-lethal outcomes).
+
+```toml
+[[actions]]
 type = "make_choice"
 player = 0
 description = "choose a player"

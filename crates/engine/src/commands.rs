@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
 use crate::types::card::CardTypeSet;
@@ -662,6 +664,198 @@ pub fn execute_command(
             let combat = state.combat.as_mut().expect("checked Some above");
             combat.blocks = blocks;
             combat.blockers_declared = true;
+
+            return Ok(CommandOutcome {
+                events,
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+                requires_payment: None,
+            });
+        }
+        PlayerActionKind::AssignCombatDamage { assignments } => {
+            // CR 510.1/509.1's turn-based-action shape, same as
+            // DeclareAttackers/DeclareBlockers: active player only, only
+            // during the combat damage step.
+            if command.actor != state.active_player {
+                return Err(CommandError::IllegalAction(
+                    "only the active player assigns combat damage".to_string(),
+                ));
+            }
+            if state.phase != Phase::Combat || state.step != Step::CombatDamage {
+                return Err(CommandError::IllegalAction(
+                    "combat damage can only be assigned during the combat damage step"
+                        .to_string(),
+                ));
+            }
+            let combat = state.combat.as_ref().ok_or_else(|| {
+                CommandError::IllegalAction("no attackers have been declared this combat".to_string())
+            })?;
+
+            // CR 510.1c: a real split only exists for an attacker with 2+
+            // blockers - every other attacker (0 or 1 blockers) has exactly
+            // one legal place for its damage to go, computed below rather
+            // than chosen.
+            let mut blockers_by_attacker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+            for (blocker, attacker) in &combat.blocks {
+                blockers_by_attacker.entry(*attacker).or_default().push(*blocker);
+            }
+            let multi_blocked: HashSet<ObjectId> = blockers_by_attacker
+                .iter()
+                .filter(|(_, blockers)| blockers.len() >= 2)
+                .map(|(attacker, _)| *attacker)
+                .collect();
+
+            // CR 510.1e atomicity: `assignments` must cover exactly the
+            // multi-blocked set - no extra (nothing to split for a 0/1-
+            // blocker attacker), no missing (the engine can't guess a
+            // split).
+            let submitted: HashSet<ObjectId> = assignments.iter().map(|(attacker, _)| *attacker).collect();
+            if submitted != multi_blocked {
+                return Err(CommandError::IllegalAction(
+                    "assignments must cover exactly the attackers with two or more blockers"
+                        .to_string(),
+                ));
+            }
+
+            for (attacker, splits) in &assignments {
+                let object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
+                // CR 510.1a: 0-or-less power assigns no damage.
+                let power = object
+                    .definition
+                    .power
+                    .as_ref()
+                    .and_then(|p| p.as_fixed())
+                    .map(|p| p.max(0) as u32)
+                    .unwrap_or(0);
+                let blockers = &blockers_by_attacker[attacker];
+
+                let mut seen = Vec::with_capacity(splits.len());
+                let mut sum: u32 = 0;
+                for (blocker, amount) in splits {
+                    if !blockers.contains(blocker) {
+                        return Err(CommandError::IllegalAction(
+                            "a split entry's blocker isn't actually blocking that attacker"
+                                .to_string(),
+                        ));
+                    }
+                    if seen.contains(blocker) {
+                        return Err(CommandError::IllegalAction(
+                            "a split can't assign the same blocker twice".to_string(),
+                        ));
+                    }
+                    seen.push(*blocker);
+                    sum += amount;
+                }
+                if seen.len() != blockers.len() {
+                    return Err(CommandError::IllegalAction(
+                        "a split must assign an amount (possibly zero) to every blocker"
+                            .to_string(),
+                    ));
+                }
+                if sum != power {
+                    return Err(CommandError::IllegalAction(
+                        "a split's amounts must sum to exactly the attacker's power".to_string(),
+                    ));
+                }
+            }
+
+            let assignment_map: HashMap<ObjectId, &Vec<(ObjectId, u32)>> =
+                assignments.iter().map(|(attacker, splits)| (*attacker, splits)).collect();
+
+            // CR 510.1b/c/d + 510.2: assign and deal in the same pass - no
+            // priority window between them.
+            let mut events = Vec::new();
+            for (attacker, target) in &combat.attackers {
+                let object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
+                // CDA power (PTValue::CharacteristicDefining) can't be
+                // resolved without the script bridge - skip rather than
+                // guess, same stance sba.rs's toughness check already takes.
+                let Some(power) = object.definition.power.as_ref().and_then(|p| p.as_fixed()) else {
+                    continue;
+                };
+                let power = power.max(0) as u32;
+                if power == 0 {
+                    continue;
+                }
+
+                match blockers_by_attacker.get(attacker) {
+                    None => {
+                        // 510.1b: unblocked - all damage to the original target.
+                        events.push(GameEventKind::DamageDealt {
+                            source: *attacker,
+                            target: *target,
+                            amount: power,
+                        });
+                    }
+                    Some(blockers) if blockers.len() == 1 => {
+                        // 510.1c: exactly one blocker - no choice, all
+                        // damage there.
+                        events.push(GameEventKind::DamageDealt {
+                            source: *attacker,
+                            target: Target::Object(blockers[0]),
+                            amount: power,
+                        });
+                    }
+                    Some(_) => {
+                        // 510.1c: 2+ blockers - the validated split above.
+                        for (blocker, amount) in assignment_map[attacker] {
+                            if *amount > 0 {
+                                events.push(GameEventKind::DamageDealt {
+                                    source: *attacker,
+                                    target: Target::Object(*blocker),
+                                    amount: *amount,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            for (blocker, attacker) in &combat.blocks {
+                let object = state.object(*blocker).ok_or(CommandError::InvalidTarget)?;
+                let Some(power) = object.definition.power.as_ref().and_then(|p| p.as_fixed()) else {
+                    continue;
+                };
+                let power = power.max(0) as u32;
+                if power == 0 {
+                    continue;
+                }
+                // 510.1d: a blocker deals all its damage to the one
+                // attacker it blocks - never ambiguous under this engine's
+                // one-blocker-one-attacker block model.
+                events.push(GameEventKind::DamageDealt {
+                    source: *blocker,
+                    target: Target::Object(*attacker),
+                    amount: power,
+                });
+            }
+
+            // CR 510.2: deal it - mark damage on creatures, convert to life
+            // loss on players, no replacement/prevention check yet
+            // (CR 614-616, replacement.rs is still mostly todo!()).
+            for event in &events {
+                let GameEventKind::DamageDealt { target, amount, .. } = event else {
+                    unreachable!("only DamageDealt events are pushed above");
+                };
+                match target {
+                    Target::Player(pid) => {
+                        if let Some(player) = state.player_mut(*pid) {
+                            player.lose_life(*amount as i32);
+                        }
+                    }
+                    Target::Object(id) => {
+                        // TODO(planeswalker/battle damage, CR 120.3c/d):
+                        // damage to those marks loyalty/defense loss, not
+                        // damage_marked - GameObject has no loyalty/defense-
+                        // damage path wired yet, so only creature targets
+                        // are functional this slice.
+                        if let Some(object) = state.object_mut(*id) {
+                            if object.definition.card_types.contains(CardTypeSet::CREATURE) {
+                                object.damage_marked += amount;
+                            }
+                        }
+                    }
+                }
+            }
 
             return Ok(CommandOutcome {
                 events,
