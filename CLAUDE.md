@@ -2,7 +2,7 @@
 This is an mtg-engine based on the ygo-pro engine.
 
 ## Startup
-On every new session, run `/caveman full` before doing anything else.
+Make sure things are started in `caveman full` mode.
 
 ## Vertical Slice Instructions
 - all slices start with a detailed requirements report of the following information:
@@ -10,7 +10,7 @@ On every new session, run `/caveman full` before doing anything else.
   - What requirements from the comp rulse are there?
   - What TODO's are we going to need to mark since they aren't implemented yet?
   - What tests will we want to add so that we can make sure this section works properly?
-- create a branch `phase5/<feature-name>`
+- create a branch `phase5/<feature-name>` and push to origin.
 - implement the given instructions for the feature.
 - As you implement, make sure to mark any stubbed parts that aren't implemented with TODO marks for later.
   - Eg: Implementing PlayLand, we don't have continuous effects for 'play additional lands' effects, so we mark the PlayLand action with a TODO so we know to implement that later.
