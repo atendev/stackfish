@@ -18,8 +18,10 @@ impl PTValue {
     /// `Some` only for `Fixed` — a CDA's number isn't known without running
     /// its script callback against current game state, which this can't do.
     pub fn as_fixed(&self) -> Option<i32> {
-        // TODO: match self; Fixed(n) -> Some(*n), CharacteristicDefining(_) -> None.
-        todo!()
+        match self {
+            PTValue::Fixed(n) => Some(*n),
+            PTValue::CharacteristicDefining(_) => None,
+        }
     }
 }
 

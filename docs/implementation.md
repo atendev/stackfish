@@ -1326,7 +1326,88 @@ in the pre-slice scoping, none new):**
 - `controlled_since_turn` is never updated past object creation — no "gain control" effect exists
   in this engine yet to retrofit it.
 
+## Phase 5: phase5/sba-basics slice
+
+Branch `phase5/sba-basics`, off master. Slice scope: baseline CR 704 state-based actions, narrowed
+to exactly three — 704.5a (player at 0 or less life loses), 704.5f (creature toughness 0 or less
+dies), 704.5g (creature with lethal marked damage dies). Deliberately *not* combat damage (CR 510)
+— that's its own next slice; this one only makes `sba::check_state_based_actions` stop being a
+hardcoded no-op, using `damage_marked`/`life` values pre-seeded directly on fixtures (no real
+producer exists yet for either, same "fixture stands in for a producer that doesn't exist yet"
+pattern `mana_pool`/`controlled_since_turn` used before their real producers landed).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 10 new tests in
+`crates/engine/tests/phase5_sba_basics.rs`, all 71 prior tests unaffected. 81 tests total, 0
+failed. Confirmed via the real CLI too: `cargo run -p stackfish-cli -- crates/engine/tests/
+scenarios/phase5_sba_basics.toml` — 1/1 action ran, 3/3 assertions passed.
+
+**What got implemented:**
+- `PTValue::as_fixed` (`card.rs`) — real body, exactly matching its own pre-existing TODO
+  (`Fixed(n) -> Some(n)`, `CharacteristicDefining(_) -> None`). Needed directly by the toughness
+  check below; filling it was in scope since nothing else could read a creature's toughness as a
+  plain number otherwise.
+- `sba::check_state_based_actions` — real body, split into two private helpers:
+  - `apply_player_loss` (704.5a): scans `state.players` for `!eliminated && life <= 0`, flips
+    `eliminated` (field already existed on `PlayerState`, unused until now), emits
+    `GameEventKind::PlayerEliminated` (event already existed, unused until now too). Skips
+    already-eliminated players so the CR 704.3 fixed-point loop actually terminates instead of
+    re-emitting the same elimination every pass.
+  - `apply_creature_death` (704.5f/g): scans `state.objects` for battlefield creatures, reads
+    toughness via the new `PTValue::as_fixed` (skipping — not guessing — anything with
+    `CharacteristicDefining` toughness, since resolving a CDA needs the script bridge), flags
+    `toughness <= 0` or `damage_marked >= toughness` as dying. Moves each via the exact same
+    new-`ObjectId`/`ObjectLineage`/`ZoneChange` convention `PlayLand`/`CastSpell`-resolution
+    already established (CR 400.7) — first SBA-driven zone move in the codebase, deliberately
+    reusing the convention rather than inventing a second one.
+  - Both helpers build `GameEvent` directly via struct literal (`caused_by_command`/
+    `parent_event: None`) rather than `GameEvent::new` — matches `CommitEvents`'s own existing
+    construction style, and SBA events have no causing command to thread through anyway.
+
+**STRUCT DEVIATIONS:** None — `PlayerState.eliminated`, `GameObject.damage_marked`,
+`CardDefinition.toughness` were all already in place from earlier phases, just unused until this
+slice gave them a real reader/writer.
+
+**INTERFACE DEVIATIONS:** None — `check_state_based_actions`'s signature (`&mut GameState ->
+Vec<GameEvent>`) was already fixed by the engine-pipeline wiring (`SbaLoop` already calls it and
+extends the ledger with the result directly); this slice filled the body to match, didn't change
+the shape.
+
+**SCOPE DEVIATIONS (not in the original TODO list, needed anyway):**
+- `GameEventKind`/`GameEvent` (`event.rs`) gained `#[derive(Debug)]` — needed for
+  `assert_eq!`/panic-message formatting in the new tests, same "needed for test assertions" reason
+  every prior slice's `Debug` derives were added (`StepStatus`, `PendingTrigger`, the id newtypes).
+- `crates/scenario/src/lib.rs`: `SetupEntry.damage_marked: u32` (default 0, mirrors
+  `controlled_since_turn`'s "fixture pre-seeds what no real producer can make yet" shape) and
+  `AssertionSpec::Eliminated { player, equals }` (mirrors `Tapped`'s shape) — needed so the TOML
+  scenario could exercise both new SBAs without dropping to raw Rust. `docs/scenario_format.md`
+  updated to match (new `damage_marked` setup field, new `eliminated` assertion).
+
+**UNRESOLVED (flagged with explicit `TODO` comments in `sba.rs`, not just here):**
+- 704.5b (empty-library draw attempt), 704.5c (10+ poison) — no tracking machinery exists for
+  either (a failed-draw flag, poison-counter increments).
+- 704.5h (deathtouch lethal regardless of amount) — deathtouch isn't modeled, no keyword-ability
+  system exists yet.
+- CDA toughness (`PTValue::CharacteristicDefining`) and continuous-effect P/T modification (CR 613
+  layer 7c) — both still blocked on `layers.rs::effective_characteristics` being full `todo!()`;
+  `apply_creature_death` reads the printed `CardDefinition.toughness` directly and skips anything
+  it can't resolve as a fixed number, rather than guessing or invoking the still-panicking layer
+  engine.
+- Regeneration (CR 701.16) — not modeled, 704.5g always destroys outright, nothing can replace it.
+- Legend rule (704.5j), world rule (704.5k), planeswalker loyalty 0 (704.5i — not v1 scope per
+  DESIGN.md), commander damage ≥ 21 (`PlayerState::commander_damage_from` already exposed for this
+  exact check, just not wired into `check_state_based_actions` yet), and the rest of CR 704.5 — no
+  prerequisite subsystem exists yet for any of them.
+- What happens *after* a player is eliminated (removal from `turn_order`, game-over detection when
+  only one player remains) is untouched — this slice only flips the flag and emits the event, same
+  boundary the original TODO already drew ("PlayerEliminated exists so a future trigger-collection
+  pass has something to match against" — ditto here for whatever ends the game).
+
 ## Next slice
+
+Combat damage step (CR 510) — now that `check_state_based_actions` does real work, a creature
+taking real combat damage will actually die. See the UNRESOLVED list on this slice's own scoping
+discussion for the open design question (one batch `AssignCombatDamage`-style action per player,
+mirroring `DeclareAttackers`/`DeclareBlockers`'s atomicity, vs. per-attacker) before starting.
 
 ## Mistakes caught (don't repeat)
 
