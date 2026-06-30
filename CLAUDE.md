@@ -9,8 +9,8 @@ On every new session, run `/caveman full` before doing anything else.
 - implement the given instructions for the feature.
 - As you implement, make sure to mark any stubbed parts that aren't implemented with TODO marks for later.
   - Eg: Implementing PlayLand, we don't have continuous effects for 'play additional lands' effects, so we mark the PlayLand action with a TODO so we know to implement that later.
-- make sure to stop and commit at appropritate times.
-- When done with implementation, give a detailed report as indicated in the workflow document.
+- make sure to stop and commit at appropritate times, but always check for permission before committing.
+- When done with implementation, give a detailed report in the chat as indicated in the workflow document.
 - Don't delete the branch, as I will manually inspect the code after for changes.
 - If all is good, I will instruct to merge the branch.
 
