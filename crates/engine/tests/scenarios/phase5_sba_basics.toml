@@ -1,0 +1,45 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+# Already at 0 life - the very first pipeline run through SbaLoop should
+# eliminate this player (CR 704.5a).
+[[players]]
+id = 1
+life = 0
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+# No real combat-damage step yet (see docs/implementation.md) - pre-seed
+# lethal damage directly so CR 704.5g has something to check.
+damage_marked = 2
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[assertions]]
+type = "object_zone"
+card = "bear"
+equals = "graveyard"
+
+[[assertions]]
+type = "eliminated"
+player = 1
+equals = true
+
+[[assertions]]
+type = "eliminated"
+player = 0
+equals = false

@@ -121,6 +121,13 @@ pub struct SetupEntry {
     /// entered the battlefield this turn).
     #[serde(default)]
     pub controlled_since_turn: u32,
+    /// CR 704.5g fixture seed: no combat-damage step exists yet to produce
+    /// this for real (see docs/implementation.md's SBA-basics slice notes),
+    /// so a scenario testing lethal-damage SBA has to pre-seed it directly,
+    /// same as `controlled_since_turn` stands in for a missing "gain
+    /// control" producer.
+    #[serde(default)]
+    pub damage_marked: u32,
 }
 
 #[derive(Deserialize, Clone)]
@@ -277,6 +284,9 @@ pub enum AssertionSpec {
     /// Checks `GameObject.tapped` — the way to confirm an `activate_ability`
     /// action (CR 605's tap-for-mana case) actually tapped its source.
     Tapped { card: String, equals: bool },
+    /// Checks `PlayerState.eliminated` — the way to confirm CR 704.5a's SBA
+    /// actually fired for a player at 0 or less life.
+    Eliminated { player: u32, equals: bool },
     Phase { equals: String },
     Step { equals: String },
     ActivePlayer { equals: u32 },
@@ -296,6 +306,9 @@ impl AssertionSpec {
                 format!("mana_pool(player={player}, color={color}) == {equals}")
             }
             AssertionSpec::Tapped { card, equals } => format!("tapped(card={card:?}) == {equals}"),
+            AssertionSpec::Eliminated { player, equals } => {
+                format!("eliminated(player={player}) == {equals}")
+            }
             AssertionSpec::Phase { equals } => format!("phase == {equals:?}"),
             AssertionSpec::Step { equals } => format!("step == {equals:?}"),
             AssertionSpec::ActivePlayer { equals } => format!("active_player == {equals}"),
@@ -514,7 +527,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
             flipped: false,
             face_down: false,
             phased_out: false,
-            damage_marked: 0,
+            damage_marked: entry.damage_marked,
             counters: CounterSet::new(),
             attachments: Vec::new(),
             attached_to: None,
@@ -829,6 +842,15 @@ fn check_assertion(
         AssertionSpec::Tapped { card, equals } => {
             let object_id = resolve_card(card, card_ids);
             let actual = state.object(object_id).map(|o| o.tapped);
+            if actual == Some(*equals) {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+            }
+        }
+        AssertionSpec::Eliminated { player, equals } => {
+            let pid = PlayerId(*player);
+            let actual = state.players.iter().find(|p| p.player_id == pid).map(|p| p.eliminated);
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {

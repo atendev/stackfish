@@ -113,7 +113,15 @@ player = 0          # u32, matches a [[players]] id
 zone = "battlefield" # see Zones below
 card = "bear"         # matches a [[cards]] key
 controlled_since_turn = 0   # optional u32, default 0 - see Summoning sickness below
+damage_marked = 0           # optional u32, default 0 - see Damage marking below
 ```
+
+**Damage marking (CR 704.5g):** `damage_marked` defaults to `0`. No combat-damage step (CR 510)
+exists yet to produce this for real, so this is the only way to build a fixture that's already
+lethally damaged — set it to (or above) the card's `toughness` to have CR 704.5g's state-based
+action destroy it the next time anything runs `check_state_based_actions` (e.g. the very first
+`pass_priority`). Same "fixture stands in for a producer that doesn't exist yet" pattern as
+`controlled_since_turn` above.
 
 **Summoning sickness (CR 302.6/602.5a):** `controlled_since_turn` defaults to `0`, which is always
 less than any real `turn_number` (the game's first turn seeds `last_active_turn_number` to `1` at
@@ -338,6 +346,18 @@ equals = true
 
 Checks `GameObject.tapped` — the way to confirm an `activate_ability` action (e.g. CR 605's
 tap-for-mana case) actually tapped its source.
+
+```toml
+[[assertions]]
+type = "eliminated"
+player = 1
+equals = true
+```
+
+Checks `PlayerState.eliminated` — the way to confirm CR 704.5a's state-based action actually fired
+for a player at 0 or less life. See `crates/engine/tests/scenarios/phase5_sba_basics.toml` for a
+full worked example of both this and the `damage_marked` setup field above, covering CR 704.5a/f/g
+in one scenario.
 
 ```toml
 [[assertions]]

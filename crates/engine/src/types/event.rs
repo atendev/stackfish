@@ -8,6 +8,7 @@ use crate::types::zone::ZoneKind;
 /// and the live action log can filter/group from a single underlying stream.
 /// This variant list is a first pass — expect additions as Phase 5 dry runs
 /// surface gaps.
+#[derive(Debug)]
 pub enum GameEventKind {
     /// `last_known_info` (CR 603.10): a snapshot of `object` exactly as it
     /// was in `from`, captured by whoever produces this event *before*
@@ -63,6 +64,7 @@ pub enum GameEventKind {
 }
 
 /// Immutable fact. Once committed, never mutated or removed.
+#[derive(Debug)]
 pub struct GameEvent {
     pub event_id: EventId,
     pub sequence_no: SequenceNo,
