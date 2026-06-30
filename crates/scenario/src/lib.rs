@@ -149,6 +149,21 @@ pub struct BlockSpec {
     pub attacker: String,
 }
 
+/// One attacker's CR 510.1c split among its 2+ blockers - only attackers
+/// actually double(+)-blocked need an entry (see
+/// `PlayerActionKind::AssignCombatDamage`'s doc comment).
+#[derive(Deserialize)]
+pub struct DamageAssignmentSpec {
+    pub attacker: String,
+    pub splits: Vec<DamageSplitSpec>,
+}
+
+#[derive(Deserialize)]
+pub struct DamageSplitSpec {
+    pub blocker: String,
+    pub amount: u32,
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActionSpec {
@@ -179,6 +194,11 @@ pub enum ActionSpec {
         player: u32,
         #[serde(default)]
         blocks: Vec<BlockSpec>,
+    },
+    AssignCombatDamage {
+        player: u32,
+        #[serde(default)]
+        assignments: Vec<DamageAssignmentSpec>,
     },
     MakeChoice {
         player: u32,
@@ -243,6 +263,22 @@ impl ActionSpec {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("declare_blockers(player={player}, blocks=[{blocks}])")
+            }
+            ActionSpec::AssignCombatDamage { player, assignments } => {
+                let assignments = assignments
+                    .iter()
+                    .map(|a| {
+                        let splits = a
+                            .splits
+                            .iter()
+                            .map(|s| format!("{:?} <- {}", s.blocker, s.amount))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("{:?} -> [{splits}]", a.attacker)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("assign_combat_damage(player={player}, assignments=[{assignments}])")
             }
             ActionSpec::MakeChoice { player, description, selection } => {
                 let selection = selection.iter().map(describe_target).collect::<Vec<_>>().join(", ");
@@ -662,6 +698,22 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                 blocks: blocks
                     .iter()
                     .map(|b| (resolve_card(&b.blocker, card_ids), resolve_card(&b.attacker, card_ids)))
+                    .collect(),
+            },
+        ),
+        ActionSpec::AssignCombatDamage { player, assignments } => (
+            *player,
+            PlayerActionKind::AssignCombatDamage {
+                assignments: assignments
+                    .iter()
+                    .map(|a| {
+                        let splits = a
+                            .splits
+                            .iter()
+                            .map(|s| (resolve_card(&s.blocker, card_ids), s.amount))
+                            .collect();
+                        (resolve_card(&a.attacker, card_ids), splits)
+                    })
                     .collect(),
             },
         ),
