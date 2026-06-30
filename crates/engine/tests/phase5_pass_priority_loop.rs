@@ -113,17 +113,22 @@ fn all_pass_with_empty_stack_advances_turn_step() {
     let status = drain(&mut engine);
 
     // Both players passed in a row with an empty stack - CR 117.4 - so the
-    // engine should have driven itself through AdvanceTurnStep and landed
-    // back on PriorityWindow without needing a third step() call from here.
+    // engine should have driven itself through AdvanceTurnStep. CR 502.4:
+    // Untap opens no priority window, so it auto-chains straight into
+    // Upkeep and lands back on PriorityWindow there, without needing a
+    // third step() call from here.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == PlayerId(0)));
     assert_eq!(engine.state().consecutive_passes, 0, "pass count resets once all-pass resolves");
     assert_eq!(engine.state().phase, Phase::Beginning);
-    assert_eq!(engine.state().step, Step::Untap);
+    assert_eq!(engine.state().step, Step::Upkeep);
     assert_eq!(engine.state().priority_player, PlayerId(0), "priority reset to active player");
     assert!(!engine.pipeline_context_active(), "pipeline_context must be cleared once back at PriorityWindow");
 
-    // 2 PriorityPassed (one per pass) + PhaseStarted + StepStarted + TurnStarted.
-    assert_eq!(engine.state().ledger.len(), 5);
+    // 2 PriorityPassed (one per pass) + PhaseStarted + StepStarted{Untap} +
+    // TurnStarted + StepStarted{Upkeep} (no second PhaseStarted - phase
+    // stays Beginning across Untap -> Upkeep). two_player_state() has no
+    // objects, so untap_step() produces no Untapped events here.
+    assert_eq!(engine.state().ledger.len(), 6);
     assert!(matches!(
         engine.state().ledger[2].kind,
         GameEventKind::PhaseStarted { phase: Phase::Beginning }
@@ -133,6 +138,7 @@ fn all_pass_with_empty_stack_advances_turn_step() {
         engine.state().ledger[4].kind,
         GameEventKind::TurnStarted { player, turn_number: 1 } if player == PlayerId(0)
     ));
+    assert!(matches!(engine.state().ledger[5].kind, GameEventKind::StepStarted { step: Step::Upkeep }));
 }
 
 #[test]

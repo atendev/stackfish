@@ -1,0 +1,179 @@
+# CR 502-504: real end-to-end Beginning-phase flow. p0 attacks with "bear"
+# on turn 1 (tapping it via a genuine DeclareAttackers/AssignCombatDamage
+# sequence, not fixture-seeded tapped state), then both players pass all the
+# way through Cleanup into turn 2.
+#
+# Note: Cleanup rotates active_player to the *next* player in turn_order, so
+# turn 2's active player is p1, not p0 (CR 502.3 untaps only the active
+# player's permanents) - "bear" (p0's, tapped during p0's own turn 1) stays
+# tapped through all of turn 2; it won't untap until p0's next turn. What
+# this scenario actually confirms at turn 2's Draw step: the no-priority
+# Untap auto-chain (CR 502.4) carried the engine cleanly through a real
+# Cleanup->Untap->Upkeep transition, active_player rotated correctly, and
+# p1 (now active) drew a real card off their own library (CR 504.1) -
+# "bear" staying tapped is the correctly-scoped negative case for CR 502.3,
+# not an oversight.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "libcard"
+name = "Forest"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 1
+zone = "library"
+card = "libcard"
+
+# PreGame -> Untap (no priority window, CR 502.4 - auto-chains into Upkeep)
+# -> Upkeep -> Draw -> PreCombatMain -> BeginningOfCombat -> DeclareAttackers,
+# 2 passes each (5 step transitions).
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+
+[[actions]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bear", target = 1 },
+]
+
+# One more pair of passes to reach declare blockers.
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+
+[[actions]]
+type = "declare_blockers"
+player = 1
+blocks = []
+
+# One more pair of passes to reach combat damage.
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+
+[[actions]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+# CombatDamage -> EndOfCombat -> PostCombatMain -> End -> Cleanup, still
+# p0's turn so p0 passes first each pair (4 transitions).
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+
+# Cleanup -> Untap (turn 2, no priority window, auto-chains) -> Upkeep ->
+# Draw. Rotates active_player to p1 as part of the Cleanup transition, so
+# priority opens to p1 first from here on, not p0.
+[[actions]]
+type = "pass_priority"
+player = 0
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 1
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[assertions]]
+type = "step"
+equals = "draw"
+
+[[assertions]]
+type = "active_player"
+equals = 1
+
+[[assertions]]
+type = "tapped"
+card = "bear"
+equals = true
+
+[[assertions]]
+type = "object_zone"
+card = "libcard"
+equals = "hand"
+
+[[assertions]]
+type = "life"
+player = 1
+equals = 18

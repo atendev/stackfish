@@ -816,17 +816,28 @@ impl Engine {
 
             ProcessState::AdvanceTurnStep => {
                 let events = self.advance_turn_step();
-                for kind in events {
-                    let event_id = self.state.allocate_event_id();
-                    let sequence_no = self.state.allocate_sequence_no();
-                    self.state.ledger.push(GameEvent {
-                        event_id,
-                        sequence_no,
-                        kind,
-                        caused_by_command: None,
-                        parent_event: None,
-                    });
+                self.log_events(events);
+
+                if self.state.step == Step::Untap {
+                    // CR 502.4: no priority window during untap - perform
+                    // its turn-based action (CR 502.3) and loop straight
+                    // back into AdvanceTurnStep instead of opening
+                    // PriorityWindow. The next call into this same arm runs
+                    // advance_turn_step() again (Untap -> Upkeep), which
+                    // does open priority normally below.
+                    let untap_events = self.untap_step();
+                    self.log_events(untap_events);
+                    self.process_state = ProcessState::AdvanceTurnStep;
+                    return StepStatus::Progressed;
                 }
+                if self.state.step == Step::Draw {
+                    // CR 504.1: draw is a turn-based action that happens
+                    // before priority opens (504.2 still opens it normally
+                    // below, unlike untap).
+                    let draw_events = self.draw_step();
+                    self.log_events(draw_events);
+                }
+
                 // CR 117.3b: priority opens to the active player at the
                 // start of each step/phase.
                 self.state.priority_player = self.state.active_player;
@@ -834,6 +845,104 @@ impl Engine {
                 StepStatus::Progressed
             }
         }
+    }
+
+    /// Wraps each `GameEventKind` into a `GameEvent` (allocating its
+    /// `event_id`/`sequence_no`) and pushes it to the ledger. Pulled out of
+    /// the `AdvanceTurnStep` arm so the same wrapping logic isn't repeated
+    /// for the base step transition, `untap_step`, and `draw_step` alike.
+    fn log_events(&mut self, events: Vec<GameEventKind>) {
+        for kind in events {
+            let event_id = self.state.allocate_event_id();
+            let sequence_no = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no,
+                kind,
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
+    }
+
+    /// CR 502.3: untaps every battlefield permanent the active player
+    /// controls, as the untap step's turn-based action. No phasing (CR
+    /// 502.1 - `phased_out` stays untouched, out of scope this slice) and
+    /// no "doesn't untap" query (no continuous-effects query API exists
+    /// yet - same gap `PlayLand`'s land-limit TODO already flags).
+    fn untap_step(&mut self) -> Vec<GameEventKind> {
+        let active = self.state.active_player;
+        let mut ids: Vec<ObjectId> = self
+            .state
+            .objects
+            .iter()
+            .filter(|(_, o)| o.zone == ZoneKind::Battlefield && o.controller == active && o.tapped)
+            .map(|(id, _)| *id)
+            .collect();
+        // HashMap iteration order is unstable - sort so the ledger is
+        // deterministic.
+        ids.sort_by_key(|id| id.0);
+
+        let mut events = Vec::with_capacity(ids.len());
+        for id in ids {
+            self.state.object_mut(id).expect("id just collected from state.objects").tapped = false;
+            events.push(GameEventKind::Untapped { object: id });
+        }
+        events
+    }
+
+    /// CR 504.1: the active player draws one card as the draw step's
+    /// turn-based action, following the same CR 400.7 new-`ObjectId` zone
+    /// move `PlayLand`/`CastSpell`/SBA death already use. CR 103.8a: in a
+    /// two-player game, the starting player skips the draw on their first
+    /// turn - `turn_number == 1` always belongs to the starting player
+    /// since `active_player` only rotates at Cleanup, so that check alone
+    /// scopes this correctly without tracking who started separately.
+    /// Drawing from an empty library is a silent no-op here, not a loss -
+    /// CR 704.5b's empty-library SBA isn't modeled yet (TODO).
+    fn draw_step(&mut self) -> Vec<GameEventKind> {
+        if self.state.turn_order.len() == 2 && self.state.turn_number == 1 {
+            return Vec::new();
+        }
+
+        let active = self.state.active_player;
+        let Some(library) = self.state.zone(ZoneKind::Library, Some(active)) else {
+            return Vec::new();
+        };
+        let Some(card) = library.contents.front().copied() else {
+            return Vec::new();
+        };
+
+        // Snapshot before the move - CR 603.10's last_known_info (see
+        // GameEventKind::ZoneChange's doc comment), same ordering PlayLand
+        // uses.
+        let last_known_info =
+            self.state.object(card).expect("card id came from the library zone's own contents").clone();
+
+        let new_id = self.state.allocate_object_id();
+        let mut new_object = last_known_info.clone();
+        new_object.object_id = new_id;
+        new_object.lineage = ObjectLineage { previous: Some(card) };
+        new_object.zone = ZoneKind::Hand;
+        new_object.timestamp = self.state.allocate_sequence_no();
+
+        self.state
+            .zone_mut(ZoneKind::Library, Some(active))
+            .expect("checked above")
+            .remove(card);
+        self.state.objects.remove(&card);
+        self.state
+            .zone_mut(ZoneKind::Hand, Some(active))
+            .expect("actor has no hand zone")
+            .push_bottom(new_id);
+        self.state.objects.insert(new_id, new_object);
+
+        vec![GameEventKind::ZoneChange {
+            object: new_id,
+            from: ZoneKind::Library,
+            to: ZoneKind::Hand,
+            last_known_info: Some(last_known_info),
+        }]
     }
 
     /// Deterministic CR 500-514 phase/step transition table for this slice:
@@ -850,6 +959,7 @@ impl Engine {
     /// `postcombat_main: bool` this table has to remember to flip - see
     /// turn.rs's `Step` doc for why that field was folded in here instead.
     fn advance_turn_step(&mut self) -> Vec<GameEventKind> {
+        let phase_before = self.state.phase;
         let starting_new_turn = match (self.state.phase, self.state.step) {
             (Phase::PreGame, _) => {
                 self.state.phase = Phase::Beginning;
@@ -954,10 +1064,15 @@ impl Engine {
             ),
         };
 
-        let mut events =
-            vec![GameEventKind::PhaseStarted { phase: self.state.phase }, GameEventKind::StepStarted {
-                step: self.state.step,
-            }];
+        // Only re-emit PhaseStarted when the phase actually changed - e.g.
+        // Untap -> Upkeep stays within Beginning and shouldn't double-log
+        // it once Untap auto-chains into Upkeep without a player action
+        // (CR 502.4) in between.
+        let mut events = Vec::new();
+        if self.state.phase != phase_before {
+            events.push(GameEventKind::PhaseStarted { phase: self.state.phase });
+        }
+        events.push(GameEventKind::StepStarted { step: self.state.step });
         if starting_new_turn {
             events.push(GameEventKind::TurnStarted {
                 player: self.state.active_player,

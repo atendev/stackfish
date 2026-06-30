@@ -1490,6 +1490,80 @@ out in the pre-slice scoping, none new):**
 - Multiplayer (an attacker facing more than one defending player) — 2-player only, same restriction
   every combat slice so far has carried.
 
+## Phase 5: phase5/beginning-phase slice
+
+Branch `phase5/beginning-phase`, off master. Slice scope: CR 502-504, the Beginning phase (Untap,
+Upkeep, Draw). Untap gets two real pieces: the turn-based action itself (502.3 — untap the active
+player's tapped battlefield permanents) and a real pipeline fix (502.4 — no priority window opens
+during untap). Upkeep needed no code change, just confirming tests (already correct generically as
+a bare priority window). Draw gets one real piece: the turn-based action (504.1 — draw one card,
+same CR 400.7 new-`ObjectId` convention `PlayLand`/`CastSpell`-resolution/SBA-death already use),
+plus CR 103.8a (2-player starting player skips their first draw).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 5 new tests in
+`crates/engine/tests/phase5_beginning_phase.rs`, all prior suites unaffected (after the pass-count
+fixture edits below). Confirmed via the real CLI too: `cargo run -p stackfish-cli -- crates/engine/
+tests/scenarios/phase5_beginning_phase.toml` — all actions ran, 5/5 assertions passed (a real
+attack tapping a creature on turn 1, full pass-chain through Cleanup into turn 2, active-player
+rotation, and a real draw off the new active player's library).
+
+**What got implemented:**
+- `event.rs`: new `GameEventKind::Untapped { object: ObjectId }`, mirroring `Tapped`'s shape — first
+  real untap producer.
+- `engine.rs`'s `advance_turn_step`: fixed a latent bug surfaced by this slice rather than created by
+  it — `PhaseStarted` was being re-emitted on every step transition, even within the same phase
+  (Untap→Upkeep, both `Beginning`). Now captures `phase_before` and only pushes `PhaseStarted` when
+  `state.phase` actually changed.
+- `engine.rs`'s `Engine`: new private `untap_step`/`draw_step` methods (same convention as
+  `advance_turn_step` — return `Vec<GameEventKind>` for the caller to log) and a `log_events` helper
+  factored out of the `AdvanceTurnStep` arm's existing wrap-and-push loop so it isn't tripled across
+  the base transition, untap, and draw event lists.
+  - `untap_step`: untaps every battlefield permanent the active player controls. Collects matching
+    ids then sorts by `ObjectId` before mutating/emitting — `state.objects` is a `HashMap`, so
+    iteration order is otherwise nondeterministic and would make the ledger's `Untapped` order
+    flaky.
+  - `draw_step`: CR 103.8a check first (`turn_order.len() == 2 && turn_number == 1` — turn 1 always
+    belongs to the starting player since `active_player` only rotates at Cleanup, so this single
+    condition correctly scopes "starting player's first turn, 2-player only"). Peeks library top via
+    `.contents.front()` directly on the zone rather than the still-`todo!()` `Zone::top()` stub —
+    confirmed nothing in the codebase calls that stub, every existing site reaches into `.contents`
+    directly. Empty library is a silent no-op (CR 704.5b empty-library-loss isn't modeled — that's
+    the SBA loop's job, not this turn-based action's). Otherwise mirrors `PlayLand`'s exact CR 400.7
+    pattern: snapshot before mutating, mint a new `ObjectId`, move library→hand, emit `ZoneChange`.
+  - `AdvanceTurnStep` arm: on landing on `Step::Untap`, runs `untap_step` then loops straight back
+    into `ProcessState::AdvanceTurnStep` and returns `Progressed` **without** opening
+    `PriorityWindow` (CR 502.4) — the next `step()` call re-enters the same arm, runs
+    `advance_turn_step()` again (Untap→Upkeep), and opens priority normally there. On landing on
+    `Step::Draw`, runs `draw_step` then falls through to the existing unconditional
+    priority-opening code (504.2 — priority still opens after the draw).
+
+**STRUCT DEVIATIONS:** None — every field `untap_step`/`draw_step` touch (`tapped`, `controller`,
+`zone`, `lineage`, `timestamp`) already existed from earlier phases.
+
+**INTERFACE DEVIATIONS:** None beyond the two new private `Engine` methods and the `log_events`
+refactor, both internal to `engine.rs` — no public signature changed shape.
+
+**SCOPE DEVIATIONS (anticipated during scoping, not a surprise mid-slice):**
+- Three existing scenario fixtures had their leading `pass_priority` counts reduced by one
+  step-transition's worth, since Untap no longer pauses for its own priority window:
+  `phase5_cast_spell_payment.toml` (4→3), `phase5_combat_declarations.toml` and
+  `phase5_combat_damage.toml` (12→10 leading passes each).
+- `phase5_pass_priority_loop.rs::all_pass_with_empty_stack_advances_turn_step` updated — the same
+  pair of passes that used to land on `Step::Untap` now auto-chains through into `Step::Upkeep`
+  (ledger gained one more `StepStarted{Upkeep}` entry, `5`→`6`).
+
+**UNRESOLVED (flagged with explicit `TODO`/doc comments in the code, not just here):**
+- 502.1 (phasing) — `GameObject.phased_out` stays unused, no phasing schedule modeled.
+- 502.2 (day/night) — no day/night state on `GameState`.
+- 503.1a (upkeep triggers onto the stack) — same script-bridge gap as every other trigger TODO.
+- CR 704.5b (empty-library loss) — draw-from-empty is `draw_step`'s silent no-op, not a loss; that
+  SBA isn't modeled (same gap `phase5/sba-basics` already flagged).
+- 103.8b/c (Two-Headed Giant / multiplayer draw-skip variants) — 2-player only, same restriction
+  every combat slice so far has carried.
+- "Doesn't untap" effects (e.g. a continuous effect locking a permanent tapped) — `untap_step` is
+  unconditional; no `continuous_effects` query API exists yet (same gap `is_sorcery_speed` already
+  flags for `PlayLand`).
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

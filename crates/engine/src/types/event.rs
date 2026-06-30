@@ -30,6 +30,10 @@ pub enum GameEventKind {
     /// First real tap producer (CR 602.5a's tap-cost activation, e.g. a
     /// mana ability) — nothing minted this event before now.
     Tapped { object: ObjectId },
+    /// CR 502.3: one per permanent untapped as the untap step's turn-based
+    /// action. Same shape as `Tapped` — first real producer on the untap
+    /// side.
+    Untapped { object: ObjectId },
     /// `units`: the exact literal mana added (CR 605), same "literal
     /// units, not a cost shape" vocabulary `CostPaid`/`CostPayment::Mana`
     /// already use — retargeted from a `ManaCost`-shaped `amount` (unused
