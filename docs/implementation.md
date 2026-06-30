@@ -1490,7 +1490,7 @@ out in the pre-slice scoping, none new):**
 - Multiplayer (an attacker facing more than one defending player) — 2-player only, same restriction
   every combat slice so far has carried.
 
-## Phase 5: phase5/beginning-phase slice
+## Phase 5: phase5/beginning-phase slice (merged to master)
 
 Branch `phase5/beginning-phase`, off master. Slice scope: CR 502-504, the Beginning phase (Untap,
 Upkeep, Draw). Untap gets two real pieces: the turn-based action itself (502.3 — untap the active
