@@ -25,12 +25,9 @@ card = "bear"
 
 # A solo player's first PassPriority always counts as "everyone passed"
 # (consecutive_passes >= turn_order.len() == 1), so each of these advances
-# one turn/phase/step (CR 500-514) - PreGame -> Untap -> Upkeep -> Draw ->
-# Main. CastSpell's non-instant branch needs Phase::Main (sorcery speed).
-[[actions]]
-type = "pass_priority"
-player = 0
-
+# one turn/phase/step (CR 500-514) - PreGame -> Untap (no priority window,
+# CR 502.4 - auto-chains into Upkeep) -> Upkeep -> Draw -> Main. CastSpell's
+# non-instant branch needs Phase::Main (sorcery speed).
 [[actions]]
 type = "pass_priority"
 player = 0
