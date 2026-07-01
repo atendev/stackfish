@@ -1,0 +1,193 @@
+# CR 514.1: discard-to-hand-size at cleanup.
+# p0 enters cleanup with 9 cards in hand (7 max), must discard 2.
+# Passes through every step of p0's first turn (no combat), arrives at
+# Cleanup, discards "c1" and "c2", then asserts hand is 7 and both
+# discarded cards landed in p0's graveyard.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+# Filler cards (7 copies, same key - only last ObjectId tracked but not referenced by discard)
+[[cards]]
+key = "filler"
+name = "Filler"
+types = ["Creature"]
+power = 1
+toughness = 1
+
+# Two uniquely-keyed cards so submit_discard can name them individually
+[[cards]]
+key = "c1"
+name = "Card One"
+types = ["Creature"]
+power = 1
+toughness = 1
+
+[[cards]]
+key = "c2"
+name = "Card Two"
+types = ["Creature"]
+power = 1
+toughness = 1
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "filler"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "filler"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "filler"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "filler"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "filler"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "filler"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "filler"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "c1"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "c2"
+
+# PreGame -> Untap (auto-chains, no priority) -> Upkeep
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# Upkeep -> Draw
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# Draw -> PreCombatMain
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# PreCombatMain -> BeginningOfCombat
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# BeginningOfCombat -> DeclareAttackers
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# DeclareAttackers -> DeclareBlockers
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# DeclareBlockers -> CombatDamage
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# CombatDamage -> EndOfCombat
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# EndOfCombat -> PostCombatMain
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# PostCombatMain -> End
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# End -> Cleanup: engine sees 9 cards in p0's hand, enters AwaitingDiscard
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# CR 514.1: discard exactly 2 (9 - 7) cards
+[[steps]]
+type = "submit_discard"
+player = 0
+cards = ["c1", "c2"]
+
+# Both discarded cards should be in p0's graveyard
+[[steps]]
+type = "assert_object_zone"
+card = "c1"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "c2"
+equals = "graveyard"
+
+# p0's hand is now exactly at max
+[[steps]]
+type = "assert_hand_size"
+player = 0
+equals = 7

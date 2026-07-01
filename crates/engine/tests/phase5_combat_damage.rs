@@ -358,17 +358,14 @@ fn damage_marked_is_cleared_entering_cleanup() {
     state.step = Step::End;
 
     let mut engine = Engine::new(state);
-    for _ in 0..10 {
-        if engine.state().step == Step::Cleanup {
-            break;
-        }
-        let active = engine.state().priority_player;
-        engine
-            .submit_action(PlayerAction { player: active, kind: PlayerActionKind::PassPriority })
-            .expect("priority window");
-        drain(&mut engine);
-    }
-    assert_eq!(engine.state().step, Step::Cleanup, "never reached Cleanup");
+    // Both players pass at End step; Cleanup runs automatically without
+    // opening a priority window (CR 514.3 — no SBAs/triggers fired here).
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(&mut engine);
+    engine.submit_action(PlayerAction { player: PlayerId(1), kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(&mut engine);
+    // Cleanup has already processed (advance_turn_step cleared damage when
+    // it set step to Cleanup, then begin_cleanup_step auto-advanced through).
     assert_eq!(engine.state().object(creature).unwrap().damage_marked, 0, "514.2: marked damage is removed entering cleanup");
 }
 

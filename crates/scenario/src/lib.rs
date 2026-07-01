@@ -28,7 +28,7 @@ use std::panic::{self, AssertUnwindSafe};
 use serde::Deserialize;
 
 use stackfish_engine::*;
-use stackfish_engine::engine::{ActionError, Engine, StepStatus};
+use stackfish_engine::engine::{ActionError, DiscardError, Engine, StepStatus};
 
 // ---------------------------------------------------------------------
 // TOML schema
@@ -225,6 +225,15 @@ pub enum ActionSpec {
         #[serde(default)]
         mana: ManaPaymentSpec,
     },
+    /// CR 514.1: answers a pending `ProcessState::AwaitingDiscard` pause —
+    /// `cards` is the list of TOML card keys the player chooses to discard.
+    /// Same "own entry point" rationale as `SubmitPayment` — routed through
+    /// `run_discard` / `Engine::submit_discard`, not `submit_action`.
+    SubmitDiscard {
+        player: u32,
+        #[serde(default)]
+        cards: Vec<String>,
+    },
 }
 
 fn describe_target(target: &TargetSpec) -> String {
@@ -297,6 +306,9 @@ impl ActionSpec {
             ActionSpec::SubmitPayment { player, mana } => {
                 format!("submit_payment(player={player}, units={:?})", mana.units)
             }
+            ActionSpec::SubmitDiscard { player, cards } => {
+                format!("submit_discard(player={player}, cards={cards:?})")
+            }
         }
     }
 }
@@ -335,6 +347,8 @@ pub enum AssertionSpec {
     Step { equals: String },
     ActivePlayer { equals: u32 },
     PriorityPlayer { equals: u32 },
+    /// Checks the number of cards in a player's hand zone.
+    HandSize { player: u32, equals: usize },
 }
 
 /// Same assertions as `AssertionSpec` but with `assert_` prefixed type names,
@@ -363,6 +377,8 @@ pub enum AssertionStepSpec {
     ActivePlayer { equals: u32 },
     #[serde(rename = "assert_priority_player")]
     PriorityPlayer { equals: u32 },
+    #[serde(rename = "assert_hand_size")]
+    HandSize { player: u32, equals: usize },
 }
 
 impl AssertionStepSpec {
@@ -378,6 +394,7 @@ impl AssertionStepSpec {
             Self::Step { equals } => AssertionSpec::Step { equals: equals.clone() },
             Self::ActivePlayer { equals } => AssertionSpec::ActivePlayer { equals: *equals },
             Self::PriorityPlayer { equals } => AssertionSpec::PriorityPlayer { equals: *equals },
+            Self::HandSize { player, equals } => AssertionSpec::HandSize { player: *player, equals: *equals },
         }
     }
 }
@@ -412,6 +429,9 @@ impl AssertionSpec {
             AssertionSpec::Step { equals } => format!("step == {equals:?}"),
             AssertionSpec::ActivePlayer { equals } => format!("active_player == {equals}"),
             AssertionSpec::PriorityPlayer { equals } => format!("priority_player == {equals}"),
+            AssertionSpec::HandSize { player, equals } => {
+                format!("hand_size(player={player}) == {equals}")
+            }
         }
     }
 }
@@ -787,10 +807,13 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                 selection: selection.iter().map(|t| resolve_target(t, card_ids)).collect(),
             },
         ),
-        // SubmitPayment never reaches here - run() intercepts it and calls
-        // Engine::submit_payment directly (see that variant's doc comment).
+        // SubmitPayment/SubmitDiscard never reach here - run_action_spec
+        // intercepts them and calls the dedicated Engine entry points.
         ActionSpec::SubmitPayment { .. } => {
-            unreachable!("SubmitPayment is handled in run(), before to_player_action")
+            unreachable!("SubmitPayment is handled in run_action_spec, before to_player_action")
+        }
+        ActionSpec::SubmitDiscard { .. } => {
+            unreachable!("SubmitDiscard is handled in run_action_spec, before to_player_action")
         }
     };
     PlayerAction { player: PlayerId(player), kind }
@@ -842,6 +865,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             | StepStatus::AwaitingReplacementChoice { .. }
             | StepStatus::AwaitingTriggerOrderChoice { .. }
             | StepStatus::AwaitingPayment { .. }
+            | StepStatus::AwaitingDiscard { .. }
             | StepStatus::GameOver { .. } => {
                 return StepOutcome::Ran;
             }
@@ -872,6 +896,21 @@ fn run_action(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
 fn run_payment(engine: &mut Engine, plan: PaymentPlan) -> StepOutcome {
     let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
         if let Err(err) = engine.submit_payment(plan) {
+            return StepOutcome::Errored(format!("{err:?}"));
+        }
+        drain(engine)
+    }));
+    match result {
+        Ok(outcome) => outcome,
+        Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
+    }
+}
+
+/// Same shape as `run_payment`, but for the `SubmitDiscard` action — answers
+/// a `ProcessState::AwaitingDiscard` pause via `Engine::submit_discard`.
+fn run_discard(engine: &mut Engine, cards: Vec<ObjectId>) -> StepOutcome {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
+        if let Err(err) = engine.submit_discard(cards) {
             return StepOutcome::Errored(format!("{err:?}"));
         }
         drain(engine)
@@ -1010,6 +1049,20 @@ fn check_assertion(
                 }
             }
         }
+        AssertionSpec::HandSize { player, equals } => {
+            let pid = PlayerId(*player);
+            let actual = state
+                .zones
+                .iter()
+                .find(|z| z.kind == ZoneKind::Hand && z.owner == Some(pid))
+                .map(|z| z.contents.len())
+                .unwrap_or(0);
+            if actual == *equals {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.to_string(), actual: actual.to_string() }
+            }
+        }
     }
 }
 
@@ -1069,6 +1122,11 @@ fn run_action_spec(
     let ledger_before = engine.state().ledger.len();
     let outcome = match action_spec {
         ActionSpec::SubmitPayment { mana, .. } => run_payment(engine, build_payment_plan(mana)),
+        ActionSpec::SubmitDiscard { cards, .. } => {
+            let card_obj_ids =
+                cards.iter().map(|k| resolve_card(k, card_ids)).collect();
+            run_discard(engine, card_obj_ids)
+        }
         other => run_action(engine, to_player_action(other, card_ids)),
     };
     remap_moved_card_ids(card_ids, &engine.state().ledger[ledger_before..]);

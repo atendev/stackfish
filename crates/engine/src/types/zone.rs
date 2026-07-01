@@ -53,13 +53,11 @@ impl Zone {
     }
 
     pub fn contains(&self, object: ObjectId) -> bool {
-        // TODO: self.contents.contains(&object).
-        todo!()
+        self.contents.contains(&object)
     }
 
     pub fn len(&self) -> usize {
-        // TODO: self.contents.len().
-        todo!()
+        self.contents.len()
     }
 
     pub fn top(&self) -> Option<ObjectId> {
