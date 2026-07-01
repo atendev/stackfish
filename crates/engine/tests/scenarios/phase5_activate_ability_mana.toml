@@ -15,24 +15,24 @@ player = 0
 zone = "battlefield"
 card = "forest"
 
-[[actions]]
+[[steps]]
 type = "activate_ability"
 player = 0
 source = "forest"
 ability_index = 0
 targets = []
 
-[[assertions]]
-type = "tapped"
+[[steps]]
+type = "assert_tapped"
 card = "forest"
 equals = true
 
-[[assertions]]
-type = "mana_pool"
+[[steps]]
+type = "assert_mana_pool"
 player = 0
 color = "green"
 equals = 1
 
-[[assertions]]
-type = "ledger_len"
+[[steps]]
+type = "assert_ledger_len"
 equals = 2

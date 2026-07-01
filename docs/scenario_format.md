@@ -37,9 +37,13 @@ seed = 1          # u64, required - seeds GameState.rng
 [[players]]        # zero or more
 [[cards]]           # zero or more - ad-hoc test card definitions
 [[setup]]           # zero or more - places a card into a zone at game start
-[[actions]]         # zero or more - PlayerActions run in order
-[[assertions]]      # zero or more - checked after all actions run
+[[actions]]         # zero or more - PlayerActions run in order         \
+[[assertions]]      # zero or more - checked after all actions run      / use one style
+[[steps]]           # zero or more - actions + assertions interleaved  /  not both
 ```
+
+`[[steps]]` and the `[[actions]]`/`[[assertions]]` pair are mutually exclusive — if `[[steps]]` is
+non-empty it takes precedence and the other two are ignored.
 
 ## `[[players]]`
 
@@ -329,9 +333,50 @@ Anywhere a target is expected (`targets`, `selection`, attacker `target`), write
 targets = [0, "bear"]   # a player and a card, mixed, both valid
 ```
 
+## `[[steps]]` — interleaved actions and assertions
+
+Use `[[steps]]` instead of separate `[[actions]]`/`[[assertions]]` when you need assertions to
+fire at specific points mid-sequence rather than all at the end.
+
+Action entries use the same `type` names as `[[actions]]`. Assertion entries use `assert_`-prefixed
+names so they're visually distinct when reading the file. Both share the same field shapes as their
+`[[actions]]`/`[[assertions]]` counterparts.
+
+```toml
+[[steps]]
+type = "play_land"          # action — same as [[actions]]
+player = 0
+card = "forest"
+
+[[steps]]
+type = "assert_object_zone" # assertion fires here, before the next action
+card = "forest"
+equals = "battlefield"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_phase"
+equals = "main"
+```
+
+**If `[[steps]]` is non-empty, `[[actions]]` and `[[assertions]]` are ignored.** They cannot be
+mixed in the same file — pick one style per scenario.
+
+Assertion type names for `[[steps]]` (all take the same fields as their `[[assertions]]`
+equivalents): `assert_life`, `assert_ledger_len`, `assert_object_zone`, `assert_mana_pool`,
+`assert_tapped`, `assert_eliminated`, `assert_phase`, `assert_step`, `assert_active_player`,
+`assert_priority_player`.
+
+---
+
 ## `[[assertions]]`
 
 Checked once, after every action has run. Tagged by `type`.
+
+> **Tip:** if you need assertions at specific points mid-sequence, use `[[steps]]` instead (see above).
 
 ```toml
 [[assertions]]

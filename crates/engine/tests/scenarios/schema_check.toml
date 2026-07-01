@@ -40,49 +40,49 @@ player = 0
 zone = "hand"
 card = "shock"
 
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
 
-[[actions]]
+[[steps]]
 type = "play_land"
 player = 0
 card = "bear"
 
-[[actions]]
+[[steps]]
 type = "cast_spell"
 player = 0
 card = "shock"
 targets = [1, "bear"]
 modes = []
 
-[[actions]]
+[[steps]]
 type = "activate_ability"
 player = 0
 source = "bear"
 ability_index = 0
 targets = []
 
-[[actions]]
+[[steps]]
 type = "declare_attackers"
 player = 0
 attackers = [
   { attacker = "bear", target = 1 },
 ]
 
-[[actions]]
+[[steps]]
 type = "declare_blockers"
 player = 1
 blocks = [
   { blocker = "bear", attacker = "bear" },
 ]
 
-[[actions]]
+[[steps]]
 type = "make_choice"
 player = 0
 description = "choose a player"
 selection = [1]
 
-[[assertions]]
-type = "ledger_len"
+[[steps]]
+type = "assert_ledger_len"
 equals = 1

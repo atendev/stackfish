@@ -10,10 +10,10 @@ life = 20
 id = 1
 life = 20
 
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
 
-[[assertions]]
-type = "ledger_len"
+[[steps]]
+type = "assert_ledger_len"
 equals = 1

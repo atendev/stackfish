@@ -48,38 +48,38 @@ card = "libcard"
 # PreGame -> Untap (no priority window, CR 502.4 - auto-chains into Upkeep)
 # -> Upkeep -> Draw -> PreCombatMain -> BeginningOfCombat -> DeclareAttackers,
 # 2 passes each (5 step transitions).
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
 
-[[actions]]
+[[steps]]
 type = "declare_attackers"
 player = 0
 attackers = [
@@ -87,93 +87,93 @@ attackers = [
 ]
 
 # One more pair of passes to reach declare blockers.
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
 
-[[actions]]
+[[steps]]
 type = "declare_blockers"
 player = 1
 blocks = []
 
 # One more pair of passes to reach combat damage.
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
 
-[[actions]]
+[[steps]]
 type = "assign_combat_damage"
 player = 0
 assignments = []
 
 # CombatDamage -> EndOfCombat -> PostCombatMain -> End -> Cleanup, still
 # p0's turn so p0 passes first each pair (4 transitions).
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
 
 # Cleanup -> Untap (turn 2, no priority window, auto-chains) -> Upkeep ->
 # Draw. Rotates active_player to p1 as part of the Cleanup transition, so
 # priority opens to p1 first from here on, not p0.
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
 
-[[assertions]]
-type = "step"
+[[steps]]
+type = "assert_step"
 equals = "draw"
 
-[[assertions]]
-type = "active_player"
+[[steps]]
+type = "assert_active_player"
 equals = 1
 
-[[assertions]]
-type = "tapped"
+[[steps]]
+type = "assert_tapped"
 card = "bear"
 equals = true
 
-[[assertions]]
-type = "object_zone"
+[[steps]]
+type = "assert_object_zone"
 card = "libcard"
 equals = "hand"
 
-[[assertions]]
-type = "life"
+[[steps]]
+type = "assert_life"
 player = 1
 equals = 18

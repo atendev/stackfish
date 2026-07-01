@@ -49,38 +49,38 @@ card = "wall2"
 # PreGame -> Untap (no priority window, CR 502.4 - auto-chains into Upkeep)
 # -> Upkeep -> Draw -> PreCombatMain -> BeginningOfCombat -> DeclareAttackers,
 # 2 passes each.
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
 
-[[actions]]
+[[steps]]
 type = "declare_attackers"
 player = 0
 attackers = [
@@ -88,14 +88,14 @@ attackers = [
 ]
 
 # One more pair of passes to reach the declare blockers step.
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
 
-[[actions]]
+[[steps]]
 type = "declare_blockers"
 player = 1
 blocks = [
@@ -104,14 +104,14 @@ blocks = [
 ]
 
 # One more pair of passes to reach the combat damage step.
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 1
 
-[[actions]]
+[[steps]]
 type = "assign_combat_damage"
 player = 0
 assignments = [
@@ -121,26 +121,26 @@ assignments = [
   ] },
 ]
 
-[[assertions]]
-type = "step"
+[[steps]]
+type = "assert_step"
 equals = "combat_damage"
 
-[[assertions]]
-type = "object_zone"
+[[steps]]
+type = "assert_object_zone"
 card = "wall1"
 equals = "graveyard"
 
-[[assertions]]
-type = "object_zone"
+[[steps]]
+type = "assert_object_zone"
 card = "wall2"
 equals = "graveyard"
 
-[[assertions]]
-type = "object_zone"
+[[steps]]
+type = "assert_object_zone"
 card = "bear"
 equals = "battlefield"
 
-[[assertions]]
-type = "life"
+[[steps]]
+type = "assert_life"
 player = 1
 equals = 20

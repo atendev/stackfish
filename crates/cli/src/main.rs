@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use stackfish_scenario::{AssertionOutcome, StepOutcome};
+use stackfish_scenario::{AssertionOutcome, EntryOutcome, StepOutcome};
 
 fn main() -> ExitCode {
     let path = match std::env::args().nth(1) {
@@ -24,28 +24,27 @@ fn main() -> ExitCode {
     println!("Running scenario: {}", path.display());
     let report = stackfish_scenario::run_path(&path);
 
-    println!("\n-- actions --");
-    for (i, (desc, outcome)) in
-        report.action_descriptions.iter().zip(report.action_outcomes.iter()).enumerate()
-    {
-        match outcome {
-            StepOutcome::Ran => println!("  [{i}] ran - {desc}"),
-            StepOutcome::NotImplemented(msg) => {
-                println!("  [{i}] not yet implemented - {desc} ({msg})")
-            }
-            StepOutcome::Errored(msg) => println!("  [{i}] errored - {desc} ({msg})"),
-        }
-    }
-
-    println!("\n-- assertions --");
+    println!("\n-- steps --");
     let mut hard_failures = 0;
-    for (i, (desc, outcome)) in
-        report.assertion_descriptions.iter().zip(report.assertion_outcomes.iter()).enumerate()
-    {
-        match outcome {
-            AssertionOutcome::Passed => println!("  [{i}] PASS - {desc}"),
-            AssertionOutcome::Failed { expected, actual } => {
-                println!("  [{i}] FAIL - {desc} (expected {expected}, got {actual})");
+    for (i, entry) in report.entries.iter().enumerate() {
+        match &entry.outcome {
+            EntryOutcome::Action(StepOutcome::Ran) => {
+                println!("  [{i}] action | ran   - {}", entry.description);
+            }
+            EntryOutcome::Action(StepOutcome::NotImplemented(msg)) => {
+                println!("  [{i}] action | not yet implemented - {} ({msg})", entry.description);
+            }
+            EntryOutcome::Action(StepOutcome::Errored(msg)) => {
+                println!("  [{i}] action | errored - {} ({msg})", entry.description);
+            }
+            EntryOutcome::Assertion(AssertionOutcome::Passed) => {
+                println!("  [{i}] assert | PASS  - {}", entry.description);
+            }
+            EntryOutcome::Assertion(AssertionOutcome::Failed { expected, actual }) => {
+                println!(
+                    "  [{i}] assert | FAIL  - {} (expected {expected}, got {actual})",
+                    entry.description
+                );
                 hard_failures += 1;
             }
         }

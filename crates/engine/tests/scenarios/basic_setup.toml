@@ -24,21 +24,21 @@ player = 0
 zone = "battlefield"
 card = "bear"
 
-[[assertions]]
-type = "life"
+[[steps]]
+type = "assert_life"
 player = 0
 equals = 20
 
-[[assertions]]
-type = "life"
+[[steps]]
+type = "assert_life"
 player = 1
 equals = 20
 
-[[assertions]]
-type = "ledger_len"
+[[steps]]
+type = "assert_ledger_len"
 equals = 0
 
-[[assertions]]
-type = "object_zone"
+[[steps]]
+type = "assert_object_zone"
 card = "bear"
 equals = "battlefield"

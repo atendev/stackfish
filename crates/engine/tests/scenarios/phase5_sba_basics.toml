@@ -25,21 +25,21 @@ card = "bear"
 # lethal damage directly so CR 704.5g has something to check.
 damage_marked = 2
 
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
 
-[[assertions]]
-type = "object_zone"
+[[steps]]
+type = "assert_object_zone"
 card = "bear"
 equals = "graveyard"
 
-[[assertions]]
-type = "eliminated"
+[[steps]]
+type = "assert_eliminated"
 player = 1
 equals = true
 
-[[assertions]]
-type = "eliminated"
+[[steps]]
+type = "assert_eliminated"
 player = 0
 equals = false

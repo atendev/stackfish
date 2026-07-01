@@ -47,6 +47,14 @@ pub struct ScenarioFile {
     pub actions: Vec<ActionSpec>,
     #[serde(default)]
     pub assertions: Vec<AssertionSpec>,
+    /// Unified ordered sequence of actions and assertions — use instead of
+    /// `actions`/`assertions` when you need assertions interleaved with actions.
+    /// Each action entry uses the same type names as `[[actions]]`; each
+    /// assertion entry uses `assert_`-prefixed names (e.g. `assert_life`,
+    /// `assert_phase`) so assertions are visually distinct in the file.
+    /// If non-empty, `actions` and `assertions` are ignored.
+    #[serde(default)]
+    pub steps: Vec<ScenarioStep>,
 }
 
 #[derive(Deserialize)]
@@ -327,6 +335,61 @@ pub enum AssertionSpec {
     Step { equals: String },
     ActivePlayer { equals: u32 },
     PriorityPlayer { equals: u32 },
+}
+
+/// Same assertions as `AssertionSpec` but with `assert_` prefixed type names,
+/// for use in `[[steps]]` where actions and assertions share one array — the
+/// prefix makes each entry's role obvious when reading the file.
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+pub enum AssertionStepSpec {
+    #[serde(rename = "assert_life")]
+    Life { player: u32, equals: i32 },
+    #[serde(rename = "assert_ledger_len")]
+    LedgerLen { equals: usize },
+    #[serde(rename = "assert_object_zone")]
+    ObjectZone { card: String, equals: String },
+    #[serde(rename = "assert_mana_pool")]
+    ManaPool { player: u32, color: String, equals: u32 },
+    #[serde(rename = "assert_tapped")]
+    Tapped { card: String, equals: bool },
+    #[serde(rename = "assert_eliminated")]
+    Eliminated { player: u32, equals: bool },
+    #[serde(rename = "assert_phase")]
+    Phase { equals: String },
+    #[serde(rename = "assert_step")]
+    Step { equals: String },
+    #[serde(rename = "assert_active_player")]
+    ActivePlayer { equals: u32 },
+    #[serde(rename = "assert_priority_player")]
+    PriorityPlayer { equals: u32 },
+}
+
+impl AssertionStepSpec {
+    fn to_assertion_spec(&self) -> AssertionSpec {
+        match self {
+            Self::Life { player, equals } => AssertionSpec::Life { player: *player, equals: *equals },
+            Self::LedgerLen { equals } => AssertionSpec::LedgerLen { equals: *equals },
+            Self::ObjectZone { card, equals } => AssertionSpec::ObjectZone { card: card.clone(), equals: equals.clone() },
+            Self::ManaPool { player, color, equals } => AssertionSpec::ManaPool { player: *player, color: color.clone(), equals: *equals },
+            Self::Tapped { card, equals } => AssertionSpec::Tapped { card: card.clone(), equals: *equals },
+            Self::Eliminated { player, equals } => AssertionSpec::Eliminated { player: *player, equals: *equals },
+            Self::Phase { equals } => AssertionSpec::Phase { equals: equals.clone() },
+            Self::Step { equals } => AssertionSpec::Step { equals: equals.clone() },
+            Self::ActivePlayer { equals } => AssertionSpec::ActivePlayer { equals: *equals },
+            Self::PriorityPlayer { equals } => AssertionSpec::PriorityPlayer { equals: *equals },
+        }
+    }
+}
+
+/// One entry in `[[steps]]` — either an action or an assertion. Serde tries
+/// `Action` first (matching any `ActionSpec` type name), then `Assertion`
+/// (matching any `assert_*` type name). No type names overlap between the two.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum ScenarioStep {
+    Action(ActionSpec),
+    Assertion(AssertionStepSpec),
 }
 
 impl AssertionSpec {
@@ -950,16 +1013,18 @@ fn check_assertion(
     }
 }
 
+pub enum EntryOutcome {
+    Action(StepOutcome),
+    Assertion(AssertionOutcome),
+}
+
+pub struct EntryReport {
+    pub description: String,
+    pub outcome: EntryOutcome,
+}
+
 pub struct ScenarioReport {
-    pub action_outcomes: Vec<StepOutcome>,
-    /// `ActionSpec::describe()` for each entry in `action_outcomes`, same
-    /// index - lets a caller (the CLI) say what actually ran, not just that
-    /// something at index N did.
-    pub action_descriptions: Vec<String>,
-    pub assertion_outcomes: Vec<AssertionOutcome>,
-    /// `AssertionSpec::describe()` for each entry in `assertion_outcomes`,
-    /// same index.
-    pub assertion_descriptions: Vec<String>,
+    pub entries: Vec<EntryReport>,
 }
 
 impl ScenarioReport {
@@ -967,7 +1032,9 @@ impl ScenarioReport {
     /// wrong answer — not an action that's merely unimplemented yet, which
     /// is expected and shouldn't fail a Phase 4/5 test run.
     pub fn has_hard_failures(&self) -> bool {
-        self.assertion_outcomes.iter().any(|a| matches!(a, AssertionOutcome::Failed { .. }))
+        self.entries.iter().any(|e| {
+            matches!(&e.outcome, EntryOutcome::Assertion(AssertionOutcome::Failed { .. }))
+        })
     }
 }
 
@@ -994,33 +1061,55 @@ fn remap_moved_card_ids(card_ids: &mut HashMap<String, ObjectId>, new_events: &[
     }
 }
 
+fn run_action_spec(
+    engine: &mut Engine,
+    card_ids: &mut HashMap<String, ObjectId>,
+    action_spec: &ActionSpec,
+) -> EntryReport {
+    let ledger_before = engine.state().ledger.len();
+    let outcome = match action_spec {
+        ActionSpec::SubmitPayment { mana, .. } => run_payment(engine, build_payment_plan(mana)),
+        other => run_action(engine, to_player_action(other, card_ids)),
+    };
+    remap_moved_card_ids(card_ids, &engine.state().ledger[ledger_before..]);
+    EntryReport { description: action_spec.describe(), outcome: EntryOutcome::Action(outcome) }
+}
+
 pub fn run(file: &ScenarioFile) -> ScenarioReport {
     let (state, mut card_ids) = build_initial_state(file);
     let mut engine = Engine::new(state);
+    let mut entries = Vec::new();
 
-    let mut action_outcomes = Vec::new();
-    let mut action_descriptions = Vec::new();
-    for action_spec in &file.actions {
-        let ledger_before = engine.state().ledger.len();
-        let outcome = match action_spec {
-            ActionSpec::SubmitPayment { mana, .. } => {
-                run_payment(&mut engine, build_payment_plan(mana))
+    if !file.steps.is_empty() {
+        for step in &file.steps {
+            match step {
+                ScenarioStep::Action(action_spec) => {
+                    entries.push(run_action_spec(&mut engine, &mut card_ids, action_spec));
+                }
+                ScenarioStep::Assertion(assertion_step) => {
+                    let spec = assertion_step.to_assertion_spec();
+                    let outcome = check_assertion(&spec, engine.state(), &card_ids);
+                    entries.push(EntryReport {
+                        description: spec.describe(),
+                        outcome: EntryOutcome::Assertion(outcome),
+                    });
+                }
             }
-            other => run_action(&mut engine, to_player_action(other, &card_ids)),
-        };
-        remap_moved_card_ids(&mut card_ids, &engine.state().ledger[ledger_before..]);
-        action_outcomes.push(outcome);
-        action_descriptions.push(action_spec.describe());
+        }
+    } else {
+        for action_spec in &file.actions {
+            entries.push(run_action_spec(&mut engine, &mut card_ids, action_spec));
+        }
+        for assertion_spec in &file.assertions {
+            let outcome = check_assertion(assertion_spec, engine.state(), &card_ids);
+            entries.push(EntryReport {
+                description: assertion_spec.describe(),
+                outcome: EntryOutcome::Assertion(outcome),
+            });
+        }
     }
 
-    let assertion_outcomes = file
-        .assertions
-        .iter()
-        .map(|a| check_assertion(a, engine.state(), &card_ids))
-        .collect();
-    let assertion_descriptions = file.assertions.iter().map(|a| a.describe()).collect();
-
-    ScenarioReport { action_outcomes, action_descriptions, assertion_outcomes, assertion_descriptions }
+    ScenarioReport { entries }
 }
 
 pub fn run_path(path: &std::path::Path) -> ScenarioReport {

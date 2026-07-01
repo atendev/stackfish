@@ -28,24 +28,24 @@ card = "bear"
 # one turn/phase/step (CR 500-514) - PreGame -> Untap (no priority window,
 # CR 502.4 - auto-chains into Upkeep) -> Upkeep -> Draw -> Main. CastSpell's
 # non-instant branch needs Phase::Main (sorcery speed).
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
 
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
 
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
 
-[[actions]]
+[[steps]]
 type = "cast_spell"
 player = 0
 card = "bear"
 
-[[actions]]
+[[steps]]
 type = "submit_payment"
 player = 0
 # 1 green for the {G} pip, 2 colorless covering the {2} (CR 118.13a's
@@ -54,31 +54,31 @@ mana = { units = ["G", "C", "C"] }
 
 # Resolves the stack (CR 608.2m: a permanent type goes to the battlefield) -
 # solo player's pass is again "everyone passed", now with a nonempty stack.
-[[actions]]
+[[steps]]
 type = "pass_priority"
 player = 0
 
-[[assertions]]
-type = "mana_pool"
+[[steps]]
+type = "assert_mana_pool"
 player = 0
 color = "green"
 equals = 0
 
-[[assertions]]
-type = "mana_pool"
+[[steps]]
+type = "assert_mana_pool"
 player = 0
 color = "colorless"
 equals = 0
 
-[[assertions]]
-type = "object_zone"
+[[steps]]
+type = "assert_object_zone"
 card = "bear"
 equals = "battlefield"
 
-[[assertions]]
-type = "phase"
+[[steps]]
+type = "assert_phase"
 equals = "main"
 
-[[assertions]]
-type = "step"
+[[steps]]
+type = "assert_step"
 equals = "pre_combat_main"
