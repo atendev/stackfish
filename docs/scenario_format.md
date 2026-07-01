@@ -322,6 +322,22 @@ additional costs (sacrifice/discard/etc) and alternative costs (flashback/escape
 `PaymentPlan::validate` rejects any `CostSpec` that has either set, and nothing in this slice
 constructs one.
 
+```toml
+[[actions]]
+type = "submit_discard"
+player = 0
+cards = ["c1", "c2"]   # card keys to discard; list may be empty for []
+```
+
+Answers a pending `ProcessState::AwaitingDiscard` pause (CR 514.1) — i.e. the action triggered when
+the active player's hand exceeds `max_hand_size` (normally 7) at the start of Cleanup. The number of
+keys in `cards` must equal exactly `hand_size - max_hand_size` (the "excess" count the engine
+computed); too many, too few, duplicates, or a key not in hand are all rejected with a `DiscardError`
+and reported as `Errored` in the scenario output. Same "own entry point" design as `submit_payment`
+— not routed through `submit_action`. Each card key must have a unique `[[setup]]` entry (if two
+setups share the same key, only the last ObjectId is tracked and only that instance can be named in
+`cards`).
+
 ### Targets
 
 Anywhere a target is expected (`targets`, `selection`, attacker `target`), write either:
@@ -368,7 +384,7 @@ mixed in the same file — pick one style per scenario.
 Assertion type names for `[[steps]]` (all take the same fields as their `[[assertions]]`
 equivalents): `assert_life`, `assert_ledger_len`, `assert_object_zone`, `assert_mana_pool`,
 `assert_tapped`, `assert_eliminated`, `assert_phase`, `assert_step`, `assert_active_player`,
-`assert_priority_player`.
+`assert_priority_player`, `assert_hand_size`.
 
 ---
 
@@ -466,6 +482,16 @@ equals = 0    # u32, matches a [[players]] id
 
 These read `GameState` fields directly (not through the engine's own accessor methods), so they
 work regardless of which inherent methods are implemented yet.
+
+```toml
+[[assertions]]
+type = "hand_size"
+player = 0
+equals = 7
+```
+
+Checks the number of cards in `player`'s hand zone. Useful after a `submit_discard` to confirm the
+active player discarded down to exactly `max_hand_size`.
 
 **A card's key keeps resolving correctly across zone moves.** `play_land`/`cast_spell`/resolution
 all mint a *new* `ObjectId` for the moved object (CR 400.7) instead of reusing the old one — every

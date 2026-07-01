@@ -9,6 +9,7 @@ use crate::triggers::{self, PendingTrigger};
 use crate::types::card::CardTypeSet;
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{self, CostPayment, CostSpec, PaymentPlan};
+use crate::types::effect::EffectDuration;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId};
@@ -66,6 +67,20 @@ pub enum PaymentError {
     InvalidPlan,
 }
 
+/// Why `submit_discard` rejected an answer to a CR 514.1
+/// `ProcessState::AwaitingDiscard` pause.
+#[derive(Debug)]
+pub enum DiscardError {
+    /// Engine isn't sitting in `ProcessState::AwaitingDiscard`.
+    NotAwaitingDiscard,
+    /// Wrong number of cards — exactly `expected` must be discarded.
+    WrongCount { expected: usize, got: usize },
+    /// Same card id listed more than once.
+    DuplicateCard,
+    /// A card id isn't in the active player's hand under their control.
+    CardNotInHand,
+}
+
 /// Whether `chosen` is a reordering of `group` — same `PendingTrigger`s
 /// (by value), each used exactly once, any order. Used by
 /// `submit_trigger_order` to reject a same-length answer that isn't
@@ -116,6 +131,13 @@ pub enum StepStatus {
     /// priority decision" rationale as `AwaitingReplacementChoice` — it has
     /// its own entry point rather than going through `submit_action`.
     AwaitingPayment { player: PlayerId, stack_id: ObjectId },
+    /// CR 514.1: `player`'s hand exceeds `max_hand_size` (normally 7) at the
+    /// start of cleanup — the caller should prompt `player` to choose exactly
+    /// `hand_size - max_hand_size` cards to discard and call `submit_discard`,
+    /// then `step()` again. Separate entry point from `submit_action` for the
+    /// same reason as `AwaitingPayment` — this is a mandatory cleanup action,
+    /// not a priority decision.
+    AwaitingDiscard { player: PlayerId, hand_size: usize, max_hand_size: usize },
     /// A command failed mid-pipeline. The engine resets to `PriorityWindow`
     /// so it doesn't get stuck — it does NOT retry or roll back whatever
     /// partial mutation happened before the error, since `execute_command`
@@ -208,6 +230,14 @@ pub enum ProcessState {
     /// All players passed with an empty stack — advance turn/phase/step
     /// (CR 500-514) before priority reopens.
     AdvanceTurnStep,
+    /// CR 514.1: cleanup's discard-to-hand-size turn-based action found the
+    /// active player's hand exceeds `max_hand_size` — waiting for
+    /// `Engine::submit_discard` to answer before continuing.
+    AwaitingDiscard { player: PlayerId, excess: usize },
+    /// CR 514.3: cleanup's turn-based actions (discard, effect expiry) are
+    /// done — run one SBA pass to decide whether priority opens (SBAs fired)
+    /// or the turn advances silently (nothing triggered, normal case).
+    CleanupSbaCheck,
     /// CR 601.2f-h: paused mid-pipeline because `CastSpell` pushed
     /// `stack_id` onto the stack but its cost (`cost`) hasn't been paid yet
     /// — `payer` must submit a `PaymentPlan` via `Engine::submit_payment`
@@ -449,6 +479,92 @@ impl Engine {
         // pause, since pipeline_context/pipeline_exit were already decided
         // before the pause happened.
         self.process_state = ProcessState::SbaLoop;
+        Ok(())
+    }
+
+    /// Answers a pending CR 514.1 discard-to-hand-size choice raised by
+    /// `StepStatus::AwaitingDiscard` — `cards` must be exactly the right
+    /// number of cards from the active player's hand. Moves each hand →
+    /// graveyard via the same CR 400.7 new-`ObjectId` convention every other
+    /// zone move uses, then queues `ProcessState::CleanupSbaCheck` so the
+    /// next `step()` decides whether CR 514.3's priority exception applies.
+    ///
+    /// TODO: discard can be replaced (e.g. Leyline of the Void redirects
+    /// discarded cards to exile) but replacement effects aren't implemented
+    /// yet — events committed directly to the ledger here, same shortcut
+    /// `submit_payment` uses.
+    pub fn submit_discard(&mut self, cards: Vec<ObjectId>) -> Result<(), DiscardError> {
+        let ProcessState::AwaitingDiscard { player, excess } = self.process_state else {
+            return Err(DiscardError::NotAwaitingDiscard);
+        };
+
+        if cards.len() != excess {
+            return Err(DiscardError::WrongCount { expected: excess, got: cards.len() });
+        }
+
+        // Duplicate check before any mutation.
+        let mut seen: Vec<ObjectId> = Vec::with_capacity(cards.len());
+        for &card in &cards {
+            if seen.contains(&card) {
+                return Err(DiscardError::DuplicateCard);
+            }
+            seen.push(card);
+        }
+
+        // Validate each card is in the active player's hand under their control.
+        for &card in &cards {
+            let object = self.state.object(card).ok_or(DiscardError::CardNotInHand)?;
+            if object.zone != ZoneKind::Hand || object.controller != player {
+                return Err(DiscardError::CardNotInHand);
+            }
+        }
+
+        // Move each card hand → graveyard (CR 400.7: new ObjectId per move).
+        let mut events: Vec<GameEventKind> = Vec::with_capacity(cards.len());
+        for card in cards {
+            let last_known_info =
+                self.state.object(card).expect("validated above").clone();
+            let owner = last_known_info.owner;
+
+            let new_id = self.state.allocate_object_id();
+            let mut new_object = last_known_info.clone();
+            new_object.object_id = new_id;
+            new_object.lineage = ObjectLineage { previous: Some(card) };
+            new_object.zone = ZoneKind::Graveyard;
+            new_object.timestamp = self.state.allocate_sequence_no();
+
+            self.state
+                .zone_mut(ZoneKind::Hand, Some(player))
+                .expect("hand zone must exist")
+                .remove(card);
+            self.state.objects.remove(&card);
+            self.state
+                .zone_mut(ZoneKind::Graveyard, Some(owner))
+                .expect("graveyard zone must exist")
+                .push_bottom(new_id);
+            self.state.objects.insert(new_id, new_object);
+
+            events.push(GameEventKind::ZoneChange {
+                object: new_id,
+                from: ZoneKind::Hand,
+                to: ZoneKind::Graveyard,
+                last_known_info: Some(last_known_info),
+            });
+        }
+
+        for kind in events {
+            let event_id = self.state.allocate_event_id();
+            let sequence_no = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no,
+                kind,
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
+
+        self.process_state = ProcessState::CleanupSbaCheck;
         Ok(())
     }
 
@@ -837,11 +953,56 @@ impl Engine {
                     let draw_events = self.draw_step();
                     self.log_events(draw_events);
                 }
+                if self.state.step == Step::Cleanup {
+                    // CR 514.3: normally no priority during cleanup - run
+                    // cleanup's turn-based actions (514.1 discard, 514.2
+                    // effect expiry) then check SBAs before deciding
+                    // whether to open a priority window or advance the turn
+                    // silently. begin_cleanup_step handles all of this.
+                    return self.begin_cleanup_step();
+                }
 
                 // CR 117.3b: priority opens to the active player at the
                 // start of each step/phase.
                 self.state.priority_player = self.state.active_player;
                 self.process_state = ProcessState::PriorityWindow;
+                StepStatus::Progressed
+            }
+
+            ProcessState::AwaitingDiscard { player, excess } => {
+                // Nothing to do until submit_discard answers - put the
+                // exact same state back and tell the caller who needs to be
+                // prompted, mirroring AwaitingPayment's pattern.
+                let hand_size = self
+                    .state
+                    .zone(ZoneKind::Hand, Some(player))
+                    .map(|z| z.contents.len())
+                    .unwrap_or(0);
+                let status =
+                    StepStatus::AwaitingDiscard { player, hand_size, max_hand_size: 7 };
+                self.process_state = ProcessState::AwaitingDiscard { player, excess };
+                status
+            }
+
+            ProcessState::CleanupSbaCheck => {
+                let events = sba::check_state_based_actions(&mut self.state);
+                if !events.is_empty() {
+                    // CR 514.3: SBAs fired during cleanup - open a priority
+                    // window so players can respond.
+                    // TODO: CR 514.3 says another cleanup step begins after
+                    // this priority window and its stack empties - currently
+                    // advance_turn_step's (Ending, Cleanup) arm rotates the
+                    // turn instead, skipping re-running discard/effect-expiry.
+                    // Correct once a case actually reaches this branch.
+                    self.state.ledger.extend(events);
+                    self.state.priority_player = self.state.active_player;
+                    self.process_state = ProcessState::PriorityWindow;
+                } else {
+                    // CR 514.3: no SBAs, no triggers (collect_triggers is
+                    // todo!() for any real ability) - skip priority entirely,
+                    // advance the turn.
+                    self.process_state = ProcessState::AdvanceTurnStep;
+                }
                 StepStatus::Progressed
             }
         }
@@ -943,6 +1104,46 @@ impl Engine {
             to: ZoneKind::Hand,
             last_known_info: Some(last_known_info),
         }]
+    }
+
+    /// CR 514.1/514.2/514.3: entry point for the cleanup step's turn-based
+    /// actions. Called from `AdvanceTurnStep` when `advance_turn_step()`
+    /// transitions into `Step::Cleanup`.
+    ///
+    /// Order: (1) drain "until end of turn" continuous effects (514.2),
+    /// (2) check hand size and pause for discard if needed (514.1),
+    /// (3) queue `CleanupSbaCheck` so the next `step()` decides whether
+    /// priority opens (CR 514.3 exception) or the turn advances silently.
+    fn begin_cleanup_step(&mut self) -> StepStatus {
+        // CR 514.2: drain "until end of turn" continuous effects.
+        // TODO: ReplacementEffect has no `duration` field yet - once added,
+        // drain state.replacement_effects here with the same retain().
+        self.state
+            .continuous_effects
+            .retain(|e| !matches!(e.duration, EffectDuration::UntilEndOfTurn));
+
+        // CR 514.1: active player discards to max hand size if needed.
+        let active = self.state.active_player;
+        let hand_size = self
+            .state
+            .zone(ZoneKind::Hand, Some(active))
+            .map(|z| z.contents.len())
+            .unwrap_or(0);
+        // TODO(CR 402.2): hardcoded to 7 - doesn't consult
+        // state.continuous_effects for effects that modify max hand size
+        // (e.g. "you have no maximum hand size"). Revisit once a continuous
+        // effect that modifies this exists and has a query API.
+        const MAX_HAND_SIZE: usize = 7;
+
+        if hand_size > MAX_HAND_SIZE {
+            let excess = hand_size - MAX_HAND_SIZE;
+            self.process_state = ProcessState::AwaitingDiscard { player: active, excess };
+            return StepStatus::AwaitingDiscard { player: active, hand_size, max_hand_size: MAX_HAND_SIZE };
+        }
+
+        // No discard needed - proceed to the SBA check.
+        self.process_state = ProcessState::CleanupSbaCheck;
+        StepStatus::Progressed
     }
 
     /// Deterministic CR 500-514 phase/step transition table for this slice:
