@@ -1564,6 +1564,93 @@ refactor, both internal to `engine.rs` — no public signature changed shape.
   unconditional; no `continuous_effects` query API exists yet (same gap `is_sorcery_speed` already
   flags for `PlayLand`).
 
+## Phase 5: phase5/ending-phase slice (merged to master)
+
+Branch `phase5/ending-phase`, off master. Slice scope: CR 511-514, the Ending Phase (End of
+Combat, End Step, Cleanup Step). End of Combat and End Step are bare priority windows — no new
+engine code required. Cleanup gets two real pieces: the discard-to-hand-size turn-based action
+(CR 514.1) and the "until end of turn" continuous effect expiry (CR 514.2). CR 514.3's
+no-priority rule was also implemented: cleanup now auto-advances without opening a priority window
+unless SBAs fire during the post-discard SBA check.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — all 9 new tests in
+`crates/engine/tests/phase5_ending_phase.rs` green, all prior suites unaffected (after the
+`phase5_combat_damage.rs` fix below). Confirmed via CLI too: `cargo run -p stackfish-cli --
+crates/engine/tests/scenarios/phase5_ending_phase.toml` — 22 actions ran, 3/3 assertions passed
+(zone-change for both discarded cards, hand-size == 7).
+
+**What got implemented:**
+
+- `zone.rs`: `Zone::len()` and `Zone::contains()` — both were `todo!()`, needed for hand-size
+  checking and `submit_discard`'s "card in hand" validation.
+
+- `engine.rs` — new types:
+  - `DiscardError`: `NotAwaitingDiscard`, `WrongCount { expected, got }`, `DuplicateCard`,
+    `CardNotInHand`.
+  - `StepStatus::AwaitingDiscard { player, hand_size, max_hand_size }` — surfaces the pause to
+    callers (mirrors `AwaitingPayment`).
+  - `ProcessState::AwaitingDiscard { player, excess }` — engine state while waiting for
+    `submit_discard`.
+  - `ProcessState::CleanupSbaCheck` — post-discard/expiry gate that decides whether to open
+    priority (SBAs fired) or rotate the turn silently (normal case).
+
+- `engine.rs` — new methods:
+  - `Engine::submit_discard(Vec<ObjectId>)`: validates exact count, no duplicates, all ids in
+    active player's hand; moves each card hand→graveyard per CR 400.7 (mints new `ObjectId`,
+    emits `ZoneChange` event with `last_known_info`); sets `CleanupSbaCheck`. Same "own entry
+    point" design as `submit_payment`.
+  - `Engine::begin_cleanup_step()` (private): called from `AdvanceTurnStep` when `step ==
+    Cleanup`. (1) Drains `continuous_effects` with `EffectDuration::UntilEndOfTurn` (CR 514.2).
+    (2) Checks active player hand size — if excess, pauses on `AwaitingDiscard`; if not, jumps
+    straight to `CleanupSbaCheck`. Damage clearing (`damage_marked = 0`) was already handled by
+    `advance_turn_step`'s `(Ending, End) → (Ending, Cleanup)` arm, not moved.
+
+- `engine.rs` — `AdvanceTurnStep` arm: added `if self.state.step == Step::Cleanup { return
+  self.begin_cleanup_step(); }` before the generic priority-open fallthrough. `AwaitingDiscard`
+  arm is idempotent (re-reads hand size, re-surfaces the pause without re-advancing state).
+  `CleanupSbaCheck` arm: runs one `sba::check_state_based_actions` pass; if events fire, opens
+  priority; if not, sets `AdvanceTurnStep` to rotate the turn silently.
+
+- `scenario/src/lib.rs`:
+  - `ActionSpec::SubmitDiscard { player, cards: Vec<String> }` — routes through new `run_discard`
+    helper (same panic-catch pattern as `run_payment`).
+  - `AssertionSpec::HandSize { player, equals }` — checks hand zone `contents.len()`.
+  - `drain()` updated to pause on `StepStatus::AwaitingDiscard` (same as `AwaitingPayment`).
+
+- `docs/scenario_format.md`: documented `submit_discard` action and `hand_size`/`assert_hand_size`
+  assertion.
+
+**STRUCT DEVIATIONS:** None.
+
+**INTERFACE DEVIATIONS:** `Zone` gained two new public methods (`len`, `contains`). `Engine`
+gained `submit_discard` as a new public entry point (alongside `submit_action`, `submit_payment`).
+`StepStatus` gained `AwaitingDiscard` variant — callers that `match` exhaustively need a new arm.
+`DiscardError` is new public type in `engine` module.
+
+**SCOPE DEVIATIONS:**
+
+- `phase5_combat_damage.rs::damage_marked_is_cleared_entering_cleanup`: this test's old loop
+  looked for `engine.state().step == Step::Cleanup` expecting the engine to pause for priority at
+  Cleanup — that was incorrect per CR 514.3. With the new implementation, Cleanup auto-advances
+  without a priority window (no SBAs in that fixture), so the engine was past Cleanup by the time
+  the test checked. Fixed: removed the loop's `step == Cleanup` break condition and step assertion;
+  now just submits 2 passes (one per player at End step) and checks `damage_marked == 0` directly.
+  The damage IS cleared (by `advance_turn_step`'s transition code, unchanged), the test was just
+  checking the wrong architectural invariant.
+
+**UNRESOLVED (flagged with explicit `TODO` in code):**
+
+- `ReplacementEffect` has no `duration` field — UntilEndOfTurn replacement effects can't be
+  drained at cleanup yet. Only `continuous_effects` are drained. Marked `TODO` in
+  `begin_cleanup_step`.
+- CR 514.3 full loop: if SBAs fire and priority opens during cleanup, and then triggers resolve,
+  a *second* cleanup should begin (not just return to Upkeep). `CleanupSbaCheck` currently just
+  opens `PriorityWindow` and doesn't re-enter `begin_cleanup_step` after it resolves. Marked TODO.
+- Max hand size hardcoded to `7` — CR 402.2 continuous effects (e.g. "you have no maximum hand
+  size") aren't queried. Marked TODO.
+- End of Combat step (CR 511): any "until end of combat" effects would need their own expiry pass
+  here. Not modeled — no such duration exists in `EffectDuration` yet.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
