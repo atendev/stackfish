@@ -735,12 +735,19 @@ impl Engine {
                         new_object.lineage = ObjectLineage { previous: Some(top.stack_id) };
                         new_object.zone = destination;
                         new_object.timestamp = self.state.allocate_sequence_no();
+                        // CR 302.6/602.5a: a permanent entering the battlefield
+                        // this turn is summoning sick — stamp it with the
+                        // current turn number so has_summoning_sickness fires.
+                        if is_permanent {
+                            new_object.controlled_since_turn = self.state.turn_number;
+                        }
 
                         self.state.objects.remove(&top.stack_id);
                         if let Some(zone) = self.state.zone_mut(destination, destination_owner) {
                             zone.push_bottom(new_id);
                             self.state.objects.insert(new_id, new_object);
                         }
+                        commands::remap_abilities(&mut self.state, top.stack_id, new_id);
                         // else: no such zone registered - defensive no-op,
                         // same stance as PlayLand's zone_mut lookups, just
                         // without a CommandError to return from here.
