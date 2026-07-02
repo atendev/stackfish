@@ -1,8 +1,14 @@
-seed = 1
+[game]
+turn_order = [0, 1]
+rng_seed = 123
 
-[[players]]
+[game.settings]
+skip_mulligan = true
+shuffle_libraries = false
+
+[[game.players]]
 id = 0
-life = 20
+library = ["forest1", "forest2", "forest3", "dork", "bear", "island1", "island2"]
 
 [[cards]]
 key = "forest1"
@@ -42,38 +48,9 @@ types = ["Creature"]
 generic_cost = 1
 colors = ["G"]
 
-[[setup]]
-player = 0
-zone = "hand"
-card = "forest1"
-[[setup]]
-player = 0
-zone = "hand"
-card = "forest2"
-[[setup]]
-player = 0
-zone = "hand"
-card = "forest3"
-[[setup]]
-player = 0
-zone = "hand"
-card = "dork"
-[[setup]]
-player = 0
-zone = "hand"
-card = "bear"
-[[setup]]
-player = 0
-zone = "library"
-card = "island1"
-[[setup]]
-player = 0
-zone = "library"
-card = "island2"
-
-[[players]]
+[[game.players]]
 id = 1
-life = 20
+library = ["mountain1", "mountain2", "mountain3", "goblin"]
 
 [[cards]]
 key = "mountain1"

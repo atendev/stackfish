@@ -43,7 +43,7 @@ If `[game]` is present, `[[players]]` and `[[setup]]` are ignored entirely.
 ## Top-level fields
 
 ```toml
-seed = 1          # u64, required - seeds GameState.rng (also default rng_seed for [game])
+seed = 1          # u64, optional - seeds GameState.rng; required on manual path, optional when [game].rng_seed is set
 
 [[players]]        # zero or more (manual path only — ignored when [game] is set)
 [[cards]]           # zero or more - ad-hoc test card definitions (used by both paths)
@@ -133,9 +133,13 @@ life_override = 40                                  # optional u32, overrides st
 copies. If `shuffle_libraries = true` (default), the engine shuffles before drawing so the order
 only matters for deterministic (`shuffle_libraries = false`) runs.
 
-**Card ids on the new-game path:** library cards created by `new_game` don't have TOML keys —
-`card_ids` is empty on this path. Assertions must use zone-count checks (`assert_hand_size`,
-`assert_phase`, `assert_life`, etc.) rather than per-card key lookups (`assert_object_zone`).
+**Card keys work on the new-game path.** The scenario crate reconstructs the object-id sequence
+that `Engine::new_game` assigns (sequential, one per library card, in player/library order), then
+remaps through the pregame ledger events — each `draw_opening_hand`/`return_hand_to_library`
+logs a `ZoneChange` with the old id, so keys follow cards into their post-pregame zones. Duplicate
+keys in a library track the last instance (same semantics as `[[setup]]`). This means
+`assert_object_zone`, `activate_ability`, `play_land`, etc. all work with library card keys after
+pregame completes.
 
 ## `[[cards]]`
 
@@ -456,9 +460,9 @@ player's hand zone (positional — hand zone order) and puts them on the library
 must equal `max(0, mulligans_taken - free_mulligans)` exactly; wrong counts are rejected. Use
 `first_n = 0` only when `mulligans_taken <= free_mulligans` (no cards owed).
 
-**Card ids on the new-game path:** since library/hand cards created by `new_game` don't have TOML
-keys, `bottom_cards` selects by position rather than by card key. The scenario doesn't name which
-specific cards go to the bottom — just how many.
+**`bottom_cards` selects by position, not by card key** — it takes the first `first_n` cards in
+hand zone order regardless of which specific cards they are. The scenario states how many go to
+the bottom, not which ones.
 
 ### Targets
 

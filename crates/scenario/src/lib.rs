@@ -37,7 +37,8 @@ use stackfish_engine::types::config::{GameConfig, GameSettings, PlayerConfig};
 
 #[derive(Deserialize)]
 pub struct ScenarioFile {
-    pub seed: u64,
+    #[serde(default)]
+    pub seed: Option<u64>,
     #[serde(default)]
     pub players: Vec<PlayerSpec>,
     #[serde(default)]
@@ -782,7 +783,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         replacement_effects: Vec::new(),
         abilities,
         ledger: Vec::new(),
-        rng: RngState { seed: file.seed, draws_consumed: 0 },
+        rng: RngState { seed: file.seed.expect("`seed` is required when `[game]` is not set"), draws_consumed: 0 },
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id,
@@ -1056,21 +1057,33 @@ fn build_game_settings(spec: &GameSettingsSpec) -> GameSettings {
 }
 
 /// Builds an `Engine` via `Engine::new_game` from a `[game]` section.
-/// Returns the engine; `card_ids` starts empty (library cards created by
-/// `new_game` don't have TOML keys and the pregame draw remaps their ids
-/// anyway — assertions on the new_game path should use zone/hand-size checks
-/// rather than per-card key lookups).
-fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> Engine {
+/// Also reconstructs `card_ids` so scenario steps can reference library
+/// cards by their `[[cards]]` key. `Engine::new_game` assigns object ids
+/// sequentially (one per library card, in player/library order starting at
+/// 0), so we track those initial ids here and then remap them through the
+/// pregame ledger events — `draw_opening_hand` and `return_hand_to_library`
+/// both log `ZoneChange` with `last_known_info`, so `remap_moved_card_ids`
+/// correctly follows each card to its post-pregame id and zone. Duplicate
+/// keys in a library get the last id (same as `[[setup]]` semantics).
+fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashMap<String, ObjectId>) {
     let card_specs: HashMap<&str, &CardSpec> =
         file.cards.iter().map(|c| (c.key.as_str(), c)).collect();
 
     let settings = build_game_settings(&game.settings);
-    let rng_seed = game.rng_seed.unwrap_or(file.seed);
+    let rng_seed = game.rng_seed.or(file.seed).unwrap_or(0);
+
+    // Track initial object ids — Engine::new_game allocates sequentially
+    // starting at 0, one per library card, in the same player/card order
+    // we iterate here.
+    let mut card_ids: HashMap<String, ObjectId> = HashMap::new();
+    let mut next_id: u64 = 0;
 
     let player_configs: Vec<PlayerConfig> = game.players.iter().map(|gp| {
         let library = gp.library.iter().map(|key| {
             let spec = card_specs.get(key.as_str())
                 .unwrap_or_else(|| panic!("game.players library references unknown card key '{key}'"));
+            card_ids.insert(key.clone(), ObjectId(next_id));
+            next_id += 1;
             let symbols = mana_symbols(spec.generic_cost, &spec.colors);
             CardDefinition {
                 definition_id: 0,
@@ -1097,7 +1110,11 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> Engine {
         game.turn_order.iter().map(|&id| PlayerId(id)).collect()
     };
 
-    Engine::new_game(GameConfig { players: player_configs, turn_order, settings, rng_seed })
+    let engine = Engine::new_game(GameConfig { players: player_configs, turn_order, settings, rng_seed });
+    // Remap ids through pregame zone changes (draw_opening_hand and
+    // return_hand_to_library both mint new ObjectIds and log ZoneChange events).
+    remap_moved_card_ids(&mut card_ids, engine.state().ledger.as_slice());
+    (engine, card_ids)
 }
 
 pub enum AssertionOutcome {
@@ -1325,10 +1342,7 @@ fn run_action_spec(
 
 pub fn run(file: &ScenarioFile) -> ScenarioReport {
     let (mut engine, mut card_ids) = if let Some(game) = &file.game {
-        // new_game path: Engine::new_game handles pregame setup. No card_ids
-        // for library cards since they're not setup entries — assertions on
-        // this path should use zone/hand-size checks, not per-card keys.
-        (build_new_game_engine(file, game), HashMap::new())
+        build_new_game_engine(file, game)
     } else {
         let (state, card_ids) = build_initial_state(file);
         (Engine::new(state), card_ids)
