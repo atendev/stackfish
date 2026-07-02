@@ -85,6 +85,8 @@ fn two_player_state() -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             },
             PlayerState {
                 player_id: p1,
@@ -94,6 +96,8 @@ fn two_player_state() -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             },
         ],
         turn_order: vec![p0, p1],
@@ -130,6 +134,7 @@ fn two_player_state() -> GameState {
         // A clearly distinct starting value makes a real id-collision bug
         // visible instead of accidentally passing.
         next_object_id: 1000,
+        pending_step_skips: Vec::new(),
     }
 }
 

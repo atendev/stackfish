@@ -74,6 +74,8 @@ fn state_with_pool(pool: ManaPool) -> GameState {
             emblems: Vec::new(),
             commander_damage_taken: Vec::new(),
             eliminated: false,
+            mulligans_taken: 0,
+            hand_kept: false,
         }],
         turn_order: vec![p0],
         active_player: p0,
@@ -102,6 +104,7 @@ fn state_with_pool(pool: ManaPool) -> GameState {
         // Not 0 - collides with the literal ObjectId(0) fixture cards use,
         // same reasoning as phase5_cast_spell.rs.
         next_object_id: 1000,
+        pending_step_skips: Vec::new(),
     }
 }
 

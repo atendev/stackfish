@@ -87,6 +87,8 @@ fn two_player_state() -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             },
             PlayerState {
                 player_id: p1,
@@ -96,6 +98,8 @@ fn two_player_state() -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             },
         ],
         turn_order: vec![p0, p1],
@@ -127,6 +131,7 @@ fn two_player_state() -> GameState {
         // Deliberately not 0/1 - those collide with the literal ObjectIds
         // fixtures below assign to test cards.
         next_object_id: 1000,
+        pending_step_skips: Vec::new(),
     }
 }
 
@@ -257,6 +262,9 @@ fn draw_skipped_on_turn_1_two_player() {
     state.phase = Phase::Beginning;
     state.step = Step::Upkeep;
     state.turn_number = 1; // CR 103.8a: starting player's first turn.
+    // Fixture starts at Upkeep, bypassing PreGame — seed the skip manually,
+    // since it's normally seeded by advance_turn_step's PreGame arm.
+    state.pending_step_skips.push((p0, Step::Draw));
 
     let card = ObjectId(0);
     state.objects.insert(card, card_object(card, land_definition("Forest"), p0, ZoneKind::Library));
@@ -264,8 +272,13 @@ fn draw_skipped_on_turn_1_two_player() {
 
     let mut engine = Engine::new(state);
     let status = pass_both(&mut engine, p0, p1);
+    // CR 500.7/500.8: a skipped step has no turn-based actions AND no priority
+    // window — the engine skips past Draw entirely and opens priority at
+    // PreCombatMain instead (old behavior opened priority at Draw with just the
+    // action omitted; this is the correct per-rule behavior).
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().step, Step::Draw, "priority still opens at Draw even when the draw is skipped");
+    assert_eq!(engine.state().phase, Phase::Main);
+    assert_eq!(engine.state().step, Step::PreCombatMain, "skipped Draw, no priority window there");
 
     assert!(zone_change_events(&engine).is_empty(), "no draw on the starting player's first turn");
     assert!(engine.state().zone(ZoneKind::Library, Some(p0)).unwrap().contents.contains(&card));

@@ -68,6 +68,8 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
             emblems: Vec::new(),
             commander_damage_taken: Vec::new(),
             eliminated: false,
+            mulligans_taken: 0,
+            hand_kept: false,
         }],
         turn_order: vec![controller],
         active_player: controller,
@@ -106,6 +108,7 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 1000,
+        pending_step_skips: Vec::new(),
     }
 }
 
@@ -230,6 +233,8 @@ fn reject_when_actor_does_not_hold_priority() {
         emblems: Vec::new(),
         commander_damage_taken: Vec::new(),
         eliminated: false,
+        mulligans_taken: 0,
+        hand_kept: false,
     });
     state.turn_order.push(p1);
     state.priority_player = p1;

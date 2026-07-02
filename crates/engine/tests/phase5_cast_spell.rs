@@ -122,6 +122,8 @@ fn two_player_state() -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             },
             PlayerState {
                 player_id: p1,
@@ -131,6 +133,8 @@ fn two_player_state() -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             },
         ],
         turn_order: vec![p0, p1],
@@ -167,6 +171,7 @@ fn two_player_state() -> GameState {
         // the tests below assign to fixture cards, same reasoning as
         // phase5_play_land.rs's two_player_state.
         next_object_id: 1000,
+        pending_step_skips: Vec::new(),
     }
 }
 

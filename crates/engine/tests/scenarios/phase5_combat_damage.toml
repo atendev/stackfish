@@ -45,16 +45,10 @@ zone = "battlefield"
 card = "wall2"
 
 # Two players, so every step transition needs both to pass in a row
-# (CR 117.4) - 5 step transitions to reach the declare attackers step:
-# PreGame -> Untap (no priority window, CR 502.4 - auto-chains into Upkeep)
-# -> Upkeep -> Draw -> PreCombatMain -> BeginningOfCombat -> DeclareAttackers,
-# 2 passes each.
-[[steps]]
-type = "pass_priority"
-player = 0
-[[steps]]
-type = "pass_priority"
-player = 1
+# (CR 117.4) - 4 step transitions to reach the declare attackers step:
+# PreGame -> Untap (no priority, CR 502.4, auto-chains into Upkeep)
+# -> Upkeep -> Draw (SKIPPED turn 1, CR 103.8a/500.7: no priority window)
+# -> PreCombatMain -> BeginningOfCombat -> DeclareAttackers, 2 passes each.
 [[steps]]
 type = "pass_priority"
 player = 0

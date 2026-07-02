@@ -65,6 +65,10 @@ pub enum GameEventKind {
     StepStarted { step: crate::turn::Step },
     PlayerEliminated { player: PlayerId },
     RngDrawn { purpose: String, value: u64 },
+    /// CR 103.3: logged once per player whose library was shuffled during
+    /// pregame setup. Useful for replay (marks where the randomness happened)
+    /// and for any future "whenever a library is shuffled" triggers.
+    LibraryShuffled { player: PlayerId },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

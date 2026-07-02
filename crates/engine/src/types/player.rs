@@ -33,13 +33,24 @@ pub struct PlayerState {
     /// source. 21+ from a single source means this player loses (CR 903.10a).
     pub commander_damage_taken: Vec<(ObjectId, u32)>,
     pub eliminated: bool,
+    /// Number of mulligans this player took during pregame (CR 103.5). Used
+    /// after the player keeps their hand to determine how many cards they must
+    /// put on the bottom of their library. Reset is not needed — this value is
+    /// only read once (during the bottoming step) and the pregame phase never
+    /// repeats.
+    pub mulligans_taken: u32,
+    /// Set to `true` when this player submits `KeepHand` during pregame.
+    /// `next_mulligan_player` skips players where this is `true`; all players
+    /// start `false` so they all get a decision before the first turn.
+    pub hand_kept: bool,
 }
 
 impl PlayerState {
     pub fn new(player_id: PlayerId, starting_life: i32) -> Self {
         // TODO: PlayerState { player_id, life: starting_life, mana_pool:
         // ManaPool::empty(), counters: CounterSet::new(), emblems: vec![],
-        // commander_damage_taken: vec![], eliminated: false }.
+        // commander_damage_taken: vec![], eliminated: false,
+        // mulligans_taken: 0, hand_kept: false }.
         todo!()
     }
 

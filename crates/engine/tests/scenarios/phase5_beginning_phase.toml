@@ -45,15 +45,10 @@ player = 1
 zone = "library"
 card = "libcard"
 
-# PreGame -> Untap (no priority window, CR 502.4 - auto-chains into Upkeep)
-# -> Upkeep -> Draw -> PreCombatMain -> BeginningOfCombat -> DeclareAttackers,
-# 2 passes each (5 step transitions).
-[[steps]]
-type = "pass_priority"
-player = 0
-[[steps]]
-type = "pass_priority"
-player = 1
+# PreGame -> Untap (no priority, CR 502.4, auto-chains into Upkeep)
+# -> Upkeep -> Draw (SKIPPED turn 1, CR 103.8a/500.7: no priority window either)
+# -> PreCombatMain -> BeginningOfCombat -> DeclareAttackers.
+# 4 step transitions that need passes: Upkeep, PreCombatMain, BeginningOfCombat, DeclareAttackers.
 [[steps]]
 type = "pass_priority"
 player = 0
