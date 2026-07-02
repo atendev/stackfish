@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Range;
 
@@ -7,15 +8,20 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::sba;
 use crate::triggers::{self, PendingTrigger};
 use crate::types::card::CardTypeSet;
+use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{self, CostPayment, CostSpec, PaymentPlan};
+use crate::types::counter::CounterSet;
 use crate::types::effect::EffectDuration;
 use crate::types::event::{GameEvent, GameEventKind};
-use crate::types::game::GameState;
-use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId};
+use crate::types::game::{GameState, RngState};
+use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, SequenceNo};
+use crate::types::mana::ManaPool;
+use crate::types::object::{GameObject, VisibilityPolicy};
+use crate::types::player::PlayerState;
 use crate::types::stack::StackEntryKind;
 use crate::types::turn::{Phase, Step};
-use crate::types::zone::ZoneKind;
+use crate::types::zone::{Zone, ZoneKind};
 
 /// Why `submit_action` rejected a `PlayerAction` outright (wrong player has
 /// priority, action doesn't match what's currently legal, etc). Distinct
@@ -79,6 +85,37 @@ pub enum DiscardError {
     DuplicateCard,
     /// A card id isn't in the active player's hand under their control.
     CardNotInHand,
+}
+
+/// Why `submit_mulligan_decision` rejected a `KeepHand` or `TakeMulligan`.
+#[derive(Debug)]
+pub enum MulliganError {
+    /// Engine isn't sitting in `ProcessState::AwaitingMulliganDecision`.
+    NotAwaitingDecision,
+    /// `action.player` isn't the player whose turn it is to decide this round.
+    WrongPlayer,
+    /// Player submitted `TakeMulligan` but has already reached
+    /// `GameSettings::max_mulligans`. They must keep.
+    MaxMulligansReached,
+    /// `action.kind` wasn't `KeepHand` or `TakeMulligan` — only those two
+    /// are valid during a mulligan decision window.
+    InvalidAction,
+}
+
+/// Why `submit_bottom_cards` rejected a `BottomCards` submission.
+#[derive(Debug)]
+pub enum BottomCardsError {
+    /// Engine isn't sitting in `ProcessState::AwaitingBottomCardChoice`.
+    NotAwaitingChoice,
+    /// `action.player` isn't the player who needs to bottom cards right now.
+    WrongPlayer,
+    /// `cards.len()` != the `count` in `AwaitingBottomCardChoice`. Must be
+    /// exactly `count` — no more, no fewer.
+    WrongCount { expected: usize, got: usize },
+    /// A card id in `cards` isn't currently in the player's hand.
+    CardNotInHand,
+    /// Same card id appears more than once in `cards`.
+    DuplicateCard,
 }
 
 /// Whether `chosen` is a reordering of `group` — same `PendingTrigger`s
@@ -145,6 +182,12 @@ pub enum StepStatus {
     /// than hiding it behind a panic.
     Error(CommandError),
     GameOver { winner: Option<PlayerId> },
+    /// CR 103.5 pregame: `player` must submit `KeepHand` or `TakeMulligan`
+    /// via `Engine::submit_mulligan_decision` before `step()` can continue.
+    AwaitingMulliganDecision { player: PlayerId },
+    /// CR 103.5 pregame: `player` must put exactly `count` cards from their
+    /// hand onto the bottom of their library via `Engine::submit_bottom_cards`.
+    AwaitingBottomCardChoice { player: PlayerId, count: usize },
 }
 
 /// Result of one `step()` call. `events_added` indexes into
@@ -230,6 +273,17 @@ pub enum ProcessState {
     /// All players passed with an empty stack — advance turn/phase/step
     /// (CR 500-514) before priority reopens.
     AdvanceTurnStep,
+    /// CR 103.5: pregame mulligan round — waiting for `player` to submit
+    /// `KeepHand` or `TakeMulligan`. Players are polled in turn order; once
+    /// all have kept the engine moves to bottoming (or to `Beginning` if no
+    /// bottoming is needed).
+    AwaitingMulliganDecision { player: PlayerId },
+    /// CR 103.5: `player` kept their hand after taking `count` paid mulligans
+    /// (i.e. mulligans beyond `GameSettings::free_mulligans`) and must now put
+    /// exactly `count` cards from their hand on the bottom of their library.
+    /// `remaining` holds the rest of the bottoming queue (same pattern as
+    /// `PutTriggersApnap::pending_groups`).
+    AwaitingBottomCardChoice { player: PlayerId, count: usize, remaining: VecDeque<(PlayerId, usize)> },
     /// CR 514.1: cleanup's discard-to-hand-size turn-based action found the
     /// active player's hand exceeds `max_hand_size` — waiting for
     /// `Engine::submit_discard` to answer before continuing.
@@ -282,6 +336,19 @@ pub struct Engine {
     /// not "this pipeline run" in general — `ResolveStackTop` runs never set
     /// it, and it's already `None` by the time they reach `CommitEvents`.
     pending_payment: Option<PendingPaymentRequest>,
+    /// Settings that govern automated pregame behavior and format-level thresholds
+    /// (life totals, poison threshold, max hand size). Stored on `Engine`, not
+    /// `GameState`, because they're configuration for this session, not mutable
+    /// game state that rules affect. `Engine::new` uses `GameSettings::default()`;
+    /// `Engine::new_game` sets this from `GameConfig::settings`.
+    pub settings: GameSettings,
+    /// `true` once pregame setup (shuffle/draw/mulligan) is complete or was
+    /// deliberately skipped. `Engine::new_game` initializes this to `false` so
+    /// the first `step()` call triggers `run_pregame_setup`. `Engine::new`
+    /// (legacy test constructor) initializes to `true` to preserve existing
+    /// tests that build `GameState` directly with `phase: PreGame` and expect
+    /// the old pass-through behavior where PreGame was a no-op.
+    pregame_setup_done: bool,
 }
 
 impl Engine {
@@ -293,6 +360,8 @@ impl Engine {
             pipeline_exit: PipelineExit::BackToPriority,
             next_command_id: 0,
             pending_payment: None,
+            settings: GameSettings::default(),
+            pregame_setup_done: true,
         }
     }
 
@@ -356,6 +425,16 @@ impl Engine {
         );
         if !is_combat_turn_based_action && action.player != self.state.priority_player {
             return Err(ActionError::NotYourTurn);
+        }
+        if matches!(
+            action.kind,
+            PlayerActionKind::KeepHand
+                | PlayerActionKind::TakeMulligan
+                | PlayerActionKind::BottomCards { .. }
+        ) {
+            return Err(ActionError::IllegalAction(
+                "pregame actions use submit_mulligan_decision / submit_bottom_cards".to_string(),
+            ));
         }
         self.process_state = ProcessState::PendingAction(action);
         Ok(())
@@ -568,6 +647,460 @@ impl Engine {
         Ok(())
     }
 
+    /// Builds a fresh `Engine` from a `GameConfig`: creates zones and
+    /// `GameObject`s for each player's library, sets starting life from
+    /// `config.settings.starting_life` (or per-player `life_override`), and
+    /// starts in `Phase::PreGame` / `ProcessState::PriorityWindow`. The first
+    /// `step()` call will enter `run_pregame_setup`.
+    pub fn new_game(config: GameConfig) -> Engine {
+        let settings = config.settings;
+        let starting_player = config.turn_order[0];
+
+        let mut players: Vec<PlayerState> = Vec::new();
+        let mut zones: Vec<Zone> = Vec::new();
+        let mut objects: HashMap<ObjectId, GameObject> = HashMap::new();
+        let mut next_object_id: u64 = 0;
+        let mut next_sequence_no: u64 = 0;
+
+        for player_cfg in &config.players {
+            let pid = player_cfg.player_id;
+            let life = player_cfg
+                .life_override
+                .unwrap_or(settings.starting_life) as i32;
+
+            players.push(PlayerState {
+                player_id: pid,
+                life,
+                mana_pool: ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 },
+                counters: CounterSet::new(),
+                emblems: Vec::new(),
+                commander_damage_taken: Vec::new(),
+                eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
+            });
+
+            let mut lib_zone = Zone::new(ZoneKind::Library, Some(pid));
+            for card_def in &player_cfg.library {
+                let obj_id = ObjectId(next_object_id);
+                next_object_id += 1;
+                let ts = SequenceNo(next_sequence_no);
+                next_sequence_no += 1;
+                let obj = GameObject {
+                    object_id: obj_id,
+                    lineage: ObjectLineage { previous: None },
+                    definition: card_def.clone(),
+                    owner: pid,
+                    controller: pid,
+                    zone: ZoneKind::Library,
+                    tapped: false,
+                    flipped: false,
+                    face_down: false,
+                    phased_out: false,
+                    damage_marked: 0,
+                    counters: CounterSet::new(),
+                    attachments: Vec::new(),
+                    attached_to: None,
+                    timestamp: ts,
+                    controlled_since_turn: 1,
+                    visibility: VisibilityPolicy { public: false, visible_to: Vec::new() },
+                };
+                lib_zone.contents.push_back(obj_id);
+                objects.insert(obj_id, obj);
+            }
+            zones.push(lib_zone);
+            zones.push(Zone::new(ZoneKind::Hand, Some(pid)));
+            zones.push(Zone::new(ZoneKind::Graveyard, Some(pid)));
+        }
+
+        // Shared zones
+        zones.push(Zone::new(ZoneKind::Battlefield, None));
+        zones.push(Zone::new(ZoneKind::Exile, None));
+
+        let state = GameState {
+            players,
+            turn_order: config.turn_order.clone(),
+            active_player: starting_player,
+            turn_number: 1,
+            phase: Phase::PreGame,
+            step: Step::Untap,
+            priority_player: starting_player,
+            consecutive_passes: 0,
+            lands_played_this_turn: HashMap::new(),
+            combat: None,
+            last_active_turn_number: HashMap::new(),
+            objects,
+            zones,
+            stack: Vec::new(),
+            continuous_effects: Vec::new(),
+            replacement_effects: Vec::new(),
+            abilities: Vec::new(),
+            ledger: Vec::new(),
+            rng: RngState { seed: config.rng_seed, draws_consumed: 0 },
+            next_event_id: 0,
+            next_sequence_no,
+            next_object_id,
+            pending_step_skips: Vec::new(),
+        };
+
+        Engine {
+            state,
+            process_state: ProcessState::PriorityWindow,
+            pipeline_context: None,
+            pipeline_exit: PipelineExit::BackToPriority,
+            next_command_id: 0,
+            pending_payment: None,
+            settings,
+            pregame_setup_done: false,
+        }
+    }
+
+    /// Returns the `GameSettings` stored on this engine instance.
+    pub fn settings(&self) -> &GameSettings {
+        &self.settings
+    }
+
+    /// Accepts a `KeepHand` or `TakeMulligan` action from the player whose
+    /// turn it is to decide during pregame. Only valid when
+    /// `process_state == AwaitingMulliganDecision { player }` and
+    /// `action.player == player`. On `TakeMulligan`, increments
+    /// `mulligans_taken`, shuffles the hand back into the library, and draws a
+    /// new opening hand immediately. Advances to the next deciding player or
+    /// (if all have kept) to the bottoming phase.
+    pub fn submit_mulligan_decision(&mut self, action: PlayerAction) -> Result<(), MulliganError> {
+        let ProcessState::AwaitingMulliganDecision { player } = self.process_state else {
+            return Err(MulliganError::NotAwaitingDecision);
+        };
+        if action.player != player {
+            return Err(MulliganError::WrongPlayer);
+        }
+        match action.kind {
+            PlayerActionKind::KeepHand => {
+                self.state.player_mut(player).expect("valid player").hand_kept = true;
+                match self.next_mulligan_player() {
+                    Some(next) => {
+                        self.process_state = ProcessState::AwaitingMulliganDecision { player: next };
+                    }
+                    None => self.transition_to_bottoming(),
+                }
+            }
+            PlayerActionKind::TakeMulligan => {
+                let taken = self.state.player(player).expect("valid player").mulligans_taken;
+                if let Some(max) = self.settings.max_mulligans {
+                    if taken >= max {
+                        return Err(MulliganError::MaxMulligansReached);
+                    }
+                }
+                self.state.player_mut(player).expect("valid player").mulligans_taken += 1;
+                self.return_hand_to_library(player);
+                self.shuffle_library(player);
+                self.draw_opening_hand(player);
+                // Advance to the next undecided player after this one (circular).
+                // Using next_after rather than next_mulligan_player because this
+                // player is still !hand_kept (they mulliganed, not kept), so
+                // next_mulligan_player would return them again immediately.
+                let next = self.next_mulligan_player_after(player);
+                self.process_state =
+                    ProcessState::AwaitingMulliganDecision { player: next.expect("player must be in turn_order") };
+            }
+            _ => return Err(MulliganError::InvalidAction),
+        }
+        Ok(())
+    }
+
+    /// Accepts a `BottomCards` action from the player who must bottom cards
+    /// after keeping with paid mulligans. Only valid when
+    /// `process_state == AwaitingBottomCardChoice { player, .. }` and
+    /// `action.player == player`. Validates count and card membership, moves
+    /// the cards to the bottom of the player's library in submission order,
+    /// then advances to the next bottoming player or to `AdvanceTurnStep`.
+    pub fn submit_bottom_cards(&mut self, action: PlayerAction) -> Result<(), BottomCardsError> {
+        let ProcessState::AwaitingBottomCardChoice { player, count, .. } = self.process_state else {
+            return Err(BottomCardsError::NotAwaitingChoice);
+        };
+        if action.player != player {
+            return Err(BottomCardsError::WrongPlayer);
+        }
+        let PlayerActionKind::BottomCards { cards } = action.kind else {
+            return Err(BottomCardsError::WrongCount { expected: count, got: 0 });
+        };
+        if cards.len() != count {
+            return Err(BottomCardsError::WrongCount { expected: count, got: cards.len() });
+        }
+        // Duplicate check
+        let mut seen: Vec<ObjectId> = Vec::with_capacity(cards.len());
+        for &card in &cards {
+            if seen.contains(&card) {
+                return Err(BottomCardsError::DuplicateCard);
+            }
+            seen.push(card);
+        }
+        // Validate each card is in the player's hand
+        for &card in &cards {
+            let obj = self.state.object(card).ok_or(BottomCardsError::CardNotInHand)?;
+            if obj.zone != ZoneKind::Hand || obj.owner != player {
+                return Err(BottomCardsError::CardNotInHand);
+            }
+        }
+        // Move each card hand → library bottom (CR 400.7 new ObjectId per move)
+        for card in &cards {
+            let card = *card;
+            let last_known = self.state.object(card).expect("validated above").clone();
+            let owner = last_known.owner;
+            let new_id = self.state.allocate_object_id();
+            let mut new_obj = last_known.clone();
+            new_obj.object_id = new_id;
+            new_obj.lineage = ObjectLineage { previous: Some(card) };
+            new_obj.zone = ZoneKind::Library;
+            new_obj.timestamp = self.state.allocate_sequence_no();
+            self.state.zone_mut(ZoneKind::Hand, Some(player)).expect("hand zone").remove(card);
+            self.state.objects.remove(&card);
+            self.state.zone_mut(ZoneKind::Library, Some(owner)).expect("library zone").push_bottom(new_id);
+            self.state.objects.insert(new_id, new_obj);
+            commands::remap_abilities(&mut self.state, card, new_id);
+            let event_id = self.state.allocate_event_id();
+            let seq = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no: seq,
+                kind: GameEventKind::ZoneChange {
+                    object: new_id,
+                    from: ZoneKind::Hand,
+                    to: ZoneKind::Library,
+                    last_known_info: Some(last_known),
+                },
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
+        // Advance the bottoming queue
+        let ProcessState::AwaitingBottomCardChoice { mut remaining, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        match remaining.pop_front() {
+            Some((next_player, next_count)) => {
+                self.process_state = ProcessState::AwaitingBottomCardChoice {
+                    player: next_player,
+                    count: next_count,
+                    remaining,
+                };
+            }
+            None => {
+                self.process_state = ProcessState::AdvanceTurnStep;
+            }
+        }
+        Ok(())
+    }
+
+    /// Called from `step()` when `phase == PreGame && process_state ==
+    /// PriorityWindow`. Runs all automatic pregame actions: shuffles libraries
+    /// (if `settings.shuffle_libraries`), draws opening hands for all players,
+    /// then either transitions to `AwaitingMulliganDecision` for the first
+    /// player in turn order (normal path) or directly to `AdvanceTurnStep`
+    /// (if `settings.skip_mulligan`).
+    fn run_pregame_setup(&mut self) {
+        let turn_order: Vec<PlayerId> = self.state.turn_order.clone();
+        if self.settings.shuffle_libraries {
+            for &pid in &turn_order {
+                self.shuffle_library(pid);
+            }
+        }
+        for &pid in &turn_order {
+            self.draw_opening_hand(pid);
+        }
+        if self.settings.skip_mulligan {
+            for &pid in &turn_order {
+                self.state.player_mut(pid).expect("valid player").hand_kept = true;
+            }
+            self.process_state = ProcessState::AdvanceTurnStep;
+        } else {
+            let first = turn_order[0];
+            self.process_state = ProcessState::AwaitingMulliganDecision { player: first };
+        }
+    }
+
+    /// Shuffles `player`'s library zone in-place using `state.rng`. Logs a
+    /// `LibraryShuffled` event and an `RngDrawn` event per shuffle draw so
+    /// the replay is fully deterministic. Uses Fisher-Yates over the zone's
+    /// `VecDeque` contents.
+    fn shuffle_library(&mut self, player: PlayerId) {
+        let len = self.state.zone(ZoneKind::Library, Some(player)).map_or(0, |z| z.contents.len());
+        // Generate all swap targets first — can't hold &mut zone while calling next_rng()
+        let mut swaps: Vec<(usize, usize)> = Vec::with_capacity(len);
+        for i in (1..len).rev() {
+            let rng_val = self.next_rng();
+            let j = (rng_val % (i as u64 + 1)) as usize;
+            swaps.push((i, j));
+            let event_id = self.state.allocate_event_id();
+            let seq = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no: seq,
+                kind: GameEventKind::RngDrawn { purpose: "shuffle".to_string(), value: rng_val },
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
+        let lib = self.state.zone_mut(ZoneKind::Library, Some(player)).expect("library zone");
+        for (i, j) in swaps {
+            lib.contents.swap(i, j);
+        }
+        let event_id = self.state.allocate_event_id();
+        let seq = self.state.allocate_sequence_no();
+        self.state.ledger.push(GameEvent {
+            event_id,
+            sequence_no: seq,
+            kind: GameEventKind::LibraryShuffled { player },
+            caused_by_command: None,
+            parent_event: None,
+        });
+    }
+
+    /// Returns all cards from `player`'s hand to the top of their library
+    /// (no particular order required by CR 103.5 — placed top for consistency).
+    /// Logs a ZoneChange per card. Used before a mulligan redraw.
+    fn return_hand_to_library(&mut self, player: PlayerId) {
+        let hand_ids: Vec<ObjectId> = self.state
+            .zone(ZoneKind::Hand, Some(player))
+            .map_or(Vec::new(), |z| z.contents.iter().copied().collect());
+        for card in hand_ids {
+            let last_known = self.state.object(card).expect("hand card must exist").clone();
+            let owner = last_known.owner;
+            let new_id = self.state.allocate_object_id();
+            let mut new_obj = last_known.clone();
+            new_obj.object_id = new_id;
+            new_obj.lineage = ObjectLineage { previous: Some(card) };
+            new_obj.zone = ZoneKind::Library;
+            new_obj.timestamp = self.state.allocate_sequence_no();
+            self.state.zone_mut(ZoneKind::Hand, Some(player)).expect("hand zone").remove(card);
+            self.state.objects.remove(&card);
+            self.state.zone_mut(ZoneKind::Library, Some(owner)).expect("library zone").push_top(new_id);
+            self.state.objects.insert(new_id, new_obj);
+            commands::remap_abilities(&mut self.state, card, new_id);
+            let event_id = self.state.allocate_event_id();
+            let seq = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no: seq,
+                kind: GameEventKind::ZoneChange {
+                    object: new_id,
+                    from: ZoneKind::Hand,
+                    to: ZoneKind::Library,
+                    last_known_info: Some(last_known),
+                },
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
+    }
+
+    /// Moves `settings.starting_hand_size` cards from the top of `player`'s
+    /// library to their hand zone, logging a `ZoneChange` per card.
+    fn draw_opening_hand(&mut self, player: PlayerId) {
+        for _ in 0..self.settings.starting_hand_size {
+            let Some(card) = self.state.zone(ZoneKind::Library, Some(player))
+                .and_then(|z| z.contents.front().copied())
+            else {
+                break;
+            };
+            let last_known = self.state.object(card).expect("library card must exist").clone();
+            let new_id = self.state.allocate_object_id();
+            let mut new_obj = last_known.clone();
+            new_obj.object_id = new_id;
+            new_obj.lineage = ObjectLineage { previous: Some(card) };
+            new_obj.zone = ZoneKind::Hand;
+            new_obj.timestamp = self.state.allocate_sequence_no();
+            self.state.zone_mut(ZoneKind::Library, Some(player)).expect("library zone").remove(card);
+            self.state.objects.remove(&card);
+            self.state.zone_mut(ZoneKind::Hand, Some(player)).expect("hand zone").push_bottom(new_id);
+            self.state.objects.insert(new_id, new_obj);
+            commands::remap_abilities(&mut self.state, card, new_id);
+            let event_id = self.state.allocate_event_id();
+            let seq = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no: seq,
+                kind: GameEventKind::ZoneChange {
+                    object: new_id,
+                    from: ZoneKind::Library,
+                    to: ZoneKind::Hand,
+                    last_known_info: Some(last_known),
+                },
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
+    }
+
+    /// Returns the first player in `state.turn_order` whose `hand_kept` is
+    /// `false`. Returns `None` when all players have kept (mulligan phase
+    /// complete).
+    fn next_mulligan_player(&self) -> Option<PlayerId> {
+        self.state.turn_order.iter().copied()
+            .find(|&pid| !self.state.player(pid).map_or(false, |p| p.hand_kept))
+    }
+
+    /// Returns the first `!hand_kept` player found in circular turn order
+    /// starting AFTER `current`. Used after `TakeMulligan` to advance to the
+    /// next player who hasn't kept, wrapping around to the current player if
+    /// they're the only undecided one remaining.
+    fn next_mulligan_player_after(&self, current: PlayerId) -> Option<PlayerId> {
+        let order = &self.state.turn_order;
+        let n = order.len();
+        let cur_pos = order.iter().position(|&p| p == current)?;
+        for i in 1..=n {
+            let pid = order[(cur_pos + i) % n];
+            if !self.state.player(pid).map_or(false, |p| p.hand_kept) {
+                return Some(pid);
+            }
+        }
+        None // all players have kept (shouldn't be reachable after a TakeMulligan)
+    }
+
+    /// Advances `state.rng` by one step and returns the raw u64. Uses
+    /// splitmix64 so the sequence is deterministic from `seed` alone and
+    /// every output is logged as `RngDrawn`.
+    fn next_rng(&mut self) -> u64 {
+        self.state.rng.draws_consumed += 1;
+        let mut z = self.state.rng.seed.wrapping_add(
+            0x9e3779b97f4a7c15u64.wrapping_mul(self.state.rng.draws_consumed),
+        );
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+        z ^ (z >> 31)
+    }
+
+    /// Builds the bottoming queue: collects every player (in turn order) whose
+    /// paid mulligan count (`mulligans_taken` minus `settings.free_mulligans`,
+    /// clamped to 0) is > 0. If the queue is empty, transitions directly to
+    /// `AdvanceTurnStep`; otherwise sets `process_state` to
+    /// `AwaitingBottomCardChoice` for the first player in the queue, with
+    /// `remaining` holding the rest.
+    fn transition_to_bottoming(&mut self) {
+        let free = self.settings.free_mulligans;
+        let mut queue: VecDeque<(PlayerId, usize)> = self.state.turn_order.iter().copied()
+            .filter_map(|pid| {
+                let taken = self.state.player(pid).map_or(0, |p| p.mulligans_taken);
+                let paid = taken.saturating_sub(free) as usize;
+                if paid > 0 { Some((pid, paid)) } else { None }
+            })
+            .collect();
+        match queue.pop_front() {
+            Some((first, count)) => {
+                self.process_state = ProcessState::AwaitingBottomCardChoice {
+                    player: first,
+                    count,
+                    remaining: queue,
+                };
+            }
+            None => {
+                self.process_state = ProcessState::AdvanceTurnStep;
+            }
+        }
+    }
+
     /// Pipeline run's final transition: consumes `self.pipeline_exit`,
     /// clears `self.pipeline_context` (the MUST documented on that field —
     /// the run that set it is finishing right here, in this call), and
@@ -601,6 +1134,11 @@ impl Engine {
         // this function returns.
         match std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow) {
             ProcessState::PriorityWindow => {
+                if self.state.phase == Phase::PreGame && !self.pregame_setup_done {
+                    self.pregame_setup_done = true;
+                    self.run_pregame_setup();
+                    return StepStatus::Progressed;
+                }
                 StepStatus::AwaitingAction { player: self.state.priority_player }
             }
 
@@ -954,6 +1492,14 @@ impl Engine {
                     return StepStatus::Progressed;
                 }
                 if self.state.step == Step::Draw {
+                    // CR 500.7/500.8: consume any queued skip before doing
+                    // anything — a skipped step has no turn-based actions and
+                    // no priority window.
+                    let active = self.state.active_player;
+                    if self.state.consume_step_skip(active, Step::Draw) {
+                        self.process_state = ProcessState::AdvanceTurnStep;
+                        return StepStatus::Progressed;
+                    }
                     // CR 504.1: draw is a turn-based action that happens
                     // before priority opens (504.2 still opens it normally
                     // below, unlike untap).
@@ -1012,6 +1558,14 @@ impl Engine {
                 }
                 StepStatus::Progressed
             }
+            ProcessState::AwaitingMulliganDecision { player } => {
+                self.process_state = ProcessState::AwaitingMulliganDecision { player };
+                StepStatus::AwaitingMulliganDecision { player }
+            }
+            ProcessState::AwaitingBottomCardChoice { player, count, remaining } => {
+                self.process_state = ProcessState::AwaitingBottomCardChoice { player, count, remaining };
+                StepStatus::AwaitingBottomCardChoice { player, count }
+            }
         }
     }
 
@@ -1069,10 +1623,6 @@ impl Engine {
     /// Drawing from an empty library is a silent no-op here, not a loss -
     /// CR 704.5b's empty-library SBA isn't modeled yet (TODO).
     fn draw_step(&mut self) -> Vec<GameEventKind> {
-        if self.state.turn_order.len() == 2 && self.state.turn_number == 1 {
-            return Vec::new();
-        }
-
         let active = self.state.active_player;
         let Some(library) = self.state.zone(ZoneKind::Library, Some(active)) else {
             return Vec::new();
@@ -1180,6 +1730,14 @@ impl Engine {
                 self.state
                     .last_active_turn_number
                     .insert(self.state.active_player, self.state.turn_number);
+                // CR 103.8a: in a two-player game, the starting player skips
+                // their draw step on turn 1. Seeded here so the general
+                // consume_step_skip path handles it uniformly with any
+                // card effect that also says "skip your next draw step".
+                if self.state.turn_order.len() == 2 {
+                    let starter = self.state.active_player;
+                    self.state.pending_step_skips.push((starter, Step::Draw));
+                }
                 true
             }
             (Phase::Beginning, Step::Untap) => {
@@ -1310,6 +1868,8 @@ mod tests {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             }],
             turn_order: vec![p0],
             active_player: p0,
@@ -1332,6 +1892,7 @@ mod tests {
             next_event_id: 0,
             next_sequence_no: 0,
             next_object_id: 0,
+            pending_step_skips: Vec::new(),
         }
     }
 

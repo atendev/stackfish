@@ -234,6 +234,12 @@ pub enum ActionSpec {
         #[serde(default)]
         cards: Vec<String>,
     },
+    // TODO: add pregame action variants routed through submit_mulligan_decision /
+    // submit_bottom_cards (same "own entry point" pattern as SubmitPayment/SubmitDiscard):
+    //   KeepHand { player: u32 }
+    //   TakeMulligan { player: u32 }
+    //   BottomCards { player: u32, cards: Vec<String> }
+    // Also add corresponding arms to describe() and run_action_spec() below.
 }
 
 fn describe_target(target: &TargetSpec) -> String {
@@ -582,6 +588,8 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
             emblems: Vec::new(),
             commander_damage_taken: Vec::new(),
             eliminated: false,
+            mulligans_taken: 0,
+            hand_kept: false,
         });
         turn_order.push(PlayerId(p.id));
     }
@@ -714,6 +722,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id,
+        pending_step_skips: Vec::new(),
     };
 
     (state, card_ids)
@@ -866,6 +875,8 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             | StepStatus::AwaitingTriggerOrderChoice { .. }
             | StepStatus::AwaitingPayment { .. }
             | StepStatus::AwaitingDiscard { .. }
+            | StepStatus::AwaitingMulliganDecision { .. }
+            | StepStatus::AwaitingBottomCardChoice { .. }
             | StepStatus::GameOver { .. } => {
                 return StepOutcome::Ran;
             }
@@ -1127,6 +1138,15 @@ fn run_action_spec(
                 cards.iter().map(|k| resolve_card(k, card_ids)).collect();
             run_discard(engine, card_obj_ids)
         }
+        // TODO: intercept pregame variants here before `to_player_action` (same
+        // pattern as SubmitPayment/SubmitDiscard — dedicated entry points, not
+        // submit_action):
+        //   ActionSpec::KeepHand { player } | ActionSpec::TakeMulligan { player } =>
+        //       run_mulligan(engine, build_mulligan_action(action_spec, player))
+        //   ActionSpec::BottomCards { player, cards } =>
+        //       run_bottom_cards(engine, build_bottom_action(player, cards, card_ids))
+        // Also add run_mulligan() and run_bottom_cards() helpers (same shape as
+        // run_payment() / run_discard() — catch_unwind, submit, drain).
         other => run_action(engine, to_player_action(other, card_ids)),
     };
     remap_moved_card_ids(card_ids, &engine.state().ledger[ledger_before..]);

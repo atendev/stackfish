@@ -72,6 +72,8 @@ fn combat_state() -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             },
             PlayerState {
                 player_id: p1,
@@ -81,6 +83,8 @@ fn combat_state() -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
             },
         ],
         turn_order: vec![p0, p1],
@@ -104,6 +108,7 @@ fn combat_state() -> GameState {
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 1000,
+        pending_step_skips: Vec::new(),
     }
 }
 

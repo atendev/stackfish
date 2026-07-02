@@ -94,6 +94,13 @@ pub struct GameState {
     /// `ObjectId` rather than reuse the old one (see `ObjectLineage`). See
     /// `allocate_object_id`.
     pub next_object_id: u64,
+    /// CR 500.7/500.8: queued step skips — each entry is a (player, step)
+    /// pair meaning that player's next occurrence of that step is skipped
+    /// entirely (no turn-based actions, no priority window). Consumed by
+    /// `consume_step_skip` at the top of `AdvanceTurnStep`. Card effects that
+    /// say "skip your next draw step" (etc.) push here; the CR 103.8a
+    /// two-player turn-1 draw skip is seeded here at game start.
+    pub pending_step_skips: Vec<(PlayerId, Step)>,
 }
 
 impl GameState {
@@ -142,6 +149,19 @@ impl GameState {
     pub fn zone_mut(&mut self, kind: ZoneKind, owner: Option<PlayerId>) -> Option<&mut Zone> {
         self.zones.iter_mut().find(|z| z.kind == kind && z.owner == owner)
     }
+
+    /// CR 500.7/500.8: checks whether `player`'s current occurrence of `step`
+    /// should be skipped, and if so consumes the entry. Returns `true` if the
+    /// step is skipped (caller should advance turn without running any
+    /// turn-based actions or opening a priority window).
+    pub fn consume_step_skip(&mut self, player: PlayerId, step: Step) -> bool {
+        if let Some(pos) = self.pending_step_skips.iter().position(|(p, s)| *p == player && *s == step) {
+            self.pending_step_skips.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -184,6 +204,7 @@ mod tests {
             next_event_id: 0,
             next_sequence_no: 0,
             next_object_id: 1,
+            pending_step_skips: Vec::new(),
         };
 
         let card = ObjectId(0);

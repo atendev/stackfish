@@ -64,6 +64,8 @@ fn player_state(id: PlayerId, life: i32) -> PlayerState {
         emblems: Vec::new(),
         commander_damage_taken: Vec::new(),
         eliminated: false,
+        mulligans_taken: 0,
+        hand_kept: false,
     }
 }
 
@@ -97,6 +99,7 @@ fn base_state() -> GameState {
         next_event_id: 0,
         next_sequence_no: 0,
         next_object_id: 1000,
+        pending_step_skips: Vec::new(),
     }
 }
 

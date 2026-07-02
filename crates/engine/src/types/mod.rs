@@ -4,6 +4,7 @@
 
 pub mod ability;
 pub mod card;
+pub mod config;
 pub mod combat;
 pub mod command;
 pub mod cost;
@@ -21,6 +22,7 @@ pub mod zone;
 
 pub use ability::*;
 pub use card::*;
+pub use config::*;
 pub use combat::*;
 pub use command::*;
 pub use cost::*;

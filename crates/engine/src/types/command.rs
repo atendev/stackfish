@@ -48,6 +48,20 @@ pub enum PlayerActionKind {
     AssignCombatDamage { assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)> },
     SubmitPayment { plan: PaymentPlan },
     MakeChoice { description: String, selection: Vec<Target> },
+    /// CR 103.5: player declares they are keeping their current opening hand.
+    /// Only valid while `ProcessState::AwaitingMulliganDecision` is active for
+    /// this player.
+    KeepHand,
+    /// CR 103.5: player declares a mulligan — their hand is shuffled back into
+    /// their library and they draw `starting_hand_size` cards again. Only valid
+    /// while `ProcessState::AwaitingMulliganDecision` is active for this player,
+    /// and only if they have not reached `GameSettings::max_mulligans`.
+    TakeMulligan,
+    /// CR 103.5: after keeping with N mulligans taken, player puts exactly N
+    /// cards (minus any free mulligans) from their hand on the bottom of their
+    /// library in the chosen order. Only valid while
+    /// `ProcessState::AwaitingBottomCardChoice` is active for this player.
+    BottomCards { cards: Vec<ObjectId> },
 }
 
 pub struct PlayerAction {

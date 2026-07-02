@@ -31,15 +31,11 @@ pub struct Zone {
 
 impl Zone {
     pub fn new(kind: ZoneKind, owner: Option<PlayerId>) -> Self {
-        // TODO: Zone { kind, owner, contents: VecDeque::new() }.
-        todo!()
+        Zone { kind, owner, contents: VecDeque::new() }
     }
 
     pub fn push_top(&mut self, object: ObjectId) {
-        // TODO: self.contents.push_front(object). "Top" = the end drawn
-        // from/seen first (library top, e.g.) — confirm this convention
-        // matches whatever draw/peek logic ends up reading from this.
-        todo!()
+        self.contents.push_front(object);
     }
 
     pub fn push_bottom(&mut self, object: ObjectId) {
@@ -61,8 +57,6 @@ impl Zone {
     }
 
     pub fn top(&self) -> Option<ObjectId> {
-        // TODO: self.contents.front().copied() — keep consistent with
-        // whichever end push_top uses above.
-        todo!()
+        self.contents.front().copied()
     }
 }
