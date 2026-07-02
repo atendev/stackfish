@@ -1,0 +1,285 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "forest1"
+name = "Forest"
+types = ["Land"]
+mana_ability = ["G"]
+[[cards]]
+key = "forest2"
+name = "Forest"
+types = ["Land"]
+mana_ability = ["G"]
+[[cards]]
+key = "forest3"
+name = "Forest"
+types = ["Land"]
+mana_ability = ["G"]
+[[cards]]
+key = "island1"
+name = "Island"
+types = ["Land"]
+mana_ability = ["U"]
+[[cards]]
+key = "island2"
+name = "Island"
+types = ["Land"]
+mana_ability = ["U"]
+[[cards]]
+key = "dork"
+name = "Llanowar Elves"
+types = ["Creature"]
+colors = ["G"]
+mana_ability = ["G"]
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+generic_cost = 1
+colors = ["G"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "forest1"
+[[setup]]
+player = 0
+zone = "hand"
+card = "forest2"
+[[setup]]
+player = 0
+zone = "hand"
+card = "forest3"
+[[setup]]
+player = 0
+zone = "hand"
+card = "dork"
+[[setup]]
+player = 0
+zone = "hand"
+card = "bear"
+[[setup]]
+player = 0
+zone = "library"
+card = "island1"
+[[setup]]
+player = 0
+zone = "library"
+card = "island2"
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "mountain1"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "mountain2"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "mountain3"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "goblin"
+name = "Goblin"
+types = ["Creature"]
+colors = ["R"]
+
+[[setup]]
+player = 1
+zone = "hand"
+card = "mountain1"
+[[setup]]
+player = 1
+zone = "hand"
+card = "mountain2"
+[[setup]]
+player = 1
+zone = "hand"
+card = "mountain3"
+[[setup]]
+player = 1
+zone = "library"
+card = "goblin"
+
+# Make sure things are where they should be
+[[steps]]
+type = "assert_object_zone"
+card = "forest1"
+equals = "hand"
+[[steps]]
+type = "assert_object_zone"
+card = "forest2"
+equals = "hand"
+[[steps]]
+type = "assert_object_zone"
+card = "forest3"
+equals = "hand"
+[[steps]]
+type = "assert_object_zone"
+card = "dork"
+equals = "hand"
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "hand"
+[[steps]]
+type = "assert_object_zone"
+card = "island1"
+equals = "library"
+[[steps]]
+type = "assert_object_zone"
+card = "island2"
+equals = "library"
+[[steps]]
+type = "assert_object_zone"
+card = "mountain1"
+equals = "hand"
+[[steps]]
+type = "assert_object_zone"
+card = "mountain2"
+equals = "hand"
+[[steps]]
+type = "assert_object_zone"
+card = "mountain3"
+equals = "hand"
+[[steps]]
+type = "assert_object_zone"
+card = "goblin"
+equals = "library"
+
+[[steps]]
+type = "assert_phase"
+equals = "pre_game"
+
+# For now have to pass priority to leave pre_game phase
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# Untap doesn't use priority, so we go straight to Upkeep in Beginning
+[[steps]]
+type = "assert_phase"
+equals = "beginning"
+[[steps]]
+type = "assert_step"
+equals = "upkeep"
+
+# On the first turn of a two-player game, the starting player skips their draw step.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_phase"
+equals = "main"
+[[steps]]
+type = "assert_step"
+equals = "pre_combat_main"
+
+# Playing a land doesn't use priority.
+[[steps]]
+type = "play_land"
+player = 0
+card = "forest1"
+
+[[steps]]
+type = "assert_object_zone"
+card = "forest1"
+equals = "battlefield"
+[[steps]]
+type = "assert_object_zone"
+card = "forest2"
+equals = "hand"
+
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "forest1"
+ability_index = 0
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "green"
+equals = 1
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "dork"
+
+[[steps]]
+type = "assert_object_zone"
+card = "dork"
+equals = "stack"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+mana = { units = ["G"]}
+
+# Priority window opens after casting a spell, so we need to pass priority to resolve it.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_object_zone"
+card = "dork"
+equals = "battlefield"
+
+# Go through to combat
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "assert_phase"
+equals = "combat"
+[[steps]]
+type = "assert_step"
+equals = "beginning_of_combat"
+
+# Then to declare attackers
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "assert_phase"
+equals = "combat"
+[[steps]]
+type = "assert_step"
+equals = "declare_attackers"
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  {attacker = "dork", target = 1}
+]
