@@ -124,6 +124,17 @@ pub(crate) fn has_summoning_sickness(state: &GameState, object: &GameObject) -> 
     }
 }
 
+/// CR 400.7: abilities belong to their object and travel with it across zone
+/// changes. Every zone change mints a new `ObjectId`; call this to keep
+/// `state.abilities` in sync so ability lookups by source id don't go stale.
+pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: ObjectId) {
+    for ability in state.abilities.iter_mut() {
+        if ability.source == old_id {
+            ability.source = new_id;
+        }
+    }
+}
+
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
 /// non-ledger state directly (zones, etc.) and returning a
 /// `CommandOutcome`. Per the rationale in `command.rs`: this does not
@@ -241,6 +252,7 @@ pub fn execute_command(
                 .push_bottom(new_id);
             state.objects.insert(new_id, new_object);
             *state.lands_played_this_turn.entry(command.actor).or_insert(0) += 1;
+            remap_abilities(state, card, new_id);
 
             return Ok(CommandOutcome {
                 events: vec![GameEventKind::ZoneChange {
@@ -329,6 +341,7 @@ pub fn execute_command(
                 .remove(card);
             state.objects.remove(&card);
             state.objects.insert(new_id, new_object);
+            remap_abilities(state, card, new_id);
 
             // TODO(script bridge): `operation` should be the card's
             // registered cast/resolution callback (looked up via its
@@ -383,10 +396,19 @@ pub fn execute_command(
                 ));
             }
 
-            let controller = state.object(source).ok_or(CommandError::InvalidTarget)?.controller;
+            let source_object = state.object(source).ok_or(CommandError::InvalidTarget)?;
+            let controller = source_object.controller;
             if controller != command.actor {
                 return Err(CommandError::IllegalAction(
                     "actor does not control the ability's source".to_string(),
+                ));
+            }
+            // CR 602.1/112.6: activated abilities on permanents are only
+            // usable while the permanent is on the battlefield (unless the
+            // ability itself says otherwise — no such override exists yet).
+            if source_object.zone != ZoneKind::Battlefield {
+                return Err(CommandError::IllegalAction(
+                    "source is not on the battlefield".to_string(),
                 ));
             }
 
