@@ -29,14 +29,26 @@ The CLI's output describes each action/assertion next to its result (`ActionSpec
   [4] FAIL - step == "untap" (expected untap, got PreCombatMain)
 ```
 
+## Two setup paths
+
+Scenarios use one of two construction paths — pick exactly one per file:
+
+| Path | Key section | Engine entry point |
+|---|---|---|
+| **Manual** | `[[players]]` + `[[setup]]` | `Engine::new()` — no pregame automation |
+| **New game** | `[game]` | `Engine::new_game()` — real shuffle, draw, mulligan |
+
+If `[game]` is present, `[[players]]` and `[[setup]]` are ignored entirely.
+
 ## Top-level fields
 
 ```toml
-seed = 1          # u64, required - seeds GameState.rng
+seed = 1          # u64, required - seeds GameState.rng (also default rng_seed for [game])
 
-[[players]]        # zero or more
-[[cards]]           # zero or more - ad-hoc test card definitions
-[[setup]]           # zero or more - places a card into a zone at game start
+[[players]]        # zero or more (manual path only — ignored when [game] is set)
+[[cards]]           # zero or more - ad-hoc test card definitions (used by both paths)
+[[setup]]           # zero or more - places a card into a zone (manual path only)
+[game]             # optional - triggers new_game path; see below
 [[actions]]         # zero or more - PlayerActions run in order         \
 [[assertions]]      # zero or more - checked after all actions run      / use one style
 [[steps]]           # zero or more - actions + assertions interleaved  /  not both
@@ -63,6 +75,67 @@ just to pay one cost). `[players.mana_pool]` can be omitted entirely (defaults t
 mana abilities now exist for the tap-a-permanent-for-mana case (see `mana_ability` under
 `[[cards]]`) — a scenario can produce real mana via `activate_ability` instead of seeding the pool,
 if that's what it's testing.
+
+**Manual path only.** `[[players]]` is ignored when `[game]` is present.
+
+## `[game]` — new game path
+
+Present the `[game]` section to trigger `Engine::new_game`, which runs real pregame automation:
+shuffle, opening hand draw (CR 103.3–103.5), and London Mulligan. The `[[players]]` and `[[setup]]`
+sections are ignored when `[game]` is set.
+
+```toml
+[game]
+turn_order = [0, 1]      # u32 list, player ids in turn order (first = starting player CR 103.1)
+                          # defaults to [[game.players]] order if omitted
+rng_seed = 42             # u64, RNG seed for shuffles; defaults to top-level `seed` if omitted
+```
+
+### `[game.settings]`
+
+All fields are optional — each overrides the corresponding default individually.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `shuffle_libraries` | bool | `true` | Shuffle each library before drawing (CR 103.3). Set `false` for deterministic scenarios. |
+| `starting_hand_size` | u8 | `7` | Cards drawn for opening hand and every redraw. |
+| `skip_mulligan` | bool | `false` | Auto-keep all hands; no mulligan decisions needed. |
+| `free_mulligans` | u32 | `0` | Mulligans that cost no card on the bottom (CR 103.5c grants 1 in Commander). |
+| `max_mulligans` | u32 | (unlimited) | Hard cap on mulligans per player; omit for standard unlimited. |
+| `starting_life` | u32 | `20` | Life total for all players (CR 103.4). |
+| `poison_loss_threshold` | u32 | `10` | Poison counters required to lose (CR 704.5c). |
+| `max_hand_size` | u32 | `7` | Cards allowed in hand at cleanup (CR 514.1). |
+
+```toml
+[game.settings]
+shuffle_libraries = false
+starting_hand_size = 7
+skip_mulligan = false
+free_mulligans = 1
+max_mulligans = 3
+starting_life = 40
+poison_loss_threshold = 10
+max_hand_size = 7
+```
+
+### `[[game.players]]`
+
+Each entry defines one player's library. All fields except `id` are optional.
+
+```toml
+[[game.players]]
+id = 0                                              # u32, required - becomes PlayerId(id)
+library = ["bear", "bear", "forest", "forest"]      # card keys from [[cards]], top to bottom
+life_override = 40                                  # optional u32, overrides starting_life for this player only
+```
+
+`library` is a list of `[[cards]]` keys in top-to-bottom order. Keys may repeat for multiple
+copies. If `shuffle_libraries = true` (default), the engine shuffles before drawing so the order
+only matters for deterministic (`shuffle_libraries = false`) runs.
+
+**Card ids on the new-game path:** library cards created by `new_game` don't have TOML keys —
+`card_ids` is empty on this path. Assertions must use zone-count checks (`assert_hand_size`,
+`assert_phase`, `assert_life`, etc.) rather than per-card key lookups (`assert_object_zone`).
 
 ## `[[cards]]`
 
@@ -149,6 +222,8 @@ placing it in `"hand"` first.
 `"stack"` is intentionally not settable here — the stack needs `StackObject` metadata
 (targets/modes/costs), not just a card sitting in a zone; use `[[actions]]` to get something onto
 the stack once casting is implemented.
+
+**Manual path only.** `[[setup]]` is ignored when `[game]` is present.
 
 ## `[[actions]]`
 
@@ -338,6 +413,53 @@ and reported as `Errored` in the scenario output. Same "own entry point" design 
 setups share the same key, only the last ObjectId is tracked and only that instance can be named in
 `cards`).
 
+### Pregame actions (new-game path only)
+
+These three action types answer mulligan decisions during `ProcessState::AwaitingMulliganDecision`
+and `ProcessState::AwaitingBottomCardChoice`. They route through `Engine::submit_mulligan_decision`
+and `Engine::submit_bottom_cards` respectively — not `submit_action`.
+
+The engine pauses at `AwaitingMulliganDecision` for the player whose turn it is to decide. London
+Mulligan round order (CR 103.5): starting player decides first, then each other player in turn order.
+After everyone has decided once, any player who took a mulligan decides again (and so on). Once all
+players have kept, the engine pauses for bottoming (one player at a time, in turn order, for each
+player who took paid mulligans).
+
+```toml
+[[steps]]
+type = "keep_hand"
+player = 0     # u32, must match the player the engine is currently waiting on
+```
+
+Keeps the current hand. Sets `hand_kept = true`; player won't be asked again. If this player took
+any paid mulligans, they'll be asked to bottom cards after all players have decided.
+
+```toml
+[[steps]]
+type = "take_mulligan"
+player = 0     # u32, must match the player the engine is currently waiting on
+```
+
+Returns hand to library (CR 103.5b), shuffles, draws `starting_hand_size` cards, increments
+`mulligans_taken`. Player will be asked to decide again on the next round. Rejected if
+`max_mulligans` is set and already reached.
+
+```toml
+[[steps]]
+type = "bottom_cards"
+player = 0       # u32, must match the player the engine is currently waiting on
+first_n = 1      # usize, how many cards to bottom; must equal paid mulligan count for this player
+```
+
+Answers a `ProcessState::AwaitingBottomCardChoice` pause. Takes the first `first_n` cards from the
+player's hand zone (positional — hand zone order) and puts them on the library bottom. The count
+must equal `max(0, mulligans_taken - free_mulligans)` exactly; wrong counts are rejected. Use
+`first_n = 0` only when `mulligans_taken <= free_mulligans` (no cards owed).
+
+**Card ids on the new-game path:** since library/hand cards created by `new_game` don't have TOML
+keys, `bottom_cards` selects by position rather than by card key. The scenario doesn't name which
+specific cards go to the bottom — just how many.
+
 ### Targets
 
 Anywhere a target is expected (`targets`, `selection`, attacker `target`), write either:
@@ -491,7 +613,8 @@ equals = 7
 ```
 
 Checks the number of cards in `player`'s hand zone. Useful after a `submit_discard` to confirm the
-active player discarded down to exactly `max_hand_size`.
+active player discarded down to exactly `max_hand_size`, or after a mulligan sequence to confirm the
+opening hand size.
 
 **A card's key keeps resolving correctly across zone moves.** `play_land`/`cast_spell`/resolution
 all mint a *new* `ObjectId` for the moved object (CR 400.7) instead of reusing the old one — every
@@ -500,7 +623,7 @@ moves it (`remap_moved_card_ids` in `crates/scenario/src/lib.rs`), so `object_zo
 referencing `"bear"` keep working after it's been cast, resolved, etc. You don't need to do anything
 for this — just keep using the same key from `[[setup]]` throughout the file.
 
-## Example: full file
+## Example: full file (manual path)
 
 ```toml
 seed = 1
@@ -609,10 +732,119 @@ type = "step"
 equals = "pre_combat_main"
 ```
 
+## Example: new-game path with London Mulligan
+
+Uses `[game]` to trigger `Engine::new_game`. P0 takes a mulligan, P1 keeps, P0 keeps — P0 then
+bottoms 1 card (paid mulligan). Assertions use `assert_hand_size` since per-card keys aren't
+available on this path.
+
+```toml
+seed = 42
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[game]
+turn_order = [0, 1]
+rng_seed = 42
+
+[game.settings]
+shuffle_libraries = false    # deterministic for test
+
+[[game.players]]
+id = 0
+library = ["bear", "bear", "bear", "bear", "bear", "bear", "bear"]
+
+[[game.players]]
+id = 1
+library = ["bear", "bear", "bear", "bear", "bear", "bear", "bear"]
+
+# P0 is starting player — decides first
+[[steps]]
+type = "take_mulligan"
+player = 0
+
+# P1 decides (still first round)
+[[steps]]
+type = "keep_hand"
+player = 1
+
+# P0 decides again (took a mulligan — gets another turn)
+[[steps]]
+type = "keep_hand"
+player = 0
+
+# P0 bottoms 1 card (1 paid mulligan, free_mulligans = 0 by default)
+[[steps]]
+type = "bottom_cards"
+player = 0
+first_n = 1
+
+# P0 hand = 7 drawn - 1 bottomed = 6
+[[steps]]
+type = "assert_hand_size"
+player = 0
+equals = 6
+
+# P1 hand = full 7 (no mulligans)
+[[steps]]
+type = "assert_hand_size"
+player = 1
+equals = 7
+
+[[steps]]
+type = "assert_phase"
+equals = "beginning"
+```
+
+## Example: new-game path with skip_mulligan
+
+For scenarios that don't care about the mulligan phase and just want to get into gameplay:
+
+```toml
+seed = 1
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[game]
+turn_order = [0, 1]
+
+[game.settings]
+shuffle_libraries = false
+skip_mulligan = true      # auto-keeps all hands, no decisions needed
+
+[[game.players]]
+id = 0
+library = ["bear", "bear", "bear", "bear", "bear", "bear", "bear"]
+
+[[game.players]]
+id = 1
+library = ["bear", "bear", "bear", "bear", "bear", "bear", "bear"]
+
+# Engine jumps straight to Beginning phase — no mulligan steps needed
+[[assertions]]
+type = "hand_size"
+player = 0
+equals = 7
+
+[[assertions]]
+type = "phase"
+equals = "beginning"
+```
+
 ## Extending the format
 
 The schema lives in `crates/scenario/src/lib.rs` (`ScenarioFile` and friends — `PlayerSpec`,
-`CardSpec`, `SetupEntry`, `ActionSpec`, `AssertionSpec`). Adding a new action or assertion variant
-is: add the enum variant + its TOML-facing fields, add the matching arm in `to_player_action` or
-`check_assertion`, update this doc. Update this doc in the same change as the code — don't let it
-drift.
+`CardSpec`, `SetupEntry`, `ActionSpec`, `AssertionSpec`, `GameSpec`, `GamePlayerSpec`,
+`GameSettingsSpec`). Adding a new action or assertion variant is: add the enum variant + its
+TOML-facing fields, add the matching arm in `to_player_action` or `check_assertion`, update this
+doc. Update this doc in the same change as the code — don't let it drift.

@@ -29,6 +29,7 @@ use serde::Deserialize;
 
 use stackfish_engine::*;
 use stackfish_engine::engine::{ActionError, DiscardError, Engine, StepStatus};
+use stackfish_engine::types::config::{GameConfig, GameSettings, PlayerConfig};
 
 // ---------------------------------------------------------------------
 // TOML schema
@@ -55,6 +56,60 @@ pub struct ScenarioFile {
     /// If non-empty, `actions` and `assertions` are ignored.
     #[serde(default)]
     pub steps: Vec<ScenarioStep>,
+    /// If present, the scenario uses `Engine::new_game(GameConfig)` instead of
+    /// the manual `build_initial_state` path. Enables real pregame automation
+    /// (shuffle, draw, mulligan) with full `GameSettings` control. The
+    /// `[[players]]` / `[[setup]]` sections are ignored when `[game]` is set.
+    #[serde(default)]
+    pub game: Option<GameSpec>,
+}
+
+/// Top-level `[game]` section — triggers the `Engine::new_game` path.
+#[derive(Deserialize)]
+pub struct GameSpec {
+    /// Players and their starting libraries. Each player's `library` is a list
+    /// of card keys from `[[cards]]` (may repeat for multiple copies).
+    pub players: Vec<GamePlayerSpec>,
+    /// Turn order as player ids. Defaults to `players` order if absent.
+    #[serde(default)]
+    pub turn_order: Vec<u32>,
+    /// RNG seed for shuffles. Defaults to the top-level `seed` field.
+    pub rng_seed: Option<u64>,
+    /// Game rule overrides. Any omitted field inherits `GameSettings::default()`.
+    #[serde(default)]
+    pub settings: GameSettingsSpec,
+}
+
+#[derive(Deserialize)]
+pub struct GamePlayerSpec {
+    pub id: u32,
+    /// Card keys (from `[[cards]]`) in library order, top to bottom. May repeat.
+    #[serde(default)]
+    pub library: Vec<String>,
+    /// Overrides `settings.starting_life` for this player only.
+    pub life_override: Option<u32>,
+}
+
+/// All fields optional — each overrides the corresponding `GameSettings::default()`.
+/// Omitted fields keep the default value.
+#[derive(Deserialize, Default)]
+pub struct GameSettingsSpec {
+    /// Shuffle each player's library before drawing (default: `true`).
+    pub shuffle_libraries: Option<bool>,
+    /// Target hand size for opening draw and redraws (default: `7`).
+    pub starting_hand_size: Option<u8>,
+    /// Auto-keep all hands without any mulligan decisions (default: `false`).
+    pub skip_mulligan: Option<bool>,
+    /// Mulligans that don't cost a card on the bottom (default: `0`).
+    pub free_mulligans: Option<u32>,
+    /// Maximum mulligans allowed. `None`/absent = unlimited (default).
+    pub max_mulligans: Option<u32>,
+    /// Starting life total (default: `20`).
+    pub starting_life: Option<u32>,
+    /// Poison counters needed to lose (default: `10`).
+    pub poison_loss_threshold: Option<u32>,
+    /// Max hand size enforced at cleanup (default: `7`).
+    pub max_hand_size: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -234,12 +289,16 @@ pub enum ActionSpec {
         #[serde(default)]
         cards: Vec<String>,
     },
-    // TODO: add pregame action variants routed through submit_mulligan_decision /
-    // submit_bottom_cards (same "own entry point" pattern as SubmitPayment/SubmitDiscard):
-    //   KeepHand { player: u32 }
-    //   TakeMulligan { player: u32 }
-    //   BottomCards { player: u32, cards: Vec<String> }
-    // Also add corresponding arms to describe() and run_action_spec() below.
+    /// CR 103.5: keep this player's current hand during pregame. Routes through
+    /// `Engine::submit_mulligan_decision`, not `submit_action`.
+    KeepHand { player: u32 },
+    /// CR 103.5: return this player's hand and draw a fresh one. Routes through
+    /// `Engine::submit_mulligan_decision`.
+    TakeMulligan { player: u32 },
+    /// CR 103.5: bottom `first_n` cards from the player's hand (taken in hand
+    /// zone order). Routes through `Engine::submit_bottom_cards`. Use
+    /// `first_n = 0` to bottom nothing (only valid when count == 0).
+    BottomCards { player: u32, #[serde(default)] first_n: usize },
 }
 
 fn describe_target(target: &TargetSpec) -> String {
@@ -314,6 +373,11 @@ impl ActionSpec {
             }
             ActionSpec::SubmitDiscard { player, cards } => {
                 format!("submit_discard(player={player}, cards={cards:?})")
+            }
+            ActionSpec::KeepHand { player } => format!("keep_hand(player={player})"),
+            ActionSpec::TakeMulligan { player } => format!("take_mulligan(player={player})"),
+            ActionSpec::BottomCards { player, first_n } => {
+                format!("bottom_cards(player={player}, first_n={first_n})")
             }
         }
     }
@@ -816,13 +880,16 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                 selection: selection.iter().map(|t| resolve_target(t, card_ids)).collect(),
             },
         ),
-        // SubmitPayment/SubmitDiscard never reach here - run_action_spec
-        // intercepts them and calls the dedicated Engine entry points.
+        // These variants never reach here — run_action_spec intercepts them
+        // and calls their dedicated Engine entry points.
         ActionSpec::SubmitPayment { .. } => {
             unreachable!("SubmitPayment is handled in run_action_spec, before to_player_action")
         }
         ActionSpec::SubmitDiscard { .. } => {
             unreachable!("SubmitDiscard is handled in run_action_spec, before to_player_action")
+        }
+        ActionSpec::KeepHand { .. } | ActionSpec::TakeMulligan { .. } | ActionSpec::BottomCards { .. } => {
+            unreachable!("pregame actions are handled in run_action_spec, before to_player_action")
         }
     };
     PlayerAction { player: PlayerId(player), kind }
@@ -930,6 +997,107 @@ fn run_discard(engine: &mut Engine, cards: Vec<ObjectId>) -> StepOutcome {
         Ok(outcome) => outcome,
         Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
     }
+}
+
+/// Answers a `ProcessState::AwaitingMulliganDecision` pause via
+/// `Engine::submit_mulligan_decision`.
+fn run_mulligan(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
+        if let Err(err) = engine.submit_mulligan_decision(action) {
+            return StepOutcome::Errored(format!("{err:?}"));
+        }
+        drain(engine)
+    }));
+    match result {
+        Ok(outcome) => outcome,
+        Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
+    }
+}
+
+/// Answers a `ProcessState::AwaitingBottomCardChoice` pause via
+/// `Engine::submit_bottom_cards`. Takes the first `first_n` cards from the
+/// player's hand zone (in order) rather than asking the caller to name
+/// specific `ObjectId`s — library cards created by `new_game` don't have
+/// TOML keys, so positional selection is the practical choice here.
+fn run_bottom_cards(engine: &mut Engine, player: PlayerId, first_n: usize) -> StepOutcome {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
+        let cards: Vec<ObjectId> = engine
+            .state()
+            .zone(ZoneKind::Hand, Some(player))
+            .map_or(Vec::new(), |z| z.contents.iter().copied().take(first_n).collect());
+        let action = PlayerAction {
+            player,
+            kind: PlayerActionKind::BottomCards { cards },
+        };
+        if let Err(err) = engine.submit_bottom_cards(action) {
+            return StepOutcome::Errored(format!("{err:?}"));
+        }
+        drain(engine)
+    }));
+    match result {
+        Ok(outcome) => outcome,
+        Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
+    }
+}
+
+/// Builds a `GameSettings` from a `GameSettingsSpec`, applying each present
+/// field as an override over `GameSettings::default()`.
+fn build_game_settings(spec: &GameSettingsSpec) -> GameSettings {
+    let mut s = GameSettings::default();
+    if let Some(v) = spec.shuffle_libraries { s.shuffle_libraries = v; }
+    if let Some(v) = spec.starting_hand_size { s.starting_hand_size = v; }
+    if let Some(v) = spec.skip_mulligan { s.skip_mulligan = v; }
+    if let Some(v) = spec.free_mulligans { s.free_mulligans = v; }
+    if let Some(v) = spec.max_mulligans { s.max_mulligans = Some(v); }
+    if let Some(v) = spec.starting_life { s.starting_life = v; }
+    if let Some(v) = spec.poison_loss_threshold { s.poison_loss_threshold = v; }
+    if let Some(v) = spec.max_hand_size { s.max_hand_size = v; }
+    s
+}
+
+/// Builds an `Engine` via `Engine::new_game` from a `[game]` section.
+/// Returns the engine; `card_ids` starts empty (library cards created by
+/// `new_game` don't have TOML keys and the pregame draw remaps their ids
+/// anyway — assertions on the new_game path should use zone/hand-size checks
+/// rather than per-card key lookups).
+fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> Engine {
+    let card_specs: HashMap<&str, &CardSpec> =
+        file.cards.iter().map(|c| (c.key.as_str(), c)).collect();
+
+    let settings = build_game_settings(&game.settings);
+    let rng_seed = game.rng_seed.unwrap_or(file.seed);
+
+    let player_configs: Vec<PlayerConfig> = game.players.iter().map(|gp| {
+        let library = gp.library.iter().map(|key| {
+            let spec = card_specs.get(key.as_str())
+                .unwrap_or_else(|| panic!("game.players library references unknown card key '{key}'"));
+            let symbols = mana_symbols(spec.generic_cost, &spec.colors);
+            CardDefinition {
+                definition_id: 0,
+                name: spec.name.clone(),
+                mana_cost: ManaCost { symbols },
+                color_indicator: None,
+                supertypes: SupertypeSet::empty(),
+                card_types: parse_card_types(&spec.types),
+                subtypes: Vec::new(),
+                oracle_text: String::new(),
+                power: spec.power.map(PTValue::Fixed),
+                toughness: spec.toughness.map(PTValue::Fixed),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::Inline(String::new()),
+            }
+        }).collect();
+        PlayerConfig { player_id: PlayerId(gp.id), library, life_override: gp.life_override }
+    }).collect();
+
+    let turn_order: Vec<PlayerId> = if game.turn_order.is_empty() {
+        game.players.iter().map(|gp| PlayerId(gp.id)).collect()
+    } else {
+        game.turn_order.iter().map(|&id| PlayerId(id)).collect()
+    };
+
+    Engine::new_game(GameConfig { players: player_configs, turn_order, settings, rng_seed })
 }
 
 pub enum AssertionOutcome {
@@ -1138,15 +1306,17 @@ fn run_action_spec(
                 cards.iter().map(|k| resolve_card(k, card_ids)).collect();
             run_discard(engine, card_obj_ids)
         }
-        // TODO: intercept pregame variants here before `to_player_action` (same
-        // pattern as SubmitPayment/SubmitDiscard — dedicated entry points, not
-        // submit_action):
-        //   ActionSpec::KeepHand { player } | ActionSpec::TakeMulligan { player } =>
-        //       run_mulligan(engine, build_mulligan_action(action_spec, player))
-        //   ActionSpec::BottomCards { player, cards } =>
-        //       run_bottom_cards(engine, build_bottom_action(player, cards, card_ids))
-        // Also add run_mulligan() and run_bottom_cards() helpers (same shape as
-        // run_payment() / run_discard() — catch_unwind, submit, drain).
+        ActionSpec::KeepHand { player } => run_mulligan(engine, PlayerAction {
+            player: PlayerId(*player),
+            kind: PlayerActionKind::KeepHand,
+        }),
+        ActionSpec::TakeMulligan { player } => run_mulligan(engine, PlayerAction {
+            player: PlayerId(*player),
+            kind: PlayerActionKind::TakeMulligan,
+        }),
+        ActionSpec::BottomCards { player, first_n } => {
+            run_bottom_cards(engine, PlayerId(*player), *first_n)
+        }
         other => run_action(engine, to_player_action(other, card_ids)),
     };
     remap_moved_card_ids(card_ids, &engine.state().ledger[ledger_before..]);
@@ -1154,8 +1324,15 @@ fn run_action_spec(
 }
 
 pub fn run(file: &ScenarioFile) -> ScenarioReport {
-    let (state, mut card_ids) = build_initial_state(file);
-    let mut engine = Engine::new(state);
+    let (mut engine, mut card_ids) = if let Some(game) = &file.game {
+        // new_game path: Engine::new_game handles pregame setup. No card_ids
+        // for library cards since they're not setup entries — assertions on
+        // this path should use zone/hand-size checks, not per-card keys.
+        (build_new_game_engine(file, game), HashMap::new())
+    } else {
+        let (state, card_ids) = build_initial_state(file);
+        (Engine::new(state), card_ids)
+    };
     let mut entries = Vec::new();
 
     if !file.steps.is_empty() {
