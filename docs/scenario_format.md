@@ -521,7 +521,7 @@ mixed in the same file — pick one style per scenario.
 Assertion type names for `[[steps]]` (all take the same fields as their `[[assertions]]`
 equivalents): `assert_life`, `assert_ledger_len`, `assert_object_zone`, `assert_mana_pool`,
 `assert_tapped`, `assert_eliminated`, `assert_phase`, `assert_step`, `assert_active_player`,
-`assert_priority_player`, `assert_hand_size`.
+`assert_priority_player`, `assert_hand_size`, `assert_object_counters`, `assert_player_counters`.
 
 ---
 
@@ -585,6 +585,29 @@ Checks `PlayerState.eliminated` — the way to confirm CR 704.5a's state-based a
 for a player at 0 or less life. See `crates/engine/tests/scenarios/phase5_sba_basics.toml` for a
 full worked example of both this and the `damage_marked` setup field above, covering CR 704.5a/f/g
 in one scenario.
+
+```toml
+[[assertions]]
+type = "object_counters"
+card = "wall1"
+kind = "minus_one_minus_one"   # plus_one_plus_one/minus_one_minus_one/loyalty/poison/energy/charge, or any other string (Custom)
+equals = 3
+```
+
+Checks `GameObject.counters` — the way to confirm Wither/Infect put `-1/-1` counters on a creature
+instead of marking damage.
+
+```toml
+[[assertions]]
+type = "player_counters"
+player = 1
+kind = "poison"
+equals = 3
+```
+
+Checks `PlayerState.counters` — the way to confirm Infect gave a player poison counters instead of
+life loss. See `crates/engine/tests/scenarios/phase5_keyword_primitives.toml` for a full worked
+example of both alongside the other keyword primitives.
 
 ```toml
 [[assertions]]

@@ -1,0 +1,299 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "drake"
+name = "Drake"
+types = ["Creature"]
+power = 2
+toughness = 2
+keywords = ["Flying", "Lifelink"]
+
+[[cards]]
+key = "asp"
+name = "Asp"
+types = ["Creature"]
+power = 1
+toughness = 1
+keywords = ["Deathtouch"]
+
+[[cards]]
+key = "witherbeast"
+name = "Wither Beast"
+types = ["Creature"]
+power = 3
+toughness = 3
+keywords = ["Wither"]
+
+[[cards]]
+key = "infector"
+name = "Infector"
+types = ["Creature"]
+power = 3
+toughness = 3
+keywords = ["Infect"]
+
+[[cards]]
+key = "vigilant"
+name = "Vigilant Guard"
+types = ["Creature"]
+power = 0
+toughness = 2
+keywords = ["Vigilance"]
+
+[[cards]]
+key = "sprinter"
+name = "Sprinter"
+types = ["Creature"]
+power = 0
+toughness = 2
+keywords = ["Haste"]
+
+[[cards]]
+key = "brute"
+name = "Brute"
+types = ["Creature"]
+power = 6
+toughness = 6
+
+[[cards]]
+key = "spider"
+name = "Spider"
+types = ["Creature"]
+power = 2
+toughness = 5
+keywords = ["Reach"]
+
+[[cards]]
+key = "giant"
+name = "Giant"
+types = ["Creature"]
+power = 8
+toughness = 8
+
+[[cards]]
+key = "victim"
+name = "Victim"
+types = ["Creature"]
+power = 2
+toughness = 5
+
+[[cards]]
+key = "golem"
+name = "Golem"
+types = ["Creature"]
+power = 1
+toughness = 3
+keywords = ["Indestructible"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "drake"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "asp"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "witherbeast"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "infector"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "vigilant"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "sprinter"
+controlled_since_turn = 1   # entered this turn - only Haste lets it attack
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "brute"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "spider"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "giant"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "victim"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "golem"
+
+# Two players, so every step transition needs both to pass in a row
+# (CR 117.4) - 4 step transitions to reach the declare attackers step:
+# PreGame -> Untap (no priority, CR 502.4, auto-chains into Upkeep)
+# -> Upkeep -> Draw (SKIPPED turn 1, CR 103.8a/500.7: no priority window)
+# -> PreCombatMain -> BeginningOfCombat -> DeclareAttackers, 2 passes each.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# CR 508.1a/702.10b: Sprinter entered this turn (controlled_since_turn = 1,
+# the current turn) but Haste lets it attack anyway - if it didn't, this
+# whole atomic declaration would fail and every assertion below would too.
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "drake", target = 1 },
+  { attacker = "asp", target = 1 },
+  { attacker = "witherbeast", target = 1 },
+  { attacker = "infector", target = 1 },
+  { attacker = "vigilant", target = 1 },
+  { attacker = "sprinter", target = 1 },
+  { attacker = "brute", target = 1 },
+]
+
+# CR 702.20a: Vigilance means attacking doesn't tap it.
+[[steps]]
+type = "assert_tapped"
+card = "vigilant"
+equals = false
+
+# Every other attacker (no vigilance) taps as normal.
+[[steps]]
+type = "assert_tapped"
+card = "sprinter"
+equals = true
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# CR 702.9b: Drake has flying, so only Spider (reach) can legally block it.
+# CR 702.2b/c: Asp's deathtouch makes any nonzero damage from it lethal, so
+# even 1 damage from a 1/1 destroys the 8-toughness Giant.
+# CR 702.80a: Wither Beast's damage to Victim becomes -1/-1 counters, not
+# marked damage. CR 702.12b: Golem's indestructible ignores the 6 marked
+# damage Brute deals it (lethal by count) - it still dies to 0 toughness,
+# just not to this.
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "spider", attacker = "drake" },
+  { blocker = "giant", attacker = "asp" },
+  { blocker = "victim", attacker = "witherbeast" },
+  { blocker = "golem", attacker = "brute" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# Every attacker here is single- or un-blocked - no real split choice
+# exists, so an empty assignments list is correct (see command.rs's doc
+# comment on why AssignCombatDamage only needs entries for 2+-blocker
+# attackers).
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+# Flying / Reach
+[[steps]]
+type = "assert_object_zone"
+card = "spider"
+equals = "battlefield"
+
+# Deathtouch
+[[steps]]
+type = "assert_object_zone"
+card = "giant"
+equals = "graveyard"
+
+# Wither: damage became counters, not marked damage - Victim survives
+# (toughness 5, net 2 after 3 counters).
+[[steps]]
+type = "assert_object_zone"
+card = "victim"
+equals = "battlefield"
+[[steps]]
+type = "assert_object_counters"
+card = "victim"
+kind = "minus_one_minus_one"
+equals = 3
+
+# Infect: unblocked damage to a player becomes poison counters, not life loss.
+[[steps]]
+type = "assert_player_counters"
+player = 1
+kind = "poison"
+equals = 3
+
+# Indestructible: 6 marked damage (lethal by count) doesn't destroy it.
+[[steps]]
+type = "assert_object_zone"
+card = "golem"
+equals = "battlefield"
+
+# Lifelink: Drake's 2 damage to Spider still gains its controller life, even
+# though the damage was dealt to a blocker, not the player.
+[[steps]]
+type = "assert_life"
+player = 0
+equals = 22
+
+# Infect doesn't cause life loss, and every 0-power attacker deals none -
+# the defending player's life is untouched by this whole combat.
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20

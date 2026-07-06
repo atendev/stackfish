@@ -425,6 +425,13 @@ pub enum AssertionSpec {
     PriorityPlayer { equals: u32 },
     /// Checks the number of cards in a player's hand zone.
     HandSize { player: u32, equals: usize },
+    /// Checks a `GameObject.counters` count by kind - the way to confirm
+    /// Wither/Infect actually put `-1/-1` counters on a creature (see
+    /// `parse_counter_kind` for supported names).
+    ObjectCounters { card: String, kind: String, equals: i32 },
+    /// Checks a `PlayerState.counters` count by kind - the way to confirm
+    /// Infect actually gave a player poison counters instead of life loss.
+    PlayerCounters { player: u32, kind: String, equals: i32 },
 }
 
 /// Same assertions as `AssertionSpec` but with `assert_` prefixed type names,
@@ -455,6 +462,10 @@ pub enum AssertionStepSpec {
     PriorityPlayer { equals: u32 },
     #[serde(rename = "assert_hand_size")]
     HandSize { player: u32, equals: usize },
+    #[serde(rename = "assert_object_counters")]
+    ObjectCounters { card: String, kind: String, equals: i32 },
+    #[serde(rename = "assert_player_counters")]
+    PlayerCounters { player: u32, kind: String, equals: i32 },
 }
 
 impl AssertionStepSpec {
@@ -471,6 +482,12 @@ impl AssertionStepSpec {
             Self::ActivePlayer { equals } => AssertionSpec::ActivePlayer { equals: *equals },
             Self::PriorityPlayer { equals } => AssertionSpec::PriorityPlayer { equals: *equals },
             Self::HandSize { player, equals } => AssertionSpec::HandSize { player: *player, equals: *equals },
+            Self::ObjectCounters { card, kind, equals } => {
+                AssertionSpec::ObjectCounters { card: card.clone(), kind: kind.clone(), equals: *equals }
+            }
+            Self::PlayerCounters { player, kind, equals } => {
+                AssertionSpec::PlayerCounters { player: *player, kind: kind.clone(), equals: *equals }
+            }
         }
     }
 }
@@ -507,6 +524,12 @@ impl AssertionSpec {
             AssertionSpec::PriorityPlayer { equals } => format!("priority_player == {equals}"),
             AssertionSpec::HandSize { player, equals } => {
                 format!("hand_size(player={player}) == {equals}")
+            }
+            AssertionSpec::ObjectCounters { card, kind, equals } => {
+                format!("object_counters(card={card:?}, kind={kind:?}) == {equals}")
+            }
+            AssertionSpec::PlayerCounters { player, kind, equals } => {
+                format!("player_counters(player={player}, kind={kind:?}) == {equals}")
             }
         }
     }
@@ -1329,6 +1352,27 @@ fn check_assertion(
                 AssertionOutcome::Passed
             } else {
                 AssertionOutcome::Failed { expected: equals.to_string(), actual: actual.to_string() }
+            }
+        }
+        AssertionSpec::ObjectCounters { card, kind, equals } => {
+            let object_id = resolve_card(card, card_ids);
+            let counter_kind = parse_counter_kind(kind);
+            let actual = state.object(object_id).map(|o| o.counters.count(&counter_kind));
+            if actual == Some(*equals) {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+            }
+        }
+        AssertionSpec::PlayerCounters { player, kind, equals } => {
+            let pid = PlayerId(*player);
+            let counter_kind = parse_counter_kind(kind);
+            let actual =
+                state.players.iter().find(|p| p.player_id == pid).map(|p| p.counters.count(&counter_kind));
+            if actual == Some(*equals) {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
             }
         }
     }
