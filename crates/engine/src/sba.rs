@@ -1,4 +1,4 @@
-use crate::types::card::CardTypeSet;
+use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
@@ -11,8 +11,11 @@ use crate::types::zone::ZoneKind;
 ///
 /// Implemented this pass: 704.5a (player at 0 or less life loses), 704.5f
 /// (creature toughness 0 or less goes to its owner's graveyard), 704.5g
-/// (creature with lethal damage marked is destroyed). Every other CR 704.5
-/// SBA is still a no-op — see the TODO below for which and why.
+/// (creature with lethal damage marked is destroyed, folding in 702.2b/c's
+/// Deathtouch — any nonzero deathtouch damage counts as lethal — and
+/// 702.12b's Indestructible — ignores 704.5g/deathtouch entirely, but NOT
+/// 704.5f). Every other CR 704.5 SBA is still a no-op — see the TODO below
+/// for which and why.
 ///
 /// This is a single pass, not the fixed-point loop — CR 704.3 requires
 /// repeating until no SBA applies. The engine loop (`engine.rs`) is
@@ -30,8 +33,6 @@ pub fn check_state_based_actions(state: &mut GameState) -> Vec<GameEvent> {
     //     (nothing tracks a failed draw attempt yet).
     //   - 704.5c: player with 10+ poison counters loses (PlayerState.counters
     //     exists but nothing increments poison yet).
-    //   - 704.5h: deathtouch-dealt damage is lethal regardless of amount
-    //     (deathtouch isn't modeled - no keyword-ability system exists).
     //   - CDA toughness (PTValue::CharacteristicDefining): apply_creature_death
     //     below skips any creature whose toughness isn't PTValue::Fixed,
     //     since resolving a CDA needs the script bridge
@@ -85,9 +86,23 @@ fn apply_creature_death(state: &mut GameState, events: &mut Vec<GameEvent>) {
         .filter_map(|o| {
             // CDA toughness (PTValue::CharacteristicDefining) can't be
             // resolved without the script bridge - skip rather than guess.
-            let toughness = o.definition.toughness.as_ref()?.as_fixed()?;
-            let lethal = toughness <= 0 || o.damage_marked >= toughness as u32;
-            lethal.then_some(o.object_id)
+            // net_with_counters folds in +1/+1 / -1/-1 counters (CR 121.3) -
+            // otherwise Wither/Infect's counters would have no effect on
+            // whether this creature is actually dead.
+            let toughness = o.definition.toughness.as_ref()?.net_with_counters(&o.counters)?;
+            // CR 704.5f: 0-or-less toughness applies unconditionally, even
+            // to an indestructible creature (702.12b only exempts 704.5g).
+            if toughness <= 0 {
+                return Some(o.object_id);
+            }
+            if o.definition.keywords.contains(KeywordSet::INDESTRUCTIBLE) {
+                return None;
+            }
+            // CR 704.5g + 702.2b/c: lethal marked damage, or any nonzero
+            // damage at all from a Deathtouch source.
+            let lethal_damage =
+                o.damage_marked >= toughness as u32 || (o.deathtouched && o.damage_marked > 0);
+            lethal_damage.then_some(o.object_id)
         })
         .collect();
 

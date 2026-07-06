@@ -6,6 +6,22 @@
 //! decides"). The actual `mlua` registration (binding these into the Lua
 //! table) isn't written yet — these are the Rust-side signatures that
 //! registration will wrap.
+//!
+//! TODO(keyword-name -> primitive/ability mapping layer, not built yet):
+//! `types::card::KeywordSet` covers the CR 702 keywords that change how an
+//! existing engine checkpoint behaves (Flying, Deathtouch, Lifelink, ...) —
+//! but nothing here lets a card's script grant one by name. The ergonomic
+//! shape discussed for this: something like `Game.GrantKeyword(card,
+//! "Flying")`, where this file owns a name -> `KeywordSet` bit lookup table
+//! (for the primitives `KeywordSet` models) or, for a keyword that's really
+//! sugar for an ordinary ability (Cycling, Persist, ...), expands the name
+//! into a normal `register_triggered_ability`/activated-ability call
+//! instead. Without this, every card wanting a standard keyword has to be
+//! authored against `KeywordSet` directly rather than just naming the
+//! keyword — fine for the hand-built test fixtures this phase has used so
+//! far, not fine once real card data flows through here. See
+//! `KeywordSet`'s own doc comment for the primitive/sugar split this table
+//! would need to encode.
 
 use crate::commands::CommandError;
 use crate::types::cost::{FilterSpec, PaymentPlan};

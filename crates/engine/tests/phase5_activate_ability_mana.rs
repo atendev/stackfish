@@ -27,6 +27,7 @@ fn land_definition() -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("test_forest".to_string()),
+        keywords: KeywordSet::empty(),
     }
 }
 
@@ -43,6 +44,7 @@ fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -
         face_down: false,
         phased_out: false,
         damage_marked: 0,
+        deathtouched: false,
         counters: CounterSet::new(),
         attachments: Vec::new(),
         attached_to: None,

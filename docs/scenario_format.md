@@ -156,6 +156,7 @@ types = ["Creature"]          # required - see Card types below
 power = 2                     # optional i32
 toughness = 2                  # optional i32
 mana_ability = ["G"]           # optional, default [] - see Mana abilities below
+keywords = ["Flying", "Deathtouch"]  # optional, default [] - see Keywords below
 ```
 
 **`mana_ability` (CR 605):** if non-empty, every instance of this card gets one
@@ -178,6 +179,16 @@ choice (CR 118.13a), not implied by the cost.
 `"{2}{R}"` — no mana-cost-string parser exists anywhere yet. Can't currently express hybrid,
 Phyrexian, or X costs on a test fixture. Extend `CardSpec` in `crates/scenario/src/lib.rs` if a
 scenario needs one of those.
+
+**`keywords` (CR 702):** printed keyword abilities, by name, parsed into a `KeywordSet` bitmask —
+only the primitives that change how an existing engine checkpoint behaves, not the full ~140-entry
+CR 702 catalog. Supported: `Flying`, `Reach`, `Menace`, `Vigilance`, `Haste`, `Defender`, `Flash`,
+`Deathtouch`, `Indestructible`, `Lifelink`, `Wither`, `Infect`. Trample, First/Double Strike,
+Hexproof/Shroud/Protection/Ward aren't modeled yet (see `docs/implementation.md`'s
+keyword-primitives slice notes for why). Keywords that are really sugar for an activated/triggered
+ability (Cycling, Persist, ...) don't belong in this list at all — use `mana_ability` above for a
+mana ability, or extend `CardSpec` for anything else, since no keyword-name -> ability mapping
+exists yet.
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and

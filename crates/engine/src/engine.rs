@@ -709,6 +709,7 @@ impl Engine {
                     face_down: false,
                     phased_out: false,
                     damage_marked: 0,
+                    deathtouched: false,
                     counters: CounterSet::new(),
                     attachments: Vec::new(),
                     attached_to: None,
@@ -1815,6 +1816,7 @@ impl Engine {
                 for object in self.state.objects.values_mut() {
                     if object.zone == ZoneKind::Battlefield {
                         object.damage_marked = 0;
+                        object.deathtouched = false;
                     }
                 }
                 false

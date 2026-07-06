@@ -170,6 +170,11 @@ pub struct CardSpec {
     /// extended further.
     #[serde(default)]
     pub mana_ability: Vec<String>,
+    /// CR 702 printed keywords, by name (e.g. `["Flying", "Deathtouch"]") —
+    /// parsed into a `KeywordSet` via `parse_keywords`. Only the primitives
+    /// `KeywordSet` itself models; see that type's doc comment.
+    #[serde(default)]
+    pub keywords: Vec<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -579,6 +584,44 @@ fn parse_mana_unit(letter: &str) -> ManaUnit {
     }
 }
 
+/// `CardSpec.keywords` entries, by CR 702 name, into `KeywordSet` bits.
+fn parse_keywords(names: &[String]) -> KeywordSet {
+    let mut set = KeywordSet::empty();
+    for name in names {
+        set |= match name.as_str() {
+            "Flying" => KeywordSet::FLYING,
+            "Reach" => KeywordSet::REACH,
+            "Menace" => KeywordSet::MENACE,
+            "Vigilance" => KeywordSet::VIGILANCE,
+            "Haste" => KeywordSet::HASTE,
+            "Defender" => KeywordSet::DEFENDER,
+            "Flash" => KeywordSet::FLASH,
+            "Deathtouch" => KeywordSet::DEATHTOUCH,
+            "Indestructible" => KeywordSet::INDESTRUCTIBLE,
+            "Lifelink" => KeywordSet::LIFELINK,
+            "Wither" => KeywordSet::WITHER,
+            "Infect" => KeywordSet::INFECT,
+            other => panic!("unknown keyword in scenario file: {other}"),
+        };
+    }
+    set
+}
+
+/// `assert_object_counters`/`assert_player_counters`'s `kind` field, by CR
+/// 122.3 name, into `CounterKind`.
+fn parse_counter_kind(name: &str) -> CounterKind {
+    match name {
+        "plus_one_plus_one" => CounterKind::PlusOnePlusOne,
+        "minus_one_minus_one" => CounterKind::MinusOneMinusOne,
+        "loyalty" => CounterKind::Loyalty,
+        "poison" => CounterKind::Poison,
+        "energy" => CounterKind::Energy,
+        "experience" => CounterKind::Experience,
+        "charge" => CounterKind::Charge,
+        other => CounterKind::Custom(other.to_string()),
+    }
+}
+
 fn parse_zone_kind(name: &str) -> ZoneKind {
     match name {
         "library" => ZoneKind::Library,
@@ -699,6 +742,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
             loyalty: None,
             defense: None,
             script_ref: ScriptReference::Inline(String::new()),
+            keywords: parse_keywords(&spec.keywords),
         };
 
         let owner = PlayerId(entry.player);
@@ -720,6 +764,7 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
             face_down: false,
             phased_out: false,
             damage_marked: entry.damage_marked,
+            deathtouched: false,
             counters: CounterSet::new(),
             attachments: Vec::new(),
             attached_to: None,
@@ -1099,6 +1144,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 loyalty: None,
                 defense: None,
                 script_ref: ScriptReference::Inline(String::new()),
+                keywords: parse_keywords(&spec.keywords),
             }
         }).collect();
         PlayerConfig { player_id: PlayerId(gp.id), library, life_override: gp.life_override }

@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
-use crate::types::card::CardTypeSet;
+use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::cost::CostSpec;
+use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
@@ -110,10 +111,12 @@ fn is_sorcery_speed(state: &GameState, player: PlayerId) -> bool {
 /// been under its current controller's control since their most recent
 /// turn began. Derived from `GameObject.controlled_since_turn` against
 /// `GameState.last_active_turn_number` rather than a stored bool - see
-/// those fields' doc comments for why. No haste override - haste isn't
-/// modeled in this engine yet, so this is the entire check, not just the
-/// base case haste would bypass.
+/// those fields' doc comments for why. CR 702.10b/c: Haste bypasses this
+/// check entirely.
 pub(crate) fn has_summoning_sickness(state: &GameState, object: &GameObject) -> bool {
+    if object.definition.keywords.contains(KeywordSet::HASTE) {
+        return false;
+    }
     match state.last_active_turn_number.get(&object.controller) {
         Some(&since) => object.controlled_since_turn >= since,
         // The controller has no recorded turn start at all - shouldn't
@@ -278,18 +281,20 @@ pub fn execute_command(
                     "card is not in actor's hand".to_string(),
                 ));
             }
-            // TODO(CR 117.1a/602's flash, not modeled here yet): instants
-            // may be cast any time the actor holds priority; anything else
-            // castable as a spell needs the full sorcery-speed window
-            // (is_sorcery_speed already covers "holds priority" as one of
-            // its four conditions, so the instant branch below only adds
-            // the priority check on its own rather than duplicating it).
-            // Cards with flash (or effects granting flash) aren't
-            // represented on CardDefinition/continuous_effects yet, so they
-            // incorrectly fall into the non-instant branch below - same
-            // class of gap is_sorcery_speed already flags for PlayLand.
-            let is_instant = object.definition.card_types.contains(CardTypeSet::INSTANT);
-            if is_instant {
+            // CR 117.1a/602/702.8b: instants, and anything with flash, may
+            // be cast any time the actor holds priority; everything else
+            // needs the full sorcery-speed window (is_sorcery_speed already
+            // covers "holds priority" as one of its four conditions, so
+            // this branch only adds the priority check on its own rather
+            // than duplicating it).
+            // TODO: effects granting flash (e.g. "you may cast this as
+            // though it had flash") aren't represented on
+            // continuous_effects yet - same class of gap is_sorcery_speed
+            // flags for PlayLand. Only the card's own printed Flash keyword
+            // is consulted here.
+            let castable_at_instant_speed = object.definition.card_types.contains(CardTypeSet::INSTANT)
+                || object.definition.keywords.contains(KeywordSet::FLASH);
+            if castable_at_instant_speed {
                 if state.priority_player != command.actor {
                     return Err(CommandError::IllegalAction(
                         "actor does not hold priority".to_string(),
@@ -532,10 +537,17 @@ pub fn execute_command(
                         "a chosen attacker is already tapped".to_string(),
                     ));
                 }
-                // CR 508.1a/302.6: no haste override - not modeled yet.
+                // CR 508.1a/302.6/702.10b: has_summoning_sickness itself
+                // grants Haste's bypass.
                 if has_summoning_sickness(state, object) {
                     return Err(CommandError::IllegalAction(
                         "a chosen attacker has summoning sickness".to_string(),
+                    ));
+                }
+                // CR 302.6b/702.3b: a creature with defender can't attack.
+                if object.definition.keywords.contains(KeywordSet::DEFENDER) {
+                    return Err(CommandError::IllegalAction(
+                        "a chosen attacker has defender and can't attack".to_string(),
                     ));
                 }
                 match target {
@@ -572,11 +584,15 @@ pub fn execute_command(
             }
 
             // CR 508.1f: tapping an attacker isn't a cost - attacking
-            // simply causes it.
+            // simply causes it. CR 702.20a: Vigilance means attacking
+            // doesn't tap it.
             let mut events = Vec::with_capacity(attackers.len() * 2);
             for (attacker, target) in &attackers {
-                state.object_mut(*attacker).expect("validated above").tapped = true;
-                events.push(GameEventKind::Tapped { object: *attacker });
+                let object = state.object_mut(*attacker).expect("validated above");
+                if !object.definition.keywords.contains(KeywordSet::VIGILANCE) {
+                    object.tapped = true;
+                    events.push(GameEventKind::Tapped { object: *attacker });
+                }
                 events
                     .push(GameEventKind::AttackerDeclared { attacker: *attacker, target: *target });
             }
@@ -676,6 +692,41 @@ pub fn execute_command(
                             .to_string(),
                     ));
                 }
+
+                // CR 702.9b: an attacker with flying can only be blocked by
+                // a creature with flying and/or reach.
+                let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
+                if attacker_object.definition.keywords.contains(KeywordSet::FLYING)
+                    && !blocker_object
+                        .definition
+                        .keywords
+                        .intersects(KeywordSet::FLYING | KeywordSet::REACH)
+                {
+                    return Err(CommandError::IllegalAction(
+                        "an attacker with flying can only be blocked by a creature with \
+                         flying or reach"
+                            .to_string(),
+                    ));
+                }
+            }
+
+            // CR 702.111b: an attacker with menace can't be blocked except
+            // by two or more creatures - a whole-batch check, since it's
+            // about how many blockers ended up assigned to that attacker,
+            // not any single pairing.
+            let mut blocker_counts: HashMap<ObjectId, u32> = HashMap::new();
+            for (_, attacker) in &blocks {
+                *blocker_counts.entry(*attacker).or_insert(0) += 1;
+            }
+            for (attacker, count) in &blocker_counts {
+                let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
+                if attacker_object.definition.keywords.contains(KeywordSet::MENACE) && *count < 2 {
+                    return Err(CommandError::IllegalAction(
+                        "an attacker with menace can't be blocked except by two or more \
+                         creatures"
+                            .to_string(),
+                    ));
+                }
             }
 
             let mut events = Vec::with_capacity(blocks.len());
@@ -748,7 +799,7 @@ pub fn execute_command(
                     .definition
                     .power
                     .as_ref()
-                    .and_then(|p| p.as_fixed())
+                    .and_then(|p| p.net_with_counters(&object.counters))
                     .map(|p| p.max(0) as u32)
                     .unwrap_or(0);
                 let blockers = &blockers_by_attacker[attacker];
@@ -794,7 +845,7 @@ pub fn execute_command(
                 // CDA power (PTValue::CharacteristicDefining) can't be
                 // resolved without the script bridge - skip rather than
                 // guess, same stance sba.rs's toughness check already takes.
-                let Some(power) = object.definition.power.as_ref().and_then(|p| p.as_fixed()) else {
+                let Some(power) = object.definition.power.as_ref().and_then(|p| p.net_with_counters(&object.counters)) else {
                     continue;
                 };
                 let power = power.max(0) as u32;
@@ -836,7 +887,7 @@ pub fn execute_command(
             }
             for (blocker, attacker) in &combat.blocks {
                 let object = state.object(*blocker).ok_or(CommandError::InvalidTarget)?;
-                let Some(power) = object.definition.power.as_ref().and_then(|p| p.as_fixed()) else {
+                let Some(power) = object.definition.power.as_ref().and_then(|p| p.net_with_counters(&object.counters)) else {
                     continue;
                 };
                 let power = power.max(0) as u32;
@@ -857,12 +908,35 @@ pub fn execute_command(
             // loss on players, no replacement/prevention check yet
             // (CR 614-616, replacement.rs is still mostly todo!()).
             for event in &events {
-                let GameEventKind::DamageDealt { target, amount, .. } = event else {
+                let GameEventKind::DamageDealt { source, target, amount } = event else {
                     unreachable!("only DamageDealt events are pushed above");
                 };
+                // CR 702.15/702.80/702.90: Lifelink/Wither/Infect all modify
+                // how this same damage event plays out, keyed off the
+                // source's keywords - looked up once, up front, so the
+                // borrow of `source`'s GameObject ends before the target
+                // mutations below (which may need a mutable borrow of the
+                // same GameState).
+                let source_obj = state.object(*source);
+                let has_lifelink =
+                    source_obj.is_some_and(|o| o.definition.keywords.contains(KeywordSet::LIFELINK));
+                let replaces_with_counters = source_obj
+                    .is_some_and(|o| o.definition.keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT));
+                let is_infect =
+                    source_obj.is_some_and(|o| o.definition.keywords.contains(KeywordSet::INFECT));
+                let has_deathtouch =
+                    source_obj.is_some_and(|o| o.definition.keywords.contains(KeywordSet::DEATHTOUCH));
+                let source_controller = source_obj.map(|o| o.controller);
+
                 match target {
                     Target::Player(pid) => {
-                        if let Some(player) = state.player_mut(*pid) {
+                        // CR 702.90b: Infect damage to a player becomes
+                        // poison counters, not life loss.
+                        if is_infect {
+                            if let Some(player) = state.player_mut(*pid) {
+                                player.counters.add(CounterKind::Poison, *amount as i32);
+                            }
+                        } else if let Some(player) = state.player_mut(*pid) {
                             player.lose_life(*amount as i32);
                         }
                     }
@@ -874,8 +948,29 @@ pub fn execute_command(
                         // are functional this slice.
                         if let Some(object) = state.object_mut(*id) {
                             if object.definition.card_types.contains(CardTypeSet::CREATURE) {
-                                object.damage_marked += amount;
+                                // CR 702.80a/702.90c: Wither/Infect damage
+                                // to a creature becomes -1/-1 counters
+                                // instead of marked damage.
+                                if replaces_with_counters {
+                                    object.counters.add(CounterKind::MinusOneMinusOne, *amount as i32);
+                                } else {
+                                    object.damage_marked += amount;
+                                    if has_deathtouch && *amount > 0 {
+                                        object.deathtouched = true;
+                                    }
+                                }
                             }
+                        }
+                    }
+                }
+
+                // CR 702.15b: Lifelink's life gain happens "in addition to
+                // any other results that damage causes" - applies to damage
+                // dealt to a player or an object alike.
+                if has_lifelink && *amount > 0 {
+                    if let Some(controller) = source_controller {
+                        if let Some(player) = state.player_mut(controller) {
+                            player.lose_life(-(*amount as i32));
                         }
                     }
                 }

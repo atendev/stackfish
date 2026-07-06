@@ -30,6 +30,7 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("test_creature".to_string()),
+        keywords: KeywordSet::empty(),
     }
 }
 
@@ -46,6 +47,7 @@ fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -
         face_down: false,
         phased_out: false,
         damage_marked,
+        deathtouched: false,
         counters: CounterSet::new(),
         attachments: Vec::new(),
         attached_to: None,
