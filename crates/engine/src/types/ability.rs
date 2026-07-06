@@ -35,6 +35,18 @@ pub enum AbilityEffect {
     GainLife(i32),
 }
 
+/// The one cost shape `Game.Costs.*` covers this slice — a Rust-native fast
+/// path so `{T}` (CR 605's mana-ability cost, generalized here to a non-mana
+/// activated ability) doesn't need a script callback at all. Mirrors
+/// `ConditionPrimitive`/`AbilityEffect`'s "recognized primitive, zero Lua
+/// calls" shape; mana cost, sacrifice/discard/life, and any `CostSpec`-style
+/// additional cost stay unmodeled (same pre-existing gap
+/// `PaymentPlan::validate` already flags for `CostSpec.additional`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AbilityCost {
+    Tap,
+}
+
 /// The two condition shapes `Game.Conditions.*` covers this slice — a
 /// Rust-native fast path so common trigger shapes don't need a full Lua
 /// condition function written out.
@@ -100,7 +112,11 @@ pub struct RegisteredAbility {
     /// `Game.Conditions.Typo` as unconditional (see
     /// `ScriptRuntime::load_condition`).
     pub condition: Option<ConditionSpec>,
-    pub cost: Option<ScriptHandle>,
+    /// `None` means "no cost primitive recognized" — same script-bridge-
+    /// fallback posture as `effect`, though nothing consumes that fallback
+    /// yet (`ScriptRuntime::invoke_cost` is still `todo!()`). `Some(Tap)` is
+    /// the one shape `ActivateAbility` resolves this slice.
+    pub cost: Option<AbilityCost>,
     pub target: Option<ScriptHandle>,
     pub operation: ScriptHandle,
     /// See `AbilityEffect`'s doc comment — `Some` for an effect shape this

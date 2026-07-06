@@ -4,7 +4,9 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
 
-use crate::types::ability::{AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility};
+use crate::types::ability::{
+    AbilityCost, AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility,
+};
 use crate::types::card::{CardDefinition, ScriptReference};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
@@ -25,6 +27,13 @@ impl UserData for ConditionTag {}
 #[derive(Clone)]
 struct OperationTag(AbilityEffect);
 impl UserData for OperationTag {}
+
+/// Same idea, for `Game.Costs.*` — e.g. `Game.Costs.Tap` is a plain tagged
+/// value (no arguments, unlike `Game.Ops.GainLife(n)`) decoded back out via
+/// `decode_cost_value`.
+#[derive(Clone, Copy)]
+struct CostTag(AbilityCost);
+impl UserData for CostTag {}
 
 #[derive(Debug)]
 pub enum ScriptError {
@@ -154,6 +163,27 @@ fn decode_operation_value(
         )),
         other => Err(ScriptError::LoadError(format!(
             "operation script must return a Game.Ops.* value or a function, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Same shape as `decode_condition_value`/`decode_operation_value`, for
+/// `Game.Costs.*` — no `Script` fallback yet (`RegisteredAbility::cost`'s
+/// only consumer, `ScriptRuntime::invoke_cost`, is still `todo!()`), so a
+/// bare custom function isn't accepted here, unlike the other two decoders.
+fn decode_cost_value(value: Value) -> Result<AbilityCost, ScriptError> {
+    match value {
+        Value::UserData(ud) => {
+            let tag: CostTag =
+                ud.borrow::<CostTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?.clone();
+            Ok(tag.0)
+        }
+        Value::Nil => Err(ScriptError::LoadError(
+            "cost script returned nil - expected a Game.Costs.* value".to_string(),
+        )),
+        other => Err(ScriptError::LoadError(format!(
+            "cost script must return a Game.Costs.* value, got {}",
             other.type_name()
         ))),
     }
@@ -294,6 +324,16 @@ impl ScriptRuntime {
         decode_operation_value(&self.lua, &mut self.registry.borrow_mut(), value)
     }
 
+    /// Loads a cost source string that resolves to a `Game.Costs.*` value
+    /// (e.g. `return Game.Costs.Tap`) — same one-liner-eval convention as
+    /// `load_condition`/`load_operation`, narrower: only the recognized-
+    /// primitive shape exists for costs this slice (see `decode_cost_value`).
+    pub fn load_cost(&mut self, source: &str) -> Result<AbilityCost, ScriptError> {
+        let value: Value =
+            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        decode_cost_value(value)
+    }
+
     fn function(&self, handle: ScriptHandle) -> Result<Function<'_>, ScriptError> {
         let registry = self.registry.borrow();
         let key = registry
@@ -423,8 +463,9 @@ impl ScriptRuntime {
     }
 }
 
-/// Builds the `Game.Conditions`/`Game.Ops`/`Game.CreateTriggeredAbility`
-/// sugar and binds it into `lua`'s globals. Deliberately not the same thing
+/// Builds the `Game.Conditions`/`Game.Ops`/`Game.Costs`/
+/// `Game.CreateTriggeredAbility` sugar and binds it into `lua`'s globals.
+/// Deliberately not the same thing
 /// as binding all of `script_api.rs`'s functions (`Game.AddContinuousEffect`/
 /// `Game.ReplaceEvent`/`Game.CastSpell`/`Game.PayCost`/`Game.SelectTargets`
 /// stay unbound) — just enough sugar for a condition/operation source
@@ -438,6 +479,9 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     let ops = lua.create_table()?;
     let gain_life = lua.create_function(|_, amount: i32| Ok(OperationTag(AbilityEffect::GainLife(amount))))?;
     ops.set("GainLife", gain_life)?;
+
+    let costs = lua.create_table()?;
+    costs.set("Tap", CostTag(AbilityCost::Tap))?;
 
     let create_triggered_ability = {
         let registry = Rc::clone(&registry);
@@ -454,6 +498,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("Ops", ops)?;
+    game.set("Costs", costs)?;
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
     lua.globals().set("Game", game)
 }
