@@ -1651,6 +1651,130 @@ gained `submit_discard` as a new public entry point (alongside `submit_action`, 
 - End of Combat step (CR 511): any "until end of combat" effects would need their own expiry pass
   here. Not modeled — no such duration exists in `EffectDuration` yet.
 
+## Phase 5: phase5/script-bridge-trigger slice
+
+Branch `phase5/script-bridge-trigger`, off master. Slice scope: a deliberately narrow first cut of
+the script bridge (Phase 2 part 3's `script.rs`/`script_api.rs` were signatures-only until now) —
+one concrete triggered ability (CR 603), real Lua condition + operation callbacks, invoked for real
+via `ScriptRuntime`, powering an ETB "gain 1 life" trigger end to end. Registration itself stays
+Rust-side this slice: a `RegisteredAbility` is built directly via a struct literal (test/scenario
+fixtures call the new `Engine::load_script` to get real `ScriptHandle`s first), not via a card
+script self-registering through `Game.RegisterTriggeredAbility` — that still needs the `Game.*` Lua
+table bound into the VM plus a registration-time mutability question sorted out (a Lua callback
+reaching `&mut GameState` mid-script), both flagged as explicit follow-up work rather than solved
+here. The keyword-primitives slice (merged just before this one, not yet written up in this file)
+laid the groundwork this builds on — `state.abilities`/`triggers.rs`'s plumbing already existed from
+the pass-priority-loop and activate-ability-mana slices.
+
+**Design lock-in, decided before writing code (see chat discussion, not just this doc):** the
+operation callback never mutates `GameState` itself — it returns a plain Lua table describing
+*intent* (`{ gain_life = 1 }`), and `ScriptRuntime::invoke_operation` decodes that table and applies
+the mutation on the Rust side. This is "Lua asks, Rust decides" (already documented as the design
+philosophy in `script_api.rs`'s header) applied to operation resolution specifically — it sidesteps
+needing a Lua callback to call back into `&mut GameState` mid-script, which `invoke_operation`'s own
+TODO had flagged as an unsorted mutability question since Phase 2 part 3. That harder problem (a
+script calling into `Game.*` itself, needing interior mutability during registration/resolution) is
+deferred to the follow-up slice that adds `Game.*` self-registration.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 7 new tests in
+`crates/engine/tests/phase5_script_bridge_trigger.rs` (unit-level `collect_triggers` condition
+true/false/none-always cases against a real `ScriptRuntime`, plus two full-pipeline end-to-end
+tests), all 151 prior tests unaffected. 158 tests total, 0 failed. Confirmed via the real CLI too:
+`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_script_bridge_trigger.toml` —
+7/7 actions ran, 3/3 assertions passed (life 20→21, bear resolved to the battlefield, ledger_len 19).
+
+**What got implemented:**
+- `script.rs`: `ScriptRuntime` gains real storage (`HashMap<ScriptHandle, mlua::RegistryKey>` +
+  a monotonic handle counter). `new()` constructs a real `Lua::new()` (the `Game.*` global table
+  binding is explicitly deferred — noted as a TODO on `new()` itself, not silently skipped). New
+  `load_function(&mut self, source: &str) -> Result<ScriptHandle, ScriptError>` — loads a standalone
+  Lua chunk that must evaluate to a function value, stores it via `create_registry_value`, mints a
+  handle. Narrower than `load_card_script` (still `todo!()` — that one needs a script to
+  self-register via `Game.*`, blocked on the same gap). `invoke_condition` real body: builds a
+  minimal Lua table from the event (`event_to_lua`, see below), calls the loaded function with
+  `(source, controller, event)`, returns the bool result. `invoke_operation` signature changed from
+  `&mut ScriptContext` to `(&self, handle, state: &mut GameState, source, controller)` — calls the
+  function with `(source, controller)`, decodes only a `gain_life` key from the returned table this
+  slice, applies via `PlayerState::gain_life`. New private `event_to_lua`/`zone_kind_name` helpers —
+  only `GameEventKind::ZoneChange` bridges into a Lua-visible table (`kind`/`object`/`from`/`to`);
+  every other event kind arrives as `nil`.
+- `types/player.rs`: `PlayerState::gain_life` real body (`self.life += amount`) — trivial fill,
+  blocked the demo operation otherwise.
+- `triggers.rs`: `collect_triggers` gains a `&ScriptRuntime` param, real body. `condition: None`
+  matches unconditionally (documented risk, not gated further this slice); `Some(handle)` invokes it
+  for real via `invoke_condition`, treating a script error as "didn't match" (TODO: no path exists
+  yet to surface a script error back to a `StepStatus`). Tracks `ability_index` as "the nth ability
+  on this source, any kind, in registration order" — matching the exact convention
+  `commands::find_ability` (new, see below) uses for `ActivateAbility`, via a per-source counter
+  walked in `state.abilities`'s registration order. A `Triggered` ability whose source no longer
+  resolves via `state.object()` (e.g. it left the battlefield) is skipped — the CR 603.10
+  last-known-information gap this leaves is called out explicitly, not fixed here (only ETB-shaped
+  conditions are exercised).
+- `commands.rs`: new `pub(crate) find_ability(state, source, ability_index) -> Option<&RegisteredAbility>`
+  — extracted from `ActivateAbility`'s previously-inline lookup so `triggers.rs`'s
+  `PutTriggersApnap` stack-push (below) and `ActivateAbility` share one definition of "index" rather
+  than each re-deriving it.
+- `engine.rs`: `Engine` gains a private `script_runtime: ScriptRuntime` field (constructed in both
+  `Engine::new` and `Engine::new_game`) and a new public `load_script(&mut self, source: &str) ->
+  Result<ScriptHandle, ScriptError>` — the same "no producer exists yet, caller wires it up by hand"
+  shape `state_mut()`'s own doc comment already described for `state.abilities`. `CollectTriggers`
+  now passes `&self.script_runtime` through to `triggers::collect_triggers`. `PutTriggersApnap`'s
+  empty-`pending_groups` branch — previously a bare TODO — now pushes a real `StackObject` (kind
+  `TriggeredAbility`) for each `PendingTrigger` in `ordered`, looked up via `commands::find_ability`,
+  logging a `StackObjectPushed` ledger event per push (same direct-ledger-write pattern
+  `submit_payment`/`submit_discard` already use for engine-internal writes outside the normal
+  `ReplacementCheck` pipeline). `ResolveStackTop`'s `StackEntryKind::TriggeredAbility` case now calls
+  `self.script_runtime.invoke_operation(...)` — the `Spell`-only zone-move branch is untouched;
+  `ActivatedAbility`/`Copy` remain no-ops exactly as before.
+- `crates/scenario/src/lib.rs`: `CardSpec` gains `trigger_condition`/`trigger_operation` (raw Lua
+  source strings) — `trigger_operation` alone registers the ability, `trigger_condition` omitted
+  means "always triggers." New `PendingTriggerScript { source, condition, operation }` and a shared
+  `register_trigger_ability` helper (loads both scripts via `Engine::load_script`, pushes the
+  `RegisteredAbility`) used by both scenario-build paths.
+- `docs/scenario_format.md`: documented the two new `CardSpec` fields with a worked ETB example,
+  noting the deliberate narrowness (no self-registration, no targeting, no continuous effects).
+
+**STRUCT DEVIATIONS:** None beyond what was scoped (`ScriptRuntime.scripts`/`next_handle`,
+`Engine.script_runtime`) — anticipated in the pre-slice requirements report, not a surprise.
+
+**INTERFACE DEVIATIONS:**
+- `crates/scenario::build_initial_state` now returns a 3-tuple (`(GameState, HashMap<String,
+  ObjectId>, Vec<PendingTriggerScript>)`) instead of a 2-tuple — not anticipated in the original
+  report. Needed because a `RegisteredAbility`'s `condition`/`operation` need *real* `ScriptHandle`s,
+  which only exist once an `Engine` (and its `ScriptRuntime`) is constructed — but
+  `build_initial_state` only builds a `GameState`, before any `Engine` exists. `run()`'s
+  `build_initial_state` branch now loads the pending scripts and registers the abilities right after
+  `Engine::new(state)`, mirroring the pattern `build_new_game_engine`'s own post-construction
+  `mana_ability` loop already established.
+- `invoke_operation`'s signature change (`&mut ScriptContext` → `state: &mut GameState` directly)
+  was flagged as likely in Phase 2 part 3's own notes, not a surprise mid-slice.
+
+**SCOPE DEVIATIONS:** None beyond the scenario-crate plumbing already scoped in the pre-slice
+requirements report.
+
+**UNRESOLVED (all flagged with explicit `TODO` comments in code, all anticipated in the pre-slice
+requirements report — none new):**
+- `Game.*` Lua global table binding and card-script self-registration (`Game.RegisterTriggeredAbility`
+  actually being called *from* Lua) — `script_api.rs`'s functions still aren't bound into the VM.
+  This is the next planned slice, along with a `Game.Conditions.*`/`Game.Ops.*` primitive-tag fast
+  path (discussed in chat, not yet built) so common shapes like "ETB" don't need a full condition
+  script written out, while a hand-written condition/operation function remains fully supported as
+  the general case.
+- `ScriptContext.state`'s hidden-information leak (full `&GameState` visible to a condition script)
+  — untouched, same DESIGN.md open question as before this slice.
+- `invoke_target`'s synchronous signature / Lua coroutine design for player-input-mid-script —
+  untouched.
+- Only `GameEventKind::ZoneChange` bridges into a Lua-visible event shape; every other event kind
+  reaches a condition script as `nil`. Extend `event_to_lua` as real conditions need more.
+- Only a `gain_life` key is decoded out of an operation's returned table; other effect shapes
+  (draw, damage, counters, ...) need their own key + apply arm in `invoke_operation`.
+- CR 603.10/603.3d: a triggered ability whose source has left the battlefield (or otherwise no
+  longer resolves via `state.object()`) is silently dropped rather than evaluated/placed using
+  last-known information — both `collect_triggers` and `PutTriggersApnap`'s stack-push flag this
+  explicitly. Only ETB-shaped (source-still-present) triggers are exercised this slice.
+- CR 603.2-603.3's once-per-turn/range/timing legality beyond the condition callback itself — not
+  modeled, same gap flagged since the pass-priority-loop slice's original `collect_triggers` TODO.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

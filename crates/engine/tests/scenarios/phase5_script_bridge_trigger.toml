@@ -1,0 +1,78 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+trigger_condition = """
+return function(source, controller, event)
+    return event ~= nil and event.kind == "zone_change"
+       and event.object == source and event.to == "battlefield"
+end
+"""
+trigger_operation = """
+return function(source, controller)
+    return { gain_life = 1 }
+end
+"""
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bear"
+
+[[actions]]
+type = "pass_priority"
+player = 0
+# (x3 total - PreGame -> Untap (auto-chains, no priority window) -> Upkeep -> Draw -> Main)
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "cast_spell"
+player = 0
+card = "bear"
+
+[[actions]]
+type = "submit_payment"
+player = 0
+# {0} cost still needs an explicit empty plan (CR 118.5a) - bear has no mana_cost.
+
+[[actions]]
+type = "pass_priority"
+player = 0
+# solo game: a single pass already satisfies "everyone passed" (CR 117.4) -
+# resolves the spell. The creature entering the battlefield is exactly the
+# ZoneChange the ETB condition matches, so its ability goes on the stack in
+# this same pipeline run.
+
+[[actions]]
+type = "pass_priority"
+player = 0
+# resolves the triggered ability itself, invoking its real Lua operation.
+
+[[assertions]]
+type = "life"
+player = 0
+equals = 21
+
+[[assertions]]
+type = "object_zone"
+card = "bear"
+equals = "battlefield"
+
+[[assertions]]
+type = "ledger_len"
+equals = 19

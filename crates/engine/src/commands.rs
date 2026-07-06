@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
+use crate::types::ability::RegisteredAbility;
 use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
@@ -125,6 +126,19 @@ pub(crate) fn has_summoning_sickness(state: &GameState, object: &GameObject) -> 
         // it as sick rather than silently allowing it.
         None => true,
     }
+}
+
+/// Looks up the `ability_index`th ability registered to `source` — any
+/// kind, in registration order (the order entries were pushed onto
+/// `state.abilities`). Shared by `ActivateAbility` (below) and
+/// `triggers::collect_triggers`'s `PendingTrigger::ability_index`, so both
+/// call sites agree on what "index" means rather than each re-deriving it.
+pub(crate) fn find_ability(
+    state: &GameState,
+    source: ObjectId,
+    ability_index: u32,
+) -> Option<&RegisteredAbility> {
+    state.abilities.iter().filter(|a| a.source == source).nth(ability_index as usize)
 }
 
 /// CR 400.7: abilities belong to their object and travel with it across zone
@@ -417,14 +431,9 @@ pub fn execute_command(
                 ));
             }
 
-            let ability = state
-                .abilities
-                .iter()
-                .filter(|a| a.source == source)
-                .nth(ability_index as usize)
-                .ok_or_else(|| {
-                    CommandError::IllegalAction("no such ability on source".to_string())
-                })?;
+            let ability = find_ability(state, source, ability_index).ok_or_else(|| {
+                CommandError::IllegalAction("no such ability on source".to_string())
+            })?;
             if ability.kind != AbilityKind::Activated {
                 return Err(CommandError::IllegalAction(
                     "ability is not an activated ability".to_string(),

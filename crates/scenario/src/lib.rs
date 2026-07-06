@@ -175,6 +175,31 @@ pub struct CardSpec {
     /// `KeywordSet` itself models; see that type's doc comment.
     #[serde(default)]
     pub keywords: Vec<String>,
+    /// Real Lua source for this card's one triggered ability's condition
+    /// callback (see `ScriptRuntime::invoke_condition`). `None` means "no
+    /// filter, always triggers" once `trigger_operation` is set — same rule
+    /// `RegisteredAbility::condition` documents.
+    #[serde(default)]
+    pub trigger_condition: Option<String>,
+    /// Real Lua source for this card's one triggered ability's operation
+    /// callback (see `ScriptRuntime::invoke_operation`). Presence of this
+    /// field is what registers the ability at all — `trigger_condition`
+    /// alone does nothing without it. Only one triggered ability per card
+    /// this way, same single-ability-per-card simplification `mana_ability`
+    /// already uses for activated abilities.
+    #[serde(default)]
+    pub trigger_operation: Option<String>,
+}
+
+/// One card instance's triggered ability, collected by `build_initial_state`
+/// but not registered there — no `Engine`/`ScriptRuntime` exists yet at that
+/// point (it only builds a `GameState`). `run()` loads the Lua source into
+/// the `Engine` that wraps this state and pushes the real `RegisteredAbility`
+/// afterward (see `register_trigger_ability`).
+pub struct PendingTriggerScript {
+    pub source: ObjectId,
+    pub condition: Option<String>,
+    pub operation: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -697,9 +722,12 @@ fn zone_owner_for(kind: ZoneKind, player: PlayerId) -> Option<PlayerId> {
 /// Builds a real `GameState` directly from struct literals (see module doc
 /// for why). Returns the state plus a card-key -> `ObjectId` map so actions/
 /// assertions can refer to setup cards by their TOML key.
-pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, ObjectId>) {
+pub fn build_initial_state(
+    file: &ScenarioFile,
+) -> (GameState, HashMap<String, ObjectId>, Vec<PendingTriggerScript>) {
     let mut next_object_id: u64 = 0;
     let mut card_ids: HashMap<String, ObjectId> = HashMap::new();
+    let mut trigger_scripts: Vec<PendingTriggerScript> = Vec::new();
 
     let mut players = Vec::new();
     let mut turn_order = Vec::new();
@@ -815,6 +843,13 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
                 effect: Some(AbilityEffect::AddMana(units)),
             });
         }
+        if let Some(operation) = &spec.trigger_operation {
+            trigger_scripts.push(PendingTriggerScript {
+                source: object_id,
+                condition: spec.trigger_condition.clone(),
+                operation: operation.clone(),
+            });
+        }
 
         objects.insert(object_id, object);
         card_ids.insert(entry.card.clone(), object_id);
@@ -858,7 +893,37 @@ pub fn build_initial_state(file: &ScenarioFile) -> (GameState, HashMap<String, O
         pending_step_skips: Vec::new(),
     };
 
-    (state, card_ids)
+    (state, card_ids, trigger_scripts)
+}
+
+/// Loads `condition_src`/`operation_src` into `engine`'s script runtime and
+/// pushes the resulting `RegisteredAbility` — shared by `run()`'s
+/// `build_initial_state` branch and `build_new_game_engine`'s per-library
+/// loop so both scenario formats support `trigger_condition`/
+/// `trigger_operation` the same way.
+fn register_trigger_ability(
+    engine: &mut Engine,
+    source: ObjectId,
+    condition_src: Option<&str>,
+    operation_src: &str,
+) {
+    let operation = engine
+        .load_script(operation_src)
+        .unwrap_or_else(|e| panic!("trigger_operation script failed to load: {e:?}"));
+    let condition = condition_src.map(|src| {
+        engine
+            .load_script(src)
+            .unwrap_or_else(|e| panic!("trigger_condition script failed to load: {e:?}"))
+    });
+    engine.state_mut().abilities.push(RegisteredAbility {
+        source,
+        kind: AbilityKind::Triggered,
+        condition,
+        cost: None,
+        target: None,
+        operation,
+        effect: None,
+    });
 }
 
 // ---------------------------------------------------------------------
@@ -1207,6 +1272,14 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                     effect: Some(AbilityEffect::AddMana(units)),
                 });
             }
+            if let Some(operation_src) = &spec.trigger_operation {
+                register_trigger_ability(
+                    &mut engine,
+                    card_ids[key],
+                    spec.trigger_condition.as_deref(),
+                    operation_src,
+                );
+            }
         }
     }
     (engine, card_ids)
@@ -1460,8 +1533,17 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
     let (mut engine, mut card_ids) = if let Some(game) = &file.game {
         build_new_game_engine(file, game)
     } else {
-        let (state, card_ids) = build_initial_state(file);
-        (Engine::new(state), card_ids)
+        let (state, card_ids, trigger_scripts) = build_initial_state(file);
+        let mut engine = Engine::new(state);
+        for pending in trigger_scripts {
+            register_trigger_ability(
+                &mut engine,
+                pending.source,
+                pending.condition.as_deref(),
+                &pending.operation,
+            );
+        }
+        (engine, card_ids)
     };
     let mut entries = Vec::new();
 

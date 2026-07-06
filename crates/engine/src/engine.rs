@@ -6,6 +6,7 @@ use crate::commands::{self, CommandError, PendingPaymentRequest, PriorityHandoff
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement::{self, ReplacementOutcome};
 use crate::sba;
+use crate::script::{ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
 use crate::types::card::CardTypeSet;
 use crate::types::config::{GameConfig, GameSettings};
@@ -15,11 +16,11 @@ use crate::types::counter::CounterSet;
 use crate::types::effect::EffectDuration;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
-use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, SequenceNo};
+use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo};
 use crate::types::mana::ManaPool;
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::PlayerState;
-use crate::types::stack::StackEntryKind;
+use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
 
@@ -349,6 +350,12 @@ pub struct Engine {
     /// tests that build `GameState` directly with `phase: PreGame` and expect
     /// the old pass-through behavior where PreGame was a no-op.
     pregame_setup_done: bool,
+    /// Embedded Lua VM + loaded callbacks (see `script.rs`). One per
+    /// `Engine`, not per-game rule per DESIGN.md — but this is a per-`Engine`
+    /// field rather than a global since there's currently no other place
+    /// with the right lifetime to own it, and nothing yet shares one
+    /// `ScriptRuntime` across multiple `Engine`s.
+    script_runtime: ScriptRuntime,
 }
 
 impl Engine {
@@ -362,6 +369,7 @@ impl Engine {
             pending_payment: None,
             settings: GameSettings::default(),
             pregame_setup_done: true,
+            script_runtime: ScriptRuntime::new(),
         }
     }
 
@@ -378,6 +386,18 @@ impl Engine {
     /// Remove once the script bridge lands.
     pub fn state_mut(&mut self) -> &mut GameState {
         &mut self.state
+    }
+
+    /// Loads a standalone Lua callback (see `ScriptRuntime::load_function`)
+    /// into this `Engine`'s script runtime, returning a `ScriptHandle` a
+    /// caller can then put on a `RegisteredAbility`'s `condition`/`operation`
+    /// field directly. Stand-in for real card-script self-registration
+    /// (`Game.RegisterTriggeredAbility`, still `todo!()` in script_api.rs) —
+    /// same "no producer exists yet, so the caller wires it up by hand"
+    /// shape `state_mut`'s own doc comment already describes for
+    /// `state.abilities`.
+    pub fn load_script(&mut self, source: &str) -> Result<ScriptHandle, ScriptError> {
+        self.script_runtime.load_function(source)
     }
 
     /// Diagnostic for tests/replay tooling: whether `pipeline_context` is
@@ -764,6 +784,7 @@ impl Engine {
             pending_payment: None,
             settings,
             pregame_setup_done: false,
+            script_runtime: ScriptRuntime::new(),
         }
     }
 
@@ -1310,10 +1331,23 @@ impl Engine {
                         });
                     }
                 }
-                // ActivatedAbility/TriggeredAbility/Copy: nothing on a zone
-                // moves when these resolve (CR 608's ability-resolution path
-                // doesn't involve a card) - only the Spell branch above
-                // produces a ZoneChange.
+                // ActivatedAbility/Copy: nothing on a zone moves when these
+                // resolve (CR 608's ability-resolution path doesn't involve
+                // a card) - only the Spell branch above produces a
+                // ZoneChange. TriggeredAbility doesn't move a zone either,
+                // but its operation callback is real now - invoke it via the
+                // script bridge (CR 603.4/608.2m's resolution proper).
+                if matches!(top.kind, StackEntryKind::TriggeredAbility) {
+                    // TODO: a script error here is silently dropped - no
+                    // path from ResolveStackTop back to a StepStatus error
+                    // exists for a mid-resolution script failure yet.
+                    let _ = self.script_runtime.invoke_operation(
+                        top.operation,
+                        &mut self.state,
+                        top.source,
+                        top.controller,
+                    );
+                }
                 events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
                 self.process_state =
                     ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
@@ -1438,7 +1472,7 @@ impl Engine {
             ProcessState::CollectTriggers { since } => {
                 let mut pending = Vec::new();
                 for event in &self.state.ledger[since..] {
-                    pending.extend(triggers::collect_triggers(&self.state, event));
+                    pending.extend(triggers::collect_triggers(&self.state, event, &self.script_runtime));
                 }
                 let groups = triggers::group_apnap(&self.state, pending);
                 self.process_state =
@@ -1455,14 +1489,46 @@ impl Engine {
                 // whole run on AwaitTriggerOrderChoice, not get resolved
                 // without them.
                 let Some((player, group)) = pending_groups.pop_front() else {
-                    // TODO: push each trigger in `ordered` onto
-                    // self.state.stack as a StackObject (needs StackObject
-                    // construction from PendingTrigger - blocked on the
-                    // same script-bridge gap as everywhere else
-                    // triggered/activated abilities need a stack
-                    // representation). Do that before consuming
-                    // end_pipeline_run() below, since this is the last
-                    // chance to read `ordered`.
+                    // Push each trigger in `ordered` onto self.state.stack
+                    // as a real StackObject (CR 603.3b/603.4) - looked up by
+                    // (source, ability_index) via commands::find_ability,
+                    // same "nth ability on this source" convention
+                    // ActivateAbility already relies on.
+                    for trigger in ordered {
+                        let Some(ability) =
+                            commands::find_ability(&self.state, trigger.source, trigger.ability_index)
+                        else {
+                            // Ability no longer resolves (e.g. its source
+                            // left play between being collected and now) -
+                            // TODO(CR 603.3d): a leaves-the-battlefield
+                            // triggered ability still goes on the stack
+                            // using last-known information; not handled
+                            // this slice (see collect_triggers's own note),
+                            // so this trigger is silently dropped instead.
+                            continue;
+                        };
+                        let operation = ability.operation;
+                        let stack_id = self.state.allocate_object_id();
+                        self.state.stack.push(StackObject::new(
+                            stack_id,
+                            StackEntryKind::TriggeredAbility,
+                            trigger.source,
+                            trigger.controller,
+                            Vec::new(),
+                            Vec::new(),
+                            None,
+                            operation,
+                        ));
+                        let event_id = self.state.allocate_event_id();
+                        let sequence_no = self.state.allocate_sequence_no();
+                        self.state.ledger.push(GameEvent {
+                            event_id,
+                            sequence_no,
+                            kind: GameEventKind::StackObjectPushed { stack_id },
+                            caused_by_command: None,
+                            parent_event: None,
+                        });
+                    }
                     self.process_state = self.end_pipeline_run();
                     return StepStatus::Progressed;
                 };
