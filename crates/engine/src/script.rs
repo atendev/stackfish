@@ -1,12 +1,28 @@
 use std::collections::HashMap;
 
-use mlua::{Function, Lua, RegistryKey, Table, Value};
+use mlua::{Function, Lua, RegistryKey, Table, UserData, Value};
 
+use crate::types::ability::{AbilityEffect, ConditionPrimitive, ConditionSpec};
 use crate::types::card::CardDefinition;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::zone::ZoneKind;
+
+/// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
+/// `Game.Conditions.Enters`/`Game.Conditions.Always` are real Lua values a
+/// condition script can `return` directly — decoded back out in
+/// `ScriptRuntime::load_condition`.
+#[derive(Clone, Copy)]
+struct ConditionTag(ConditionPrimitive);
+impl UserData for ConditionTag {}
+
+/// Same idea as `ConditionTag`, for `Game.Ops.*` — e.g. `Game.Ops.GainLife(1)`
+/// is a Lua function that returns one of these, decoded back out in
+/// `ScriptRuntime::load_operation`.
+#[derive(Clone)]
+struct OperationTag(AbilityEffect);
+impl UserData for OperationTag {}
 
 #[derive(Debug)]
 pub enum ScriptError {
@@ -47,16 +63,21 @@ pub struct ScriptRuntime {
 
 impl ScriptRuntime {
     pub fn new() -> Self {
-        // Game.* table binding (Game.RegisterTriggeredAbility etc, and the
-        // Game.Conditions.*/Game.Ops.* primitive-tag sugar discussed for a
-        // follow-up slice) isn't wired into `lua`'s globals yet - narrow
-        // scope for this slice is loading/invoking standalone callbacks by
-        // handle (see load_function below), not a card script that
-        // self-registers via Game.* while running. TODO: bind Game.* here
-        // once script_api.rs's functions are ready to be exposed to Lua and
+        let lua = Lua::new();
+        // Game.Conditions.*/Game.Ops.* sugar tables only this slice - real
+        // Game.RegisterTriggeredAbility/etc self-registration (script_api.rs's
+        // functions actually bound into `lua`) is still deferred: that needs
         // the registration-time mutability question (a Lua callback needing
-        // to reach &mut GameState mid-script) is sorted.
-        ScriptRuntime { lua: Lua::new(), scripts: HashMap::new(), next_handle: 0 }
+        // to reach &mut GameState mid-script) sorted first. TODO: bind the
+        // rest of Game.* here once that's designed.
+        bind_game_globals(&lua).expect("binding the Game.Conditions/Game.Ops sugar tables should never fail");
+        ScriptRuntime { lua, scripts: HashMap::new(), next_handle: 0 }
+    }
+
+    fn next_script_handle(&mut self) -> ScriptHandle {
+        let handle = ScriptHandle(self.next_handle);
+        self.next_handle += 1;
+        handle
     }
 
     /// Loads `source` (a Lua chunk that must evaluate to a single function
@@ -76,10 +97,131 @@ impl ScriptRuntime {
             .lua
             .create_registry_value(function)
             .map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let handle = ScriptHandle(self.next_handle);
-        self.next_handle += 1;
+        let handle = self.next_script_handle();
         self.scripts.insert(handle, key);
         Ok(handle)
+    }
+
+    /// Loads a condition source string that may be either shape: a full
+    /// custom `return function(source, controller, event) ... end` (falls
+    /// back to `ConditionSpec::Script`, invoked for real via
+    /// `invoke_condition` at trigger-check time, unchanged from before this
+    /// slice) or a one-liner referencing `Game.Conditions.*`
+    /// (`ConditionSpec::Primitive`, resolved once here — zero further Lua
+    /// calls). Any other returned value (including a bare `nil`, e.g. a
+    /// typo'd `Game.Conditions.Typo`) is a load error, not guessed at — see
+    /// `RegisteredAbility::condition`'s doc comment for why `nil` isn't
+    /// silently treated as "always".
+    pub fn load_condition(&mut self, source: &str) -> Result<ConditionSpec, ScriptError> {
+        // The eval+match is confined to this nested block so the `Value`'s
+        // tie to `self.lua`'s borrow ends here, before `next_script_handle`
+        // needs `&mut self` below — otherwise NLL's drop elaboration for
+        // `Value` (some variants wrap a live Lua-side ref) extends that
+        // borrow to the end of the whole function even though every arm
+        // fully consumes it.
+        enum Decoded {
+            Primitive(ConditionPrimitive),
+            Pending(RegistryKey),
+        }
+        let decoded = {
+            let value: Value =
+                self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            match value {
+                Value::UserData(ud) => {
+                    let tag: ConditionTag = ud
+                        .borrow::<ConditionTag>()
+                        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+                        .clone();
+                    Decoded::Primitive(tag.0)
+                }
+                Value::Function(function) => {
+                    let key = self
+                        .lua
+                        .create_registry_value(function)
+                        .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                    Decoded::Pending(key)
+                }
+                Value::Nil => {
+                    return Err(ScriptError::LoadError(
+                        "condition script returned nil - use `return Game.Conditions.Always` \
+                         for an explicit unconditional trigger, not an empty/typo'd chunk"
+                            .to_string(),
+                    ));
+                }
+                other => {
+                    return Err(ScriptError::LoadError(format!(
+                        "condition script must return a Game.Conditions.* value or a function, got {}",
+                        other.type_name()
+                    )));
+                }
+            }
+        };
+        match decoded {
+            Decoded::Primitive(primitive) => Ok(ConditionSpec::Primitive(primitive)),
+            Decoded::Pending(key) => {
+                let handle = self.next_script_handle();
+                self.scripts.insert(handle, key);
+                Ok(ConditionSpec::Script(handle))
+            }
+        }
+    }
+
+    /// Same two-shapes-at-load-time pattern as `load_condition`, for
+    /// operations. A recognized `Game.Ops.*` value decodes into
+    /// `(Some(AbilityEffect), ScriptHandle(0))` — the handle is an unused
+    /// placeholder, same convention CR 605 mana abilities already use for
+    /// `RegisteredAbility::operation` when `effect` is `Some`. A custom
+    /// function falls back to `(None, <real handle>)`, invoked via
+    /// `invoke_operation` exactly as before this slice.
+    pub fn load_operation(
+        &mut self,
+        source: &str,
+    ) -> Result<(Option<AbilityEffect>, ScriptHandle), ScriptError> {
+        // Same nested-block reasoning as load_condition above.
+        enum Decoded {
+            Primitive(AbilityEffect),
+            Pending(RegistryKey),
+        }
+        let decoded = {
+            let value: Value =
+                self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            match value {
+                Value::UserData(ud) => {
+                    let tag: OperationTag = ud
+                        .borrow::<OperationTag>()
+                        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+                        .clone();
+                    Decoded::Primitive(tag.0)
+                }
+                Value::Function(function) => {
+                    let key = self
+                        .lua
+                        .create_registry_value(function)
+                        .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                    Decoded::Pending(key)
+                }
+                Value::Nil => {
+                    return Err(ScriptError::LoadError(
+                        "operation script returned nil - expected a Game.Ops.* value or a function"
+                            .to_string(),
+                    ));
+                }
+                other => {
+                    return Err(ScriptError::LoadError(format!(
+                        "operation script must return a Game.Ops.* value or a function, got {}",
+                        other.type_name()
+                    )));
+                }
+            }
+        };
+        match decoded {
+            Decoded::Primitive(effect) => Ok((Some(effect), ScriptHandle(0))),
+            Decoded::Pending(key) => {
+                let handle = self.next_script_handle();
+                self.scripts.insert(handle, key);
+                Ok((None, handle))
+            }
+        }
     }
 
     fn function(&self, handle: ScriptHandle) -> Result<Function<'_>, ScriptError> {
@@ -175,6 +317,27 @@ impl ScriptRuntime {
         }
         Ok(())
     }
+}
+
+/// Builds the `Game.Conditions`/`Game.Ops` sugar tables and binds them into
+/// `lua`'s globals as `Game.Conditions.*`/`Game.Ops.*`. Deliberately not the
+/// same thing as binding `script_api.rs`'s functions (`Game.RegisterTriggeredAbility`
+/// etc stay unbound) — just these two small factories so a condition/
+/// operation source string can be a one-liner like `return Game.Conditions.Enters`
+/// / `return Game.Ops.GainLife(1)` instead of a full hand-written function.
+fn bind_game_globals(lua: &Lua) -> mlua::Result<()> {
+    let conditions = lua.create_table()?;
+    conditions.set("Enters", ConditionTag(ConditionPrimitive::EntersBattlefield))?;
+    conditions.set("Always", ConditionTag(ConditionPrimitive::Always))?;
+
+    let ops = lua.create_table()?;
+    let gain_life = lua.create_function(|_, amount: i32| Ok(OperationTag(AbilityEffect::GainLife(amount))))?;
+    ops.set("GainLife", gain_life)?;
+
+    let game = lua.create_table()?;
+    game.set("Conditions", conditions)?;
+    game.set("Ops", ops)?;
+    lua.globals().set("Game", game)
 }
 
 /// Bridges the one event shape this slice's condition scripts need to read —

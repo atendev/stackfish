@@ -8,6 +8,7 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::sba;
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
+use crate::types::ability::{AbilityEffect, ConditionSpec};
 use crate::types::card::CardTypeSet;
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
@@ -398,6 +399,23 @@ impl Engine {
     /// `state.abilities`.
     pub fn load_script(&mut self, source: &str) -> Result<ScriptHandle, ScriptError> {
         self.script_runtime.load_function(source)
+    }
+
+    /// Loads a condition source string — either a `Game.Conditions.*`
+    /// one-liner or a full custom function — into this `Engine`'s script
+    /// runtime. See `ScriptRuntime::load_condition`.
+    pub fn load_condition(&mut self, source: &str) -> Result<ConditionSpec, ScriptError> {
+        self.script_runtime.load_condition(source)
+    }
+
+    /// Loads an operation source string — either a `Game.Ops.*` one-liner or
+    /// a full custom function — into this `Engine`'s script runtime. See
+    /// `ScriptRuntime::load_operation`.
+    pub fn load_operation(
+        &mut self,
+        source: &str,
+    ) -> Result<(Option<AbilityEffect>, ScriptHandle), ScriptError> {
+        self.script_runtime.load_operation(source)
     }
 
     /// Diagnostic for tests/replay tooling: whether `pipeline_context` is
@@ -1334,19 +1352,36 @@ impl Engine {
                 // ActivatedAbility/Copy: nothing on a zone moves when these
                 // resolve (CR 608's ability-resolution path doesn't involve
                 // a card) - only the Spell branch above produces a
-                // ZoneChange. TriggeredAbility doesn't move a zone either,
-                // but its operation callback is real now - invoke it via the
-                // script bridge (CR 603.4/608.2m's resolution proper).
+                // ZoneChange. TriggeredAbility doesn't move a zone either;
+                // its effect resolves via the Rust-native fast path when
+                // `top.effect` is a recognized primitive (no Lua call at
+                // all), falling back to the real script bridge
+                // (CR 603.4/608.2m's resolution proper) only when it's None.
                 if matches!(top.kind, StackEntryKind::TriggeredAbility) {
-                    // TODO: a script error here is silently dropped - no
-                    // path from ResolveStackTop back to a StepStatus error
-                    // exists for a mid-resolution script failure yet.
-                    let _ = self.script_runtime.invoke_operation(
-                        top.operation,
-                        &mut self.state,
-                        top.source,
-                        top.controller,
-                    );
+                    match &top.effect {
+                        Some(AbilityEffect::GainLife(amount)) => {
+                            if let Some(player) = self.state.player_mut(top.controller) {
+                                player.gain_life(*amount);
+                            }
+                        }
+                        // AddMana is only ever set on an Activated mana
+                        // ability, which never uses the stack (CR 605.1a) -
+                        // a TriggeredAbility StackObject should never carry
+                        // this variant. Defensive no-op rather than a panic.
+                        Some(AbilityEffect::AddMana(_)) => {}
+                        None => {
+                            // TODO: a script error here is silently dropped
+                            // - no path from ResolveStackTop back to a
+                            // StepStatus error exists for a mid-resolution
+                            // script failure yet.
+                            let _ = self.script_runtime.invoke_operation(
+                                top.operation,
+                                &mut self.state,
+                                top.source,
+                                top.controller,
+                            );
+                        }
+                    }
                 }
                 events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
                 self.process_state =
@@ -1508,6 +1543,7 @@ impl Engine {
                             continue;
                         };
                         let operation = ability.operation;
+                        let effect = ability.effect.clone();
                         let stack_id = self.state.allocate_object_id();
                         self.state.stack.push(StackObject::new(
                             stack_id,
@@ -1518,6 +1554,7 @@ impl Engine {
                             Vec::new(),
                             None,
                             operation,
+                            effect,
                         ));
                         let event_id = self.state.allocate_event_id();
                         let sequence_no = self.state.allocate_sequence_no();

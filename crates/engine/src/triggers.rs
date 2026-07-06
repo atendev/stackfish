@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::script::{ScriptContext, ScriptRuntime};
-use crate::types::ability::AbilityKind;
+use crate::types::ability::{AbilityKind, ConditionSpec};
 use crate::types::event::GameEvent;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId};
@@ -96,9 +96,14 @@ pub fn collect_triggers(
         };
         let controller = source_object.controller;
 
-        let matched = match ability.condition {
+        let matched = match &ability.condition {
             None => true,
-            Some(handle) => {
+            // Rust-native fast path - zero Lua VM calls, see
+            // ConditionPrimitive::matches's own doc comment.
+            Some(ConditionSpec::Primitive(primitive)) => {
+                primitive.matches(ability.source, &event.kind)
+            }
+            Some(ConditionSpec::Script(handle)) => {
                 let ctx = ScriptContext {
                     state,
                     source: ability.source,
@@ -110,7 +115,7 @@ pub fn collect_triggers(
                 // match" rather than being surfaced to the caller - no
                 // error-reporting path exists from CollectTriggers back to
                 // a StepStatus yet.
-                runtime.invoke_condition(handle, &ctx).unwrap_or(false)
+                runtime.invoke_condition(*handle, &ctx).unwrap_or(false)
             }
         };
         if matched {

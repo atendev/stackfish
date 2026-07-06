@@ -907,12 +907,12 @@ fn register_trigger_ability(
     condition_src: Option<&str>,
     operation_src: &str,
 ) {
-    let operation = engine
-        .load_script(operation_src)
+    let (effect, operation) = engine
+        .load_operation(operation_src)
         .unwrap_or_else(|e| panic!("trigger_operation script failed to load: {e:?}"));
     let condition = condition_src.map(|src| {
         engine
-            .load_script(src)
+            .load_condition(src)
             .unwrap_or_else(|e| panic!("trigger_condition script failed to load: {e:?}"))
     });
     engine.state_mut().abilities.push(RegisteredAbility {
@@ -922,7 +922,7 @@ fn register_trigger_ability(
         cost: None,
         target: None,
         operation,
-        effect: None,
+        effect,
     });
 }
 

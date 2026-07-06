@@ -169,7 +169,7 @@ fn collect_triggers_matches_a_real_condition_script() {
     state.abilities.push(RegisteredAbility {
         source: bear,
         kind: AbilityKind::Triggered,
-        condition: Some(condition),
+        condition: Some(ConditionSpec::Script(condition)),
         cost: None,
         target: None,
         operation: ScriptHandle(0), // never invoked by collect_triggers itself
@@ -198,7 +198,7 @@ fn collect_triggers_condition_false_on_a_different_object() {
     state.abilities.push(RegisteredAbility {
         source: bear,
         kind: AbilityKind::Triggered,
-        condition: Some(condition),
+        condition: Some(ConditionSpec::Script(condition)),
         cost: None,
         target: None,
         operation: ScriptHandle(0),
@@ -225,7 +225,7 @@ fn collect_triggers_condition_false_on_wrong_destination_zone() {
     state.abilities.push(RegisteredAbility {
         source: bear,
         kind: AbilityKind::Triggered,
-        condition: Some(condition),
+        condition: Some(ConditionSpec::Script(condition)),
         cost: None,
         target: None,
         operation: ScriptHandle(0),
@@ -323,7 +323,7 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     engine.state_mut().abilities.push(RegisteredAbility {
         source: bear,
         kind: AbilityKind::Triggered,
-        condition: Some(condition),
+        condition: Some(ConditionSpec::Script(condition)),
         cost: None,
         target: None,
         operation,
@@ -397,7 +397,7 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
     engine.state_mut().abilities.push(RegisteredAbility {
         source: bear,
         kind: AbilityKind::Triggered,
-        condition: Some(condition),
+        condition: Some(ConditionSpec::Script(condition)),
         cost: None,
         target: None,
         operation,

@@ -1775,6 +1775,98 @@ requirements report — none new):**
 - CR 603.2-603.3's once-per-turn/range/timing legality beyond the condition callback itself — not
   modeled, same gap flagged since the pass-priority-loop slice's original `collect_triggers` TODO.
 
+## Phase 5: phase5/script-bridge-primitives slice
+
+Branch `phase5/script-bridge-primitives`, off master. Slice scope: `Game.Conditions.*`/
+`Game.Ops.*` as real Lua values, so a condition/operation source string can be a one-liner
+(`return Game.Conditions.Enters`, `return Game.Ops.GainLife(1)`) instead of a full
+hand-written function — resolved once at *load* time into a Rust-native fast path with zero
+further Lua VM calls at trigger-check/resolve time. A full custom function remains fully
+supported (unchanged fallback). Full `Game.RegisterTriggeredAbility` self-registration is
+explicitly still out of scope — registration stays Rust-side (test/scenario fixtures build a
+`RegisteredAbility` directly), same as the prior slice.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 10 new tests in
+`crates/engine/tests/phase5_script_bridge_primitives.rs`, all 158 prior tests unaffected. 168
+tests total, 0 failed. Confirmed via the real CLI too: `cargo run -p stackfish-cli --
+crates/engine/tests/scenarios/phase5_script_bridge_primitives.toml` — 7/7 actions ran, 3/3
+assertions passed (life 20→21, bear resolved to the battlefield, ledger_len 19) — same
+ledger shape as the prior slice's hand-written-script scenario, confirming the primitive path
+produces identical observable behavior.
+
+**What got implemented:**
+- `types/ability.rs`: `AbilityEffect::GainLife(i32)` — the `Game.Ops.GainLife(n)` primitive.
+  `ConditionPrimitive { EntersBattlefield, Always }` — a Rust-native `matches(source, &GameEventKind)
+  -> bool`, mirroring the hand-written Lua condition's exact semantics (`event.object == source
+  && event.to == "battlefield"` for `EntersBattlefield`; unconditional for `Always`).
+  `ConditionSpec { Primitive(ConditionPrimitive), Script(ScriptHandle) }` replaces
+  `RegisteredAbility::condition`'s old `Option<ScriptHandle>` — now `Option<ConditionSpec>`.
+  `Always` is a real variant (not just reusing `None`) so a Lua author has an explicit, correct
+  spelling for "no filter" — loading rejects a bare Lua `nil` result as an error instead of
+  silently treating a typo'd `Game.Conditions.Typo` as unconditional (closes the footgun flagged
+  in the pre-slice design chat).
+- `types/stack.rs`: `StackObject` gains `effect: Option<AbilityEffect>`, baked in at push time
+  (`PutTriggersApnap`) from the triggering `RegisteredAbility`, same "primitive stand-in when
+  Some, script fallback when None" contract `RegisteredAbility::effect` already had for CR 605
+  mana abilities. `StackObject::new` gained a matching trailing parameter — both existing call
+  sites (`commands.rs`'s `CastSpell`, `engine.rs`'s `PutTriggersApnap`) updated.
+- `script.rs`: two small Lua sugar tables built into globals at `ScriptRuntime::new()` —
+  `Game.Conditions = { Enters = <ConditionTag>, Always = <ConditionTag> }`, `Game.Ops = {
+  GainLife = <function(amount) -> OperationTag> }`. `ConditionTag`/`OperationTag` are thin
+  `impl mlua::UserData` wrappers around `ConditionPrimitive`/`AbilityEffect` respectively — this
+  is *not* the same as binding `script_api.rs`'s functions (`Game.RegisterTriggeredAbility` etc
+  stay unbound). New `ScriptRuntime::load_condition`/`load_operation`: each evaluates the chunk
+  to an `mlua::Value` and branches — `UserData` decodes the tag into the primitive spec/effect,
+  `Function` registers via the same registry-key path `load_function` already used (factored the
+  handle-minting into a shared `next_script_handle` helper), `Nil`/anything else is a load error.
+  `Engine` gained matching `load_condition`/`load_operation` wrappers alongside `load_script`.
+- `triggers.rs`'s `collect_triggers`: matches on `ConditionSpec` now — `Primitive` calls
+  `ConditionPrimitive::matches` directly (zero Lua calls), `Script` still calls
+  `invoke_condition` exactly as before.
+- `engine.rs`'s `ResolveStackTop`: the `TriggeredAbility` branch now checks `top.effect` first —
+  `Some(GainLife(n))` applies directly via `PlayerState::gain_life`, falling back to
+  `invoke_operation` only when `effect` is `None`. `Some(AddMana(_))` is a defensive no-op (that
+  variant is only ever set on an `Activated` mana ability, which never uses the stack per CR
+  605.1a — a `TriggeredAbility` `StackObject` should never actually carry it).
+- `commands.rs`'s `ActivateAbility` arm: its exhaustive `match effect` needed a new arm for the
+  added `AbilityEffect::GainLife` variant — folded into the same `todo!()` catch as `None`, since
+  a non-mana activated ability (script-invoked *or* a recognized primitive) both need the
+  not-yet-built "`ActivateAbility` pushes a real `StackObject`" machinery before either effect
+  shape can resolve; out of scope for this slice regardless of which effect is waiting behind it.
+- `crates/scenario/src/lib.rs`'s `register_trigger_ability` helper: now calls
+  `Engine::load_condition`/`load_operation` instead of `load_script` twice, threading the decoded
+  `effect` through onto the pushed `RegisteredAbility` — supports both source-string shapes
+  transparently for TOML fixtures.
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice requirements report anticipated exactly
+(`ConditionPrimitive`, `ConditionSpec`, `AbilityEffect::GainLife`, `StackObject::effect`).
+
+**INTERFACE DEVIATIONS:** None beyond the two new `Engine`/`ScriptRuntime` method pairs
+(`load_condition`/`load_operation`) already scoped in the requirements report.
+
+**SCOPE DEVIATIONS:**
+- A genuine Rust borrow-checker wrinkle, not anticipated: `mlua::Value`'s `Table`/`Function`/
+  `UserData` variants hold an actual `&'lua Lua` reference internally (not just a phantom
+  lifetime), and Rust's drop elaboration for a `let value = ...; match value { ... }` pattern
+  defers `value`'s (mostly-no-op, since fully moved-out) destructor call to `value`'s *lexical*
+  scope end rather than immediately after the match — which pinned the borrow of `self.lua` all
+  the way to the end of `load_condition`/`load_operation`, conflicting with the `&mut self` call
+  to mint a handle afterward. Fixed by nesting the eval+match in an inner block that ends before
+  any `&mut self` call, so `value`'s lexical scope (and the borrow tied to it) closes first.
+- Four pre-existing test files needed mechanical updates for the two type/shape changes (not new
+  gaps, just call sites the type system caught): `phase5_script_bridge_trigger.rs`'s five
+  `condition: Some(condition)` sites now read `condition: Some(ConditionSpec::Script(condition))`;
+  `phase5_cast_spell.rs`/`phase5_play_land.rs`/`phase5_pass_priority_loop.rs`'s direct
+  `StackObject { .. }` struct literals each needed `effect: None` added.
+
+**UNRESOLVED (all anticipated in the pre-slice requirements report, none new):**
+- `Game.*` self-registration (`Game.RegisterTriggeredAbility` actually callable *from* Lua) —
+  still out of scope, blocked on the registration-time mutability question.
+- Only `Game.Ops.GainLife` and `Game.Conditions.{Enters,Always}` are wired — `DrawCards`/`Leaves`/
+  etc need their own factory/tag entries as real cards need them.
+- `ScriptContext.state`'s hidden-information leak, `invoke_target`'s synchronous signature, and
+  CR 603.10's last-known-information gap are all untouched, same as before this slice.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

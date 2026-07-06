@@ -378,6 +378,7 @@ pub fn execute_command(
                 targets,
                 x_value,
                 ScriptHandle(0),
+                None,
             ));
 
             return Ok(CommandOutcome {
@@ -489,17 +490,19 @@ pub fn execute_command(
                         requires_payment: None,
                     });
                 }
-                None => {
-                    // TODO(script bridge): a non-mana activated ability
-                    // needs cost/target/operation script callbacks to
-                    // determine its real cost, validate targets, push a
-                    // StackObject (CR 602.2a-b mirrors casting a spell), and
-                    // eventually resolve via its operation - none of that
-                    // exists yet (same gap every other ability/operation
-                    // hits). Structural lookup/validation above (source
-                    // exists, actor controls it, the ability exists and is
-                    // Activated) is real; everything past here needs the
-                    // script bridge.
+                // None (script-bridge-only effect) and Some(GainLife) (a
+                // non-mana ActivateAbility whose effect happens to be a
+                // recognized primitive) both hit the same gap: unlike CR
+                // 605's mana abilities, a non-mana activated ability still
+                // needs cost/target validation and a real StackObject push
+                // (CR 602.2a-b mirrors casting a spell) before its effect
+                // (script-invoked or primitive) can resolve at all - none of
+                // that ActivateAbility-pushes-a-StackObject machinery exists
+                // yet. Structural lookup/validation above (source exists,
+                // actor controls it, the ability exists and is Activated) is
+                // real; everything past here needs that machinery built,
+                // regardless of which effect shape is waiting behind it.
+                None | Some(AbilityEffect::GainLife(_)) => {
                     todo!()
                 }
             }
