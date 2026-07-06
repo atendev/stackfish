@@ -159,6 +159,7 @@ mana_ability = ["G"]           # optional, default [] - see Mana abilities below
 keywords = ["Flying", "Deathtouch"]  # optional, default [] - see Keywords below
 trigger_condition = "..."      # optional Lua source, default none - see Triggered abilities below
 trigger_operation = "..."      # optional Lua source, default none - see Triggered abilities below
+script = "..."                 # optional full self-registering Lua source, default none - see below
 ```
 
 **`mana_ability` (CR 605):** if non-empty, every instance of this card gets one
@@ -211,10 +212,34 @@ trigger_condition = "return Game.Conditions.Enters"
 trigger_operation = "return Game.Ops.GainLife(1)"
 ```
 
-This is deliberately narrow — no `Game.RegisterTriggeredAbility` self-registration (a card script
-calling into `Game.*` itself to register its own abilities), no targeting, no continuous effects.
-Real self-registration is still follow-up work (see `docs/implementation.md`'s script-bridge
-slice notes).
+This shape is deliberately narrow — no targeting, no continuous effects, and registration is done
+by the harness rather than the card's own script. See `script` below for real self-registration.
+
+**`script` (CR 603, real self-registration):** a full card script — the `s.initial_effect(c)`
+module convention, calling `Game.CreateTriggeredAbility(c)` itself — instead of the harness
+building a `RegisteredAbility` by hand. Sets `CardDefinition::script_ref` directly; no
+post-construction `Engine` step needed, since the real engine pipeline (`PlayLand`/
+`ResolveStackTop`) runs it automatically once the card actually reaches the battlefield. **See
+`docs/lua_scripts.md` for the full authoring reference.** Example (same ETB "gain 1 life" ability
+as above, self-registered instead of harness-wired):
+
+```toml
+script = """
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateTriggeredAbility(c)
+    e:SetCondition(Game.Conditions.Enters)
+    e:SetOperation(Game.Ops.GainLife(1))
+    e:Register()
+end
+return s
+"""
+```
+
+Still narrow — no targeting, no continuous effects, no `Game.CreateActivatedAbility`/
+`Game.CreateStaticAbility` (only triggered abilities can self-register so far). Nothing stops a
+card from setting both `script` and `trigger_condition`/`trigger_operation` at once, but that's
+not a supported combination — pick one per card.
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and

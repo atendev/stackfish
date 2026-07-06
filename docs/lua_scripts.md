@@ -146,41 +146,38 @@ schema currently has (a scenario-harness limitation, not a Lua one).
 
 ## How registration actually happens today
 
-There is **no self-registration** yet — a card's own Lua script cannot call
-`Game.RegisterTriggeredAbility` to register itself (see "Not available yet"). Every
-`RegisteredAbility` in the engine today is built Rust-side:
+Two ways, both real, coexisting:
+
+**Harness-wired** (`trigger_condition`/`trigger_operation`, prior slice) — the test/scenario
+harness builds the `RegisteredAbility` by hand, Rust-side:
 
 1. Load the condition string via `Engine::load_condition(source)` -> `ConditionSpec`.
 2. Load the operation string via `Engine::load_operation(source)` -> `(Option<AbilityEffect>, ScriptHandle)`.
 3. Push a `RegisteredAbility { source, kind: AbilityKind::Triggered, condition: Some(condition),
    operation, effect, cost: None, target: None }` onto `GameState.abilities` directly.
 
-The scenario TOML harness (`crates/scenario/src/lib.rs`'s `register_trigger_ability`) does
-exactly this for `trigger_condition`/`trigger_operation` fields, once the `Engine` (and its
-`ScriptRuntime`) exists. A hand-written Rust test can do the same thing directly — see any test
-in `crates/engine/tests/phase5_script_bridge_primitives.rs` for the pattern.
+`crates/scenario/src/lib.rs`'s `register_trigger_ability` does exactly this for
+`trigger_condition`/`trigger_operation` fields. Still fully supported — see any test in
+`crates/engine/tests/phase5_script_bridge_primitives.rs` for the pattern.
 
-## Where this is headed: one script file per card
+**Real self-registration** (`script`, this slice) — the card's own Lua calls
+`Game.CreateTriggeredAbility(c)` itself; nothing outside the script builds a `RegisteredAbility`
+by hand. See the next section.
+
+## Real self-registration: a full card script
 
 `CardDefinition.script_ref` is a `ScriptReference` (`types/card.rs`) — either `Inline(String)`
-(a literal Lua source string, what every example above uses) or `ByKey(String)` (a lookup key
-into an external card-database project's script registry, per `DESIGN.md`'s "no card database
-tooling" non-goal — this engine consumes that registry, it doesn't author or lay it out).
-`ByKey` is the shape a real card database will use: one `.lua` file per card, looked up by key,
-loaded once via `ScriptRuntime::load_card_script` and cached per `CardDefinition` (not
-per-`GameObject` instance).
-
-**This isn't runnable yet** — `load_card_script` is `todo!()`, and so is the self-registration
-path it depends on (`Game.RegisterTriggeredAbility` isn't bound into the Lua VM; see "Not
-available yet"). But the *shape* of that eventual file is worth writing down now, since it's
-what today's `trigger_condition`/`trigger_operation` snippets are standing in for. Following
-`docs/ygo_pro_reference.md`'s `s.initial_effect(c)` convention (one Lua module per card, effects
-built and registered inside a single setup function, condition/operation broken out as named
-functions rather than written inline):
+(a literal Lua source string) or `ByKey(String)` (a lookup key into an external card-database
+project's script registry, per `DESIGN.md`'s "no card database tooling" non-goal — this engine
+consumes that registry, it doesn't author or lay it out; `ByKey` stays unimplemented here, see
+"Not available yet"). `ScriptRuntime::run_card_script` loads `Inline` source, evaluates it to a
+Lua table with a callable `initial_effect` field (the `s.initial_effect(c)` module convention,
+per `docs/ygo_pro_reference.md`), and calls it with the object's own id — real, running, tested
+(`crates/engine/tests/phase5_script_self_registration.rs`):
 
 ```lua
 -- test_bear.lua
--- CardDefinition.script_ref = ScriptReference::ByKey("test_bear")
+-- CardDefinition.script_ref = ScriptReference::Inline(<this file's contents>)
 --
 -- Test Bear
 -- Creature - Bear, 2/2
@@ -189,56 +186,62 @@ functions rather than written inline):
 local s = {}
 
 function s.initial_effect(c)
-    -- c is this card's own object id (the `source` every condition/operation
-    -- below receives as their first argument) - self-registers one
-    -- triggered ability using the same primitives documented above.
-    Game.RegisterTriggeredAbility(c, Game.Conditions.Enters, nil, nil, Game.Ops.GainLife(1))
+    -- c is this card's own object id - Game.CreateTriggeredAbility(c) returns
+    -- a builder mirroring ygopro's Effect.CreateEffect(c)/e1:SetCondition(...)
+    -- /c:RegisterEffect(e1) convention.
+    local e = Game.CreateTriggeredAbility(c)
+    e:SetCondition(Game.Conditions.Enters)
+    e:SetOperation(Game.Ops.GainLife(1))
+    e:Register()
 end
 
 return s
 ```
 
-A card whose ability needs more than the primitive tables cover falls back to named custom
-functions instead — same `condition`/`operation` split, just written out instead of a one-liner
-(mirroring `s.cond`/`s.op` in the ygopro reference):
+`:SetCondition`/`:SetOperation` accept either shape from the tables above — a primitive tag or a
+custom function:
 
 ```lua
--- some_other_card.lua
--- CardDefinition.script_ref = ScriptReference::ByKey("some_other_card")
-
-local s = {}
-
 function s.initial_effect(c)
-    Game.RegisterTriggeredAbility(c, s.condition, nil, nil, s.operation)
+    local e = Game.CreateTriggeredAbility(c)
+    e:SetCondition(function(source, controller, event)
+        return event ~= nil and event.kind == "zone_change"
+           and event.object == source and event.to == "battlefield"
+    end)
+    e:SetOperation(function(source, controller)
+        return { gain_life = 1 }
+    end)
+    e:Register()
 end
-
-function s.condition(source, controller, event)
-    return event ~= nil and event.kind == "zone_change"
-       and event.object == source and event.to == "battlefield"
-end
-
-function s.operation(source, controller)
-    return { gain_life = 1 }
-end
-
-return s
 ```
 
-Caveats on both examples, so they don't get mistaken for a locked-in API:
+Omitting `:SetCondition` before `:Register()` means unconditional (same meaning `condition: None`
+already has). Calling `:Register()` with no `:SetOperation()` set is a real error — an ability
+needs an operation. A script can call `Game.CreateTriggeredAbility(c)` more than once inside one
+`initial_effect` to register more than one ability on the same card — this isn't a special case,
+it falls out of the mechanism for free (each `:Register()` independently queues its own
+`RegisteredAbility`).
 
-- `Game.RegisterTriggeredAbility`'s exact calling convention isn't finalized. `script_api.rs`'s
-  Rust-side signature (`source, condition, cost, target, operation`) is what these examples
-  mirror positionally, but its own doc comment flags a real open question (no `AbilityKind`
-  parameter yet, despite the function nominally covering triggered/activated/static abilities) —
-  the shape above is illustrative of the intended ergonomics, not something to code against yet.
-- Calling `Game.RegisterTriggeredAbility` *from inside a running Lua callback* needs `&mut
-  GameState` reachable at registration time — the same interior-mutability-during-script-
-  execution problem flagged since Phase 2's script bridge notes, still unsolved. This is the
-  actual blocker keeping self-registration out of scope, not just the binding being unwritten.
-- File naming/location (`test_bear.lua`, one file per card key) is illustrative, not a decision
-  this engine makes — per `DESIGN.md`'s non-goals, that layout belongs to whichever external
-  project maintains the card database, and `ScriptReference::ByKey`'s own doc comment is
-  deliberately silent on how a key resolves to source.
+`kind` is implied by which constructor you called (`Game.CreateTriggeredAbility` here) rather
+than a settable field — `Game.CreateActivatedAbility`/`Game.CreateStaticAbility` are the natural
+future siblings for the other two `AbilityKind`s, not built yet (see "Not available yet").
+`:SetCost`/`:SetTarget` aren't bound on the builder either — `invoke_cost`/`invoke_target` are
+still `todo!()` regardless, so nothing would consume them yet.
+
+**Registration timing (CR 400.7):** a card's script re-runs — unconditionally, every time,
+no "first time only" check — at exactly the two points a *new* battlefield object id is minted:
+`PlayLand`'s hand→battlefield move, and `ResolveStackTop`'s permanent-entry branch
+(stack→battlefield, after casting). This matches CR 400.7's "an object that moves from one zone
+to another becomes a new object with no memory of its previous existence" literally — the
+previous id's `RegisteredAbility` (if any) is purged once that id is retired (`commands::
+retire_object`, called at every zone-change site that doesn't otherwise carry the ability forward
+via `remap_abilities` — e.g. SBA-driven death), so a card that returns to the battlefield later
+gets a genuinely fresh registration, not a stale leftover. Abilities keyed off a *pre-battlefield*
+zone (a cast trigger, a graveyard-based ability like flashback) aren't in scope — self-
+registration only runs at the two "entering the battlefield" points above.
+
+Scenario TOML fixtures can use this directly via `CardSpec.script` — see `docs/scenario_format.md`
+and `crates/engine/tests/scenarios/phase5_script_self_registration.toml`.
 
 ## Hidden information
 
@@ -256,13 +259,21 @@ forever, and don't add a Lua-visible full-state argument without re-reading
 
 Don't spend time trying these — they're signatures only, or explicitly unbound:
 
-- **`Game.RegisterTriggeredAbility`, `Game.AddContinuousEffect`, `Game.ReplaceEvent`,
-  `Game.CastSpell`, `Game.PayCost`, `Game.SelectTargets`** (`script_api.rs`) — none of these are
-  bound into the Lua VM's globals. A card script cannot call any of them. Only the
-  `Game.Conditions.*`/`Game.Ops.*` sugar tables documented above exist in `Game` right now.
-- **Cost and target callbacks** — `RegisteredAbility.cost`/`.target` exist as fields but
-  `ScriptRuntime::invoke_cost`/`invoke_target` are both `todo!()`. Every trigger exercised so far
-  has no cost and no targets.
+- **`Game.AddContinuousEffect`, `Game.ReplaceEvent`, `Game.CastSpell`, `Game.PayCost`,
+  `Game.SelectTargets`** (`script_api.rs`) — none of these are bound into the Lua VM's globals. A
+  card script cannot call any of them. `Game.Conditions.*`/`Game.Ops.*`/`Game.CreateTriggeredAbility`
+  are the only things that exist on `Game` right now.
+- **`Game.CreateActivatedAbility`/`Game.CreateStaticAbility`** — only triggered abilities can
+  self-register so far. A mana ability is still wired via `mana_ability`
+  (`docs/scenario_format.md`), not Lua at all.
+- **`ByKey` script resolution** — `run_card_script` only handles `ScriptReference::Inline`;
+  `ByKey` is a real error. Real integration is expected to always hand this engine an
+  already-resolved `Inline` source (the database crate resolves the key upstream), so this may
+  never need solving here.
+- **Cost and target callbacks** — `RegisteredAbility.cost`/`.target` exist as fields, and the
+  builder doesn't even bind `:SetCost`/`:SetTarget`, but `ScriptRuntime::invoke_cost`/
+  `invoke_target` are both `todo!()` regardless. Every trigger exercised so far has no cost and no
+  targets.
 - **Activated (non-mana) abilities** — `commands::execute_command`'s `ActivateAbility` arm still
   `todo!()`s for anything other than a CR 605 mana ability (see `mana_ability` in
   `docs/scenario_format.md`, which doesn't go through Lua at all). A `Game.Ops.GainLife`-style

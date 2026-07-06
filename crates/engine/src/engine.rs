@@ -665,7 +665,9 @@ impl Engine {
                 .zone_mut(ZoneKind::Hand, Some(player))
                 .expect("hand zone must exist")
                 .remove(card);
-            self.state.objects.remove(&card);
+            // CR 400.7: discarded, no remap follows - purge any
+            // RegisteredAbility still pointing at the hand-zone id.
+            commands::retire_object(&mut self.state, card);
             self.state
                 .zone_mut(ZoneKind::Graveyard, Some(owner))
                 .expect("graveyard zone must exist")
@@ -1210,6 +1212,22 @@ impl Engine {
                     }
                 };
 
+                // CommandOutcome::battlefield_entries - execute_command
+                // can't reach ScriptRuntime itself (state: &mut GameState
+                // only), so it just reports which ids became new battlefield
+                // permanents; this is the "one place performs the side
+                // effect" half, same split priority_handoff/broke_pass_chain
+                // already use. TODO: a script error here is silently
+                // dropped, same gap ResolveStackTop's own call flags.
+                for object_id in &outcome.battlefield_entries {
+                    if let Some(definition) =
+                        self.state.object(*object_id).map(|o| o.definition.clone())
+                    {
+                        let _ =
+                            self.script_runtime.run_card_script(&mut self.state, &definition, *object_id);
+                    }
+                }
+
                 self.pipeline_context = Some(PipelineContext {
                     since_ledger,
                     caused_by_command: Some(command_id),
@@ -1332,6 +1350,12 @@ impl Engine {
                         }
 
                         self.state.objects.remove(&top.stack_id);
+                        // Captured before `new_object` moves into
+                        // `objects.insert` below - only a permanent actually
+                        // reaches the battlefield, so only it gets its card
+                        // script run.
+                        let definition_for_script =
+                            if is_permanent { Some(new_object.definition.clone()) } else { None };
                         if let Some(zone) = self.state.zone_mut(destination, destination_owner) {
                             zone.push_bottom(new_id);
                             self.state.objects.insert(new_id, new_object);
@@ -1340,6 +1364,17 @@ impl Engine {
                         // else: no such zone registered - defensive no-op,
                         // same stance as PlayLand's zone_mut lookups, just
                         // without a CommandError to return from here.
+                        if let Some(definition) = definition_for_script {
+                            // CR 400.7: a fresh battlefield object,
+                            // unconditionally - self-registration runs every
+                            // time, no "first time only" check.
+                            // TODO: a script error here is silently dropped,
+                            // same gap the operation-invocation path below
+                            // already flags (no error surface from
+                            // ResolveStackTop back to a StepStatus yet).
+                            let _ =
+                                self.script_runtime.run_card_script(&mut self.state, &definition, new_id);
+                        }
 
                         events.push(GameEventKind::ZoneChange {
                             object: new_id,
@@ -1763,7 +1798,9 @@ impl Engine {
             .zone_mut(ZoneKind::Library, Some(active))
             .expect("checked above")
             .remove(card);
-        self.state.objects.remove(&card);
+        // CR 400.7: drawn, no remap follows - purge any RegisteredAbility
+        // still pointing at the library-zone id.
+        commands::retire_object(&mut self.state, card);
         self.state
             .zone_mut(ZoneKind::Hand, Some(active))
             .expect("actor has no hand zone")
