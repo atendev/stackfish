@@ -441,10 +441,12 @@ pub fn execute_command(
                             "source is already tapped".to_string(),
                         ));
                     }
-                    // CR 602.5a: this is a {T}-cost ability (the only shape
-                    // this slice's mana abilities model), so summoning
-                    // sickness gates it.
-                    if has_summoning_sickness(state, source_object) {
+                    // CR 302.6: summoning sickness only restricts a
+                    // creature's {T}/{Q} abilities - non-creature permanents
+                    // (lands, artifacts, ...) ignore it entirely.
+                    if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
+                        && has_summoning_sickness(state, source_object)
+                    {
                         return Err(CommandError::IllegalAction(
                             "source has summoning sickness".to_string(),
                         ));

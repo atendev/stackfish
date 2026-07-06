@@ -6,10 +6,6 @@ rng_seed = 123
 skip_mulligan = true
 shuffle_libraries = false
 
-[[game.players]]
-id = 0
-library = ["forest1", "forest2", "forest3", "dork", "bear", "island1", "island2"]
-
 [[cards]]
 key = "forest1"
 name = "Forest"
@@ -26,12 +22,37 @@ name = "Forest"
 types = ["Land"]
 mana_ability = ["G"]
 [[cards]]
+key = "forest4"
+name = "Forest"
+types = ["Land"]
+mana_ability = ["G"]
+[[cards]]
+key = "forest5"
+name = "Forest"
+types = ["Land"]
+mana_ability = ["G"]
+[[cards]]
 key = "island1"
 name = "Island"
 types = ["Land"]
 mana_ability = ["U"]
 [[cards]]
 key = "island2"
+name = "Island"
+types = ["Land"]
+mana_ability = ["U"]
+[[cards]]
+key = "island3"
+name = "Island"
+types = ["Land"]
+mana_ability = ["U"]
+[[cards]]
+key = "island4"
+name = "Island"
+types = ["Land"]
+mana_ability = ["U"]
+[[cards]]
+key = "island5"
 name = "Island"
 types = ["Land"]
 mana_ability = ["U"]
@@ -49,48 +70,10 @@ generic_cost = 1
 colors = ["G"]
 
 [[game.players]]
-id = 1
-library = ["mountain1", "mountain2", "mountain3", "goblin"]
+id = 0
+library = ["forest1", "forest2", "forest3", "dork", "bear", "island1", "island2", "island3", "island4", "island5", "forest4", "forest5"]
 
-[[cards]]
-key = "mountain1"
-name = "Mountain"
-types = ["Land"]
-mana_ability = ["R"]
-[[cards]]
-key = "mountain2"
-name = "Mountain"
-types = ["Land"]
-mana_ability = ["R"]
-[[cards]]
-key = "mountain3"
-name = "Mountain"
-types = ["Land"]
-mana_ability = ["R"]
-[[cards]]
-key = "goblin"
-name = "Goblin"
-types = ["Creature"]
-colors = ["R"]
-
-[[setup]]
-player = 1
-zone = "hand"
-card = "mountain1"
-[[setup]]
-player = 1
-zone = "hand"
-card = "mountain2"
-[[setup]]
-player = 1
-zone = "hand"
-card = "mountain3"
-[[setup]]
-player = 1
-zone = "library"
-card = "goblin"
-
-# Make sure things are where they should be
+# Assert player0 starting hand since we aren't shuffling libraries
 [[steps]]
 type = "assert_object_zone"
 card = "forest1"
@@ -114,11 +97,68 @@ equals = "hand"
 [[steps]]
 type = "assert_object_zone"
 card = "island1"
-equals = "library"
+equals = "hand"
 [[steps]]
 type = "assert_object_zone"
 card = "island2"
-equals = "library"
+equals = "hand"
+
+[[cards]]
+key = "mountain1"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "mountain2"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "mountain3"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "mountain4"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "mountain5"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "mountain6"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "mountain7"
+name = "Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+[[cards]]
+key = "goblin1"
+name = "Goblin"
+types = ["Creature"]
+colors = ["R"]
+[[cards]]
+key = "goblin2"
+name = "Goblin"
+types = ["Creature"]
+colors = ["R"]
+[[cards]]
+key = "goblin3"
+name = "Goblin"
+types = ["Creature"]
+colors = ["R"]
+
+[[game.players]]
+id = 1
+library = ["mountain1", "mountain2", "mountain3","goblin1", "goblin2", "goblin3", "mountain4", "mountain5", "mountain6", "mountain7"]
+
+# Assert Player1 starting hand since we aren't shuffling libraries
 [[steps]]
 type = "assert_object_zone"
 card = "mountain1"
@@ -133,20 +173,20 @@ card = "mountain3"
 equals = "hand"
 [[steps]]
 type = "assert_object_zone"
-card = "goblin"
-equals = "library"
-
+card = "goblin1"
+equals = "hand"
 [[steps]]
-type = "assert_phase"
-equals = "pre_game"
-
-# For now have to pass priority to leave pre_game phase
+type = "assert_object_zone"
+card = "goblin2"
+equals = "hand"
 [[steps]]
-type = "pass_priority"
-player = 0
+type = "assert_object_zone"
+card = "goblin3"
+equals = "hand"
 [[steps]]
-type = "pass_priority"
-player = 1
+type = "assert_object_zone"
+card = "mountain4"
+equals = "hand"
 
 # Untap doesn't use priority, so we go straight to Upkeep in Beginning
 [[steps]]
@@ -181,10 +221,6 @@ card = "forest1"
 type = "assert_object_zone"
 card = "forest1"
 equals = "battlefield"
-[[steps]]
-type = "assert_object_zone"
-card = "forest2"
-equals = "hand"
 
 [[steps]]
 type = "activate_ability"
@@ -254,9 +290,76 @@ equals = "combat"
 type = "assert_step"
 equals = "declare_attackers"
 
+
+# Passing through declare attackers wth none declared
+# skips to end of combat
 [[steps]]
-type = "declare_attackers"
+type = "pass_priority"
 player = 0
-attackers = [
-  {attacker = "dork", target = 1}
-]
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "assert_phase"
+equals = "combat"
+[[steps]]
+type = "assert_step"
+equals = "end_of_combat"
+
+# Pass through end of combat
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "assert_phase"
+equals = "main"
+[[steps]]
+type = "assert_step"
+equals = "post_combat_main"
+
+# Pass through to end phase
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "assert_phase"
+equals = "ending"
+[[steps]]
+type = "assert_step"
+equals = "end"
+
+# cleanup has no priority, so we go to the next turn
+# untap for the next turn doesn't have priority
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "assert_phase"
+equals = "beginning"
+[[steps]]
+type = "assert_step"
+equals = "upkeep"
+
+#on new player's turn
+# we switch order of passing since the active player is now player 1
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "assert_phase"
+equals = "beginning"
+[[steps]]
+type = "assert_step"
+equals = "draw"

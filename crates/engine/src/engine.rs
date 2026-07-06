@@ -369,6 +369,17 @@ impl Engine {
         &self.state
     }
 
+    /// TODO(script bridge): `state.abilities` should be populated by each
+    /// card's script registering itself (see `script_api.rs`'s
+    /// `register_triggered_ability` TODO) as objects enter zones that grant
+    /// abilities. That bridge doesn't exist yet, so callers building a game
+    /// from `CardDefinition`s outside the manual scenario-fixture path (e.g.
+    /// `new_game`) need a way to seed `RegisteredAbility` entries directly.
+    /// Remove once the script bridge lands.
+    pub fn state_mut(&mut self) -> &mut GameState {
+        &mut self.state
+    }
+
     /// Diagnostic for tests/replay tooling: whether `pipeline_context` is
     /// currently set. Should be `false` whenever `process_state` is
     /// `PriorityWindow` - `end_pipeline_run` is the only place that clears
@@ -1763,8 +1774,14 @@ impl Engine {
                 false
             }
             (Phase::Combat, Step::DeclareAttackers) => {
+              // CR 506.1: if no attackers were declared, skip to end of combat
+              if self.state.combat.as_ref().map(|c| c.attackers.is_empty()).unwrap_or(true) {
+                  self.state.phase = Phase::Combat;
+                  self.state.step = Step::EndOfCombat;
+              } else {
                 self.state.step = Step::DeclareBlockers;
-                false
+              }
+              false
             }
             (Phase::Combat, Step::DeclareBlockers) => {
                 self.state.step = Step::CombatDamage;

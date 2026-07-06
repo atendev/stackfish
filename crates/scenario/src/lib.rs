@@ -1110,10 +1110,36 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
         game.turn_order.iter().map(|&id| PlayerId(id)).collect()
     };
 
-    let engine = Engine::new_game(GameConfig { players: player_configs, turn_order, settings, rng_seed });
+    let mut engine = Engine::new_game(GameConfig { players: player_configs, turn_order, settings, rng_seed });
+    // Drive pregame automation (shuffle/draw/mulligan) to completion before
+    // any scenario step runs — `new_game` only sets up `Phase::PreGame`; the
+    // actual pregame actions happen on the first `step()` call, same as they
+    // would in live play.
+    drain(&mut engine);
     // Remap ids through pregame zone changes (draw_opening_hand and
     // return_hand_to_library both mint new ObjectIds and log ZoneChange events).
     remap_moved_card_ids(&mut card_ids, engine.state().ledger.as_slice());
+    // Same `mana_ability` -> `RegisteredAbility` workaround `build_initial_state`
+    // uses (no script bridge to register these from `CardDefinition` yet — see
+    // `Engine::state_mut`'s doc comment). Done after the remap above so each
+    // ability's `source` is the card's current (post-pregame) id.
+    for gp in &game.players {
+        for key in &gp.library {
+            let spec = card_specs[key.as_str()];
+            if !spec.mana_ability.is_empty() {
+                let units = spec.mana_ability.iter().map(|s| parse_mana_unit(s)).collect();
+                engine.state_mut().abilities.push(RegisteredAbility {
+                    source: card_ids[key],
+                    kind: AbilityKind::Activated,
+                    condition: None,
+                    cost: None,
+                    target: None,
+                    operation: ScriptHandle(0),
+                    effect: Some(AbilityEffect::AddMana(units)),
+                });
+            }
+        }
+    }
     (engine, card_ids)
 }
 
