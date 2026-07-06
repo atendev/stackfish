@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::types::ability::AbilityCost;
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
 use crate::types::ability::RegisteredAbility;
@@ -475,6 +476,8 @@ pub fn execute_command(
                 ));
             }
             let effect = ability.effect.clone();
+            let cost = ability.cost;
+            let operation = ability.operation;
 
             match effect {
                 Some(AbilityEffect::AddMana(units)) => {
@@ -527,19 +530,70 @@ pub fn execute_command(
                 }
                 // None (script-bridge-only effect) and Some(GainLife) (a
                 // non-mana ActivateAbility whose effect happens to be a
-                // recognized primitive) both hit the same gap: unlike CR
-                // 605's mana abilities, a non-mana activated ability still
-                // needs cost/target validation and a real StackObject push
-                // (CR 602.2a-b mirrors casting a spell) before its effect
-                // (script-invoked or primitive) can resolve at all - none of
-                // that ActivateAbility-pushes-a-StackObject machinery exists
-                // yet. Structural lookup/validation above (source exists,
-                // actor controls it, the ability exists and is Activated) is
-                // real; everything past here needs that machinery built,
-                // regardless of which effect shape is waiting behind it.
-                None | Some(AbilityEffect::GainLife(_)) => {
-                    todo!()
-                }
+                // recognized primitive) both take the same path: unlike CR
+                // 605's mana abilities, a non-mana activated ability uses
+                // the stack (CR 602.2) rather than resolving immediately.
+                // Targets are accepted and stored on the StackObject below,
+                // not validated for legality - same stance CastSpell already
+                // takes (see its own TODO comment above).
+                non_mana_effect @ (None | Some(AbilityEffect::GainLife(_))) => match cost {
+                    Some(AbilityCost::Tap) => {
+                        let source_object =
+                            state.object(source).ok_or(CommandError::InvalidTarget)?;
+                        if source_object.tapped {
+                            return Err(CommandError::IllegalAction(
+                                "source is already tapped".to_string(),
+                            ));
+                        }
+                        // CR 302.6: same summoning-sickness restriction as
+                        // the mana-ability arm above - a creature's own
+                        // {T} abilities are restricted, non-creatures ignore
+                        // it.
+                        if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
+                            && has_summoning_sickness(state, source_object)
+                        {
+                            return Err(CommandError::IllegalAction(
+                                "source has summoning sickness".to_string(),
+                            ));
+                        }
+
+                        state.object_mut(source).ok_or(CommandError::InvalidTarget)?.tapped = true;
+
+                        // CR 400.7: the stack object is a new id, distinct
+                        // from `source` (which stays on the battlefield) -
+                        // same convention PutTriggersApnap uses for
+                        // triggered abilities.
+                        let stack_id = state.allocate_object_id();
+                        state.stack.push(StackObject::new(
+                            stack_id,
+                            StackEntryKind::ActivatedAbility,
+                            source,
+                            command.actor,
+                            // TODO: no modes/X value on activated abilities yet.
+                            Vec::new(),
+                            targets,
+                            None,
+                            operation,
+                            non_mana_effect,
+                        ));
+
+                        return Ok(CommandOutcome {
+                            events: vec![
+                                GameEventKind::Tapped { object: source },
+                                GameEventKind::StackObjectPushed { stack_id },
+                            ],
+                            broke_pass_chain: true,
+                            priority_handoff: PriorityHandoff::Unchanged,
+                            requires_payment: None,
+                            battlefield_entries: Vec::new(),
+                        });
+                    }
+                    // No cost primitive recognized yet - same
+                    // script-bridge-fallback gap as `invoke_cost` itself
+                    // (still `todo!()`); no ability in this engine has ever
+                    // set `cost` to anything but `Tap` or `None`.
+                    None => todo!(),
+                },
             }
         }
         PlayerActionKind::DeclareAttackers { attackers } => {

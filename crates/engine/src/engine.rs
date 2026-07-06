@@ -1387,22 +1387,26 @@ impl Engine {
                 // ActivatedAbility/Copy: nothing on a zone moves when these
                 // resolve (CR 608's ability-resolution path doesn't involve
                 // a card) - only the Spell branch above produces a
-                // ZoneChange. TriggeredAbility doesn't move a zone either;
-                // its effect resolves via the Rust-native fast path when
-                // `top.effect` is a recognized primitive (no Lua call at
-                // all), falling back to the real script bridge
-                // (CR 603.4/608.2m's resolution proper) only when it's None.
-                if matches!(top.kind, StackEntryKind::TriggeredAbility) {
+                // ZoneChange. Activated and triggered abilities resolve the
+                // same way: `top.effect`'s Rust-native fast path when it's a
+                // recognized primitive (no Lua call at all), falling back to
+                // the real script bridge (CR 602.2b/603.4/608.2m's
+                // resolution proper) only when it's None.
+                if matches!(
+                    top.kind,
+                    StackEntryKind::TriggeredAbility | StackEntryKind::ActivatedAbility
+                ) {
                     match &top.effect {
                         Some(AbilityEffect::GainLife(amount)) => {
                             if let Some(player) = self.state.player_mut(top.controller) {
                                 player.gain_life(*amount);
                             }
                         }
-                        // AddMana is only ever set on an Activated mana
-                        // ability, which never uses the stack (CR 605.1a) -
-                        // a TriggeredAbility StackObject should never carry
-                        // this variant. Defensive no-op rather than a panic.
+                        // AddMana is only ever set on a mana ability, which
+                        // resolves immediately and never reaches the stack
+                        // (CR 605.1a/605.3b) - no StackObject of either kind
+                        // should ever carry this variant. Defensive no-op
+                        // rather than a panic.
                         Some(AbilityEffect::AddMana(_)) => {}
                         None => {
                             // TODO: a script error here is silently dropped
