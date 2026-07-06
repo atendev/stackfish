@@ -1,3 +1,4 @@
+use crate::types::ability::AbilityEffect;
 use crate::types::cost::CostPayment;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::object::GameObject;
@@ -27,6 +28,12 @@ pub struct StackObject {
     /// reference") but dropped in Phase 1 before the script bridge existed
     /// to give it a concrete type — restored now as a `ScriptHandle`.
     pub operation: ScriptHandle,
+    /// Same "primitive stand-in when Some, script fallback when None"
+    /// contract as `RegisteredAbility::effect` — baked in at push time
+    /// (`PutTriggersApnap`) from the ability that produced this
+    /// `StackObject`, so resolution can apply it directly without a Lua
+    /// call. `None` falls back to invoking `operation` for real.
+    pub effect: Option<AbilityEffect>,
 }
 
 impl StackObject {
@@ -45,6 +52,7 @@ impl StackObject {
         targets: Vec<Target>,
         x_value: Option<u32>,
         operation: ScriptHandle,
+        effect: Option<AbilityEffect>,
     ) -> Self {
         StackObject {
             stack_id,
@@ -60,6 +68,7 @@ impl StackObject {
             x_value,
             costs_paid: Vec::new(),
             operation,
+            effect,
         }
     }
 }
