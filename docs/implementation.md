@@ -1867,6 +1867,156 @@ produces identical observable behavior.
 - `ScriptContext.state`'s hidden-information leak, `invoke_target`'s synchronous signature, and
   CR 603.10's last-known-information gap are all untouched, same as before this slice.
 
+## Phase 5: phase5/script-self-registration slice
+
+Branch `phase5/script-self-registration`, off master. Slice scope: real card-script
+self-registration — a card's own Lua `initial_effect(c)` calling `Game.CreateTriggeredAbility(c)`
+to register its own triggered ability, replacing the "harness builds `RegisteredAbility` by hand"
+pattern (`trigger_condition`/`trigger_operation`, still fully supported, unaffected) with the
+genuine article for triggered abilities specifically.
+
+**Design lock-ins from the pre-slice discussion (chat, not just this doc):**
+- **Mutability fix: queued registration, not shared `GameState` access.** The actual blocker
+  since Phase 2 was never "how do you bind a function," it was "a Lua callback can't hold `&mut
+  GameState` mid-script." Fixed by giving `ScriptRuntime` a `Rc<RefCell<ScriptRegistry>>` — a
+  small side-channel (loaded-script storage plus a `pending_triggered: Vec<RegisteredAbility>`
+  queue) that a Lua-bound closure can reach without ever touching `GameState`. `:Register()`
+  pushes onto that queue; `ScriptRuntime::run_card_script` drains it into `state.abilities` only
+  *after* the whole script call returns. Same "Lua asks, Rust decides" split already proven for
+  operation resolution, applied to registration instead.
+- **Call shape: a builder object, not a flat function call.** `Game.CreateTriggeredAbility(c)`
+  returns a `TriggeredAbilityBuilder` (`mlua::UserData`) with `:SetCondition`/`:SetOperation`/
+  `:Register()` methods — deliberately mirroring ygopro's `Effect.CreateEffect(c)`/
+  `e1:SetCondition(...)`/`c:RegisterEffect(e1)` convention (`docs/ygo_pro_reference.md`) over a
+  single call with a growing pile of positional/nil args. Side effect: this *permanently* resolves
+  `register_triggered_ability`'s old "no `AbilityKind` parameter" gap, not just defers it — kind
+  is implied by which constructor was called, never a data field. `Game.CreateActivatedAbility`/
+  `Game.CreateStaticAbility` are the natural future siblings, not built this slice.
+- **Registration timing: unconditional, every mint, only at real battlefield-entry points.**
+  Re-runs a card's script at exactly two places — `PlayLand`'s hand→battlefield move and
+  `ResolveStackTop`'s permanent-entry branch (stack→battlefield) — every single time, no "first
+  time only" bookkeeping, matching CR 400.7's "no memory of its previous existence" literally.
+  Cast-triggers/graveyard-sourced abilities (needing a source before the battlefield) stay out of
+  scope, same framing every prior script-bridge slice has used for "only ETB-shaped triggers
+  exercised."
+- **Purge stale abilities everywhere an id retires, not just at the 2 new sites.** A real,
+  pre-existing (not new) gap surfaced while scoping this: `commands::remap_abilities` (added
+  during `phase5/cast-spell`, carries a `RegisteredAbility.source` forward across a CR 400.7 id
+  mint) was already called at 6 of 9 `state.objects.remove(&old_id)` sites — `PlayLand`,
+  `CastSpell`, both mulligan bottom/redraw paths, and `ResolveStackTop`'s permanent branch — but
+  **not** at discard (hand→graveyard), `draw_step` (library→hand), or SBA-driven death
+  (battlefield→graveyard). Those 3 had no remap and no purge — any `RegisteredAbility` registered
+  against a card that got discarded, drawn, or died just sat dead in `state.abilities` forever,
+  pre-dating self-registration entirely. New `commands::retire_object(state, old_id)` — removes
+  the object *and* purges `state.abilities.retain(|a| a.source != old_id)` — replaces the bare
+  `.remove()` at exactly those 3 sites. The other 6 sites are deliberately **untouched**: calling
+  `retire_object` there too would be wrong, since it would delete what `remap_abilities` just
+  correctly carried forward (e.g. a mana ability registered against a land while still in hand
+  must survive the hand→battlefield move) — `retire_object`'s own doc comment spells out this
+  "remap XOR retire, never both" contract explicitly so it doesn't get miscopied later.
+- **`ByKey` stays out of scope, by design, likely permanently.** Confirmed in the pre-slice
+  discussion: the real card-database crate is expected to resolve a key to source *before*
+  handing this engine a `CardDefinition` — `ScriptReference::ByKey` may end up practically unused
+  from this engine's side forever. `run_card_script` returns a real error for it rather than
+  guessing at a resolution convention.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 1 new lib unit test
+(`commands::tests::retire_object_purges_only_the_retired_source`, `pub(crate)` visibility means
+it can't live in an integration test) + 9 new tests in
+`crates/engine/tests/phase5_script_self_registration.rs`, all 168 prior tests unaffected. 178
+tests total, 0 failed. Confirmed via the real CLI too: `cargo run -p stackfish-cli --
+crates/engine/tests/scenarios/phase5_script_self_registration.toml` — 7/7 actions ran, 3/3
+assertions passed (life 20→21, bear resolved to the battlefield, ledger_len 19) — same ledger
+shape as the harness-wired version, confirming self-registration produces identical observable
+behavior.
+
+**What got implemented:**
+- `script.rs`: `ScriptRegistry` (new private struct) bundles `scripts`/`next_handle` (moved out of
+  `ScriptRuntime` directly) plus the new `pending_triggered` queue, all behind one
+  `Rc<RefCell<_>>` `ScriptRuntime` now holds instead of owning those fields itself. `load_function`/
+  `load_condition`/`load_operation`/`function` updated to go through `self.registry.borrow_mut()`/
+  `.borrow()` instead of direct field mutation — as a side effect, this let the earlier
+  nested-block NLL workaround in `load_condition`/`load_operation` (from the primitives slice) be
+  removed entirely: registry mutation no longer needs `&mut self` at all (interior mutability via
+  the `RefCell`), so there's no more conflict with `self.lua`'s borrow to work around. Decode logic
+  for a condition/operation value factored into free functions `decode_condition_value`/
+  `decode_operation_value(lua, registry, value)` — shared by `ScriptRuntime::load_condition`/
+  `load_operation` (decoding a freshly-`eval`'d chunk) and the new builder's `:SetCondition`/
+  `:SetOperation` (decoding a value already in hand as a call argument).
+  `TriggeredAbilityBuilder` (new `mlua::UserData`) holds `source`/`condition`/`operation` plus a
+  clone of the shared registry `Rc`; `:Register()` builds a real `RegisteredAbility` and pushes it
+  onto `registry.pending_triggered`. `bind_game_globals` gained a `registry` parameter and binds
+  `Game.CreateTriggeredAbility` as a closure capturing a clone of it. Old `load_card_script`
+  (`todo!()`, unused, wrong signature for what was actually needed) replaced by real
+  `run_card_script(&mut self, state: &mut GameState, definition: &CardDefinition, source:
+  ObjectId) -> Result<(), ScriptError>` — evaluates `Inline` source to a table, calls its
+  `initial_effect` field with `source.0`, drains `pending_triggered` into `state.abilities`
+  afterward. Re-parses the source fresh every call rather than caching per `CardDefinition`
+  (flagged as a deliberate simplification, not a decided design).
+- `commands.rs`: new `pub(crate) fn retire_object` (see design lock-in above). `CommandOutcome`
+  gained `battlefield_entries: Vec<ObjectId>` — `execute_command` can't reach `ScriptRuntime`
+  (`state: &mut GameState` only), so `PlayLand`'s arm reports which id just became a new
+  battlefield permanent instead of invoking the script itself; every other arm sets it to
+  `Vec::new()`. Same "one place decides, one place performs the side effect" split
+  `priority_handoff`/`broke_pass_chain` already established.
+- `engine.rs`: `PendingAction`'s branch drains `outcome.battlefield_entries` and calls
+  `self.script_runtime.run_card_script(...)` for each id, right after `execute_command` returns
+  (before `CollectTriggers` runs later in the same pipeline run). `ResolveStackTop`'s permanent-
+  entry branch calls it directly (already owns both `state` and `script_runtime`) — captures
+  `new_object.definition.clone()` before `new_object` moves into `state.objects.insert`, calls
+  `run_card_script` right after the existing `remap_abilities` call (order: remap first, so any
+  ability from an earlier zone-change survives; then self-register fresh — the two don't conflict
+  in practice since nothing self-registered exists before a card's first battlefield entry).
+- `sba.rs`: death branch now calls `commands::retire_object` instead of a bare `objects.remove`
+  (new `use crate::commands;`).
+- `crates/scenario/src/lib.rs`: `CardSpec` gained `script: Option<String>` — sets
+  `CardDefinition::script_ref` to `ScriptReference::Inline` directly at both construction sites,
+  no post-construction `Engine` step needed (unlike `trigger_condition`/`trigger_operation`,
+  self-registration runs automatically through the real `PlayLand`/`ResolveStackTop` pipeline once
+  the card reaches the battlefield).
+- `docs/lua_scripts.md`/`docs/scenario_format.md`: rewritten to describe self-registration as
+  real (the prior slice's version was explicitly speculative/illustrative-only — the exact
+  `Game.RegisterTriggeredAbility(c, condition, cost, target, operation)` positional shape guessed
+  there turned out different from what got built; replaced with the actual builder-based
+  `Game.CreateTriggeredAbility` API).
+
+**STRUCT DEVIATIONS:**
+- `CommandOutcome::battlefield_entries` — not anticipated by name in the pre-slice report, but the
+  underlying need (`execute_command` can't reach `ScriptRuntime`) was flagged as a design question
+  before writing code, and this is the direct consequence.
+- `ScriptRuntime`'s internal shape changed substantially (`scripts`/`next_handle` moved into a new
+  private `ScriptRegistry` behind `Rc<RefCell<_>>`) — anticipated in the pre-slice discussion
+  (queued-registration was the chosen mutability fix), not a surprise.
+
+**INTERFACE DEVIATIONS:** `ScriptRuntime::load_card_script` (never implemented, `todo!()`) is
+gone, replaced by `run_card_script` with a different signature (needs `&mut GameState` and
+`ObjectId`, which the old one didn't take) — anticipated, since the old signature was written
+before this slice's actual requirements were known.
+
+**SCOPE DEVIATIONS:**
+- `commands::retire_object` touches 3 pre-existing call sites (`engine.rs`'s discard and
+  `draw_step`, `sba.rs`'s death) that have nothing to do with self-registration directly — surfaced
+  and confirmed with the human before implementing (see design lock-ins above), not discovered
+  after the fact.
+- `crates/scenario/src/lib.rs` and both `docs/*.md` files touched beyond the engine crate itself —
+  same "verification tooling / docs need to track new capability" pattern every prior slice
+  affecting the scenario harness has followed.
+
+**UNRESOLVED (anticipated in the pre-slice requirements report, none new):**
+- `Game.CreateActivatedAbility`/`Game.CreateStaticAbility` — not built; only `Triggered` can
+  self-register.
+- `:SetCost`/`:SetTarget` — not bound on the builder; `invoke_cost`/`invoke_target` still `todo!()`
+  regardless.
+- Self-registration only runs at the 2 "enters the battlefield" call sites — cast-triggers/
+  graveyard-sourced abilities can't self-register yet.
+- `ScriptReference::ByKey` — stays `todo!()`/an error; expected to stay that way given the real
+  database crate's design (see design lock-ins above).
+- `run_card_script` re-parses the card's Lua source fresh every call rather than caching the
+  compiled chunk per `CardDefinition` — `CardDefinition` has no stable cache key today.
+- No guard against `run_card_script` being invoked twice for the same id without an intervening
+  zone change (would double-register) — not expected given the two call sites are each single-shot
+  per mint, but not defensively checked.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

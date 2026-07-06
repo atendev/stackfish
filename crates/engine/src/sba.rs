@@ -1,3 +1,4 @@
+use crate::commands;
 use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
@@ -126,7 +127,11 @@ fn apply_creature_death(state: &mut GameState, events: &mut Vec<GameEvent>) {
         if let Some(zone) = state.zone_mut(ZoneKind::Battlefield, None) {
             zone.remove(object_id);
         }
-        state.objects.remove(&object_id);
+        // CR 400.7: this object is gone for good (no remap follows, unlike
+        // PlayLand/CastSpell/ResolveStackTop's "same card, new id" moves) -
+        // purge any RegisteredAbility still pointing at it (e.g. a self-
+        // registered ETB trigger) rather than leaving a dead entry behind.
+        commands::retire_object(state, object_id);
         if let Some(zone) = state.zone_mut(ZoneKind::Graveyard, Some(owner)) {
             zone.push_bottom(new_id);
             state.objects.insert(new_id, new_object);

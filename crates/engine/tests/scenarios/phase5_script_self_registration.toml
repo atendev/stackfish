@@ -1,0 +1,78 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+script = """
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateTriggeredAbility(c)
+    e:SetCondition(Game.Conditions.Enters)
+    e:SetOperation(Game.Ops.GainLife(1))
+    e:Register()
+end
+return s
+"""
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bear"
+
+[[actions]]
+type = "pass_priority"
+player = 0
+# (x3 total - PreGame -> Untap (auto-chains, no priority window) -> Upkeep -> Draw -> Main)
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "pass_priority"
+player = 0
+
+[[actions]]
+type = "cast_spell"
+player = 0
+card = "bear"
+
+[[actions]]
+type = "submit_payment"
+player = 0
+# {0} cost still needs an explicit empty plan (CR 118.5a) - bear has no mana_cost.
+
+[[actions]]
+type = "pass_priority"
+player = 0
+# solo game: a single pass already satisfies "everyone passed" (CR 117.4) -
+# resolves the spell. The creature entering the battlefield is where
+# run_card_script fires for real, self-registering the ETB ability, which
+# then matches this same ZoneChange and goes on the stack in this same run.
+
+[[actions]]
+type = "pass_priority"
+player = 0
+# resolves the self-registered triggered ability - the fast path applies
+# GainLife(1) directly, no further Lua call.
+
+[[assertions]]
+type = "life"
+player = 0
+equals = 21
+
+[[assertions]]
+type = "object_zone"
+card = "bear"
+equals = "battlefield"
+
+[[assertions]]
+type = "ledger_len"
+equals = 19

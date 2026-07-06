@@ -189,6 +189,20 @@ pub struct CardSpec {
     /// already uses for activated abilities.
     #[serde(default)]
     pub trigger_operation: Option<String>,
+    /// A full self-registering card script — the `s.initial_effect(c)`
+    /// module convention (see `docs/lua_scripts.md`), calling
+    /// `Game.CreateTriggeredAbility(c)` itself rather than the harness
+    /// building a `RegisteredAbility` by hand. Sets `CardDefinition::
+    /// script_ref` to `ScriptReference::Inline(script)` directly - unlike
+    /// `trigger_condition`/`trigger_operation`, this needs no post-
+    /// construction `Engine`/`ScriptRuntime` step: the real engine pipeline
+    /// (`PlayLand`/`ResolveStackTop`) runs it automatically once the card
+    /// actually reaches the battlefield. Mutually exclusive in practice with
+    /// `trigger_condition`/`trigger_operation` (both can be set, but nothing
+    /// stops a card from having both a self-registered ability and a
+    /// harness-wired one - not a supported combination, just not rejected).
+    #[serde(default)]
+    pub script: Option<String>,
 }
 
 /// One card instance's triggered ability, collected by `build_initial_state`
@@ -792,7 +806,7 @@ pub fn build_initial_state(
             toughness: spec.toughness.map(PTValue::Fixed),
             loyalty: None,
             defense: None,
-            script_ref: ScriptReference::Inline(String::new()),
+            script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
             keywords: parse_keywords(&spec.keywords),
         };
 
@@ -1231,7 +1245,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 toughness: spec.toughness.map(PTValue::Fixed),
                 loyalty: None,
                 defense: None,
-                script_ref: ScriptReference::Inline(String::new()),
+                script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
                 keywords: parse_keywords(&spec.keywords),
             }
         }).collect();

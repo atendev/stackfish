@@ -75,6 +75,17 @@ pub struct CommandOutcome {
     /// `None` for every other variant — nothing else here puts something on
     /// the stack pending payment.
     pub requires_payment: Option<PendingPaymentRequest>,
+    /// Object ids that just became new battlefield permanents this command
+    /// (CR 400.7 mints a fresh id per zone change) — `engine.rs` runs each
+    /// one's card script (`ScriptRuntime::run_card_script`) right after this
+    /// outcome is applied. Empty for every variant except `PlayLand`, since
+    /// `execute_command` (`state: &mut GameState` only) can't reach
+    /// `ScriptRuntime` itself — same "one place decides, one place performs
+    /// the side effect" split `priority_handoff`/`broke_pass_chain` already
+    /// use. `ResolveStackTop`'s permanent-entry branch lives directly in
+    /// `engine.rs`, so it calls `run_card_script` itself without needing
+    /// this field.
+    pub battlefield_entries: Vec<ObjectId>,
 }
 
 /// See `CommandOutcome::requires_payment`'s doc comment for why this exists
@@ -152,6 +163,25 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     }
 }
 
+/// Removes `old_id` from `state.objects` and purges any `RegisteredAbility`
+/// still pointing at it (`state.abilities.retain`). Use at a zone-change
+/// site that does **not** also call `remap_abilities` for `old_id` — calling
+/// both would be wrong (retire would delete what remap just carried
+/// forward); calling neither leaves a dead `RegisteredAbility` sitting in
+/// `state.abilities` forever (harmless per `collect_triggers`'s existing
+/// "skip if source doesn't resolve" check, but pure pileup). Today that's
+/// exactly the sites with no in-play "same card, new id" continuation to
+/// carry forward: discard (hand→graveyard), `draw_step` (library→hand), and
+/// SBA-driven death (battlefield→graveyard) — the other zone-change sites
+/// (`PlayLand`, `CastSpell`, mulligan bottom/redraw, `ResolveStackTop`'s
+/// permanent branch) already call `remap_abilities` instead, which is the
+/// correct behavior there (e.g. a mana ability registered against a land
+/// while still in hand must survive the hand→battlefield move).
+pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) {
+    state.objects.remove(&old_id);
+    state.abilities.retain(|a| a.source != old_id);
+}
+
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
 /// non-ledger state directly (zones, etc.) and returning a
 /// `CommandOutcome`. Per the rationale in `command.rs`: this does not
@@ -188,6 +218,7 @@ pub fn execute_command(
                 broke_pass_chain: false,
                 priority_handoff: PriorityHandoff::To(state.turn_order[next_idx]),
                 requires_payment: None,
+                battlefield_entries: Vec::new(),
             });
         }
         PlayerActionKind::MakeChoice { .. } => {
@@ -203,6 +234,7 @@ pub fn execute_command(
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
                 requires_payment: None,
+                battlefield_entries: Vec::new(),
             });
         }
         PlayerActionKind::PlayLand { card } => {
@@ -281,6 +313,7 @@ pub fn execute_command(
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
                 requires_payment: None,
+                battlefield_entries: vec![new_id],
             });
         }
         PlayerActionKind::CastSpell { card, modes, targets, x_value } => {
@@ -404,6 +437,7 @@ pub fn execute_command(
                     payer: command.actor,
                     cost,
                 }),
+                battlefield_entries: Vec::new(),
             });
         }
         PlayerActionKind::ActivateAbility { source, ability_index, targets } => {
@@ -488,6 +522,7 @@ pub fn execute_command(
                         broke_pass_chain: true,
                         priority_handoff: PriorityHandoff::Unchanged,
                         requires_payment: None,
+                        battlefield_entries: Vec::new(),
                     });
                 }
                 // None (script-bridge-only effect) and Some(GainLife) (a
@@ -616,6 +651,7 @@ pub fn execute_command(
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
                 requires_payment: None,
+                battlefield_entries: Vec::new(),
             });
         }
         PlayerActionKind::DeclareBlockers { blocks } => {
@@ -757,6 +793,7 @@ pub fn execute_command(
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
                 requires_payment: None,
+                battlefield_entries: Vec::new(),
             });
         }
         PlayerActionKind::AssignCombatDamage { assignments } => {
@@ -993,6 +1030,7 @@ pub fn execute_command(
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
                 requires_payment: None,
+                battlefield_entries: Vec::new(),
             });
         }
         _ => {}
@@ -1018,4 +1056,76 @@ pub fn execute_command(
     // Every branch ends in returning
     // Ok(CommandOutcome { events, broke_pass_chain, priority_handoff }).
     todo!()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::counter::CounterSet;
+    use crate::types::game::RngState;
+    use crate::types::mana::ManaPool;
+    use crate::types::player::PlayerState;
+
+    fn minimal_state() -> GameState {
+        let p0 = PlayerId(0);
+        GameState {
+            players: vec![PlayerState {
+                player_id: p0,
+                life: 20,
+                mana_pool: ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 },
+                counters: CounterSet::new(),
+                emblems: Vec::new(),
+                commander_damage_taken: Vec::new(),
+                eliminated: false,
+                mulligans_taken: 0,
+                hand_kept: false,
+            }],
+            turn_order: vec![p0],
+            active_player: p0,
+            turn_number: 1,
+            phase: Phase::PreGame,
+            step: Step::Untap,
+            priority_player: p0,
+            consecutive_passes: 0,
+            lands_played_this_turn: HashMap::new(),
+            combat: None,
+            last_active_turn_number: HashMap::new(),
+            objects: HashMap::new(),
+            zones: Vec::new(),
+            stack: Vec::new(),
+            continuous_effects: Vec::new(),
+            replacement_effects: Vec::new(),
+            abilities: Vec::new(),
+            ledger: Vec::new(),
+            rng: RngState { seed: 1, draws_consumed: 0 },
+            next_event_id: 0,
+            next_sequence_no: 0,
+            next_object_id: 0,
+            pending_step_skips: Vec::new(),
+        }
+    }
+
+    fn dummy_ability(source: ObjectId) -> RegisteredAbility {
+        RegisteredAbility {
+            source,
+            kind: AbilityKind::Triggered,
+            condition: None,
+            cost: None,
+            target: None,
+            operation: ScriptHandle(0),
+            effect: Some(AbilityEffect::GainLife(1)),
+        }
+    }
+
+    #[test]
+    fn retire_object_purges_only_the_retired_source() {
+        let mut state = minimal_state();
+        state.abilities.push(dummy_ability(ObjectId(1)));
+        state.abilities.push(dummy_ability(ObjectId(2)));
+
+        retire_object(&mut state, ObjectId(1));
+
+        assert_eq!(state.abilities.len(), 1, "only ObjectId(1)'s ability should be purged");
+        assert_eq!(state.abilities[0].source, ObjectId(2), "ObjectId(2)'s ability must survive untouched");
+    }
 }
