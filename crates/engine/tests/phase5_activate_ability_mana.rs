@@ -203,12 +203,17 @@ fn reject_when_source_already_tapped() {
 
 /// CR 602.5a: closes the TODO the activate-ability-mana slice left open -
 /// a creature that entered the battlefield this turn can't tap for mana
-/// either (same summoning-sickness check `DeclareAttackers` uses).
+/// either (same summoning-sickness check `DeclareAttackers` uses). CR
+/// 302.6/the keyword-primitives slice: summoning sickness only restricts a
+/// *creature's* tap abilities, not a land's - `state_with_source`'s default
+/// fixture is a land, so this test overrides it to a creature to actually
+/// exercise the check it's testing.
 #[test]
 fn reject_when_source_has_summoning_sickness() {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
     let mut state = state_with_source(source, p0, source);
+    state.object_mut(source).unwrap().definition.card_types = CardTypeSet::CREATURE;
     // last_active_turn_number[p0] == 1 (state_with_source's default) - a
     // source controlled since turn 1 (the current turn) hasn't been
     // controlled since the turn *began*, so it's sick.
