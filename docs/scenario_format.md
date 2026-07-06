@@ -194,35 +194,27 @@ exists yet.
 
 **`trigger_condition`/`trigger_operation` (CR 603, narrow script bridge):** if `trigger_operation` is
 set, every instance of this card gets one `RegisteredAbility { kind: Triggered, .. }` set up
-automatically, with both fields loaded as real Lua source via `Engine::load_script` (see
+automatically, with both fields loaded via `Engine::load_condition`/`Engine::load_operation` (see
 `script.rs`'s `ScriptRuntime`). `trigger_operation` alone is what registers the ability —
 `trigger_condition` is optional and means "no filter, always triggers" when omitted (per
 `RegisteredAbility::condition`'s doc). Only one triggered ability per card this way, same
-single-ability-per-card simplification `mana_ability` uses. Condition scripts only see
-`GameEventKind::ZoneChange` events as a Lua table (`event.kind == "zone_change"`, `event.object`,
-`event.from`/`event.to` as lowercase zone-name strings) — every other event kind arrives as `nil`.
-Operation scripts return a plain table describing intent rather than mutating anything themselves
-("Lua asks, Rust decides") — only `gain_life` is a recognized key this slice. Example (an ETB "gain
-1 life" trigger):
+single-ability-per-card simplification `mana_ability` uses.
+
+Each field's source string can be either a `Game.Conditions.*`/`Game.Ops.*` one-liner (resolved
+once at load time, no Lua VM calls afterward) or a full custom Lua function, invoked for real
+every time. **See `docs/lua_scripts.md` for the full authoring reference** — recognized
+primitives, the custom-function calling convention, what event data a condition can see, and
+what isn't wired up yet. Short example (an ETB "gain 1 life" trigger, primitive form):
 
 ```toml
-trigger_condition = """
-return function(source, controller, event)
-    return event ~= nil and event.kind == "zone_change"
-       and event.object == source and event.to == "battlefield"
-end
-"""
-trigger_operation = """
-return function(source, controller)
-    return { gain_life = 1 }
-end
-"""
+trigger_condition = "return Game.Conditions.Enters"
+trigger_operation = "return Game.Ops.GainLife(1)"
 ```
 
 This is deliberately narrow — no `Game.RegisterTriggeredAbility` self-registration (a card script
-calling into `Game.*` itself), no targeting, no continuous effects. Real self-registration and a
-`Game.Conditions.*`/`Game.Ops.*` primitive-tag fast path are follow-up work (see
-`docs/implementation.md`'s script-bridge slice notes).
+calling into `Game.*` itself to register its own abilities), no targeting, no continuous effects.
+Real self-registration is still follow-up work (see `docs/implementation.md`'s script-bridge
+slice notes).
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and
