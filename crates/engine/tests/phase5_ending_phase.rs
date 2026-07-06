@@ -26,6 +26,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("bear".to_string()),
+        keywords: KeywordSet::empty(),
     };
     let obj = GameObject {
         object_id: id,
@@ -39,6 +40,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
         face_down: false,
         phased_out: false,
         damage_marked: 0,
+        deathtouched: false,
         counters: CounterSet::new(),
         attachments: Vec::new(),
         attached_to: None,

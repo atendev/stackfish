@@ -28,6 +28,7 @@ fn land_definition() -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("forest".to_string()),
+        keywords: KeywordSet::empty(),
     }
 }
 
@@ -46,6 +47,7 @@ fn instant_definition() -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("shock".to_string()),
+        keywords: KeywordSet::empty(),
     }
 }
 
@@ -64,6 +66,7 @@ fn sorcery_definition() -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("rampant_growth".to_string()),
+        keywords: KeywordSet::empty(),
     }
 }
 
@@ -82,6 +85,7 @@ fn creature_definition() -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("grizzly_bears".to_string()),
+        keywords: KeywordSet::empty(),
     }
 }
 
@@ -98,6 +102,7 @@ fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: 
         face_down: false,
         phased_out: false,
         damage_marked: 0,
+        deathtouched: false,
         counters: CounterSet::new(),
         attachments: Vec::new(),
         attached_to: None,

@@ -29,6 +29,7 @@ fn plain_card_def(name: &str) -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey(name.to_string()),
+        keywords: KeywordSet::empty(),
     }
 }
 

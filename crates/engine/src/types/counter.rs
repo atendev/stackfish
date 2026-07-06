@@ -34,20 +34,16 @@ impl CounterSet {
     }
 
     pub fn count(&self, kind: &CounterKind) -> i32 {
-        // TODO: find self.counters entry matching kind (note: CounterKind
-        // needs PartialEq derived/implemented for this to compile -
-        // currently missing), return its count or 0 if absent.
-        todo!()
+        self.counters.iter().find(|(k, _)| k == kind).map(|(_, n)| *n).unwrap_or(0)
     }
 
     /// Negative `amount` removes counters (e.g. -1/-1 cancelling +1/+1 —
     /// CR 121.3-121.4 style annihilation is handled elsewhere; this just
     /// adjusts the named kind's count).
     pub fn add(&mut self, kind: CounterKind, amount: i32) {
-        // TODO: find or insert the (kind, count) entry, add amount. Decide
-        // whether a count reaching 0 should remove the entry or just sit at
-        // 0 - matters for CounterSet::count's "absent" vs "present at 0"
-        // distinction if that's ever observable.
-        todo!()
+        match self.counters.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, n)) => *n += amount,
+            None => self.counters.push((kind, amount)),
+        }
     }
 }

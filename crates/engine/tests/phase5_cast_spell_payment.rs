@@ -34,6 +34,7 @@ fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey("test_spell".to_string()),
+        keywords: KeywordSet::empty(),
     }
 }
 
@@ -50,6 +51,7 @@ fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: 
         face_down: false,
         phased_out: false,
         damage_marked: 0,
+        deathtouched: false,
         counters: CounterSet::new(),
         attachments: Vec::new(),
         attached_to: None,

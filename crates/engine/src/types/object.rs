@@ -51,6 +51,12 @@ pub struct GameObject {
     pub face_down: bool,
     pub phased_out: bool,
     pub damage_marked: u32,
+    /// CR 702.2: whether any of the damage currently in `damage_marked` was
+    /// dealt by a source with Deathtouch — a plain `u32` total can't answer
+    /// that on its own (1 damage from a deathtouch source is just as lethal
+    /// as 1 damage from a vanilla source's 20). Reset to `false` alongside
+    /// `damage_marked` at Cleanup (CR 514.2).
+    pub deathtouched: bool,
     pub counters: CounterSet,
     pub attachments: Vec<ObjectId>,
     pub attached_to: Option<ObjectId>,
@@ -85,7 +91,7 @@ impl GameObject {
         // (vs. a zone-change successor, which needs a different
         // constructor or a lineage param - not covered by this signature
         // yet); tapped/flipped/face_down/phased_out: false; damage_marked:
-        // 0; counters: CounterSet::new(); attachments: empty;
+        // 0; deathtouched: false; counters: CounterSet::new(); attachments: empty;
         // attached_to: None; controlled_since_turn: needs the current
         // GameState.turn_number, which this signature has no way to read -
         // this constructor will need a turn_number param (or a &GameState)

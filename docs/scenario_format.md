@@ -156,6 +156,7 @@ types = ["Creature"]          # required - see Card types below
 power = 2                     # optional i32
 toughness = 2                  # optional i32
 mana_ability = ["G"]           # optional, default [] - see Mana abilities below
+keywords = ["Flying", "Deathtouch"]  # optional, default [] - see Keywords below
 ```
 
 **`mana_ability` (CR 605):** if non-empty, every instance of this card gets one
@@ -178,6 +179,16 @@ choice (CR 118.13a), not implied by the cost.
 `"{2}{R}"` — no mana-cost-string parser exists anywhere yet. Can't currently express hybrid,
 Phyrexian, or X costs on a test fixture. Extend `CardSpec` in `crates/scenario/src/lib.rs` if a
 scenario needs one of those.
+
+**`keywords` (CR 702):** printed keyword abilities, by name, parsed into a `KeywordSet` bitmask —
+only the primitives that change how an existing engine checkpoint behaves, not the full ~140-entry
+CR 702 catalog. Supported: `Flying`, `Reach`, `Menace`, `Vigilance`, `Haste`, `Defender`, `Flash`,
+`Deathtouch`, `Indestructible`, `Lifelink`, `Wither`, `Infect`. Trample, First/Double Strike,
+Hexproof/Shroud/Protection/Ward aren't modeled yet (see `docs/implementation.md`'s
+keyword-primitives slice notes for why). Keywords that are really sugar for an activated/triggered
+ability (Cycling, Persist, ...) don't belong in this list at all — use `mana_ability` above for a
+mana ability, or extend `CardSpec` for anything else, since no keyword-name -> ability mapping
+exists yet.
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and
@@ -510,7 +521,7 @@ mixed in the same file — pick one style per scenario.
 Assertion type names for `[[steps]]` (all take the same fields as their `[[assertions]]`
 equivalents): `assert_life`, `assert_ledger_len`, `assert_object_zone`, `assert_mana_pool`,
 `assert_tapped`, `assert_eliminated`, `assert_phase`, `assert_step`, `assert_active_player`,
-`assert_priority_player`, `assert_hand_size`.
+`assert_priority_player`, `assert_hand_size`, `assert_object_counters`, `assert_player_counters`.
 
 ---
 
@@ -574,6 +585,29 @@ Checks `PlayerState.eliminated` — the way to confirm CR 704.5a's state-based a
 for a player at 0 or less life. See `crates/engine/tests/scenarios/phase5_sba_basics.toml` for a
 full worked example of both this and the `damage_marked` setup field above, covering CR 704.5a/f/g
 in one scenario.
+
+```toml
+[[assertions]]
+type = "object_counters"
+card = "wall1"
+kind = "minus_one_minus_one"   # plus_one_plus_one/minus_one_minus_one/loyalty/poison/energy/charge, or any other string (Custom)
+equals = 3
+```
+
+Checks `GameObject.counters` — the way to confirm Wither/Infect put `-1/-1` counters on a creature
+instead of marking damage.
+
+```toml
+[[assertions]]
+type = "player_counters"
+player = 1
+kind = "poison"
+equals = 3
+```
+
+Checks `PlayerState.counters` — the way to confirm Infect gave a player poison counters instead of
+life loss. See `crates/engine/tests/scenarios/phase5_keyword_primitives.toml` for a full worked
+example of both alongside the other keyword primitives.
 
 ```toml
 [[assertions]]
