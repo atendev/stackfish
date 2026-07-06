@@ -1,8 +1,16 @@
 # Stackfish
 This is an mtg-engine based on the ygo-pro engine.
 
-## Startup
-Make sure things are started in `caveman full` mode.
+## Commits
+Commits should be straight and to the point, but in readable and understandable language that the user can understand.
+
+### Commit Structure
+1. A single line starting with the action and a sentence explaining what was changed.
+  - eg: 'add narrow script bridge with one real lua triggered ability implementation'
+  - eg: 'fix card ids not working properly with new_game init'
+  - eg: 'update scenario with new_game setup method to properly walk through pre-game'
+2. A more detailed explanation of the changes made.
+> [IMPORTANT] Do not add anything else. No attribution line, nothing.
 
 ## Vertical Slice Instructions
 - all slices start with a detailed requirements report of the following information:
