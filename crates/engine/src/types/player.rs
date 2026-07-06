@@ -62,8 +62,7 @@ impl PlayerState {
     }
 
     pub fn gain_life(&mut self, amount: i32) {
-        // TODO: self.life += amount.
-        todo!()
+        self.life += amount;
     }
 
     /// Commander damage from a single source reaching 21 means this player

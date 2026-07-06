@@ -157,6 +157,8 @@ power = 2                     # optional i32
 toughness = 2                  # optional i32
 mana_ability = ["G"]           # optional, default [] - see Mana abilities below
 keywords = ["Flying", "Deathtouch"]  # optional, default [] - see Keywords below
+trigger_condition = "..."      # optional Lua source, default none - see Triggered abilities below
+trigger_operation = "..."      # optional Lua source, default none - see Triggered abilities below
 ```
 
 **`mana_ability` (CR 605):** if non-empty, every instance of this card gets one
@@ -189,6 +191,38 @@ keyword-primitives slice notes for why). Keywords that are really sugar for an a
 ability (Cycling, Persist, ...) don't belong in this list at all — use `mana_ability` above for a
 mana ability, or extend `CardSpec` for anything else, since no keyword-name -> ability mapping
 exists yet.
+
+**`trigger_condition`/`trigger_operation` (CR 603, narrow script bridge):** if `trigger_operation` is
+set, every instance of this card gets one `RegisteredAbility { kind: Triggered, .. }` set up
+automatically, with both fields loaded as real Lua source via `Engine::load_script` (see
+`script.rs`'s `ScriptRuntime`). `trigger_operation` alone is what registers the ability —
+`trigger_condition` is optional and means "no filter, always triggers" when omitted (per
+`RegisteredAbility::condition`'s doc). Only one triggered ability per card this way, same
+single-ability-per-card simplification `mana_ability` uses. Condition scripts only see
+`GameEventKind::ZoneChange` events as a Lua table (`event.kind == "zone_change"`, `event.object`,
+`event.from`/`event.to` as lowercase zone-name strings) — every other event kind arrives as `nil`.
+Operation scripts return a plain table describing intent rather than mutating anything themselves
+("Lua asks, Rust decides") — only `gain_life` is a recognized key this slice. Example (an ETB "gain
+1 life" trigger):
+
+```toml
+trigger_condition = """
+return function(source, controller, event)
+    return event ~= nil and event.kind == "zone_change"
+       and event.object == source and event.to == "battlefield"
+end
+"""
+trigger_operation = """
+return function(source, controller)
+    return { gain_life = 1 }
+end
+"""
+```
+
+This is deliberately narrow — no `Game.RegisterTriggeredAbility` self-registration (a card script
+calling into `Game.*` itself), no targeting, no continuous effects. Real self-registration and a
+`Game.Conditions.*`/`Game.Ops.*` primitive-tag fast path are follow-up work (see
+`docs/implementation.md`'s script-bridge slice notes).
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and
