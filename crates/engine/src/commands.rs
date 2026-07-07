@@ -140,6 +140,36 @@ pub(crate) fn has_summoning_sickness(state: &GameState, object: &GameObject) -> 
     }
 }
 
+/// CR 613 layer 6: `id`'s live keywords (printed plus anything granted by an
+/// applicable `ContinuousEffect`), via `layers::effective_characteristics`.
+/// Tolerates a missing `id` (returns `KeywordSet::empty()`) rather than
+/// panicking the way `effective_characteristics` itself does — several call
+/// sites below already separately raise `CommandError::InvalidTarget` for a
+/// missing id and just want "no keywords" as the fallback otherwise (mirrors
+/// the pre-existing `Option<&GameObject>` + `is_some_and` shape this
+/// replaces).
+fn effective_keywords(state: &GameState, id: ObjectId) -> KeywordSet {
+    if state.object(id).is_some() {
+        crate::layers::effective_characteristics(state, id).keywords
+    } else {
+        KeywordSet::empty()
+    }
+}
+
+/// CR 613 layer 7c: `id`'s live power (already netted against counters and
+/// any applicable `ModifyPT`/`SetPT` continuous effect), via
+/// `layers::effective_characteristics`. `None` for a missing `id` or an
+/// unresolved characteristic-defining base value — same "skip rather than
+/// guess" contract `effective_characteristics` itself already documents,
+/// just reachable without risking its panic-on-missing-id path.
+fn effective_power(state: &GameState, id: ObjectId) -> Option<i32> {
+    if state.object(id).is_some() {
+        crate::layers::effective_characteristics(state, id).power
+    } else {
+        None
+    }
+}
+
 /// Looks up the `ability_index`th ability registered to `source` — any
 /// kind, in registration order (the order entries were pushed onto
 /// `state.abilities`). Shared by `ActivateAbility` (below) and
@@ -796,20 +826,15 @@ pub fn execute_command(
                 }
 
                 // CR 702.9b: an attacker with flying can only be blocked by
-                // a creature with flying and/or reach.
-                // TODO(layers): reads KeywordSet straight off CardDefinition -
-                // a continuous effect granting/removing Flying/Reach (layer 6,
-                // see layers::effective_characteristics) isn't consulted here.
-                // sba.rs's lethal-toughness check is this engine's only real
-                // layer-engine consumer so far (docs/implementation.md's
-                // layer-engine-basics slice) - this is flagged follow-up, not
-                // an oversight.
+                // a creature with flying and/or reach. Reads through
+                // effective_keywords (CR 613 layer 6) - a continuous effect
+                // granting/removing Flying/Reach now actually changes
+                // blocking legality, not just the printed KeywordSet.
                 let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
-                if attacker_object.definition.keywords.contains(KeywordSet::FLYING)
-                    && !blocker_object
-                        .definition
-                        .keywords
-                        .intersects(KeywordSet::FLYING | KeywordSet::REACH)
+                let attacker_keywords = effective_keywords(state, attacker_object.object_id);
+                let blocker_keywords = effective_keywords(state, blocker_object.object_id);
+                if attacker_keywords.contains(KeywordSet::FLYING)
+                    && !blocker_keywords.intersects(KeywordSet::FLYING | KeywordSet::REACH)
                 {
                     return Err(CommandError::IllegalAction(
                         "an attacker with flying can only be blocked by a creature with \
@@ -822,14 +847,16 @@ pub fn execute_command(
             // CR 702.111b: an attacker with menace can't be blocked except
             // by two or more creatures - a whole-batch check, since it's
             // about how many blockers ended up assigned to that attacker,
-            // not any single pairing.
+            // not any single pairing. Same effective_keywords treatment as
+            // Flying/Reach above.
             let mut blocker_counts: HashMap<ObjectId, u32> = HashMap::new();
             for (_, attacker) in &blocks {
                 *blocker_counts.entry(*attacker).or_insert(0) += 1;
             }
             for (attacker, count) in &blocker_counts {
                 let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
-                if attacker_object.definition.keywords.contains(KeywordSet::MENACE) && *count < 2 {
+                let attacker_keywords = effective_keywords(state, attacker_object.object_id);
+                if attacker_keywords.contains(KeywordSet::MENACE) && *count < 2 {
                     return Err(CommandError::IllegalAction(
                         "an attacker with menace can't be blocked except by two or more \
                          creatures"
@@ -903,15 +930,14 @@ pub fn execute_command(
             }
 
             for (attacker, splits) in &assignments {
-                let object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
-                // CR 510.1a: 0-or-less power assigns no damage.
-                let power = object
-                    .definition
-                    .power
-                    .as_ref()
-                    .and_then(|p| p.net_with_counters(&object.counters))
-                    .map(|p| p.max(0) as u32)
-                    .unwrap_or(0);
+                if state.object(*attacker).is_none() {
+                    return Err(CommandError::InvalidTarget);
+                }
+                // CR 510.1a: 0-or-less power assigns no damage. Reads through
+                // effective_power (CR 613 layer 7c) so this validation stays
+                // consistent with the actual damage-event amounts computed
+                // below, which use the same helper.
+                let power = effective_power(state, *attacker).map(|p| p.max(0) as u32).unwrap_or(0);
                 let blockers = &blockers_by_attacker[attacker];
 
                 let mut seen = Vec::with_capacity(splits.len());
@@ -951,18 +977,15 @@ pub fn execute_command(
             // priority window between them.
             let mut events = Vec::new();
             for (attacker, target) in &combat.attackers {
-                let object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
+                if state.object(*attacker).is_none() {
+                    return Err(CommandError::InvalidTarget);
+                }
                 // CDA power (PTValue::CharacteristicDefining) can't be
                 // resolved without the script bridge - skip rather than
                 // guess, same stance sba.rs's toughness check already takes.
-                // TODO(layers): also doesn't consult layers::
-                // effective_characteristics (CR 613 layer 7c power pumps) -
-                // execute_command has no &ScriptRuntime to thread through
-                // (same wall script-self-registration's CommandOutcome::
-                // battlefield_entries deferred-call pattern solved once
-                // already - see docs/implementation.md's layer-engine-basics
-                // slice notes for why this wasn't retrofitted here too).
-                let Some(power) = object.definition.power.as_ref().and_then(|p| p.net_with_counters(&object.counters)) else {
+                // effective_power (CR 613 layer 7c) folds in any applicable
+                // ModifyPT/SetPT continuous effect on top of that.
+                let Some(power) = effective_power(state, *attacker) else {
                     continue;
                 };
                 let power = power.max(0) as u32;
@@ -1003,8 +1026,10 @@ pub fn execute_command(
                 }
             }
             for (blocker, attacker) in &combat.blocks {
-                let object = state.object(*blocker).ok_or(CommandError::InvalidTarget)?;
-                let Some(power) = object.definition.power.as_ref().and_then(|p| p.net_with_counters(&object.counters)) else {
+                if state.object(*blocker).is_none() {
+                    return Err(CommandError::InvalidTarget);
+                }
+                let Some(power) = effective_power(state, *blocker) else {
                     continue;
                 };
                 let power = power.max(0) as u32;
@@ -1030,20 +1055,18 @@ pub fn execute_command(
                 };
                 // CR 702.15/702.80/702.90: Lifelink/Wither/Infect all modify
                 // how this same damage event plays out, keyed off the
-                // source's keywords - looked up once, up front, so the
-                // borrow of `source`'s GameObject ends before the target
-                // mutations below (which may need a mutable borrow of the
-                // same GameState).
-                let source_obj = state.object(*source);
-                let has_lifelink =
-                    source_obj.is_some_and(|o| o.definition.keywords.contains(KeywordSet::LIFELINK));
-                let replaces_with_counters = source_obj
-                    .is_some_and(|o| o.definition.keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT));
-                let is_infect =
-                    source_obj.is_some_and(|o| o.definition.keywords.contains(KeywordSet::INFECT));
-                let has_deathtouch =
-                    source_obj.is_some_and(|o| o.definition.keywords.contains(KeywordSet::DEATHTOUCH));
-                let source_controller = source_obj.map(|o| o.controller);
+                // source's effective keywords (CR 613 layer 6 - a granted
+                // Lifelink/Deathtouch/etc now applies here too, not just the
+                // printed KeywordSet) - looked up once, up front, so the
+                // borrow ends before the target mutations below (which may
+                // need a mutable borrow of the same GameState).
+                let source_keywords = effective_keywords(state, *source);
+                let has_lifelink = source_keywords.contains(KeywordSet::LIFELINK);
+                let replaces_with_counters =
+                    source_keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT);
+                let is_infect = source_keywords.contains(KeywordSet::INFECT);
+                let has_deathtouch = source_keywords.contains(KeywordSet::DEATHTOUCH);
+                let source_controller = state.object(*source).map(|o| o.controller);
 
                 match target {
                     Target::Player(pid) => {

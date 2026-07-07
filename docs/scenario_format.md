@@ -284,6 +284,9 @@ filter_card_types = ["Creature"]
 
 See `crates/engine/tests/scenarios/phase5_layer_engine_basics.toml` for a full worked example
 (the anthem above keeping a lethally-damaged bear alive through CR 704.5g's state-based action).
+`phase5_layer_engine_consumers.toml` shows the same `power_toughness_modifying` primitive changing
+real combat damage dealt (`assign_combat_damage`), not just an SBA — see
+`docs/implementation.md`'s layer-engine-consumers slice notes.
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and

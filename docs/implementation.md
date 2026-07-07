@@ -2030,14 +2030,14 @@ shift, don't treat it as fixed once written.
    (docs/implementation.md, above) landed layers 6/7b/7c with `sba.rs` as the only real consumer.
    Turned out to be big enough to split into its own piecemeal sequence rather than one item —
    sub-slices, in order (re-order as they land, same as the rest of this list):
-   1. **A: wire the two deferred consumers** (combat-damage power in `commands.rs`'s
-      `AssignCombatDamage` arm, Flying/Reach/Menace blocking legality in `DeclareBlockers`) into
-      `layers::effective_characteristics`. Corrects a mistaken TODO from the first layer-engine
-      slice — both call sites already have `&GameState`, no `&ScriptRuntime` needed for the
-      primitive-only path, so there's no actual architectural wall here (the TODOs wrongly
-      compared this to the `battlefield_entries`/self-registration wall, which is a different,
-      real `&ScriptRuntime` gap). Cheap, and makes layers 6/7c actually affect combat outcomes,
-      not just SBA death checks.
+   1. ~~**A: wire the two deferred consumers**~~ — done, `phase5/layer-engine-consumers` slice
+      (docs/implementation.md, above). Combat-damage power (`AssignCombatDamage`) and Flying/
+      Reach/Menace blocking legality (`DeclareBlockers`) both now consult
+      `layers::effective_characteristics` via new `effective_power`/`effective_keywords` helpers in
+      `commands.rs` — plus the Lifelink/Wither/Infect/Deathtouch keyword reads in the same function,
+      folded in as the same category of gap. Turned out to need no new plumbing at all — the prior
+      slice's TODOs claiming an `&ScriptRuntime` wall here were simply wrong (see that slice's own
+      "Correction" note).
    2. **B: layers 4/5** (type-changing, color-changing) — same `EffectPrimitive` shape as
       `AddKeyword`/`SetPT` (`SetType`/`AddType`, `SetColor`/`AddColor`), mechanical extension of
       the existing query.
@@ -2186,6 +2186,70 @@ was scoped to primitives-only (Script evaluation deferred, `AffectedFilter::Scri
   `CardDefinition` directly, flagged in `commands.rs` itself now, not just here.
 - `CardDefinition::colors()`/`ManaCost::colors()`/`ManaSymbol::colors()` — all three still `todo!()`;
   `effective_characteristics.colors` reads `color_indicator` directly as a stopgap.
+
+## Phase 5: phase5/layer-engine-consumers slice
+
+Branch `phase5/layer-engine-consumers`, off master. Slice backlog item 1's sub-slice A. Scope:
+wire the two consumers the layer-engine-basics slice deliberately deferred — combat-damage power
+(`AssignCombatDamage`) and Flying/Reach/Menace blocking legality (`DeclareBlockers`) — into
+`layers::effective_characteristics`.
+
+**Correction to the prior slice, found while scoping this one:** the layer-engine-basics slice's
+TODO comments claimed these two consumers were blocked the same way `CommandOutcome::
+battlefield_entries` was (`execute_command` has no `&ScriptRuntime`). That was wrong —
+`effective_characteristics(state, id)` only takes `&GameState`, since this slice's primitive-only
+evaluation needs zero Lua calls. `execute_command` already has `&mut GameState`, which reborrows as
+`&GameState` trivially. There was no architectural wall here at all; the TODO over-pattern-matched
+against a different, real wall. Wiring both consumers turned out to be a same-day mechanical change,
+not a slice requiring new plumbing.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 4 new tests in
+`crates/engine/tests/phase5_layer_engine_consumers.rs` (a `ModifyPT` boost increasing combat damage
+dealt, the same attacker without the boost dealing only its printed power, a continuous-effect-
+granted Flying still enforcing CR 702.9b blocking legality, the same attacker without the grant
+blocking normally), all 189 prior tests unaffected. 193 tests total, 0 failed. Confirmed via the
+real CLI too: `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/
+phase5_layer_engine_consumers.toml` — 15/15 actions ran, 1/1 assertion passed (a 3/3 bear with a
+`+2/+2` continuous effect dealt 5 combat damage to the defending player, not 3).
+
+**What got implemented:**
+- `commands.rs`: two new private helpers, `effective_keywords(state, id) -> KeywordSet` and
+  `effective_power(state, id) -> Option<i32>` — both wrap `layers::effective_characteristics`,
+  tolerating a missing `id` (return `KeywordSet::empty()`/`None`) rather than panicking the way
+  `effective_characteristics` itself does, since several call sites already separately raise
+  `CommandError::InvalidTarget` for a missing id and just want the safe fallback otherwise.
+- `DeclareBlockers`'s Flying/Reach check and Menace check: now call `effective_keywords` instead of
+  reading `CardDefinition.keywords` directly.
+- `AssignCombatDamage`: all three power reads (the split-validation loop, the attacker
+  damage-emission loop, the blocker damage-emission loop) now call `effective_power` instead of
+  `object.definition.power.as_ref().and_then(|p| p.net_with_counters(&object.counters))` directly —
+  kept identical CDA-skip semantics (`effective_characteristics` returns `None` for the same reason
+  `net_with_counters` did), just adds layer 7c on top.
+- **Scope addition beyond the two consumers named in the requirements discussion:** the same
+  function's Lifelink/Wither/Infect/Deathtouch keyword reads (further down, in the damage-application
+  loop) were left reading `CardDefinition.keywords` directly by the prior slice's TODO — fixed here
+  too, via the same `effective_keywords` helper, since leaving them un-migrated while Flying/Reach
+  became layer-aware in the same function would have been an inconsistent half-state. Not scoped by
+  name in the pre-slice discussion, but the same category of already-flagged gap in the same
+  function — judged in-scope rather than a separate slice.
+
+**STRUCT DEVIATIONS:** None — no new types, just two new private functions in `commands.rs`.
+
+**INTERFACE DEVIATIONS:** None — `effective_keywords`/`effective_power` are new `fn`s, not changes
+to any existing signature.
+
+**SCOPE DEVIATIONS:**
+- The Lifelink/Wither/Infect/Deathtouch keyword reads (see above) — not named in the pre-slice
+  discussion, judged in-scope for the reason given there.
+- `docs/scenario_format.md` gained a one-line pointer to the new TOML fixture, same pattern every
+  prior scenario-crate-adjacent slice has followed.
+
+**UNRESOLVED (anticipated, none new):**
+- Layers 4/5/7a/7e, the CR 613.6-8 dependency system, `AffectedFilter::Script`/`EffectPayload::
+  Script` evaluation — all still exactly where the layer-engine-basics slice left them; this slice
+  only widened *who calls* the existing layers 6/7b/7c query, not the query's own coverage.
+- `PlayLand`'s land-limit check, `is_sorcery_speed`, and other continuous-effect-consulting gaps
+  flagged in earlier slices are untouched — this slice's scope was specifically combat/blocking.
 
 ## Mistakes caught (don't repeat)
 

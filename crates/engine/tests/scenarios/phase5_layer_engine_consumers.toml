@@ -1,0 +1,93 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 3
+toughness = 3
+
+# CR 613 layer 7c, sourced from the bear itself (self_only) - +2/+2, so
+# combat damage should reflect the effective 5 power, not the printed 3.
+[cards.continuous_effect]
+layer = "power_toughness_modifying"
+power = 2
+toughness = 2
+filter_self_only = true
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+# Two players, so every step transition needs both to pass in a row
+# (CR 117.4) - see phase5_combat_damage.toml for the full step-by-step
+# breakdown this mirrors.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bear", target = 1 },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = []
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 15
