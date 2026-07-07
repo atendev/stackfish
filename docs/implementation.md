@@ -2069,6 +2069,104 @@ shift, don't treat it as fixed once written.
 16. **Planeswalkers/Battles/DFCs/split/Sagas** — explicit non-goals in DESIGN.md's v1 scope;
     lowest priority unless that scope changes.
 
+## Phase 5: phase5/layer-engine-basics slice
+
+Branch `phase5/layer-engine-basics`, off master. Slice backlog item 1 (above). Scope, locked in
+before writing code: CR 613 layers 6 (ability adding) and 7b/7c (power/toughness set/modify) only —
+copy/control/text/type/color (1-5) and 7a/7d/7e stay unbuilt, each with a doc-comment TODO on
+`Layer` explaining what it needs. Timestamp-only ordering within a layer, no CR 613.6-8 dependency
+system (large TODO on `Layer` explaining the gap and why it's real rules work, not a sort tweak).
+`ContinuousEffect`s are built directly via Rust struct literal (test/scenario fixtures) — no
+`Game.AddContinuousEffect` Lua binding this slice, same bootstrap-before-scripting pattern every
+prior subsystem used. Real consumer: `sba::check_state_based_actions`'s lethal-toughness check only
+(already has no `&ScriptRuntime` dependency to add, since the primitive-only path needs zero Lua
+calls) — combat-damage power and blocking-legality keyword checks (`commands.rs`) are flagged
+follow-up, not touched.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 11 new tests in
+`crates/engine/tests/phase5_layer_engine_basics.rs` (base case, `AddKeyword` union, `ModifyPT`
+additive, `SetPT` overriding base before `ModifyPT` applies on top, later-timestamp `SetPT` winning
+within a layer, controller/card-type filter scoping, `self_only` filter scoping, CDA still
+skipped-not-guessed, and three SBA-real-consumer tests: a boost saving a creature from lethal
+toughness, the same creature dying without it, and a granted Indestructible surviving lethal
+damage), all 178 prior tests unaffected. 189 tests total, 0 failed. Confirmed via the real CLI too:
+`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_layer_engine_basics.toml` — 1/1
+action ran, 2/2 assertions passed (an anthem's `+1/+1` keeping a 2-damage-marked 2-toughness bear on
+the battlefield instead of the graveyard).
+
+**What got implemented:**
+- `types/effect.rs`: `Layer` gained derives (`Clone, Copy, PartialEq, Eq, Debug`) plus the doc
+  comment above explaining every unbuilt layer and the dependency-system gap. New `EffectPrimitive`
+  (`SetPT`/`ModifyPT`/`AddKeyword`), `EffectPayload` (`Primitive`/`Script`), `EffectFilter`
+  (`controller`/`card_types`/`self_only`), `AffectedFilter` (`Primitive`/`Script`) — same
+  `Primitive`/`Script` split `ConditionSpec`/`AbilityEffect` already established, reusing
+  `cost.rs`'s `FilterController` (which gained `Clone, Copy, PartialEq, Eq, Debug`) rather than a
+  second controller-filter enum. `ContinuousEffect.affected_predicate: ScriptHandle` replaced with
+  `affected: AffectedFilter` + a new `effect: EffectPayload` field (the same "matcher had no
+  rewrite" gap `ReplacementEffect` still has, fixed here for continuous effects specifically).
+  `ContinuousEffect::applies_to` real body for the `Primitive` case (zero Lua calls); `Script`
+  returns `false` — nothing can construct that variant yet (no card creates a continuous effect
+  through Lua this slice), so it's dead code with a clear TODO rather than a `todo!()` that would
+  panic the moment a future slice's fixture accidentally hits it.
+- `EffectiveCharacteristics` gained `keywords: KeywordSet`.
+- `layers.rs::effective_characteristics`: real body. Starts from `CardDefinition` base (power/
+  toughness netted against counters via the existing `PTValue::net_with_counters`, matching what
+  `sba.rs` already did; keywords straight from `CardDefinition.keywords`), applies layer 6 then 7b
+  then 7c from `state.continuous_effects` filtered by `applicable_effects_in_layer` (matches layer,
+  resolves the effect's source to check its controller, sorts by `timestamp`). No `&ScriptRuntime`
+  parameter — nothing evaluable this slice needs one. `colors` is read off `color_indicator`
+  directly rather than through `CardDefinition::colors()` (itself still `todo!()`, depends on
+  `ManaCost::colors()`/`ManaSymbol::colors()` which are also `todo!()`) — flagged as a TODO rather
+  than filling three unrelated `todo!()`s incidentally; nothing this slice touches reads `colors`.
+- `sba.rs`'s `apply_creature_death`: rewritten to call `effective_characteristics` for toughness and
+  Indestructible instead of reading `CardDefinition`/counters directly — first real consumer, proves
+  the query actually changes SBA outcomes (see the three new "real consumer" tests). Restructured
+  into a two-pass (`candidates` then `dying`) rather than one `filter_map` over `state.objects.
+  values()`, to keep the borrow shape simple rather than fighting the borrow checker over
+  interleaving `state.objects.values()` with a `&GameState`-taking query call.
+- `commands.rs`: two TODO comments added (no behavior change) at the Flying/Reach blocking-legality
+  check and the combat-damage power calculation, each pointing at this slice's SBA wiring as the
+  template and explaining why they weren't retrofitted too (`execute_command` has no
+  `&ScriptRuntime`/layer-engine access — same wall `battlefield_entries`' deferred-outcome pattern
+  solved once already for script self-registration).
+- `crates/scenario/src/lib.rs`: `CardSpec.continuous_effect: Option<ContinuousEffectSpec>` (new
+  struct: `layer`/`power`/`toughness`/`keywords`/`filter_controller`/`filter_card_types`/
+  `filter_self_only`) and a shared `build_continuous_effect` helper, wired into both
+  `build_initial_state` and `build_new_game_engine` (parity with how `mana_ability`/
+  `trigger_operation` are handled in both paths). `docs/scenario_format.md` documents the new field
+  with a worked anthem example, referencing the new TOML fixture.
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice requirements report scoped exactly
+(`EffectPrimitive`/`EffectPayload`/`EffectFilter`/`AffectedFilter`, `EffectiveCharacteristics.
+keywords`) — this *is* the plan, not a deviation from it.
+
+**INTERFACE DEVIATIONS:** None — `effective_characteristics(state, object)`'s signature needed no
+`&ScriptRuntime` param, which simplified the pre-slice assumption that wiring a real consumer would
+require adding one to `sba::check_state_based_actions` too; turned out unnecessary once the slice
+was scoped to primitives-only (Script evaluation deferred, `AffectedFilter::Script`/
+`EffectPayload::Script` both dead code for now).
+
+**SCOPE DEVIATIONS:**
+- `types/cost.rs`'s `FilterController` gained derives it didn't have before — needed to reuse it
+  inside `EffectFilter`/match on it inside `applies_to`, not anticipated by name in the pre-slice
+  report but a direct, mechanical consequence of reusing the type rather than duplicating it.
+- `commands.rs`'s two TODO-only comments (Flying/Reach check, combat-damage power) — anticipated in
+  the pre-slice discussion (Q4) as the explicit trade-off of scoping the real consumer to SBA only.
+
+**UNRESOLVED (all anticipated in the pre-slice requirements report, none new):**
+- Layers 1-5 (copy/control/text/type/color) and 7a/7d(-as-a-real-layer-step)/7e — each has its own
+  TODO on `Layer` itself.
+- CR 613.6-8 dependency system — timestamp-only ordering, large TODO on `Layer` explaining what a
+  real implementation needs.
+- `AffectedFilter::Script`/`EffectPayload::Script` — structurally present, unevaluated; the next
+  slice to need them (static-ability self-registration, backlog item 3) will have to thread a
+  `&ScriptRuntime` into `effective_characteristics` and decide what "skip vs. invoke" means once a
+  real card can construct one.
+- Combat-damage power and blocking-legality (Flying/Reach/Menace) keyword checks — still read
+  `CardDefinition` directly, flagged in `commands.rs` itself now, not just here.
+- `CardDefinition::colors()`/`ManaCost::colors()`/`ManaSymbol::colors()` — all three still `todo!()`;
+  `effective_characteristics.colors` reads `color_indicator` directly as a stopgap.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

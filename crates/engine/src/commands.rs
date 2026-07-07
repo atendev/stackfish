@@ -797,6 +797,13 @@ pub fn execute_command(
 
                 // CR 702.9b: an attacker with flying can only be blocked by
                 // a creature with flying and/or reach.
+                // TODO(layers): reads KeywordSet straight off CardDefinition -
+                // a continuous effect granting/removing Flying/Reach (layer 6,
+                // see layers::effective_characteristics) isn't consulted here.
+                // sba.rs's lethal-toughness check is this engine's only real
+                // layer-engine consumer so far (docs/implementation.md's
+                // layer-engine-basics slice) - this is flagged follow-up, not
+                // an oversight.
                 let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
                 if attacker_object.definition.keywords.contains(KeywordSet::FLYING)
                     && !blocker_object
@@ -948,6 +955,13 @@ pub fn execute_command(
                 // CDA power (PTValue::CharacteristicDefining) can't be
                 // resolved without the script bridge - skip rather than
                 // guess, same stance sba.rs's toughness check already takes.
+                // TODO(layers): also doesn't consult layers::
+                // effective_characteristics (CR 613 layer 7c power pumps) -
+                // execute_command has no &ScriptRuntime to thread through
+                // (same wall script-self-registration's CommandOutcome::
+                // battlefield_entries deferred-call pattern solved once
+                // already - see docs/implementation.md's layer-engine-basics
+                // slice notes for why this wasn't retrofitted here too).
                 let Some(power) = object.definition.power.as_ref().and_then(|p| p.net_with_counters(&object.counters)) else {
                     continue;
                 };

@@ -35,12 +35,15 @@ pub fn check_state_based_actions(state: &mut GameState) -> Vec<GameEvent> {
     //   - 704.5c: player with 10+ poison counters loses (PlayerState.counters
     //     exists but nothing increments poison yet).
     //   - CDA toughness (PTValue::CharacteristicDefining): apply_creature_death
-    //     below skips any creature whose toughness isn't PTValue::Fixed,
-    //     since resolving a CDA needs the script bridge
-    //     (layers.rs::effective_characteristics, still todo!()).
-    //   - continuous-effect P/T modification (CR 613 layer 7c): toughness is
-    //     read straight off CardDefinition's printed value, ignoring any
-    //     continuous effect that would raise/lower it - same layers.rs gap.
+    //     below still skips any creature whose toughness isn't PTValue::Fixed
+    //     (layers::effective_characteristics returns None for it too - CDA
+    //     resolution needs the script bridge, not designed into the layer
+    //     query yet).
+    //   - continuous-effect P/T modification (CR 613 layer 7c) and
+    //     Indestructible-granting (layer 6): now real, via
+    //     layers::effective_characteristics - see apply_creature_death's own
+    //     doc comment. Combat-damage power and blocking-legality keyword
+    //     checks (commands.rs) are NOT wired to the layer engine yet.
     //   - regeneration (CR 701.16): would replace 704.5g's destroy, not
     //     modeled, lethal damage always destroys outright here.
     //   - legend rule (704.5j), world rule (704.5k), planeswalker loyalty 0
@@ -79,31 +82,43 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
 /// graveyard. Moves the surviving creature snapshot through a fresh
 /// `ObjectId` (CR 400.7), same convention `PlayLand`/`CastSpell` resolution
 /// already use for every other zone change in this codebase.
+///
+/// Toughness and Indestructible are read via `layers::effective_characteristics`
+/// (CR 613 layers 6/7b/7c) rather than straight off `CardDefinition` — the
+/// first real consumer of the layer engine (docs/implementation.md's
+/// layer-engine-basics slice). A "+1/+1 to all your creatures"-style
+/// continuous effect, or one granting Indestructible, now actually changes
+/// whether a creature survives this check; combat-damage power and
+/// blocking-legality keyword checks (commands.rs) are NOT wired to the layer
+/// engine yet — flagged there as follow-up, not silently inconsistent.
 fn apply_creature_death(state: &mut GameState, events: &mut Vec<GameEvent>) {
-    let dying: Vec<ObjectId> = state
+    let candidates: Vec<ObjectId> = state
         .objects
         .values()
         .filter(|o| o.zone == ZoneKind::Battlefield && o.definition.card_types.contains(CardTypeSet::CREATURE))
-        .filter_map(|o| {
+        .map(|o| o.object_id)
+        .collect();
+
+    let dying: Vec<ObjectId> = candidates
+        .into_iter()
+        .filter(|&id| {
+            let effective = crate::layers::effective_characteristics(state, id);
             // CDA toughness (PTValue::CharacteristicDefining) can't be
-            // resolved without the script bridge - skip rather than guess.
-            // net_with_counters folds in +1/+1 / -1/-1 counters (CR 121.3) -
-            // otherwise Wither/Infect's counters would have no effect on
-            // whether this creature is actually dead.
-            let toughness = o.definition.toughness.as_ref()?.net_with_counters(&o.counters)?;
+            // resolved without the script bridge - skip rather than guess,
+            // same stance `PTValue::as_fixed`/`layers.rs` already take.
+            let Some(toughness) = effective.toughness else { return false };
+            let object = state.object(id).expect("candidate id came from state.objects itself");
             // CR 704.5f: 0-or-less toughness applies unconditionally, even
             // to an indestructible creature (702.12b only exempts 704.5g).
             if toughness <= 0 {
-                return Some(o.object_id);
+                return true;
             }
-            if o.definition.keywords.contains(KeywordSet::INDESTRUCTIBLE) {
-                return None;
+            if effective.keywords.contains(KeywordSet::INDESTRUCTIBLE) {
+                return false;
             }
             // CR 704.5g + 702.2b/c: lethal marked damage, or any nonzero
             // damage at all from a Deathtouch source.
-            let lethal_damage =
-                o.damage_marked >= toughness as u32 || (o.deathtouched && o.damage_marked > 0);
-            lethal_damage.then_some(o.object_id)
+            object.damage_marked >= toughness as u32 || (object.deathtouched && object.damage_marked > 0)
         })
         .collect();
 
