@@ -334,7 +334,8 @@ fn dying_creatures_registered_ability_is_purged_by_sba() {
         effect: Some(AbilityEffect::GainLife(1)),
     });
 
-    let _events = stackfish_engine::sba::check_state_based_actions(&mut state);
+    let script_runtime = ScriptRuntime::new();
+    let _events = stackfish_engine::sba::check_state_based_actions(&mut state, &script_runtime);
 
     assert!(
         state.abilities.iter().all(|a| a.source != bear),

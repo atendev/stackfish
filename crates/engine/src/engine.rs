@@ -1201,22 +1201,27 @@ impl Engine {
                 let command =
                     EngineCommand { command_id, actor: action.player, action: action.kind };
 
-                let outcome = match commands::execute_command(&mut self.state, command) {
-                    Ok(outcome) => outcome,
-                    Err(err) => {
-                        // Reset to PriorityWindow rather than leaving process_state
-                        // in limbo - see StepStatus::Error's doc comment for why
-                        // this doesn't attempt rollback.
-                        self.process_state = ProcessState::PriorityWindow;
-                        return StepStatus::Error(err);
-                    }
-                };
+                let outcome =
+                    match commands::execute_command(&mut self.state, &self.script_runtime, command) {
+                        Ok(outcome) => outcome,
+                        Err(err) => {
+                            // Reset to PriorityWindow rather than leaving process_state
+                            // in limbo - see StepStatus::Error's doc comment for why
+                            // this doesn't attempt rollback.
+                            self.process_state = ProcessState::PriorityWindow;
+                            return StepStatus::Error(err);
+                        }
+                    };
 
                 // CommandOutcome::battlefield_entries - execute_command
-                // can't reach ScriptRuntime itself (state: &mut GameState
-                // only), so it just reports which ids became new battlefield
-                // permanents; this is the "one place performs the side
-                // effect" half, same split priority_handoff/broke_pass_chain
+                // takes &ScriptRuntime as of the layer-engine-cda slice (for
+                // effective_power/effective_keywords's read-only CDA
+                // resolution), but that's an immutable borrow - it still
+                // can't run a card's self-registering script itself
+                // (run_card_script needs &mut ScriptRuntime to load into the
+                // registry), so it just reports which ids became new
+                // battlefield permanents; this is the "one place performs
+                // the side effect" half, same split priority_handoff/broke_pass_chain
                 // already use. TODO: a script error here is silently
                 // dropped, same gap ResolveStackTop's own call flags.
                 for object_id in &outcome.battlefield_entries {
@@ -1529,7 +1534,7 @@ impl Engine {
             }
 
             ProcessState::SbaLoop => {
-                let events = sba::check_state_based_actions(&mut self.state);
+                let events = sba::check_state_based_actions(&mut self.state, &self.script_runtime);
                 if events.is_empty() {
                     let since =
                         self.pipeline_context.as_ref().map(|ctx| ctx.since_ledger).unwrap_or(0);
@@ -1692,7 +1697,7 @@ impl Engine {
             }
 
             ProcessState::CleanupSbaCheck => {
-                let events = sba::check_state_based_actions(&mut self.state);
+                let events = sba::check_state_based_actions(&mut self.state, &self.script_runtime);
                 if !events.is_empty() {
                     // CR 514.3: SBAs fired during cleanup - open a priority
                     // window so players can respond.

@@ -155,6 +155,8 @@ colors = ["G"]                # one entry PER PIP (repeats included), default []
 types = ["Creature"]          # required - see Card types below
 power = 2                     # optional i32
 toughness = 2                  # optional i32
+power_script = "..."           # optional Lua source, default none - see Characteristic-defining below
+toughness_script = "..."       # optional Lua source, default none - see Characteristic-defining below
 mana_ability = ["G"]           # optional, default [] - see Mana abilities below
 keywords = ["Flying", "Deathtouch"]  # optional, default [] - see Keywords below
 trigger_condition = "..."      # optional Lua source, default none - see Triggered abilities below
@@ -182,6 +184,18 @@ choice (CR 118.13a), not implied by the cost.
 `"{2}{R}"` — no mana-cost-string parser exists anywhere yet. Can't currently express hybrid,
 Phyrexian, or X costs on a test fixture. Extend `CardSpec` in `crates/scenario/src/lib.rs` if a
 scenario needs one of those.
+
+**`power_script`/`toughness_script` (CR 604.3/208.2a, characteristic-defining values):** if set,
+`power`/`toughness` above is ignored for that characteristic — instead `CardDefinition.power`/
+`.toughness` becomes `PTValue::CharacteristicDefining { script: Some(ScriptReference::Inline(...)) }`,
+resolved at query time via `ScriptRuntime::invoke_cda` (CR 613 layer 7a, `layers.rs`). Raw Lua
+source evaluating to `function(source, controller) -> integer`, same convention
+`trigger_condition`/`trigger_operation` already use for a raw-source-string field. No `Game.*`
+state-query bindings exist yet, so a real "count cards in your graveyard"-style CDA isn't
+expressible in a scenario file yet — only a constant or something derived from `source`/`controller`
+alone. A card with neither field set keeps the plain `power = N` shape as before. See
+`crates/engine/tests/scenarios/phase5_layer_engine_cda.toml` for a worked example (a creature with
+scripted toughness dying to CR 704.5g's lethal-damage SBA).
 
 **`keywords` (CR 702):** printed keyword abilities, by name, parsed into a `KeywordSet` bitmask —
 only the primitives that change how an existing engine checkpoint behaves, not the full ~140-entry

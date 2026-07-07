@@ -2044,10 +2044,17 @@ shift, don't treat it as fixed once written.
       `sba::apply_creature_death` now checks the *effective* card type, not `CardDefinition`'s, so
       a land animated into a creature (layer 4's `AddCardType` + layer 7b's `SetPT`) is actually
       subject to CR 704.5g.
-   3. **C: layer 7a** (characteristic-defining P/T) — needs a real `&ScriptRuntime` threaded into
-      `effective_characteristics` to invoke a card's CDA callback. Natural pairing point to also
-      finally evaluate `AffectedFilter::Script`/`EffectPayload::Script` (both dead code today),
-      since the script-runtime plumbing arrives in the same slice.
+   3. ~~**C: layer 7a** (characteristic-defining P/T)~~ — done, `phase5/layer-engine-cda` slice
+      (docs/implementation.md, below), CDA resolution only — `AffectedFilter::Script`/
+      `EffectPayload::Script` deliberately **not** paired in despite the `&ScriptRuntime` plumbing
+      now being available (see that slice's "Correction to the backlog" note); still dead code,
+      now its own explicitly-named follow-up (item 3a below).
+   3a. **Script-backed continuous effects** (`AffectedFilter::Script`/`EffectPayload::Script`) —
+      structurally different from CDA resolution: a boolean affects-predicate script plus an
+      effect-shape-decoding script, not a numeric query. `ContinuousEffect::applies_to` needs a
+      `&ScriptRuntime` param of its own (it currently takes none) to evaluate the predicate; the
+      effect-shape decode needs a "Lua asks, Rust decides" table convention like
+      `invoke_operation`'s, not designed yet.
    4. **D: layer 7e** (power/toughness switching) — narrow, low effort once 7b/7c exist.
    5. Layers 1/2/3 (copy/control/text-changing) and the CR 613.6-8 dependency system — each needs
       its own real subsystem (copy-object semantics, control-transfer command, text-rewrite
@@ -2348,6 +2355,124 @@ unchanged, same as the consumers slice found for its own two consumers.
   effect granting Land type to a card still in hand wouldn't make it playable.
 - Layers 1/2/3, 7a, 7d(-as-a-real-layer-step), 7e, and the CR 613.6-8 dependency system — each has
   its own TODO on `Layer` itself, untouched by this slice.
+
+## Phase 5: phase5/layer-engine-cda slice
+
+Branch `phase5/layer-engine-cda`, off master. Slice backlog item 1's sub-slice C. Scope locked in
+with the human before writing code: CR 613 layer 7a (characteristic-defining power/toughness)
+resolution only. `AffectedFilter::Script`/`EffectPayload::Script` (continuous effects backed by a
+script rather than a primitive) stay dead code — the backlog's own text suggested pairing them in
+since "the script-runtime plumbing arrives in the same slice," but they're a structurally
+different Lua calling convention (a boolean affects-predicate plus an effect-shape-decoding
+script, vs. this slice's single numeric CDA query) and a real design question of their own;
+bundling both risked the exact scope creep every prior slice has deliberately avoided. Split into
+backlog item 3a, named explicitly rather than left implicit.
+
+**Correction to the backlog, found while scoping this one:** checked `script.rs` before writing
+code — neither `invoke_condition` nor `invoke_operation` actually passes `GameState` into the Lua
+call (`ScriptContext.state` is Rust-side plumbing only, never bound into a `Game.*` function a
+script could call). A genuine "count cards in your graveyard"-style CDA (the flavor of the real
+backlog motivation, Tarmogoyf-style cards) isn't buildable with the script bridge as it stands —
+that needs `Game.*` state-query bindings, which is slice backlog item 8 (Script API expansion),
+not this slice. `invoke_cda` was scoped down to match `invoke_operation`'s existing calling
+convention (`(source, controller) -> value`, no state channel) rather than inventing a new one,
+and every test CDA is a constant or id-derived value — same limitation `invoke_condition`'s own
+existing tests already live with, not a new gap this slice introduced.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 8 new tests in
+`crates/engine/tests/phase5_layer_engine_cda.rs` (no script still resolves to `None`, a
+constant-returning script resolves to a real number, a CDA base is overridden by a later `SetPT`
+not stacked with it, a CDA base has `ModifyPT` stacked on top of it, a CDA base nets against
+`+1/+1` counters, an erroring script resolves to `None` rather than panicking, and the real-consumer
+pair: a script-less CDA creature never dies to the lethal-damage SBA regardless of damage marked,
+a scripted one does), all 195 prior tests unaffected. 203 tests total, 0 failed. Confirmed via the
+real CLI too: `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_layer_engine_cda.toml`
+— 1/1 action ran, 2/2 assertions passed (a creature with no printed toughness, only a scripted
+`return 3`, died to 3 pre-seeded marked damage).
+
+**What got implemented:**
+- `types/card.rs`: `PTValue::CharacteristicDefining` changed from a bare `String` (display text
+  only) to `{ display: String, script: Option<ScriptReference> }` — mirrors
+  `CardDefinition.script_ref`'s own `Inline`/`ByKey` split rather than a pre-loaded
+  `ScriptHandle`, keeping `PTValue` plain runtime-independent data same as `CardDefinition`
+  itself. `None` (no script) behaves identically to before this slice — `as_fixed`/
+  `net_with_counters` are unchanged, still unconditionally `None` for any `CharacteristicDefining`
+  regardless of the new field, since CDA resolution needs `&GameState`/`&ScriptRuntime` neither
+  method has access to. Extracted `net_counters(base: i32, counters: &CounterSet) -> i32` (CR
+  121.3's counter-netting formula) as a shared `pub(crate)` fn — `net_with_counters` now calls it
+  for a `Fixed` base, `layers.rs`'s new CDA path calls it for a script-resolved base, so the
+  formula lives in exactly one place.
+- `script.rs`: new `ScriptRuntime::invoke_cda(&self, source_code, source, controller) ->
+  Result<i32, ScriptError>` — evaluates `source_code` fresh every call (no `ScriptHandle`/registry
+  entry, same one-shot-eval convention `run_card_script` already uses for `Inline` sources),
+  expects `function(source, controller) -> integer`, same argument shape `invoke_operation`
+  already uses. `&self`, not `&mut self` — `Lua::load`/`.eval()`/`.call()` only need `&Lua`.
+- `layers.rs::effective_characteristics`: gained a `&ScriptRuntime` parameter. New private
+  `resolve_base_pt` helper resolves layer 7a (CR 613.4a) before layers 7b/7c apply — a `Fixed`
+  value (or a `CharacteristicDefining` with no resolvable script) delegates straight to the
+  unchanged `PTValue::net_with_counters`; a `CharacteristicDefining` with an `Inline` script gets
+  `invoke_cda` called for the base, then netted against counters via the shared `net_counters`. A
+  script that errors, or a `ByKey` reference (not resolvable by this engine, same stance
+  `run_card_script` already takes), falls through to the same `None` as before this slice — "skip
+  rather than guess" stays infallible rather than making the whole query (and every caller) return
+  a `Result`. `Layer`'s doc comment updated: 7a moved from "not resolved" to real, with an explicit
+  note on why `AffectedFilter::Script`/`EffectPayload::Script` are *still* not evaluated despite a
+  `&ScriptRuntime` now being in scope (see the "Correction" above).
+- **Ripple, threaded through as planned:** `commands::execute_command` and its two private helpers
+  (`effective_power`/`effective_keywords`) gained a `&ScriptRuntime` parameter, threaded to all 7
+  internal call sites (Flying/Reach/Menace blocking checks, combat-damage power reads,
+  Lifelink/Wither/Infect/Deathtouch keyword reads). `sba::check_state_based_actions` and
+  `apply_creature_death` gained the same parameter. `engine.rs`'s 3 call sites (one
+  `execute_command`, two `check_state_based_actions`) now pass `&self.script_runtime` — `Engine`
+  already owned one, no new field needed. Side effect worth calling out: `commands.rs`'s
+  `effective_power` (combat-damage power, wired since layer-engine-consumers) now resolves a
+  scripted CDA creature's power too, for free — no separate consumer wiring needed, same "the
+  query gets more capable, existing consumers benefit automatically" pattern the types-colors
+  slice already established for its two consumers.
+- `crates/scenario/src/lib.rs`: `CardSpec` gained `power_script`/`toughness_script: Option<String>`
+  (raw Lua source, same convention `trigger_condition`/`trigger_operation` already use). A script
+  wins over a plain `power`/`toughness` i32 if both happen to be set — not rejected, "not a
+  supported combination" same stance `CardSpec.script`'s own doc comment already takes for its
+  overlap with `trigger_condition`/`trigger_operation`. New `build_pt` helper centralizes the
+  `Fixed`-vs-`CharacteristicDefining` choice, used by both `build_initial_state` and
+  `build_new_game_engine`'s card-construction paths (parity, same pattern every prior
+  scenario-crate-adjacent slice has followed). `docs/scenario_format.md` documents both fields and
+  points at the new TOML fixture.
+
+**STRUCT DEVIATIONS:**
+- `PTValue::CharacteristicDefining` changing shape (tuple variant → struct variant with a new
+  `script` field) was the pre-slice report's own headline proposal, not a deviation from it — but
+  it did require touching 3 existing test call sites mechanically
+  (`phase5_keyword_primitives.rs`, `phase5_layer_engine_basics.rs` ×2, `phase5_sba_basics.rs`),
+  exactly as flagged as expected churn in the report.
+
+**INTERFACE DEVIATIONS:** None beyond what the pre-slice report explicitly flagged as expected
+ripple — `effective_characteristics`/`execute_command`/`check_state_based_actions` all gained a
+`&ScriptRuntime` parameter, anticipated by name in the report's "Ripple" section, not discovered
+mid-implementation.
+
+**SCOPE DEVIATIONS:**
+- Every existing Rust unit test that calls `effective_characteristics`/`check_state_based_actions`
+  directly (`phase5_layer_engine_basics.rs`, `phase5_layer_engine_types_colors.rs`,
+  `phase5_sba_basics.rs`, `phase5_script_self_registration.rs` — 24 call sites total) needed a
+  `ScriptRuntime::new()` constructed and passed through — anticipated by name in the report's
+  "Ripple" section as expected mechanical churn, not a surprise.
+- `commands.rs`'s and `sba.rs`'s doc comments updated in a few places to stop saying CDA
+  power/toughness "can't be resolved without the script bridge" now that it sometimes can —
+  accuracy upkeep, not new behavior.
+
+**UNRESOLVED (anticipated, none new):**
+- `AffectedFilter::Script`/`EffectPayload::Script` — still dead code, now backlog item 3a by name
+  instead of implicitly bundled into this slice.
+- `Game.*` state-query bindings (backlog item 8) — the real blocker for any CDA that reads actual
+  board state (Tarmogoyf, etc.) rather than a constant; this slice's calling convention
+  (`invoke_cda`) is ready for it once that binding exists, no further signature change expected.
+- CR 604.3's "functions outside the game / in all zones" — `effective_characteristics` still only
+  meaningfully queried for battlefield objects; not attempted.
+- `ScriptContext`'s hidden-information leak (`state: &GameState` full access) — pre-existing,
+  unrelated, untouched.
+- Layers 1/2/3, 7d(-as-a-real-layer-step), 7e, and the CR 613.6-8 dependency system — each still
+  has its own TODO on `Layer` itself.
 
 ## Mistakes caught (don't repeat)
 

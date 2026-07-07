@@ -14,6 +14,7 @@ use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::sba::check_state_based_actions;
+use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 
 fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> CardDefinition {
@@ -185,7 +186,7 @@ fn base_case_no_continuous_effects_mirrors_card_definition() {
     let bear = ObjectId(0);
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
 
-    let effective = effective_characteristics(&state, bear);
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
 
     assert_eq!(effective.card_types, CardTypeSet::CREATURE);
     assert_eq!(effective.colors, ColorSet::empty());
@@ -207,7 +208,7 @@ fn add_card_type_unions_a_type_in_without_removing_existing_types() {
         0,
     ));
 
-    let effective = effective_characteristics(&state, target_land);
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), target_land);
 
     assert!(effective.card_types.contains(CardTypeSet::CREATURE), "should gain Creature");
     assert!(effective.card_types.contains(CardTypeSet::LAND), "should keep Land, not lose it");
@@ -231,7 +232,7 @@ fn add_color_unions_a_color_in_without_removing_existing_colors() {
         0,
     ));
 
-    let effective = effective_characteristics(&state, target);
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), target);
 
     assert!(effective.colors.contains(ColorSet::WHITE), "should keep White, not lose it");
     assert!(effective.colors.contains(ColorSet::RED), "should gain Red");
@@ -256,8 +257,8 @@ fn effect_filter_still_scopes_type_and_color_effects() {
         0,
     ));
 
-    let own = effective_characteristics(&state, own_land);
-    let opposing = effective_characteristics(&state, opposing_land);
+    let own = effective_characteristics(&state, &ScriptRuntime::new(), own_land);
+    let opposing = effective_characteristics(&state, &ScriptRuntime::new(), opposing_land);
 
     assert!(own.card_types.contains(CardTypeSet::CREATURE), "controller's own land should be animated");
     assert!(!opposing.card_types.contains(CardTypeSet::CREATURE), "an opponent's land should be untouched");
@@ -282,7 +283,7 @@ fn a_plain_land_is_not_a_creature_and_is_untouched_by_the_lethal_damage_sba() {
     object.damage_marked = 3;
     put_on_battlefield(&mut state, object);
 
-    let events = check_state_based_actions(&mut state);
+    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
 
     assert!(events.is_empty(), "a non-creature land should never be subject to 704.5g");
     assert!(state.object(plain_land).is_some());
@@ -315,7 +316,7 @@ fn a_land_animated_into_a_creature_by_add_card_type_dies_to_lethal_damage_via_sb
         0,
     ));
 
-    let events = check_state_based_actions(&mut state);
+    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
 
     assert_eq!(events.len(), 1, "the animated land should die to its 3 marked damage");
     assert!(state.object(animated_land).is_none());

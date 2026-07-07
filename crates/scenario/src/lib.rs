@@ -160,6 +160,19 @@ pub struct CardSpec {
     pub types: Vec<String>,
     pub power: Option<i32>,
     pub toughness: Option<i32>,
+    /// CR 604.3/208.2a: if set, this card's power is characteristic-defining
+    /// (CR 613 layer 7a) rather than fixed — `power` above is ignored when
+    /// this is set (a card is one or the other, not both; not rejected if
+    /// somehow both are set, same "not a supported combination" stance
+    /// `script`'s own doc comment below already takes for its overlap).
+    /// Raw Lua source, same `function(source, controller) -> integer`
+    /// convention `ScriptRuntime::invoke_cda` expects — same raw-source-
+    /// string convention `trigger_condition`/`trigger_operation` already use.
+    #[serde(default)]
+    pub power_script: Option<String>,
+    /// Same as `power_script`, for toughness.
+    #[serde(default)]
+    pub toughness_script: Option<String>,
     /// CR 605: if non-empty, every instance of this card is set up with one
     /// `RegisteredAbility { kind: Activated, effect: Some(AddMana(...)) }` —
     /// `ability_index = 0` in an `activate_ability` action. Each entry is one
@@ -652,6 +665,22 @@ fn parse_card_types(names: &[String]) -> CardTypeSet {
     set
 }
 
+/// `CardSpec.power`/`.power_script` (or the `toughness` pair) -> a
+/// `PTValue` — a script, if present, wins over a plain fixed value (see
+/// `CardSpec.power_script`'s doc comment on why that overlap isn't
+/// rejected). `display` is always `"*"` for a scripted value — scenario
+/// fixtures have no use for real oracle-text display, it's UI-only and
+/// unconsulted by anything this crate checks.
+fn build_pt(value: Option<i32>, script: &Option<String>) -> Option<PTValue> {
+    if let Some(source) = script {
+        return Some(PTValue::CharacteristicDefining {
+            display: "*".to_string(),
+            script: Some(ScriptReference::Inline(source.clone())),
+        });
+    }
+    value.map(PTValue::Fixed)
+}
+
 fn parse_color(letter: &str) -> Color {
     match letter {
         "W" => Color::White,
@@ -917,8 +946,8 @@ pub fn build_initial_state(
             card_types: parse_card_types(&spec.types),
             subtypes: Vec::new(),
             oracle_text: String::new(),
-            power: spec.power.map(PTValue::Fixed),
-            toughness: spec.toughness.map(PTValue::Fixed),
+            power: build_pt(spec.power, &spec.power_script),
+            toughness: build_pt(spec.toughness, &spec.toughness_script),
             loyalty: None,
             defense: None,
             script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
@@ -1359,8 +1388,8 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 card_types: parse_card_types(&spec.types),
                 subtypes: Vec::new(),
                 oracle_text: String::new(),
-                power: spec.power.map(PTValue::Fixed),
-                toughness: spec.toughness.map(PTValue::Fixed),
+                power: build_pt(spec.power, &spec.power_script),
+                toughness: build_pt(spec.toughness, &spec.toughness_script),
                 loyalty: None,
                 defense: None,
                 script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
