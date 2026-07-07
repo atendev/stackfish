@@ -2017,6 +2017,58 @@ before this slice's actual requirements were known.
   zone change (would double-register) — not expected given the two call sites are each single-shot
   per mint, but not defensively checked.
 
+## Slice backlog (ordered by priority toward "script real cards")
+
+Compiled after surveying everything merged so far (roughly: full pipeline, turn loop, combat,
+basic SBA, CR 702 keyword bitmask, and a first real script bridge with triggered-ability
+self-registration and mana/non-mana activated abilities via the stack). Two foundational
+subsystems still sit at zero: the continuous-effect layer engine and targeting — both gate a
+large fraction of real card text. Order below reflects that; re-order as slices land and priorities
+shift, don't treat it as fixed once written.
+
+1. **Continuous effect / layer engine (CR 613)** — `layers.rs::effective_characteristics` still
+   `todo!()`. Blocks static abilities, anthems, auras, equipment, "as though" effects. Biggest
+   single remaining architectural gap.
+2. **Targeting system** — `CastSpell`/`StackObject` accept `targets` but nothing validates
+   legality/count, rechecks at resolution, or fizzles. Blocks the majority of real spells.
+3. **Static ability self-registration** (`Game.CreateStaticAbility`) — pairs with #1, needed for
+   any printed static ability text to actually attach a `ContinuousEffect`.
+4. **General activated abilities** — extend past the mana-tap-cost/single-tap-non-mana shape that
+   just landed: sacrifice/discard/other costs, multi-ability-per-card stable indexing (currently
+   positional by registration order, flagged fragile since the mana-ability slice), `Game.
+   CreateActivatedAbility`.
+5. **Replacement/prevention effects (CR 614-616)** — `replacement.rs` is still a no-op past the
+   empty-registry fast path. Needed for "if this would die, exile it instead," damage prevention/
+   redirection.
+6. **Cost system completeness** — additional costs, alternative costs, `{X}` costs, hybrid/
+   Phyrexian/snow mana payment, cost reduction/increase.
+7. **Trigger system completeness** — once-per-turn/intervening-if (CR 603.2-603.3), last-known-
+   info fallback for a trigger whose source already left the battlefield (CR 603.10, flagged since
+   the script-bridge-trigger slice), non-ETB trigger conditions (leaves-battlefield, upkeep,
+   damage-dealt, etc — only `Game.Conditions.Enters`/`Always` exist today).
+8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Damage, Counters, Destroy,
+   Exile, Sacrifice, CreateToken — only `GainLife` exists today), and a hidden-information-safe
+   `ScriptContext` (currently leaks the full `&GameState`, a standing DESIGN.md open question).
+9. **Player-input-mid-script (Lua coroutines)** — needed for "choose one," "may," and modal spells.
+   `invoke_target`/`Game.SelectTargets` are stubbed synchronous on purpose; real fix needs
+   `Lua::create_thread` yield/resume spanning `Engine::step()` calls, flagged unresolved since
+   Phase 2 part 3.
+10. **SBA completeness** — empty-library draw loss (704.5b), 10+ poison (704.5c), legend rule
+    (704.5j), commander damage ≥ 21 wiring (`PlayerState::commander_damage_from` already exists,
+    unused).
+11. **Multiplayer/Commander generalization** — combat is 2-player only today (`CombatState`/
+    `DeclareBlockers` assume one defending player); command-zone tax/damage/elimination-without-
+    ending-the-game aren't wired despite being named in DESIGN.md's Commander section.
+12. **First/double strike (CR 702.4/702.7)** and remaining combat-keyword edges.
+13. **Mana system completeness** — lands/abilities that add more than one mana or a player-chosen
+    color, beyond the flat `AbilityEffect::AddMana(Vec<ManaUnit>)` shape.
+14. **Zone/library helpers** — `Zone::new`/`push_top`/`top` still `todo!()`; needed for shuffle/
+    scry/surveil/search/tutor effects.
+15. **CR 601.6 unwind** — a rejected `submit_payment` plan leaves the engine stuck in
+    `AwaitingPayment` forever; nothing returns the card to hand or un-pushes the stack object.
+16. **Planeswalkers/Battles/DFCs/split/Sagas** — explicit non-goals in DESIGN.md's v1 scope;
+    lowest priority unless that scope changes.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
