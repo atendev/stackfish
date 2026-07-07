@@ -2026,9 +2026,29 @@ subsystems still sit at zero: the continuous-effect layer engine and targeting �
 large fraction of real card text. Order below reflects that; re-order as slices land and priorities
 shift, don't treat it as fixed once written.
 
-1. **Continuous effect / layer engine (CR 613)** — `layers.rs::effective_characteristics` still
-   `todo!()`. Blocks static abilities, anthems, auras, equipment, "as though" effects. Biggest
-   single remaining architectural gap.
+1. **Continuous effect / layer engine (CR 613)** — the `phase5/layer-engine-basics` slice
+   (docs/implementation.md, above) landed layers 6/7b/7c with `sba.rs` as the only real consumer.
+   Turned out to be big enough to split into its own piecemeal sequence rather than one item —
+   sub-slices, in order (re-order as they land, same as the rest of this list):
+   1. **A: wire the two deferred consumers** (combat-damage power in `commands.rs`'s
+      `AssignCombatDamage` arm, Flying/Reach/Menace blocking legality in `DeclareBlockers`) into
+      `layers::effective_characteristics`. Corrects a mistaken TODO from the first layer-engine
+      slice — both call sites already have `&GameState`, no `&ScriptRuntime` needed for the
+      primitive-only path, so there's no actual architectural wall here (the TODOs wrongly
+      compared this to the `battlefield_entries`/self-registration wall, which is a different,
+      real `&ScriptRuntime` gap). Cheap, and makes layers 6/7c actually affect combat outcomes,
+      not just SBA death checks.
+   2. **B: layers 4/5** (type-changing, color-changing) — same `EffectPrimitive` shape as
+      `AddKeyword`/`SetPT` (`SetType`/`AddType`, `SetColor`/`AddColor`), mechanical extension of
+      the existing query.
+   3. **C: layer 7a** (characteristic-defining P/T) — needs a real `&ScriptRuntime` threaded into
+      `effective_characteristics` to invoke a card's CDA callback. Natural pairing point to also
+      finally evaluate `AffectedFilter::Script`/`EffectPayload::Script` (both dead code today),
+      since the script-runtime plumbing arrives in the same slice.
+   4. **D: layer 7e** (power/toughness switching) — narrow, low effort once 7b/7c exist.
+   5. Layers 1/2/3 (copy/control/text-changing) and the CR 613.6-8 dependency system — each needs
+      its own real subsystem (copy-object semantics, control-transfer command, text-rewrite
+      representation, dependency detection), not just a query extension. Stay last.
 2. **Targeting system** — `CastSpell`/`StackObject` accept `targets` but nothing validates
    legality/count, rechecks at resolution, or fizzles. Blocks the majority of real spells.
 3. **Static ability self-registration** (`Game.CreateStaticAbility`) — pairs with #1, needed for
