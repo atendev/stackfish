@@ -83,26 +83,33 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
 /// `ObjectId` (CR 400.7), same convention `PlayLand`/`CastSpell` resolution
 /// already use for every other zone change in this codebase.
 ///
-/// Toughness and Indestructible are read via `layers::effective_characteristics`
-/// (CR 613 layers 6/7b/7c) rather than straight off `CardDefinition` — the
-/// first real consumer of the layer engine (docs/implementation.md's
-/// layer-engine-basics slice). A "+1/+1 to all your creatures"-style
-/// continuous effect, or one granting Indestructible, now actually changes
-/// whether a creature survives this check; combat-damage power and
-/// blocking-legality keyword checks (commands.rs) are NOT wired to the layer
-/// engine yet — flagged there as follow-up, not silently inconsistent.
+/// Toughness, Indestructible, and (as of the layer-engine-types-colors
+/// slice) creature type itself are all read via
+/// `layers::effective_characteristics` (CR 613 layers 4/6/7b/7c) rather than
+/// straight off `CardDefinition` — first flagged in docs/implementation.md's
+/// layer-engine-basics slice. A "+1/+1 to all your creatures"-style
+/// continuous effect, one granting Indestructible, or one granting the
+/// Creature type itself (e.g. an animated land, `AddCardType(CREATURE)`
+/// plus a `SetPT` for its 3/3) now actually changes whether this check
+/// applies at all; combat-damage power and blocking-legality keyword checks
+/// (commands.rs) are NOT wired to the layer engine yet — flagged there as
+/// follow-up, not silently inconsistent.
 fn apply_creature_death(state: &mut GameState, events: &mut Vec<GameEvent>) {
-    let candidates: Vec<ObjectId> = state
-        .objects
-        .values()
-        .filter(|o| o.zone == ZoneKind::Battlefield && o.definition.card_types.contains(CardTypeSet::CREATURE))
-        .map(|o| o.object_id)
-        .collect();
+    let candidates: Vec<ObjectId> =
+        state.objects.values().filter(|o| o.zone == ZoneKind::Battlefield).map(|o| o.object_id).collect();
 
     let dying: Vec<ObjectId> = candidates
         .into_iter()
         .filter(|&id| {
             let effective = crate::layers::effective_characteristics(state, id);
+            // CR 613 layer 4: a land animated into a creature by
+            // AddCardType(CREATURE) is subject to this SBA; a plain land
+            // (or any other non-creature permanent) isn't - checked against
+            // the effective type, not CardDefinition.card_types, so a
+            // granted type actually counts.
+            if !effective.card_types.contains(CardTypeSet::CREATURE) {
+                return false;
+            }
             // CDA toughness (PTValue::CharacteristicDefining) can't be
             // resolved without the script bridge - skip rather than guess,
             // same stance `PTValue::as_fixed`/`layers.rs` already take.

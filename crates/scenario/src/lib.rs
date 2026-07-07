@@ -215,12 +215,12 @@ pub struct CardSpec {
 }
 
 /// `CardSpec.continuous_effect`'s shape — `layer` picks which of the layer
-/// engine's three built primitives (`layers.rs`) this effect is:
-/// `"ability_adding"` (uses `keywords`), `"power_toughness_setting"` /
-/// `"power_toughness_modifying"` (both use `power`/`toughness`). Always
-/// `EffectDuration::Permanent`, timestamp `0` - ordering-within-a-layer
-/// fixtures aren't exercised via TOML, only via the Rust integration tests
-/// in `phase5_layer_engine_basics.rs`.
+/// engine's built primitives (`layers.rs`) this effect is: `"type_changing"`
+/// (uses `types`), `"color_changing"` (uses `colors`), `"ability_adding"`
+/// (uses `keywords`), `"power_toughness_setting"` / `"power_toughness_modifying"`
+/// (both use `power`/`toughness`). Always `EffectDuration::Permanent`,
+/// timestamp `0` - ordering-within-a-layer fixtures aren't exercised via
+/// TOML, only via the Rust integration tests in `phase5_layer_engine_basics.rs`.
 #[derive(Deserialize)]
 pub struct ContinuousEffectSpec {
     pub layer: String,
@@ -230,6 +230,17 @@ pub struct ContinuousEffectSpec {
     pub toughness: i32,
     #[serde(default)]
     pub keywords: Vec<String>,
+    /// `type_changing` only — card types (e.g. `["Creature"]`) this effect
+    /// grants in addition to whatever the affected object already has (CR
+    /// 613.1 layer 4, additive only — see `EffectPrimitive::AddCardType`).
+    #[serde(default)]
+    pub types: Vec<String>,
+    /// `color_changing` only — colors (e.g. `["R"]`, same letters as
+    /// `CardSpec.colors`) this effect grants in addition to whatever the
+    /// affected object already has (CR 613.1 layer 5, additive only — see
+    /// `EffectPrimitive::AddColor`).
+    #[serde(default)]
+    pub colors: Vec<String>,
     #[serde(default)]
     pub filter_controller: Option<String>,
     #[serde(default)]
@@ -652,6 +663,24 @@ fn parse_color(letter: &str) -> Color {
     }
 }
 
+/// `ContinuousEffectSpec.colors` entries, by the same `"W"/"U"/"B"/"R"/"G"`
+/// letters as `CardSpec.colors`, into a `ColorSet` (unlike `parse_color`,
+/// which returns one `Color` — a `color_changing` effect can grant more
+/// than one color at once).
+fn parse_colors(letters: &[String]) -> ColorSet {
+    let mut set = ColorSet::empty();
+    for letter in letters {
+        set |= match parse_color(letter) {
+            Color::White => ColorSet::WHITE,
+            Color::Blue => ColorSet::BLUE,
+            Color::Black => ColorSet::BLACK,
+            Color::Red => ColorSet::RED,
+            Color::Green => ColorSet::GREEN,
+        };
+    }
+    set
+}
+
 /// `CardSpec`'s simplified generic+colors cost shape, as `ManaSymbol`s.
 /// `ManaPaymentSpec` (what `SubmitPayment` pays *with*) deliberately does
 /// NOT share this helper - a payment is a flat list of literal units (CR
@@ -716,16 +745,20 @@ fn parse_filter_controller(name: &str) -> FilterController {
 /// primitives this is — see `ContinuousEffectSpec`'s own doc comment.
 fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> ContinuousEffect {
     let layer = match spec.layer.as_str() {
+        "type_changing" => Layer::TypeChanging,
+        "color_changing" => Layer::ColorChanging,
         "ability_adding" => Layer::AbilityAdding,
         "power_toughness_setting" => Layer::PowerToughnessSetting,
         "power_toughness_modifying" => Layer::PowerToughnessModifying,
         other => panic!(
             "unsupported continuous_effect layer in scenario file: {other} - only \
-             ability_adding/power_toughness_setting/power_toughness_modifying are wired to \
-             the layer engine so far (see layers.rs)"
+             type_changing/color_changing/ability_adding/power_toughness_setting/\
+             power_toughness_modifying are wired to the layer engine so far (see layers.rs)"
         ),
     };
     let effect = match layer {
+        Layer::TypeChanging => EffectPrimitive::AddCardType(parse_card_types(&spec.types)),
+        Layer::ColorChanging => EffectPrimitive::AddColor(parse_colors(&spec.colors)),
         Layer::AbilityAdding => EffectPrimitive::AddKeyword(parse_keywords(&spec.keywords)),
         Layer::PowerToughnessSetting => {
             EffectPrimitive::SetPT { power: spec.power, toughness: spec.toughness }
@@ -733,7 +766,7 @@ fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> Con
         Layer::PowerToughnessModifying => {
             EffectPrimitive::ModifyPT { power: spec.power, toughness: spec.toughness }
         }
-        _ => unreachable!("layer already matched to one of the three arms above"),
+        _ => unreachable!("layer already matched to one of the five arms above"),
     };
     let filter = EffectFilter {
         controller: spec.filter_controller.as_deref().map(parse_filter_controller),

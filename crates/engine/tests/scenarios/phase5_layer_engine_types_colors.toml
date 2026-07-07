@@ -1,0 +1,72 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "totem_type"
+name = "Test Totem (Type)"
+types = ["Artifact"]
+
+# CR 613 layer 4: grants Creature to any Land on the battlefield - the
+# "type-changing" half of "target land becomes a 3/3 Elemental creature".
+[cards.continuous_effect]
+layer = "type_changing"
+types = ["Creature"]
+filter_card_types = ["Land"]
+
+[[cards]]
+key = "totem_pt"
+name = "Test Totem (P/T)"
+types = ["Artifact"]
+
+# The "3/3" half of the same effect - a separate source since one
+# ContinuousEffect is one layer (see ContinuousEffectSpec's doc comment).
+[cards.continuous_effect]
+layer = "power_toughness_setting"
+power = 3
+toughness = 3
+filter_card_types = ["Land"]
+
+[[cards]]
+key = "land"
+name = "Test Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "totem_type"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "totem_pt"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "land"
+# No real combat-damage step exercised here - pre-seed 3 damage marked, same
+# trick phase5_layer_engine_basics.toml uses. Sub-lethal against a plain
+# land (which isn't a creature at all - CR 704.5g doesn't apply), lethal
+# once layer 4 makes it an effective 3-toughness creature.
+damage_marked = 3
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "land"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_ledger_len"
+equals = 2

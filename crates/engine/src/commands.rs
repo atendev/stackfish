@@ -296,6 +296,16 @@ pub fn execute_command(
             }
 
             let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
+            // TODO: reads CardDefinition.card_types directly rather than
+            // layers::effective_characteristics (CR 613 layer 4, real as of
+            // the layer-engine-types-colors slice) - a continuous effect
+            // granting Land type to a card still in hand would not make it
+            // playable here. Deliberately not wired this slice: this
+            // object is in ZoneKind::Hand, and every real consumer in this
+            // codebase so far (sba.rs's creature-type check, combat's
+            // power/keyword checks) targets a battlefield permanent, not a
+            // hand card - flagged rather than silently wired to an
+            // untested shape.
             if !object.definition.card_types.contains(CardTypeSet::LAND) {
                 return Err(CommandError::IllegalAction("card is not a Land".to_string()));
             }
