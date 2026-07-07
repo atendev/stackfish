@@ -2,13 +2,13 @@ use crate::{CardTypeSet, Subtype, SupertypeSet, ObjectId, SequenceNo, ColorSet, 
 use crate::types::card::KeywordSet;
 use crate::types::cost::FilterController;
 
-/// CR 613.1 layers, with sublayers for layer 7 (power/toughness). Only
-/// `AbilityAdding` (6), `PowerToughnessSetting` (7b), and
-/// `PowerToughnessModifying` (7c) have a real query/apply path yet — see
-/// `layers::effective_characteristics`. The rest are named here (so the
-/// CR 613.1 layer list is complete and in the right relative order) but
-/// nothing in `state.continuous_effects` can be built against them yet and
-/// the query doesn't look for them:
+/// CR 613.1 layers, with sublayers for layer 7 (power/toughness).
+/// `TypeChanging` (4), `ColorChanging` (5), `AbilityAdding` (6),
+/// `PowerToughnessSetting` (7b), and `PowerToughnessModifying` (7c) have a
+/// real query/apply path — see `layers::effective_characteristics`. The rest
+/// are named here (so the CR 613.1 layer list is complete and in the right
+/// relative order) but nothing in `state.continuous_effects` can be built
+/// against them yet and the query doesn't look for them:
 ///
 /// TODO(layer 1, CopyEffects): needs real copy-object semantics (CR 706 —
 /// becoming a copy of another object/printed values), which nothing in this
@@ -27,16 +27,15 @@ use crate::types::cost::FilterController;
 /// exists; `CardDefinition.oracle_text` is a plain immutable `String`, not a
 /// live/rewritable characteristic.
 ///
-/// TODO(layer 4, TypeChanging): needs an `EffectPrimitive` case that
-/// overrides/adds to `CardTypeSet`/`SupertypeSet`/subtypes (CR 613.1 layer
-/// 4 — e.g. "target land becomes a 3/3 Elemental creature in addition to
-/// its other types"). Structurally similar to `AddKeyword` below, just not
-/// built this slice — narrowed to ability/P-T only per the pre-slice scoping
-/// discussion (see docs/implementation.md).
-///
-/// TODO(layer 5, ColorChanging): same shape of gap as layer 4, for
-/// `ColorSet` instead of `CardTypeSet` (CR 613.1 layer 5 — e.g. "target
-/// creature becomes red").
+/// Layers 4/5 (CR 613.1) don't have CR-defined sublayers the way layer 7
+/// does (CR 613.3 only lettered-sublayers layers 3, 4, 6, and 7 — and layer
+/// 4's own lettered sublayers are about control-changing-vs-not, not
+/// modeled here) — `AddCardType`/`AddColor` below are each a single
+/// primitive per layer, which is faithful to the rule, not a simplification
+/// of it. Narrowed to additive-only this slice (CR 305.7/205's "gains/loses
+/// types"-style text, in the common "in addition to its other types" shape)
+/// — a full overwrite ("loses all other types/colors") isn't modeled; see
+/// `EffectPrimitive`'s own TODO for that.
 ///
 /// TODO(dependency system, CR 613.6-613.8): even once more layers exist,
 /// `layers::effective_characteristics` only sorts effects *within* a layer
@@ -71,9 +70,21 @@ pub enum Layer {
 
 /// The recognized shapes a `ContinuousEffect`'s actual modification can take
 /// — mirrors `ConditionSpec`/`AbilityEffect`'s "Rust-native primitive, zero
-/// further evaluation" vs. "falls back to the script bridge" split. Only
-/// `SetPT`/`ModifyPT`/`AddKeyword` exist this slice (layers 7b/7c/6) — see
+/// further evaluation" vs. "falls back to the script bridge" split. See
 /// `Layer`'s own doc comment for the layers with no primitive yet.
+///
+/// TODO(overwrite shapes): `SetCardTypes(CardTypeSet)`/`SetColors(ColorSet)`
+/// — the full "loses all other types/colors" overwrite (mirrors `SetPT`'s
+/// override semantics for layer 7b) — aren't modeled yet. `AddCardType`/
+/// `AddColor` below only cover the additive "in addition to its other
+/// types/colors" shape, deferred per the pre-slice scoping discussion (see
+/// docs/implementation.md).
+///
+/// TODO(supertypes/subtypes): gaining a supertype (e.g. "becomes
+/// legendary") or a creature subtype (e.g. "becomes an Elemental in
+/// addition to its other types") isn't modeled — `EffectiveCharacteristics.
+/// supertypes`/`.subtypes` stay a straight `CardDefinition` copy. Natural
+/// next extension of the same `AddCardType` pattern once needed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EffectPrimitive {
     /// Layer 7b (CR 613.3): sets power/toughness to an exact value,
@@ -90,6 +101,17 @@ pub enum EffectPrimitive {
     /// "loses all abilities" (also layer 6, but a text-removal shape) isn't
     /// modeled; see `Layer::TextChanging`'s TODO.
     AddKeyword(KeywordSet),
+    /// Layer 4 (CR 613.1, general "gains types" text): grants the listed
+    /// card type(s) in addition to whatever the object already has — e.g.
+    /// "target land becomes a 3/3 Elemental creature in addition to its
+    /// other types" is this primitive (for the type-changing half) plus a
+    /// `SetPT` (layer 7b) for the 3/3. Union, never removes a type — see
+    /// this enum's own overwrite TODO above.
+    AddCardType(CardTypeSet),
+    /// Layer 5 (CR 613.1, general "gains colors" text): grants the listed
+    /// color(s) in addition to whatever the object already has — e.g.
+    /// "enchanted creature is also red". Union, never removes a color.
+    AddColor(ColorSet),
 }
 
 /// A `ContinuousEffect`'s actual effect — either a recognized
@@ -247,14 +269,23 @@ impl ReplacementEffect {
 pub struct EffectiveCharacteristics {
     pub name: String,
     pub mana_cost: ManaCost,
+    /// Base (`color_indicator`, see `layers.rs`'s own stopgap note on that)
+    /// unioned with every applicable layer 5 `EffectPrimitive::AddColor`.
+    /// No layer removes a color yet (see `EffectPrimitive`'s overwrite
+    /// TODO).
     pub colors: ColorSet,
+    /// Base (`CardDefinition.card_types`) unioned with every applicable
+    /// layer 4 `EffectPrimitive::AddCardType`. No layer removes a type yet
+    /// (see `EffectPrimitive`'s overwrite TODO).
     pub card_types: CardTypeSet,
+    /// Straight `CardDefinition` copy — no layer touches supertypes yet
+    /// (see `EffectPrimitive`'s supertypes/subtypes TODO).
     pub supertypes: SupertypeSet,
+    /// Straight `CardDefinition` copy — no layer touches subtypes yet (see
+    /// `EffectPrimitive`'s supertypes/subtypes TODO).
     pub subtypes: Vec<Subtype>,
     /// Base (`CardDefinition.keywords`) unioned with every applicable layer
-    /// 6 `EffectPrimitive::AddKeyword` — the one field this slice's layer
-    /// engine actually computes beyond a straight `CardDefinition` copy,
-    /// besides `power`/`toughness` below. No layer removes a keyword yet
+    /// 6 `EffectPrimitive::AddKeyword`. No layer removes a keyword yet
     /// (see `Layer::TextChanging`'s TODO).
     pub keywords: KeywordSet,
     /// `None` for non-creatures (mirrors `CardDefinition`).

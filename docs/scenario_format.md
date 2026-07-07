@@ -249,17 +249,22 @@ card this way, same single-per-card simplification `mana_ability`/`trigger_opera
 
 ```toml
 [cards.continuous_effect]
-layer = "power_toughness_modifying"  # "ability_adding" | "power_toughness_setting" | "power_toughness_modifying"
+layer = "power_toughness_modifying"  # "type_changing" | "color_changing" | "ability_adding" |
+                                      # "power_toughness_setting" | "power_toughness_modifying"
 power = 1                            # i32, default 0 - power_toughness_* layers only
 toughness = 1                        # i32, default 0 - power_toughness_* layers only
 keywords = ["Indestructible"]        # ability_adding only, default [] - see Keywords above for names
+types = ["Creature"]                 # type_changing only, default [] - same names as Card types below,
+                                      # additive only (grants in addition to existing types)
+colors = ["R"]                       # color_changing only, default [] - same letters as CardSpec.colors,
+                                      # additive only (grants in addition to existing colors)
 filter_controller = "you"            # "you" | "opponent" | "any", optional, default: no controller filter
 filter_card_types = ["Creature"]     # optional, default [] (no card-type filter)
 filter_self_only = false             # optional, default false - "just this effect's own source"
 ```
 
-`layer` picks which of `layers.rs`'s three built primitives this is — only these three layers have
-a real query path so far (CR 613's other layers — copy/control/text/type/color, plus 7a's
+`layer` picks which of `layers.rs`'s five built primitives this is — only these five layers have
+a real query path so far (CR 613's other layers — copy/control/text, plus 7a's
 characteristic-defining values and 7d/7e — aren't wired to the layer engine yet; see `layers.rs`'s
 own doc comment). Ordering *within* a layer is by registration timestamp, which a scenario file
 can't control (always `0`) — write a direct Rust integration test
@@ -287,6 +292,11 @@ See `crates/engine/tests/scenarios/phase5_layer_engine_basics.toml` for a full w
 `phase5_layer_engine_consumers.toml` shows the same `power_toughness_modifying` primitive changing
 real combat damage dealt (`assign_combat_damage`), not just an SBA — see
 `docs/implementation.md`'s layer-engine-consumers slice notes.
+`phase5_layer_engine_types_colors.toml` shows `type_changing` (CR 613 layer 4, additive only) —
+pairing an `AddCardType(Creature)` effect with a `power_toughness_setting` effect animates a Land
+into a creature that's then actually subject to CR 704.5g's lethal-damage SBA (two separate
+`[[cards]]` sources, since one `ContinuousEffect` is one layer — see `docs/implementation.md`'s
+layer-engine-types-colors slice notes).
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and

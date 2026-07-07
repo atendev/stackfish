@@ -10,13 +10,14 @@ use crate::types::object::GameObject;
 /// every call rather than cached — see the no-mutable-cache rationale on
 /// `EffectiveCharacteristics` itself.
 ///
-/// Only layers 6 (`AbilityAdding`), 7b (`PowerToughnessSetting`), and 7c
-/// (`PowerToughnessModifying`) are applied — see `Layer`'s own doc comment
-/// for why the rest (copy/control/text/type/color, plus 7a/7d/7e) aren't
-/// built yet. Layer 7d (counters) is folded in from `GameObject.counters`
-/// directly via `PTValue::net_with_counters` before any continuous effect is
-/// applied, same as `sba.rs`'s pre-existing toughness check already did —
-/// this is a deliberate simplification, not CR 613.4's literal timestamp-
+/// Layers 4 (`TypeChanging`), 5 (`ColorChanging`), 6 (`AbilityAdding`), 7b
+/// (`PowerToughnessSetting`), and 7c (`PowerToughnessModifying`) are
+/// applied — see `Layer`'s own doc comment for why the rest (copy/control/
+/// text, plus 7a/7d/7e) aren't built yet. Layer 7d (counters) is folded in
+/// from `GameObject.counters` directly via `PTValue::net_with_counters`
+/// before any continuous effect is applied, same as `sba.rs`'s pre-existing
+/// toughness check already did — this is a deliberate simplification, not
+/// CR 613.4's literal timestamp-
 /// interleaving of counters alongside other layer-7 effects (flagged, not
 /// silently wrong: it gives the same answer as long as nothing on the board
 /// needs counters and a `SetPT`/`ModifyPT` effect ordered relative to each
@@ -42,6 +43,30 @@ pub fn effective_characteristics(state: &GameState, object: ObjectId) -> Effecti
     let mut power = def.power.as_ref().and_then(|p| p.net_with_counters(&obj.counters));
     let mut toughness = def.toughness.as_ref().and_then(|t| t.net_with_counters(&obj.counters));
     let mut keywords = def.keywords;
+    let mut card_types = def.card_types;
+    // TODO: CardDefinition::colors()/ManaCost::colors() are both still
+    // todo!() (see mana.rs) - once filled, derive this from def.colors()
+    // instead of reading color_indicator directly (which ignores colors
+    // contributed by mana_cost symbols per CR 202.2). Carried forward from
+    // the layer-engine-basics slice; this slice's layer 5 union applies on
+    // top of whatever this stopgap produces, not blocked on fixing it.
+    let mut colors = def.color_indicator.unwrap_or(crate::ColorSet::empty());
+
+    // Layer 4: additive only (CR 613.1, general "gains types" text) - see
+    // EffectPrimitive::AddCardType's doc comment for the deferred overwrite
+    // shape.
+    for effect in applicable_effects_in_layer(state, obj, Layer::TypeChanging) {
+        if let EffectPayload::Primitive(EffectPrimitive::AddCardType(added)) = &effect.effect {
+            card_types |= *added;
+        }
+    }
+
+    // Layer 5: additive only, same shape as layer 4 above.
+    for effect in applicable_effects_in_layer(state, obj, Layer::ColorChanging) {
+        if let EffectPayload::Primitive(EffectPrimitive::AddColor(added)) = &effect.effect {
+            colors |= *added;
+        }
+    }
 
     for effect in applicable_effects_in_layer(state, obj, Layer::AbilityAdding) {
         if let EffectPayload::Primitive(EffectPrimitive::AddKeyword(added)) = &effect.effect {
@@ -72,13 +97,8 @@ pub fn effective_characteristics(state: &GameState, object: ObjectId) -> Effecti
     EffectiveCharacteristics {
         name: def.name.clone(),
         mana_cost: def.mana_cost.clone(),
-        // TODO: CardDefinition::colors()/ManaCost::colors() are both still
-        // todo!() (see mana.rs) - once filled, derive this from def.colors()
-        // instead of reading color_indicator directly (which ignores colors
-        // contributed by mana_cost symbols per CR 202.2). Not needed by this
-        // slice's scope (layers 6/7b/7c don't touch color at all).
-        colors: def.color_indicator.unwrap_or(crate::ColorSet::empty()),
-        card_types: def.card_types,
+        colors,
+        card_types,
         supertypes: def.supertypes,
         subtypes: def.subtypes.clone(),
         keywords,

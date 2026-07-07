@@ -2038,9 +2038,12 @@ shift, don't treat it as fixed once written.
       folded in as the same category of gap. Turned out to need no new plumbing at all — the prior
       slice's TODOs claiming an `&ScriptRuntime` wall here were simply wrong (see that slice's own
       "Correction" note).
-   2. **B: layers 4/5** (type-changing, color-changing) — same `EffectPrimitive` shape as
-      `AddKeyword`/`SetPT` (`SetType`/`AddType`, `SetColor`/`AddColor`), mechanical extension of
-      the existing query.
+   2. ~~**B: layers 4/5** (type-changing, color-changing)~~ — done, `phase5/layer-engine-types-colors`
+      slice (docs/implementation.md, below). `EffectPrimitive::AddCardType`/`AddColor` (additive
+      only, overwrite deferred), applied in `layers.rs` alongside 6/7b/7c. Real consumer:
+      `sba::apply_creature_death` now checks the *effective* card type, not `CardDefinition`'s, so
+      a land animated into a creature (layer 4's `AddCardType` + layer 7b's `SetPT`) is actually
+      subject to CR 704.5g.
    3. **C: layer 7a** (characteristic-defining P/T) — needs a real `&ScriptRuntime` threaded into
       `effective_characteristics` to invoke a card's CDA callback. Natural pairing point to also
       finally evaluate `AffectedFilter::Script`/`EffectPayload::Script` (both dead code today),
@@ -2250,6 +2253,101 @@ to any existing signature.
   only widened *who calls* the existing layers 6/7b/7c query, not the query's own coverage.
 - `PlayLand`'s land-limit check, `is_sorcery_speed`, and other continuous-effect-consulting gaps
   flagged in earlier slices are untouched — this slice's scope was specifically combat/blocking.
+
+## Phase 5: phase5/layer-engine-types-colors slice
+
+Branch `phase5/layer-engine-types-colors`, off master. Slice backlog item 1's sub-slice B. Scope,
+locked in before writing code: CR 613 layers 4 (`TypeChanging`) and 5 (`ColorChanging`), additive
+only (`AddCardType`/`AddColor`, mirroring `AddKeyword`'s shape) — the full overwrite shape
+(`SetCardTypes`/`SetColors`, mirroring `SetPT`'s override semantics) is deferred to its own future
+slice, same "narrow the first cut" discipline every prior slice used. Went with the recommended
+default from the pre-slice requirements report rather than the "both shapes now" alternative (the
+way P/T got `SetPT`+`ModifyPT` together) — additive is the dominant real-Magic case and keeps this
+slice's surface the same size as layer-engine-basics' single-shape-per-layer 6/7c additions.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 6 new tests in
+`crates/engine/tests/phase5_layer_engine_types_colors.rs` (base case mirrors `CardDefinition`,
+`AddCardType` unions a type onto a land without losing Land, `AddColor` unions a color onto a
+white creature without losing White, `EffectFilter` controller-scoping still applies to type
+effects, a plain land is untouched by the lethal-damage SBA, and the real-consumer pair: a land
+animated into a creature by `AddCardType`+`SetPT` actually dies to lethal marked damage), all 189
+prior tests unaffected. 195 tests total, 0 failed. Confirmed via the real CLI too: `cargo run -p
+stackfish-cli -- crates/engine/tests/scenarios/phase5_layer_engine_types_colors.toml` — 1/1 action
+ran, 2/2 assertions passed (an artifact granting Creature type plus a second artifact setting 3/3,
+both filtered onto any Land, animated a land that then died to 3 pre-seeded marked damage — CR
+704.5g firing on an object that was never a creature by `CardDefinition` at all).
+
+**What got implemented:**
+- `types/effect.rs`: `EffectPrimitive` gained `AddCardType(CardTypeSet)` (layer 4) and
+  `AddColor(ColorSet)` (layer 5), same union-only shape as `AddKeyword`. New TODO on the enum
+  itself for the deferred `SetCardTypes`/`SetColors` overwrite shapes and for supertypes/subtypes
+  (still untouched — `EffectiveCharacteristics.supertypes`/`.subtypes` stay a straight
+  `CardDefinition` copy). `Layer`'s own doc comment updated: layers 4/5 moved from "TODO, unbuilt"
+  to "real," with a note that CR 613.3's lettered sublayers don't apply to layers 4/5 at all (only
+  layers 3/4/6/7 have any, and layer 4's own lettered split is about control-changing-vs-not, not
+  modeled here) — a single primitive per layer is faithful to the rule, not a simplification.
+- `layers.rs::effective_characteristics`: two more `applicable_effects_in_layer` passes,
+  `Layer::TypeChanging` unioning `AddCardType` into a new `card_types` local and
+  `Layer::ColorChanging` unioning `AddColor` into the existing `colors` local (previously computed
+  inline in the return struct; pulled into a local so layer 5 has something to union onto). Slotted
+  in before the existing layer 6/7b/7c passes, matching CR 613.1's real layer numbering (4, 5, 6,
+  7b, 7c) for readability — apply order doesn't matter for correctness since these touch different
+  characteristics than 6/7b/7c. The pre-existing `color_indicator`-as-stopgap comment (colors read
+  directly rather than through the still-`todo!()` `CardDefinition::colors()`) carried forward
+  unchanged — layer 5's union applies on top of whatever that stopgap produces, not blocked on
+  fixing it.
+- `sba.rs`'s `apply_creature_death`: real consumer. `candidates` no longer pre-filters by
+  `CardTypeSet::CREATURE` off `CardDefinition` — it now takes every battlefield object, and the
+  `CREATURE` check moved inside the `dying` filter against `effective.card_types` (one
+  `effective_characteristics` call per candidate instead of two, as a side benefit of the
+  restructure). A land with no continuous effects is filtered out here exactly as it always was;
+  a land with an `AddCardType(CREATURE)` effect (plus a `SetPT` for its P/T, since a land has no
+  base toughness `PTValue` to net) now passes the type check and is subject to the rest of
+  704.5f/g, same as any printed creature.
+- `commands.rs`: one new TODO-only comment (no behavior change) on `PlayLand`'s land-type check,
+  explaining why it wasn't retrofitted this slice — that check reads a card still in
+  `ZoneKind::Hand`, and every real consumer built so far (this slice's SBA type check, the
+  consumers slice's combat/blocking checks) targets a battlefield permanent; wiring a hand-zone
+  card through `effective_characteristics` untested felt like guessing at a shape rather than
+  building the flagged gap for real.
+- `crates/scenario/src/lib.rs`: `ContinuousEffectSpec` gained `types: Vec<String>` and
+  `colors: Vec<String>` fields (both `type_changing`/`color_changing`-only, same
+  default-empty-vec convention as `keywords`). `build_continuous_effect` gained matching arms
+  (`"type_changing"` → `Layer::TypeChanging` + `AddCardType(parse_card_types(&spec.types))`,
+  `"color_changing"` → `Layer::ColorChanging` + `AddColor(parse_colors(&spec.colors))`), reusing
+  the existing `parse_card_types` helper (already used by `filter_card_types`) and a new
+  `parse_colors` helper (reuses the existing per-letter `parse_color`, unioned into a `ColorSet` —
+  `parse_color` itself stays single-`Color`-returning since `CardSpec.colors`/`ManaPaymentSpec`
+  callers only ever need one color at a time per entry). `docs/scenario_format.md` documents both
+  new fields and points at the new TOML fixture, same pattern every prior scenario-crate-adjacent
+  slice has followed.
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice requirements report scoped exactly
+(`EffectPrimitive::AddCardType`/`AddColor`) — this *is* the plan, not a deviation from it.
+
+**INTERFACE DEVIATIONS:** None — `effective_characteristics(state, object)`'s signature is
+unchanged, same as the consumers slice found for its own two consumers.
+
+**SCOPE DEVIATIONS:**
+- `sba.rs`'s `apply_creature_death` restructuring `candidates`/`dying` into a single
+  `effective_characteristics` call per object (down from a raw-definition prefilter plus a second
+  per-candidate call) wasn't named in the pre-slice report as a required change — it fell out
+  directly from moving the type check onto the effective value, judged in-scope as the same
+  function's minimal correct shape rather than a separate cleanup slice.
+- `commands.rs`'s `PlayLand` TODO-only comment — anticipated in the pre-slice discussion as the
+  explicit trade-off of picking `sba.rs` as this slice's one real consumer over `PlayLand`.
+
+**UNRESOLVED (anticipated, none new):**
+- `SetCardTypes`/`SetColors` (full overwrite) — TODO on `EffectPrimitive`.
+- Supertypes/subtypes (e.g. "becomes legendary", gaining a subtype) — TODO on `EffectPrimitive`,
+  `EffectiveCharacteristics.supertypes`/`.subtypes` still a straight `CardDefinition` copy.
+- `CardDefinition::colors()`/`ManaCost::colors()`/`ManaSymbol::colors()` — all three still
+  `todo!()`; `effective_characteristics.colors` still reads `color_indicator` directly as a
+  stopgap, unchanged from the layer-engine-basics slice.
+- `PlayLand`'s land-type check — flagged in `commands.rs` itself now, not just here; a continuous
+  effect granting Land type to a card still in hand wouldn't make it playable.
+- Layers 1/2/3, 7a, 7d(-as-a-real-layer-step), 7e, and the CR 613.6-8 dependency system — each has
+  its own TODO on `Layer` itself, untouched by this slice.
 
 ## Mistakes caught (don't repeat)
 
