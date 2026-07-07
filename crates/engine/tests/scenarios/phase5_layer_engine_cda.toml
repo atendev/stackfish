@@ -1,0 +1,43 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "star"
+name = "Test CDA Creature"
+types = ["Creature"]
+# CR 604.3/208.2a: no printed power/toughness number - power stays unset
+# (None), toughness is characteristic-defining (layer 7a), resolved via
+# ScriptRuntime::invoke_cda. No Game.* state-query bindings exist yet (see
+# docs/implementation.md's layer-engine-cda slice notes), so this is a
+# constant rather than a real "count things in a zone" CDA.
+toughness_script = "return function(source, controller) return 3 end"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "star"
+# No real combat-damage step exercised here - pre-seed 3 damage marked, same
+# trick every prior layer-engine TOML fixture uses. Sub-lethal against an
+# unresolved toughness (None - can't apply 704.5g at all), lethal once layer
+# 7a resolves the CDA to a real 3.
+damage_marked = 3
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "star"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_ledger_len"
+equals = 2

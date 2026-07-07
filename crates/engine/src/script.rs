@@ -408,6 +408,36 @@ impl ScriptRuntime {
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
+    /// CR 604.3/208.2a: resolves a characteristic-defining power/toughness
+    /// callback. `source_code` is evaluated fresh every call — no
+    /// `ScriptHandle`/registry entry, same one-shot-eval convention
+    /// `run_card_script` already uses for `ScriptReference::Inline` — and is
+    /// expected to evaluate to `function(source, controller) -> integer`,
+    /// same argument shape `invoke_operation` already uses. `&self`, not
+    /// `&mut self`: `Lua::load`/`.eval()`/`.call()` only need `&Lua`, and
+    /// this doesn't touch the script registry at all.
+    ///
+    /// No `GameState` is passed into the Lua call — nothing in this script
+    /// bridge exposes state-querying `Game.*` bindings yet (checked: neither
+    /// `invoke_condition` nor `invoke_operation` passes state into Lua
+    /// either), so a real "count cards in your graveyard"-style CDA isn't
+    /// buildable until that lands (docs/implementation.md's slice backlog,
+    /// script API expansion). This only wires the calling convention; a
+    /// script is free to compute a constant, or something from `source`/
+    /// `controller` alone, until that binding exists.
+    pub fn invoke_cda(
+        &self,
+        source_code: &str,
+        source: ObjectId,
+        controller: PlayerId,
+    ) -> Result<i32, ScriptError> {
+        let function: Function =
+            self.lua.load(source_code).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        function
+            .call::<_, i32>((source.0, controller.0))
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))
+    }
+
     pub fn invoke_cost(&self, handle: ScriptHandle, ctx: &ScriptContext) -> Result<(), ScriptError> {
         // TODO: same calling pattern as invoke_condition above.
         let _ = (handle, ctx);

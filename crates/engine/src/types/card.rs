@@ -9,37 +9,54 @@ use crate::types::mana::{ColorSet, ManaCost};
 /// "base star plus offset" case to represent) are characteristic-defining
 /// abilities: the number isn't known until the script callback runs against
 /// current game state, so it can't be stored as a plain `i32`.
+///
+/// `CharacteristicDefining.script` mirrors `CardDefinition.script_ref`'s own
+/// `Inline`/`ByKey` split (CR 604.3, 208.2a) rather than a pre-loaded
+/// `ScriptHandle` — this type is meant to stay plain, runtime-independent
+/// data, same as `CardDefinition` itself. `None` means no script was
+/// supplied (nothing can resolve the number - `layers::effective_characteristics`
+/// treats it exactly like an unresolvable script, "skip rather than guess",
+/// not a panic). `display` is unchanged from before this field existed —
+/// literal oracle text (`"*"`, `"*+1"`) for UI/debugging only, never
+/// consulted for resolution.
 #[derive(Clone, Debug)]
 pub enum PTValue {
     Fixed(i32),
-    CharacteristicDefining(String),
+    CharacteristicDefining { display: String, script: Option<ScriptReference> },
 }
 
 impl PTValue {
     /// `Some` only for `Fixed` — a CDA's number isn't known without running
     /// its script callback against current game state, which this can't do.
+    /// See `layers::effective_characteristics` for where a `CharacteristicDefining`
+    /// with a real `script` actually gets resolved.
     pub fn as_fixed(&self) -> Option<i32> {
         match self {
             PTValue::Fixed(n) => Some(*n),
-            PTValue::CharacteristicDefining(_) => None,
+            PTValue::CharacteristicDefining { .. } => None,
         }
     }
 
     /// `as_fixed`, netted against `+1/+1`/`-1/-1` counters (CR 121.3's
     /// counters-affect-characteristics rule) — `None` for the same reason
-    /// `as_fixed` is `None` (a CDA's base number isn't known without the
-    /// script bridge). Doesn't merge/annihilate opposing counters out of
-    /// `counters` itself (CR 704.5q's state-based action does that as a
+    /// `as_fixed` is `None`. Doesn't merge/annihilate opposing counters out
+    /// of `counters` itself (CR 704.5q's state-based action does that as a
     /// real mutation) — this only nets them arithmetically for a read,
     /// which gives the same effective number without needing that SBA
     /// implemented yet.
     pub fn net_with_counters(&self, counters: &CounterSet) -> Option<i32> {
         let base = self.as_fixed()?;
-        Some(
-            base + counters.count(&CounterKind::PlusOnePlusOne)
-                - counters.count(&CounterKind::MinusOneMinusOne),
-        )
+        Some(net_counters(base, counters))
     }
+}
+
+/// CR 121.3: nets `+1/+1`/`-1/-1` counters against an already-resolved base
+/// value. Shared by `PTValue::net_with_counters` (base = a `Fixed` literal)
+/// and `layers::effective_characteristics`'s CDA resolution (base = a
+/// script-resolved number, CR 613.4a) — same formula, two different sources
+/// for `base`.
+pub(crate) fn net_counters(base: i32, counters: &CounterSet) -> i32 {
+    base + counters.count(&CounterKind::PlusOnePlusOne) - counters.count(&CounterKind::MinusOneMinusOne)
 }
 
 bitflags! {

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityCost;
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
@@ -148,23 +149,24 @@ pub(crate) fn has_summoning_sickness(state: &GameState, object: &GameObject) -> 
 /// missing id and just want "no keywords" as the fallback otherwise (mirrors
 /// the pre-existing `Option<&GameObject>` + `is_some_and` shape this
 /// replaces).
-fn effective_keywords(state: &GameState, id: ObjectId) -> KeywordSet {
+fn effective_keywords(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> KeywordSet {
     if state.object(id).is_some() {
-        crate::layers::effective_characteristics(state, id).keywords
+        crate::layers::effective_characteristics(state, script_runtime, id).keywords
     } else {
         KeywordSet::empty()
     }
 }
 
-/// CR 613 layer 7c: `id`'s live power (already netted against counters and
-/// any applicable `ModifyPT`/`SetPT` continuous effect), via
-/// `layers::effective_characteristics`. `None` for a missing `id` or an
-/// unresolved characteristic-defining base value — same "skip rather than
-/// guess" contract `effective_characteristics` itself already documents,
-/// just reachable without risking its panic-on-missing-id path.
-fn effective_power(state: &GameState, id: ObjectId) -> Option<i32> {
+/// CR 613 layers 7a/7c: `id`'s live power (already netted against counters,
+/// any resolvable characteristic-defining base, and any applicable
+/// `ModifyPT`/`SetPT` continuous effect), via `layers::effective_characteristics`.
+/// `None` for a missing `id` or an unresolved characteristic-defining base
+/// value — same "skip rather than guess" contract `effective_characteristics`
+/// itself already documents, just reachable without risking its
+/// panic-on-missing-id path.
+fn effective_power(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> Option<i32> {
     if state.object(id).is_some() {
-        crate::layers::effective_characteristics(state, id).power
+        crate::layers::effective_characteristics(state, script_runtime, id).power
     } else {
         None
     }
@@ -227,6 +229,7 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) {
 /// `CommandOutcome::broke_pass_chain`/`priority_handoff`.
 pub fn execute_command(
     state: &mut GameState,
+    script_runtime: &ScriptRuntime,
     command: EngineCommand,
 ) -> Result<CommandOutcome, CommandError> {
     match command.action {
@@ -841,8 +844,8 @@ pub fn execute_command(
                 // granting/removing Flying/Reach now actually changes
                 // blocking legality, not just the printed KeywordSet.
                 let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
-                let attacker_keywords = effective_keywords(state, attacker_object.object_id);
-                let blocker_keywords = effective_keywords(state, blocker_object.object_id);
+                let attacker_keywords = effective_keywords(state, script_runtime, attacker_object.object_id);
+                let blocker_keywords = effective_keywords(state, script_runtime, blocker_object.object_id);
                 if attacker_keywords.contains(KeywordSet::FLYING)
                     && !blocker_keywords.intersects(KeywordSet::FLYING | KeywordSet::REACH)
                 {
@@ -865,7 +868,7 @@ pub fn execute_command(
             }
             for (attacker, count) in &blocker_counts {
                 let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
-                let attacker_keywords = effective_keywords(state, attacker_object.object_id);
+                let attacker_keywords = effective_keywords(state, script_runtime, attacker_object.object_id);
                 if attacker_keywords.contains(KeywordSet::MENACE) && *count < 2 {
                     return Err(CommandError::IllegalAction(
                         "an attacker with menace can't be blocked except by two or more \
@@ -947,7 +950,8 @@ pub fn execute_command(
                 // effective_power (CR 613 layer 7c) so this validation stays
                 // consistent with the actual damage-event amounts computed
                 // below, which use the same helper.
-                let power = effective_power(state, *attacker).map(|p| p.max(0) as u32).unwrap_or(0);
+                let power =
+                    effective_power(state, script_runtime, *attacker).map(|p| p.max(0) as u32).unwrap_or(0);
                 let blockers = &blockers_by_attacker[attacker];
 
                 let mut seen = Vec::with_capacity(splits.len());
@@ -990,12 +994,14 @@ pub fn execute_command(
                 if state.object(*attacker).is_none() {
                     return Err(CommandError::InvalidTarget);
                 }
-                // CDA power (PTValue::CharacteristicDefining) can't be
-                // resolved without the script bridge - skip rather than
-                // guess, same stance sba.rs's toughness check already takes.
-                // effective_power (CR 613 layer 7c) folds in any applicable
-                // ModifyPT/SetPT continuous effect on top of that.
-                let Some(power) = effective_power(state, *attacker) else {
+                // CDA power (PTValue::CharacteristicDefining, layer 7a) now
+                // resolves for real if the card's base value carries a
+                // script - a script-less/erroring CDA still skips rather
+                // than guesses, same stance sba.rs's toughness check
+                // already takes. effective_power also folds in any
+                // applicable ModifyPT/SetPT continuous effect (layer 7c) on
+                // top of that.
+                let Some(power) = effective_power(state, script_runtime, *attacker) else {
                     continue;
                 };
                 let power = power.max(0) as u32;
@@ -1039,7 +1045,7 @@ pub fn execute_command(
                 if state.object(*blocker).is_none() {
                     return Err(CommandError::InvalidTarget);
                 }
-                let Some(power) = effective_power(state, *blocker) else {
+                let Some(power) = effective_power(state, script_runtime, *blocker) else {
                     continue;
                 };
                 let power = power.max(0) as u32;
@@ -1070,7 +1076,7 @@ pub fn execute_command(
                 // printed KeywordSet) - looked up once, up front, so the
                 // borrow ends before the target mutations below (which may
                 // need a mutable borrow of the same GameState).
-                let source_keywords = effective_keywords(state, *source);
+                let source_keywords = effective_keywords(state, script_runtime, *source);
                 let has_lifelink = source_keywords.contains(KeywordSet::LIFELINK);
                 let replaces_with_counters =
                     source_keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT);

@@ -1,4 +1,5 @@
 use crate::commands;
+use crate::script::ScriptRuntime;
 use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
@@ -23,22 +24,24 @@ use crate::types::zone::ZoneKind;
 /// responsible for calling this in a loop until it returns empty, not this
 /// function itself, so a caller stepping through ledger entries one at a
 /// time can observe each pass separately rather than the loop being opaque.
-pub fn check_state_based_actions(state: &mut GameState) -> Vec<GameEvent> {
+pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptRuntime) -> Vec<GameEvent> {
     let mut events = Vec::new();
 
     apply_player_loss(state, &mut events);
-    apply_creature_death(state, &mut events);
+    apply_creature_death(state, script_runtime, &mut events);
 
     // TODO: still unimplemented, no prerequisite machinery exists yet:
     //   - 704.5b: player who attempted to draw from an empty library loses
     //     (nothing tracks a failed draw attempt yet).
     //   - 704.5c: player with 10+ poison counters loses (PlayerState.counters
     //     exists but nothing increments poison yet).
-    //   - CDA toughness (PTValue::CharacteristicDefining): apply_creature_death
-    //     below still skips any creature whose toughness isn't PTValue::Fixed
-    //     (layers::effective_characteristics returns None for it too - CDA
-    //     resolution needs the script bridge, not designed into the layer
-    //     query yet).
+    //   - CDA toughness (PTValue::CharacteristicDefining): now real, via
+    //     layers::effective_characteristics's layer 7a resolution (as of the
+    //     layer-engine-cda slice) - see apply_creature_death's own doc
+    //     comment. Only resolves if the card's CharacteristicDefining value
+    //     actually carries a script (script: Some(ScriptReference::Inline(_)));
+    //     no script, or a script that errors, still skips rather than
+    //     guesses (returns None), same as always.
     //   - continuous-effect P/T modification (CR 613 layer 7c) and
     //     Indestructible-granting (layer 6): now real, via
     //     layers::effective_characteristics - see apply_creature_death's own
@@ -85,23 +88,27 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
 ///
 /// Toughness, Indestructible, and (as of the layer-engine-types-colors
 /// slice) creature type itself are all read via
-/// `layers::effective_characteristics` (CR 613 layers 4/6/7b/7c) rather than
-/// straight off `CardDefinition` — first flagged in docs/implementation.md's
-/// layer-engine-basics slice. A "+1/+1 to all your creatures"-style
-/// continuous effect, one granting Indestructible, or one granting the
-/// Creature type itself (e.g. an animated land, `AddCardType(CREATURE)`
-/// plus a `SetPT` for its 3/3) now actually changes whether this check
-/// applies at all; combat-damage power and blocking-legality keyword checks
-/// (commands.rs) are NOT wired to the layer engine yet — flagged there as
-/// follow-up, not silently inconsistent.
-fn apply_creature_death(state: &mut GameState, events: &mut Vec<GameEvent>) {
+/// `layers::effective_characteristics` (CR 613 layers 4/6/7a/7b/7c) rather
+/// than straight off `CardDefinition` — first flagged in
+/// docs/implementation.md's layer-engine-basics slice. A "+1/+1 to all your
+/// creatures"-style continuous effect, one granting Indestructible, one
+/// granting the Creature type itself (e.g. an animated land,
+/// `AddCardType(CREATURE)` plus a `SetPT` for its 3/3), or a scripted
+/// characteristic-defining toughness (layer 7a, as of the layer-engine-cda
+/// slice) now actually changes whether this check applies at all.
+/// `commands.rs`'s combat-damage power (`effective_power`) and
+/// blocking-legality keyword checks (`effective_keywords`) already read
+/// through the same query (since layer-engine-consumers) — as of this
+/// slice's `&ScriptRuntime` threading into `execute_command`, a scripted
+/// CDA power resolves there too, no separate wiring needed.
+fn apply_creature_death(state: &mut GameState, script_runtime: &ScriptRuntime, events: &mut Vec<GameEvent>) {
     let candidates: Vec<ObjectId> =
         state.objects.values().filter(|o| o.zone == ZoneKind::Battlefield).map(|o| o.object_id).collect();
 
     let dying: Vec<ObjectId> = candidates
         .into_iter()
         .filter(|&id| {
-            let effective = crate::layers::effective_characteristics(state, id);
+            let effective = crate::layers::effective_characteristics(state, script_runtime, id);
             // CR 613 layer 4: a land animated into a creature by
             // AddCardType(CREATURE) is subject to this SBA; a plain land
             // (or any other non-creature permanent) isn't - checked against

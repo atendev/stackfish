@@ -579,6 +579,6 @@ fn net_with_counters_folds_plus_and_minus_counters() {
 
 #[test]
 fn net_with_counters_is_none_for_a_characteristic_defining_value() {
-    let toughness = PTValue::CharacteristicDefining("*".to_string());
+    let toughness = PTValue::CharacteristicDefining { display: "*".to_string(), script: None };
     assert_eq!(toughness.net_with_counters(&CounterSet::new()), None);
 }
