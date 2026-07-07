@@ -34,6 +34,7 @@ impl FilterSpec {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FilterController {
     You,
     Opponent,

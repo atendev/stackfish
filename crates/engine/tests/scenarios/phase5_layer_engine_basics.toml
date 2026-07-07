@@ -1,0 +1,58 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "anthem"
+name = "Glorious Anthem"
+types = ["Enchantment"]
+
+# CR 613 layer 7c: +1/+1 to creatures you control - built directly as a
+# ContinuousEffect (no Game.AddContinuousEffect Lua binding yet, see
+# docs/implementation.md's layer-engine-basics slice).
+[cards.continuous_effect]
+layer = "power_toughness_modifying"
+power = 1
+toughness = 1
+filter_controller = "you"
+filter_card_types = ["Creature"]
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "anthem"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+# No real combat-damage step exercised here - pre-seed 2 damage marked, same
+# as phase5_sba_basics.toml. Lethal against the printed 2 toughness, but
+# sub-lethal against the anthem-boosted effective 3 toughness.
+damage_marked = 2
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_ledger_len"
+equals = 1

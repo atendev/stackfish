@@ -203,6 +203,39 @@ pub struct CardSpec {
     /// harness-wired one - not a supported combination, just not rejected).
     #[serde(default)]
     pub script: Option<String>,
+    /// CR 613: if set, every instance of this card is set up with one static
+    /// `ContinuousEffect` sourced from it, built directly as a Rust struct —
+    /// there's no `Game.AddContinuousEffect` Lua binding yet (that's its own
+    /// future slice, static-ability self-registration — see
+    /// docs/implementation.md's slice backlog). Only one continuous effect
+    /// per card this way, same single-per-card simplification
+    /// `mana_ability`/`trigger_operation` already use.
+    #[serde(default)]
+    pub continuous_effect: Option<ContinuousEffectSpec>,
+}
+
+/// `CardSpec.continuous_effect`'s shape — `layer` picks which of the layer
+/// engine's three built primitives (`layers.rs`) this effect is:
+/// `"ability_adding"` (uses `keywords`), `"power_toughness_setting"` /
+/// `"power_toughness_modifying"` (both use `power`/`toughness`). Always
+/// `EffectDuration::Permanent`, timestamp `0` - ordering-within-a-layer
+/// fixtures aren't exercised via TOML, only via the Rust integration tests
+/// in `phase5_layer_engine_basics.rs`.
+#[derive(Deserialize)]
+pub struct ContinuousEffectSpec {
+    pub layer: String,
+    #[serde(default)]
+    pub power: i32,
+    #[serde(default)]
+    pub toughness: i32,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub filter_controller: Option<String>,
+    #[serde(default)]
+    pub filter_card_types: Vec<String>,
+    #[serde(default)]
+    pub filter_self_only: bool,
 }
 
 /// One card instance's triggered ability, collected by `build_initial_state`
@@ -669,6 +702,54 @@ fn parse_keywords(names: &[String]) -> KeywordSet {
     set
 }
 
+fn parse_filter_controller(name: &str) -> FilterController {
+    match name {
+        "you" => FilterController::You,
+        "opponent" => FilterController::Opponent,
+        "any" => FilterController::Any,
+        other => panic!("unknown filter_controller in scenario file: {other}"),
+    }
+}
+
+/// `CardSpec.continuous_effect` -> a real `ContinuousEffect` sourced from
+/// `source`. `spec.layer` selects which of `layers.rs`'s three built
+/// primitives this is — see `ContinuousEffectSpec`'s own doc comment.
+fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> ContinuousEffect {
+    let layer = match spec.layer.as_str() {
+        "ability_adding" => Layer::AbilityAdding,
+        "power_toughness_setting" => Layer::PowerToughnessSetting,
+        "power_toughness_modifying" => Layer::PowerToughnessModifying,
+        other => panic!(
+            "unsupported continuous_effect layer in scenario file: {other} - only \
+             ability_adding/power_toughness_setting/power_toughness_modifying are wired to \
+             the layer engine so far (see layers.rs)"
+        ),
+    };
+    let effect = match layer {
+        Layer::AbilityAdding => EffectPrimitive::AddKeyword(parse_keywords(&spec.keywords)),
+        Layer::PowerToughnessSetting => {
+            EffectPrimitive::SetPT { power: spec.power, toughness: spec.toughness }
+        }
+        Layer::PowerToughnessModifying => {
+            EffectPrimitive::ModifyPT { power: spec.power, toughness: spec.toughness }
+        }
+        _ => unreachable!("layer already matched to one of the three arms above"),
+    };
+    let filter = EffectFilter {
+        controller: spec.filter_controller.as_deref().map(parse_filter_controller),
+        card_types: (!spec.filter_card_types.is_empty()).then(|| parse_card_types(&spec.filter_card_types)),
+        self_only: spec.filter_self_only,
+    };
+    ContinuousEffect {
+        source,
+        layer,
+        affected: AffectedFilter::Primitive(filter),
+        effect: EffectPayload::Primitive(effect),
+        timestamp: SequenceNo(0),
+        duration: EffectDuration::Permanent,
+    }
+}
+
 /// `assert_object_counters`/`assert_player_counters`'s `kind` field, by CR
 /// 122.3 name, into `CounterKind`.
 fn parse_counter_kind(name: &str) -> CounterKind {
@@ -782,6 +863,7 @@ pub fn build_initial_state(
 
     let mut objects: HashMap<ObjectId, GameObject> = HashMap::new();
     let mut abilities: Vec<RegisteredAbility> = Vec::new();
+    let mut continuous_effects: Vec<ContinuousEffect> = Vec::new();
 
     for entry in &file.setup {
         let spec = card_specs
@@ -864,6 +946,9 @@ pub fn build_initial_state(
                 operation: operation.clone(),
             });
         }
+        if let Some(effect_spec) = &spec.continuous_effect {
+            continuous_effects.push(build_continuous_effect(object_id, effect_spec));
+        }
 
         objects.insert(object_id, object);
         card_ids.insert(entry.card.clone(), object_id);
@@ -896,7 +981,7 @@ pub fn build_initial_state(
         objects,
         zones,
         stack: Vec::new(),
-        continuous_effects: Vec::new(),
+        continuous_effects,
         replacement_effects: Vec::new(),
         abilities,
         ledger: Vec::new(),
@@ -1293,6 +1378,9 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                     spec.trigger_condition.as_deref(),
                     operation_src,
                 );
+            }
+            if let Some(effect_spec) = &spec.continuous_effect {
+                engine.state_mut().continuous_effects.push(build_continuous_effect(card_ids[key], effect_spec));
             }
         }
     }

@@ -241,6 +241,50 @@ Still narrow — no targeting, no continuous effects, no `Game.CreateActivatedAb
 card from setting both `script` and `trigger_condition`/`trigger_operation` at once, but that's
 not a supported combination — pick one per card.
 
+**`continuous_effect` (CR 613, layer engine):** if set, every instance of this card gets one static
+`ContinuousEffect` set up automatically, built directly as a Rust struct — there's no
+`Game.AddContinuousEffect` Lua binding yet (that's its own future slice, static-ability
+self-registration; see `docs/implementation.md`'s slice backlog). Only one continuous effect per
+card this way, same single-per-card simplification `mana_ability`/`trigger_operation` use.
+
+```toml
+[cards.continuous_effect]
+layer = "power_toughness_modifying"  # "ability_adding" | "power_toughness_setting" | "power_toughness_modifying"
+power = 1                            # i32, default 0 - power_toughness_* layers only
+toughness = 1                        # i32, default 0 - power_toughness_* layers only
+keywords = ["Indestructible"]        # ability_adding only, default [] - see Keywords above for names
+filter_controller = "you"            # "you" | "opponent" | "any", optional, default: no controller filter
+filter_card_types = ["Creature"]     # optional, default [] (no card-type filter)
+filter_self_only = false             # optional, default false - "just this effect's own source"
+```
+
+`layer` picks which of `layers.rs`'s three built primitives this is — only these three layers have
+a real query path so far (CR 613's other layers — copy/control/text/type/color, plus 7a's
+characteristic-defining values and 7d/7e — aren't wired to the layer engine yet; see `layers.rs`'s
+own doc comment). Ordering *within* a layer is by registration timestamp, which a scenario file
+can't control (always `0`) — write a direct Rust integration test
+(`crates/engine/tests/phase5_layer_engine_basics.rs`) instead if a fixture needs to exercise
+timestamp ordering between two effects in the same layer.
+
+Example — an anthem enchantment giving `+1/+1` to creatures its controller controls:
+
+```toml
+[[cards]]
+key = "anthem"
+name = "Glorious Anthem"
+types = ["Enchantment"]
+
+[cards.continuous_effect]
+layer = "power_toughness_modifying"
+power = 1
+toughness = 1
+filter_controller = "you"
+filter_card_types = ["Creature"]
+```
+
+See `crates/engine/tests/scenarios/phase5_layer_engine_basics.toml` for a full worked example
+(the anthem above keeping a lethally-damaged bear alive through CR 704.5g's state-based action).
+
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and
 subtypes (`Human`, `Aura`, etc) aren't settable from a scenario file yet — add fields to

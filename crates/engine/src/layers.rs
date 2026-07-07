@@ -1,35 +1,119 @@
-use crate::types::effect::EffectiveCharacteristics;
+use crate::types::effect::{ContinuousEffect, EffectPayload, EffectPrimitive, EffectiveCharacteristics, Layer};
 use crate::types::game::GameState;
 use crate::types::ids::ObjectId;
+use crate::types::object::GameObject;
 
 /// The continuous-effect layer engine's query (CR 613): computes `object`'s
 /// live characteristics from its `CardDefinition` base values plus every
 /// applicable `ContinuousEffect` in `state.continuous_effects`, applied in
-/// layer order with timestamp/dependency ordering within each layer.
-/// Recomputed on every call rather than cached — see the no-mutable-cache
-/// rationale on `EffectiveCharacteristics` itself.
+/// layer order with timestamp ordering within each layer. Recomputed on
+/// every call rather than cached — see the no-mutable-cache rationale on
+/// `EffectiveCharacteristics` itself.
 ///
-/// Resolving a `PTValue::CharacteristicDefining` value (layer 7a) requires
-/// invoking the card's script callback, which means this signature will
-/// likely need a script-runtime handle threaded through once that exists —
-/// not added yet since the script bridge hasn't been designed.
+/// Only layers 6 (`AbilityAdding`), 7b (`PowerToughnessSetting`), and 7c
+/// (`PowerToughnessModifying`) are applied — see `Layer`'s own doc comment
+/// for why the rest (copy/control/text/type/color, plus 7a/7d/7e) aren't
+/// built yet. Layer 7d (counters) is folded in from `GameObject.counters`
+/// directly via `PTValue::net_with_counters` before any continuous effect is
+/// applied, same as `sba.rs`'s pre-existing toughness check already did —
+/// this is a deliberate simplification, not CR 613.4's literal timestamp-
+/// interleaving of counters alongside other layer-7 effects (flagged, not
+/// silently wrong: it gives the same answer as long as nothing on the board
+/// needs counters and a `SetPT`/`ModifyPT` effect ordered relative to each
+/// other by timestamp — which no test in this slice exercises).
+///
+/// Layer 7a (characteristic-defining power/toughness) is not resolved here —
+/// same "skip rather than guess" stance `sba.rs` already takes: an object
+/// with `PTValue::CharacteristicDefining` power/toughness gets `None` for
+/// that field, exactly as `PTValue::as_fixed`/`net_with_counters` already
+/// return `None` for it. Resolving a CDA needs the script bridge, not
+/// designed into this query yet.
+///
+/// No `&ScriptRuntime` parameter: nothing this slice can construct
+/// (`AffectedFilter::Script`/`EffectPayload::Script`) is actually
+/// evaluated — see those types' doc comments. A future slice threading real
+/// script-backed continuous effects through here will need to add one.
 pub fn effective_characteristics(state: &GameState, object: ObjectId) -> EffectiveCharacteristics {
-    // TODO: 1. Look up object's GameObject (state.object(object)) and start
-    //          from its CardDefinition's base values (copiable values, CR
-    //          613.2).
-    //       2. Collect every ContinuousEffect in state.continuous_effects
-    //          where ContinuousEffect::applies_to(object's GameObject) is
-    //          true (that method itself isn't implementable yet - needs a
-    //          ScriptRuntime, see effect.rs's TODO).
-    //       3. Group by Layer, sort within each layer by timestamp (and
-    //          dependency order where effects depend on each other's
-    //          results - CR 613.6-613.8's dependency rule isn't designed
-    //          yet at all, this will need real thought, not just a sort).
-    //       4. Apply each layer's effects in order (1 through 7e) to build
-    //          up the final EffectiveCharacteristics.
-    //       5. For power.toughness/loyalty/defense starting from
-    //          PTValue::CharacteristicDefining (layer 7a), invoke the card's
-    //          CDA script callback via ScriptRuntime - needs a
-    //          &ScriptRuntime parameter added to this signature.
-    todo!()
+    let obj = state
+        .object(object)
+        .unwrap_or_else(|| panic!("effective_characteristics called with unknown ObjectId {object:?}"));
+    let def = &obj.definition;
+
+    let mut power = def.power.as_ref().and_then(|p| p.net_with_counters(&obj.counters));
+    let mut toughness = def.toughness.as_ref().and_then(|t| t.net_with_counters(&obj.counters));
+    let mut keywords = def.keywords;
+
+    for effect in applicable_effects_in_layer(state, obj, Layer::AbilityAdding) {
+        if let EffectPayload::Primitive(EffectPrimitive::AddKeyword(added)) = &effect.effect {
+            keywords |= *added;
+        }
+    }
+
+    // Layer 7b: setting replaces whatever came before this layer entirely -
+    // later timestamp wins outright, it doesn't stack with an earlier SetPT.
+    for effect in applicable_effects_in_layer(state, obj, Layer::PowerToughnessSetting) {
+        if let EffectPayload::Primitive(EffectPrimitive::SetPT { power: p, toughness: t }) = &effect.effect {
+            power = Some(*p);
+            toughness = Some(*t);
+        }
+    }
+
+    // Layer 7c: modifying is additive across every applicable effect, in
+    // timestamp order (order doesn't actually change the sum for a plain
+    // add, but the sort is kept anyway - see applicable_effects_in_layer's
+    // doc comment on why the sort lives there regardless).
+    for effect in applicable_effects_in_layer(state, obj, Layer::PowerToughnessModifying) {
+        if let EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) = &effect.effect {
+            power = power.map(|p| p + dp);
+            toughness = toughness.map(|t| t + dt);
+        }
+    }
+
+    EffectiveCharacteristics {
+        name: def.name.clone(),
+        mana_cost: def.mana_cost.clone(),
+        // TODO: CardDefinition::colors()/ManaCost::colors() are both still
+        // todo!() (see mana.rs) - once filled, derive this from def.colors()
+        // instead of reading color_indicator directly (which ignores colors
+        // contributed by mana_cost symbols per CR 202.2). Not needed by this
+        // slice's scope (layers 6/7b/7c don't touch color at all).
+        colors: def.color_indicator.unwrap_or(crate::ColorSet::empty()),
+        card_types: def.card_types,
+        supertypes: def.supertypes,
+        subtypes: def.subtypes.clone(),
+        keywords,
+        power,
+        toughness,
+        loyalty: def.loyalty.as_ref().and_then(|l| l.as_fixed()),
+        defense: def.defense.as_ref().and_then(|d| d.as_fixed()),
+    }
+}
+
+/// Every `ContinuousEffect` in `layer` whose `affected` filter matches
+/// `object`, sorted by `timestamp` (CR 613.4's ordering within a layer — see
+/// `Layer`'s doc comment for why this is timestamp-only, no dependency
+/// detection). Sorting here rather than at each call site keeps that
+/// contract in one place regardless of which layer's caller in
+/// `effective_characteristics` is walking it.
+fn applicable_effects_in_layer<'a>(
+    state: &'a GameState,
+    object: &GameObject,
+    layer: Layer,
+) -> Vec<&'a ContinuousEffect> {
+    let mut effects: Vec<&ContinuousEffect> = state
+        .continuous_effects
+        .iter()
+        .filter(|e| e.layer == layer)
+        .filter(|e| {
+            // An effect whose own source has already left the battlefield
+            // (and has no remap - see commands::retire_object) can't resolve
+            // a controller to check `You`/`Opponent` against. Skip rather
+            // than guess, same stance collect_triggers already takes for a
+            // trigger whose source no longer resolves (CR 603.10 gap,
+            // flagged there too).
+            state.object(e.source).is_some_and(|source| e.applies_to(object, source))
+        })
+        .collect();
+    effects.sort_by_key(|e| e.timestamp);
+    effects
 }
