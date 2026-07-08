@@ -78,6 +78,7 @@ fn bear_definition(script: &str) -> CardDefinition {
         script_ref: ScriptReference::Inline(script.to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -312,5 +313,6 @@ fn land_definition(script: &str) -> CardDefinition {
         script_ref: ScriptReference::Inline(script.to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }

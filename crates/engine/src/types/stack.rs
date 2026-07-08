@@ -34,6 +34,12 @@ pub struct StackObject {
     /// somewhere to eventually live once that's evaluable.
     pub target_requirement: Option<TargetSpec>,
     pub x_value: Option<u32>,
+    /// CR 702.34a: baked in at push time from the chosen `AlternativeCost`
+    /// (`false` for a spell cast normally, or an ability — abilities never
+    /// set this). When `true`, the zone-destination sites in `engine.rs`
+    /// that would otherwise send a resolving/fizzling spell to its owner's
+    /// graveyard send it to exile instead.
+    pub exile_on_leaving_stack: bool,
     pub costs_paid: Vec<CostPayment>,
     /// Which script callback to invoke on resolution. Present in the
     /// original adaptation doc's `StackObject` spec ("resolution callback
@@ -64,6 +70,7 @@ impl StackObject {
         targets: Vec<Target>,
         target_requirement: Option<TargetSpec>,
         x_value: Option<u32>,
+        exile_on_leaving_stack: bool,
         operation: ScriptHandle,
         effect: Option<AbilityEffect>,
     ) -> Self {
@@ -80,6 +87,7 @@ impl StackObject {
             targets,
             target_requirement,
             x_value,
+            exile_on_leaving_stack,
             costs_paid: Vec::new(),
             operation,
             effect,

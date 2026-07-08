@@ -31,6 +31,7 @@ fn plain_card_def(name: &str) -> CardDefinition {
         script_ref: ScriptReference::ByKey(name.to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 

@@ -1245,8 +1245,13 @@ impl Engine {
     ) -> Option<GameEventKind> {
         let spell_object = self.state.object(stack_id)?;
         let last_known_info = spell_object.clone();
-        let destination_owner =
-            if destination == ZoneKind::Battlefield { None } else { Some(last_known_info.owner) };
+        // Battlefield and Exile are both shared zones (owner: None) - only
+        // Graveyard (the other destination this function is ever called
+        // with) is per-player.
+        let destination_owner = match destination {
+            ZoneKind::Battlefield | ZoneKind::Exile => None,
+            _ => Some(last_known_info.owner),
+        };
 
         let new_id = self.state.allocate_object_id();
         let mut new_object = last_known_info.clone();
@@ -1465,11 +1470,15 @@ impl Engine {
                     // CR 608.2b: doesn't resolve at all - no effect
                     // invocation, no permanent-entry script, and (unlike
                     // normal CR 608.2m resolution) a spell always lands in
-                    // its owner's graveyard regardless of card type.
+                    // its owner's graveyard regardless of card type - unless
+                    // it was cast via an alternative cost that exiles it
+                    // instead (CR 702.34a: flashback's "exiled... as it
+                    // resolves or as it leaves the stack otherwise" covers
+                    // fizzling too).
                     if matches!(top.kind, StackEntryKind::Spell) {
-                        if let Some(event) =
-                            self.move_resolving_spell(top.stack_id, ZoneKind::Graveyard, false)
-                        {
+                        let destination =
+                            if top.exile_on_leaving_stack { ZoneKind::Exile } else { ZoneKind::Graveyard };
+                        if let Some(event) = self.move_resolving_spell(top.stack_id, destination, false) {
                             events.push(event);
                         }
                     }
@@ -1488,16 +1497,22 @@ impl Engine {
                         // battlefield as a permanent; an instant or sorcery
                         // (the only other types castable as a spell - see
                         // CastSpell's land rejection in commands.rs) goes to
-                        // its owner's graveyard instead. Peek the card's
-                        // types before moving it - move_resolving_spell needs
-                        // the destination decided up front.
+                        // its owner's graveyard instead - or exile, if this
+                        // was cast via an alternative cost that exiles it on
+                        // resolution (CR 702.34a). Peek the card's types
+                        // before moving it - move_resolving_spell needs the
+                        // destination decided up front.
                         let destination = self.state.object(top.stack_id).map(|obj| {
                             if obj
                                 .definition
                                 .card_types
                                 .intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY)
                             {
-                                ZoneKind::Graveyard
+                                if top.exile_on_leaving_stack {
+                                    ZoneKind::Exile
+                                } else {
+                                    ZoneKind::Graveyard
+                                }
                             } else {
                                 ZoneKind::Battlefield
                             }
@@ -1755,6 +1770,7 @@ impl Engine {
                             Vec::new(),
                             target_requirement,
                             None,
+                            false,
                             operation,
                             effect,
                         ));
@@ -2382,6 +2398,7 @@ mod tests {
                 script_ref: ScriptReference::ByKey("test".to_string()),
                 keywords: KeywordSet::empty(),
                 target_requirement: None,
+                alternative_costs: Vec::new(),
             },
             owner: controller,
             controller,

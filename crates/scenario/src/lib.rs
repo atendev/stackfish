@@ -1004,6 +1004,7 @@ pub fn build_initial_state(
             script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
             keywords: parse_keywords(&spec.keywords),
             target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
+            alternative_costs: Vec::new(),
         };
 
         let owner = PlayerId(entry.player);
@@ -1176,6 +1177,9 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                 modes: modes.clone(),
                 targets: targets.iter().map(|t| resolve_target(t, card_ids)).collect(),
                 x_value: *x_value,
+                // TODO: no TOML scenario field for this yet - see the
+                // matching TODO on CardDefinition.alternative_costs above.
+                alternative_cost: None,
             },
         ),
         ActionSpec::ActivateAbility { player, source, ability_index, targets } => (
@@ -1449,6 +1453,12 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
                 keywords: parse_keywords(&spec.keywords),
                 target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
+                // TODO: no TOML scenario field for alternative costs yet -
+                // flashback/escape-style cards aren't constructible via a
+                // scenario fixture this slice, only via direct struct
+                // literals in Rust integration tests (see
+                // phase5_flashback_alternative_costs.rs).
+                alternative_costs: Vec::new(),
             }
         }).collect();
         PlayerConfig { player_id: PlayerId(gp.id), library, life_override: gp.life_override }

@@ -110,6 +110,7 @@ fn bear_definition(script: &str) -> CardDefinition {
         script_ref: ScriptReference::Inline(script.to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -130,6 +131,7 @@ fn vanilla_bear_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("vanilla_bear".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -380,7 +382,7 @@ fn cast_self_buffing_creature_resolves_with_effective_pt_boosted() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None },
+            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
@@ -449,5 +451,6 @@ fn bear_definition_as_land() -> CardDefinition {
         script_ref: ScriptReference::Inline(ANTHEM_YOUR_CREATURES.to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
