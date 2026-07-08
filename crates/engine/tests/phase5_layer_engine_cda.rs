@@ -60,6 +60,7 @@ fn cda_creature_definition(power_script: Option<&str>, toughness_script: Option<
         script_ref: ScriptReference::ByKey("test_cda_creature".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -103,6 +104,7 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_creature".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 

@@ -28,6 +28,7 @@ fn creature_definition(name: &str) -> CardDefinition {
         script_ref: ScriptReference::ByKey("bear".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -48,6 +49,7 @@ fn land_definition(name: &str) -> CardDefinition {
         script_ref: ScriptReference::ByKey("forest".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 

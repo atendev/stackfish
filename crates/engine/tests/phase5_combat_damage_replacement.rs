@@ -28,6 +28,7 @@ fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition
         script_ref: ScriptReference::ByKey(name.to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 

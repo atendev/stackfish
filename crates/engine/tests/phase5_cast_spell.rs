@@ -30,6 +30,7 @@ fn land_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("forest".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -50,6 +51,7 @@ fn instant_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("shock".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -70,6 +72,7 @@ fn sorcery_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("rampant_growth".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -90,6 +93,7 @@ fn creature_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("grizzly_bears".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -239,6 +243,7 @@ fn cast_spell_moves_card_hand_to_stack() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .expect("p0 holds priority, spell is in hand");
@@ -271,6 +276,7 @@ fn cast_spell_keeps_priority_with_caster() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .unwrap();
@@ -306,6 +312,7 @@ fn cast_spell_breaks_pass_chain() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .unwrap();
@@ -330,6 +337,7 @@ fn cast_spell_rejects_land() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .unwrap();
@@ -357,6 +365,7 @@ fn cast_spell_rejects_card_not_in_hand() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .unwrap();
@@ -383,6 +392,7 @@ fn cast_sorcery_rejects_outside_main_phase() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .unwrap();
@@ -412,6 +422,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
         targets: Vec::new(),
         target_requirement: None,
         x_value: None,
+        exile_on_leaving_stack: false,
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),
         effect: None,
@@ -429,6 +440,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .expect("p0 holds priority - instant can be cast despite combat phase + nonempty stack");
@@ -459,6 +471,7 @@ fn cast_instant_resolves_to_owners_graveyard() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .unwrap();
@@ -501,6 +514,7 @@ fn cast_creature_resolves_to_battlefield() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .unwrap();

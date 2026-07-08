@@ -160,6 +160,7 @@ fn all_pass_with_nonempty_stack_resolves_top_instead_of_advancing_step() {
         targets: Vec::new(),
         target_requirement: None,
         x_value: None,
+        exile_on_leaving_stack: false,
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),
         effect: None,

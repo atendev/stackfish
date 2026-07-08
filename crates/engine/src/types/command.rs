@@ -23,7 +23,18 @@ use crate::types::ids::{CommandId, ObjectId, PlayerId, Target};
 /// information choices must always arrive as an explicit `PlayerAction`,
 /// never as an implicit default chosen by the engine.
 pub enum PlayerActionKind {
-    CastSpell { card: ObjectId, modes: Vec<u32>, targets: Vec<Target>, x_value: Option<u32> },
+    CastSpell {
+        card: ObjectId,
+        modes: Vec<u32>,
+        targets: Vec<Target>,
+        x_value: Option<u32>,
+        /// CR 601.2b: index into the cast card's `CardDefinition::alternative_costs`,
+        /// announced as part of casting (same phase as `x_value`) — `None`
+        /// means casting normally for the printed `mana_cost`. `commands.rs`'s
+        /// `CastSpell` arm rejects an out-of-range index, and requires the
+        /// card to actually be in the chosen alternative's `from_zone`.
+        alternative_cost: Option<usize>,
+    },
     ActivateAbility { source: ObjectId, ability_index: u32, targets: Vec<Target> },
     PlayLand { card: ObjectId },
     PassPriority,

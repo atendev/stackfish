@@ -28,6 +28,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
         script_ref: ScriptReference::ByKey("bear".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     };
     let obj = GameObject {
         object_id: id,

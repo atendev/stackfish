@@ -71,8 +71,27 @@ pub enum AdditionalCost {
 
 #[derive(Clone, Debug)]
 pub enum AlternativeCost {
-    /// e.g. flashback, escape — paying this cost replaces the mana cost entirely.
-    Replacement { description: String, cost: CostSpec },
+    /// e.g. flashback, escape — paying this cost replaces the mana cost
+    /// entirely, and is announced as part of casting (CR 601.2b), not
+    /// decided at payment time (same phase as an `{X}` announcement).
+    Replacement {
+        description: String,
+        cost: CostSpec,
+        /// Which zone the card must actually be in for this alternative to
+        /// apply (flashback: `Graveyard`) — CR 601.2b's alternative-cost
+        /// permission and the zone permission it grants ("you may cast this
+        /// from your graveyard") are the same grant, not two separate
+        /// checks. Named generically, not "flashback-specific", so
+        /// escape/jump-start/aftermath/mayhem can reuse this same shape
+        /// later (all of them are "cast from graveyard/exile, replace the
+        /// normal cost").
+        from_zone: ZoneKind,
+        /// CR 702.34a: a spell cast this way is exiled instead of going to
+        /// its normal destination (graveyard on resolving or fizzling) when
+        /// it next leaves the stack. Baked onto `StackObject` at push time
+        /// once this alternative is chosen (see `StackObject::exile_on_leaving_stack`).
+        exile_on_leaving_stack: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -589,6 +608,7 @@ mod tests {
                 script_ref: ScriptReference::ByKey("test".to_string()),
                 keywords: KeywordSet::empty(),
                 target_requirement: None,
+                alternative_costs: Vec::new(),
             },
             owner: controller,
             controller,

@@ -239,6 +239,14 @@ pub struct CardDefinition {
     /// does). See `TargetRequirement`/`TargetSpec` (target.rs) for what's
     /// and isn't representable here.
     pub target_requirement: Option<crate::types::target::TargetSpec>,
+    /// CR 601.2b's alternative costs this card grants (flashback, escape,
+    /// etc — see `AlternativeCost`'s own doc comment for which of those are
+    /// actually representable yet). Empty for the overwhelming majority of
+    /// cards, which only ever pay their printed `mana_cost`. Indexed by
+    /// `PlayerActionKind::CastSpell::alternative_cost` — the caster
+    /// announces which one (if any) they're invoking, same "announced at
+    /// cast time" pattern as `x_value`.
+    pub alternative_costs: Vec<crate::types::cost::AlternativeCost>,
 }
 
 impl CardDefinition {

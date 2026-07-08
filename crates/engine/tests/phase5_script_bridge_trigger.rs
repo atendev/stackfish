@@ -55,6 +55,7 @@ fn bear_definition() -> CardDefinition {
         script_ref: ScriptReference::Inline(String::new()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -334,7 +335,7 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None },
+            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
@@ -413,6 +414,7 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .expect("p0 holds priority");

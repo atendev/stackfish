@@ -29,6 +29,7 @@ fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
         script_ref: ScriptReference::ByKey("test".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 

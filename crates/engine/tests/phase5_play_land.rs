@@ -28,6 +28,7 @@ fn land_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("forest".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -48,6 +49,7 @@ fn instant_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("shock".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -285,6 +287,7 @@ fn play_land_rejects_nonempty_stack() {
         targets: Vec::new(),
         target_requirement: None,
         x_value: None,
+        exile_on_leaving_stack: false,
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),
         effect: None,

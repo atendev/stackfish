@@ -31,6 +31,7 @@ fn creature_definition(toughness: i32) -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_creature".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -164,6 +165,7 @@ fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
             script_ref: ScriptReference::ByKey("test_shield".to_string()),
             keywords: KeywordSet::empty(),
             target_requirement: None,
+            alternative_costs: Vec::new(),
         },
         owner: controller,
         controller,

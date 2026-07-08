@@ -53,6 +53,7 @@ fn bear_definition() -> CardDefinition {
         script_ref: ScriptReference::Inline(String::new()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -375,7 +376,7 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None },
+            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
@@ -453,6 +454,7 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .expect("p0 holds priority");
@@ -476,6 +478,7 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
+                alternative_cost: None,
             },
         })
         .expect("p0 holds priority");

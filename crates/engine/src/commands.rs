@@ -7,7 +7,7 @@ use crate::types::ability::RegisteredAbility;
 use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
-use crate::types::cost::{self, AdditionalCost, CostPayment, CostSpec, FilterController};
+use crate::types::cost::{self, AdditionalCost, AlternativeCost, CostPayment, CostSpec, FilterController};
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -687,18 +687,49 @@ pub fn execute_command(
                 battlefield_entries: vec![new_id],
             });
         }
-        PlayerActionKind::CastSpell { card, modes, targets, x_value } => {
+        PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost } => {
             let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
             if object.definition.card_types.contains(CardTypeSet::LAND) {
                 return Err(CommandError::IllegalAction(
                     "lands aren't cast as spells - use PlayLand".to_string(),
                 ));
             }
-            if object.zone != ZoneKind::Hand || object.controller != command.actor {
+            // CR 601.2b: an announced alternative cost (flashback, etc)
+            // replaces the mana cost entirely and, for the ones this slice
+            // supports, is what grants permission to cast from a zone other
+            // than the hand in the first place - so the zone permission and
+            // the alternative-cost choice are resolved together, not as two
+            // independent checks.
+            let alternative: Option<&AlternativeCost> = match alternative_cost {
+                Some(idx) => Some(
+                    object
+                        .definition
+                        .alternative_costs
+                        .get(idx)
+                        .ok_or(CommandError::IllegalAction(
+                            "no such alternative cost on this card".to_string(),
+                        ))?,
+                ),
+                None => None,
+            };
+            // TODO: doesn't require casting from the graveyard specifically
+            // for flashback's own zone permission to have been granted at
+            // all (e.g. nothing here checks the card actually has a
+            // Flashback keyword vs. an ad-hoc alternative_costs entry) -
+            // simplest correct rule for now: the chosen alternative's
+            // from_zone must match where the card actually is, full stop.
+            // Without an alternative_cost declared, the card must be in
+            // hand, same as before this slice.
+            let required_zone = match alternative {
+                Some(AlternativeCost::Replacement { from_zone, .. }) => *from_zone,
+                None => ZoneKind::Hand,
+            };
+            if object.zone != required_zone || object.controller != command.actor {
                 return Err(CommandError::IllegalAction(
-                    "card is not in actor's hand".to_string(),
+                    "card is not in the zone required to cast it this way".to_string(),
                 ));
             }
+            let from_zone = object.zone;
             // CR 117.1a/602/702.8b: instants, and anything with flash, may
             // be cast any time the actor holds priority; everything else
             // needs the full sorcery-speed window (is_sorcery_speed already
@@ -745,8 +776,10 @@ pub fn execute_command(
                 command.actor,
             )?;
 
-            // CR 601.2f: total cost = the card's printed mana_cost only -
-            // no additional/alternative costs, no reductions yet (see
+            // CR 601.2f: total cost = the card's printed mana_cost, unless
+            // an alternative cost was announced (CR 601.2b), in which case
+            // it replaces the mana cost entirely - never mixed with it.
+            // No additional-cost support yet either way (see
             // CostSpec::mana_only's own doc, and PaymentPlan::validate's
             // "out of scope" list).
             //
@@ -758,23 +791,34 @@ pub fn execute_command(
             // cost.rs). TODO: X on an activated ability's own cost isn't
             // supported at all yet - ActivateAbility has no x_value field
             // to announce one with, a real struct gap, not just this check
-            // missing.
-            let has_x = object.definition.mana_cost.has_x();
-            let resolved_mana_cost = match (has_x, x_value) {
-                (true, Some(x)) => object.definition.mana_cost.resolve_x(x),
-                (false, None) => object.definition.mana_cost.clone(),
-                (true, None) => {
-                    return Err(CommandError::IllegalAction(
-                        "this spell's cost includes {X} - a value must be announced".to_string(),
-                    ));
+            // missing. TODO: X combined with an alternative cost (e.g.
+            // flashback on an X spell) isn't handled - x_value is simply
+            // unchecked in that branch below.
+            let (cost, exile_on_leaving_stack) = match alternative {
+                Some(AlternativeCost::Replacement { cost, exile_on_leaving_stack, .. }) => {
+                    (cost.clone(), *exile_on_leaving_stack)
                 }
-                (false, Some(_)) => {
-                    return Err(CommandError::IllegalAction(
-                        "an X value was announced but this spell's cost has no {X}".to_string(),
-                    ));
+                None => {
+                    let has_x = object.definition.mana_cost.has_x();
+                    let resolved_mana_cost = match (has_x, x_value) {
+                        (true, Some(x)) => object.definition.mana_cost.resolve_x(x),
+                        (false, None) => object.definition.mana_cost.clone(),
+                        (true, None) => {
+                            return Err(CommandError::IllegalAction(
+                                "this spell's cost includes {X} - a value must be announced"
+                                    .to_string(),
+                            ));
+                        }
+                        (false, Some(_)) => {
+                            return Err(CommandError::IllegalAction(
+                                "an X value was announced but this spell's cost has no {X}"
+                                    .to_string(),
+                            ));
+                        }
+                    };
+                    (CostSpec::mana_only(resolved_mana_cost), false)
                 }
             };
-            let cost = CostSpec::mana_only(resolved_mana_cost);
 
             // Snapshot before the move - CR 603.10's last_known_info (see
             // GameEventKind::ZoneChange's doc comment).
@@ -791,8 +835,8 @@ pub fn execute_command(
             new_object.timestamp = state.allocate_sequence_no();
 
             state
-                .zone_mut(ZoneKind::Hand, Some(command.actor))
-                .ok_or_else(|| CommandError::IllegalAction("actor has no hand zone".to_string()))?
+                .zone_mut(from_zone, Some(command.actor))
+                .ok_or_else(|| CommandError::IllegalAction("actor has no such zone".to_string()))?
                 .remove(card);
             state.objects.remove(&card);
             state.objects.insert(new_id, new_object);
@@ -814,6 +858,7 @@ pub fn execute_command(
                 targets,
                 target_requirement,
                 x_value,
+                exile_on_leaving_stack,
                 ScriptHandle(0),
                 None,
             ));
@@ -822,7 +867,7 @@ pub fn execute_command(
                 events: vec![
                     GameEventKind::ZoneChange {
                         object: new_id,
-                        from: ZoneKind::Hand,
+                        from: from_zone,
                         to: ZoneKind::Stack,
                         last_known_info: Some(last_known_info),
                     },
@@ -1004,6 +1049,7 @@ pub fn execute_command(
                         targets,
                         target_requirement,
                         None,
+                        false,
                         operation,
                         non_mana_effect,
                     ));

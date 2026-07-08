@@ -28,6 +28,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
         script_ref: ScriptReference::ByKey("bear".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -48,6 +49,7 @@ fn artifact_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("artifact".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -73,6 +75,7 @@ fn bolt_definition() -> CardDefinition {
             filter: TargetFilter::AnyTarget,
             count: 1,
         })),
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -102,6 +105,7 @@ fn pump_definition() -> CardDefinition {
             },
             count: 1,
         })),
+        alternative_costs: Vec::new(),
     }
 }
 
@@ -219,7 +223,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None },
         })
         .expect("player holds priority, spell is in hand");
 }
