@@ -2064,8 +2064,12 @@ shift, don't treat it as fixed once written.
    stack (CR 601.2c-e/602.2b), and `ResolveStackTop` fizzles on CR 608.2b (all targets illegal at
    resolution). Narrower than the full rules text — see that slice's own UNRESOLVED list (no
    "up to N" counts, no multi-"target"-word spells, no partial fizzle, `TargetSpec::Script` dead).
-3. **Static ability self-registration** (`Game.CreateStaticAbility`) — pairs with #1, needed for
-   any printed static ability text to actually attach a `ContinuousEffect`.
+3. ~~**Static ability self-registration**~~ — done, `phase5/static-ability-self-registration`
+   slice (docs/implementation.md, below). `Game.CreateStaticAbility` mirrors
+   `Game.CreateTriggeredAbility`'s builder/queued-registration exactly, producing a real
+   `ContinuousEffect` instead of a `RegisteredAbility`. Narrower than the full rules text — see
+   that slice's own UNRESOLVED list (5 real layers only, no `Script`-backed predicate/effect,
+   always `Permanent` duration, no conditional "as long as" gating).
 4. **General activated abilities** — extend past the mana-tap-cost/single-tap-non-mana shape that
    just landed: sacrifice/discard/other costs, multi-ability-per-card stable indexing (currently
    positional by registration order, flagged fragile since the mana-ability slice), `Game.
@@ -2563,6 +2567,109 @@ anticipated by the "baked at push time" plan, same pattern `effect` already esta
   populates `targets` for a `TriggeredAbility` `StackObject` today.
 - CR 601.2d (division/distribution among targets), splice (601.2b/702.47) — pre-existing gaps,
   untouched.
+
+## Phase 5: phase5/static-ability-self-registration slice
+
+Branch `phase5/static-ability-self-registration`, off master. Slice backlog item 3. Scope: real
+card-script self-registration for static abilities (CR 604/611) — a card's own Lua
+`initial_effect(c)` calling `Game.CreateStaticAbility(c)` to attach a real `ContinuousEffect` to
+`GameState.continuous_effects`, exact mirror of the already-real
+`Game.CreateTriggeredAbility`/`TriggeredAbilityBuilder` mechanism (same queued-registration fix
+for the "Lua callback can't hold `&mut GameState`" gap). Building a `ContinuousEffect` by hand
+(Rust struct literal / TOML `[cards.continuous_effect]`) remains fully supported, unaffected.
+
+**Two design decisions locked in before writing code** (both confirmed in the pre-slice
+requirements report):
+- **Timestamp allocated at drain time, not builder time.** The builder has no `&mut GameState` to
+  call `allocate_sequence_no()` from inside a Lua callback — `run_card_script`'s existing drain
+  step (already runs for `pending_triggered`) stamps each queued `ContinuousEffect.timestamp` right
+  before appending it to `state.continuous_effects`.
+- **`retire_object` also purges `state.continuous_effects`.** A static effect's source leaving the
+  battlefield already made it inert (`layers::applicable_effects_in_layer` skips a source that
+  doesn't resolve) but never removed the dead entry — same pileup gap `retire_object` was built to
+  close for `state.abilities`, extended here (one more `.retain()` line, same 3 existing call
+  sites: discard, `draw_step`, SBA death).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 8 new tests in
+`crates/engine/tests/phase5_static_ability_self_registration.rs`, plus the existing
+`retire_object_purges_only_the_retired_source` unit test extended (not just left alone) to also
+cover the `continuous_effects` purge, all 211 prior tests unaffected. 219 tests total, 0 failed.
+Confirmed via the real CLI too: `cargo run -p stackfish-cli --
+crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml` — 15/15 actions ran,
+5/5 assertions passed (an anthem land's self-registered "creatures you control get +1/+1" static
+ability made a vanilla 2/2 bear deal 3 combat damage instead of 2 — the layer-engine consumer
+wired two slices ago picks up a script-registered effect automatically, no new consumer code
+needed).
+
+**What got implemented:**
+- `script.rs`: `LayerTag`/`EffectPrimitiveTag` (new `mlua::UserData` tag wrappers, same pattern
+  `ConditionTag`/`OperationTag`/`CostTag` already use), `decode_layer_value`/`decode_effect_value`
+  (only a `Game.Layers.*`/`Game.Effects.*` tag accepted — no custom-function fallback, since
+  neither `Layer` nor `EffectPrimitive` has a `Script` escape hatch of their own the way
+  condition/operation do), `decode_affected_table` (a plain Lua table
+  `{controller=.., card_types={..}, self_only=..}`, every key optional — matches how
+  `EffectFilter`/the scenario TOML's `ContinuousEffectSpec` already read as a flat option bag,
+  less new surface than a `Game.Filters.*` tag-factory family), and
+  `validate_layer_effect_pairing` (rejects e.g. `SetLayer(TypeChanging)` +
+  `SetEffect(ModifyPT(..))` at `:Register()` time with a real error, rather than silently building
+  a `ContinuousEffect` `layers::effective_characteristics` could never actually apply). Small
+  local `parse_card_type_name`/`parse_keyword_name`/`parse_color_letter`/
+  `parse_filter_controller_name` helpers — duplicated from the scenario crate's equivalents rather
+  than shared (separate crate, no common string-parsing utility today).
+  `StaticAbilityBuilder` (new `mlua::UserData`, mirrors `TriggeredAbilityBuilder` exactly) with
+  `:SetLayer`/`:SetEffect`/`:SetAffected`/`:Register()`. `ScriptRegistry` gained
+  `pending_static: Vec<ContinuousEffect>` alongside `pending_triggered`. `bind_game_globals` gained
+  `Game.Layers` (only the 5 layers with a real query path — `TypeChanging`/`ColorChanging`/
+  `AbilityAdding`/`PowerToughnessSetting`/`PowerToughnessModifying`, matching `Layer`'s own doc
+  comment for what's built), `Game.Effects` (`SetPT`/`ModifyPT`/`AddKeyword`/`AddCardType`/
+  `AddColor`, one factory function per `EffectPrimitive` shape, same convention `Game.Ops.GainLife`
+  already established), and `Game.CreateStaticAbility`. `run_card_script` now drains
+  `pending_static` into `state.continuous_effects` (stamping real timestamps) right after draining
+  `pending_triggered` into `state.abilities` — same call, no new call sites.
+- `commands.rs`: `retire_object` extended per the design decision above; its own doc comment
+  updated to describe both purges. `retire_object_purges_only_the_retired_source` (unit test)
+  extended with a `dummy_continuous_effect` helper and matching assertions.
+- `docs/lua_scripts.md`: new "Self-registering a static ability" section (worked anthem example,
+  `Game.Layers`/`Game.Effects` reference, the layer/effect-pairing validation, the
+  timestamp-at-drain-time note) mirroring the triggered-ability section's structure. "Not available
+  yet" section updated — `Game.CreateActivatedAbility` is now the only missing builder;
+  `Game.AddContinuousEffect` reclassified as "superseded by `Game.CreateStaticAbility`," not merely
+  unbound; `AffectedFilter::Script`/`EffectPayload::Script` called out by name as backlog item 3a.
+- `docs/scenario_format.md`: `script`'s doc paragraph points at the new static-ability section/
+  fixture; `continuous_effect`'s doc paragraph no longer calls itself a stand-in for a "future
+  slice" that's now done — reframed as a plain-Rust-struct convenience path alongside the real
+  script one.
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice requirements report scoped exactly
+(`ScriptRegistry.pending_static`, `StaticAbilityBuilder`, the two tag wrappers) — this *is* the
+plan, not a deviation from it.
+
+**INTERFACE DEVIATIONS:** None — `run_card_script`'s signature is unchanged; it just does more
+inside the same call.
+
+**SCOPE DEVIATIONS:**
+- `retire_object`'s extension to `state.continuous_effects` was explicitly flagged and confirmed
+  in the pre-slice report before writing code, not discovered after the fact — same "surfaced and
+  confirmed with the human before implementing" pattern the original `retire_object` design used
+  for its own 3 call sites.
+- `docs/scenario_format.md`'s `continuous_effect` paragraph rewrite — anticipated (it explicitly
+  referenced "static-ability self-registration" as a future slice; that reference had to be
+  updated regardless of anything else touched this slice).
+
+**UNRESOLVED (anticipated, none new):**
+- `Game.Layers` only exposes the 5 real layers — layers 1/2/3/7d/7e can't be requested by a static
+  ability at all, matching `Layer`'s own doc comment.
+- `AffectedFilter::Script`/`EffectPayload::Script` (backlog item 3a) — still dead code; a
+  script-backed target/affects predicate needs its own "Lua asks, Rust decides" convention, not
+  designed yet. `Game.Layers`/`Game.Effects`/`SetAffected`'s table shape don't touch this at all —
+  they only ever build the `Primitive` case.
+- Always `EffectDuration::Permanent` — no "until end of turn" static-generated effect (CR 611.3a-d's
+  timing nuances around "may play/cast" effects untouched).
+- No conditional static abilities (CR 606's "as long as you control a Forest"-style gating) —
+  always active whenever the source is on the battlefield, no extra condition gate.
+- `Game.CreateActivatedAbility` — the one remaining builder sibling; activated (non-mana)
+  abilities are still wired only through the pre-existing `AbilityCost::Tap`/`cost: Some(Tap)` path
+  (backlog item 4).
 
 ## Mistakes caught (don't repeat)
 

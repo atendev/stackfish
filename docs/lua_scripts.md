@@ -223,25 +223,85 @@ it falls out of the mechanism for free (each `:Register()` independently queues 
 `RegisteredAbility`).
 
 `kind` is implied by which constructor you called (`Game.CreateTriggeredAbility` here) rather
-than a settable field — `Game.CreateActivatedAbility`/`Game.CreateStaticAbility` are the natural
-future siblings for the other two `AbilityKind`s, not built yet (see "Not available yet").
-`:SetCost`/`:SetTarget` aren't bound on the builder either — `invoke_cost`/`invoke_target` are
-still `todo!()` regardless, so nothing would consume them yet.
+than a settable field — `Game.CreateActivatedAbility` is the natural remaining future sibling
+(`Game.CreateStaticAbility` now exists for real, see the next section). `:SetCost`/`:SetTarget`
+aren't bound on the builder either — `invoke_cost`/`invoke_target` are still `todo!()`
+regardless, so nothing would consume them yet.
 
 **Registration timing (CR 400.7):** a card's script re-runs — unconditionally, every time,
 no "first time only" check — at exactly the two points a *new* battlefield object id is minted:
 `PlayLand`'s hand→battlefield move, and `ResolveStackTop`'s permanent-entry branch
 (stack→battlefield, after casting). This matches CR 400.7's "an object that moves from one zone
 to another becomes a new object with no memory of its previous existence" literally — the
-previous id's `RegisteredAbility` (if any) is purged once that id is retired (`commands::
-retire_object`, called at every zone-change site that doesn't otherwise carry the ability forward
-via `remap_abilities` — e.g. SBA-driven death), so a card that returns to the battlefield later
-gets a genuinely fresh registration, not a stale leftover. Abilities keyed off a *pre-battlefield*
-zone (a cast trigger, a graveyard-based ability like flashback) aren't in scope — self-
-registration only runs at the two "entering the battlefield" points above.
+previous id's `RegisteredAbility`/`ContinuousEffect` (if any) is purged once that id is retired
+(`commands::retire_object`, called at every zone-change site that doesn't otherwise carry the
+ability/effect forward via `remap_abilities` — e.g. SBA-driven death), so a card that returns to
+the battlefield later gets a genuinely fresh registration, not a stale leftover. Abilities keyed
+off a *pre-battlefield* zone (a cast trigger, a graveyard-based ability like flashback) aren't in
+scope — self-registration only runs at the two "entering the battlefield" points above.
 
 Scenario TOML fixtures can use this directly via `CardSpec.script` — see `docs/scenario_format.md`
 and `crates/engine/tests/scenarios/phase5_script_self_registration.toml`.
+
+## Self-registering a static ability
+
+`Game.CreateStaticAbility(c)` is the CR 604/611 sibling of `Game.CreateTriggeredAbility` — same
+queued-registration mechanism (`StaticAbilityBuilder` next to `TriggeredAbilityBuilder` in
+`script.rs`), producing a real `ContinuousEffect` pushed onto `GameState.continuous_effects`
+instead of a `RegisteredAbility`:
+
+```lua
+-- Anthem: creatures you control get +1/+1.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.PowerToughnessModifying)
+    e:SetEffect(Game.Effects.ModifyPT(1, 1))
+    e:SetAffected({ controller = "you", card_types = { "Creature" } })
+    e:Register()
+end
+
+return s
+```
+
+`Game.Layers` only exposes the 5 layers with a real query path in `layers.rs` —
+`TypeChanging`/`ColorChanging`/`AbilityAdding`/`PowerToughnessSetting`/`PowerToughnessModifying`.
+Layers 1/2/3/7d/7e aren't offered at all (see `Layer`'s own doc comment in `types/effect.rs` for
+why each is unbuilt).
+
+`Game.Effects` mirrors `Game.Ops`'s one-factory-per-shape convention: `SetPT(power, toughness)`,
+`ModifyPT(power, toughness)`, `AddKeyword(name)`, `AddCardType(name)`, `AddColor(letter)` — each
+call returns a tagged value for `:SetEffect`. `:Register()` rejects a layer/effect pairing that
+doesn't match (e.g. `SetLayer(TypeChanging)` with `SetEffect(ModifyPT(...))`) with a real error,
+rather than silently building a `ContinuousEffect` the layer engine could never actually apply.
+
+`:SetAffected` takes a plain table, not its own family of tag factories — every key optional,
+same shape `EffectFilter` (`types/effect.rs`) already has:
+
+```lua
+e:SetAffected({
+    controller = "you",           -- "you" | "opponent" | "any", optional (default: no filter)
+    card_types = { "Creature" },  -- optional (default: no filter)
+    self_only = true,             -- optional, default false - "just this effect's own source"
+})
+```
+
+Omitting `:SetAffected()` entirely means no filter at all — the effect applies to every object
+(a real, if unusual, shape). Calling `:Register()` with no `:SetLayer()`/no `:SetEffect()` is a
+real error, same stance `TriggeredAbilityBuilder`'s `Register()` takes for a missing
+`:SetOperation()`. A card can call `Game.CreateStaticAbility(c)` more than once per
+`initial_effect` — each `:Register()` independently queues, same as multiple triggered abilities.
+
+`timestamp` (CR 613.7 ordering) is stamped by `run_card_script`'s drain step, not the builder
+itself — the builder has no `&mut GameState` to allocate one from inside a Lua callback.
+
+Same registration timing and `retire_object` purge as triggered abilities above — no new call
+sites needed; `run_card_script` drains both `pending_triggered` and `pending_static` in one pass.
+
+Real, tested end to end: `crates/engine/tests/phase5_static_ability_self_registration.rs`.
+Scenario TOML fixtures can use this via `CardSpec.script` too — see
+`crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 
 ## Hidden information
 
@@ -259,13 +319,20 @@ forever, and don't add a Lua-visible full-state argument without re-reading
 
 Don't spend time trying these — they're signatures only, or explicitly unbound:
 
-- **`Game.AddContinuousEffect`, `Game.ReplaceEvent`, `Game.CastSpell`, `Game.PayCost`,
-  `Game.SelectTargets`** (`script_api.rs`) — none of these are bound into the Lua VM's globals. A
-  card script cannot call any of them. `Game.Conditions.*`/`Game.Ops.*`/`Game.CreateTriggeredAbility`
-  are the only things that exist on `Game` right now.
-- **`Game.CreateActivatedAbility`/`Game.CreateStaticAbility`** — only triggered abilities can
-  self-register so far. A mana ability is still wired via `mana_ability`
-  (`docs/scenario_format.md`), not Lua at all.
+- **`Game.ReplaceEvent`, `Game.CastSpell`, `Game.PayCost`, `Game.SelectTargets`** (`script_api.rs`)
+  — none of these are bound into the Lua VM's globals. A card script cannot call any of them.
+  `Game.Conditions.*`/`Game.Ops.*`/`Game.Costs.*`/`Game.Layers.*`/`Game.Effects.*`/
+  `Game.CreateTriggeredAbility`/`Game.CreateStaticAbility` are what exist on `Game` right now.
+  `Game.AddContinuousEffect` specifically is superseded by `Game.CreateStaticAbility`'s builder
+  (same relationship the old `register_triggered_ability` free function has to
+  `Game.CreateTriggeredAbility`) — it was never bound and isn't expected to be.
+- **`Game.CreateActivatedAbility`** — only triggered and static abilities can self-register so
+  far. A mana ability is still wired via `mana_ability` (`docs/scenario_format.md`), not Lua at
+  all.
+- **`AffectedFilter::Script`/`EffectPayload::Script`** (script-backed static-ability predicates/
+  effect shapes, as opposed to the `Game.Layers.*`/`Game.Effects.*`/`SetAffected` table primitives
+  above) — still dead code, not evaluable. `docs/implementation.md`'s slice backlog tracks this as
+  its own item (3a).
 - **`ByKey` script resolution** — `run_card_script` only handles `ScriptReference::Inline`;
   `ByKey` is a real error. Real integration is expected to always hand this engine an
   already-resolved `Inline` source (the database crate resolves the key upstream), so this may

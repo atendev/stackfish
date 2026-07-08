@@ -250,16 +250,19 @@ return s
 """
 ```
 
-Still narrow — no targeting, no continuous effects, no `Game.CreateActivatedAbility`/
-`Game.CreateStaticAbility` (only triggered abilities can self-register so far). Nothing stops a
-card from setting both `script` and `trigger_condition`/`trigger_operation` at once, but that's
-not a supported combination — pick one per card.
+`Game.CreateStaticAbility(c)` self-registers a real `ContinuousEffect` the same way (CR 604/611)
+— see `docs/lua_scripts.md`'s "Self-registering a static ability" section and
+`crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml` for a worked example
+(an anthem land whose own script buffs "creatures you control" the moment it's played). Still
+narrow beyond that — no targeting on either builder, no `Game.CreateActivatedAbility`. Nothing
+stops a card from setting both `script` and `trigger_condition`/`trigger_operation` at once, but
+that's not a supported combination — pick one per card.
 
 **`continuous_effect` (CR 613, layer engine):** if set, every instance of this card gets one static
-`ContinuousEffect` set up automatically, built directly as a Rust struct — there's no
-`Game.AddContinuousEffect` Lua binding yet (that's its own future slice, static-ability
-self-registration; see `docs/implementation.md`'s slice backlog). Only one continuous effect per
-card this way, same single-per-card simplification `mana_ability`/`trigger_operation` use.
+`ContinuousEffect` set up automatically, built directly as a Rust struct — a convenience field for
+fixtures that don't need real script self-registration (`Game.CreateStaticAbility`, see `script`
+above, now real). Only one continuous effect per card this way, same single-per-card
+simplification `mana_ability`/`trigger_operation` use.
 
 ```toml
 [cards.continuous_effect]

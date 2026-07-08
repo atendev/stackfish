@@ -1,0 +1,133 @@
+# Static-ability self-registration slice (CR 604/611): a card's own script
+# calls Game.CreateStaticAbility(c) instead of the harness building a
+# ContinuousEffect by hand. The anthem land's own script self-registers a
+# "creatures you control get +1/+1" static ability the moment it enters the
+# battlefield via PlayLand - no stack involved (static effects don't use it,
+# unlike triggered abilities). Proven via real combat damage: the vanilla
+# bear's effective power (layer 7c) reflects the boost, dealing 3 damage
+# instead of its printed 2 (same real-consumer proof
+# phase5_layer_engine_consumers.toml uses for a hand-built ContinuousEffect).
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "anthem_land"
+name = "Test Anthem Land"
+types = ["Land"]
+script = """
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.PowerToughnessModifying)
+    e:SetEffect(Game.Effects.ModifyPT(1, 1))
+    e:SetAffected({ controller = "you", card_types = { "Creature" } })
+    e:Register()
+end
+return s
+"""
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "anthem_land"
+
+# Two players, so every step transition needs both to pass in a row
+# (CR 117.4) - reaches precombat Main.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_phase"
+equals = "main"
+[[steps]]
+type = "assert_step"
+equals = "pre_combat_main"
+
+[[steps]]
+type = "play_land"
+player = 0
+card = "anthem_land"
+# The anthem's static ability self-registers immediately here - no stack
+# involved, unlike a triggered ability.
+
+[[steps]]
+type = "assert_ledger_len"
+equals = 12
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bear", target = 1 },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = []
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 17
