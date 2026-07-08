@@ -1,6 +1,7 @@
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, ScriptHandle};
 use crate::types::mana::ManaUnit;
+use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 /// Per ygopro's effect lifecycle (`docs/ygo_pro_reference.md`), generalized
@@ -117,7 +118,13 @@ pub struct RegisteredAbility {
     /// yet (`ScriptRuntime::invoke_cost` is still `todo!()`). `Some(Tap)` is
     /// the one shape `ActivateAbility` resolves this slice.
     pub cost: Option<AbilityCost>,
-    pub target: Option<ScriptHandle>,
+    /// `None` means "no targets required" — same "cast as though it did
+    /// not require those targets" stance `CardDefinition::target_requirement`
+    /// takes. `Some(TargetSpec::Primitive(_))` is what `ActivateAbility`
+    /// validates non-mana-ability targets against this slice;
+    /// `Some(TargetSpec::Script(_))` stays dead code (see `TargetSpec`'s own
+    /// doc comment).
+    pub target: Option<TargetSpec>,
     pub operation: ScriptHandle,
     /// See `AbilityEffect`'s doc comment — `Some` for an effect shape this
     /// engine can resolve without a script call at all (CR 605 mana

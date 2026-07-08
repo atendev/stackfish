@@ -57,6 +57,14 @@ pub enum GameEventKind {
     PriorityPassed { player: PlayerId },
     StackObjectPushed { stack_id: ObjectId },
     StackObjectResolved { stack_id: ObjectId },
+    /// CR 608.2b: every target of `stack_id`, for its one instance of the
+    /// word "target," was illegal by the time it would resolve - it doesn't
+    /// resolve at all. Emitted instead of (not alongside) `StackObjectResolved`
+    /// - 608.2b is explicit the spell/ability "doesn't resolve." A fizzled
+    /// spell still leaves the stack (see the accompanying `ZoneChange` to its
+    /// owner's graveyard, pushed just before this); a fizzled ability just
+    /// stops existing, no `ZoneChange` for it.
+    Fizzled { stack_id: ObjectId },
     TriggerQueued { source: ObjectId, controller: PlayerId },
     ReplacementApplied { source: ObjectId, original_event: EventId },
     StateBasedActionApplied { description: String },

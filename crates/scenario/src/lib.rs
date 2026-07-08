@@ -225,6 +225,11 @@ pub struct CardSpec {
     /// `mana_ability`/`trigger_operation` already use.
     #[serde(default)]
     pub continuous_effect: Option<ContinuousEffectSpec>,
+    /// CR 601.2c: if set, casting this card as a spell requires exactly
+    /// `count` targets matching `filter` — see `TargetRequirementSpec`'s own
+    /// doc comment. `None` means no targets required (the common case).
+    #[serde(default)]
+    pub target_requirement: Option<TargetRequirementSpec>,
 }
 
 /// `CardSpec.continuous_effect`'s shape — `layer` picks which of the layer
@@ -260,6 +265,24 @@ pub struct ContinuousEffectSpec {
     pub filter_card_types: Vec<String>,
     #[serde(default)]
     pub filter_self_only: bool,
+}
+
+/// `CardSpec.target_requirement`'s shape — `filter` picks which
+/// `TargetFilter` variant this is: `"object"` (uses `card_types`/
+/// `controller`/`zone`, CR 115.2's battlefield default applies when `zone`
+/// is unset), `"player"` (any player), or `"any"` (CR 115.4's "any target" —
+/// creature/player/planeswalker/battle). `count` is always exact — see
+/// `TargetRequirement`'s own "up to N" TODO for why.
+#[derive(Deserialize)]
+pub struct TargetRequirementSpec {
+    pub filter: String,
+    #[serde(default)]
+    pub card_types: Vec<String>,
+    #[serde(default)]
+    pub controller: Option<String>,
+    #[serde(default)]
+    pub zone: Option<String>,
+    pub count: u32,
 }
 
 /// One card instance's triggered ability, collected by `build_initial_state`
@@ -812,6 +835,30 @@ fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> Con
     }
 }
 
+/// `CardSpec.target_requirement` -> a real `TargetSpec::Primitive`.
+/// Fully-qualified as `stackfish_engine::TargetSpec` - this crate already
+/// has its own unrelated `TargetSpec` (the TOML-facing `Player(u32)`/
+/// `Card(String)` reference used by `AttackerSpec`/`MakeChoice` actions,
+/// resolved separately via `resolve_target`), and that local definition
+/// shadows the glob-imported engine one by Rust's name-resolution rules.
+/// See `TargetRequirementSpec`'s own doc comment for what each field means.
+fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::TargetSpec {
+    let filter = match spec.filter.as_str() {
+        "object" => TargetFilter::Object {
+            card_types: (!spec.card_types.is_empty()).then(|| parse_card_types(&spec.card_types)),
+            controller: spec.controller.as_deref().map(parse_filter_controller),
+            zone: spec.zone.as_deref().map(parse_zone_kind),
+        },
+        "player" => TargetFilter::Player,
+        "any" => TargetFilter::AnyTarget,
+        other => panic!(
+            "unknown target_requirement filter in scenario file: {other} - expected \
+             object/player/any"
+        ),
+    };
+    stackfish_engine::TargetSpec::Primitive(TargetRequirement { filter, count: spec.count })
+}
+
 /// `assert_object_counters`/`assert_player_counters`'s `kind` field, by CR
 /// 122.3 name, into `CounterKind`.
 fn parse_counter_kind(name: &str) -> CounterKind {
@@ -952,6 +999,7 @@ pub fn build_initial_state(
             defense: None,
             script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
             keywords: parse_keywords(&spec.keywords),
+            target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
         };
 
         let owner = PlayerId(entry.player);
@@ -1394,6 +1442,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 defense: None,
                 script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
                 keywords: parse_keywords(&spec.keywords),
+                target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
             }
         }).collect();
         PlayerConfig { player_id: PlayerId(gp.id), library, life_override: gp.life_override }

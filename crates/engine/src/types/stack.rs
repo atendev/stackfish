@@ -2,6 +2,7 @@ use crate::types::ability::AbilityEffect;
 use crate::types::cost::CostPayment;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::object::GameObject;
+use crate::types::target::TargetSpec;
 
 pub enum StackEntryKind {
     Spell,
@@ -21,6 +22,17 @@ pub struct StackObject {
     pub controller: PlayerId,
     pub chosen_modes: Vec<u32>,
     pub targets: Vec<Target>,
+    /// Baked in at push time from whatever produced this `StackObject`
+    /// (`CardDefinition::target_requirement` for a spell,
+    /// `RegisteredAbility::target` for an ability) — same "primitive
+    /// stand-in, decided once at push, not re-derived" contract `effect`
+    /// already established. `ResolveStackTop` rechecks `targets` against
+    /// this at resolution time (CR 608.2b); it does *not* need the original
+    /// `count`, only the `filter`, since CR 601.2c fixes the count at cast
+    /// time and it can't change afterward — but the full `TargetSpec` is
+    /// carried anyway (not just `TargetFilter`) so the `Script` case has
+    /// somewhere to eventually live once that's evaluable.
+    pub target_requirement: Option<TargetSpec>,
     pub x_value: Option<u32>,
     pub costs_paid: Vec<CostPayment>,
     /// Which script callback to invoke on resolution. Present in the
@@ -50,6 +62,7 @@ impl StackObject {
         controller: PlayerId,
         chosen_modes: Vec<u32>,
         targets: Vec<Target>,
+        target_requirement: Option<TargetSpec>,
         x_value: Option<u32>,
         operation: ScriptHandle,
         effect: Option<AbilityEffect>,
@@ -65,6 +78,7 @@ impl StackObject {
             controller,
             chosen_modes,
             targets,
+            target_requirement,
             x_value,
             costs_paid: Vec::new(),
             operation,

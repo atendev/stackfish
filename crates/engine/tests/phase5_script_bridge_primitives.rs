@@ -52,6 +52,7 @@ fn bear_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::Inline(String::new()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 

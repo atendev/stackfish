@@ -29,6 +29,7 @@ fn land_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("forest".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -48,6 +49,7 @@ fn instant_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("shock".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -67,6 +69,7 @@ fn sorcery_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("rampant_growth".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -86,6 +89,7 @@ fn creature_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("grizzly_bears".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -406,6 +410,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
         controller: p0,
         chosen_modes: Vec::new(),
         targets: Vec::new(),
+        target_requirement: None,
         x_value: None,
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),

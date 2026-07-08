@@ -232,6 +232,13 @@ pub struct CardDefinition {
     /// Printed CR 702 keywords this card has natively - see `KeywordSet`'s
     /// own doc comment for what is and isn't represented here.
     pub keywords: KeywordSet,
+    /// `None` means this card requires no targets (CR 601.2c: "a spell may
+    /// require some targets only if... otherwise the spell is cast as
+    /// though it did not require those targets" — this engine doesn't model
+    /// modes/kicker yet, so a card either always requires this or never
+    /// does). See `TargetRequirement`/`TargetSpec` (target.rs) for what's
+    /// and isn't representable here.
+    pub target_requirement: Option<crate::types::target::TargetSpec>,
 }
 
 impl CardDefinition {

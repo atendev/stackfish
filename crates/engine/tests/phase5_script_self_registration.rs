@@ -107,6 +107,7 @@ fn bear_definition(script: &str) -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::Inline(script.to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -126,6 +127,7 @@ fn land_definition(script: &str) -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::Inline(script.to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 

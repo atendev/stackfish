@@ -28,6 +28,7 @@ fn creature_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_cleric".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -235,17 +236,18 @@ fn reject_ability_kind_not_activated() {
     assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
 }
 
-/// Targets are accepted and stored on the StackObject, not validated for
-/// legality (same stance CastSpell already takes) - supplying one doesn't
-/// reject activation the way it does for a mana ability.
+/// This ability's `target: None` (CR 601.2c's "no targets required") -
+/// supplying one anyway is rejected the same as CastSpell would reject an
+/// unrequested target (see phase5_targeting_basics.rs for the full
+/// targeting-system slice). Nothing is mutated: no tap, no stack push.
 #[test]
-fn targets_are_accepted_and_stored_without_legality_check() {
+fn unrequested_target_is_rejected() {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
     let state = state_with_source(source, p0, source);
     let mut engine = Engine::new(state);
 
     let status = activate_and_drain(&mut engine, p0, source, vec![Target::Player(p0)]);
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert!(engine.state().object(source).unwrap().tapped);
+    assert!(matches!(status, StepStatus::Error(EngineCommandError::InvalidTarget)));
+    assert!(!engine.state().object(source).unwrap().tapped);
 }

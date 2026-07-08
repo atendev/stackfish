@@ -27,6 +27,7 @@ fn land_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("forest".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -46,6 +47,7 @@ fn instant_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("shock".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -281,6 +283,7 @@ fn play_land_rejects_nonempty_stack() {
         controller: p0,
         chosen_modes: Vec::new(),
         targets: Vec::new(),
+        target_requirement: None,
         x_value: None,
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),

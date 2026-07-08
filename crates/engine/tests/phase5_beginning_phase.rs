@@ -27,6 +27,7 @@ fn creature_definition(name: &str) -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("bear".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
@@ -46,6 +47,7 @@ fn land_definition(name: &str) -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("forest".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 
