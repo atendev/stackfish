@@ -2077,9 +2077,27 @@ shift, don't treat it as fixed once written.
    `Game.CreateActivatedAbility` added alongside the triggered/static builders. Multi-ability-per-
    card stable indexing stays exactly as fragile as before (still positional by registration
    order) — orthogonal to "what can a cost contain," explicitly not bundled in.
-5. **Replacement/prevention effects (CR 614-616)** — `replacement.rs` is still a no-op past the
-   empty-registry fast path. Needed for "if this would die, exile it instead," damage prevention/
-   redirection.
+5. ~~**Replacement/prevention effects (CR 614-616)**~~ — done, `phase5/replacement-prevention-effects`
+   slice (docs/implementation.md, below). `ReplacementEffect` gained the same `Primitive`/`Script`
+   split every other filter-shaped type in this codebase uses; `apply_replacements`/
+   `submit_replacement_choice` are real. Narrower than the full rules text — see that slice's own
+   UNRESOLVED list (two `EventFilter` shapes only, no Lua builder). Surfaced two real, pre-existing
+   gaps while scoping this — split out as their own backlog items rather than silently fixed or
+   silently ignored:
+   5a. **`AssignCombatDamage` bypasses replacement checking** — `commands.rs`'s combat-damage arm
+      mutates `damage_marked`/life *directly*, before the `DamageDealt` events it returns ever reach
+      `ReplacementCheck` — a prevention/redirection effect can rewrite the *ledger's* event but
+      can't stop the mutation that already happened. Needs the same "propose via `CommandOutcome.
+      events`, mutate only at `CommitEvents`" discipline `CastSpell`/`PlayLand` already follow,
+      applied to combat damage specifically.
+   5b. **SBA-driven zone changes bypass replacement checking** — `sba.rs`'s `apply_creature_death`
+      moves a dying creature straight to the graveyard and commits its own `ZoneChange` event
+      directly, never through `apply_replacements` at all (SBA events never flow through
+      `ReplacementCheck` — only `execute_command`'s events do). CR 614.13's single most common
+      real-card use ("if this would die, exile it instead") can't fire off a real death yet. Needs
+      `check_state_based_actions`'s calling convention reworked so a dying object's zone change is
+      proposed and checked before it's applied — likely also needs a new `ProcessState` pause if a
+      >1-match CR 616.1 ordering choice can arise mid-SBA.
 6. **Cost system completeness** — alternative costs (flashback-style), `{X}` costs, hybrid/
    Phyrexian/snow mana payment, cost reduction/increase, mana-cost components on an activated
    ability's own cost (no Lua-facing mana-cost-string parser exists anywhere yet). Structured
@@ -2812,6 +2830,129 @@ anticipated by name before writing code.
   yet; every `Game.Costs.*` shape resolves to a real `AdditionalCost` with zero Lua calls at
   activation/payment time.
 
+## Phase 5: phase5/replacement-prevention-effects slice
+
+Branch `phase5/replacement-prevention-effects`, off master. Slice backlog item 5. Scope, locked in
+with the human before writing code: `ReplacementEffect` gains the same `Primitive`/`Script` split
+`ContinuousEffect` already has — `EventFilter` (matcher) covering exactly two shapes (damage about
+to be dealt; a permanent about to move Battlefield→Graveyard, CR 704.5g's "dies") and
+`ReplacementPayload` (rewrite) covering `PreventDamage`/`RedirectDamage`/`ReplaceZoneDestination`.
+`apply_replacements`/`submit_replacement_choice` (both `todo!()` since Phase 2) become real.
+`Script` stays dead code, same convention every prior slice's filter-shaped type follows — no Lua
+builder for a card to construct a `ReplacementEffect` itself, unlike the triggered/static/activated
+ability builders (a natural future sibling, not built here).
+
+**Correction to the backlog, found while scoping this one:** checked `commands.rs`/`sba.rs` before
+writing code — neither combat damage nor SBA-driven death actually routes through the replacement
+pipeline today. `AssignCombatDamage` mutates `damage_marked`/life *directly* in `execute_command`,
+before the `DamageDealt` events it returns ever reach `ReplacementCheck` (a real, pre-existing gap
+`commands.rs` already flagged inline: "no replacement/prevention check yet"). `apply_creature_death`
+(sba.rs) moves a dying creature straight to the graveyard and commits its own `ZoneChange` directly
+— SBA events never flow through `ReplacementCheck` at all, only `execute_command`'s do. So "prevent
+damage"/"if this would die, exile instead" can't be exercised end-to-end through real combat/SBA
+without a separate fix to those two call sites' apply-then-report timing. Confirmed with the human
+mid-report: kept this slice scoped to `replacement.rs`/`effect.rs` themselves, tested via directly-
+constructed events and `Engine`-level tests that drive the real `ReplacementCheck`/
+`AwaitingReplacementChoice` pipeline stages directly (not through combat/SBA producers) — split the
+two bypass gaps out as their own named backlog items (5a, 5b, above) rather than silently fixing or
+silently ignoring them.
+
+**Bug caught mid-slice, before merge:** the first draft of `apply_replacements`'s CR 616
+stabilization loop hung forever on two of its own new tests
+(`repeatable_effect_is_never_consumed`, `stabilizes_across_two_different_replacements`) —
+`cargo test` visibly stalled rather than failing cleanly. Root cause: nothing stopped an already-
+applied `Repeatable`/multi-`LimitedUses` effect from matching its own just-rewritten output again
+on the very next loop iteration — `PreventDamage` zeroing an already-zero `amount` doesn't change
+the event in any way that stops its own `EventFilter` from matching, so the loop never reached a
+fixed point. The real rule (CR 616.1: "each applicable replacement effect can apply only once to a
+given event") was missing entirely — `ConsumptionPolicy` governs whether an effect survives for
+*future* events, not whether it can reapply to the *same* event repeatedly. Fixed by threading a
+per-event `excluded: Vec<ObjectId>` through the whole resolution — `apply_replacements` is now a
+thin wrapper over `apply_replacements_from(state, event, Vec::new())`, which appends each applied
+effect's source to `excluded` before looping, and `ReplacementOutcome::NeedsOrderingChoice`/
+`ProcessState::AwaitingReplacementChoice` both carry `excluded` forward across a CR 616.1 pause too
+(`submit_replacement_choice` pushes `chosen` onto it before resuming) — otherwise an effect applied
+before the pause could reapply to the same event after it. Caught by the test suite itself doing
+exactly its job, not a redesign — the shape (`Primitive`/`Script` split, `EventFilter`/
+`ReplacementPayload`) was right, only the stabilization loop's termination condition was wrong.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 260 tests total (236 prior + 7 new
+`ReplacementEffect::matches`/`apply` unit tests in `types/effect.rs` + 7 new `apply_replacements`/
+consumption/stabilization unit tests in `replacement.rs` + 3 new `Engine`-level pipeline tests in
+`engine.rs`'s own `#[cfg(test)]` module, exercising `ReplacementCheck`/`AwaitingReplacementChoice`/
+`submit_replacement_choice` directly rather than through combat/SBA), 0 failed, no hangs (re-ran
+under a hard `timeout` after the mid-slice bug to confirm termination, not just absence of a
+panic). Confirmed the CLI still runs an unrelated existing scenario
+(`phase5_static_ability_self_registration.toml`) unaffected. No new CLI/TOML fixture this slice —
+same "flagged rather than silent" stance the activated-ability-costs slice already took, since
+`crates/scenario` has no TOML shape for constructing a `ReplacementEffect` and the two producers
+that could exercise one for real (combat, SBA) are exactly the bypasses named above.
+
+**What got implemented:**
+- `types/effect.rs`: `ConsumptionPolicy` gained `Clone, Copy, PartialEq, Eq, Debug` (needed to read/
+  compare/mutate it in place during consumption bookkeeping). New `EventFilter`
+  (`DamageDealt{affected: EffectFilter}` / `WouldDie{affected: EffectFilter}` — reuses
+  `EffectFilter`'s existing controller/card_types/self_only shape rather than inventing a parallel
+  one) and `ReplacementPayload` (`PreventDamage`/`RedirectDamage(Target)`/
+  `ReplaceZoneDestination(ZoneKind)`). New `ReplacementSpec` (`Primitive`/`Script`, `Script` dead
+  code). `ReplacementEffect.event_pattern: ScriptHandle` replaced with `spec: ReplacementSpec`.
+  `ReplacementEffect::matches(&self, event, state)` real body (gained a `&GameState` param — needed
+  to resolve the event's own object/player and the effect's source's controller; no `&ScriptRuntime`
+  needed, the `Primitive` case is zero-Lua-calls same as every other primitive-only query in this
+  codebase). `ReplacementEffect::apply(&self, event) -> GameEventKind` new — the "matcher had no
+  rewrite" gap flagged since Phase 3, closed the same way `ContinuousEffect`'s own matcher/rewrite
+  split already was. New free fn `event_target_matches` shared by both `EventFilter` arms —
+  generalizes `ContinuousEffect::applies_to`'s controller/card_types/self_only check over `Target`
+  (a player has no card types and can't be `self_only`, both real non-matches not guessed past).
+- `replacement.rs`: `apply_replacements` real body — thin wrapper over new `pub(crate)
+  apply_replacements_from(state, event, excluded)`, the actual CR 614/615/616 loop (see the bug note
+  above for why `excluded` exists). New `pub(crate) apply_one_replacement` — applies one effect's
+  rewrite and performs its `ConsumptionPolicy` bookkeeping (`OneShot`/exhausted `LimitedUses`
+  removes the entry from `state.replacement_effects`; `LimitedUses(n>1)` decrements in place;
+  `Repeatable` untouched) — shared by `apply_replacements_from`'s single-match loop body and
+  `Engine::submit_replacement_choice`. New private `affected_player_for` — CR 616.1's "affected
+  player" derivation (a `Target::Player` directly, a `Target::Object`'s controller), covering the
+  two constructible `EventFilter` shapes; a `_ =>` fallback exists only so this stays total, not
+  reachable given today's shapes. `ReplacementOutcome::NeedsOrderingChoice` gained `excluded:
+  Vec<ObjectId>`.
+- `engine.rs`: `ProcessState::AwaitingReplacementChoice` gained `excluded: Vec<ObjectId>`, threaded
+  through both its construction sites (`ReplacementCheck`'s multi-match arm, the pause-and-reprompt
+  arm) and `submit_replacement_choice`'s real body — applies `chosen` via `apply_one_replacement`,
+  pushes it onto `excluded`, then resumes via `apply_replacements_from` (not the public wrapper) so
+  the exclusion set survives the pause. `StepStatus::AwaitingReplacementChoice` (the public-facing
+  status) is unchanged — the host doesn't need `excluded` to prompt the player, same reasoning
+  `AwaitingPayment`'s `source` field wasn't added to its own public status.
+
+**STRUCT DEVIATIONS:**
+- `ReplacementOutcome::NeedsOrderingChoice`/`ProcessState::AwaitingReplacementChoice` both gaining
+  `excluded` — not in the pre-slice scoping discussion (which hadn't yet discovered the
+  reapplication-loop gap), a direct, necessary consequence of the mid-slice bug fix rather than
+  scope creep.
+
+**INTERFACE DEVIATIONS:**
+- `ReplacementEffect::matches` gained a `&GameState` param beyond the Phase 3 TODO's guess (which
+  expected a `&ScriptRuntime` instead) — the `Primitive` case turned out to need zero Lua calls,
+  same "the TODO over-pattern-matched against a different, real wall" correction the
+  layer-engine-consumers slice already made once for a different query.
+- New `pub(crate) apply_replacements_from`/`apply_one_replacement` — not named in the pre-slice
+  report, direct consequence of the CR 616.1 fix (`apply_replacements` itself keeps its original
+  public signature unchanged).
+
+**SCOPE DEVIATIONS:**
+- Backlog items 5a/5b (`AssignCombatDamage`/SBA-driven death bypassing replacement checking) — both
+  surfaced and confirmed with the human before writing code, not discovered after the fact; kept out
+  of this slice's diff entirely per that discussion.
+
+**UNRESOLVED (anticipated, none new beyond 5a/5b already covered above):**
+- `EventFilter`/`ReplacementPayload` cover exactly two shapes (damage, "would die") — no ETB-tapped
+  modifiers, no counter-addition replacements, no non-damage/non-death event shapes.
+- No Lua builder (`Game.CreateReplacementEffect`) — `ReplacementSpec::Script` stays dead code; a
+  card can only get a `ReplacementEffect` via a Rust struct literal (test/scenario fixtures) today,
+  same bootstrap-before-scripting stance every other primitive-first subsystem in this codebase took
+  before its own builder slice landed.
+- `AssignCombatDamage`/SBA-driven death bypassing replacement checking — named above as backlog
+  items 5a/5b, not fixed here.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
@@ -2819,3 +2960,13 @@ anticipated by name before writing code.
   An atom can itself carry multiple payment options (`Phyrexian(Color)` = color or life), so a
   2-slot `Hybrid` of two atoms can yield more than 2 total ways to pay. Before declaring a data
   shape "can't represent X," check whether an existing variant already absorbs the complexity.
+- First draft of `replacement::apply_replacements`'s CR 616 stabilization loop had no termination
+  condition for a `Repeatable`/multi-`LimitedUses` effect matching its own already-rewritten output
+  again (`PreventDamage` zeroing an already-zero `amount` doesn't stop its own filter from matching)
+  — `cargo test` hung rather than failed. `ConsumptionPolicy` governs whether an effect survives
+  for *future* events, not whether it can reapply to the *same* event repeatedly; CR 616.1's actual
+  rule ("each applicable replacement effect can apply only once to a given event") was missing
+  entirely. Any "loop until no further match" stabilization/fixed-point design needs an explicit
+  per-resolution exclusion set from the start, not just "the rewritten form might not match
+  anymore" — a rewrite that doesn't change the property being matched on will match forever
+  otherwise. Caught by the test suite (two tests visibly stalled) before merge, not after.
