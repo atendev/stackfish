@@ -324,22 +324,28 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
 }
 
 /// Removes `old_id` from `state.objects` and purges any `RegisteredAbility`
-/// still pointing at it (`state.abilities.retain`). Use at a zone-change
-/// site that does **not** also call `remap_abilities` for `old_id` — calling
-/// both would be wrong (retire would delete what remap just carried
-/// forward); calling neither leaves a dead `RegisteredAbility` sitting in
-/// `state.abilities` forever (harmless per `collect_triggers`'s existing
-/// "skip if source doesn't resolve" check, but pure pileup). Today that's
-/// exactly the sites with no in-play "same card, new id" continuation to
-/// carry forward: discard (hand→graveyard), `draw_step` (library→hand), and
-/// SBA-driven death (battlefield→graveyard) — the other zone-change sites
-/// (`PlayLand`, `CastSpell`, mulligan bottom/redraw, `ResolveStackTop`'s
-/// permanent branch) already call `remap_abilities` instead, which is the
-/// correct behavior there (e.g. a mana ability registered against a land
-/// while still in hand must survive the hand→battlefield move).
+/// or `ContinuousEffect` still pointing at it (`state.abilities.retain`/
+/// `state.continuous_effects.retain`). Use at a zone-change site that does
+/// **not** also call `remap_abilities` for `old_id` — calling both would be
+/// wrong (retire would delete what remap just carried forward); calling
+/// neither leaves a dead entry sitting in `state.abilities`/
+/// `state.continuous_effects` forever (harmless per `collect_triggers`'s/
+/// `layers::applicable_effects_in_layer`'s existing "skip if source doesn't
+/// resolve" checks, but pure pileup — the same gap this function was
+/// originally built to close for abilities, extended here to continuous
+/// effects now that `Game.CreateStaticAbility` (script.rs) can produce one
+/// that outlives its source). Today that's exactly the sites with no
+/// in-play "same card, new id" continuation to carry forward: discard
+/// (hand→graveyard), `draw_step` (library→hand), and SBA-driven death
+/// (battlefield→graveyard) — the other zone-change sites (`PlayLand`,
+/// `CastSpell`, mulligan bottom/redraw, `ResolveStackTop`'s permanent
+/// branch) already call `remap_abilities` instead, which is the correct
+/// behavior there (e.g. a mana ability registered against a land while
+/// still in hand must survive the hand→battlefield move).
 pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) {
     state.objects.remove(&old_id);
     state.abilities.retain(|a| a.source != old_id);
+    state.continuous_effects.retain(|e| e.source != old_id);
 }
 
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
@@ -1316,7 +1322,12 @@ pub fn execute_command(
 mod tests {
     use super::*;
     use crate::types::counter::CounterSet;
+    use crate::types::effect::{
+        AffectedFilter, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload, EffectPrimitive,
+        Layer,
+    };
     use crate::types::game::RngState;
+    use crate::types::ids::SequenceNo;
     use crate::types::mana::ManaPool;
     use crate::types::player::PlayerState;
 
@@ -1371,15 +1382,42 @@ mod tests {
         }
     }
 
+    fn dummy_continuous_effect(source: ObjectId) -> ContinuousEffect {
+        ContinuousEffect {
+            source,
+            layer: Layer::PowerToughnessModifying,
+            affected: AffectedFilter::Primitive(EffectFilter {
+                controller: None,
+                card_types: None,
+                self_only: true,
+            }),
+            effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
+            timestamp: SequenceNo(0),
+            duration: EffectDuration::Permanent,
+        }
+    }
+
     #[test]
     fn retire_object_purges_only_the_retired_source() {
         let mut state = minimal_state();
         state.abilities.push(dummy_ability(ObjectId(1)));
         state.abilities.push(dummy_ability(ObjectId(2)));
+        state.continuous_effects.push(dummy_continuous_effect(ObjectId(1)));
+        state.continuous_effects.push(dummy_continuous_effect(ObjectId(2)));
 
         retire_object(&mut state, ObjectId(1));
 
         assert_eq!(state.abilities.len(), 1, "only ObjectId(1)'s ability should be purged");
         assert_eq!(state.abilities[0].source, ObjectId(2), "ObjectId(2)'s ability must survive untouched");
+        assert_eq!(
+            state.continuous_effects.len(),
+            1,
+            "only ObjectId(1)'s continuous effect should be purged"
+        );
+        assert_eq!(
+            state.continuous_effects[0].source,
+            ObjectId(2),
+            "ObjectId(2)'s continuous effect must survive untouched"
+        );
     }
 }

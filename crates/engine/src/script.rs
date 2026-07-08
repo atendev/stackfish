@@ -7,10 +7,16 @@ use mlua::{Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
 use crate::types::ability::{
     AbilityCost, AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility,
 };
-use crate::types::card::{CardDefinition, ScriptReference};
+use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference};
+use crate::types::cost::FilterController;
+use crate::types::effect::{
+    AffectedFilter, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload, EffectPrimitive,
+    Layer,
+};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
+use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
+use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
 
 /// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
@@ -34,6 +40,21 @@ impl UserData for OperationTag {}
 #[derive(Clone, Copy)]
 struct CostTag(AbilityCost);
 impl UserData for CostTag {}
+
+/// Same idea, for `Game.Layers.*` — e.g. `Game.Layers.PowerToughnessModifying`
+/// is a plain tagged value, decoded back out via `decode_layer_value`. Only
+/// the 5 layers with a real query path (`layers::effective_characteristics`)
+/// are ever bound onto `Game.Layers` — see `bind_game_globals`.
+#[derive(Clone, Copy)]
+struct LayerTag(Layer);
+impl UserData for LayerTag {}
+
+/// Same idea, for `Game.Effects.*` — e.g. `Game.Effects.ModifyPT(1, 1)` is a
+/// Lua function returning one of these, decoded back out via
+/// `decode_effect_value`.
+#[derive(Clone, Copy)]
+struct EffectPrimitiveTag(EffectPrimitive);
+impl UserData for EffectPrimitiveTag {}
 
 #[derive(Debug)]
 pub enum ScriptError {
@@ -84,6 +105,13 @@ struct ScriptRegistry {
     /// gets a `GameState` reference at all — this is what `:Register()`
     /// pushes onto instead.
     pending_triggered: Vec<RegisteredAbility>,
+    /// Same idea as `pending_triggered`, for `Game.CreateStaticAbility`'s
+    /// builder (CR 604/611) — drained into `GameState.continuous_effects` by
+    /// `run_card_script`. `timestamp` on each queued `ContinuousEffect` is a
+    /// placeholder (`SequenceNo(0)`) until drain time, since the builder has
+    /// no `&mut GameState` to call `allocate_sequence_no()` from inside a Lua
+    /// callback — the drain step stamps the real value.
+    pending_static: Vec<ContinuousEffect>,
 }
 
 impl ScriptRegistry {
@@ -189,6 +217,170 @@ fn decode_cost_value(value: Value) -> Result<AbilityCost, ScriptError> {
     }
 }
 
+/// `CardTypeSet` names, by CR 108-ish printed card type — mirrors
+/// `crates/scenario/src/lib.rs`'s `parse_card_types`, duplicated here rather
+/// than shared since that's a separate crate with no common string-parsing
+/// utility today. Single-type-at-a-time (`Game.Effects.AddCardType(name)`
+/// takes one name, unlike the scenario crate's `Vec<String>`-per-card
+/// shape) — `decode_affected_table`'s `card_types` list unions these.
+fn parse_card_type_name(name: &str) -> Result<CardTypeSet, ScriptError> {
+    Ok(match name {
+        "Artifact" => CardTypeSet::ARTIFACT,
+        "Creature" => CardTypeSet::CREATURE,
+        "Enchantment" => CardTypeSet::ENCHANTMENT,
+        "Instant" => CardTypeSet::INSTANT,
+        "Land" => CardTypeSet::LAND,
+        "Sorcery" => CardTypeSet::SORCERY,
+        "Kindred" => CardTypeSet::KINDRED,
+        "Planeswalker" => CardTypeSet::PLANESWALKER,
+        "Battle" => CardTypeSet::BATTLE,
+        other => return Err(ScriptError::LoadError(format!("unknown card type '{other}'"))),
+    })
+}
+
+/// `KeywordSet` names, by CR 702 keyword — mirrors the scenario crate's
+/// `parse_keywords`, same duplication rationale as `parse_card_type_name`.
+fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> {
+    Ok(match name {
+        "Flying" => KeywordSet::FLYING,
+        "Reach" => KeywordSet::REACH,
+        "Menace" => KeywordSet::MENACE,
+        "Vigilance" => KeywordSet::VIGILANCE,
+        "Haste" => KeywordSet::HASTE,
+        "Defender" => KeywordSet::DEFENDER,
+        "Flash" => KeywordSet::FLASH,
+        "Deathtouch" => KeywordSet::DEATHTOUCH,
+        "Indestructible" => KeywordSet::INDESTRUCTIBLE,
+        "Lifelink" => KeywordSet::LIFELINK,
+        "Wither" => KeywordSet::WITHER,
+        "Infect" => KeywordSet::INFECT,
+        other => return Err(ScriptError::LoadError(format!("unknown keyword '{other}'"))),
+    })
+}
+
+/// `ColorSet` by single WUBRG letter — same duplication rationale as
+/// `parse_card_type_name`.
+fn parse_color_letter(letter: &str) -> Result<ColorSet, ScriptError> {
+    Ok(match letter {
+        "W" => ColorSet::WHITE,
+        "U" => ColorSet::BLUE,
+        "B" => ColorSet::BLACK,
+        "R" => ColorSet::RED,
+        "G" => ColorSet::GREEN,
+        other => return Err(ScriptError::LoadError(format!("unknown color '{other}'"))),
+    })
+}
+
+fn parse_filter_controller_name(name: &str) -> Result<FilterController, ScriptError> {
+    match name {
+        "you" => Ok(FilterController::You),
+        "opponent" => Ok(FilterController::Opponent),
+        "any" => Ok(FilterController::Any),
+        other => Err(ScriptError::LoadError(format!(
+            "unknown controller filter '{other}' - expected you/opponent/any"
+        ))),
+    }
+}
+
+/// `TriggeredAbilityBuilder`'s `:SetLayer` decoder — only a `Game.Layers.*`
+/// tag is accepted (no custom-function fallback; unlike condition/operation,
+/// there's no `Layer::Script` concept to fall back to).
+fn decode_layer_value(value: Value) -> Result<Layer, ScriptError> {
+    match value {
+        Value::UserData(ud) => {
+            let tag: LayerTag =
+                ud.borrow::<LayerTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?.clone();
+            Ok(tag.0)
+        }
+        Value::Nil => Err(ScriptError::LoadError(
+            "SetLayer() called with nil - expected a Game.Layers.* value".to_string(),
+        )),
+        other => Err(ScriptError::LoadError(format!(
+            "SetLayer() expects a Game.Layers.* value, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// `StaticAbilityBuilder`'s `:SetEffect` decoder — only a `Game.Effects.*`
+/// tag is accepted (no custom-function fallback this slice, see
+/// `EffectPayload::Script`'s own "not evaluable yet" doc comment).
+fn decode_effect_value(value: Value) -> Result<EffectPrimitive, ScriptError> {
+    match value {
+        Value::UserData(ud) => {
+            let tag: EffectPrimitiveTag = ud
+                .borrow::<EffectPrimitiveTag>()
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?
+                .clone();
+            Ok(tag.0)
+        }
+        Value::Nil => Err(ScriptError::LoadError(
+            "SetEffect() called with nil - expected a Game.Effects.* value".to_string(),
+        )),
+        other => Err(ScriptError::LoadError(format!(
+            "SetEffect() expects a Game.Effects.* value, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// `StaticAbilityBuilder`'s `:SetAffected` decoder — a plain Lua table
+/// (`{controller=.., card_types={..}, self_only=..}`, every key optional)
+/// rather than its own family of `Game.Filters.*` tag factories, matching
+/// how `EffectFilter`/the scenario TOML's `ContinuousEffectSpec` already
+/// read as a flat option bag. Omitting the table entirely (or every key in
+/// it) means "no filter, applies to everything" — a real, if unusual, shape
+/// (see `EffectFilter`'s own fields, all optional/defaulted there too).
+fn decode_affected_table(table: Table) -> Result<EffectFilter, ScriptError> {
+    let controller_name: Option<String> =
+        table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+
+    let card_types_table: Option<Table> =
+        table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let card_types = match card_types_table {
+        Some(t) => {
+            let mut set = CardTypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                set |= parse_card_type_name(&name)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+
+    let self_only: Option<bool> =
+        table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+
+    Ok(EffectFilter { controller, card_types, self_only: self_only.unwrap_or(false) })
+}
+
+/// CR 613.1's per-layer primitive shape (`Layer`'s own doc comment) — a
+/// static ability's `:SetLayer`/`:SetEffect` pairing must agree, or
+/// `:Register()` would silently build a `ContinuousEffect` that
+/// `layers::effective_characteristics` can never actually apply (it matches
+/// on `(layer, primitive)` shape internally). Checked explicitly here so a
+/// card script gets a real error instead of a silently-inert effect.
+fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPrimitive) -> Result<(), ScriptError> {
+    let paired = matches!(
+        (layer, effect),
+        (Layer::TypeChanging, EffectPrimitive::AddCardType(_))
+            | (Layer::ColorChanging, EffectPrimitive::AddColor(_))
+            | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
+            | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
+            | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
+    );
+    if paired {
+        Ok(())
+    } else {
+        Err(ScriptError::LoadError(format!(
+            "SetLayer({layer:?}) doesn't pair with SetEffect({effect:?}) - each layer only accepts \
+             its own effect primitive shape"
+        )))
+    }
+}
+
 /// `Game.CreateTriggeredAbility(c)`'s return value — a builder mirroring
 /// ygopro's `Effect.CreateEffect(c)` / `e1:SetCondition(...)` /
 /// `c:RegisterEffect(e1)` convention (see `docs/ygo_pro_reference.md`).
@@ -249,6 +441,73 @@ impl UserData for TriggeredAbilityBuilder {
                 effect,
             };
             this.registry.borrow_mut().pending_triggered.push(ability);
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreateStaticAbility(c)`'s return value — mirrors
+/// `TriggeredAbilityBuilder` for CR 604/611 static abilities: `:SetLayer`/
+/// `:SetEffect` each accept a `Game.Layers.*`/`Game.Effects.*` tag,
+/// `:SetAffected` takes a plain filter table (see `decode_affected_table`).
+/// `:Register()` validates the layer/effect pairing (`validate_layer_effect_pairing`)
+/// and queues the finished `ContinuousEffect` onto the shared registry's
+/// `pending_static` list — `run_card_script` drains it into
+/// `state.continuous_effects`, stamping the real `timestamp` there (the only
+/// place with `&mut GameState` to allocate one).
+///
+/// `kind` is implied by which constructor built this the same way
+/// `TriggeredAbilityBuilder`'s doc comment already explains for
+/// `AbilityKind` — a `ContinuousEffect` has no `kind` field at all (it's
+/// always CR 613, not a `RegisteredAbility`), so this is more "which queue
+/// does :Register() push onto" than a settable field anywhere.
+struct StaticAbilityBuilder {
+    source: ObjectId,
+    layer: Option<Layer>,
+    effect: Option<EffectPrimitive>,
+    affected: EffectFilter,
+    registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for StaticAbilityBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetLayer", |_, this, value: Value| {
+            this.layer = Some(decode_layer_value(value).map_err(to_lua_err)?);
+            Ok(())
+        });
+        methods.add_method_mut("SetEffect", |_, this, value: Value| {
+            this.effect = Some(decode_effect_value(value).map_err(to_lua_err)?);
+            Ok(())
+        });
+        methods.add_method_mut("SetAffected", |_, this, table: Table| {
+            this.affected = decode_affected_table(table).map_err(to_lua_err)?;
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let layer = this.layer.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetLayer() - a static ability needs a layer"
+                        .to_string(),
+                )
+            })?;
+            let effect = this.effect.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetEffect() - a static ability needs an effect"
+                        .to_string(),
+                )
+            })?;
+            validate_layer_effect_pairing(layer, &effect).map_err(to_lua_err)?;
+            let continuous_effect = ContinuousEffect {
+                source: this.source,
+                layer,
+                affected: AffectedFilter::Primitive(this.affected),
+                effect: EffectPayload::Primitive(effect),
+                // Placeholder - run_card_script's drain step stamps the real
+                // value (see this struct's own doc comment).
+                timestamp: SequenceNo(0),
+                duration: EffectDuration::Permanent,
+            };
+            this.registry.borrow_mut().pending_static.push(continuous_effect);
             Ok(())
         });
     }
@@ -347,10 +606,13 @@ impl ScriptRuntime {
     /// with a callable `initial_effect` field (the ygopro-style
     /// `s.initial_effect(c)` module convention — see `docs/lua_scripts.md`),
     /// and calls it with `source.0`. Whatever the script's `initial_effect`
-    /// `:Register()`ed onto the shared registry's pending-abilities queue
-    /// during the call is drained into `state.abilities` right after —
-    /// `Game.CreateTriggeredAbility`'s builder never touches `state` itself,
-    /// only this drain does.
+    /// `:Register()`ed onto the shared registry's pending queues during the
+    /// call is drained right after — `pending_triggered` into
+    /// `state.abilities`, `pending_static` into `state.continuous_effects`
+    /// (stamped with a real `timestamp` here, the only place with `&mut
+    /// GameState` to allocate one). Neither `Game.CreateTriggeredAbility`'s
+    /// nor `Game.CreateStaticAbility`'s builder ever touches `state` itself
+    /// — only this drain does.
     ///
     /// Re-parses/re-evaluates the source fresh on every call rather than
     /// caching the compiled chunk per `CardDefinition` — simpler for this
@@ -391,6 +653,16 @@ impl ScriptRuntime {
         let mut registered: Vec<RegisteredAbility> =
             self.registry.borrow_mut().pending_triggered.drain(..).collect();
         state.abilities.append(&mut registered);
+
+        let mut static_effects: Vec<ContinuousEffect> =
+            self.registry.borrow_mut().pending_static.drain(..).collect();
+        for effect in &mut static_effects {
+            // Real timestamp (CR 613.7 ordering) - the builder itself has no
+            // &mut GameState to allocate one from inside a Lua callback (see
+            // StaticAbilityBuilder's own doc comment).
+            effect.timestamp = state.allocate_sequence_no();
+        }
+        state.continuous_effects.append(&mut static_effects);
         Ok(())
     }
 
@@ -493,14 +765,17 @@ impl ScriptRuntime {
     }
 }
 
-/// Builds the `Game.Conditions`/`Game.Ops`/`Game.Costs`/
-/// `Game.CreateTriggeredAbility` sugar and binds it into `lua`'s globals.
-/// Deliberately not the same thing
-/// as binding all of `script_api.rs`'s functions (`Game.AddContinuousEffect`/
-/// `Game.ReplaceEvent`/`Game.CastSpell`/`Game.PayCost`/`Game.SelectTargets`
-/// stay unbound) — just enough sugar for a condition/operation source
-/// string to be a one-liner, and for a card script to self-register a
-/// triggered ability via the `TriggeredAbilityBuilder` above.
+/// Builds the `Game.Conditions`/`Game.Ops`/`Game.Costs`/`Game.Layers`/
+/// `Game.Effects`/`Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`
+/// sugar and binds it into `lua`'s globals. Deliberately not the same thing
+/// as binding all of `script_api.rs`'s functions (`Game.ReplaceEvent`/
+/// `Game.CastSpell`/`Game.PayCost`/`Game.SelectTargets` stay unbound —
+/// `Game.AddContinuousEffect` specifically is now superseded by
+/// `Game.CreateStaticAbility`'s builder, same relationship
+/// `register_triggered_ability` has to `Game.CreateTriggeredAbility`) —
+/// just enough sugar for a condition/operation source string to be a
+/// one-liner, and for a card script to self-register a triggered or static
+/// ability via the builders above.
 fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::Result<()> {
     let conditions = lua.create_table()?;
     conditions.set("Enters", ConditionTag(ConditionPrimitive::EntersBattlefield))?;
@@ -512,6 +787,51 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
 
     let costs = lua.create_table()?;
     costs.set("Tap", CostTag(AbilityCost::Tap))?;
+
+    // Only the 5 layers with a real query path (layers::effective_characteristics)
+    // are exposed - a static ability can't request layer 1/2/3/7d/7e at all
+    // (see `Layer`'s own doc comment for what's unbuilt and why).
+    let layers = lua.create_table()?;
+    layers.set("TypeChanging", LayerTag(Layer::TypeChanging))?;
+    layers.set("ColorChanging", LayerTag(Layer::ColorChanging))?;
+    layers.set("AbilityAdding", LayerTag(Layer::AbilityAdding))?;
+    layers.set("PowerToughnessSetting", LayerTag(Layer::PowerToughnessSetting))?;
+    layers.set("PowerToughnessModifying", LayerTag(Layer::PowerToughnessModifying))?;
+
+    let effects = lua.create_table()?;
+    effects.set(
+        "SetPT",
+        lua.create_function(|_, (power, toughness): (i32, i32)| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::SetPT { power, toughness }))
+        })?,
+    )?;
+    effects.set(
+        "ModifyPT",
+        lua.create_function(|_, (power, toughness): (i32, i32)| {
+            Ok(EffectPrimitiveTag(EffectPrimitive::ModifyPT { power, toughness }))
+        })?,
+    )?;
+    effects.set(
+        "AddKeyword",
+        lua.create_function(|_, name: String| {
+            let set = parse_keyword_name(&name).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddKeyword(set)))
+        })?,
+    )?;
+    effects.set(
+        "AddCardType",
+        lua.create_function(|_, name: String| {
+            let set = parse_card_type_name(&name).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddCardType(set)))
+        })?,
+    )?;
+    effects.set(
+        "AddColor",
+        lua.create_function(|_, letter: String| {
+            let set = parse_color_letter(&letter).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddColor(set)))
+        })?,
+    )?;
 
     let create_triggered_ability = {
         let registry = Rc::clone(&registry);
@@ -525,11 +845,27 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?
     };
 
+    let create_static_ability = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(StaticAbilityBuilder {
+                source: ObjectId(source),
+                layer: None,
+                effect: None,
+                affected: EffectFilter { controller: None, card_types: None, self_only: false },
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("Ops", ops)?;
     game.set("Costs", costs)?;
+    game.set("Layers", layers)?;
+    game.set("Effects", effects)?;
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
+    game.set("CreateStaticAbility", create_static_ability)?;
     lua.globals().set("Game", game)
 }
 
