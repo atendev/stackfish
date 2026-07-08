@@ -1248,7 +1248,9 @@ fn build_payment_plan(mana: &ManaPaymentSpec) -> PaymentPlan {
         PaymentPlan { payments: Vec::new() }
     } else {
         let units = mana.units.iter().map(|s| parse_mana_unit(s)).collect();
-        PaymentPlan { payments: vec![CostPayment::Mana(units)] }
+        // Phyrexian life payment isn't representable in scenario fixtures
+        // yet (see CardSpec's own doc comment on this same gap) - always 0.
+        PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] }
     }
 }
 

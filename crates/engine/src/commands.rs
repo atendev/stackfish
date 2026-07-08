@@ -411,9 +411,18 @@ pub(crate) fn commit_payment(
     let mut events = Vec::new();
     for payment in payments {
         match payment {
-            CostPayment::Mana(units) => {
+            CostPayment::Mana { units, phyrexian_life } => {
                 if let Some(player) = state.player_mut(payer) {
                     cost::spend(units, &mut player.mana_pool);
+                    if *phyrexian_life > 0 {
+                        player.lose_life(*phyrexian_life as i32);
+                    }
+                }
+                if *phyrexian_life > 0 {
+                    events.push(GameEventKind::LifeChanged {
+                        player: payer,
+                        delta: -(*phyrexian_life as i32),
+                    });
                 }
             }
             CostPayment::Tap(id) => {
