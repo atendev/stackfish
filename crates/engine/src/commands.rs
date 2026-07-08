@@ -748,9 +748,33 @@ pub fn execute_command(
             // CR 601.2f: total cost = the card's printed mana_cost only -
             // no additional/alternative costs, no reductions yet (see
             // CostSpec::mana_only's own doc, and PaymentPlan::validate's
-            // "out of scope" list). x_value isn't folded into the generic
-            // component yet either - same gap CostSpec/ManaCost flag.
-            let cost = CostSpec::mana_only(object.definition.mana_cost.clone());
+            // "out of scope" list).
+            //
+            // CR 107.3a/601.2b: an {X} cost and an announced x_value must
+            // agree - both present or both absent - and once agreed, X is
+            // substituted for a generic amount before PaymentPlan::validate
+            // ever sees the cost (see ManaCost::resolve_x's own doc comment
+            // for why that's enough on its own, no changes needed in
+            // cost.rs). TODO: X on an activated ability's own cost isn't
+            // supported at all yet - ActivateAbility has no x_value field
+            // to announce one with, a real struct gap, not just this check
+            // missing.
+            let has_x = object.definition.mana_cost.has_x();
+            let resolved_mana_cost = match (has_x, x_value) {
+                (true, Some(x)) => object.definition.mana_cost.resolve_x(x),
+                (false, None) => object.definition.mana_cost.clone(),
+                (true, None) => {
+                    return Err(CommandError::IllegalAction(
+                        "this spell's cost includes {X} - a value must be announced".to_string(),
+                    ));
+                }
+                (false, Some(_)) => {
+                    return Err(CommandError::IllegalAction(
+                        "an X value was announced but this spell's cost has no {X}".to_string(),
+                    ));
+                }
+            };
+            let cost = CostSpec::mana_only(resolved_mana_cost);
 
             // Snapshot before the move - CR 603.10's last_known_info (see
             // GameEventKind::ZoneChange's doc comment).

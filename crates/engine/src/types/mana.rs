@@ -111,6 +111,32 @@ impl ManaCost {
         // TODO: union ManaSymbol::colors() across self.symbols.
         todo!()
     }
+
+    /// Whether this cost has an `{X}` in it (CR 107.3a) — the caller's cue
+    /// that an X value must be announced before this cost can be paid.
+    pub fn has_x(&self) -> bool {
+        self.symbols.iter().any(|s| matches!(s, ManaSymbol::X))
+    }
+
+    /// Substitutes the announced value of X for every `{X}` in this cost
+    /// (CR 107.3a/107.3i: X is chosen once and every instance shares that
+    /// same value) — `X` is only ever a bare top-level `ManaSymbol`, never
+    /// nested inside a `Hybrid` (see that type's own doc comment), so this
+    /// is a flat per-symbol substitution, not a recursive one. Once
+    /// resolved, the cost has no `X` symbols left, so `PaymentPlan::validate`
+    /// can treat it exactly like any ordinary cost.
+    pub fn resolve_x(&self, x: u32) -> ManaCost {
+        ManaCost {
+            symbols: self
+                .symbols
+                .iter()
+                .map(|s| match s {
+                    ManaSymbol::X => ManaSymbol::Atom(AtomicManaSymbol::Generic(x)),
+                    other => *other,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// A player's floating mana pool. Cleared at the end of each step/phase per
@@ -227,5 +253,51 @@ impl ManaPool {
     pub fn clear(&mut self) {
         // TODO: set all six fields to 0.
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_x_true_and_false_cases() {
+        let with_x = ManaCost {
+            symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+        };
+        assert!(with_x.has_x());
+        let without_x =
+            ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
+        assert!(!without_x.has_x());
+    }
+
+    #[test]
+    fn resolve_x_substitutes_generic_and_leaves_other_symbols_alone() {
+        let cost = ManaCost {
+            symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))],
+        };
+        let resolved = cost.resolve_x(3);
+        assert_eq!(
+            resolved.symbols,
+            vec![
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(3)),
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_x_gives_every_x_the_same_value() {
+        // CR 107.3i: all instances of X in one cost share the same value -
+        // not independently chosen per occurrence.
+        let cost = ManaCost { symbols: vec![ManaSymbol::X, ManaSymbol::X] };
+        let resolved = cost.resolve_x(2);
+        assert_eq!(
+            resolved.symbols,
+            vec![
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
+            ]
+        );
     }
 }
