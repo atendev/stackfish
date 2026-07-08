@@ -939,6 +939,9 @@ pub fn build_initial_state(
         players.push(PlayerState {
             player_id: PlayerId(p.id),
             life: p.life,
+            // Snow-sourced mana isn't representable in scenario fixtures yet
+            // (same gap CardSpec's own doc comment flags for hybrid/
+            // Phyrexian) - snow_* fields default to 0 via the spread.
             mana_pool: ManaPool {
                 white: p.mana_pool.white,
                 blue: p.mana_pool.blue,
@@ -946,6 +949,7 @@ pub fn build_initial_state(
                 red: p.mana_pool.red,
                 green: p.mana_pool.green,
                 colorless: p.mana_pool.colorless,
+                ..ManaPool::default()
             },
             counters: CounterSet::new(),
             emblems: Vec::new(),

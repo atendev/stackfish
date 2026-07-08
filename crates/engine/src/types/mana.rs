@@ -113,7 +113,16 @@ impl ManaCost {
     }
 }
 
-/// A player's floating mana pool. Cleared at the end of each step/phase per CR 106.4.
+/// A player's floating mana pool. Cleared at the end of each step/phase per
+/// CR 106.4. The `snow_*` fields are subcounts, not a seventh mana type —
+/// snow is neither a color nor a type of mana (CR 107.4h), just a tag some
+/// floating mana carries because of what produced it. `snow_white` is always
+/// `<= white`, etc — the snow-tagged mana of a color is part of that color's
+/// total, not separate from it. Needed so a `{S}` cost symbol (payable with
+/// *any* type of mana, as long as it came from a snow source) can be told
+/// apart from an ordinary mana of the same color — see `ManaUnit`'s own doc
+/// comment for the matching per-unit tag.
+#[derive(Default)]
 pub struct ManaPool {
     pub white: u32,
     pub blue: u32,
@@ -121,21 +130,35 @@ pub struct ManaPool {
     pub red: u32,
     pub green: u32,
     pub colorless: u32,
+    pub snow_white: u32,
+    pub snow_blue: u32,
+    pub snow_black: u32,
+    pub snow_red: u32,
+    pub snow_green: u32,
+    pub snow_colorless: u32,
 }
 
 /// One literal unit of floating mana, as it actually exists in a `ManaPool`
 /// — deliberately a narrower type than `AtomicManaSymbol`: that type also
-/// has `Generic`/`Snow`/`Phyrexian` variants, which describe *cost shapes*
-/// or *payment choices*, not things that can sit in a pool waiting to be
-/// spent (`ManaPool` itself has no snow-mana field, for instance). Used by
-/// `CostPayment::Mana` to record exactly which units a `PaymentPlan` spends
-/// — see that type's doc comment in `cost.rs` for why this replaced an
-/// earlier design that only recorded the cost's *shape*, not the payer's
+/// has a `Generic`/`Phyrexian` variant, which describe *cost shapes* or
+/// *payment choices*, not things that can sit in a pool waiting to be spent.
+/// Used by `CostPayment::Mana` to record exactly which units a `PaymentPlan`
+/// spends — see that type's doc comment in `cost.rs` for why this replaced
+/// an earlier design that only recorded the cost's *shape*, not the payer's
 /// actual choice of units (CR 118.13a).
+///
+/// `SnowColored`/`SnowColorless` are the snow-sourced counterpart of
+/// `Colored`/`Colorless` (CR 107.4h) — a separate pair of variants, not a
+/// `snow: bool` field wrapping the other two, so the 28-or-so existing call
+/// sites building plain non-snow units don't need touching. A snow unit is
+/// still exactly that color for every other purpose (colored pips, generic)
+/// — the tag only matters for paying a `{S}` symbol.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ManaUnit {
     Colored(Color),
     Colorless,
+    SnowColored(Color),
+    SnowColorless,
 }
 
 impl ManaPool {
@@ -143,6 +166,8 @@ impl ManaPool {
     /// of removing one. Used by CR 605 mana abilities, which add exact
     /// units to the pool rather than a `ManaCost`-shaped amount (see
     /// `ManaUnit`'s own doc comment for why this is the narrower vocabulary).
+    /// A snow unit bumps both its color's total and its snow subcount —
+    /// the two always move together, keeping `snow_* <= *` an invariant.
     pub fn add_unit(&mut self, unit: ManaUnit) {
         match unit {
             ManaUnit::Colored(Color::White) => self.white += 1,
@@ -151,6 +176,30 @@ impl ManaPool {
             ManaUnit::Colored(Color::Red) => self.red += 1,
             ManaUnit::Colored(Color::Green) => self.green += 1,
             ManaUnit::Colorless => self.colorless += 1,
+            ManaUnit::SnowColored(Color::White) => {
+                self.white += 1;
+                self.snow_white += 1;
+            }
+            ManaUnit::SnowColored(Color::Blue) => {
+                self.blue += 1;
+                self.snow_blue += 1;
+            }
+            ManaUnit::SnowColored(Color::Black) => {
+                self.black += 1;
+                self.snow_black += 1;
+            }
+            ManaUnit::SnowColored(Color::Red) => {
+                self.red += 1;
+                self.snow_red += 1;
+            }
+            ManaUnit::SnowColored(Color::Green) => {
+                self.green += 1;
+                self.snow_green += 1;
+            }
+            ManaUnit::SnowColorless => {
+                self.colorless += 1;
+                self.snow_colorless += 1;
+            }
         }
     }
 

@@ -104,12 +104,14 @@ fn color_index(c: Color) -> usize {
 /// One way to settle a single symbol's requirement — the unit of choice
 /// that `assign_branches`'s backtracking search picks between. `Color`
 /// reserves one dedicated unit of that color out of the shared pool;
-/// `Generic`/`Life` don't reserve anything up front, they add to a running
-/// total settled by the final exactness check (a leftover-units total for
-/// `Generic`, a declared-life total for `Life`).
+/// `Snow` reserves one dedicated snow-tagged unit of *any* color/colorless
+/// (CR 107.4h); `Generic`/`Life` don't reserve anything up front, they add
+/// to a running total settled by the final exactness check (a
+/// leftover-units total for `Generic`, a declared-life total for `Life`).
 #[derive(Clone, Copy)]
 enum PayBranch {
     Color(Color),
+    Snow,
     Generic(u32),
     Life(u32),
 }
@@ -117,13 +119,15 @@ enum PayBranch {
 /// The branches a single atom offers (CR 107.4f: a `Phyrexian` atom is
 /// inherently two-way — pay that color, or pay 2 life — even outside a
 /// `Hybrid`). `None` for atoms this slice doesn't support paying for yet
-/// (`Colorless`/`Snow` — see docs/implementation.md's 6a-iii).
+/// (`Colorless` — the `{C}` symbol, unrelated to `ManaUnit::Colorless` —
+/// isn't modeled as its own cost-side atom yet).
 fn atom_branches(atom: AtomicManaSymbol) -> Option<Vec<PayBranch>> {
     match atom {
         AtomicManaSymbol::Colored(c) => Some(vec![PayBranch::Color(c)]),
         AtomicManaSymbol::Generic(n) => Some(vec![PayBranch::Generic(n)]),
         AtomicManaSymbol::Phyrexian(c) => Some(vec![PayBranch::Color(c), PayBranch::Life(2)]),
-        AtomicManaSymbol::Colorless | AtomicManaSymbol::Snow => None,
+        AtomicManaSymbol::Snow => Some(vec![PayBranch::Snow]),
+        AtomicManaSymbol::Colorless => None,
     }
 }
 
@@ -148,14 +152,26 @@ fn symbol_branches(symbol: &ManaSymbol) -> Option<Vec<PayBranch>> {
     }
 }
 
-/// Checks whether `spent_colored`/`spent_colorless` (the payer's chosen
-/// units, already tallied by `spent_tally`) plus `phyrexian_life` (the
-/// payer's declared life payment, CR 107.4f) can satisfy `required` (the
-/// cost's symbols) per CR 118.13a. `None` means `required` contains a
-/// symbol shape this slice doesn't support paying for yet (see
-/// `symbol_branches`/`atom_branches` for exactly what's unsupported and
-/// why). `Some(false)` means every symbol is a supported shape but this
-/// particular payment can't cover them.
+/// Snapshot of the payer's remaining declared units as `assign_branches`'s
+/// backtracking search consumes them — mirrors `ManaPool`'s color/colorless
+/// split, plus the snow subcounts CR 107.4h's `{S}` symbol needs.
+/// `snow_colored[i] <= colored[i]` (and `snow_colorless <= colorless`) is an
+/// invariant every mutation below preserves, same as `ManaPool` itself.
+#[derive(Clone, Copy)]
+struct SpentPool {
+    colored: [u32; 5],
+    colorless: u32,
+    snow_colored: [u32; 5],
+    snow_colorless: u32,
+}
+
+/// Checks whether `spent` (the payer's chosen units, already tallied by
+/// `spent_tally`) plus `phyrexian_life` (the payer's declared life payment,
+/// CR 107.4f) can satisfy `required` (the cost's symbols) per CR 118.13a.
+/// `None` means `required` contains a symbol shape this slice doesn't
+/// support paying for yet (see `symbol_branches`/`atom_branches` for exactly
+/// what's unsupported and why). `Some(false)` means every symbol is a
+/// supported shape but this particular payment can't cover them.
 ///
 /// Which branch each symbol takes isn't decidable by tallying once 2+
 /// multi-branch symbols compete for the same pool of spent units — e.g.
@@ -166,80 +182,103 @@ fn symbol_branches(symbol: &ManaSymbol) -> Option<Vec<PayBranch>> {
 /// doesn't need real search-algorithm sophistication.
 fn mana_payment_satisfies(
     required: &[ManaSymbol],
-    spent_colored: [u32; 5],
-    spent_colorless: u32,
+    spent: SpentPool,
     phyrexian_life: u32,
 ) -> Option<bool> {
     let mut branch_sets = Vec::with_capacity(required.len());
     for symbol in required {
         branch_sets.push(symbol_branches(symbol)?);
     }
-    Some(assign_branches(&branch_sets, 0, spent_colored, spent_colorless, 0, 0, phyrexian_life))
+    Some(assign_branches(&branch_sets, 0, spent, 0, 0, phyrexian_life))
 }
 
 /// Backtracking step for `mana_payment_satisfies` — tries each remaining
 /// symbol's branch options against the current leftover pool, recursing
 /// before committing. At the base case (`idx` past the last symbol), the
-/// pool remaining after every `Color` reservation, plus any spent
-/// colorless, must equal the accumulated `Generic` total exactly; and the
-/// accumulated `Life` total must equal the payer's declared
-/// `phyrexian_life` exactly — no more, no less either way (CR 118.13a).
+/// pool remaining after every `Color`/`Snow` reservation must equal the
+/// accumulated `Generic` total exactly; and the accumulated `Life` total
+/// must equal the payer's declared `phyrexian_life` exactly — no more, no
+/// less either way (CR 118.13a).
+///
+/// `Color(c)` tries *both* a non-snow and a snow-tagged unit of `c` when
+/// both are available, not just "any unit of color `c`" — which specific
+/// unit backs a colored pip changes what's left over for a later `Snow`
+/// symbol to claim, so it's part of the same search, not an independent
+/// choice. `Snow` tries every color-or-colorless bucket that still has a
+/// snow-tagged unit (CR 107.4h: `{S}` doesn't care which type, only that it
+/// came from a snow source) — removing one always debits both the color
+/// total and its snow subcount together, keeping the invariant intact.
 fn assign_branches(
     branch_sets: &[Vec<PayBranch>],
     idx: usize,
-    spent_colored: [u32; 5],
-    spent_colorless: u32,
+    spent: SpentPool,
     generic_needed: u32,
     life_needed: u32,
     phyrexian_life: u32,
 ) -> bool {
     if idx == branch_sets.len() {
-        let leftover: u32 = spent_colored.iter().sum::<u32>() + spent_colorless;
+        let leftover: u32 = spent.colored.iter().sum::<u32>() + spent.colorless;
         return leftover == generic_needed && life_needed == phyrexian_life;
     }
     for branch in &branch_sets[idx] {
         match branch {
             PayBranch::Color(c) => {
                 let ci = color_index(*c);
-                if spent_colored[ci] > 0 {
-                    let mut next = spent_colored;
-                    next[ci] -= 1;
-                    if assign_branches(
-                        branch_sets,
-                        idx + 1,
-                        next,
-                        spent_colorless,
-                        generic_needed,
-                        life_needed,
-                        phyrexian_life,
-                    ) {
+                if spent.colored[ci] > spent.snow_colored[ci] {
+                    let mut next = spent;
+                    next.colored[ci] -= 1;
+                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
+                    {
+                        return true;
+                    }
+                }
+                if spent.snow_colored[ci] > 0 {
+                    let mut next = spent;
+                    next.colored[ci] -= 1;
+                    next.snow_colored[ci] -= 1;
+                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
+                    {
+                        return true;
+                    }
+                }
+            }
+            PayBranch::Snow => {
+                for ci in 0..5 {
+                    if spent.snow_colored[ci] > 0 {
+                        let mut next = spent;
+                        next.colored[ci] -= 1;
+                        next.snow_colored[ci] -= 1;
+                        if assign_branches(
+                            branch_sets,
+                            idx + 1,
+                            next,
+                            generic_needed,
+                            life_needed,
+                            phyrexian_life,
+                        ) {
+                            return true;
+                        }
+                    }
+                }
+                if spent.snow_colorless > 0 {
+                    let mut next = spent;
+                    next.colorless -= 1;
+                    next.snow_colorless -= 1;
+                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
+                    {
                         return true;
                     }
                 }
             }
             PayBranch::Generic(n) => {
-                if assign_branches(
-                    branch_sets,
-                    idx + 1,
-                    spent_colored,
-                    spent_colorless,
-                    generic_needed + n,
-                    life_needed,
-                    phyrexian_life,
-                ) {
+                if assign_branches(branch_sets, idx + 1, spent, generic_needed + n, life_needed, phyrexian_life)
+                {
                     return true;
                 }
             }
             PayBranch::Life(n) => {
-                if assign_branches(
-                    branch_sets,
-                    idx + 1,
-                    spent_colored,
-                    spent_colorless,
-                    generic_needed,
-                    life_needed + n,
-                    phyrexian_life,
-                ) {
+                if assign_branches(branch_sets, idx + 1, spent, generic_needed, life_needed + n, phyrexian_life)
+                {
                     return true;
                 }
             }
@@ -248,20 +287,31 @@ fn assign_branches(
     false
 }
 
-/// Tallies `units` into per-color spent counts and total colorless spent —
-/// the payer's-side mirror of `colored_and_generic`, but over literal
-/// `ManaUnit`s rather than cost-shape `ManaSymbol`s (there's no "generic
-/// unit"; every unit spent is some specific color or colorless).
-fn spent_tally(units: &[ManaUnit]) -> ([u32; 5], u32) {
+/// Tallies `units` into per-color spent counts, total colorless spent, and
+/// their snow subcounts (CR 107.4h) — the payer's-side mirror of
+/// `atom_branches`, but over literal `ManaUnit`s rather than cost-shape
+/// symbols (there's no "generic unit"; every unit spent is some specific
+/// color or colorless, snow-tagged or not).
+fn spent_tally(units: &[ManaUnit]) -> ([u32; 5], u32, [u32; 5], u32) {
     let mut colored = [0u32; 5];
     let mut colorless = 0u32;
+    let mut snow_colored = [0u32; 5];
+    let mut snow_colorless = 0u32;
     for unit in units {
         match unit {
             ManaUnit::Colored(c) => colored[color_index(*c)] += 1,
             ManaUnit::Colorless => colorless += 1,
+            ManaUnit::SnowColored(c) => {
+                colored[color_index(*c)] += 1;
+                snow_colored[color_index(*c)] += 1;
+            }
+            ManaUnit::SnowColorless => {
+                colorless += 1;
+                snow_colorless += 1;
+            }
         }
     }
-    (colored, colorless)
+    (colored, colorless, snow_colored, snow_colorless)
 }
 
 /// Deducts exactly `units` from `pool` (CR 118.3a) — no priority order, no
@@ -279,6 +329,30 @@ pub(crate) fn spend(units: &[ManaUnit], pool: &mut ManaPool) {
             ManaUnit::Colored(Color::Red) => pool.red -= 1,
             ManaUnit::Colored(Color::Green) => pool.green -= 1,
             ManaUnit::Colorless => pool.colorless -= 1,
+            ManaUnit::SnowColored(Color::White) => {
+                pool.white -= 1;
+                pool.snow_white -= 1;
+            }
+            ManaUnit::SnowColored(Color::Blue) => {
+                pool.blue -= 1;
+                pool.snow_blue -= 1;
+            }
+            ManaUnit::SnowColored(Color::Black) => {
+                pool.black -= 1;
+                pool.snow_black -= 1;
+            }
+            ManaUnit::SnowColored(Color::Red) => {
+                pool.red -= 1;
+                pool.snow_red -= 1;
+            }
+            ManaUnit::SnowColored(Color::Green) => {
+                pool.green -= 1;
+                pool.snow_green -= 1;
+            }
+            ManaUnit::SnowColorless => {
+                pool.colorless -= 1;
+                pool.snow_colorless -= 1;
+            }
         }
     }
 }
@@ -351,12 +425,11 @@ impl PaymentPlan {
     /// unit summing to exactly the generic amount, no more, no less.
     ///
     /// Out of scope this slice (returns `false`): `spec.alternative` costs,
-    /// `{X}` costs, and any mana symbol shape this slice doesn't support
-    /// paying for — `Colorless`/`Snow`/`X` on their own, or a `Hybrid` built
-    /// from one of those atoms (see `mana_payment_satisfies` for exactly
-    /// what's deferred and why). Plain colored/generic pips, `Phyrexian`
-    /// pips (paid with colored mana or 2 life, CR 107.4f), and `Hybrid`
-    /// symbols built from `Colored`/`Generic`/`Phyrexian` atoms (`{W/U}`,
+    /// `{X}` costs, and the `{C}` colorless mana symbol on the *cost* side
+    /// (not modeled as its own atom yet — see `atom_branches`). Plain
+    /// colored/generic pips, `Phyrexian` pips (paid with colored mana or 2
+    /// life, CR 107.4f), `Snow` pips (paid with any snow-tagged mana, CR
+    /// 107.4h), and `Hybrid` symbols built from any of those atoms (`{W/U}`,
     /// `{2/W}`, `{W/U/P}`) *are* handled. `AdditionalCost::Other` always
     /// fails validation too — no `CostPayment` shape can express an
     /// unstructured-text cost. Returning `bool` here as a placeholder — real
@@ -374,8 +447,15 @@ impl PaymentPlan {
                 let Some(CostPayment::Mana { units, phyrexian_life }) = payments.next() else {
                     return false;
                 };
-                let (spent_colored, spent_colorless) = spent_tally(units);
-                match mana_payment_satisfies(required, spent_colored, spent_colorless, *phyrexian_life) {
+                let (spent_colored, spent_colorless, spent_snow_colored, spent_snow_colorless) =
+                    spent_tally(units);
+                let spent = SpentPool {
+                    colored: spent_colored,
+                    colorless: spent_colorless,
+                    snow_colored: spent_snow_colored,
+                    snow_colorless: spent_snow_colorless,
+                };
+                match mana_payment_satisfies(required, spent, *phyrexian_life) {
                     Some(true) => {}
                     Some(false) | None => return false,
                 }
@@ -391,6 +471,18 @@ impl PaymentPlan {
                     return false;
                 }
                 if spent_colorless > pool.colorless {
+                    return false;
+                }
+                // The snow-tagged units declared can't exceed how much of
+                // the pool is actually snow-tagged - the color/colorless
+                // check above only bounds the total, not which of it is
+                // snow-sourced (CR 107.4h).
+                let pool_snow_colored =
+                    [pool.snow_white, pool.snow_blue, pool.snow_black, pool.snow_red, pool.snow_green];
+                if spent_snow_colored.iter().zip(pool_snow_colored).any(|(spent, have)| *spent > have) {
+                    return false;
+                }
+                if spent_snow_colorless > pool.snow_colorless {
                     return false;
                 }
             }
@@ -564,8 +656,12 @@ mod tests {
         assert!(!filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
     }
 
-    fn colored(n: [u32; 5]) -> [u32; 5] {
-        n
+    fn spent(colored: [u32; 5], colorless: u32) -> SpentPool {
+        SpentPool { colored, colorless, snow_colored: [0; 5], snow_colorless: 0 }
+    }
+
+    fn spent_snow(colored: [u32; 5], colorless: u32, snow_colored: [u32; 5], snow_colorless: u32) -> SpentPool {
+        SpentPool { colored, colorless, snow_colored, snow_colorless }
     }
 
     #[test]
@@ -575,11 +671,11 @@ mod tests {
             AtomicManaSymbol::Colored(Color::Blue),
         )];
         // {W/U} paid with white - legal.
-        assert_eq!(mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 0, 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
         // {W/U} paid with blue - legal.
-        assert_eq!(mana_payment_satisfies(&required, colored([0, 1, 0, 0, 0]), 0, 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([0, 1, 0, 0, 0], 0), 0), Some(true));
         // {W/U} paid with black - rejected (not one of the two options).
-        assert_eq!(mana_payment_satisfies(&required, colored([0, 0, 1, 0, 0]), 0, 0), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 1, 0, 0], 0), 0), Some(false));
     }
 
     #[test]
@@ -589,9 +685,9 @@ mod tests {
             AtomicManaSymbol::Colored(Color::White),
         )];
         // {2/W} paid with 2 generic-eligible (colorless) units - legal.
-        assert_eq!(mana_payment_satisfies(&required, colored([0, 0, 0, 0, 0]), 2, 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 0, 0], 2), 0), Some(true));
         // {2/W} paid with 1 white - legal via the color branch, 0 generic owed.
-        assert_eq!(mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 0, 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
     }
 
     #[test]
@@ -609,9 +705,9 @@ mod tests {
         // One white + one blue - legal, but only because each symbol can
         // claim a different unit (a plain tally can't tell this apart from
         // an unpayable case without the assignment).
-        assert_eq!(mana_payment_satisfies(&required, colored([1, 1, 0, 0, 0]), 0, 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 1, 0, 0, 0], 0), 0), Some(true));
         // Two white - also legal, both symbols take the white branch.
-        assert_eq!(mana_payment_satisfies(&required, colored([2, 0, 0, 0, 0]), 0, 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([2, 0, 0, 0, 0], 0), 0), Some(true));
     }
 
     #[test]
@@ -625,26 +721,26 @@ mod tests {
         ];
         // {1}{W/U} paid with white (for the hybrid) + one colorless (for
         // the plain generic) - legal.
-        assert_eq!(mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 1, 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 1), 0), Some(true));
         // Same payment but one colorless short - the generic component
         // isn't fully covered, rejected.
-        assert_eq!(mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 0, 0), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
         // One extra, unneeded colorless unit - overpaying is rejected too
         // (leftover must equal the generic component exactly, no more).
-        assert_eq!(mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 2, 0), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 2), 0), Some(false));
     }
 
     #[test]
     fn plain_phyrexian_paid_with_color_or_life() {
         let required = [ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))];
         // {W/P} paid with white - legal.
-        assert_eq!(mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 0, 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(true));
         // {W/P} paid with 2 life, no mana - legal.
-        assert_eq!(mana_payment_satisfies(&required, colored([0; 5]), 0, 2), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 2), Some(true));
         // {W/P} paid with black - rejected, not the pip's color and no life declared.
-        assert_eq!(mana_payment_satisfies(&required, colored([0, 0, 1, 0, 0]), 0, 0), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 1, 0, 0], 0), 0), Some(false));
         // {W/P} "paid" with only 1 life - short of the flat 2, rejected.
-        assert_eq!(mana_payment_satisfies(&required, colored([0; 5]), 0, 1), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 1), Some(false));
     }
 
     #[test]
@@ -655,11 +751,11 @@ mod tests {
             AtomicManaSymbol::Phyrexian(Color::Blue),
             AtomicManaSymbol::Colored(Color::Green),
         )];
-        assert_eq!(mana_payment_satisfies(&required, colored([0, 1, 0, 0, 0]), 0, 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, colored([0, 0, 0, 0, 1]), 0, 0), Some(true));
-        assert_eq!(mana_payment_satisfies(&required, colored([0; 5]), 0, 2), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([0, 1, 0, 0, 0], 0), 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 0, 1], 0), 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 2), Some(true));
         // Red is none of the three options - rejected.
-        assert_eq!(mana_payment_satisfies(&required, colored([0, 0, 0, 1, 0]), 0, 0), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([0, 0, 0, 1, 0], 0), 0), Some(false));
     }
 
     #[test]
@@ -670,30 +766,74 @@ mod tests {
         ];
         // {1}{W/P} paid with 2 life for the Phyrexian pip + 1 colorless for
         // the generic - legal.
-        assert_eq!(mana_payment_satisfies(&required, colored([0; 5]), 1, 2), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 2), Some(true));
         // Declaring only 1 life toward a pip that needs the full 2 - rejected.
-        assert_eq!(mana_payment_satisfies(&required, colored([0; 5]), 1, 1), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 1), Some(false));
         // Declaring life the cost never asked for (paid the pip with white
         // mana instead, but still declared 2 life) - rejected, no more no less.
-        assert_eq!(mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 1, 2), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 1), 2), Some(false));
+    }
+
+    #[test]
+    fn snow_pip_paid_with_any_snow_tagged_mana() {
+        let required = [ManaSymbol::Atom(AtomicManaSymbol::Snow)];
+        // {S} paid with a snow-tagged white unit - legal.
+        assert_eq!(
+            mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
+            Some(true)
+        );
+        // {S} paid with a snow-tagged colorless unit - legal (any type works).
+        assert_eq!(mana_payment_satisfies(&required, spent_snow([0; 5], 1, [0; 5], 1), 0), Some(true));
+        // {S} "paid" with an ordinary (non-snow) white unit - rejected, right
+        // color but wrong source.
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
+    }
+
+    #[test]
+    fn colored_pip_and_snow_pip_compete_for_the_same_snow_unit() {
+        // {W}{S} with exactly one snow white unit and nothing else - only
+        // one symbol can claim it, so this must be rejected (not a plain
+        // tally, which could wrongly see "1 white available" and think
+        // both symbols are covered).
+        let required =
+            [ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)), ManaSymbol::Atom(AtomicManaSymbol::Snow)];
+        assert_eq!(
+            mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
+            Some(false)
+        );
+        // Same cost, but with a second, non-snow white unit available too -
+        // now {W} can take the non-snow one, freeing the snow one for {S}.
+        assert_eq!(
+            mana_payment_satisfies(&required, spent_snow([2, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn generic_pip_mixed_with_snow_leftover_must_match_exactly() {
+        let required =
+            [ManaSymbol::Atom(AtomicManaSymbol::Generic(1)), ManaSymbol::Atom(AtomicManaSymbol::Snow)];
+        // {1}{S} paid with a snow white unit (for {S}) + a colorless unit
+        // (for the generic) - legal.
+        assert_eq!(
+            mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 1, [1, 0, 0, 0, 0], 0), 0),
+            Some(true)
+        );
+        // Same, but the generic component is short - rejected.
+        assert_eq!(
+            mana_payment_satisfies(&required, spent_snow([1, 0, 0, 0, 0], 0, [1, 0, 0, 0, 0], 0), 0),
+            Some(false)
+        );
     }
 
     #[test]
     fn unsupported_symbol_shapes_bail_with_none() {
-        // Snow/Colorless/X requirements aren't modeled yet.
+        // The {C} colorless cost symbol and bare X requirements aren't
+        // modeled yet.
         assert_eq!(
-            mana_payment_satisfies(&[ManaSymbol::Atom(AtomicManaSymbol::Snow)], colored([0; 5]), 1, 0),
+            mana_payment_satisfies(&[ManaSymbol::Atom(AtomicManaSymbol::Colorless)], spent([0; 5], 1), 0),
             None
         );
-        assert_eq!(
-            mana_payment_satisfies(
-                &[ManaSymbol::Atom(AtomicManaSymbol::Colorless)],
-                colored([0; 5]),
-                1,
-                0
-            ),
-            None
-        );
-        assert_eq!(mana_payment_satisfies(&[ManaSymbol::X], colored([0; 5]), 0, 0), None);
+        assert_eq!(mana_payment_satisfies(&[ManaSymbol::X], spent([0; 5], 0), 0), None);
     }
 }
