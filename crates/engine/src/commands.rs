@@ -453,6 +453,86 @@ pub(crate) fn commit_payment(
     events
 }
 
+/// Performs the real effect of one already-committed `GameEventKind::
+/// DamageDealt` event (CR 510.2/119/702.15/702.80/702.90) — mark damage on
+/// a creature or lose life on a player, folding in Lifelink/Wither/Infect/
+/// Deathtouch off the source's effective keywords (CR 613 layer 6, so a
+/// granted keyword applies here too, not just the printed `KeywordSet`).
+///
+/// Called from `engine.rs`'s `CommitEvents` once `event` is in its final,
+/// post-replacement form — CR 614-616 says damage is itself a replaceable/
+/// preventable event, so this can't run any earlier than that (`amount`
+/// might have been reduced to 0, or `target` redirected, by a
+/// `ReplacementEffect` in between the moment `AssignCombatDamage` proposed
+/// it and the moment it's actually committed). `AssignCombatDamage` itself
+/// (this file) only ever *proposes* `DamageDealt` events now — it must not
+/// also mutate `damage_marked`/life directly, or a prevention/redirection
+/// effect would rewrite the ledger's record of what happened without
+/// stopping the mutation that already happened.
+pub(crate) fn apply_damage_event(
+    state: &mut GameState,
+    script_runtime: &ScriptRuntime,
+    source: ObjectId,
+    target: Target,
+    amount: u32,
+) {
+    // CR 702.15/702.80/702.90: looked up once, up front, so the borrow ends
+    // before the target mutations below (which may need a mutable borrow of
+    // the same GameState).
+    let source_keywords = effective_keywords(state, script_runtime, source);
+    let has_lifelink = source_keywords.contains(KeywordSet::LIFELINK);
+    let replaces_with_counters = source_keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT);
+    let is_infect = source_keywords.contains(KeywordSet::INFECT);
+    let has_deathtouch = source_keywords.contains(KeywordSet::DEATHTOUCH);
+    let source_controller = state.object(source).map(|o| o.controller);
+
+    match target {
+        Target::Player(pid) => {
+            // CR 702.90b: Infect damage to a player becomes poison
+            // counters, not life loss.
+            if is_infect {
+                if let Some(player) = state.player_mut(pid) {
+                    player.counters.add(CounterKind::Poison, amount as i32);
+                }
+            } else if let Some(player) = state.player_mut(pid) {
+                player.lose_life(amount as i32);
+            }
+        }
+        Target::Object(id) => {
+            // TODO(planeswalker/battle damage, CR 120.3c/d): damage to
+            // those marks loyalty/defense loss, not damage_marked -
+            // GameObject has no loyalty/defense-damage path wired yet, so
+            // only creature targets are functional this slice.
+            if let Some(object) = state.object_mut(id) {
+                if object.definition.card_types.contains(CardTypeSet::CREATURE) {
+                    // CR 702.80a/702.90c: Wither/Infect damage to a
+                    // creature becomes -1/-1 counters instead of marked
+                    // damage.
+                    if replaces_with_counters {
+                        object.counters.add(CounterKind::MinusOneMinusOne, amount as i32);
+                    } else {
+                        object.damage_marked += amount;
+                        if has_deathtouch && amount > 0 {
+                            object.deathtouched = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // CR 702.15b: Lifelink's life gain happens "in addition to any other
+    // results that damage causes" - applies to damage dealt to a player or
+    // an object alike.
+    if has_lifelink && amount > 0 {
+        if let Some(controller) = source_controller {
+            if let Some(player) = state.player_mut(controller) {
+                player.lose_life(-(amount as i32));
+            }
+        }
+    }
+}
+
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
 /// non-ledger state directly (zones, etc.) and returning a
 /// `CommandOutcome`. Per the rationale in `command.rs`: this does not
@@ -1337,76 +1417,10 @@ pub fn execute_command(
                 });
             }
 
-            // CR 510.2: deal it - mark damage on creatures, convert to life
-            // loss on players, no replacement/prevention check yet
-            // (CR 614-616, replacement.rs is still mostly todo!()).
-            for event in &events {
-                let GameEventKind::DamageDealt { source, target, amount } = event else {
-                    unreachable!("only DamageDealt events are pushed above");
-                };
-                // CR 702.15/702.80/702.90: Lifelink/Wither/Infect all modify
-                // how this same damage event plays out, keyed off the
-                // source's effective keywords (CR 613 layer 6 - a granted
-                // Lifelink/Deathtouch/etc now applies here too, not just the
-                // printed KeywordSet) - looked up once, up front, so the
-                // borrow ends before the target mutations below (which may
-                // need a mutable borrow of the same GameState).
-                let source_keywords = effective_keywords(state, script_runtime, *source);
-                let has_lifelink = source_keywords.contains(KeywordSet::LIFELINK);
-                let replaces_with_counters =
-                    source_keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT);
-                let is_infect = source_keywords.contains(KeywordSet::INFECT);
-                let has_deathtouch = source_keywords.contains(KeywordSet::DEATHTOUCH);
-                let source_controller = state.object(*source).map(|o| o.controller);
-
-                match target {
-                    Target::Player(pid) => {
-                        // CR 702.90b: Infect damage to a player becomes
-                        // poison counters, not life loss.
-                        if is_infect {
-                            if let Some(player) = state.player_mut(*pid) {
-                                player.counters.add(CounterKind::Poison, *amount as i32);
-                            }
-                        } else if let Some(player) = state.player_mut(*pid) {
-                            player.lose_life(*amount as i32);
-                        }
-                    }
-                    Target::Object(id) => {
-                        // TODO(planeswalker/battle damage, CR 120.3c/d):
-                        // damage to those marks loyalty/defense loss, not
-                        // damage_marked - GameObject has no loyalty/defense-
-                        // damage path wired yet, so only creature targets
-                        // are functional this slice.
-                        if let Some(object) = state.object_mut(*id) {
-                            if object.definition.card_types.contains(CardTypeSet::CREATURE) {
-                                // CR 702.80a/702.90c: Wither/Infect damage
-                                // to a creature becomes -1/-1 counters
-                                // instead of marked damage.
-                                if replaces_with_counters {
-                                    object.counters.add(CounterKind::MinusOneMinusOne, *amount as i32);
-                                } else {
-                                    object.damage_marked += amount;
-                                    if has_deathtouch && *amount > 0 {
-                                        object.deathtouched = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // CR 702.15b: Lifelink's life gain happens "in addition to
-                // any other results that damage causes" - applies to damage
-                // dealt to a player or an object alike.
-                if has_lifelink && *amount > 0 {
-                    if let Some(controller) = source_controller {
-                        if let Some(player) = state.player_mut(controller) {
-                            player.lose_life(-(*amount as i32));
-                        }
-                    }
-                }
-            }
-
+            // CR 510.2/601.2a: these are proposed events only - engine.rs's
+            // ReplacementCheck (CR 614-616) gets a chance to rewrite or
+            // prevent each one (see apply_damage_event's own doc comment for
+            // why the real mutation isn't performed here anymore).
             return Ok(CommandOutcome {
                 events,
                 broke_pass_chain: true,

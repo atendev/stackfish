@@ -5,7 +5,7 @@ use std::ops::Range;
 use crate::commands::{self, CommandError, PendingPaymentRequest, PriorityHandoff};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement::{self, ReplacementOutcome};
-use crate::sba;
+use crate::sba::{self, SbaOutcome};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
 use crate::types::ability::{AbilityEffect, ConditionSpec};
@@ -214,6 +214,31 @@ pub struct StepResult {
 /// `Engine::legal_actions()` yet to do a real "collect" step against, so
 /// there's nothing to separate it from "waiting for a submit_action" yet.
 /// Revisit if/when legal-action enumeration becomes a real feature.
+///
+/// Which pipeline a paused `ProcessState::AwaitingReplacementChoice` should
+/// resume into once `Engine::submit_replacement_choice` answers — the pause
+/// itself (event/candidates/excluded) is identical either way; only what
+/// happens *after* the choice differs.
+pub enum ReplacementResumeTarget {
+    /// Reached from a command's own proposed events (`CastSpell`/
+    /// `ActivateAbility`/combat damage's `DamageDealt`, ...) —
+    /// `remaining`/`checked` carry the rest of the same `ReplacementCheck`
+    /// run, same contract that struct's own fields already had.
+    ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
+    /// Reached from inside an SBA pass instead (`sba::resolve_deaths`, CR
+    /// 614.13's "if this would die, instead ..."). `pending_deaths` is the
+    /// rest of this pass's dying-creature list still to check; `then` says
+    /// which state originally started this pass, since `SbaLoop`'s and
+    /// `CleanupSbaCheck`'s own "nothing more to do" transitions differ.
+    SbaDeath { pending_deaths: VecDeque<ObjectId>, then: SbaResumeThen },
+}
+
+/// See `ReplacementResumeTarget::SbaDeath`'s own doc comment.
+pub enum SbaResumeThen {
+    SbaLoop,
+    CleanupSbaCheck,
+}
+
 pub enum ProcessState {
     PriorityWindow,
     /// Accepted by `submit_action`, waiting for the next `step()` to
@@ -230,23 +255,24 @@ pub enum ProcessState {
     /// order it was built, rather than a `Vec`'s `pop()` silently reversing
     /// processing order.
     ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
-    /// CR 616.1: paused mid-`ReplacementCheck` because `pending_event`
-    /// matched more than one `ReplacementEffect` (`candidates`, identified
-    /// by `source` `ObjectId`) and `affected_player` must choose which
-    /// applies first. `checked`/`remaining` carry the rest of the same
-    /// `ReplacementCheck` run so it can resume once
-    /// `submit_replacement_choice` answers. `excluded` is
+    /// CR 616.1: paused because `pending_event` matched more than one
+    /// `ReplacementEffect` (`candidates`, identified by `source` `ObjectId`)
+    /// and `affected_player` must choose which applies first. `excluded` is
     /// `replacement::ReplacementOutcome::NeedsOrderingChoice`'s own
     /// per-event exclusion set (CR 616.1: an effect applies at most once to
     /// a given event) — carried here so resuming doesn't forget which
     /// effects already applied earlier in this same event's resolution.
+    /// `resume` says what to do once `submit_replacement_choice` answers —
+    /// this pause is reached from two different pipelines (a command's own
+    /// events via `ReplacementCheck`, or a dying creature's zone-change via
+    /// `sba::resolve_deaths`), and only `resume` distinguishes them; the
+    /// pause itself is identical either way.
     AwaitingReplacementChoice {
         affected_player: PlayerId,
         pending_event: GameEventKind,
         candidates: Vec<ObjectId>,
         excluded: Vec<ObjectId>,
-        remaining: VecDeque<GameEventKind>,
-        checked: Vec<GameEventKind>,
+        resume: ReplacementResumeTarget,
     },
     /// Checked events ready to become real `GameEvent`s in the ledger.
     CommitEvents { checked: Vec<GameEventKind> },
@@ -515,9 +541,8 @@ impl Engine {
         if !candidates.contains(&chosen) {
             return Err(ReplacementChoiceError::InvalidCandidate);
         }
-        let ProcessState::AwaitingReplacementChoice {
-            pending_event, mut excluded, remaining, mut checked, ..
-        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingReplacementChoice { pending_event, mut excluded, resume, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
@@ -531,21 +556,39 @@ impl Engine {
         // pause can't reapply to the same event after it.
         let rewritten = replacement::apply_one_replacement(&mut self.state, chosen, pending_event);
         excluded.push(chosen);
-        self.process_state = match replacement::apply_replacements_from(&mut self.state, rewritten, excluded) {
-            ReplacementOutcome::Resolved(event) => {
-                checked.push(event);
-                ProcessState::ReplacementCheck { remaining, checked }
-            }
-            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
-                ProcessState::AwaitingReplacementChoice {
-                    affected_player,
-                    pending_event: event,
-                    candidates,
-                    excluded,
-                    remaining,
-                    checked,
+        let outcome = replacement::apply_replacements_from(&mut self.state, rewritten, excluded);
+
+        self.process_state = match resume {
+            ReplacementResumeTarget::ReplacementCheck { remaining, mut checked } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    checked.push(event);
+                    ProcessState::ReplacementCheck { remaining, checked }
                 }
-            }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::ReplacementCheck { remaining, checked },
+                    }
+                }
+            },
+            ReplacementResumeTarget::SbaDeath { pending_deaths, then } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let committed = sba::commit_death(&mut self.state, event);
+                    self.resume_sba_death(pending_deaths, vec![committed], then)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::SbaDeath { pending_deaths, then },
+                    }
+                }
+            },
         };
         Ok(())
     }
@@ -1543,22 +1586,14 @@ impl Engine {
                             pending_event: event,
                             candidates,
                             excluded,
-                            remaining,
-                            checked,
+                            resume: ReplacementResumeTarget::ReplacementCheck { remaining, checked },
                         };
                     }
                 }
                 StepStatus::Progressed
             }
 
-            ProcessState::AwaitingReplacementChoice {
-                affected_player,
-                pending_event,
-                candidates,
-                excluded,
-                remaining,
-                checked,
-            } => {
+            ProcessState::AwaitingReplacementChoice { affected_player, pending_event, candidates, excluded, resume } => {
                 // Nothing to do until submit_replacement_choice answers -
                 // put the exact same state back and tell the caller who
                 // needs to be prompted, mirroring PriorityWindow's
@@ -1572,8 +1607,7 @@ impl Engine {
                     pending_event,
                     candidates,
                     excluded,
-                    remaining,
-                    checked,
+                    resume,
                 };
                 status
             }
@@ -1586,6 +1620,15 @@ impl Engine {
                     .unwrap_or((None, None));
 
                 for kind in checked {
+                    // CR 510.2/614-616: a DamageDealt event describes an
+                    // effect that hasn't happened to state yet - apply it
+                    // now that it's in its final, post-replacement form
+                    // (amount/target may have been prevented/redirected).
+                    // See commands::apply_damage_event's own doc comment for
+                    // why this can't happen any earlier than here.
+                    if let GameEventKind::DamageDealt { source, target, amount } = &kind {
+                        commands::apply_damage_event(&mut self.state, &self.script_runtime, *source, *target, *amount);
+                    }
                     let event_id = self.state.allocate_event_id();
                     let sequence_no = self.state.allocate_sequence_no();
                     self.state.ledger.push(GameEvent {
@@ -1624,17 +1667,30 @@ impl Engine {
             }
 
             ProcessState::SbaLoop => {
-                let events = sba::check_state_based_actions(&mut self.state, &self.script_runtime);
-                if events.is_empty() {
-                    let since =
-                        self.pipeline_context.as_ref().map(|ctx| ctx.since_ledger).unwrap_or(0);
-                    self.process_state = ProcessState::CollectTriggers { since };
-                } else {
-                    self.state.ledger.extend(events);
-                    // Re-enter SbaLoop next step() - CR 704.3's fixed
-                    // point, not a single pass.
-                    self.process_state = ProcessState::SbaLoop;
-                }
+                self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
+                    SbaOutcome::Progressed(events) => self.finish_sba_loop(events),
+                    SbaOutcome::NeedsOrderingChoice {
+                        affected_player,
+                        pending_event,
+                        candidates,
+                        excluded,
+                        pending_deaths,
+                        resolved_so_far,
+                    } => {
+                        // Unaffected by the pause below (player-loss events,
+                        // plus any deaths already resolved earlier in this
+                        // same pass) - commit them now rather than holding
+                        // them hostage to a choice about a different death.
+                        self.state.ledger.extend(resolved_so_far);
+                        ProcessState::AwaitingReplacementChoice {
+                            affected_player,
+                            pending_event,
+                            candidates,
+                            excluded,
+                            resume: ReplacementResumeTarget::SbaDeath { pending_deaths, then: SbaResumeThen::SbaLoop },
+                        }
+                    }
+                };
                 StepStatus::Progressed
             }
 
@@ -1799,24 +1855,29 @@ impl Engine {
             }
 
             ProcessState::CleanupSbaCheck => {
-                let events = sba::check_state_based_actions(&mut self.state, &self.script_runtime);
-                if !events.is_empty() {
-                    // CR 514.3: SBAs fired during cleanup - open a priority
-                    // window so players can respond.
-                    // TODO: CR 514.3 says another cleanup step begins after
-                    // this priority window and its stack empties - currently
-                    // advance_turn_step's (Ending, Cleanup) arm rotates the
-                    // turn instead, skipping re-running discard/effect-expiry.
-                    // Correct once a case actually reaches this branch.
-                    self.state.ledger.extend(events);
-                    self.state.priority_player = self.state.active_player;
-                    self.process_state = ProcessState::PriorityWindow;
-                } else {
-                    // CR 514.3: no SBAs, no triggers (collect_triggers is
-                    // todo!() for any real ability) - skip priority entirely,
-                    // advance the turn.
-                    self.process_state = ProcessState::AdvanceTurnStep;
-                }
+                self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
+                    SbaOutcome::Progressed(events) => self.finish_cleanup_sba_check(events),
+                    SbaOutcome::NeedsOrderingChoice {
+                        affected_player,
+                        pending_event,
+                        candidates,
+                        excluded,
+                        pending_deaths,
+                        resolved_so_far,
+                    } => {
+                        self.state.ledger.extend(resolved_so_far);
+                        ProcessState::AwaitingReplacementChoice {
+                            affected_player,
+                            pending_event,
+                            candidates,
+                            excluded,
+                            resume: ReplacementResumeTarget::SbaDeath {
+                                pending_deaths,
+                                then: SbaResumeThen::CleanupSbaCheck,
+                            },
+                        }
+                    }
+                };
                 StepStatus::Progressed
             }
             ProcessState::AwaitingMulliganDecision { player } => {
@@ -1826,6 +1887,87 @@ impl Engine {
             ProcessState::AwaitingBottomCardChoice { player, count, remaining } => {
                 self.process_state = ProcessState::AwaitingBottomCardChoice { player, count, remaining };
                 StepStatus::AwaitingBottomCardChoice { player, count }
+            }
+        }
+    }
+
+    /// `SbaLoop`'s own "what happens once this pass's events are known"
+    /// transition — pulled out so a resumed CR 616.1 pause
+    /// (`resume_sba_death`) and a fresh pass (`SbaLoop`'s own arm) agree on
+    /// it instead of duplicating the branch.
+    fn finish_sba_loop(&mut self, events: Vec<GameEvent>) -> ProcessState {
+        if events.is_empty() {
+            let since = self.pipeline_context.as_ref().map(|ctx| ctx.since_ledger).unwrap_or(0);
+            ProcessState::CollectTriggers { since }
+        } else {
+            self.state.ledger.extend(events);
+            // Re-enter SbaLoop next step() - CR 704.3's fixed point, not a
+            // single pass.
+            ProcessState::SbaLoop
+        }
+    }
+
+    /// `CleanupSbaCheck`'s own "what happens once this pass's events are
+    /// known" transition — pulled out for the same reason `finish_sba_loop`
+    /// is.
+    fn finish_cleanup_sba_check(&mut self, events: Vec<GameEvent>) -> ProcessState {
+        if !events.is_empty() {
+            // CR 514.3: SBAs fired during cleanup - open a priority window
+            // so players can respond.
+            // TODO: CR 514.3 says another cleanup step begins after this
+            // priority window and its stack empties - currently
+            // advance_turn_step's (Ending, Cleanup) arm rotates the turn
+            // instead, skipping re-running discard/effect-expiry. Correct
+            // once a case actually reaches this branch.
+            self.state.ledger.extend(events);
+            self.state.priority_player = self.state.active_player;
+            ProcessState::PriorityWindow
+        } else {
+            // CR 514.3: no SBAs, no triggers (collect_triggers is todo!()
+            // for any real ability) - skip priority entirely, advance the
+            // turn.
+            ProcessState::AdvanceTurnStep
+        }
+    }
+
+    /// Continues `sba::resolve_deaths` after a paused CR 616.1 ordering
+    /// choice was answered for one dying creature — `already_resolved` is
+    /// that creature's own just-committed death event; `pending_deaths` is
+    /// the rest of this SBA pass's dying-creature list. Finishes into
+    /// whichever state originally started this pass (`then`), via
+    /// `finish_sba_loop`/`finish_cleanup_sba_check`, so a resumed pause and
+    /// a fresh pass reach the exact same "nothing more to do" transition.
+    fn resume_sba_death(
+        &mut self,
+        pending_deaths: VecDeque<ObjectId>,
+        mut already_resolved: Vec<GameEvent>,
+        then: SbaResumeThen,
+    ) -> ProcessState {
+        match sba::resolve_deaths(&mut self.state, pending_deaths) {
+            sba::DeathResolution::Done(mut events) => {
+                already_resolved.append(&mut events);
+                match then {
+                    SbaResumeThen::SbaLoop => self.finish_sba_loop(already_resolved),
+                    SbaResumeThen::CleanupSbaCheck => self.finish_cleanup_sba_check(already_resolved),
+                }
+            }
+            sba::DeathResolution::NeedsOrderingChoice {
+                affected_player,
+                pending_event,
+                candidates,
+                excluded,
+                pending_deaths,
+            } => {
+                // already_resolved (this pass's progress so far) commits now
+                // - it's unaffected by this further pause.
+                self.state.ledger.extend(already_resolved);
+                ProcessState::AwaitingReplacementChoice {
+                    affected_player,
+                    pending_event,
+                    candidates,
+                    excluded,
+                    resume: ReplacementResumeTarget::SbaDeath { pending_deaths, then },
+                }
             }
         }
     }
@@ -2315,8 +2457,7 @@ mod tests {
             },
             candidates: vec![ObjectId(1), ObjectId(2)],
             excluded: Vec::new(),
-            remaining: VecDeque::new(),
-            checked: Vec::new(),
+            resume: ReplacementResumeTarget::ReplacementCheck { remaining: VecDeque::new(), checked: Vec::new() },
         };
         let err = engine.submit_replacement_choice(ObjectId(99)).unwrap_err();
         assert!(matches!(err, ReplacementChoiceError::InvalidCandidate));

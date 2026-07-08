@@ -2084,20 +2084,11 @@ shift, don't treat it as fixed once written.
    UNRESOLVED list (two `EventFilter` shapes only, no Lua builder). Surfaced two real, pre-existing
    gaps while scoping this — split out as their own backlog items rather than silently fixed or
    silently ignored:
-   5a. **`AssignCombatDamage` bypasses replacement checking** — `commands.rs`'s combat-damage arm
-      mutates `damage_marked`/life *directly*, before the `DamageDealt` events it returns ever reach
-      `ReplacementCheck` — a prevention/redirection effect can rewrite the *ledger's* event but
-      can't stop the mutation that already happened. Needs the same "propose via `CommandOutcome.
-      events`, mutate only at `CommitEvents`" discipline `CastSpell`/`PlayLand` already follow,
-      applied to combat damage specifically.
-   5b. **SBA-driven zone changes bypass replacement checking** — `sba.rs`'s `apply_creature_death`
-      moves a dying creature straight to the graveyard and commits its own `ZoneChange` event
-      directly, never through `apply_replacements` at all (SBA events never flow through
-      `ReplacementCheck` — only `execute_command`'s events do). CR 614.13's single most common
-      real-card use ("if this would die, exile it instead") can't fire off a real death yet. Needs
-      `check_state_based_actions`'s calling convention reworked so a dying object's zone change is
-      proposed and checked before it's applied — likely also needs a new `ProcessState` pause if a
-      >1-match CR 616.1 ordering choice can arise mid-SBA.
+   5a. ~~**`AssignCombatDamage` bypasses replacement checking**~~ — done,
+      `phase5/fix-replacement-bypasses` slice (docs/implementation.md, below).
+   5b. ~~**SBA-driven zone changes bypass replacement checking**~~ — done, same slice. Real CR 616.1
+      pause support mid-SBA (not just a deterministic first-match fallback) was built, per the
+      human's explicit choice when this fork was raised.
 6. **Cost system completeness** — alternative costs (flashback-style), `{X}` costs, hybrid/
    Phyrexian/snow mana payment, cost reduction/increase, mana-cost components on an activated
    ability's own cost (no Lua-facing mana-cost-string parser exists anywhere yet). Structured
@@ -2952,6 +2943,106 @@ that could exercise one for real (combat, SBA) are exactly the bypasses named ab
   before its own builder slice landed.
 - `AssignCombatDamage`/SBA-driven death bypassing replacement checking — named above as backlog
   items 5a/5b, not fixed here.
+
+## Phase 5: phase5/fix-replacement-bypasses slice
+
+Branch `phase5/fix-replacement-bypasses`, off master. Slice backlog items 5a/5b — the two gaps
+the replacement-prevention-effects slice surfaced but deliberately didn't fix: `AssignCombatDamage`
+mutates state before its `DamageDealt` events reach `ReplacementCheck`, and SBA-driven death never
+goes through `ReplacementCheck` at all.
+
+**Scope fork, put to the human before writing code:** 5a is a clean timing fix (the pipeline
+already exists, only *when* the mutation happens is wrong). 5b is structurally harder — SBA has no
+pause mechanism anywhere, unlike `execute_command`→`CommitEvents`. Two options were on the table:
+a deterministic-first-match fallback for the rare 2+-simultaneous-death-replacement case (small,
+CR-616.1-incomplete for that one edge), or building SBA its own real `AwaitingReplacementChoice`-
+equivalent pause (bigger, fully compliant). **The human chose the real pause.** Everything below
+reflects that.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 265 tests total (260 prior + 2 new in
+`phase5_combat_damage_replacement.rs` proving 5a end-to-end through real combat, + 3 new in
+`phase5_sba_death_replacement.rs` proving 5b end-to-end, including the real multi-match pause and
+resume), 0 failed. Run under a hard `timeout` throughout this slice (lesson from the prior slice's
+own hang) — no hangs. Confirmed the CLI still runs an unrelated existing scenario
+(`phase5_layer_engine_basics.toml`) unaffected.
+
+**What got implemented (5a):**
+- `commands.rs`: `AssignCombatDamage`'s arm no longer mutates `damage_marked`/life/counters at
+  all — it only proposes `DamageDealt` events now, same "propose via `CommandOutcome.events`,
+  mutate only at commit time" discipline `CastSpell`/`PlayLand` already followed for zone changes.
+  The extracted mutation logic (Lifelink/Wither/Infect/Deathtouch, life loss, poison, marked
+  damage) becomes new `pub(crate) fn apply_damage_event(state, script_runtime, source, target,
+  amount)` — unchanged behavior, just relocated and parameterized off already-known values instead
+  of reading straight out of the loop.
+- `engine.rs`: `CommitEvents`'s loop calls `commands::apply_damage_event` for each
+  `GameEventKind::DamageDealt` in `checked` — i.e., only once the event is in its final,
+  post-replacement form. A `PreventDamage`/`RedirectDamage` effect registered against combat damage
+  now actually stops/redirects the real mutation, not just the ledger's record of it (see
+  `phase5_combat_damage_replacement.rs`).
+
+**What got implemented (5b):**
+- `sba.rs`: `apply_creature_death` split into `collect_dying_creatures` (the existing CR
+  704.5f/g candidate filter, unchanged) and new `pub(crate) fn resolve_deaths(state,
+  pending_deaths: VecDeque<ObjectId>) -> DeathResolution` — processes one dying creature at a
+  time, proposing its Battlefield→Graveyard `ZoneChange` (using its *old*, still-on-the-battlefield
+  id, since `ReplacementEffect::matches` needs to resolve it) and running it through
+  `replacement::apply_replacements` *before* actually moving it. `DeathResolution::Done(Vec
+  <GameEvent>)` (everything resolved, ids allocated) or `DeathResolution::NeedsOrderingChoice
+  { affected_player, pending_event, candidates, excluded, pending_deaths }` (CR 616.1, same shape
+  `ReplacementOutcome::NeedsOrderingChoice` already has, reached from inside an SBA pass instead of
+  a command's own events). New `pub(crate) fn commit_death` — the actual zone-move + CR 400.7 new-
+  id + `retire_object` purge, parameterized by the *final* `to` zone (`Graveyard` unless a
+  `ReplaceZoneDestination` replacement fired) instead of the old hardcoded `Graveyard`.
+  `check_state_based_actions`'s signature changed from `-> Vec<GameEvent>` to `-> SbaOutcome`
+  (`Progressed(Vec<GameEvent>)` — same meaning the bare `Vec` had before, just wrapped — or
+  `NeedsOrderingChoice { .., resolved_so_far }`, `resolved_so_far` being this pass's already-settled
+  events, e.g. player-loss, unaffected by the pause and safe to commit immediately).
+- `engine.rs`: `ProcessState::AwaitingReplacementChoice`'s `remaining`/`checked` fields (specific to
+  the command-pipeline `ReplacementCheck` case) replaced with a single `resume:
+  ReplacementResumeTarget` — `ReplacementCheck { remaining, checked }` (the original case) or
+  `SbaDeath { pending_deaths, then: SbaResumeThen }` (new; `then` is `SbaLoop` or
+  `CleanupSbaCheck`, since those two states' own "nothing more to do" transitions differ — CR
+  514.3's cleanup-priority-window special case vs. the normal `CollectTriggers` transition — and the
+  resume needs to know which one to finish into). `submit_replacement_choice` branches on `resume`
+  after applying the chosen effect. Three new private `Engine` methods: `finish_sba_loop`/
+  `finish_cleanup_sba_check` (each state's own "what happens once this pass's events are known"
+  transition, pulled out so a resumed pause and a fresh pass agree on it instead of duplicating the
+  branch) and `resume_sba_death` (continues `sba::resolve_deaths` after a paused choice, using
+  those two `finish_*` methods once it's genuinely done). Both `SbaLoop`'s and `CleanupSbaCheck`'s
+  own arms rewritten to match on `SbaOutcome` and route a `NeedsOrderingChoice` into
+  `AwaitingReplacementChoice` with the appropriate `SbaDeath` resume target.
+
+**STRUCT DEVIATIONS:**
+- `SbaOutcome`/`DeathResolution` (sba.rs), `ReplacementResumeTarget`/`SbaResumeThen` (engine.rs) —
+  all anticipated in the pre-slice discussion once "build the real pause" was chosen; this *is* the
+  shape that discussion converged on, not a deviation from it.
+
+**INTERFACE DEVIATIONS:**
+- `check_state_based_actions`'s return type change (`Vec<GameEvent>` → `SbaOutcome`) rippled into
+  every direct test caller (19 call sites across 4 test files: `phase5_layer_engine_basics.rs`,
+  `phase5_layer_engine_cda.rs`, `phase5_layer_engine_types_colors.rs`, `phase5_sba_basics.rs`) —
+  anticipated as expected mechanical churn once the signature change was on the table, same
+  "ripple through every direct caller" pattern the `&ScriptRuntime` threading (layer-engine-cda
+  slice) and `AbilityKind`-cost threading (activated-ability-costs slice) already established. Each
+  file gained a small `progressed(outcome) -> Vec<GameEvent>` local helper (panics on
+  `NeedsOrderingChoice`, since none of those fixtures register a replacement on a dying creature) so
+  the actual call-site diff is one wrapping function call, not a rewritten assertion.
+
+**SCOPE DEVIATIONS:** None — 5a/5b were the explicit, sole scope of this slice, confirmed with the
+human before writing any code.
+
+**UNRESOLVED:**
+- `resolve_deaths`/`commit_death` only handle the CR 704.5f/g creature-death shape — a
+  `ReplaceZoneDestination` fired against some other future SBA-driven zone change (none exist yet)
+  would need the same treatment applied to whatever produces it.
+- `CleanupSbaCheck`'s own pre-existing incompleteness (CR 514.3's "another cleanup step begins
+  after this priority window" isn't modeled — `advance_turn_step` just rotates the turn) is
+  untouched; `SbaResumeThen::CleanupSbaCheck` reaches the exact same incomplete transition
+  `finish_cleanup_sba_check` already had, just reachable now via a resumed pause too, not a new gap.
+- Every other `EventFilter`/`ReplacementPayload` gap the replacement-prevention-effects slice
+  already flagged (no ETB-tapped modifiers, no counter-addition replacements, no Lua builder) is
+  unchanged — this slice only fixed *when* replacement checking runs for damage/death, not *what*
+  it can express.
 
 ## Mistakes caught (don't repeat)
 

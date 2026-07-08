@@ -12,9 +12,21 @@
 use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::engine::{Engine, StepStatus};
-use stackfish_engine::sba::check_state_based_actions;
+use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+
+/// This slice's fixtures never register a `ReplacementEffect` on a dying
+/// creature - a real CR 616.1 pause here would mean the fixture itself is
+/// wrong, not something to handle gracefully.
+fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
+    match outcome {
+        SbaOutcome::Progressed(events) => events,
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+    }
+}
 
 fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -120,7 +132,7 @@ fn lethal_marked_damage_destroys_creature() {
     let bear = ObjectId(0);
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(state.object(bear).is_none(), "old id should no longer resolve");
     assert!(!state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&bear));
@@ -148,7 +160,7 @@ fn zero_toughness_creature_dies_without_any_damage_marked() {
     let weenie = ObjectId(0);
     put_on_battlefield(&mut state, creature(weenie, p0, 0, 0));
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(state.object(weenie).is_none());
     assert_eq!(events.len(), 1);
@@ -161,7 +173,7 @@ fn sub_lethal_damage_creature_survives() {
     let bear = ObjectId(0);
     put_on_battlefield(&mut state, creature(bear, p0, 3, 2));
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(state.object(bear).is_some());
     assert!(events.is_empty());
@@ -176,7 +188,7 @@ fn two_lethally_damaged_creatures_die_in_the_same_pass() {
     put_on_battlefield(&mut state, creature(a, p0, 2, 2));
     put_on_battlefield(&mut state, creature(b, p0, 1, 5));
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(state.object(a).is_none());
     assert!(state.object(b).is_none());
@@ -194,7 +206,7 @@ fn creature_with_characteristic_defining_toughness_is_skipped() {
         Some(PTValue::CharacteristicDefining { display: "*".to_string(), script: None });
     put_on_battlefield(&mut state, object);
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     // Can't resolve a CDA without the script bridge - must not guess and
     // must not panic.
@@ -208,7 +220,7 @@ fn player_at_zero_life_is_eliminated() {
     let p0 = PlayerId(0);
     state.player_mut(p0).unwrap().life = 0;
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(state.player(p0).unwrap().eliminated);
     assert_eq!(events.len(), 1);
@@ -220,7 +232,7 @@ fn player_above_zero_life_is_untouched() {
     let mut state = base_state();
     let p0 = PlayerId(0);
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(!state.player(p0).unwrap().eliminated);
     assert!(events.is_empty());
@@ -232,10 +244,10 @@ fn already_eliminated_player_does_not_re_emit_on_next_pass() {
     let p0 = PlayerId(0);
     state.player_mut(p0).unwrap().life = -5;
 
-    let first = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let first = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(first.len(), 1);
 
-    let second = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let second = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert!(second.is_empty(), "fixed-point loop must terminate, not re-eliminate every pass");
 }
 
@@ -246,7 +258,7 @@ fn nothing_applies_returns_empty() {
     let bear = ObjectId(0);
     put_on_battlefield(&mut state, creature(bear, p0, 2, 0));
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(events.is_empty());
     assert!(state.object(bear).is_some());

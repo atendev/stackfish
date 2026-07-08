@@ -15,9 +15,21 @@
 use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::check_state_based_actions;
+use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+
+/// This slice's fixtures never register a `ReplacementEffect` on a dying
+/// creature - a real CR 616.1 pause here would mean the fixture itself is
+/// wrong, not something to handle gracefully.
+fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
+    match outcome {
+        SbaOutcome::Progressed(events) => events,
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+    }
+}
 
 fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> CardDefinition {
     CardDefinition {
@@ -352,7 +364,7 @@ fn a_modify_pt_boost_saves_a_creature_from_the_lethal_toughness_sba() {
     put_on_battlefield(&mut state, daged_bear);
 
     // Without the boost, 2 damage on a 2-toughness creature is lethal.
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1, "should have died without the boost");
     assert!(state.object(bear).is_none());
 }
@@ -375,7 +387,7 @@ fn with_the_boost_registered_the_same_creature_survives_sba() {
     damaged_bear.damage_marked = 2;
     put_on_battlefield(&mut state, damaged_bear);
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(events.is_empty(), "the +1/+1 anthem should make 2 damage sub-lethal on an effective 3 toughness");
     assert!(state.object(bear).is_some());
@@ -399,7 +411,7 @@ fn a_granted_indestructible_survives_lethal_damage_via_sba() {
     damaged_bear.damage_marked = 5;
     put_on_battlefield(&mut state, damaged_bear);
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(events.is_empty(), "granted Indestructible should ignore 704.5g lethal damage");
     assert!(state.object(bear).is_some());
