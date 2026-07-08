@@ -235,11 +235,16 @@ pub enum ProcessState {
     /// by `source` `ObjectId`) and `affected_player` must choose which
     /// applies first. `checked`/`remaining` carry the rest of the same
     /// `ReplacementCheck` run so it can resume once
-    /// `submit_replacement_choice` answers.
+    /// `submit_replacement_choice` answers. `excluded` is
+    /// `replacement::ReplacementOutcome::NeedsOrderingChoice`'s own
+    /// per-event exclusion set (CR 616.1: an effect applies at most once to
+    /// a given event) — carried here so resuming doesn't forget which
+    /// effects already applied earlier in this same event's resolution.
     AwaitingReplacementChoice {
         affected_player: PlayerId,
         pending_event: GameEventKind,
         candidates: Vec<ObjectId>,
+        excluded: Vec<ObjectId>,
         remaining: VecDeque<GameEventKind>,
         checked: Vec<GameEventKind>,
     },
@@ -510,15 +515,39 @@ impl Engine {
         if !candidates.contains(&chosen) {
             return Err(ReplacementChoiceError::InvalidCandidate);
         }
-        // TODO: apply the chosen ReplacementEffect's rewrite to
-        // pending_event (needs ReplacementEffect's "apply" callback - same
-        // gap noted in replacement.rs, doesn't exist yet), then re-run
-        // apply_replacements on the result (CR 616's stabilization
-        // requirement, since the rewritten form may match yet another
-        // effect), pushing the eventual Resolved form onto `checked` before
-        // transitioning back to `ProcessState::ReplacementCheck { remaining,
-        // checked }` so the rest of this run's events still get processed.
-        todo!()
+        let ProcessState::AwaitingReplacementChoice {
+            pending_event, mut excluded, remaining, mut checked, ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        // Apply the chosen effect, exclude it from matching this same event
+        // again (CR 616.1), then re-run resolution on the result (CR 616's
+        // stabilization requirement - the rewritten form may match yet
+        // another effect, including needing a further ordering choice of
+        // its own) - carrying `excluded` forward rather than starting a
+        // fresh exclusion set, so an effect already applied before this
+        // pause can't reapply to the same event after it.
+        let rewritten = replacement::apply_one_replacement(&mut self.state, chosen, pending_event);
+        excluded.push(chosen);
+        self.process_state = match replacement::apply_replacements_from(&mut self.state, rewritten, excluded) {
+            ReplacementOutcome::Resolved(event) => {
+                checked.push(event);
+                ProcessState::ReplacementCheck { remaining, checked }
+            }
+            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
+                ProcessState::AwaitingReplacementChoice {
+                    affected_player,
+                    pending_event: event,
+                    candidates,
+                    excluded,
+                    remaining,
+                    checked,
+                }
+            }
+        };
+        Ok(())
     }
 
     /// Answers a pending CR 603.3b intra-group ordering choice raised by
@@ -1508,11 +1537,12 @@ impl Engine {
                         checked.push(event);
                         self.process_state = ProcessState::ReplacementCheck { remaining, checked };
                     }
-                    ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates } => {
+                    ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
                         self.process_state = ProcessState::AwaitingReplacementChoice {
                             affected_player,
                             pending_event: event,
                             candidates,
+                            excluded,
                             remaining,
                             checked,
                         };
@@ -1525,6 +1555,7 @@ impl Engine {
                 affected_player,
                 pending_event,
                 candidates,
+                excluded,
                 remaining,
                 checked,
             } => {
@@ -1540,6 +1571,7 @@ impl Engine {
                     affected_player,
                     pending_event,
                     candidates,
+                    excluded,
                     remaining,
                     checked,
                 };
@@ -2091,6 +2123,8 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::types::counter::CounterSet;
+    use crate::types::effect::ConsumptionPolicy;
+    use crate::types::ids::Target;
     use crate::types::mana::ManaPool;
     use crate::types::player::PlayerState;
     use std::collections::HashMap;
@@ -2175,5 +2209,157 @@ mod tests {
         let reordered = vec![group[1], group[0]];
         engine.submit_trigger_order(reordered).expect("a true reordering must be accepted");
         assert!(matches!(engine.process_state, ProcessState::PutTriggersApnap { .. }));
+    }
+
+    // ---------------------------------------------------------------------
+    // Replacement/prevention (CR 614-616) - real ReplacementCheck/
+    // AwaitingReplacementChoice pipeline wiring, driven directly (not
+    // through combat/SBA - see docs/implementation.md's own note on why
+    // those two producers can't exercise this for real yet).
+    // ---------------------------------------------------------------------
+
+    fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::GameObject {
+        use crate::types::card::{CardTypeSet, KeywordSet, PTValue, ScriptReference, SupertypeSet};
+        use crate::types::object::VisibilityPolicy;
+        crate::types::object::GameObject {
+            object_id: id,
+            lineage: crate::types::ids::ObjectLineage { previous: None },
+            definition: crate::types::card::CardDefinition {
+                definition_id: 1,
+                name: "Test Object".to_string(),
+                mana_cost: crate::types::mana::ManaCost { symbols: Vec::new() },
+                color_indicator: None,
+                supertypes: SupertypeSet::empty(),
+                card_types: CardTypeSet::ARTIFACT,
+                subtypes: Vec::new(),
+                oracle_text: String::new(),
+                power: Some(PTValue::Fixed(1)),
+                toughness: Some(PTValue::Fixed(1)),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::ByKey("test".to_string()),
+                keywords: KeywordSet::empty(),
+                target_requirement: None,
+            },
+            owner: controller,
+            controller,
+            zone: crate::types::zone::ZoneKind::Battlefield,
+            tapped: false,
+            flipped: false,
+            face_down: false,
+            phased_out: false,
+            damage_marked: 0,
+            deathtouched: false,
+            counters: CounterSet::new(),
+            attachments: Vec::new(),
+            attached_to: None,
+            timestamp: crate::types::ids::SequenceNo(0),
+            controlled_since_turn: 0,
+            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+        }
+    }
+
+    fn prevent_all_damage(source: ObjectId) -> crate::types::effect::ReplacementEffect {
+        use crate::types::effect::{EffectFilter, EventFilter, ReplacementPayload, ReplacementSpec};
+        crate::types::effect::ReplacementEffect {
+            source,
+            spec: ReplacementSpec::Primitive {
+                filter: EventFilter::DamageDealt {
+                    affected: EffectFilter { card_types: None, controller: None, self_only: false },
+                },
+                payload: ReplacementPayload::PreventDamage,
+            },
+            consumption: ConsumptionPolicy::Repeatable,
+        }
+    }
+
+    #[test]
+    fn replacement_check_applies_single_match_and_commits_rewritten_event() {
+        let p0 = PlayerId(0);
+        let effect_source = ObjectId(0);
+        let mut state = minimal_state();
+        state.objects.insert(effect_source, dummy_object(effect_source, p0));
+        state.replacement_effects.push(prevent_all_damage(effect_source));
+
+        let mut engine = Engine::new(state);
+        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(p0), amount: 7 };
+        engine.process_state =
+            ProcessState::ReplacementCheck { remaining: VecDeque::from([event]), checked: Vec::new() };
+
+        loop {
+            match engine.step().status {
+                StepStatus::Progressed => continue,
+                _ => break,
+            }
+        }
+
+        let last = engine.state().ledger.last().expect("CommitEvents must have appended the resolved event");
+        assert!(
+            matches!(last.kind, GameEventKind::DamageDealt { amount: 0, .. }),
+            "the registered PreventDamage effect must have zeroed the committed event's amount"
+        );
+    }
+
+    #[test]
+    fn submit_replacement_choice_rejects_invalid_candidate_and_not_awaiting() {
+        let mut engine = Engine::new(minimal_state());
+        let err = engine.submit_replacement_choice(ObjectId(0)).unwrap_err();
+        assert!(matches!(err, ReplacementChoiceError::NotAwaitingChoice));
+
+        engine.process_state = ProcessState::AwaitingReplacementChoice {
+            affected_player: PlayerId(0),
+            pending_event: GameEventKind::DamageDealt {
+                source: ObjectId(9),
+                target: Target::Player(PlayerId(0)),
+                amount: 1,
+            },
+            candidates: vec![ObjectId(1), ObjectId(2)],
+            excluded: Vec::new(),
+            remaining: VecDeque::new(),
+            checked: Vec::new(),
+        };
+        let err = engine.submit_replacement_choice(ObjectId(99)).unwrap_err();
+        assert!(matches!(err, ReplacementChoiceError::InvalidCandidate));
+        // A rejected answer must not have consumed the pending state.
+        assert!(matches!(engine.process_state, ProcessState::AwaitingReplacementChoice { .. }));
+    }
+
+    #[test]
+    fn submit_replacement_choice_applies_chosen_then_resolves_the_other_and_commits() {
+        let p0 = PlayerId(0);
+        let a = ObjectId(0);
+        let b = ObjectId(1);
+        let mut state = minimal_state();
+        state.objects.insert(a, dummy_object(a, p0));
+        state.objects.insert(b, dummy_object(b, p0));
+        state.replacement_effects.push(prevent_all_damage(a));
+        state.replacement_effects.push(prevent_all_damage(b));
+
+        let mut engine = Engine::new(state);
+        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p0), amount: 7 };
+        engine.process_state =
+            ProcessState::ReplacementCheck { remaining: VecDeque::from([event]), checked: Vec::new() };
+
+        // Both effects match unrestricted - one step() call should pause on
+        // the CR 616.1 ordering choice rather than guessing an order.
+        assert!(matches!(engine.step().status, StepStatus::Progressed));
+        let ProcessState::AwaitingReplacementChoice { candidates, .. } = &engine.process_state else {
+            panic!("expected AwaitingReplacementChoice - two effects matched the same event");
+        };
+        assert_eq!(candidates.len(), 2);
+
+        engine.submit_replacement_choice(a).expect("a is a real candidate");
+        // b still matches the (already-prevented) event since it isn't
+        // excluded yet - this drains it too, then commits once nothing else
+        // matches (CR 616.1: a is now excluded and can't reapply).
+        loop {
+            match engine.step().status {
+                StepStatus::Progressed => continue,
+                _ => break,
+            }
+        }
+
+        let last = engine.state().ledger.last().expect("CommitEvents must have appended the resolved event");
+        assert!(matches!(last.kind, GameEventKind::DamageDealt { amount: 0, .. }));
     }
 }
