@@ -312,6 +312,30 @@ into a creature that's then actually subject to CR 704.5g's lethal-damage SBA (t
 `[[cards]]` sources, since one `ContinuousEffect` is one layer — see `docs/implementation.md`'s
 layer-engine-types-colors slice notes).
 
+**`target_requirement` (CR 115/601.2c-e, targeting system):** if set, casting this card as a
+spell requires exactly `count` targets matching `filter` — `CastSpell` validates count/filter/
+dedup before the spell is allowed onto the stack (CR 601.2e), and `ResolveStackTop` rechecks
+legality against current game state at resolution (CR 608.2b) — if every target is now illegal,
+the spell fizzles (doesn't resolve, removed from the stack, owner's graveyard) instead of running
+its effect. `count` is always exact — no "up to N"/variable counts yet (see
+`TargetRequirement`'s own doc comment).
+
+```toml
+[cards.target_requirement]
+filter = "any"          # "object" | "player" | "any" (CR 115.4's any target: creature/player/
+                         # planeswalker/battle)
+card_types = ["Creature"] # "object" filter only, default [] (no card-type restriction)
+controller = "you"       # "object" filter only, optional: "you" | "opponent" | "any"
+zone = "battlefield"     # "object" filter only, optional, default: battlefield (CR 115.2)
+count = 1                # u32, required - exact target count
+```
+
+See `crates/engine/tests/scenarios/phase5_targeting_basics.toml` for a worked example (an "any
+target" instant cast targeting a battlefield creature, resolving normally since the target is
+still legal) — the reject/fizzle paths (wrong count, filter mismatch, duplicate targets, a target
+becoming illegal before resolution) are exercised exhaustively in
+`crates/engine/tests/phase5_targeting_basics.rs` instead, not via TOML.
+
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and
 subtypes (`Human`, `Aura`, etc) aren't settable from a scenario file yet — add fields to

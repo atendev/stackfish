@@ -8,13 +8,14 @@ use crate::types::ability::RegisteredAbility;
 use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
-use crate::types::cost::CostSpec;
+use crate::types::cost::{CostSpec, FilterController};
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
 use crate::types::object::GameObject;
 use crate::types::stack::{StackEntryKind, StackObject};
+use crate::types::target::{TargetFilter, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
@@ -169,6 +170,132 @@ fn effective_power(state: &GameState, script_runtime: &ScriptRuntime, id: Object
         crate::layers::effective_characteristics(state, script_runtime, id).power
     } else {
         None
+    }
+}
+
+/// CR 115/601.2c-e: whether `target` satisfies `filter`, evaluated against
+/// current `state` (used both at cast/activation time and, unchanged, again
+/// at `ResolveStackTop` for the CR 608.2b recheck — legality is defined the
+/// same way both times, only *when* it's asked differs). `caster` is the
+/// spell/ability's controller, since `FilterController::You`/`Opponent` are
+/// relative to whoever is casting/activating, not the target's own
+/// perspective.
+///
+/// TODO: `CR 115.2`'s "no longer in the zone it was in" half of 608.2b isn't
+/// checked here — this only asks "is it legal *now*", not "is it in the
+/// zone it was originally targeted in". The two coincide for every filter
+/// this slice builds (an `Object` filter's `zone` is fixed, so a target that
+/// changed zones already fails the zone check below), but a future filter
+/// that doesn't pin a zone would need the original zone threaded through
+/// separately to catch that case.
+pub(crate) fn target_is_legal(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    target: Target,
+    filter: &TargetFilter,
+    caster: PlayerId,
+) -> bool {
+    match filter {
+        TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
+        TargetFilter::Object { card_types, controller, zone } => {
+            let Target::Object(id) = target else { return false };
+            let Some(obj) = state.object(id) else { return false };
+            if obj.zone != zone.unwrap_or(ZoneKind::Battlefield) {
+                return false;
+            }
+            if let Some(types) = card_types {
+                let effective = crate::layers::effective_characteristics(state, script_runtime, id);
+                if !effective.card_types.intersects(*types) {
+                    return false;
+                }
+            }
+            if let Some(fc) = controller {
+                let matches_controller = match fc {
+                    FilterController::You => obj.controller == caster,
+                    FilterController::Opponent => obj.controller != caster,
+                    FilterController::Any => true,
+                };
+                if !matches_controller {
+                    return false;
+                }
+            }
+            true
+        }
+        // CR 115.4: creature, player, planeswalker, or battle only - no
+        // noncreature artifacts, no spells/abilities on the stack.
+        TargetFilter::AnyTarget => match target {
+            Target::Player(pid) => state.player(pid).is_some(),
+            Target::Object(id) => {
+                let Some(obj) = state.object(id) else { return false };
+                if obj.zone != ZoneKind::Battlefield {
+                    return false;
+                }
+                let effective = crate::layers::effective_characteristics(state, script_runtime, id);
+                effective.card_types.intersects(
+                    CardTypeSet::CREATURE | CardTypeSet::PLANESWALKER | CardTypeSet::BATTLE,
+                )
+            }
+        },
+    }
+}
+
+/// CR 601.2c/601.2e (spells) and CR 602.2b (activated abilities): validates
+/// a full set of chosen `targets` against `requirement` before the
+/// spell/ability is allowed onto the stack at all - an illegal proposed
+/// cast/activation never happens (601.2e), so this is called before any
+/// state mutation in `CastSpell`/`ActivateAbility`, and its `Err` propagates
+/// straight out without anything having been touched.
+///
+/// `None` requirement means the spell/ability takes no targets at all
+/// (CR 601.2c's "cast as though it did not require those targets") - any
+/// targets submitted anyway are rejected rather than silently ignored,
+/// since nothing asked for them.
+///
+/// TODO(CR 601.2c/115.6): `requirement.count` is exact only - "up to N"/
+/// variable-count spells aren't modeled, see `TargetRequirement`'s own doc.
+/// TODO(CR 601.2d): no division/distribution step for effects that split
+/// among several targets.
+fn validate_targets(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    requirement: Option<&TargetSpec>,
+    targets: &[Target],
+    caster: PlayerId,
+) -> Result<(), CommandError> {
+    match requirement {
+        None => {
+            if targets.is_empty() {
+                Ok(())
+            } else {
+                Err(CommandError::InvalidTarget)
+            }
+        }
+        // TODO: a script-backed target requirement isn't evaluable yet -
+        // same "Script variant stays dead code" stance ConditionSpec/
+        // AffectedFilter already take elsewhere. Nothing constructs this
+        // variant, so this arm can't be exercised for real; accept
+        // unconditionally rather than guessing at a legality rule no card
+        // uses.
+        Some(TargetSpec::Script(_)) => Ok(()),
+        Some(TargetSpec::Primitive(req)) => {
+            if targets.len() != req.count as usize {
+                return Err(CommandError::InvalidTarget);
+            }
+            // CR 115.3/601.2c: the same target can't be chosen twice for one
+            // instance of the word "target".
+            let mut seen = HashSet::new();
+            for t in targets {
+                if !seen.insert(*t) {
+                    return Err(CommandError::InvalidTarget);
+                }
+            }
+            for t in targets {
+                if !target_is_legal(state, script_runtime, *t, &req.filter, caster) {
+                    return Err(CommandError::InvalidTarget);
+                }
+            }
+            Ok(())
+        }
     }
 }
 
@@ -399,16 +526,24 @@ pub fn execute_command(
                 ));
             }
 
-            // TODO(CR 601.2b-h): modes/targets/x_value are accepted and
-            // stored on the resulting StackObject below, but none of them
-            // are validated for legality yet - no mode-legality check, no
-            // target-legality check (range/restriction/count per CR
-            // 601.2c), no division/distribution step (CR 601.2d), and no
-            // legality recheck (CR 601.2e). Also no splice (CR 601.2b/
-            // 702.47) - a player revealing other cards in hand to splice
-            // their text onto this spell isn't modeled at all; PlayerAction
-            // has nowhere to carry "which cards I'm splicing," and
-            // StackObject has nowhere to record it either.
+            // CR 601.2c/601.2e: target count/filter/dedup validated below via
+            // validate_targets, rejecting the whole cast before anything is
+            // mutated if illegal. TODO(CR 601.2b): no mode-legality check
+            // yet (modes are stored, never validated). TODO(CR 601.2d): no
+            // division/distribution step for effects that split among
+            // targets. TODO: no splice (CR 601.2b/702.47) - a player
+            // revealing other cards in hand to splice their text onto this
+            // spell isn't modeled at all; PlayerAction has nowhere to carry
+            // "which cards I'm splicing," and StackObject has nowhere to
+            // record it either.
+            let target_requirement = object.definition.target_requirement;
+            validate_targets(
+                state,
+                script_runtime,
+                target_requirement.as_ref(),
+                &targets,
+                command.actor,
+            )?;
 
             // CR 601.2f: total cost = the card's printed mana_cost only -
             // no additional/alternative costs, no reductions yet (see
@@ -453,6 +588,7 @@ pub fn execute_command(
                 command.actor,
                 modes,
                 targets,
+                target_requirement,
                 x_value,
                 ScriptHandle(0),
                 None,
@@ -521,6 +657,7 @@ pub fn execute_command(
             let effect = ability.effect.clone();
             let cost = ability.cost;
             let operation = ability.operation;
+            let target_requirement = ability.target;
 
             match effect {
                 Some(AbilityEffect::AddMana(units)) => {
@@ -576,10 +713,18 @@ pub fn execute_command(
                 // recognized primitive) both take the same path: unlike CR
                 // 605's mana abilities, a non-mana activated ability uses
                 // the stack (CR 602.2) rather than resolving immediately.
-                // Targets are accepted and stored on the StackObject below,
-                // not validated for legality - same stance CastSpell already
-                // takes (see its own TODO comment above).
-                non_mana_effect @ (None | Some(AbilityEffect::GainLife(_))) => match cost {
+                // Targets are validated below (CR 602.2b/601.2c-e) via the
+                // same validate_targets CastSpell uses, before any state
+                // mutation (tapping, stack push) happens.
+                non_mana_effect @ (None | Some(AbilityEffect::GainLife(_))) => {
+                    validate_targets(
+                        state,
+                        script_runtime,
+                        target_requirement.as_ref(),
+                        &targets,
+                        command.actor,
+                    )?;
+                    match cost {
                     Some(AbilityCost::Tap) => {
                         let source_object =
                             state.object(source).ok_or(CommandError::InvalidTarget)?;
@@ -615,6 +760,7 @@ pub fn execute_command(
                             // TODO: no modes/X value on activated abilities yet.
                             Vec::new(),
                             targets,
+                            target_requirement,
                             None,
                             operation,
                             non_mana_effect,
@@ -636,7 +782,8 @@ pub fn execute_command(
                     // (still `todo!()`); no ability in this engine has ever
                     // set `cost` to anything but `Tap` or `None`.
                     None => todo!(),
-                },
+                    }
+                }
             }
         }
         PlayerActionKind::DeclareAttackers { attackers } => {

@@ -158,6 +158,7 @@ fn all_pass_with_nonempty_stack_resolves_top_instead_of_advancing_step() {
         controller: PlayerId(0),
         chosen_modes: Vec::new(),
         targets: Vec::new(),
+        target_requirement: None,
         x_value: None,
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),

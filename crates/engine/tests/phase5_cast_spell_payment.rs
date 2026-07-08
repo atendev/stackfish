@@ -35,6 +35,7 @@ fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_spell".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 

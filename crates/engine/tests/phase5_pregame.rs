@@ -30,6 +30,7 @@ fn plain_card_def(name: &str) -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey(name.to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 

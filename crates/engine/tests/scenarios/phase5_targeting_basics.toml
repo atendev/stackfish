@@ -1,0 +1,87 @@
+# Targeting-system slice (CR 115/601.2c-e/608.2b): a card declares a real
+# target_requirement, CastSpell validates the chosen target against it
+# before the spell is allowed onto the stack, and it carries through to a
+# normal CR 608.2b-checked resolution (target still legal - resolves
+# exactly as before this slice, no fizzle). The reject/fizzle paths
+# themselves are exercised exhaustively in
+# crates/engine/tests/phase5_targeting_basics.rs - this fixture only proves
+# the real end-to-end pipeline (TOML -> Engine -> CLI) wires the new
+# CardSpec.target_requirement field through correctly.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "bolt"
+name = "Test Bolt"
+types = ["Instant"]
+
+# CR 115.4's "any target" - creature, player, planeswalker, or battle.
+[cards.target_requirement]
+filter = "any"
+count = 1
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bolt"
+
+# A solo player's first PassPriority always counts as "everyone passed", so
+# each of these advances one turn/phase/step (CR 500-514) - PreGame -> Untap
+# (no priority window) -> Upkeep -> Draw -> Main. Same prelude as
+# phase5_cast_spell_payment.toml.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "bolt"
+targets = ["bear"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+# bolt has no mana_cost - still needs an explicit empty plan (CR 118.5a).
+
+# Resolves the stack - target ("bear") is still legally on the battlefield,
+# so this proceeds as a normal CR 608.2m resolution (instant -> graveyard),
+# not a CR 608.2b fizzle.
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bolt"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_ledger_len"
+equals = 16

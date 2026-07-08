@@ -32,6 +32,7 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_creature".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 

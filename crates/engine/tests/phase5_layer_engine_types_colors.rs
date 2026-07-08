@@ -33,6 +33,7 @@ fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> Card
         defense: None,
         script_ref: ScriptReference::ByKey("test_creature".to_string()),
         keywords,
+        target_requirement: None,
     }
 }
 
@@ -78,6 +79,7 @@ fn land_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_land".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 

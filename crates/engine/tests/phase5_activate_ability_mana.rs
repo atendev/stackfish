@@ -28,6 +28,7 @@ fn land_definition() -> CardDefinition {
         defense: None,
         script_ref: ScriptReference::ByKey("test_forest".to_string()),
         keywords: KeywordSet::empty(),
+        target_requirement: None,
     }
 }
 

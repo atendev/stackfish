@@ -17,6 +17,7 @@ pub mod mana;
 pub mod object;
 pub mod player;
 pub mod stack;
+pub mod target;
 pub mod turn;
 pub mod zone;
 
@@ -35,5 +36,6 @@ pub use mana::*;
 pub use object::*;
 pub use player::*;
 pub use stack::*;
+pub use target::*;
 pub use turn::*;
 pub use zone::*;

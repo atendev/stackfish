@@ -41,6 +41,7 @@ fn creature_definition(name: &str, power: i32, toughness: i32, keywords: Keyword
         defense: None,
         script_ref: ScriptReference::ByKey(name.to_string()),
         keywords,
+        target_requirement: None,
     }
 }
 

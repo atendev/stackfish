@@ -22,6 +22,7 @@ use crate::types::mana::ManaPool;
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::PlayerState;
 use crate::types::stack::{StackEntryKind, StackObject};
+use crate::types::target::TargetSpec;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
 
@@ -1154,6 +1155,67 @@ impl Engine {
         }
     }
 
+    /// CR 608.2m (normal resolution) and CR 608.2b (fizzle): moves a
+    /// resolving spell's card off the stack into `destination`, minting a
+    /// fresh `ObjectId` (CR 400.7) the same way every other zone change
+    /// does. Pulled out so `ResolveStackTop`'s normal-resolution branch and
+    /// its CR 608.2b fizzle branch (below) share one zone-move
+    /// implementation instead of two copies that could drift apart -
+    /// `destination`/`run_script` are the only two things that differ
+    /// between them (battlefield-vs-graveyard, and whether a permanent's
+    /// card script runs). Returns `None` only in the defensive case where
+    /// `stack_id`'s `GameObject` is already gone (shouldn't happen - nothing
+    /// else removes it while still on the stack).
+    fn move_resolving_spell(
+        &mut self,
+        stack_id: ObjectId,
+        destination: ZoneKind,
+        run_script: bool,
+    ) -> Option<GameEventKind> {
+        let spell_object = self.state.object(stack_id)?;
+        let last_known_info = spell_object.clone();
+        let destination_owner =
+            if destination == ZoneKind::Battlefield { None } else { Some(last_known_info.owner) };
+
+        let new_id = self.state.allocate_object_id();
+        let mut new_object = last_known_info.clone();
+        new_object.object_id = new_id;
+        new_object.lineage = ObjectLineage { previous: Some(stack_id) };
+        new_object.zone = destination;
+        new_object.timestamp = self.state.allocate_sequence_no();
+        // CR 302.6/602.5a: only a permanent actually entering the
+        // battlefield is summoning sick - a fizzled/graveyard-bound card
+        // was never in play.
+        if destination == ZoneKind::Battlefield {
+            new_object.controlled_since_turn = self.state.turn_number;
+        }
+
+        self.state.objects.remove(&stack_id);
+        // Captured before `new_object` moves into `objects.insert` below -
+        // `run_script` is `false` for a fizzle (CR 608.2b: it never
+        // resolves, so no ETB self-registration either) and for any
+        // non-battlefield destination.
+        let definition_for_script = if run_script { Some(new_object.definition.clone()) } else { None };
+        if let Some(zone) = self.state.zone_mut(destination, destination_owner) {
+            zone.push_bottom(new_id);
+            self.state.objects.insert(new_id, new_object);
+        }
+        commands::remap_abilities(&mut self.state, stack_id, new_id);
+        if let Some(definition) = definition_for_script {
+            // TODO: a script error here is silently dropped, same gap
+            // ResolveStackTop's operation-invocation path already flags (no
+            // error surface from ResolveStackTop back to a StepStatus yet).
+            let _ = self.script_runtime.run_card_script(&mut self.state, &definition, new_id);
+        }
+
+        Some(GameEventKind::ZoneChange {
+            object: new_id,
+            from: ZoneKind::Stack,
+            to: destination,
+            last_known_info: Some(last_known_info),
+        })
+    }
+
     /// Pipeline run's final transition: consumes `self.pipeline_exit`,
     /// clears `self.pipeline_context` (the MUST documented on that field —
     /// the run that set it is finishing right here, in this call), and
@@ -1304,130 +1366,127 @@ impl Engine {
                 self.pipeline_context =
                     Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
                 self.pipeline_exit = PipelineExit::BackToPriority;
-                // TODO: real resolution should look up top.operation
-                // (ScriptHandle) and invoke it via
-                // ScriptRuntime::invoke_operation to actually carry out
-                // whatever the spell/ability says - blocked on the script
-                // bridge like every other script-shaped gap. What follows is
-                // only CR 608.2m's zone-change half of resolution (a spell's
-                // card moves off the stack once it resolves) - it does not
-                // run any spell effect.
+
+                // CR 608.2b: before doing anything else, recheck every
+                // target against current game state. Only fizzles if there
+                // was a real (count > 0) requirement and every target now
+                // fails it - a requirement of `None`/count 0 never fizzles,
+                // same as if it had no targets to begin with.
+                let fizzles = match &top.target_requirement {
+                    Some(TargetSpec::Primitive(req)) if req.count > 0 => top.targets.iter().all(|t| {
+                        !commands::target_is_legal(
+                            &self.state,
+                            &self.script_runtime,
+                            *t,
+                            &req.filter,
+                            top.controller,
+                        )
+                    }),
+                    // `None` (no targets required), count-0 requirement, or
+                    // a `Script`-backed requirement (not evaluable this
+                    // slice, see `TargetSpec`'s own doc comment) - never
+                    // fizzles.
+                    _ => false,
+                };
+
                 let mut events = Vec::new();
-                if matches!(top.kind, StackEntryKind::Spell) {
-                    // Defensive: the spell's GameObject should always still
-                    // be at top.stack_id (nothing else removes it while on
-                    // the stack) - None here would mean some other path
-                    // already mutated it unexpectedly. Skip the zone move
-                    // rather than panic, same defensive stance as the empty-
-                    // stack branch above.
-                    if let Some(spell_object) = self.state.object(top.stack_id) {
-                        let last_known_info = spell_object.clone();
+                if fizzles {
+                    // CR 608.2b: doesn't resolve at all - no effect
+                    // invocation, no permanent-entry script, and (unlike
+                    // normal CR 608.2m resolution) a spell always lands in
+                    // its owner's graveyard regardless of card type.
+                    if matches!(top.kind, StackEntryKind::Spell) {
+                        if let Some(event) =
+                            self.move_resolving_spell(top.stack_id, ZoneKind::Graveyard, false)
+                        {
+                            events.push(event);
+                        }
+                    }
+                    events.push(GameEventKind::Fizzled { stack_id: top.stack_id });
+                } else {
+                    // TODO: real resolution should look up top.operation
+                    // (ScriptHandle) and invoke it via
+                    // ScriptRuntime::invoke_operation to actually carry out
+                    // whatever the spell/ability says - blocked on the script
+                    // bridge like every other script-shaped gap. What follows is
+                    // only CR 608.2m's zone-change half of resolution (a spell's
+                    // card moves off the stack once it resolves) - it does not
+                    // run any spell effect.
+                    if matches!(top.kind, StackEntryKind::Spell) {
                         // CR 608.2m: a permanent type goes to the
                         // battlefield as a permanent; an instant or sorcery
                         // (the only other types castable as a spell - see
                         // CastSpell's land rejection in commands.rs) goes to
-                        // its owner's graveyard instead.
-                        let is_permanent = !last_known_info
-                            .definition
-                            .card_types
-                            .intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY);
-                        let destination = if is_permanent {
-                            ZoneKind::Battlefield
-                        } else {
-                            ZoneKind::Graveyard
-                        };
-                        let destination_owner =
-                            if is_permanent { None } else { Some(last_known_info.owner) };
-
-                        // CR 400.7: another zone change, another new id -
-                        // same convention as PlayLand/CastSpell's hand moves.
-                        let new_id = self.state.allocate_object_id();
-                        let mut new_object = last_known_info.clone();
-                        new_object.object_id = new_id;
-                        new_object.lineage = ObjectLineage { previous: Some(top.stack_id) };
-                        new_object.zone = destination;
-                        new_object.timestamp = self.state.allocate_sequence_no();
-                        // CR 302.6/602.5a: a permanent entering the battlefield
-                        // this turn is summoning sick — stamp it with the
-                        // current turn number so has_summoning_sickness fires.
-                        if is_permanent {
-                            new_object.controlled_since_turn = self.state.turn_number;
-                        }
-
-                        self.state.objects.remove(&top.stack_id);
-                        // Captured before `new_object` moves into
-                        // `objects.insert` below - only a permanent actually
-                        // reaches the battlefield, so only it gets its card
-                        // script run.
-                        let definition_for_script =
-                            if is_permanent { Some(new_object.definition.clone()) } else { None };
-                        if let Some(zone) = self.state.zone_mut(destination, destination_owner) {
-                            zone.push_bottom(new_id);
-                            self.state.objects.insert(new_id, new_object);
-                        }
-                        commands::remap_abilities(&mut self.state, top.stack_id, new_id);
-                        // else: no such zone registered - defensive no-op,
-                        // same stance as PlayLand's zone_mut lookups, just
-                        // without a CommandError to return from here.
-                        if let Some(definition) = definition_for_script {
-                            // CR 400.7: a fresh battlefield object,
-                            // unconditionally - self-registration runs every
-                            // time, no "first time only" check.
-                            // TODO: a script error here is silently dropped,
-                            // same gap the operation-invocation path below
-                            // already flags (no error surface from
-                            // ResolveStackTop back to a StepStatus yet).
-                            let _ =
-                                self.script_runtime.run_card_script(&mut self.state, &definition, new_id);
-                        }
-
-                        events.push(GameEventKind::ZoneChange {
-                            object: new_id,
-                            from: ZoneKind::Stack,
-                            to: destination,
-                            last_known_info: Some(last_known_info),
+                        // its owner's graveyard instead. Peek the card's
+                        // types before moving it - move_resolving_spell needs
+                        // the destination decided up front.
+                        let destination = self.state.object(top.stack_id).map(|obj| {
+                            if obj
+                                .definition
+                                .card_types
+                                .intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY)
+                            {
+                                ZoneKind::Graveyard
+                            } else {
+                                ZoneKind::Battlefield
+                            }
                         });
-                    }
-                }
-                // ActivatedAbility/Copy: nothing on a zone moves when these
-                // resolve (CR 608's ability-resolution path doesn't involve
-                // a card) - only the Spell branch above produces a
-                // ZoneChange. Activated and triggered abilities resolve the
-                // same way: `top.effect`'s Rust-native fast path when it's a
-                // recognized primitive (no Lua call at all), falling back to
-                // the real script bridge (CR 602.2b/603.4/608.2m's
-                // resolution proper) only when it's None.
-                if matches!(
-                    top.kind,
-                    StackEntryKind::TriggeredAbility | StackEntryKind::ActivatedAbility
-                ) {
-                    match &top.effect {
-                        Some(AbilityEffect::GainLife(amount)) => {
-                            if let Some(player) = self.state.player_mut(top.controller) {
-                                player.gain_life(*amount);
+                        if let Some(destination) = destination {
+                            let run_script = destination == ZoneKind::Battlefield;
+                            if let Some(event) =
+                                self.move_resolving_spell(top.stack_id, destination, run_script)
+                            {
+                                events.push(event);
                             }
                         }
-                        // AddMana is only ever set on a mana ability, which
-                        // resolves immediately and never reaches the stack
-                        // (CR 605.1a/605.3b) - no StackObject of either kind
-                        // should ever carry this variant. Defensive no-op
-                        // rather than a panic.
-                        Some(AbilityEffect::AddMana(_)) => {}
-                        None => {
-                            // TODO: a script error here is silently dropped
-                            // - no path from ResolveStackTop back to a
-                            // StepStatus error exists for a mid-resolution
-                            // script failure yet.
-                            let _ = self.script_runtime.invoke_operation(
-                                top.operation,
-                                &mut self.state,
-                                top.source,
-                                top.controller,
-                            );
+                        // else: defensive - the spell's GameObject should
+                        // always still be at top.stack_id (nothing else
+                        // removes it while on the stack); None here would
+                        // mean some other path already mutated it
+                        // unexpectedly. Skip the zone move rather than
+                        // panic, same defensive stance as the empty-stack
+                        // branch above.
+                    }
+                    // ActivatedAbility/Copy: nothing on a zone moves when these
+                    // resolve (CR 608's ability-resolution path doesn't involve
+                    // a card) - only the Spell branch above produces a
+                    // ZoneChange. Activated and triggered abilities resolve the
+                    // same way: `top.effect`'s Rust-native fast path when it's a
+                    // recognized primitive (no Lua call at all), falling back to
+                    // the real script bridge (CR 602.2b/603.4/608.2m's
+                    // resolution proper) only when it's None.
+                    if matches!(
+                        top.kind,
+                        StackEntryKind::TriggeredAbility | StackEntryKind::ActivatedAbility
+                    ) {
+                        match &top.effect {
+                            Some(AbilityEffect::GainLife(amount)) => {
+                                if let Some(player) = self.state.player_mut(top.controller) {
+                                    player.gain_life(*amount);
+                                }
+                            }
+                            // AddMana is only ever set on a mana ability, which
+                            // resolves immediately and never reaches the stack
+                            // (CR 605.1a/605.3b) - no StackObject of either kind
+                            // should ever carry this variant. Defensive no-op
+                            // rather than a panic.
+                            Some(AbilityEffect::AddMana(_)) => {}
+                            None => {
+                                // TODO: a script error here is silently dropped
+                                // - no path from ResolveStackTop back to a
+                                // StepStatus error exists for a mid-resolution
+                                // script failure yet.
+                                let _ = self.script_runtime.invoke_operation(
+                                    top.operation,
+                                    &mut self.state,
+                                    top.source,
+                                    top.controller,
+                                );
+                            }
                         }
                     }
+                    events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
                 }
-                events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
                 self.process_state =
                     ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
                 StepStatus::Progressed
@@ -1588,7 +1647,18 @@ impl Engine {
                         };
                         let operation = ability.operation;
                         let effect = ability.effect.clone();
+                        let target_requirement = ability.target;
                         let stack_id = self.state.allocate_object_id();
+                        // TODO(CR 603.3c): triggered abilities that require
+                        // targets ("when this dies, destroy target
+                        // creature") aren't choosable yet - targets is
+                        // always empty here, same script-bridge-mid-
+                        // pipeline gap invoke_target/select_targets already
+                        // flag. target_requirement is still baked onto the
+                        // StackObject (in case a future ability sets a
+                        // fixed/no-choice target) so ResolveStackTop's CR
+                        // 608.2b recheck applies uniformly regardless of
+                        // StackEntryKind.
                         self.state.stack.push(StackObject::new(
                             stack_id,
                             StackEntryKind::TriggeredAbility,
@@ -1596,6 +1666,7 @@ impl Engine {
                             trigger.controller,
                             Vec::new(),
                             Vec::new(),
+                            target_requirement,
                             None,
                             operation,
                             effect,
