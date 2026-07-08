@@ -1,3 +1,4 @@
+use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, ScriptHandle};
 use crate::types::mana::ManaUnit;
@@ -34,18 +35,6 @@ pub enum AbilityEffect {
     /// `{ gain_life = n }` Lua operation table from the prior slice, just
     /// resolved on the Rust side instead of via `ScriptRuntime::invoke_operation`.
     GainLife(i32),
-}
-
-/// The one cost shape `Game.Costs.*` covers this slice — a Rust-native fast
-/// path so `{T}` (CR 605's mana-ability cost, generalized here to a non-mana
-/// activated ability) doesn't need a script callback at all. Mirrors
-/// `ConditionPrimitive`/`AbilityEffect`'s "recognized primitive, zero Lua
-/// calls" shape; mana cost, sacrifice/discard/life, and any `CostSpec`-style
-/// additional cost stay unmodeled (same pre-existing gap
-/// `PaymentPlan::validate` already flags for `CostSpec.additional`).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AbilityCost {
-    Tap,
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a
@@ -113,11 +102,16 @@ pub struct RegisteredAbility {
     /// `Game.Conditions.Typo` as unconditional (see
     /// `ScriptRuntime::load_condition`).
     pub condition: Option<ConditionSpec>,
-    /// `None` means "no cost primitive recognized" — same script-bridge-
-    /// fallback posture as `effect`, though nothing consumes that fallback
-    /// yet (`ScriptRuntime::invoke_cost` is still `todo!()`). `Some(Tap)` is
-    /// the one shape `ActivateAbility` resolves this slice.
-    pub cost: Option<AbilityCost>,
+    /// `None` means "no cost at all" — `ActivateAbility` treats this the
+    /// same as an empty `CostSpec` (mana: None, additional: empty), still
+    /// routing through `AwaitingPayment` for an explicit (even if empty)
+    /// acknowledgment, same CR 118.5a stance `CastSpell`'s mana cost already
+    /// takes. `Some(spec)` is CR 602.2b's real cost — mana-cost components
+    /// on an activated ability's cost stay out of scope (no Lua-facing
+    /// mana-cost-string parser exists anywhere yet), so `spec.mana` is
+    /// always `None` in practice this slice; `spec.additional` is what
+    /// `Game.CreateActivatedAbility`'s `:AddCost` builds up.
+    pub cost: Option<CostSpec>,
     /// `None` means "no targets required" — same "cast as though it did
     /// not require those targets" stance `CardDefinition::target_requirement`
     /// takes. `Some(TargetSpec::Primitive(_))` is what `ActivateAbility`

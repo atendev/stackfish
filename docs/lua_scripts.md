@@ -15,9 +15,11 @@ before assuming something works.
 
 Per `docs/ygo_pro_reference.md`'s effect lifecycle (condition/cost/target/operation as separate
 callbacks, not one monolithic function), a `RegisteredAbility` keeps each concern separate so the
-engine can check one without committing to another. Only **condition** and **operation** are
-real this slice — **cost** and **target** callbacks exist as `Option<ScriptHandle>` fields but
-are never invoked yet (see "Not available yet").
+engine can check one without committing to another. **condition**, **cost**, and **operation** are
+all real — **cost** (`RegisteredAbility.cost: Option<CostSpec>`) is built from `Game.Costs.*`
+primitives via `ActivatedAbilityBuilder`, not a script callback at all (there's no `Script`
+fallback shape for costs, see "Not available yet"). **target** stays unreal — it exists as an
+`Option<TargetSpec>` field but nothing sets it from Lua yet.
 
 - **condition** — did this ability's trigger event happen? Runs at `CollectTriggers` time,
   once per matching event, and must be a pure yes/no check.
@@ -303,6 +305,61 @@ Real, tested end to end: `crates/engine/tests/phase5_static_ability_self_registr
 Scenario TOML fixtures can use this via `CardSpec.script` too — see
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 
+## Self-registering an activated ability
+
+`Game.CreateActivatedAbility(c)` is the CR 602 sibling of `Game.CreateTriggeredAbility`/
+`Game.CreateStaticAbility` — same queued-registration mechanism (`ActivatedAbilityBuilder` next to
+the other two builders in `script.rs`), producing a real `RegisteredAbility` with
+`kind = AbilityKind::Activated`:
+
+```lua
+-- {T}: Gain 1 life.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:AddCost(Game.Costs.TapSelf)
+    e:SetOperation(Game.Ops.GainLife(1))
+    e:Register()
+end
+
+return s
+```
+
+`:AddCost` is called once per cost component, not a single `:SetCost` — an activation can need
+more than one at once (e.g. `{T}, Sacrifice a creature:`):
+
+```lua
+e:AddCost(Game.Costs.TapSelf)
+e:AddCost(Game.Costs.Sacrifice({ card_types = { "Creature" } }))
+```
+
+`Game.Costs` mirrors `Game.Effects`'s one-factory-per-shape convention:
+
+- `Game.Costs.TapSelf` — CR 602.5a's `{T}` on the ability's own source. A plain tagged value (no
+  arguments), always taps whichever object is activating the ability — never a filter choice.
+- `Game.Costs.Sacrifice(filter)` / `Game.Costs.Discard(filter)` — `filter` is a plain table, same
+  shape `:SetAffected` already uses: `{ card_types = {...}, controller = "you"|"opponent"|"any",
+  random = true }`, every key optional.
+- `Game.Costs.TapPermanents(filter, count)` — taps `count` *other* permanents matching `filter`
+  (distinct from `TapSelf`).
+- `Game.Costs.Life(n)` — pay `n` life.
+
+No `:SetCost` — every `:AddCost` call appends to the ability's `CostSpec.additional`. Omitting
+`:AddCost` entirely means `cost: None` (no cost at all), not an empty `CostSpec`. Mana-cost
+components on an activated ability's own cost stay out of scope — no Lua-facing mana-cost-string
+parser exists anywhere yet (same boundary `CastSpell`'s own cost has). `:SetTarget` isn't bound
+either — a script-registered activated ability is targetless this slice, same "nothing built yet
+to consume it" stance `TriggeredAbilityBuilder`'s own `:SetTarget` omission takes.
+
+Activating one of these still pauses on `AwaitingPayment` the same way `CastSpell` does, even for a
+bare `Game.Costs.TapSelf` cost — the actual tap (or sacrifice/discard/life deduction) happens once
+`Engine::submit_payment` commits a real `PaymentPlan`, not when the ability is announced.
+
+Real, tested end to end: `crates/engine/tests/phase5_activated_ability_self_registration.rs` and
+`crates/engine/tests/phase5_activate_ability_costs.rs` (the latter covers hand-built, non-script
+`CostSpec`s exercising every additional-cost shape).
+
 ## Hidden information
 
 A condition function only ever receives `source`/`controller`/`event` as plain values — the full
@@ -322,13 +379,13 @@ Don't spend time trying these — they're signatures only, or explicitly unbound
 - **`Game.ReplaceEvent`, `Game.CastSpell`, `Game.PayCost`, `Game.SelectTargets`** (`script_api.rs`)
   — none of these are bound into the Lua VM's globals. A card script cannot call any of them.
   `Game.Conditions.*`/`Game.Ops.*`/`Game.Costs.*`/`Game.Layers.*`/`Game.Effects.*`/
-  `Game.CreateTriggeredAbility`/`Game.CreateStaticAbility` are what exist on `Game` right now.
-  `Game.AddContinuousEffect` specifically is superseded by `Game.CreateStaticAbility`'s builder
-  (same relationship the old `register_triggered_ability` free function has to
-  `Game.CreateTriggeredAbility`) — it was never bound and isn't expected to be.
-- **`Game.CreateActivatedAbility`** — only triggered and static abilities can self-register so
-  far. A mana ability is still wired via `mana_ability` (`docs/scenario_format.md`), not Lua at
-  all.
+  `Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`/`Game.CreateActivatedAbility` are what
+  exist on `Game` right now. `Game.AddContinuousEffect` specifically is superseded by
+  `Game.CreateStaticAbility`'s builder (same relationship the old `register_triggered_ability` free
+  function has to `Game.CreateTriggeredAbility`) — it was never bound and isn't expected to be.
+- **A mana ability via Lua** — still wired via `mana_ability` (`docs/scenario_format.md`), not
+  `Game.CreateActivatedAbility` — CR 605 mana abilities resolve immediately and never read `.cost`
+  at all, out of scope for that builder.
 - **`AffectedFilter::Script`/`EffectPayload::Script`** (script-backed static-ability predicates/
   effect shapes, as opposed to the `Game.Layers.*`/`Game.Effects.*`/`SetAffected` table primitives
   above) — still dead code, not evaluable. `docs/implementation.md`'s slice backlog tracks this as
@@ -337,15 +394,13 @@ Don't spend time trying these — they're signatures only, or explicitly unbound
   `ByKey` is a real error. Real integration is expected to always hand this engine an
   already-resolved `Inline` source (the database crate resolves the key upstream), so this may
   never need solving here.
-- **Cost and target callbacks** — `RegisteredAbility.cost`/`.target` exist as fields, and the
-  builder doesn't even bind `:SetCost`/`:SetTarget`, but `ScriptRuntime::invoke_cost`/
-  `invoke_target` are both `todo!()` regardless. Every trigger exercised so far has no cost and no
-  targets.
-- **Activated (non-mana) abilities** — `commands::execute_command`'s `ActivateAbility` arm still
-  `todo!()`s for anything other than a CR 605 mana ability (see `mana_ability` in
-  `docs/scenario_format.md`, which doesn't go through Lua at all). A `Game.Ops.GainLife`-style
-  primitive on an *activated* (not triggered) ability can't resolve yet — there's nowhere for
-  `ActivateAbility` to push a `StackObject` for it.
+- **Script-backed costs/targets** — `ScriptRuntime::invoke_cost`/`invoke_target` are both
+  `todo!()`. `Game.Costs.*` covers every structured `AdditionalCost` shape without needing either
+  one, and `TriggeredAbilityBuilder`/`ActivatedAbilityBuilder` don't bind `:SetCost`/`:SetTarget`
+  at all — a script-registered ability can't have a custom-Lua-function cost or target predicate,
+  only the recognized primitive shapes.
+- **{X} costs, alternative costs (flashback-style), hybrid/Phyrexian/snow mana payment** —
+  pre-existing `CostSpec`/`PaymentPlan` gaps, not specific to the script bridge.
 - **Continuous effects and replacement effects** — `ContinuousEffect::applies_to` and
   `ReplacementEffect::matches` are both `todo!()`. No "as long as you control a Forest" or
   "if a source would deal damage, prevent it" style effect can be checked yet, scripted or not.

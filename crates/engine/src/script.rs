@@ -5,10 +5,10 @@ use std::rc::Rc;
 use mlua::{Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{
-    AbilityCost, AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility,
+    AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility,
 };
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference};
-use crate::types::cost::FilterController;
+use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{
     AffectedFilter, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload, EffectPrimitive,
     Layer,
@@ -34,11 +34,11 @@ impl UserData for ConditionTag {}
 struct OperationTag(AbilityEffect);
 impl UserData for OperationTag {}
 
-/// Same idea, for `Game.Costs.*` — e.g. `Game.Costs.Tap` is a plain tagged
-/// value (no arguments, unlike `Game.Ops.GainLife(n)`) decoded back out via
-/// `decode_cost_value`.
-#[derive(Clone, Copy)]
-struct CostTag(AbilityCost);
+/// Same idea, for `Game.Costs.*` — e.g. `Game.Costs.TapSelf` is a plain
+/// tagged value, `Game.Costs.Sacrifice({...})` is a Lua function returning
+/// one of these — decoded back out via `decode_additional_cost_value`.
+#[derive(Clone)]
+struct CostTag(AdditionalCost);
 impl UserData for CostTag {}
 
 /// Same idea, for `Game.Layers.*` — e.g. `Game.Layers.PowerToughnessModifying`
@@ -103,7 +103,9 @@ struct ScriptRegistry {
     /// waiting to be drained into `GameState.abilities` once the whole card
     /// script call returns (`ScriptRuntime::run_card_script`). Lua never
     /// gets a `GameState` reference at all — this is what `:Register()`
-    /// pushes onto instead.
+    /// pushes onto instead. Shared by both `TriggeredAbilityBuilder` and
+    /// `ActivatedAbilityBuilder` — the drain doesn't care about
+    /// `AbilityKind`, so there's no need for a second, kind-specific queue.
     pending_triggered: Vec<RegisteredAbility>,
     /// Same idea as `pending_triggered`, for `Game.CreateStaticAbility`'s
     /// builder (CR 604/611) — drained into `GameState.continuous_effects` by
@@ -197,10 +199,13 @@ fn decode_operation_value(
 }
 
 /// Same shape as `decode_condition_value`/`decode_operation_value`, for
-/// `Game.Costs.*` — no `Script` fallback yet (`RegisteredAbility::cost`'s
-/// only consumer, `ScriptRuntime::invoke_cost`, is still `todo!()`), so a
-/// bare custom function isn't accepted here, unlike the other two decoders.
-fn decode_cost_value(value: Value) -> Result<AbilityCost, ScriptError> {
+/// `Game.Costs.*` — no `Script` fallback (`AdditionalCost` has no such
+/// variant), so a bare custom function isn't accepted here, unlike the
+/// condition/operation decoders. Shared by `ActivatedAbilityBuilder::AddCost`
+/// and (indirectly, via a plain one-liner eval) any future standalone-cost
+/// loader, same convention `decode_condition_value` follows for
+/// `load_condition`/`TriggeredAbilityBuilder::SetCondition`.
+fn decode_additional_cost_value(value: Value) -> Result<AdditionalCost, ScriptError> {
     match value {
         Value::UserData(ud) => {
             let tag: CostTag =
@@ -208,13 +213,43 @@ fn decode_cost_value(value: Value) -> Result<AbilityCost, ScriptError> {
             Ok(tag.0)
         }
         Value::Nil => Err(ScriptError::LoadError(
-            "cost script returned nil - expected a Game.Costs.* value".to_string(),
+            "AddCost() called with nil - expected a Game.Costs.* value".to_string(),
         )),
         other => Err(ScriptError::LoadError(format!(
-            "cost script must return a Game.Costs.* value, got {}",
+            "AddCost() expects a Game.Costs.* value, got {}",
             other.type_name()
         ))),
     }
+}
+
+/// `ActivatedAbilityBuilder`'s `:AddCost`/`Game.Costs.Sacrifice`/`Discard`/
+/// `TapPermanents` filter argument — a plain Lua table
+/// (`{controller=.., card_types={..}, random=..}`, every key optional), same
+/// convention `decode_affected_table` already established for
+/// `StaticAbilityBuilder::SetAffected`. `extra` is never settable from Lua
+/// this slice (see `FilterSpec::extra`'s own doc comment) — always `None`.
+fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
+    let controller_name: Option<String> =
+        table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+
+    let card_types_table: Option<Table> =
+        table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let card_types = match card_types_table {
+        Some(t) => {
+            let mut set = CardTypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                set |= parse_card_type_name(&name)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+
+    let random: Option<bool> = table.get("random").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+
+    Ok(FilterSpec { card_types, controller, random: random.unwrap_or(false), extra: None })
 }
 
 /// `CardTypeSet` names, by CR 108-ish printed card type — mirrors
@@ -395,7 +430,8 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPrimitive) -> Resu
 /// -> always `AbilityKind::Triggered`) rather than a settable field — this is
 /// what permanently resolves `script_api.rs::register_triggered_ability`'s
 /// old "no `AbilityKind` parameter" gap; `Game.CreateActivatedAbility`/
-/// `Game.CreateStaticAbility` are the natural future siblings, not built yet.
+/// `Game.CreateStaticAbility` are the natural sibling builders (both built,
+/// see below).
 ///
 /// `:SetCost`/`:SetTarget` are deliberately not bound this slice —
 /// `ScriptRuntime::invoke_cost`/`invoke_target` are still `todo!()` regardless,
@@ -436,6 +472,84 @@ impl UserData for TriggeredAbilityBuilder {
                 kind: AbilityKind::Triggered,
                 condition: this.condition,
                 cost: None,
+                target: None,
+                operation,
+                effect,
+            };
+            this.registry.borrow_mut().pending_triggered.push(ability);
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreateActivatedAbility(c)`'s return value — mirrors
+/// `TriggeredAbilityBuilder` for CR 602 activated abilities, generalized off
+/// the old single `AbilityCost::Tap` shortcut. `:AddCost` is called once per
+/// cost component (`Game.Costs.TapSelf`, `Sacrifice({...})`, `Discard({...})`,
+/// `TapPermanents({...}, count)`, `Life(n)`) and accumulates onto
+/// `CostSpec.additional` — not a single `:SetCost`, since a real activation
+/// can need more than one component at once (e.g. `{T}, Sacrifice a
+/// creature:`). `:SetOperation` mirrors `TriggeredAbilityBuilder`'s own
+/// setter exactly. `:Register()` queues the finished `RegisteredAbility`
+/// onto the same shared `pending_triggered` list `TriggeredAbilityBuilder`
+/// uses — that queue drains into `state.abilities` regardless of
+/// `AbilityKind` (see `ScriptRegistry::pending_triggered`'s doc comment), so
+/// there's no need for an `Activated`-only queue.
+///
+/// `kind` is implied the same way `TriggeredAbilityBuilder`'s own doc
+/// comment already explains.
+///
+/// Mana-cost components on an activated ability's cost stay out of scope —
+/// no Lua-facing mana-cost-string parser exists anywhere yet (same boundary
+/// `CastSpell`'s own cost already has) — so `cost.mana` is always `None`;
+/// `:AddCost` only ever appends to `cost.additional`. `:SetTarget` is
+/// deliberately not bound this slice either, same "nothing built yet to
+/// consume it" stance `TriggeredAbilityBuilder`'s own doc comment takes for
+/// its own `:SetTarget` — a script-registered activated ability is
+/// targetless until that's designed.
+struct ActivatedAbilityBuilder {
+    source: ObjectId,
+    cost: CostSpec,
+    operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
+    registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for ActivatedAbilityBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("AddCost", |_, this, value: Value| {
+            let additional = decode_additional_cost_value(value).map_err(to_lua_err)?;
+            this.cost.additional.push(additional);
+            Ok(())
+        });
+        methods.add_method_mut("SetOperation", |lua, this, value: Value| {
+            let mut registry = this.registry.borrow_mut();
+            let decoded = decode_operation_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            drop(registry);
+            this.operation = Some(decoded);
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let (effect, operation) = this.operation.clone().ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetOperation() - an activated ability needs an \
+                     operation"
+                        .to_string(),
+                )
+            })?;
+            // `None` means "no cost at all" - same empty-CostSpec treatment
+            // RegisteredAbility::cost's own doc comment describes; only
+            // meaningfully different from Some(empty) in that ActivateAbility
+            // doesn't have to construct the empty CostSpec itself.
+            let cost = if this.cost.additional.is_empty() && this.cost.mana.is_none() {
+                None
+            } else {
+                Some(this.cost.clone())
+            };
+            let ability = RegisteredAbility {
+                source: this.source,
+                kind: AbilityKind::Activated,
+                condition: None,
+                cost,
                 target: None,
                 operation,
                 effect,
@@ -581,16 +695,6 @@ impl ScriptRuntime {
         let value: Value =
             self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
         decode_operation_value(&self.lua, &mut self.registry.borrow_mut(), value)
-    }
-
-    /// Loads a cost source string that resolves to a `Game.Costs.*` value
-    /// (e.g. `return Game.Costs.Tap`) — same one-liner-eval convention as
-    /// `load_condition`/`load_operation`, narrower: only the recognized-
-    /// primitive shape exists for costs this slice (see `decode_cost_value`).
-    pub fn load_cost(&mut self, source: &str) -> Result<AbilityCost, ScriptError> {
-        let value: Value =
-            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        decode_cost_value(value)
     }
 
     fn function(&self, handle: ScriptHandle) -> Result<Function<'_>, ScriptError> {
@@ -766,16 +870,17 @@ impl ScriptRuntime {
 }
 
 /// Builds the `Game.Conditions`/`Game.Ops`/`Game.Costs`/`Game.Layers`/
-/// `Game.Effects`/`Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`
-/// sugar and binds it into `lua`'s globals. Deliberately not the same thing
-/// as binding all of `script_api.rs`'s functions (`Game.ReplaceEvent`/
-/// `Game.CastSpell`/`Game.PayCost`/`Game.SelectTargets` stay unbound —
-/// `Game.AddContinuousEffect` specifically is now superseded by
-/// `Game.CreateStaticAbility`'s builder, same relationship
-/// `register_triggered_ability` has to `Game.CreateTriggeredAbility`) —
-/// just enough sugar for a condition/operation source string to be a
-/// one-liner, and for a card script to self-register a triggered or static
-/// ability via the builders above.
+/// `Game.Effects`/`Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`/
+/// `Game.CreateActivatedAbility` sugar and binds it into `lua`'s globals.
+/// Deliberately not the same thing as binding all of `script_api.rs`'s
+/// functions (`Game.ReplaceEvent`/`Game.CastSpell`/`Game.PayCost`/
+/// `Game.SelectTargets` stay unbound — `Game.AddContinuousEffect`
+/// specifically is now superseded by `Game.CreateStaticAbility`'s builder,
+/// same relationship `register_triggered_ability` has to
+/// `Game.CreateTriggeredAbility`) — just enough sugar for a
+/// condition/operation source string to be a one-liner, and for a card
+/// script to self-register a triggered, static, or activated ability via
+/// the builders above.
 fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::Result<()> {
     let conditions = lua.create_table()?;
     conditions.set("Enters", ConditionTag(ConditionPrimitive::EntersBattlefield))?;
@@ -786,7 +891,32 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     ops.set("GainLife", gain_life)?;
 
     let costs = lua.create_table()?;
-    costs.set("Tap", CostTag(AbilityCost::Tap))?;
+    costs.set("TapSelf", CostTag(AdditionalCost::TapSelf))?;
+    costs.set(
+        "Sacrifice",
+        lua.create_function(|_, table: Table| {
+            let filter = decode_filter_table(table).map_err(to_lua_err)?;
+            Ok(CostTag(AdditionalCost::Sacrifice { filter }))
+        })?,
+    )?;
+    costs.set(
+        "Discard",
+        lua.create_function(|_, table: Table| {
+            let filter = decode_filter_table(table).map_err(to_lua_err)?;
+            Ok(CostTag(AdditionalCost::Discard { filter }))
+        })?,
+    )?;
+    costs.set(
+        "TapPermanents",
+        lua.create_function(|_, (table, count): (Table, u32)| {
+            let filter = decode_filter_table(table).map_err(to_lua_err)?;
+            Ok(CostTag(AdditionalCost::TapPermanents { filter, count }))
+        })?,
+    )?;
+    costs.set(
+        "Life",
+        lua.create_function(|_, amount: u32| Ok(CostTag(AdditionalCost::LifePayment { amount })))?,
+    )?;
 
     // Only the 5 layers with a real query path (layers::effective_characteristics)
     // are exposed - a static ability can't request layer 1/2/3/7d/7e at all
@@ -858,6 +988,18 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?
     };
 
+    let create_activated_ability = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(ActivatedAbilityBuilder {
+                source: ObjectId(source),
+                cost: CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() },
+                operation: None,
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("Ops", ops)?;
@@ -866,6 +1008,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     game.set("Effects", effects)?;
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
     game.set("CreateStaticAbility", create_static_ability)?;
+    game.set("CreateActivatedAbility", create_activated_ability)?;
     lua.globals().set("Game", game)
 }
 

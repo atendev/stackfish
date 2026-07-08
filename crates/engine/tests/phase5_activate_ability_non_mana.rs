@@ -1,10 +1,13 @@
 //! Phase 5 vertical slice: `ActivateAbility` (CR 602) generalized off the
 //! CR 605 mana-ability shape to a non-mana effect. Covers exactly `{T}` as
-//! the whole cost (`AbilityCost::Tap`) - unlike a mana ability, this uses
-//! the stack (CR 602.2) rather than resolving immediately. Mana cost,
-//! sacrifice/discard/life costs, modes, and X values on an ability stay
-//! unmodeled (same pre-existing gaps `PaymentPlan::validate`/`CastSpell`
-//! already flag).
+//! the whole cost (`AdditionalCost::TapSelf`) - unlike a mana ability, this
+//! uses the stack (CR 602.2) rather than resolving immediately, and (as of
+//! the general-activated-abilities slice) pauses on `AwaitingPayment` the
+//! same way `CastSpell` does, even for this bare `{T}` cost - the actual tap
+//! happens at `Engine::submit_payment` commit time, not at push time. Mana
+//! cost, modes, and X values on an ability stay unmodeled; sacrifice/
+//! discard/life/multi-tap additional costs are covered by
+//! phase5_activate_ability_costs.rs instead of here.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -99,7 +102,11 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
             source: ability_owner,
             kind: AbilityKind::Activated,
             condition: None,
-            cost: Some(AbilityCost::Tap),
+            cost: Some(CostSpec {
+                mana: None,
+                additional: vec![AdditionalCost::TapSelf],
+                alternative: Vec::new(),
+            }),
             target: None,
             operation: ScriptHandle(0),
             effect: Some(AbilityEffect::GainLife(1)),
@@ -142,23 +149,50 @@ fn activate_and_drain(
     drain(engine)
 }
 
+/// This ability's whole cost is `{T}` on its own source - pays it via the
+/// real `PaymentPlan` `Engine::submit_payment` now requires (CR 602.2f-h,
+/// same `AwaitingPayment` pause `CastSpell`'s own tests pay through via
+/// `pay_free_and_drain`), then drains the rest of that pipeline run. Asserts
+/// the engine was actually sitting in `AwaitingPayment` first, same
+/// self-check `pay_free_and_drain` performs elsewhere.
+fn pay_tap_and_drain(engine: &mut Engine, source: ObjectId) -> StepStatus {
+    let status = drain(engine);
+    assert!(
+        matches!(status, StepStatus::AwaitingPayment { .. }),
+        "expected a pause for the ability's {{T}} cost, got {status:?}"
+    );
+    engine
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Tap(source)] })
+        .expect("a Tap(source) payment pays a bare TapSelf cost");
+    drain(engine)
+}
+
 #[test]
-fn tap_ability_pushes_stack_object_and_taps_source() {
+fn tap_ability_pushes_stack_object_and_awaits_payment() {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
     let state = state_with_source(source, p0, source);
     let mut engine = Engine::new(state);
 
     let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+    assert!(matches!(status, StepStatus::AwaitingPayment { player, .. } if player == p0));
 
-    assert!(engine.state().object(source).unwrap().tapped, "source taps");
+    // The tap is a cost payment, not an immediate side effect of announcing
+    // the activation (CR 602.2f-h) - it hasn't happened yet.
+    assert!(!engine.state().object(source).unwrap().tapped, "source doesn't tap until payment commits");
     assert_eq!(engine.state().consecutive_passes, 0, "activating breaks the pass chain (CR 117.4)");
     assert_eq!(engine.state().priority_player, p0, "priority stays with the activator (CR 117.3c)");
 
     let events: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
-    assert!(matches!(events[0], GameEventKind::Tapped { object } if *object == source));
-    assert!(matches!(events[1], GameEventKind::StackObjectPushed { .. }));
+    assert!(matches!(events[0], GameEventKind::StackObjectPushed { .. }));
+
+    let status = pay_tap_and_drain(&mut engine, source);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+    assert!(engine.state().object(source).unwrap().tapped, "source taps once the cost is paid");
+
+    let events: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
+    assert!(events.iter().any(|e| matches!(e, GameEventKind::Tapped { object } if *object == source)));
+    assert!(events.iter().any(|e| matches!(e, GameEventKind::CostPaid { .. })));
 }
 
 #[test]
@@ -168,7 +202,8 @@ fn tap_ability_resolves_gain_life_via_fast_path_and_empties_stack() {
     let state = state_with_source(source, p0, source);
     let mut engine = Engine::new(state);
 
-    activate_and_drain(&mut engine, p0, source, Vec::new());
+    activate(&mut engine, p0, source, Vec::new());
+    pay_tap_and_drain(&mut engine, source);
     // Sole player passes priority with a non-empty stack - resolves the
     // pushed ActivatedAbility.
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
