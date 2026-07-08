@@ -172,7 +172,7 @@ fn affordable_payment_succeeds_and_debits_pool() {
     // explicit choice (CR 118.13a), not an echo of the cost's shape.
     let units = vec![ManaUnit::Colored(Color::Green), ManaUnit::Colorless, ManaUnit::Colorless];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] })
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
         .expect("pool covers the cost exactly");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
@@ -209,7 +209,7 @@ fn short_on_generic_is_rejected_and_pool_unchanged() {
     // Shape is correct (1 green pip + 2 generic-covering units) but the
     // pool has no second unit to spend on the second one.
     let units = vec![ManaUnit::Colored(Color::Green), ManaUnit::Colorless, ManaUnit::Colored(Color::Blue)];
-    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] }).unwrap_err();
+    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] }).unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
     let pool = &engine.state().player(p0).unwrap().mana_pool;
     assert_eq!((pool.green, pool.colorless), (1, 1), "no partial deduction on a rejected plan");
@@ -232,7 +232,7 @@ fn wrong_color_is_rejected() {
     drain(&mut engine);
 
     let units = vec![ManaUnit::Colored(Color::Green)];
-    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] }).unwrap_err();
+    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] }).unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "pool untouched");
 }
@@ -260,7 +260,7 @@ fn colored_pip_cannot_be_substituted_by_a_different_color() {
     drain(&mut engine);
 
     let units = vec![ManaUnit::Colored(Color::Blue), ManaUnit::Colored(Color::Blue)];
-    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] }).unwrap_err();
+    let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] }).unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
     let pool = &engine.state().player(p0).unwrap().mana_pool;
     assert_eq!((pool.blue, pool.green), (2, 1), "pool untouched");
@@ -284,7 +284,7 @@ fn generic_can_be_paid_with_a_mix_of_colors() {
 
     let units = vec![ManaUnit::Colored(Color::White), ManaUnit::Colored(Color::Blue)];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] })
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
         .expect("a {2} generic cost can be paid with any mix of colors");
     let pool = &engine.state().player(p0).unwrap().mana_pool;
     assert_eq!((pool.white, pool.blue), (0, 0), "both units spent");
@@ -338,7 +338,7 @@ fn exact_amount_drains_pool_to_zero() {
     let units =
         vec![ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::Red), ManaUnit::Colored(Color::White)];
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(units)] })
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
         .expect("2 red + 1 generic from the leftover white covers it exactly");
     let pool = &engine.state().player(p0).unwrap().mana_pool;
     assert_eq!((pool.red, pool.white), (0, 0), "pool drained to exactly zero");
@@ -375,7 +375,11 @@ fn mismatched_plan_with_extra_payment_is_rejected() {
     // "affordable from a big pool".
     let overpay = vec![ManaUnit::Colorless, ManaUnit::Colorless, ManaUnit::Colorless];
     let err =
-        engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(overpay)] }).unwrap_err();
+        engine
+            .submit_payment(PaymentPlan {
+                payments: vec![CostPayment::Mana { units: overpay, phyrexian_life: 0 }],
+            })
+            .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.colorless, 5, "pool untouched");
 }
@@ -396,7 +400,9 @@ fn paid_cast_still_resolves_to_graveyard() {
     cast(&mut engine, p0, card);
     drain(&mut engine);
     engine
-        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana(vec![ManaUnit::Colorless])] })
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colorless], phyrexian_life: 0 }],
+        })
         .unwrap();
     drain(&mut engine);
 
@@ -407,4 +413,61 @@ fn paid_cast_still_resolves_to_graveyard() {
     assert!(engine.state().stack.is_empty(), "spell resolved off the stack");
     let (_, from, to) = last_zone_change(&engine);
     assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard));
+}
+
+/// Test case 9 (6a-ii): a Phyrexian pip paid via life (CR 107.4f) actually
+/// deducts life from the payer and records it in the ledger - not just a
+/// validator-only check.
+#[test]
+fn phyrexian_pip_paid_with_life_deducts_life_and_logs_it() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost =
+        ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))] };
+    let mut state = state_with_pool(empty_pool());
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    drain(&mut engine);
+
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana { units: Vec::new(), phyrexian_life: 2 }],
+        })
+        .expect("no white mana available, but 2 life covers the Phyrexian pip");
+    drain(&mut engine);
+
+    assert_eq!(engine.state().player(p0).unwrap().life, 18, "life actually spent, not just checked");
+    let logged = engine.state().ledger.iter().any(|event| {
+        matches!(event.kind, GameEventKind::LifeChanged { player, delta } if player == p0 && delta == -2)
+    });
+    assert!(logged, "expected a LifeChanged {{ player: p0, delta: -2 }} event in the ledger");
+}
+
+/// Test case 10 (6a-ii): CR 119.4 - can't pay more life toward a Phyrexian
+/// pip than the payer has, even though the payment is otherwise well-formed.
+#[test]
+fn phyrexian_life_payment_rejected_below_zero_life() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost =
+        ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))] };
+    let mut state = state_with_pool(empty_pool());
+    state.players[0].life = 1;
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    drain(&mut engine);
+
+    let err = engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana { units: Vec::new(), phyrexian_life: 2 }],
+        })
+        .unwrap_err();
+    assert!(matches!(err, PaymentError::InvalidPlan));
+    assert_eq!(engine.state().player(p0).unwrap().life, 1, "life untouched by a rejected plan");
 }
