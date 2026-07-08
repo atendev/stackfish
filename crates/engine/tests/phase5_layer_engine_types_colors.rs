@@ -13,9 +13,21 @@
 use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::check_state_based_actions;
+use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+
+/// This slice's fixtures never register a `ReplacementEffect` on a dying
+/// creature - a real CR 616.1 pause here would mean the fixture itself is
+/// wrong, not something to handle gracefully.
+fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
+    match outcome {
+        SbaOutcome::Progressed(events) => events,
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+    }
+}
 
 fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> CardDefinition {
     CardDefinition {
@@ -285,7 +297,7 @@ fn a_plain_land_is_not_a_creature_and_is_untouched_by_the_lethal_damage_sba() {
     object.damage_marked = 3;
     put_on_battlefield(&mut state, object);
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert!(events.is_empty(), "a non-creature land should never be subject to 704.5g");
     assert!(state.object(plain_land).is_some());
@@ -318,7 +330,7 @@ fn a_land_animated_into_a_creature_by_add_card_type_dies_to_lethal_damage_via_sb
         0,
     ));
 
-    let events = check_state_based_actions(&mut state, &ScriptRuntime::new());
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
     assert_eq!(events.len(), 1, "the animated land should die to its 3 marked damage");
     assert!(state.object(animated_land).is_none());

@@ -17,9 +17,21 @@
 use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::layers::effective_characteristics;
-use stackfish_engine::sba::check_state_based_actions;
+use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+
+/// This slice's fixtures never register a `ReplacementEffect` on a dying
+/// creature - a real CR 616.1 pause here would mean the fixture itself is
+/// wrong, not something to handle gracefully.
+fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
+    match outcome {
+        SbaOutcome::Progressed(events) => events,
+        SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+    }
+}
 
 /// `script: None` means no CDA callback was ever supplied — `layers.rs`
 /// resolves this exactly like `PTValue::as_fixed` already did (`None`, skip
@@ -321,7 +333,7 @@ fn a_script_less_cda_creature_never_dies_to_the_lethal_damage_sba() {
     put_on_battlefield(&mut state, object);
 
     let script_runtime = ScriptRuntime::new();
-    let events = check_state_based_actions(&mut state, &script_runtime);
+    let events = progressed(check_state_based_actions(&mut state, &script_runtime));
 
     assert!(events.is_empty(), "toughness is unresolved (None) - 704.5g can't apply without a number");
     assert!(state.object(star).is_some());
@@ -338,7 +350,7 @@ fn a_scripted_cda_creature_dies_to_lethal_damage_via_sba() {
     put_on_battlefield(&mut state, object);
 
     let script_runtime = ScriptRuntime::new();
-    let events = check_state_based_actions(&mut state, &script_runtime);
+    let events = progressed(check_state_based_actions(&mut state, &script_runtime));
 
     assert_eq!(events.len(), 1, "a real resolved toughness should make 704.5g apply");
     assert!(state.object(star).is_none());
