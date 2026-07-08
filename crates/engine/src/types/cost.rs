@@ -101,21 +101,106 @@ fn color_index(c: Color) -> usize {
     }
 }
 
-/// Tallies `symbols` into (per-color counts, total generic) — `None` if any
-/// symbol isn't one of the shapes this slice supports paying for (see
-/// docs/implementation.md's "next slice" TODO list: `Colorless`/`Snow`/
-/// `Phyrexian`/`Hybrid`/`X` payment are all explicitly out of scope here).
-fn colored_and_generic(symbols: &[ManaSymbol]) -> Option<([u32; 5], u32)> {
-    let mut colored = [0u32; 5];
-    let mut generic = 0u32;
-    for symbol in symbols {
+/// Checks whether `spent_colored`/`spent_colorless` (the payer's chosen
+/// units, already tallied by `spent_tally`) can satisfy `required` (the
+/// cost's symbols) per CR 118.13a. `None` means `required` contains a
+/// symbol shape this slice doesn't support paying for yet — `Colorless`/
+/// `Snow`/`Phyrexian`/`X` on their own, or a `Hybrid` built from one of
+/// those atoms (a hybrid Phyrexian symbol like `{W/U/P}` — see
+/// docs/implementation.md for why that's deferred as 6a-ii, and plain
+/// `Snow` as 6a-iii). `Some(false)` means every symbol is a supported
+/// shape but this particular set of spent units can't pay for them.
+///
+/// Plain colored pips are a fixed, non-negotiable requirement (CR
+/// 118.13a: no substitution), subtracted from `spent_colored` up front.
+/// Plain generic pips just add to a running total, settled by the final
+/// leftover check, same as before this slice. `Hybrid(a, b)` symbols
+/// (CR 107.4e/f) choose between two atoms: a `Colored` branch reserves
+/// one dedicated unit of that color out of the shared pool; a `Generic`
+/// branch instead adds its amount to the running generic total (e.g.
+/// `{2/W}` paid without touching white mana owes 2 generic).
+///
+/// Which branch each hybrid symbol takes isn't decidable by tallying
+/// once 2+ hybrid symbols compete for the same pool of spent units —
+/// e.g. two `{W/U}` paid with one white + one blue unit is legal only if
+/// each symbol claims a *different* unit. So this is a small backtracking
+/// assignment search over the hybrid symbols, not a sum comparison —
+/// costs are never more than a handful of symbols, so this doesn't need
+/// real search-algorithm sophistication.
+fn mana_payment_satisfies(
+    required: &[ManaSymbol],
+    mut spent_colored: [u32; 5],
+    spent_colorless: u32,
+) -> Option<bool> {
+    let mut generic_needed = 0u32;
+    let mut hybrids: Vec<(AtomicManaSymbol, AtomicManaSymbol)> = Vec::new();
+
+    for symbol in required {
         match symbol {
-            ManaSymbol::Atom(AtomicManaSymbol::Colored(c)) => colored[color_index(*c)] += 1,
-            ManaSymbol::Atom(AtomicManaSymbol::Generic(n)) => generic += n,
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(c)) => {
+                let idx = color_index(*c);
+                if spent_colored[idx] == 0 {
+                    return Some(false);
+                }
+                spent_colored[idx] -= 1;
+            }
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(n)) => generic_needed += n,
+            ManaSymbol::Hybrid(a, b) => hybrids.push((*a, *b)),
             _ => return None,
         }
     }
-    Some((colored, generic))
+
+    assign_hybrids(&hybrids, 0, spent_colored, spent_colorless, generic_needed)
+}
+
+/// Backtracking step for `mana_payment_satisfies`'s hybrid symbols — tries
+/// each remaining hybrid symbol's two atoms against the current leftover
+/// pool, recursing before committing. At the base case (`idx` past the
+/// last hybrid symbol), the pool remaining after every reservation, plus
+/// any spent colorless, must equal the generic total accumulated by
+/// plain-generic pips and any hybrid symbols that took their generic
+/// branch — exactly, no more, no less (CR 118.13a).
+fn assign_hybrids(
+    hybrids: &[(AtomicManaSymbol, AtomicManaSymbol)],
+    idx: usize,
+    spent_colored: [u32; 5],
+    spent_colorless: u32,
+    generic_needed: u32,
+) -> Option<bool> {
+    if idx == hybrids.len() {
+        let leftover: u32 = spent_colored.iter().sum::<u32>() + spent_colorless;
+        return Some(leftover == generic_needed);
+    }
+    let (a, b) = hybrids[idx];
+    for atom in [a, b] {
+        match atom {
+            AtomicManaSymbol::Colored(c) => {
+                let ci = color_index(c);
+                if spent_colored[ci] > 0 {
+                    let mut next = spent_colored;
+                    next[ci] -= 1;
+                    if let Some(true) =
+                        assign_hybrids(hybrids, idx + 1, next, spent_colorless, generic_needed)
+                    {
+                        return Some(true);
+                    }
+                }
+            }
+            AtomicManaSymbol::Generic(n) => {
+                if let Some(true) = assign_hybrids(
+                    hybrids,
+                    idx + 1,
+                    spent_colored,
+                    spent_colorless,
+                    generic_needed + n,
+                ) {
+                    return Some(true);
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(false)
 }
 
 /// Tallies `units` into per-color spent counts and total colorless spent —
@@ -216,13 +301,16 @@ impl PaymentPlan {
     /// unit summing to exactly the generic amount, no more, no less.
     ///
     /// Out of scope this slice (returns `false`): `spec.alternative` costs,
-    /// and any mana symbol shape other than plain colored/generic on the
-    /// *cost* side (`Colorless`/`Snow`/`Phyrexian`/`Hybrid`/`X` requirements
-    /// aren't modeled — see `colored_and_generic`). `AdditionalCost::Other`
-    /// always fails validation too — no `CostPayment` shape can express an
-    /// unstructured-text cost. Returning `bool` here as a placeholder — real
-    /// version will likely return a `Result` with a reason once validation
-    /// failure modes are designed.
+    /// `{X}` costs, and any mana symbol shape this slice doesn't support
+    /// paying for — `Colorless`/`Snow`/`Phyrexian`/`X` on their own, or a
+    /// `Hybrid` built from one of those atoms (see `mana_payment_satisfies`
+    /// for exactly what's deferred and why). Plain colored/generic pips and
+    /// `Hybrid` symbols built from `Colored`/`Generic` atoms (`{W/U}`,
+    /// `{2/W}`) *are* handled. `AdditionalCost::Other` always fails
+    /// validation too — no `CostPayment` shape can express an unstructured-
+    /// text cost. Returning `bool` here as a placeholder — real version will
+    /// likely return a `Result` with a reason once validation failure modes
+    /// are designed.
     pub fn validate(&self, spec: &CostSpec, state: &GameState, payer: PlayerId, source: ObjectId) -> bool {
         if !spec.alternative.is_empty() {
             return false;
@@ -233,27 +321,10 @@ impl PaymentPlan {
             let required = mana_cost.symbols.as_slice();
             if !required.is_empty() {
                 let Some(CostPayment::Mana(units)) = payments.next() else { return false };
-                let Some((required_colored, generic_needed)) = colored_and_generic(required) else {
-                    return false;
-                };
                 let (spent_colored, spent_colorless) = spent_tally(units);
-
-                // Every colored pip must be paid with that exact color - no
-                // substitution, checked before anything about totals.
-                if required_colored.iter().zip(spent_colored).any(|(need, have)| have < *need) {
-                    return false;
-                }
-                // Whatever's spent beyond each pip's exact requirement, plus
-                // any colorless spent, must cover the generic component
-                // exactly.
-                let leftover: u32 = spent_colored
-                    .iter()
-                    .zip(required_colored)
-                    .map(|(have, need)| have - need)
-                    .sum::<u32>()
-                    + spent_colorless;
-                if leftover != generic_needed {
-                    return false;
+                match mana_payment_satisfies(required, spent_colored, spent_colorless) {
+                    Some(true) => {}
+                    Some(false) | None => return false,
                 }
                 let Some(player) = state.player(payer) else { return false };
                 let pool = &player.mana_pool;
@@ -433,5 +504,138 @@ mod tests {
             extra: Some("power 4 or greater".to_string()),
         };
         assert!(!filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
+    }
+
+    fn colored(n: [u32; 5]) -> [u32; 5] {
+        n
+    }
+
+    #[test]
+    fn hybrid_color_color_paid_with_either_color() {
+        let required = [ManaSymbol::Hybrid(
+            AtomicManaSymbol::Colored(Color::White),
+            AtomicManaSymbol::Colored(Color::Blue),
+        )];
+        // {W/U} paid with white - legal.
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 0),
+            Some(true)
+        );
+        // {W/U} paid with blue - legal.
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([0, 1, 0, 0, 0]), 0),
+            Some(true)
+        );
+        // {W/U} paid with black - rejected (not one of the two options).
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([0, 0, 1, 0, 0]), 0),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn hybrid_generic_color_paid_either_branch() {
+        let required = [ManaSymbol::Hybrid(
+            AtomicManaSymbol::Generic(2),
+            AtomicManaSymbol::Colored(Color::White),
+        )];
+        // {2/W} paid with 2 generic-eligible (colorless) units - legal.
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([0, 0, 0, 0, 0]), 2),
+            Some(true)
+        );
+        // {2/W} paid with 1 white - legal via the color branch, 0 generic owed.
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 0),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn two_hybrid_symbols_require_real_assignment_not_just_a_count_check() {
+        let required = [
+            ManaSymbol::Hybrid(
+                AtomicManaSymbol::Colored(Color::White),
+                AtomicManaSymbol::Colored(Color::Blue),
+            ),
+            ManaSymbol::Hybrid(
+                AtomicManaSymbol::Colored(Color::White),
+                AtomicManaSymbol::Colored(Color::Blue),
+            ),
+        ];
+        // One white + one blue - legal, but only because each symbol can
+        // claim a different unit (a plain tally can't tell this apart from
+        // an unpayable case without the assignment).
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([1, 1, 0, 0, 0]), 0),
+            Some(true)
+        );
+        // Two white - also legal, both symbols take the white branch.
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([2, 0, 0, 0, 0]), 0),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn generic_pip_mixed_with_hybrid_leftover_must_match_exactly() {
+        let required = [
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+            ManaSymbol::Hybrid(
+                AtomicManaSymbol::Colored(Color::White),
+                AtomicManaSymbol::Colored(Color::Blue),
+            ),
+        ];
+        // {1}{W/U} paid with white (for the hybrid) + one colorless (for
+        // the plain generic) - legal.
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 1),
+            Some(true)
+        );
+        // Same payment but one colorless short - the generic component
+        // isn't fully covered, rejected.
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 0),
+            Some(false)
+        );
+        // One extra, unneeded colorless unit - overpaying is rejected too
+        // (leftover must equal the generic component exactly, no more).
+        assert_eq!(
+            mana_payment_satisfies(&required, colored([1, 0, 0, 0, 0]), 2),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn unsupported_symbol_shapes_bail_with_none() {
+        // Plain Phyrexian/Snow/Colorless/X requirements aren't modeled yet.
+        assert_eq!(
+            mana_payment_satisfies(
+                &[ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))],
+                colored([1, 0, 0, 0, 0]),
+                0
+            ),
+            None
+        );
+        assert_eq!(
+            mana_payment_satisfies(&[ManaSymbol::Atom(AtomicManaSymbol::Snow)], colored([0; 5]), 1),
+            None
+        );
+        assert_eq!(
+            mana_payment_satisfies(&[ManaSymbol::X], colored([0; 5]), 0),
+            None
+        );
+        // A hybrid Phyrexian symbol ({W/U/P}-style) is deferred too (6a-ii).
+        assert_eq!(
+            mana_payment_satisfies(
+                &[ManaSymbol::Hybrid(
+                    AtomicManaSymbol::Phyrexian(Color::Blue),
+                    AtomicManaSymbol::Colored(Color::Green)
+                )],
+                colored([0, 0, 0, 0, 1]),
+                0
+            ),
+            None
+        );
     }
 }
