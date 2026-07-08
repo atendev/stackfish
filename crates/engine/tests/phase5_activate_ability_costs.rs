@@ -94,7 +94,7 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, ObjectId, ObjectId, 
         players: vec![PlayerState {
             player_id: p0,
             life: 20,
-            mana_pool: ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 },
+            mana_pool: ManaPool::default(),
             counters: CounterSet::new(),
             emblems: Vec::new(),
             commander_damage_taken: Vec::new(),

@@ -112,7 +112,7 @@ fn state_with_pool(pool: ManaPool) -> GameState {
 }
 
 fn empty_pool() -> ManaPool {
-    ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 }
+    ManaPool::default()
 }
 
 fn drain(engine: &mut Engine) -> StepStatus {
@@ -470,4 +470,46 @@ fn phyrexian_life_payment_rejected_below_zero_life() {
         .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
     assert_eq!(engine.state().player(p0).unwrap().life, 1, "life untouched by a rejected plan");
+}
+
+/// Test case 11 (6a-iii): a `{S}` pip must debit the specific snow-tagged
+/// unit declared, not just any unit of the same color (CR 107.4h) - the
+/// pool here has both a snow and a non-snow white mana, only the snow one
+/// is a legal `{S}` payment.
+#[test]
+fn snow_pip_debits_the_snow_tagged_unit_specifically() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Snow)] };
+    let mut state = state_with_pool(ManaPool { white: 2, snow_white: 1, ..empty_pool() });
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    drain(&mut engine);
+
+    // Declaring the ordinary (non-snow) white unit for {S} is rejected -
+    // right color, wrong source.
+    let err = engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::White)], phyrexian_life: 0 }],
+        })
+        .unwrap_err();
+    assert!(matches!(err, PaymentError::InvalidPlan));
+    let pool = &engine.state().player(p0).unwrap().mana_pool;
+    assert_eq!((pool.white, pool.snow_white), (2, 1), "rejected plan leaves the pool untouched");
+
+    // Declaring the snow-tagged one is legal, and debits both the color
+    // total and the snow subcount together.
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana {
+                units: vec![ManaUnit::SnowColored(Color::White)],
+                phyrexian_life: 0,
+            }],
+        })
+        .expect("the snow-tagged white unit legally pays {S}");
+    let pool = &engine.state().player(p0).unwrap().mana_pool;
+    assert_eq!((pool.white, pool.snow_white), (1, 0), "snow unit and its color total both debited");
 }

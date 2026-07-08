@@ -66,7 +66,7 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
         players: vec![PlayerState {
             player_id: controller,
             life: 20,
-            mana_pool: ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 },
+            mana_pool: ManaPool::default(),
             counters: CounterSet::new(),
             emblems: Vec::new(),
             commander_damage_taken: Vec::new(),
@@ -236,7 +236,7 @@ fn reject_when_actor_does_not_hold_priority() {
     state.players.push(PlayerState {
         player_id: p1,
         life: 20,
-        mana_pool: ManaPool { white: 0, blue: 0, black: 0, red: 0, green: 0, colorless: 0 },
+        mana_pool: ManaPool::default(),
         counters: CounterSet::new(),
         emblems: Vec::new(),
         commander_damage_taken: Vec::new(),
