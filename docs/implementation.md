@@ -3044,6 +3044,101 @@ human before writing any code.
   unchanged — this slice only fixed *when* replacement checking runs for damage/death, not *what*
   it can express.
 
+## Phase 5: phase5/flashback-alternative-costs slice (6c, merged to master)
+
+Branch `phase5/flashback-alternative-costs`, off master. Scoped to flashback specifically (CR
+702.34a) — the cleanest, most literal "alternative cost" (CR 601.2b) — not escape/jump-start/
+aftermath/mayhem, each of which layers on its own additional-cost or zone-shape wrinkle deferred
+below. `CostSpec.alternative`/`AlternativeCost::Replacement` existed since Phase 1 but nothing ever
+populated them — `CardDefinition` had no field to carry a card's alternative costs at all, so
+`CastSpell` always built `CostSpec::mana_only(...)` and `PaymentPlan::validate`'s `if
+!spec.alternative.is_empty() { return false }` guard was unreachable dead weight. This slice is
+that missing data plus the cast-time plumbing to use it — `PaymentPlan::validate` itself needed
+*zero* changes, same reasoning as the x-costs slice's `{X}` substitution: by the time `validate`
+sees the resolved `CostSpec`, the alternative has already been swapped in wholesale, and
+`spec.alternative` stays empty on that resolved spec.
+
+**VERIFICATION RESULT:** Pass. New `phase5_flashback_alternative_costs.rs` — 7 tests (cast from
+hand unaffected with no alternative announced; cast from graveyard with the index, paid with the
+flashback cost, not the mana cost; graveyard without declaring the alternative rejected; resolving
+lands in exile not graveyard; fizzling also lands in exile; out-of-range index rejected; declaring
+the alternative while still in hand rejected) — all green. `cargo test --workspace` green
+throughout, no regressions from the mechanical field-addition sweep below.
+
+**What got implemented:**
+- `CardDefinition.alternative_costs: Vec<AlternativeCost>` — the actual missing persistent data a
+  card needs to say "I have flashback for `{2}{R}}`."
+- `AlternativeCost::Replacement` gained `from_zone: ZoneKind` and `exile_on_leaving_stack: bool`,
+  named generically (not flashback-specific) so escape/jump-start/aftermath/mayhem can reuse this
+  exact shape later — all of them are "cast from graveyard/exile, replace the normal cost."
+- `PlayerActionKind::CastSpell` gained `alternative_cost: Option<usize>` — an index into
+  `alternative_costs`, announced at cast time, same phase `x_value` already established (6b).
+- `commands.rs`'s `CastSpell` arm: resolves the announced index (rejects out-of-range before
+  anything mutates), computes `required_zone` from the chosen alternative's `from_zone` (or `Hand`
+  if none was announced) and rejects unless the card is actually there — the simplest correct rule
+  given there's no "does this card actually have flashback" check independent of the
+  `alternative_costs` data itself (see UNRESOLVED). Cost building now branches: the alternative's
+  own `cost` entirely replaces the mana/X-resolution path, never mixed with it. The "remove from
+  hand" zone-mutation and its `ZoneChange` event both generalized from hard-coded `ZoneKind::Hand`
+  to the resolved `from_zone`.
+- `StackObject.exile_on_leaving_stack: bool`, baked in at push time from the chosen alternative
+  (mirrors 6b's `x_value` precedent) — `false` for every non-`CastSpell` `StackObject::new` call
+  site (`ActivateAbility`, `PutTriggersApnap`'s triggered-ability push), since neither abilities nor
+  triggers have an alternative-cost concept.
+- `engine.rs`'s two hard-coded-`Graveyard` zone-destination sites (the fizzle branch and the
+  normal-resolution instant/sorcery branch inside `ResolveStackTop`) now check
+  `top.exile_on_leaving_stack` and route to `Exile` instead when it's set.
+
+**STRUCT DEVIATIONS:**
+- `move_resolving_spell`'s `destination_owner` computation (`Battlefield → None, else →
+  Some(owner)`) was a latent bug this slice's own tests exposed: `Exile` is a single shared zone
+  with `owner: None` (built once in `build_initial_state`), just like `Battlefield` — not per-player
+  like `Graveyard`. The old two-way match happened to be correct only because `Graveyard` was the
+  sole non-`Battlefield` destination that existed before this slice. Fixed to match on `Battlefield
+  | Exile` both giving `None`, `_` giving `Some(owner)`. Not anticipated in the pre-slice report;
+  caught by `resolving_flashback_spell_exiles_instead_of_graveyard` failing against the wrong zone
+  lookup during development, not by inspection.
+
+**INTERFACE DEVIATIONS:** None beyond what the pre-slice requirements report already called for
+(`StackObject::new` gaining the bool param, `CastSpell` gaining the field) — the report's own
+"four things need to change together" scoping held exactly as written.
+
+**SCOPE DEVIATIONS:**
+- `CardDefinition.alternative_costs` (last-declared field) and the `PlayerActionKind::CastSpell`
+  variant rippled mechanically through every direct construction site — same "wide, not individually
+  risky" mechanical-sweep shape 6a-iii's `ManaPool::default()` sweep already established, done via a
+  small Python script rather than by hand across ~32 files / ~46+ occurrences. Two files' `TODO`-
+  worthy edge cases the blind sweep pattern-matched onto by mistake: `phase5_play_land.rs`,
+  `phase5_pass_priority_loop.rs`, and `phase5_cast_spell.rs` each construct a `StackObject` literal
+  directly (which also has its own, unrelated `target_requirement: None,` line) — the sweep's regex
+  added the new `CardDefinition` field there too, caught by the resulting compile error
+  (`StackObject` has no field named `alternative_costs`) and hand-corrected to
+  `exile_on_leaving_stack: false` instead.
+- `crates/scenario`'s `CardSpec`/`ActionSpec::CastSpell` construction updated only to keep compiling
+  (`alternative_costs: Vec::new()`, `alternative_cost: None`) — no TOML scenario field for either
+  exists yet, flagged with a `TODO` in `lib.rs` at both sites. A flashback fixture isn't expressible
+  via the TOML scenario format this slice, only via a direct Rust struct literal (the new test file)
+  — same "verification tooling has to track new fields, but not necessarily expose them yet"
+  pattern every earlier slice's scope-deviation section already established.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Escape (needs an `ExileFromGraveyard` additional-cost shape that doesn't exist), jump-start/
+  retrace (a discard-a-card additional cost on a spell — spells have no additional-cost slot
+  populated from card data any more than they had an alternative one before this slice, same
+  underlying gap), aftermath/mayhem, buyback/kicker (CR 118.8/118.9 — additional, not alternative),
+  cost reduction/increase (6d), ability-cost mana strings (6e). Countering a spell isn't modeled at
+  all, so "exile instead of graveyard when countered" isn't a real path to handle yet — only the
+  fizzle and normal-resolution zone-change sites exist today.
+- `commands.rs`'s zone check is "the announced alternative's `from_zone` must match where the card
+  actually is, full stop" — there's no independent check that the card's `alternative_costs` entry
+  actually corresponds to a real Flashback keyword/oracle-text grant vs. an arbitrary
+  `alternative_costs` entry a card happens to carry. Fine for now since nothing populates
+  `alternative_costs` except deliberately-authored fixtures, but worth tightening once a real
+  card-database/script-bridge path can author this field for actual printed cards.
+- X combined with an alternative cost (e.g. flashback on an `{X}` spell) isn't handled —
+  `x_value` is simply unchecked whenever an alternative is chosen, flagged with a `TODO` directly in
+  `commands.rs`'s `CastSpell` arm.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
