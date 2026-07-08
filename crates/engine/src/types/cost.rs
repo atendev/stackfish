@@ -1,6 +1,6 @@
 use crate::{
-    AtomicManaSymbol, CardTypeSet, Color, GameObject, ManaCost, ManaPool, ManaSymbol, ManaUnit,
-    ObjectId,
+    AtomicManaSymbol, CardTypeSet, Color, GameObject, GameState, ManaCost, ManaPool, ManaSymbol,
+    ManaUnit, ObjectId, PlayerId, ZoneKind,
 };
 
 /// Structured stand-in for "filter described in oracle text" — e.g.
@@ -9,6 +9,7 @@ use crate::{
 /// shapes; `extra` is a script-bind-time-refined catch-all for filters that
 /// don't reduce to type + controller + count (e.g. "with power 4 or
 /// greater", named-card restrictions).
+#[derive(Clone, Debug)]
 pub struct FilterSpec {
     pub card_types: Option<CardTypeSet>,
     pub controller: Option<FilterController>,
@@ -17,20 +18,33 @@ pub struct FilterSpec {
 }
 
 impl FilterSpec {
-    /// Whether `object` satisfies this filter. Resolving `extra` (if set)
-    /// requires the script bridge, so this needs more context than just the
-    /// object once that's wired up — signature may grow.
-    pub fn matches(&self, object: &GameObject) -> bool {
-        // TODO: card_types: if Some(set), object.definition.card_types must
-        // intersect set. controller: if Some(c), compare against whatever
-        // "you"/"opponent" resolves to for the player running this filter
-        // (needs that player passed in - signature will likely need a
-        // `viewer: PlayerId` param). random: doesn't affect matching itself,
-        // only which matching object gets picked - irrelevant here. extra:
-        // requires the script bridge (ScriptRuntime), not available from
-        // this signature yet - matches() will need to grow a context param
-        // once that's wired up, same caveat as ContinuousEffect::applies_to.
-        todo!()
+    /// Whether `object` satisfies this filter, from `viewer`'s perspective
+    /// (`FilterController::You`/`Opponent` are relative to whoever is paying
+    /// the cost). `random` doesn't affect matching itself — only which
+    /// matching object gets picked, irrelevant here. `extra` requires the
+    /// script bridge, not available from this signature — a filter with
+    /// `extra` set is treated as "doesn't match" rather than guessed at (see
+    /// this struct's own doc comment for why `extra` exists at all).
+    pub fn matches(&self, object: &GameObject, viewer: PlayerId) -> bool {
+        if self.extra.is_some() {
+            return false;
+        }
+        if let Some(types) = self.card_types {
+            if !object.definition.card_types.intersects(types) {
+                return false;
+            }
+        }
+        if let Some(fc) = self.controller {
+            let ok = match fc {
+                FilterController::You => object.controller == viewer,
+                FilterController::Opponent => object.controller != viewer,
+                FilterController::Any => true,
+            };
+            if !ok {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -41,7 +55,13 @@ pub enum FilterController {
     Any,
 }
 
+#[derive(Clone, Debug)]
 pub enum AdditionalCost {
+    /// CR 602.5a's `{T}` on an activated ability's own source — distinct
+    /// from `TapPermanents`, which taps *other* permanents chosen by the
+    /// payer. Always targets whichever object is activating the ability
+    /// (`PaymentPlan::validate`'s `source` param), never a filter choice.
+    TapSelf,
     Sacrifice { filter: FilterSpec },
     Discard { filter: FilterSpec },
     TapPermanents { filter: FilterSpec, count: u32 },
@@ -49,11 +69,13 @@ pub enum AdditionalCost {
     Other { description: String },
 }
 
+#[derive(Clone, Debug)]
 pub enum AlternativeCost {
     /// e.g. flashback, escape — paying this cost replaces the mana cost entirely.
     Replacement { description: String, cost: CostSpec },
 }
 
+#[derive(Clone, Debug)]
 pub struct CostSpec {
     pub mana: Option<ManaCost>,
     pub additional: Vec<AdditionalCost>,
@@ -161,69 +183,255 @@ pub struct PaymentPlan {
 }
 
 impl PaymentPlan {
-    /// Validates this plan atomically against `spec` (every cost present,
-    /// nothing extra, mana actually affordable from `pool`). `pool` is the
-    /// payer's floating mana — added as a param beyond the original Phase 2
-    /// signature since affordability can't be checked without it (flagged
-    /// already in this doc's prior TODO; see docs/implementation.md's
-    /// cast-spell-payment slice notes for why `&GameState` wasn't needed
-    /// instead — there's no real tapping path yet, so the pool is the only
-    /// state this needs to read).
+    /// Validates this plan atomically against `spec` — every cost component
+    /// present, nothing extra, mana actually affordable from `payer`'s pool,
+    /// every additional-cost payment resolving to a real, legal object.
+    /// `state`/`payer` replace the original `pool: &ManaPool` param (kept for
+    /// mana affordability, same reasoning as before) since validating
+    /// `spec.additional` needs to look objects up by id and check their
+    /// zone/controller/tapped state — `source` is the object activating the
+    /// ability/spell, needed so `AdditionalCost::TapSelf` can confirm the
+    /// payment taps *that* object specifically, not some other one.
+    ///
+    /// `self.payments` is ordered to mirror `spec`: a `Mana` entry first, iff
+    /// `spec.mana` is `Some` *and* actually has symbols to pay (a `{0}` cost
+    /// — CR 118.5a's "must explicitly acknowledge" requirement — is
+    /// satisfied by there being no `Mana` entry at all, same convention this
+    /// function used before generalizing to additional costs), then exactly
+    /// one entry per `spec.additional` component in order (`TapPermanents`'s
+    /// `count` consumes that many consecutive `Tap` entries) — this
+    /// ordering is what lets several same-shaped payments (e.g. two `Tap`
+    /// entries, one for `TapSelf` and one for a `TapPermanents` component)
+    /// disambiguate which requirement each one is satisfying. `commit`
+    /// doesn't need this ordering — once validated, every payment's *action*
+    /// (tap this id, sacrifice this id, ...) is unambiguous on its own.
     ///
     /// CR 118.13a's payment choice: a colored pip must be paid with that
     /// *exact* color — no substitution — but the generic component can be
     /// paid with any leftover units, including extra units of a color that
     /// also satisfied a colored pip (e.g. paying `{1}{G}` with three green
     /// units: one for the `{G}` pip, two covering the `{1}`). The `units`
-    /// list inside the single `CostPayment::Mana` entry must total *exactly*
-    /// the cost — every pip accounted for by the right color, every leftover
+    /// list inside a `CostPayment::Mana` entry must total *exactly* the
+    /// cost — every pip accounted for by the right color, every leftover
     /// unit summing to exactly the generic amount, no more, no less.
     ///
-    /// Out of scope this slice (returns `false`, doesn't attempt to honor
-    /// them): `spec.additional`/`spec.alternative` costs, and any mana
-    /// symbol shape other than plain colored/generic on the *cost* side
-    /// (`Colorless`/`Snow`/`Phyrexian`/`Hybrid`/`X` requirements aren't
-    /// modeled — see `colored_and_generic`). Returning `bool` here as a
-    /// placeholder — real version will likely return a `Result` with a
-    /// reason once validation failure modes are designed.
-    pub fn validate(&self, spec: &CostSpec, pool: &ManaPool) -> bool {
-        if !spec.additional.is_empty() || !spec.alternative.is_empty() {
+    /// Out of scope this slice (returns `false`): `spec.alternative` costs,
+    /// and any mana symbol shape other than plain colored/generic on the
+    /// *cost* side (`Colorless`/`Snow`/`Phyrexian`/`Hybrid`/`X` requirements
+    /// aren't modeled — see `colored_and_generic`). `AdditionalCost::Other`
+    /// always fails validation too — no `CostPayment` shape can express an
+    /// unstructured-text cost. Returning `bool` here as a placeholder — real
+    /// version will likely return a `Result` with a reason once validation
+    /// failure modes are designed.
+    pub fn validate(&self, spec: &CostSpec, state: &GameState, payer: PlayerId, source: ObjectId) -> bool {
+        if !spec.alternative.is_empty() {
             return false;
         }
-        let required = spec.mana.as_ref().map(|m| m.symbols.as_slice()).unwrap_or(&[]);
-        if required.is_empty() {
-            // CR 118.5/118.5a: a {0}-cost spell still needs an explicit,
-            // empty payment - not auto-cast - but there's nothing to pay,
-            // so the only valid plan is one with no payments in it either.
-            return self.payments.is_empty();
-        }
-        let [CostPayment::Mana(units)] = self.payments.as_slice() else { return false };
-        let Some((required_colored, generic_needed)) = colored_and_generic(required) else {
-            return false;
-        };
-        let (spent_colored, spent_colorless) = spent_tally(units);
+        let mut payments = self.payments.iter();
 
-        // Every colored pip must be paid with that exact color - no
-        // substitution, checked before anything about totals.
-        if required_colored.iter().zip(spent_colored).any(|(need, have)| have < *need) {
-            return false;
+        if let Some(mana_cost) = &spec.mana {
+            let required = mana_cost.symbols.as_slice();
+            if !required.is_empty() {
+                let Some(CostPayment::Mana(units)) = payments.next() else { return false };
+                let Some((required_colored, generic_needed)) = colored_and_generic(required) else {
+                    return false;
+                };
+                let (spent_colored, spent_colorless) = spent_tally(units);
+
+                // Every colored pip must be paid with that exact color - no
+                // substitution, checked before anything about totals.
+                if required_colored.iter().zip(spent_colored).any(|(need, have)| have < *need) {
+                    return false;
+                }
+                // Whatever's spent beyond each pip's exact requirement, plus
+                // any colorless spent, must cover the generic component
+                // exactly.
+                let leftover: u32 = spent_colored
+                    .iter()
+                    .zip(required_colored)
+                    .map(|(have, need)| have - need)
+                    .sum::<u32>()
+                    + spent_colorless;
+                if leftover != generic_needed {
+                    return false;
+                }
+                let Some(player) = state.player(payer) else { return false };
+                let pool = &player.mana_pool;
+                let pool_colored = [pool.white, pool.blue, pool.black, pool.red, pool.green];
+                if spent_colored.iter().zip(pool_colored).any(|(spent, have)| *spent > have) {
+                    return false;
+                }
+                if spent_colorless > pool.colorless {
+                    return false;
+                }
+            }
+            // required.is_empty(): CR 118.5a's explicit-acknowledgment
+            // requirement is satisfied by the absence of a Mana entry here -
+            // nothing to consume.
         }
-        // Whatever's spent beyond each pip's exact requirement, plus any
-        // colorless spent, must cover the generic component exactly.
-        let leftover: u32 = spent_colored
-            .iter()
-            .zip(required_colored)
-            .map(|(have, need)| have - need)
-            .sum::<u32>()
-            + spent_colorless;
-        if leftover != generic_needed {
-            return false;
+
+        for additional in &spec.additional {
+            match additional {
+                AdditionalCost::TapSelf => {
+                    let Some(CostPayment::Tap(id)) = payments.next() else { return false };
+                    if *id != source {
+                        return false;
+                    }
+                    let Some(obj) = state.object(*id) else { return false };
+                    if obj.tapped {
+                        return false;
+                    }
+                }
+                AdditionalCost::TapPermanents { filter, count } => {
+                    let mut used: Vec<ObjectId> = Vec::with_capacity(*count as usize);
+                    for _ in 0..*count {
+                        let Some(CostPayment::Tap(id)) = payments.next() else { return false };
+                        if used.contains(id) {
+                            return false;
+                        }
+                        let Some(obj) = state.object(*id) else { return false };
+                        if obj.tapped || obj.zone != ZoneKind::Battlefield {
+                            return false;
+                        }
+                        if !filter.matches(obj, payer) {
+                            return false;
+                        }
+                        used.push(*id);
+                    }
+                }
+                AdditionalCost::Sacrifice { filter } => {
+                    let Some(CostPayment::Sacrifice(id)) = payments.next() else { return false };
+                    let Some(obj) = state.object(*id) else { return false };
+                    // CR 701.20a: you can only sacrifice a permanent you control.
+                    if obj.zone != ZoneKind::Battlefield || obj.controller != payer {
+                        return false;
+                    }
+                    if !filter.matches(obj, payer) {
+                        return false;
+                    }
+                }
+                AdditionalCost::Discard { filter } => {
+                    let Some(CostPayment::Discard(id)) = payments.next() else { return false };
+                    let Some(obj) = state.object(*id) else { return false };
+                    if obj.zone != ZoneKind::Hand || obj.controller != payer {
+                        return false;
+                    }
+                    if !filter.matches(obj, payer) {
+                        return false;
+                    }
+                }
+                AdditionalCost::LifePayment { amount } => {
+                    let Some(CostPayment::Life(paid)) = payments.next() else { return false };
+                    if paid != amount {
+                        return false;
+                    }
+                    // CR 119.4: a player can't pay a life-payment cost that
+                    // would take them below 0 life.
+                    let Some(player) = state.player(payer) else { return false };
+                    if player.life < *amount as i32 {
+                        return false;
+                    }
+                }
+                AdditionalCost::Other { .. } => return false,
+            }
         }
-        // Finally, the pool must actually hold what's being spent.
-        let pool_colored = [pool.white, pool.blue, pool.black, pool.red, pool.green];
-        if spent_colored.iter().zip(pool_colored).any(|(spent, have)| *spent > have) {
-            return false;
+
+        payments.next().is_none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::card::{CardDefinition, KeywordSet, PTValue, ScriptReference, SupertypeSet};
+    use crate::types::counter::CounterSet;
+    use crate::types::ids::SequenceNo;
+    use crate::types::object::VisibilityPolicy;
+
+    fn creature(controller: PlayerId, card_types: CardTypeSet) -> GameObject {
+        GameObject {
+            object_id: ObjectId(0),
+            lineage: crate::types::ids::ObjectLineage { previous: None },
+            definition: CardDefinition {
+                definition_id: 1,
+                name: "Test Object".to_string(),
+                mana_cost: ManaCost { symbols: Vec::new() },
+                color_indicator: None,
+                supertypes: SupertypeSet::empty(),
+                card_types,
+                subtypes: Vec::new(),
+                oracle_text: String::new(),
+                power: Some(PTValue::Fixed(1)),
+                toughness: Some(PTValue::Fixed(1)),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::ByKey("test".to_string()),
+                keywords: KeywordSet::empty(),
+                target_requirement: None,
+            },
+            owner: controller,
+            controller,
+            zone: ZoneKind::Battlefield,
+            tapped: false,
+            flipped: false,
+            face_down: false,
+            phased_out: false,
+            damage_marked: 0,
+            deathtouched: false,
+            counters: CounterSet::new(),
+            attachments: Vec::new(),
+            attached_to: None,
+            timestamp: SequenceNo(0),
+            controlled_since_turn: 0,
+            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
         }
-        spent_colorless <= pool.colorless
+    }
+
+    #[test]
+    fn card_types_true_and_false_cases() {
+        let p0 = PlayerId(0);
+        let filter = FilterSpec {
+            card_types: Some(CardTypeSet::CREATURE),
+            controller: None,
+            random: false,
+            extra: None,
+        };
+        assert!(filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
+        assert!(!filter.matches(&creature(p0, CardTypeSet::LAND), p0));
+    }
+
+    #[test]
+    fn controller_you_and_opponent_true_and_false_cases() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let you_filter = FilterSpec {
+            card_types: None,
+            controller: Some(FilterController::You),
+            random: false,
+            extra: None,
+        };
+        assert!(you_filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
+        assert!(!you_filter.matches(&creature(p1, CardTypeSet::CREATURE), p0));
+
+        let opponent_filter = FilterSpec {
+            card_types: None,
+            controller: Some(FilterController::Opponent),
+            random: false,
+            extra: None,
+        };
+        assert!(opponent_filter.matches(&creature(p1, CardTypeSet::CREATURE), p0));
+        assert!(!opponent_filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
+    }
+
+    #[test]
+    fn extra_is_never_guessed_at() {
+        let p0 = PlayerId(0);
+        let filter = FilterSpec {
+            card_types: None,
+            controller: None,
+            random: false,
+            extra: Some("power 4 or greater".to_string()),
+        };
+        assert!(!filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
     }
 }

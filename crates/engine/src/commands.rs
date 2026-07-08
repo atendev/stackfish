@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::script::ScriptRuntime;
-use crate::types::ability::AbilityCost;
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
 use crate::types::ability::RegisteredAbility;
 use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
-use crate::types::cost::{CostSpec, FilterController};
+use crate::types::cost::{self, AdditionalCost, CostPayment, CostSpec, FilterController};
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -97,6 +96,13 @@ pub struct PendingPaymentRequest {
     pub stack_id: ObjectId,
     pub payer: PlayerId,
     pub cost: CostSpec,
+    /// The object whose activation/cast this cost belongs to —
+    /// `AdditionalCost::TapSelf` validates against this specifically (CR
+    /// 602.5a: an activated ability's own `{T}` always taps *this* object,
+    /// never a filter choice). For `CastSpell`, this is the spell's own
+    /// `stack_id` — harmless as a placeholder since a spell's `CostSpec`
+    /// never contains `TapSelf`.
+    pub source: ObjectId,
 }
 
 /// CR 117.1a's "sorcery speed" window — `player` may take an action that
@@ -346,6 +352,105 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) {
     state.objects.remove(&old_id);
     state.abilities.retain(|a| a.source != old_id);
     state.continuous_effects.retain(|e| e.source != old_id);
+}
+
+/// CR 400.7: moves `id` from `from`/`from_owner` to the graveyard, minting a
+/// fresh `ObjectId` (same convention every other zone move in this codebase
+/// uses) and purging any ability/continuous-effect the old id left behind
+/// (`retire_object` - no remap follows a sacrifice/discard, same as a
+/// SBA-driven death). Shared by `commit_payment`'s `Sacrifice`/`Discard`
+/// arms, which are identical past "which zone did it start in."
+fn move_to_graveyard_for_cost(
+    state: &mut GameState,
+    id: ObjectId,
+    from: ZoneKind,
+    from_owner: Option<PlayerId>,
+) -> Option<GameEventKind> {
+    let last_known_info = state.object(id)?.clone();
+    let owner = last_known_info.owner;
+
+    let new_id = state.allocate_object_id();
+    let mut new_object = last_known_info.clone();
+    new_object.object_id = new_id;
+    new_object.lineage = ObjectLineage { previous: Some(id) };
+    new_object.zone = ZoneKind::Graveyard;
+    new_object.timestamp = state.allocate_sequence_no();
+
+    if let Some(zone) = state.zone_mut(from, from_owner) {
+        zone.remove(id);
+    }
+    retire_object(state, id);
+    if let Some(zone) = state.zone_mut(ZoneKind::Graveyard, Some(owner)) {
+        zone.push_bottom(new_id);
+    }
+    state.objects.insert(new_id, new_object);
+
+    Some(GameEventKind::ZoneChange {
+        object: new_id,
+        from,
+        to: ZoneKind::Graveyard,
+        last_known_info: Some(last_known_info),
+    })
+}
+
+/// Performs the real side effect of every `CostPayment` in an already-
+/// validated `PaymentPlan` (`PaymentPlan::validate` must have confirmed the
+/// whole plan first — same "trusts validate, doesn't recheck" contract
+/// `cost::spend` documents for mana). Unlike `PaymentPlan::validate`, this
+/// doesn't need `spec`/positional ordering at all: each `CostPayment`
+/// variant is self-describing (tap this id, sacrifice this id, ...)
+/// regardless of which `AdditionalCost` component it happened to satisfy.
+/// Returns the `GameEventKind`s for the caller (`Engine::submit_payment`) to
+/// append to the ledger — same "commands decide, engine.rs writes the
+/// ledger" split every other command path in this file follows.
+pub(crate) fn commit_payment(
+    state: &mut GameState,
+    payer: PlayerId,
+    payments: &[CostPayment],
+) -> Vec<GameEventKind> {
+    let mut events = Vec::new();
+    for payment in payments {
+        match payment {
+            CostPayment::Mana(units) => {
+                if let Some(player) = state.player_mut(payer) {
+                    cost::spend(units, &mut player.mana_pool);
+                }
+            }
+            CostPayment::Tap(id) => {
+                if let Some(obj) = state.object_mut(*id) {
+                    obj.tapped = true;
+                }
+                events.push(GameEventKind::Tapped { object: *id });
+            }
+            CostPayment::Sacrifice(id) => {
+                if let Some(event) =
+                    move_to_graveyard_for_cost(state, *id, ZoneKind::Battlefield, None)
+                {
+                    events.push(event);
+                }
+            }
+            CostPayment::Discard(id) => {
+                if let Some(event) =
+                    move_to_graveyard_for_cost(state, *id, ZoneKind::Hand, Some(payer))
+                {
+                    events.push(event);
+                }
+            }
+            CostPayment::Life(amount) => {
+                if let Some(player) = state.player_mut(payer) {
+                    player.lose_life(*amount as i32);
+                }
+                events.push(GameEventKind::LifeChanged { player: payer, delta: -(*amount as i32) });
+            }
+            CostPayment::Other { .. } => {
+                // PaymentPlan::validate never accepts a plan containing
+                // this variant (see AdditionalCost::Other's doc comment) -
+                // unreachable in practice, no-op rather than panicking if
+                // it somehow got here anyway.
+            }
+        }
+    }
+    events
 }
 
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
@@ -622,6 +727,9 @@ pub fn execute_command(
                     stack_id: new_id,
                     payer: command.actor,
                     cost,
+                    // Placeholder - a spell's CostSpec never contains
+                    // AdditionalCost::TapSelf, so this is never consulted.
+                    source: new_id,
                 }),
                 battlefield_entries: Vec::new(),
             });
@@ -661,7 +769,7 @@ pub fn execute_command(
                 ));
             }
             let effect = ability.effect.clone();
-            let cost = ability.cost;
+            let cost = ability.cost.clone();
             let operation = ability.operation;
             let target_requirement = ability.target;
 
@@ -721,7 +829,7 @@ pub fn execute_command(
                 // the stack (CR 602.2) rather than resolving immediately.
                 // Targets are validated below (CR 602.2b/601.2c-e) via the
                 // same validate_targets CastSpell uses, before any state
-                // mutation (tapping, stack push) happens.
+                // mutation (stack push) happens.
                 non_mana_effect @ (None | Some(AbilityEffect::GainLife(_))) => {
                     validate_targets(
                         state,
@@ -730,8 +838,28 @@ pub fn execute_command(
                         &targets,
                         command.actor,
                     )?;
-                    match cost {
-                    Some(AbilityCost::Tap) => {
+
+                    // `None` means "no cost at all" - same empty-CostSpec
+                    // treatment RegisteredAbility::cost's own doc comment
+                    // describes.
+                    let cost = cost.unwrap_or(CostSpec {
+                        mana: None,
+                        additional: Vec::new(),
+                        alternative: Vec::new(),
+                    });
+
+                    // CR 602.5a/302.6: a TapSelf cost can't be paid by an
+                    // already-tapped source, and a creature's own {T}
+                    // ability is restricted by summoning sickness - both
+                    // checked against the declared cost up front, before
+                    // anything is pushed (an illegal activation never
+                    // happens, same stance validate_targets already takes).
+                    // The actual tap (like every other additional-cost
+                    // mutation) happens once Engine::submit_payment commits
+                    // a real PaymentPlan - CR 602.2f-h treats paying the
+                    // cost as its own step, separate from announcing the
+                    // activation.
+                    if cost.additional.iter().any(|c| matches!(c, AdditionalCost::TapSelf)) {
                         let source_object =
                             state.object(source).ok_or(CommandError::InvalidTarget)?;
                         if source_object.tapped {
@@ -739,10 +867,6 @@ pub fn execute_command(
                                 "source is already tapped".to_string(),
                             ));
                         }
-                        // CR 302.6: same summoning-sickness restriction as
-                        // the mana-ability arm above - a creature's own
-                        // {T} abilities are restricted, non-creatures ignore
-                        // it.
                         if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
                             && has_summoning_sickness(state, source_object)
                         {
@@ -750,45 +874,43 @@ pub fn execute_command(
                                 "source has summoning sickness".to_string(),
                             ));
                         }
+                    }
 
-                        state.object_mut(source).ok_or(CommandError::InvalidTarget)?.tapped = true;
+                    // CR 400.7: the stack object is a new id, distinct
+                    // from `source` (which stays on the battlefield) -
+                    // same convention PutTriggersApnap uses for
+                    // triggered abilities.
+                    let stack_id = state.allocate_object_id();
+                    state.stack.push(StackObject::new(
+                        stack_id,
+                        StackEntryKind::ActivatedAbility,
+                        source,
+                        command.actor,
+                        // TODO: no modes/X value on activated abilities yet.
+                        Vec::new(),
+                        targets,
+                        target_requirement,
+                        None,
+                        operation,
+                        non_mana_effect,
+                    ));
 
-                        // CR 400.7: the stack object is a new id, distinct
-                        // from `source` (which stays on the battlefield) -
-                        // same convention PutTriggersApnap uses for
-                        // triggered abilities.
-                        let stack_id = state.allocate_object_id();
-                        state.stack.push(StackObject::new(
+                    return Ok(CommandOutcome {
+                        events: vec![GameEventKind::StackObjectPushed { stack_id }],
+                        broke_pass_chain: true,
+                        priority_handoff: PriorityHandoff::Unchanged,
+                        // CR 602.2f-h: same AwaitingPayment pause CastSpell
+                        // uses, even for a bare {T} cost (CR 118.5a's
+                        // "explicit empty acknowledgment" stance applies
+                        // here too via the empty-CostSpec default above).
+                        requires_payment: Some(PendingPaymentRequest {
                             stack_id,
-                            StackEntryKind::ActivatedAbility,
+                            payer: command.actor,
+                            cost,
                             source,
-                            command.actor,
-                            // TODO: no modes/X value on activated abilities yet.
-                            Vec::new(),
-                            targets,
-                            target_requirement,
-                            None,
-                            operation,
-                            non_mana_effect,
-                        ));
-
-                        return Ok(CommandOutcome {
-                            events: vec![
-                                GameEventKind::Tapped { object: source },
-                                GameEventKind::StackObjectPushed { stack_id },
-                            ],
-                            broke_pass_chain: true,
-                            priority_handoff: PriorityHandoff::Unchanged,
-                            requires_payment: None,
-                            battlefield_entries: Vec::new(),
-                        });
-                    }
-                    // No cost primitive recognized yet - same
-                    // script-bridge-fallback gap as `invoke_cost` itself
-                    // (still `todo!()`); no ability in this engine has ever
-                    // set `cost` to anything but `Tap` or `None`.
-                    None => todo!(),
-                    }
+                        }),
+                        battlefield_entries: Vec::new(),
+                    });
                 }
             }
         }

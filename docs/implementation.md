@@ -2070,15 +2070,21 @@ shift, don't treat it as fixed once written.
    `ContinuousEffect` instead of a `RegisteredAbility`. Narrower than the full rules text — see
    that slice's own UNRESOLVED list (5 real layers only, no `Script`-backed predicate/effect,
    always `Permanent` duration, no conditional "as long as" gating).
-4. **General activated abilities** — extend past the mana-tap-cost/single-tap-non-mana shape that
-   just landed: sacrifice/discard/other costs, multi-ability-per-card stable indexing (currently
-   positional by registration order, flagged fragile since the mana-ability slice), `Game.
-   CreateActivatedAbility`.
+4. ~~**General activated abilities**~~ — done, `phase5/activated-ability-costs` slice
+   (docs/implementation.md, below). `RegisteredAbility.cost` generalized from the one-shot
+   `AbilityCost::Tap` enum to a real `CostSpec` (`AdditionalCost::TapSelf`/`Sacrifice`/`Discard`/
+   `TapPermanents`/`LifePayment`), `FilterSpec::matches`/`PaymentPlan::validate` made real, and
+   `Game.CreateActivatedAbility` added alongside the triggered/static builders. Multi-ability-per-
+   card stable indexing stays exactly as fragile as before (still positional by registration
+   order) — orthogonal to "what can a cost contain," explicitly not bundled in.
 5. **Replacement/prevention effects (CR 614-616)** — `replacement.rs` is still a no-op past the
    empty-registry fast path. Needed for "if this would die, exile it instead," damage prevention/
    redirection.
-6. **Cost system completeness** — additional costs, alternative costs, `{X}` costs, hybrid/
-   Phyrexian/snow mana payment, cost reduction/increase.
+6. **Cost system completeness** — alternative costs (flashback-style), `{X}` costs, hybrid/
+   Phyrexian/snow mana payment, cost reduction/increase, mana-cost components on an activated
+   ability's own cost (no Lua-facing mana-cost-string parser exists anywhere yet). Structured
+   additional costs (sacrifice/discard/tap-permanents/life) are real as of
+   `phase5/activated-ability-costs` (above) — this item is what's left.
 7. **Trigger system completeness** — once-per-turn/intervening-if (CR 603.2-603.3), last-known-
    info fallback for a trigger whose source already left the battlefield (CR 603.10, flagged since
    the script-bridge-trigger slice), non-ETB trigger conditions (leaves-battlefield, upkeep,
@@ -2670,6 +2676,141 @@ inside the same call.
 - `Game.CreateActivatedAbility` — the one remaining builder sibling; activated (non-mana)
   abilities are still wired only through the pre-existing `AbilityCost::Tap`/`cost: Some(Tap)` path
   (backlog item 4).
+
+## Phase 5: phase5/activated-ability-costs slice
+
+Branch `phase5/activated-ability-costs`, off master. Slice backlog item 4. Scope: CR 602
+generalizes an activated ability's cost off the one-shot `AbilityCost::Tap` shortcut onto the same
+`CostSpec`/`PaymentPlan` model `CastSpell` already uses (CR 602.2b: "identical to the process for
+casting a spell") — `Sacrifice`/`Discard`/`TapPermanents`/`LifePayment` additional costs, in any
+combination, plus `Game.CreateActivatedAbility` so a card script can build one itself.
+
+**Design decisions locked in before writing code** (all confirmed in the pre-slice requirements
+report):
+- `AbilityCost` enum retired entirely. `RegisteredAbility.cost: Option<AbilityCost>` ->
+  `Option<CostSpec>`; the old `Tap` variant becomes `AdditionalCost::TapSelf` (distinct from
+  `TapPermanents{filter, count}`, which taps *other* permanents). Mana abilities (CR 605) are
+  untouched — they never read `.cost` at all, only the mana-ability arm's own hardcoded
+  tap-and-add-mana logic.
+- Non-mana `ActivateAbility` routes through `AwaitingPayment`, same as `CastSpell`, even for a bare
+  `{T}` cost — the tap (or sacrifice/discard/life deduction) is a payment-commit-time side effect,
+  not something `execute_command` does synchronously anymore. Every pre-existing Tap-only
+  activated-ability test gained a `submit_payment` step.
+- `FilterSpec::matches` gained a required `viewer: PlayerId` param and a real body (`card_types`/
+  `controller` checked for real; `random` doesn't affect matching; `extra` is treated as "doesn't
+  match," never guessed at, since resolving it needs the script bridge which isn't wired to this
+  call).
+- `PaymentPlan::validate` gained `&GameState`/`payer: PlayerId`/`source: ObjectId` params. `source`
+  is new — needed so `AdditionalCost::TapSelf` can confirm a `CostPayment::Tap` payment taps
+  *that* object specifically, not some other one the payer happens to control. Validation is
+  positional (`self.payments` mirrors `spec`: an optional `Mana` entry, then one entry per
+  `spec.additional` in order, `TapPermanents`'s `count` consuming that many consecutive `Tap`
+  entries) — that ordering is what disambiguates two same-shaped `Tap` payments (one for
+  `TapSelf`, one for a `TapPermanents` component) from each other. A new `commands::commit_payment`
+  performs the actual side effect (tap/move-to-graveyard/deduct-life) once validated — it doesn't
+  need the same positional ordering, since each `CostPayment` variant is self-describing regardless
+  of which requirement it happened to satisfy.
+- `Game.CreateActivatedAbility`'s cost builder accumulates via `:AddCost(tag)` called once per
+  component (`Game.Costs.TapSelf`/`Sacrifice(filter)`/`Discard(filter)`/`TapPermanents(filter,
+  count)`/`Life(n)`), not a single `:SetCost` — a real activation can need more than one component
+  at once. Mana-cost components on an activated ability's cost stay out of scope (no Lua-facing
+  mana-cost-string parser exists anywhere yet, same boundary `CastSpell`'s own cost already has).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 236 tests total (219 prior + 3 new
+`FilterSpec::matches` unit tests in `types/cost.rs` + 9 new tests in
+`phase5_activate_ability_costs.rs` + 5 new tests in
+`phase5_activated_ability_self_registration.rs`), 0 failed. One pre-existing test file
+(`phase5_activate_ability_non_mana.rs`) updated in place (see SCOPE DEVIATIONS) rather than counted
+as new. Not confirmed via the CLI/TOML harness this slice — see UNRESOLVED.
+
+**What got implemented:**
+- `types/cost.rs`: `FilterSpec` gained `Clone, Debug` and a real `matches(&self, object, viewer)`
+  body. `AdditionalCost`/`AlternativeCost`/`CostSpec` gained `Clone, Debug` (needed to
+  `ability.cost.clone()` the same way `ability.effect.clone()` already does).
+  `AdditionalCost::TapSelf` added. `PaymentPlan::validate`'s signature and body rewritten per the
+  design decisions above — real per-component validation for every `AdditionalCost` shape,
+  `AdditionalCost::Other` and `spec.alternative` still unconditionally rejected (no `CostPayment`
+  shape can express an unstructured-text cost; alternative costs stay out of scope). New
+  `#[cfg(test)]` module: 3 unit tests for `FilterSpec::matches` (card_types true/false, controller
+  you/opponent true/false, `extra` always failing rather than guessed).
+- `types/ability.rs`: `AbilityCost` enum deleted. `RegisteredAbility.cost: Option<CostSpec>`.
+- `commands.rs`: `ActivateAbility`'s non-mana arm rewritten — validates targets, then (if the
+  cost's `additional` contains `TapSelf`) pre-checks "not already tapped"/"not summoning sick"
+  against the *declared* cost before pushing anything (an illegal activation never happens, same
+  stance `validate_targets` already takes), pushes the `StackObject` with no tap yet, and returns
+  `requires_payment: Some(PendingPaymentRequest { .. })` the same way `CastSpell` does. New
+  `PendingPaymentRequest.source: ObjectId` field (the object whose activation/cast this cost
+  belongs to — a spell's own `stack_id` as a harmless placeholder, since a spell's `CostSpec` never
+  contains `TapSelf`). New `pub(crate) fn commit_payment` — performs the real side effect of every
+  `CostPayment` in a validated plan: `Mana` deducts via the existing `cost::spend`, `Tap` sets
+  `tapped = true` (+ `Tapped` event), `Sacrifice`/`Discard` move the object to the graveyard via a
+  new private `move_to_graveyard_for_cost` helper (mints a new id per CR 400.7, purges via the
+  existing `retire_object`, same pattern `Engine::submit_discard`/`draw_step` already established),
+  `Life` deducts via `PlayerState::lose_life` (+ `LifeChanged` event).
+- `engine.rs`: `ProcessState::AwaitingPayment`/`commands::PendingPaymentRequest` both gained
+  `source: ObjectId`, threaded through the two construction sites and `submit_payment`.
+  `submit_payment`'s commit step now calls `commands::commit_payment` for every payment (mana
+  included) instead of only special-casing `CostPayment::Mana` inline — `cost::spend`'s call site
+  moved into `commands.rs` accordingly. `StepStatus::AwaitingPayment` (the public-facing status) is
+  unchanged — the host doesn't need `source` to prompt the payer, it already knows what it
+  activated.
+- `script.rs`: `CostTag` now wraps `AdditionalCost` (was `AbilityCost`). New
+  `decode_additional_cost_value`/`decode_filter_table` (mirrors `decode_affected_table`'s plain-
+  table-of-optional-keys convention). `Game.Costs` rebuilt: `TapSelf` (plain tag),
+  `Sacrifice(filter)`/`Discard(filter)`/`TapPermanents(filter, count)`/`Life(n)` (factory
+  functions) — the old bare `Tap` tag is gone (retired along with `AbilityCost`). New
+  `ActivatedAbilityBuilder` (mirrors `TriggeredAbilityBuilder`/`StaticAbilityBuilder`): `:AddCost`
+  accumulates onto `CostSpec.additional`, `:SetOperation` mirrors `TriggeredAbilityBuilder`'s own
+  setter, `:Register()` queues onto the same shared `pending_triggered` list the other two builders
+  use (the drain into `state.abilities` doesn't care about `AbilityKind`, so no new queue needed).
+  `Game.CreateActivatedAbility` bound alongside the other two constructors. `ScriptRuntime::
+  load_cost` (unused anywhere, returned the now-gone `AbilityCost`) deleted rather than repointed.
+- `docs/lua_scripts.md`: new "Self-registering an activated ability" section (worked `{T}: Gain 1
+  life` example, combined-cost example, `Game.Costs.*` reference). "Not available yet" section
+  updated — `Game.CreateActivatedAbility` is no longer listed as missing; the stale "Activated
+  (non-mana) abilities" bullet (left over from *before* that slice's own doc update, already
+  inaccurate) replaced with the real remaining gaps (`{X}`/alternative/hybrid-etc costs,
+  script-backed cost/target predicates). The condition/cost/target/operation intro section's claim
+  that cost "exists as an `Option<ScriptHandle>` field but is never invoked" corrected — cost is
+  real now, just never a Lua-function callback (no `Script` fallback shape exists for it).
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice requirements report scoped exactly
+(`AdditionalCost::TapSelf`, `RegisteredAbility.cost: Option<CostSpec>`, `PendingPaymentRequest.
+source`) — this *is* the plan, not a deviation from it.
+
+**INTERFACE DEVIATIONS:** None beyond what the report's own design-lock-in section named —
+`PaymentPlan::validate`'s new params and `FilterSpec::matches`'s new `viewer` param were both
+anticipated by name before writing code.
+
+**SCOPE DEVIATIONS:**
+- `phase5_activate_ability_non_mana.rs`'s two success-path tests rewritten (not just extended) to
+  pause on `AwaitingPayment` and pay via a new `pay_tap_and_drain` helper (mirrors `CastSpell`'s own
+  `pay_free_and_drain`) — anticipated by name in the pre-slice report ("every existing Tap-only
+  activated-ability test gets a SubmitPayment step added"). The three purely-rejecting tests
+  (already-tapped, summoning-sick, wrong-controller) needed no changes — those checks stayed at
+  `execute_command` time, before any push, unchanged from before this slice.
+- `docs/lua_scripts.md`'s intro section correction (cost no longer "never invoked") — accuracy
+  upkeep surfaced while writing the new section, not named in the pre-slice report.
+
+**UNRESOLVED:**
+- `crates/scenario` (the TOML scenario crate) — `ActionSpec::SubmitPayment`/`ManaPaymentSpec` only
+  build a `PaymentPlan` with a `Mana` (or empty) payment; there's no TOML shape for
+  `Sacrifice`/`Discard`/`Tap`/`Life` payments yet, so no CLI/TOML fixture was added or run this
+  slice (every other slice's own verification includes one) — flagged explicitly rather than
+  silently skipped. Extending `ManaPaymentSpec`-equivalent TOML support for additional-cost
+  payments is a real, undone follow-up if TOML-driven coverage of this cost shape is wanted.
+- Multi-ability-per-card stable indexing — still positional by registration order
+  (`ability_index: u32`), exactly as fragile as before this slice; explicitly out of scope (see
+  backlog item 4's own note).
+- `{X}` costs, alternative costs (flashback-style), hybrid/Phyrexian/snow mana payment, cost
+  reduction/increase, mana-cost components on an activated ability's own cost — all pre-existing
+  `CostSpec`/`PaymentPlan` gaps, not re-litigated here (backlog item 6).
+- `:SetTarget` not bound on `ActivatedAbilityBuilder` — a script-registered activated ability is
+  targetless, same "nothing built yet to consume it" stance `TriggeredAbilityBuilder`'s own
+  `:SetTarget` omission already takes.
+- `ScriptRuntime::invoke_cost` still `todo!()` — no cost primitive needs a script-bridge fallback
+  yet; every `Game.Costs.*` shape resolves to a real `AdditionalCost` with zero Lua calls at
+  activation/payment time.
 
 ## Mistakes caught (don't repeat)
 

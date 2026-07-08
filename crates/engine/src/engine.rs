@@ -12,7 +12,7 @@ use crate::types::ability::{AbilityEffect, ConditionSpec};
 use crate::types::card::CardTypeSet;
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
-use crate::types::cost::{self, CostPayment, CostSpec, PaymentPlan};
+use crate::types::cost::{CostSpec, PaymentPlan};
 use crate::types::counter::CounterSet;
 use crate::types::effect::EffectDuration;
 use crate::types::event::{GameEvent, GameEventKind};
@@ -301,8 +301,11 @@ pub enum ProcessState {
     /// before this run can continue (CR 118.5a: even a `{0}` cost needs an
     /// explicit empty plan, no auto-pay). Set from `CommitEvents` reading
     /// `Engine::pending_payment` rather than carried in this variant's own
-    /// construction path — see that field's doc comment.
-    AwaitingPayment { stack_id: ObjectId, payer: PlayerId, cost: CostSpec },
+    /// construction path — see that field's doc comment. `source` is the
+    /// object whose activation/cast this cost belongs to (see
+    /// `commands::PendingPaymentRequest::source`'s doc comment) — needed by
+    /// `PaymentPlan::validate` to check `AdditionalCost::TapSelf`.
+    AwaitingPayment { stack_id: ObjectId, payer: PlayerId, cost: CostSpec, source: ObjectId },
 }
 
 /// The step-able rules processor (DESIGN.md's "step-able core"). Wraps
@@ -557,20 +560,16 @@ impl Engine {
     /// is a sub-decision mid-pipeline, not a `PlayerAction`/priority
     /// decision.
     pub fn submit_payment(&mut self, plan: PaymentPlan) -> Result<(), PaymentError> {
-        let ProcessState::AwaitingPayment { payer, .. } = &self.process_state else {
+        let ProcessState::AwaitingPayment { payer, source, .. } = &self.process_state else {
             return Err(PaymentError::NotAwaitingPayment);
         };
         let payer = *payer;
+        let source = *source;
         let valid = {
             let ProcessState::AwaitingPayment { cost, .. } = &self.process_state else {
                 unreachable!("checked above");
             };
-            let pool = &self
-                .state
-                .player(payer)
-                .expect("AwaitingPayment's payer must be a real player")
-                .mana_pool;
-            plan.validate(cost, pool)
+            plan.validate(cost, &self.state, payer, source)
         };
         if !valid {
             return Err(PaymentError::InvalidPlan);
@@ -581,26 +580,26 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        // CR 118.3a/118.13a: commit exactly the units the plan declared -
-        // see cost::spend's doc comment for why this trusts validate's
-        // affordability check rather than re-deriving an amount to spend.
-        if let Some(CostPayment::Mana(units)) = plan.payments.first() {
-            if let Some(player) = self.state.player_mut(payer) {
-                cost::spend(units, &mut player.mana_pool);
-            }
-        }
+        // CR 118.3a/118.13a/602.2f-h: commit exactly what the plan declared
+        // (mana deducted, tap/sacrifice/discard/life side effects applied) -
+        // see commands::commit_payment's doc comment for why this trusts
+        // validate's check rather than re-deriving anything.
+        let mut events = commands::commit_payment(&mut self.state, payer, &plan.payments);
         if let Some(stack_object) = self.state.stack.iter_mut().find(|s| s.stack_id == stack_id) {
             stack_object.costs_paid = plan.payments;
         }
-        let event_id = self.state.allocate_event_id();
-        let sequence_no = self.state.allocate_sequence_no();
-        self.state.ledger.push(GameEvent {
-            event_id,
-            sequence_no,
-            kind: GameEventKind::CostPaid { stack_id, payer },
-            caused_by_command: None,
-            parent_event: None,
-        });
+        events.push(GameEventKind::CostPaid { stack_id, payer });
+        for kind in events {
+            let event_id = self.state.allocate_event_id();
+            let sequence_no = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no,
+                kind,
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
 
         // Resume exactly where CommitEvents would otherwise have gone had
         // pending_payment been None (see that arm's doc comment) - the rest
@@ -1574,21 +1573,21 @@ impl Engine {
                 // never set pending_payment, so they fall straight through
                 // to SbaLoop exactly as before this slice.
                 self.process_state = match self.pending_payment.take() {
-                    Some(PendingPaymentRequest { stack_id, payer, cost }) => {
-                        ProcessState::AwaitingPayment { stack_id, payer, cost }
+                    Some(PendingPaymentRequest { stack_id, payer, cost, source }) => {
+                        ProcessState::AwaitingPayment { stack_id, payer, cost, source }
                     }
                     None => ProcessState::SbaLoop,
                 };
                 StepStatus::Progressed
             }
 
-            ProcessState::AwaitingPayment { stack_id, payer, cost } => {
+            ProcessState::AwaitingPayment { stack_id, payer, cost, source } => {
                 // Nothing to do until submit_payment answers - put the
                 // exact same state back and tell the caller who needs to be
                 // prompted, mirroring AwaitingReplacementChoice/
                 // AwaitTriggerOrderChoice.
                 let status = StepStatus::AwaitingPayment { player: payer, stack_id };
-                self.process_state = ProcessState::AwaitingPayment { stack_id, payer, cost };
+                self.process_state = ProcessState::AwaitingPayment { stack_id, payer, cost, source };
                 status
             }
 
