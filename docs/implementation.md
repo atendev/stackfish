@@ -2059,8 +2059,11 @@ shift, don't treat it as fixed once written.
    5. Layers 1/2/3 (copy/control/text-changing) and the CR 613.6-8 dependency system — each needs
       its own real subsystem (copy-object semantics, control-transfer command, text-rewrite
       representation, dependency detection), not just a query extension. Stay last.
-2. **Targeting system** — `CastSpell`/`StackObject` accept `targets` but nothing validates
-   legality/count, rechecks at resolution, or fizzles. Blocks the majority of real spells.
+2. ~~**Targeting system**~~ — done, `phase5/targeting-basics` slice (docs/implementation.md,
+   below). `CastSpell`/`ActivateAbility` now validate count/filter/dedup before pushing to the
+   stack (CR 601.2c-e/602.2b), and `ResolveStackTop` fizzles on CR 608.2b (all targets illegal at
+   resolution). Narrower than the full rules text — see that slice's own UNRESOLVED list (no
+   "up to N" counts, no multi-"target"-word spells, no partial fizzle, `TargetSpec::Script` dead).
 3. **Static ability self-registration** (`Game.CreateStaticAbility`) — pairs with #1, needed for
    any printed static ability text to actually attach a `ContinuousEffect`.
 4. **General activated abilities** — extend past the mana-tap-cost/single-tap-non-mana shape that
@@ -2473,6 +2476,93 @@ mid-implementation.
   unrelated, untouched.
 - Layers 1/2/3, 7d(-as-a-real-layer-step), 7e, and the CR 613.6-8 dependency system — each still
   has its own TODO on `Layer` itself.
+
+## Phase 5: phase5/targeting-basics slice
+
+Branch `phase5/targeting-basics`, off master (merged). Slice backlog item 2. Scope: CR 115/
+601.2c-e/608.2b — a card/ability declares a fixed-count, primitive-filter `TargetRequirement`;
+`CastSpell`/`ActivateAbility`'s non-mana arm validate count/filter/dedup before pushing to the
+stack (an illegal proposed cast never happens, CR 601.2e); `ResolveStackTop` rechecks every target
+at resolution and fizzles (CR 608.2b) if all are now illegal.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 211 tests total (203 prior + 8 new in
+`phase5_targeting_basics.rs`), 0 failed. One pre-existing test
+(`phase5_activate_ability_non_mana.rs`'s `targets_are_accepted_and_stored_without_legality_check`)
+explicitly asserted the old no-validation stub behavior — rewritten to
+`unrequested_target_is_rejected` since the behavior it tested is now correctly illegal, same
+"fixture written against a stale baseline" pattern flagged in earlier slices. Confirmed via the
+real CLI too: `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_targeting_basics.toml`
+— 6/6 actions ran, 3/3 assertions passed (an "any target" instant resolves normally against a
+still-legal battlefield creature; the reject/fizzle paths stay Rust-test-only, not forced through
+TOML).
+
+**What got implemented:**
+- `types/target.rs` (new): `TargetFilter` (`Object{card_types, controller, zone}` / `Player` /
+  `AnyTarget`), `TargetRequirement` (filter + exact `count`), `TargetSpec` (`Primitive`/`Script`,
+  same split every other filter-shaped type in this codebase uses — `Script` stays dead code,
+  nothing constructs it, same stance `ContinuousEffect::applies_to`'s own `Script` arm already
+  takes).
+- `CardDefinition.target_requirement: Option<TargetSpec>` (new field — `None` means CR 601.2c's
+  "cast as though it did not require those targets"). `RegisteredAbility.target` retyped
+  `Option<ScriptHandle>` -> `Option<TargetSpec>` (every existing construction site was already
+  `None`, purely mechanical).
+- `StackObject.target_requirement` — baked in at push time from whichever produced the
+  `StackObject` (spell's `CardDefinition` or ability's `RegisteredAbility`), same "primitive
+  stand-in decided once at push" contract `effect` already established. Threaded through all 3
+  `StackObject::new` call sites (`CastSpell`, `ActivateAbility`, `PutTriggersApnap` — triggered
+  abilities don't choose targets yet, see UNRESOLVED, but the field is there for when they do).
+- `commands::target_is_legal`/`validate_targets` (new, `pub(crate)`) — the actual CR 115 legality
+  check (zone default battlefield per 115.2, card-type/controller filter via
+  `layers::effective_characteristics`, "any target" per 115.4) plus count/dedup (115.3) validation.
+  Called in `CastSpell` and `ActivateAbility`'s non-mana arm before any state mutation.
+- `engine.rs`: new `GameEventKind::Fizzled { stack_id }`. `ResolveStackTop` now rechecks
+  `top.target_requirement` against `top.targets` before doing anything else; if a real (count > 0)
+  requirement's every target is now illegal, it fizzles — no effect/script runs, and (unlike normal
+  CR 608.2m routing) a spell is forced to its owner's graveyard regardless of card type. Refactored
+  the zone-move logic that both the normal-resolution and fizzle paths need into a shared
+  `Engine::move_resolving_spell(stack_id, destination, run_script)` helper rather than duplicating
+  it.
+- `crates/scenario/src/lib.rs`: `CardSpec.target_requirement: Option<TargetRequirementSpec>` +
+  `build_target_requirement` helper, wired into both `build_initial_state`/`build_new_game_engine`.
+  Hit a real naming collision — the scenario crate already has its own unrelated `TargetSpec`
+  (TOML target-reference enum, `Player(u32)`/`Card(String)`, used by `AttackerSpec`/`CastSpell`
+  actions) that shadows the glob-imported engine `TargetSpec` by Rust's name-resolution rules
+  (explicit local item beats glob import) — fixed by fully-qualifying `stackfish_engine::TargetSpec`
+  at its one construction site, documented inline so it isn't miscopied later.
+- `docs/scenario_format.md` — new `target_requirement` section + worked example, pointing at the
+  new `phase5_targeting_basics.toml` fixture.
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice requirements report scoped exactly.
+
+**INTERFACE DEVIATIONS:** `StackObject::new` gained one parameter (`target_requirement`) —
+anticipated by the "baked at push time" plan, same pattern `effect` already established.
+
+**SCOPE DEVIATIONS:**
+- `RegisteredAbility.target`'s type change touched ~23 construction sites across the engine crate
+  and its tests — all were already `None`, purely mechanical churn (verified via diff), same
+  "expected ripple" pattern the CDA slice's `&ScriptRuntime` threading already established.
+- Scenario/TOML support (`CardSpec.target_requirement`, the TOML fixture, the docs section) wasn't
+  in the original test list — added as a follow-up at the human's request after the first
+  deviation report, to keep parity with every other slice's Rust-test-plus-TOML-fixture-plus-CLI-
+  confirmation convention.
+
+**UNRESOLVED (anticipated, none new):**
+- No "up to N"/variable target counts (CR 601.2c/115.6) — `TargetRequirement.count` is exact only.
+- No multiple distinct "target" words per spell/ability — one `TargetRequirement` per
+  spell/ability, not a list.
+- No partial fizzle (CR 608.2b's "illegal targets aren't affected, other parts still are") — no
+  targeted effect primitive exists yet (only untargeted `GainLife`) to even exercise this against;
+  only the all-or-nothing fizzle path is implemented.
+- `TargetSpec::Script` — structurally present, dead code; a script-backed target-legality predicate
+  needs its own "Lua asks, Rust decides" convention, not designed yet (same shape of gap as backlog
+  item 3a's continuous-effect `Script` arm).
+- CR 603.10 last-known-information for a target whose source already left — pre-existing gap,
+  untouched.
+- Triggered abilities can't choose targets yet (`PutTriggersApnap` always pushes `targets:
+  Vec::new()`) — `target_requirement` is baked on regardless for when that lands, but nothing
+  populates `targets` for a `TriggeredAbility` `StackObject` today.
+- CR 601.2d (division/distribution among targets), splice (601.2b/702.47) — pre-existing gaps,
+  untouched.
 
 ## Mistakes caught (don't repeat)
 
