@@ -3907,6 +3907,83 @@ one new test file.
   backlog item 8.
 - Single fixed target only, same narrowing `Damage`/targeting-basics already established.
 
+## Phase 5: phase5/script-ops-counters slice (backlog item 8, third Script API primitive)
+
+Branch `phase5/script-ops-counters`, off master. Third of backlog item 8's missing `Game.Ops`
+primitives — `AbilityEffect::Counters { kind: CounterKind, amount: i32 }`/`Game.Ops.Counters(kind,
+n)` (CR 122.1a), e.g. "Put two +1/+1 counters on target creature."
+
+**Key finding, confirmed before writing code:** cheaper than `Destroy` — `GameEventKind::
+CounterAdded { object, kind, amount }` already existed in the event enum as complete dead code
+(never constructed, never matched anywhere), and it's the exact shape needed. Reused `Damage`'s
+"push an unapplied event into `events`, let `CommitEvents` retroactively apply it" pattern rather
+than `Destroy`'s heavier inline replacement-check path, since there's no existing counter-
+replacement concept to hook into (no `EventFilter::CounterAdded` shape exists — `EventFilter` only
+has `DamageDealt`/`WouldDie`).
+
+**Scope narrowing, confirmed before writing code:**
+- Object targets only — `CounterAdded` only carries `object: ObjectId`, not a generic `Target`.
+  Player-facing counters (Energy/Experience/Poison-via-effect) deferred as a named follow-up
+  (would need widening this event or a parallel one).
+- No replacement-effect modeling for counter placement — same pre-existing gap `GainLife`'s
+  inline-mutate shortcut already has, now also true of `Counters` (unlike `Damage`, which got the
+  real prevention/replacement pipeline for free by reusing `DamageDealt`).
+- CR 704.5q's +1/+1-vs--1/-1 annihilation SBA doesn't exist at all (grepped, confirmed nothing).
+  Both kinds now coexist un-annihilated forever — a genuine pre-existing gap, not introduced here.
+  `net_counters` (already used by `layers::effective_characteristics`) nets them correctly for P/T
+  purposes regardless, so visible behavior stays correct even without the SBA; only the literal
+  counter bookkeeping piles up. Named, not fixed.
+
+**VERIFICATION RESULT:** Pass. New `phase5_script_ops_counters.rs` — 6 end-to-end tests through the
+real engine: a cast "put two +1/+1 counters on target creature" spell resolves with `CounterSet::
+count` and effective power/toughness (via `layers::effective_characteristics`) both reflecting it;
+same for -1/-1 counters (amount 1, not 2, to avoid CR 704.5g killing the 2/2 test creature before
+the assertions run); both kinds coexisting on one creature (3 +1/+1, 1 -1/-1) prove no annihilation
+happens (literal counts both persist) while `net_counters` still nets the correct effective P/T
+anyway; an *activated ability* (not just a spell) with `Counters` works identically, same dual-path
+proof `Damage`/`Destroy` established; an unrecognized kind name (`"Skull"`) round-trips through
+`ScriptRuntime::load_operation("return Game.Ops.Counters(\"Skull\", 3)")` to `CounterKind::
+Custom("Skull")`; a fizzled spell (illegal target at resolution) adds no counters and emits no
+`CounterAdded` event. `cargo test --workspace` green throughout — no regressions in any prior suite.
+
+**What got implemented:**
+- `AbilityEffect::Counters { kind: CounterKind, amount: i32 }` (types/ability.rs).
+- `engine.rs`'s `ResolveStackTop`: a new `Some(AbilityEffect::Counters { kind, amount })` arm —
+  if `top.targets.first()` is `Some(Target::Object(id))`, pushes `GameEventKind::CounterAdded
+  { object: id, kind: kind.clone(), amount: *amount }` into `events`; any other target shape is a
+  silent no-op, same convention every other arm here uses.
+- `engine.rs`'s `CommitEvents` `for kind in checked` loop gained a second special-case (right next
+  to the existing `DamageDealt` one): `if let GameEventKind::CounterAdded { object, kind, amount }
+  = &kind { ... obj.counters.add(kind.clone(), *amount) }`.
+- `commands.rs`'s `ActivateAbility` non-mana-effect match pattern gained
+  `Some(AbilityEffect::Counters { .. })` alongside `GainLife`/`Damage`/`Destroy`.
+- `parse_counter_kind_name(name: &str) -> CounterKind` (script.rs) — recognized names
+  (`PlusOnePlusOne`/`MinusOneMinusOne`/`Loyalty`/`Poison`/`Energy`/`Experience`/`Charge`) map to
+  their variant; anything unrecognized becomes `CounterKind::Custom(name)` rather than an error —
+  matches `CounterKind`'s own doc comment ("the long tail of flavor-named counters falls back to
+  `Custom`"), unlike `parse_keyword_name`/`parse_card_type_name` which do error on an unknown name.
+- `Game.Ops.Counters(kindName, amount)` binding (script.rs) — a two-arg Lua function (unlike
+  `Destroy`'s zero-arg tagged value or `Damage`'s single-arg one), decoding into
+  `OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount })`.
+
+**STRUCT DEVIATIONS:** None — matched the pre-slice requirements report exactly.
+
+**INTERFACE DEVIATIONS:** None.
+
+**SCOPE DEVIATIONS:** None — no `GameState`/`CardDefinition` literal sweep needed (no new fields on
+either type), everything landed in `types/ability.rs`, `commands.rs`, `engine.rs`, `script.rs`, and
+one new test file.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Player-target counters (Energy/Experience/Poison-via-effect) — `CounterAdded` only carries
+  `object: ObjectId`; would need widening this event or a parallel one.
+- No replacement/prevention modeling for counter placement — no `EventFilter::CounterAdded` shape;
+  same class of gap `GainLife`'s inline-mutate shortcut already has.
+- CR 704.5q's +1/+1-vs--1/-1 annihilation SBA still doesn't exist — pre-existing, unrelated to this
+  slice, but now more visibly relevant since cards can actually put both kinds on one creature.
+- `DrawCards`/`Exile`/`Sacrifice`/`CreateToken` — still no `Game.Ops` primitive; next in backlog
+  item 8.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

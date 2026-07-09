@@ -8,6 +8,7 @@ use crate::types::ability::{
     AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility,
 };
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference};
+use crate::types::counter::CounterKind;
 use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{
     AffectedFilter, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload, EffectPrimitive,
@@ -309,6 +310,24 @@ fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> {
 
 /// `ColorSet` by single WUBRG letter — same duplication rationale as
 /// `parse_card_type_name`.
+/// `CounterKind` names, by CR 122.3's common-kind list. Unlike
+/// `parse_card_type_name`/`parse_keyword_name`, an unrecognized name is not
+/// an error — `CounterKind`'s own doc comment already declares `Custom` the
+/// fallback for "the long tail of flavor-named counters," so this mirrors
+/// that rather than rejecting a legitimate flavor counter name.
+fn parse_counter_kind_name(name: &str) -> CounterKind {
+    match name {
+        "PlusOnePlusOne" => CounterKind::PlusOnePlusOne,
+        "MinusOneMinusOne" => CounterKind::MinusOneMinusOne,
+        "Loyalty" => CounterKind::Loyalty,
+        "Poison" => CounterKind::Poison,
+        "Energy" => CounterKind::Energy,
+        "Experience" => CounterKind::Experience,
+        "Charge" => CounterKind::Charge,
+        other => CounterKind::Custom(other.to_string()),
+    }
+}
+
 fn parse_color_letter(letter: &str) -> Result<ColorSet, ScriptError> {
     Ok(match letter {
         "W" => ColorSet::WHITE,
@@ -933,6 +952,10 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     let damage = lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::Damage(amount))))?;
     ops.set("Damage", damage)?;
     ops.set("Destroy", OperationTag(AbilityEffect::Destroy))?;
+    let counters = lua.create_function(|_, (kind, amount): (String, i32)| {
+        Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
+    })?;
+    ops.set("Counters", counters)?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;

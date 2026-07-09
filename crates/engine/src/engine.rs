@@ -1688,6 +1688,22 @@ impl Engine {
                                 // shouldn't be reachable given cast-time target
                                 // validation against a real card's filter.
                             }
+                            // CR 122.1a: same "push an unapplied event, let
+                            // CommitEvents retroactively apply it" pattern as
+                            // Damage above - GameEventKind::CounterAdded
+                            // already existed with this exact shape (dead
+                            // code until now). Object targets only - a
+                            // Target::Player or empty targets is a silent
+                            // no-op, same stance every other arm here takes.
+                            Some(AbilityEffect::Counters { kind, amount }) => {
+                                if let Some(Target::Object(id)) = top.targets.first().copied() {
+                                    events.push(GameEventKind::CounterAdded {
+                                        object: id,
+                                        kind: kind.clone(),
+                                        amount: *amount,
+                                    });
+                                }
+                            }
                             // AddMana is only ever set on a mana ability, which
                             // resolves immediately and never reaches the stack
                             // (CR 605.1a/605.3b) - no StackObject of any kind
@@ -1780,6 +1796,19 @@ impl Engine {
                     // why this can't happen any earlier than here.
                     if let GameEventKind::DamageDealt { source, target, amount } = &kind {
                         commands::apply_damage_event(&mut self.state, &self.script_runtime, *source, *target, *amount);
+                    }
+                    // CR 122.1a: same "describes an effect that hasn't
+                    // happened to state yet" shape as DamageDealt above -
+                    // apply it now that it's in final, post-replacement form.
+                    // No replacement effect actually targets CounterAdded
+                    // yet (no EventFilter::CounterAdded), so this never
+                    // changes from what ResolveStackTop proposed - still
+                    // applied here rather than at push time, matching
+                    // Damage's convention rather than GainLife's shortcut.
+                    if let GameEventKind::CounterAdded { object, kind, amount } = &kind {
+                        if let Some(obj) = self.state.object_mut(*object) {
+                            obj.counters.add(kind.clone(), *amount);
+                        }
                     }
                     let event_id = self.state.allocate_event_id();
                     let sequence_no = self.state.allocate_sequence_no();

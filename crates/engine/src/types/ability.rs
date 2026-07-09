@@ -1,4 +1,5 @@
 use crate::types::cost::CostSpec;
+use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ManaUnit;
@@ -62,6 +63,20 @@ pub enum AbilityEffect {
     /// replacement-checked event, not a replacement effect itself. No
     /// fields — a toggle, not a value, same shape as `SwitchPT`.
     Destroy,
+    /// The `Game.Ops.Counters(kind, n)` primitive — puts `amount` counters
+    /// of `kind` on the resolving `StackObject`'s first chosen target (CR
+    /// 122.1a). Like `Damage`, not `Destroy`: `GameEventKind::CounterAdded`
+    /// already existed as dead code (never constructed, never matched) with
+    /// exactly this shape, so `ResolveStackTop` pushes it unapplied and
+    /// `CommitEvents` retroactively applies it, the same pipeline `Damage`
+    /// uses for `DamageDealt`. Object targets only — no player-facing
+    /// counters (Energy/Experience) this slice, since real "put a counter on
+    /// target creature/artifact" text vastly outnumbers those and
+    /// `CounterAdded` only carries a single `ObjectId`, not a generic
+    /// `Target`. No replacement/prevention modeling for counter placement
+    /// either (no `EventFilter::CounterAdded` shape exists) — same gap
+    /// `GainLife` already has, not fixed here.
+    Counters { kind: CounterKind, amount: i32 },
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a
