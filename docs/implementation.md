@@ -2108,14 +2108,32 @@ shift, don't treat it as fixed once written.
       `ConditionPrimitive::BeginningOfYourUpkeep`/`BeginningOfEachUpkeep`. `Untap` (CR 502.4: no
       priority granted, so no trigger window to place one before) and `Cleanup` (its own separate
       `CleanupSbaCheck` flow, still not wired to `collect_triggers` either) are unaffected — still
-      real, open gaps, not silently expanded into this fix.
-   Still open: once-per-turn/intervening-if legality, the CR 603.10 last-known-info fallback (a
-   leaves-battlefield/dies condition can't be added until `collect_triggers`'s `state.object(ability.
-   source)` live-lookup gap is fixed — that lookup fails by design once `retire_object` has already
-   purged the ability, which happens before trigger collection ever runs), `Cleanup`'s own trigger-
-   collection gap (see 7a above), and every condition shape beyond ETB/damage-dealt/upkeep (e.g.
-   "whenever you draw a card," "at the beginning of combat/end step" — same event family as upkeep,
-   cheap to add now that the pipeline fix has landed, just not done yet).
+      real, open gaps, not silently expanded into this fix. Cleanup's own gap is still open (see
+      below).
+   ~~CR 603.10 last-known-information fallback for dies/leaves-battlefield~~ — done,
+   `phase5/dies-triggers` slice (docs/implementation.md, below): `ConditionPrimitive::Dies`/
+   `LeavesBattlefield`, wired for the SBA-driven death path (`sba::commit_death`) via `Engine`'s
+   transient `departed_triggered_abilities` stash.
+   ~~Sacrifice-cost LKI wiring~~ — done, `phase5/draw-combat-end-triggers` slice
+   (docs/implementation.md, below): the same stash now also captures a Sacrifice/Discard cost
+   payment's departed abilities (`commands::move_to_graveyard_for_cost` → `commit_payment` →
+   `Engine::submit_payment`), so a "when this dies" ability fires off a sacrificed permanent too —
+   Discard's own half is captured but stays dormant (no condition matches a Hand-departure LKI yet).
+   ~~"Whenever you draw a card"/beginning-of-combat/beginning-of-end-step conditions~~ — done, same
+   `phase5/draw-combat-end-triggers` slice: `ConditionPrimitive::DrawsCard`/`EachDrawsCard`,
+   `BeginningOfYourCombat`/`BeginningOfEachCombat`, `BeginningOfYourEndStep`/`BeginningOfEachEndStep`
+   — cheap additions once `AdvanceTurnStep`'s pipeline fix (7a) had already landed, exactly as that
+   slice's own UNRESOLVED list predicted.
+   Still open: once-per-turn/intervening-if legality (CR 603.2-603.3); `Cleanup`'s own trigger-
+   collection gap (its `CleanupSbaCheck` flow still doesn't run `collect_triggers` at all — a
+   second, differently-shaped fix from 7a's `AdvanceTurnStep` rewire); `submit_discard`'s CR 514.1
+   hand-size discard and `draw_step`'s library-side retirement still discard their departed
+   abilities outright (both would be inert to wire today — neither can produce a
+   Battlefield-departure LKI); "whenever a creature you control dies" (filtered by something other
+   than "is this exact object," i.e. a `Script`-backed or filter-scoped condition) isn't
+   representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/etc only ever match a fixed identity
+   or the ability's own controller, never a characteristic filter over some other object; Untap-step
+   triggers stay unfireable regardless (CR 502.4 grants no priority there).
 8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Damage, Counters, Destroy,
    Exile, Sacrifice, CreateToken — only `GainLife` exists today), and a hidden-information-safe
    `ScriptContext` (currently leaks the full `&GameState`, a standing DESIGN.md open question).
@@ -3544,6 +3562,101 @@ path only; source-identity conditions only, not filtered "a creature you control
 - The pre-existing `resolve_deaths` drop-on-pause bug named above (STRUCT/INTERFACE DEVIATIONS) —
   surfaced by this slice's own refactor, not fixed by it.
 - Once-per-turn/intervening-if legality (CR 603.2-603.3) — untouched, same as every prior sub-slice.
+
+## Phase 5: phase5/draw-combat-end-triggers slice (backlog item 7, fourth sub-slice)
+
+Branch `phase5/draw-combat-end-triggers`, off master. Bundles two independent fixes named in the
+dies-triggers slice's own UNRESOLVED list: extending the CR 603.10 last-known-information stash to
+the Sacrifice/Discard cost-payment departure path, and adding the "cheap follow-up" condition shapes
+`AdvanceTurnStep`'s pipeline fix (7a) was always going to unlock — draw-a-card, beginning-of-combat,
+beginning-of-end-step.
+
+**Key scoping finding, checked before writing code:** of the three remaining `retire_object` call
+sites the dies-triggers slice left discarding their return value, only one is actually wireable
+today. `move_to_graveyard_for_cost`'s `Sacrifice` arm moves Battlefield→Graveyard — the exact shape
+`Dies`/`LeavesBattlefield` match — and `submit_payment` was confirmed to already resume at
+`ProcessState::SbaLoop` (not `log_events`), so no 7a-style pipeline rewire was needed, just the same
+stash-threading `commit_death` already does. `submit_discard`'s CR 514.1 hand-size discard happens
+during `Cleanup`, which still bypasses `collect_triggers` entirely (7a's still-open cleanup half) —
+wiring the stash there would be inert. `draw_step`'s library-side retirement purges an old
+*library*-zone id, which can never produce a Battlefield-departure LKI either. Both were excluded
+from this slice's scope rather than wired for no observable effect.
+
+**VERIFICATION RESULT:** Pass. 18 new unit tests in `types/ability.rs` (`DrawsCard`/`EachDrawsCard`,
+`BeginningOfYourCombat`/`BeginningOfEachCombat`, `BeginningOfYourEndStep`/`BeginningOfEachEndStep` —
+matching/non-matching cases each, mirroring the existing Upkeep pair's own test shape). New
+`phase5_draw_combat_end_triggers.rs` — 9 end-to-end tests driving the real turn loop (mirroring
+`phase5_upkeep_triggers.rs`): each of the three new condition pairs fires and resolves for its own
+controller, fails to fire for a different controller (the "Your" variant), and fires regardless of
+whose turn it is (the "Each" variant). New `phase5_sacrifice_dies_trigger.rs` — 3 end-to-end tests
+proving the LKI wiring extension: a "when this dies" ability fires and resolves after its source is
+sacrificed as an activated ability's cost (not just SBA-driven combat death); a bystander creature's
+own Dies ability does not fire just because *some* sacrifice happened in the same payment; and a
+regression proving Discard's own half of the same code path captures departed abilities without any
+behavior change (no condition matches a Hand-departure LKI, so a Dies ability on a discarded card
+still doesn't fire). `cargo test --workspace` green throughout (all pre-existing suites unchanged),
+including every prior trigger-slice suite (`phase5_upkeep_triggers`, `phase5_dies_triggers`,
+`phase5_damage_dealt_triggers`).
+
+**What got implemented:**
+- `commands::move_to_graveyard_for_cost` changed from `-> Option<GameEventKind>` to
+  `-> Option<(GameEventKind, Vec<RegisteredAbility>)>` — returns `retire_object`'s departed
+  `Triggered`-kind abilities alongside the event instead of discarding them, same tuple-return shape
+  `sba::commit_death` already established.
+- `commands::commit_payment` changed from `-> Vec<GameEventKind>` to
+  `-> (Vec<GameEventKind>, Vec<RegisteredAbility>)` — both `Sacrifice`/`Discard` arms fold
+  `move_to_graveyard_for_cost`'s departed abilities into a single accumulator threaded up to the
+  caller.
+- `Engine::submit_payment` (engine.rs) extends `self.departed_triggered_abilities` with
+  `commit_payment`'s returned abilities before resuming at `ProcessState::SbaLoop` — populated
+  directly at this call site rather than via `finish_sba_loop`, since `submit_payment`'s pause/resume
+  doesn't route through that function.
+- `ConditionPrimitive` (ability.rs) gained 6 variants: `DrawsCard`/`EachDrawsCard` (matches
+  `ZoneChange{from: Library, to: Hand}`, filtered on `last_known_info.controller` — no `matches()`
+  signature change needed, that field was already present on every `ZoneChange`),
+  `BeginningOfYourCombat`/`BeginningOfEachCombat` (matches `StepStarted{step: Step::BeginningOfCombat}`),
+  `BeginningOfYourEndStep`/`BeginningOfEachEndStep` (matches `StepStarted{step: Step::End}`) — all
+  three pairs mirror `BeginningOfYourUpkeep`/`BeginningOfEachUpkeep`'s existing Your/Each split
+  exactly, a deliberate consistency choice (see STRUCT DEVIATIONS) over a parameterized single
+  variant.
+- `Game.Conditions.DrawsCard`/`EachDrawsCard`/`BeginningOfCombat`/`EachBeginningOfCombat`/`EndStep`/
+  `EachEndStep` bindings (script.rs), same one-line-per-variant pattern every prior condition uses.
+- Updated `move_to_graveyard_for_cost`/`retire_object`/`ConditionPrimitive`'s TODO block doc comments
+  to describe the new state accurately (two wired departure paths instead of one, which two call
+  sites remain genuinely inert, once-per-turn/intervening-if and Cleanup's gap still open).
+
+**STRUCT DEVIATIONS:** None on the `ConditionPrimitive` enum itself. One real design fork surfaced
+mid-planning (not mid-code): whether the 3 new condition families should be flat Your/Each pairs
+(matching Upkeep's existing precedent) or a single variant parameterized by a `TurnScope`-style enum.
+Decided flat pairs before writing code, specifically to avoid two different patterns for "the same
+shape of gap" sitting side by side in `ConditionPrimitive` (Upkeep already shipped as flat pairs;
+retrofitting it to match a parameterized approach would have meant touching already-merged/tested
+code for a pure style change) and to avoid forking `Game.Conditions.*`'s binding convention (every
+existing entry is a plain table value, not a function call — a parameterized variant would need the
+latter for these specific conditions only).
+
+**INTERFACE DEVIATIONS:** `move_to_graveyard_for_cost`/`commit_payment`'s signature changes were
+anticipated by the pre-slice plan exactly (same tuple-return shape `commit_death` already
+established) — not a deviation.
+
+**SCOPE DEVIATIONS:** None — no `GameState`/`CardDefinition` literal sweep needed (no new fields on
+either type), everything landed in `commands.rs`, `engine.rs`, `types/ability.rs`, `script.rs`, and
+two new test files.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- `submit_discard`'s CR 514.1 hand-size discard and `draw_step`'s library-side retirement still
+  discard their departed abilities outright — both excluded from this slice's scope as inert (see
+  the pre-slice scoping finding above), not an oversight.
+- Once-per-turn/intervening-if legality (CR 603.2-603.3) — untouched, same as every prior sub-slice.
+- `Cleanup`'s own trigger-collection gap (its `CleanupSbaCheck` flow still doesn't run
+  `collect_triggers` at all) — untouched, same as every prior sub-slice since 7a.
+- "Whenever a creature you control dies"/"whenever a player draws their second card"/any filter over
+  the departing or drawing object's characteristics rather than a fixed source identity or plain
+  controller check — none of the new conditions, or `Dies`/`LeavesBattlefield` before them, support a
+  `Script`-backed or filter-scoped shape yet.
+- CR 121.5's "moved without the word 'draw'" distinction — `DrawsCard`/`EachDrawsCard` match by
+  zone-shape only (`Library`→`Hand`); no non-draw effect produces that shape in this engine yet, so
+  this is a documented limitation, not a live bug.
 
 ## Mistakes caught (don't repeat)
 

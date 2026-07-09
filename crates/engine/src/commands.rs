@@ -352,13 +352,19 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
 /// Returns the departing object's own `Triggered`-kind abilities (CR
 /// 603.10) — a "when this dies"/"when this leaves the battlefield" ability
 /// would otherwise be deleted right here, before `collect_triggers` ever
-/// gets a chance to see it. The SBA-driven death call site (`sba::
-/// commit_death`) threads this return value up to `Engine`'s transient
-/// last-known-information stash so trigger collection can still find it;
-/// the other three call sites (sacrifice/discard cost, draw-step library
-/// retirement) discard it this slice — deliberately deferred, same
-/// mechanism to be wired there once proven on the highest-value death path
-/// (see docs/implementation.md's backlog item 7).
+/// gets a chance to see it. Two call sites now thread this up into
+/// `Engine`'s transient last-known-information stash so trigger collection
+/// can still find it: `sba::commit_death` (SBA-driven death) and
+/// `move_to_graveyard_for_cost` (Sacrifice/Discard cost payment, via
+/// `commit_payment` → `Engine::submit_payment`) — a "when this dies"
+/// ability now fires off a sacrificed permanent the same way it does off a
+/// combat death. The remaining two call sites (`submit_discard`'s CR 514.1
+/// hand-size discard, `draw_step`'s library-side retirement) still discard
+/// the return value: neither can ever produce a Battlefield-departure LKI
+/// (`Dies`/`LeavesBattlefield` require `from == Battlefield`), so stashing
+/// there would be inert until a hand/library-departure condition shape
+/// exists to consume it — deliberately left, not an oversight (see
+/// docs/implementation.md's backlog item 7).
 pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<RegisteredAbility> {
     state.objects.remove(&old_id);
     let mut departed_triggered = Vec::new();
@@ -381,12 +387,20 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
 /// (`retire_object` - no remap follows a sacrifice/discard, same as a
 /// SBA-driven death). Shared by `commit_payment`'s `Sacrifice`/`Discard`
 /// arms, which are identical past "which zone did it start in."
+///
+/// Returns the departed `Triggered`-kind abilities alongside the event (CR
+/// 603.10) — for a `Sacrifice` (Battlefield→Graveyard), this is what lets
+/// `Dies`/`LeavesBattlefield` fire the same way they do off an SBA-driven
+/// death. For a `Discard` (Hand→Graveyard), the departed abilities are
+/// still captured and returned here for the caller to stash, but stay
+/// dormant in practice — no `ConditionPrimitive` shape matches a
+/// Hand-departure LKI yet.
 fn move_to_graveyard_for_cost(
     state: &mut GameState,
     id: ObjectId,
     from: ZoneKind,
     from_owner: Option<PlayerId>,
-) -> Option<GameEventKind> {
+) -> Option<(GameEventKind, Vec<RegisteredAbility>)> {
     let last_known_info = state.object(id)?.clone();
     let owner = last_known_info.owner;
 
@@ -400,21 +414,21 @@ fn move_to_graveyard_for_cost(
     if let Some(zone) = state.zone_mut(from, from_owner) {
         zone.remove(id);
     }
-    // Departed Triggered abilities discarded here - sacrifice/discard cost
-    // isn't wired to the CR 603.10 LKI stash this slice (see
-    // retire_object's own doc comment).
-    let _ = retire_object(state, id);
+    let departed_triggered = retire_object(state, id);
     if let Some(zone) = state.zone_mut(ZoneKind::Graveyard, Some(owner)) {
         zone.push_bottom(new_id);
     }
     state.objects.insert(new_id, new_object);
 
-    Some(GameEventKind::ZoneChange {
-        object: new_id,
-        from,
-        to: ZoneKind::Graveyard,
-        last_known_info: Some(last_known_info),
-    })
+    Some((
+        GameEventKind::ZoneChange {
+            object: new_id,
+            from,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(last_known_info),
+        },
+        departed_triggered,
+    ))
 }
 
 /// Performs the real side effect of every `CostPayment` in an already-
@@ -425,14 +439,18 @@ fn move_to_graveyard_for_cost(
 /// variant is self-describing (tap this id, sacrifice this id, ...)
 /// regardless of which `AdditionalCost` component it happened to satisfy.
 /// Returns the `GameEventKind`s for the caller (`Engine::submit_payment`) to
-/// append to the ledger — same "commands decide, engine.rs writes the
-/// ledger" split every other command path in this file follows.
+/// append to the ledger, plus every departed `Triggered`-kind ability a
+/// `Sacrifice`/`Discard` payment purged along the way (CR 603.10 — see
+/// `move_to_graveyard_for_cost`'s doc comment) for the caller to fold into
+/// `Engine::departed_triggered_abilities` — same "commands decide, engine.rs
+/// writes the ledger" split every other command path in this file follows.
 pub(crate) fn commit_payment(
     state: &mut GameState,
     payer: PlayerId,
     payments: &[CostPayment],
-) -> Vec<GameEventKind> {
+) -> (Vec<GameEventKind>, Vec<RegisteredAbility>) {
     let mut events = Vec::new();
+    let mut departed_triggered = Vec::new();
     for payment in payments {
         match payment {
             CostPayment::Mana { units, phyrexian_life } => {
@@ -456,17 +474,19 @@ pub(crate) fn commit_payment(
                 events.push(GameEventKind::Tapped { object: *id });
             }
             CostPayment::Sacrifice(id) => {
-                if let Some(event) =
+                if let Some((event, departed)) =
                     move_to_graveyard_for_cost(state, *id, ZoneKind::Battlefield, None)
                 {
                     events.push(event);
+                    departed_triggered.extend(departed);
                 }
             }
             CostPayment::Discard(id) => {
-                if let Some(event) =
+                if let Some((event, departed)) =
                     move_to_graveyard_for_cost(state, *id, ZoneKind::Hand, Some(payer))
                 {
                     events.push(event);
+                    departed_triggered.extend(departed);
                 }
             }
             CostPayment::Life(amount) => {
@@ -483,7 +503,7 @@ pub(crate) fn commit_payment(
             }
         }
     }
-    events
+    (events, departed_triggered)
 }
 
 /// Performs the real effect of one already-committed `GameEventKind::
