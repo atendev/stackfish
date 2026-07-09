@@ -3211,6 +3211,76 @@ controller's spell; casting with zero registered modifiers is completely unaffec
   real CR 601.2f says yes in principle; this slice's cost modifiers only ever touch the plain
   mana-cost path, same deferral 6c's own report already flagged from the other direction.
 
+## Phase 5: phase5/ability-mana-cost-strings slice (6e, merged to master)
+
+Branch `phase5/ability-mana-cost-strings`, off master. Last item in backlog #6 ("cost system
+completeness") — closes it out entirely (6a Phyrexian/snow/hybrid mana payment, 6b `{X}` costs, 6c
+flashback/alternative costs, 6d cost modifiers, 6e this slice).
+
+**Key finding before writing code:** the engine-side gap this backlog item implied didn't actually
+exist. `RegisteredAbility.cost: Option<CostSpec>` and `CostSpec.mana: Option<ManaCost>` were already
+real (from the activated-ability-costs slice), and `PaymentPlan::validate` already validates a mana
+component generically regardless of whether the `CostSpec` came from a spell or an ability — no
+engine-logic changes were needed at all. The actual gap was purely on the *authoring* side:
+`ActivatedAbilityBuilder::AddCost` (script.rs) only ever pushed onto `cost.additional`, since no
+Lua-facing mana-cost-string parser existed anywhere to turn `"{1}{R}"` into a real `ManaCost` — that
+builder's own doc comment already flagged this as deferred. So this slice is a pure string→data
+parser plus one new script binding, zero engine-logic changes.
+
+**VERIFICATION RESULT:** Pass. `ManaCost::parse` — 9 new unit tests in `mana.rs` (generic+colored,
+repeated colored pips, color/color hybrid, generic/color hybrid, plain Phyrexian, hybrid-Phyrexian,
+snow+colorless, `{X}`, and a batch of malformed-string rejections). `phase5_activated_ability_self_registration.rs`
+gained 5 new tests: parse-and-register via `Game.Costs.Mana("{1}{R}")`, rejecting a second
+`Game.Costs.Mana(...)` call on one builder, rejecting a malformed cost string, plus a full
+end-to-end activate→pay→resolve test through the real `Engine` (mana + `{T}` cost paid together,
+ability resolves, life gained). `cargo test --workspace` green throughout, no regressions.
+
+**What got implemented:**
+- `ManaCost::parse(s: &str) -> Result<ManaCost, ManaCostParseError>` (mana.rs) — tokenizes
+  `{...}`-group cost strings into every symbol shape already modeled: digits → `Generic`; a single
+  WUBRG letter → `Colored`; `C` → `Colorless` (parses fine, stays unpayable — pre-existing
+  `atom_branches` gap, not fixed here); `S` → `Snow`; `X` → bare `ManaSymbol::X`; `<letter>/P` →
+  plain `Phyrexian` (not a `Hybrid` — matches this type's own doc comment on why); `<A>/<B>` → color/
+  color or generic/color `Hybrid`; `<A>/<B>/P` → hybrid-Phyrexian `Hybrid(Phyrexian(A), Colored(B))`,
+  matching the exact convention `cost.rs`'s `hybrid_phyrexian_offers_three_real_branches` test
+  already documents. Anything outside a `{...}` group, an empty/unterminated group, or an
+  unrecognized shape inside one is a hard parse error.
+- `script.rs`: generalized `CostTag(AdditionalCost)` → `CostTag(CostComponent)` where
+  `CostComponent` is `Additional(AdditionalCost) | Mana(ManaCost)` — a single enum rather than a
+  separate builder method, so `Game.Costs.Mana(...)` slots into the exact same `:AddCost(...)`
+  vocabulary as `TapSelf`/`Sacrifice`/`Discard`/`TapPermanents`/`Life`. `decode_additional_cost_value`
+  renamed to `decode_cost_component_value` (same shape, wider return type).
+  `ActivatedAbilityBuilder::AddCost` now dispatches on the decoded `CostComponent`: `Additional`
+  pushes onto `cost.additional` as before, `Mana` sets `cost.mana` — erroring (not silently
+  overwriting) if called a second time on the same builder.
+- New `Game.Costs.Mana(s)` binding in `bind_game_globals` — parses `s` via `ManaCost::parse`,
+  surfaces a parse failure as a real Lua runtime error (not a nil/silently-ignored cost).
+
+**STRUCT DEVIATIONS:** `CostComponent` (script.rs) is new, but directly implied by "generalize
+`CostTag`" from the pre-slice plan — not a surprise discovered mid-implementation.
+
+**INTERFACE DEVIATIONS:** `decode_additional_cost_value` renamed to `decode_cost_component_value`
+with a widened return type (`AdditionalCost` → `CostComponent`) — a direct, necessary consequence of
+generalizing `CostTag`, not independently scoped, but worth naming as a rename for anyone grepping
+for the old name.
+
+**SCOPE DEVIATIONS:** None — no `GameState`/`CardDefinition` literal sweep needed this time (no new
+fields on either type), everything landed in `mana.rs`, `script.rs`, and the one existing
+ability-self-registration test file.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- `{C}` parses fine but stays unpayable — `atom_branches`'s pre-existing gap, unrelated to this
+  slice's own scope.
+- `{X}` parses to `ManaSymbol::X`, but an activated ability still has no `x_value` announcement slot
+  to resolve it with (flagged since the x-costs slice, 6b) — nothing consumes an ability-side `{X}`.
+- `CardDefinition.mana_cost` (spells) is untouched — still sourced as a structured `ManaCost` from
+  the external card database, never parsed from a string; only `ActivatedAbilityBuilder` got this
+  wiring.
+
+**Backlog item 6 ("cost system completeness") is now fully closed** — every sub-item (alternative
+costs, `{X}` costs, hybrid/Phyrexian/snow mana payment, cost reduction/increase, ability mana-cost
+strings) has landed on master.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
