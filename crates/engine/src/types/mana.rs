@@ -179,6 +179,143 @@ impl ManaCost {
         }
         ManaCost { symbols }
     }
+
+    /// Parses a printed mana-cost string (CR 107.4/202.3's `{...}`-group
+    /// templating, e.g. `"{1}{R}"`, `"{X}{G}"`, `"{W/U}"`, `"{2/W}"`,
+    /// `"{W/P}"`, `"{B/G/P}"`, `"{S}"`) into every symbol shape this engine
+    /// already models (`AtomicManaSymbol`/`ManaSymbol`) — a pure string→data
+    /// parser, no new payment logic: once a real `ManaCost` exists, the
+    /// existing `PaymentPlan`/`ManaCost` machinery (6a's Phyrexian/snow/
+    /// hybrid payment) handles it exactly like a spell's cost, unmodified.
+    ///
+    /// Closes the "no Lua-facing mana-cost-string parser exists anywhere
+    /// yet" gap `ActivatedAbilityBuilder` (script.rs) previously flagged —
+    /// `CardDefinition.mana_cost` (spells) is untouched by this: it's still
+    /// sourced as a structured `ManaCost` from the external card database,
+    /// never parsed from a string.
+    ///
+    /// Grammar per `{...}` group: digits → `Generic`; a single WUBRG letter →
+    /// `Colored`; `C` → `Colorless` (parses fine, still unpayable — see
+    /// `atom_branches`'s own doc comment, a pre-existing gap this doesn't
+    /// fix); `S` → `Snow`; `X` → bare `ManaSymbol::X`; `<letter>/P` → plain
+    /// `Phyrexian` (not a `Hybrid` — see this type's own doc comment on why);
+    /// `<A>/<B>` (color/color or generic/color) → `Hybrid`; `<A>/<B>/P`
+    /// (both `A`/`B` colors) → hybrid-Phyrexian `Hybrid(Phyrexian(A),
+    /// Colored(B))`, matching the convention `cost.rs`'s own
+    /// `hybrid_phyrexian_offers_three_real_branches` test already documents.
+    /// Anything outside a `{...}` group, an empty/unterminated group, or an
+    /// unrecognized shape inside one is a hard parse error, not guessed at.
+    pub fn parse(s: &str) -> Result<ManaCost, ManaCostParseError> {
+        let mut symbols = Vec::new();
+        let mut chars = s.char_indices().peekable();
+        while let Some((start, c)) = chars.next() {
+            if c != '{' {
+                return Err(ManaCostParseError(format!(
+                    "expected '{{' at position {start} in \"{s}\", found '{c}'"
+                )));
+            }
+            let mut inner = String::new();
+            let mut closed = false;
+            for (_, c) in chars.by_ref() {
+                if c == '}' {
+                    closed = true;
+                    break;
+                }
+                inner.push(c);
+            }
+            if !closed {
+                return Err(ManaCostParseError(format!("unterminated '{{' in \"{s}\"")));
+            }
+            symbols.push(parse_symbol_group(&inner, s)?);
+        }
+        Ok(ManaCost { symbols })
+    }
+}
+
+/// `ManaCost::parse`'s error type — a plain human-readable message, same
+/// "a String is enough, no fancy variant taxonomy needed" stance this
+/// codebase already takes for script-load errors (`ScriptError::LoadError`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManaCostParseError(pub String);
+
+/// Parses one `{...}` group's inner text (already stripped of braces) —
+/// shared by every call `ManaCost::parse` makes per symbol. `whole` is the
+/// original full string, kept only for error messages.
+fn parse_symbol_group(inner: &str, whole: &str) -> Result<ManaSymbol, ManaCostParseError> {
+    if inner.is_empty() {
+        return Err(ManaCostParseError(format!("empty \"{{}}\" group in \"{whole}\"")));
+    }
+    if inner.chars().all(|c| c.is_ascii_digit()) {
+        let n: u32 = inner
+            .parse()
+            .map_err(|_| ManaCostParseError(format!("generic amount \"{inner}\" out of range in \"{whole}\"")))?;
+        return Ok(ManaSymbol::Atom(AtomicManaSymbol::Generic(n)));
+    }
+    if inner == "X" {
+        return Ok(ManaSymbol::X);
+    }
+    if inner == "C" {
+        return Ok(ManaSymbol::Atom(AtomicManaSymbol::Colorless));
+    }
+    if inner == "S" {
+        return Ok(ManaSymbol::Atom(AtomicManaSymbol::Snow));
+    }
+    if let Ok(color) = parse_color_letter(inner) {
+        return Ok(ManaSymbol::Atom(AtomicManaSymbol::Colored(color)));
+    }
+
+    let parts: Vec<&str> = inner.split('/').collect();
+    match parts.as_slice() {
+        [a, b] if *b == "P" => {
+            let color = parse_color_letter(a)
+                .map_err(|_| ManaCostParseError(format!("\"{{{inner}}}\" needs a color before /P in \"{whole}\"")))?;
+            Ok(ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(color)))
+        }
+        [a, b] => {
+            let atom_a = parse_hybrid_atom(a, inner, whole)?;
+            let atom_b = parse_hybrid_atom(b, inner, whole)?;
+            Ok(ManaSymbol::Hybrid(atom_a, atom_b))
+        }
+        [a, b, c] if *c == "P" => {
+            let color_a = parse_color_letter(a).map_err(|_| {
+                ManaCostParseError(format!("\"{{{inner}}}\" needs two colors before /P in \"{whole}\""))
+            })?;
+            let color_b = parse_color_letter(b).map_err(|_| {
+                ManaCostParseError(format!("\"{{{inner}}}\" needs two colors before /P in \"{whole}\""))
+            })?;
+            Ok(ManaSymbol::Hybrid(
+                AtomicManaSymbol::Phyrexian(color_a),
+                AtomicManaSymbol::Colored(color_b),
+            ))
+        }
+        _ => Err(ManaCostParseError(format!("unrecognized mana symbol \"{{{inner}}}\" in \"{whole}\""))),
+    }
+}
+
+/// A 2-part hybrid's own atom: either a generic amount or a single color —
+/// never `P` on its own (plain Phyrexian is handled as its own case in
+/// `parse_symbol_group` before this is ever called on a `/P` pair).
+fn parse_hybrid_atom(part: &str, inner: &str, whole: &str) -> Result<AtomicManaSymbol, ManaCostParseError> {
+    if part.chars().all(|c| c.is_ascii_digit()) && !part.is_empty() {
+        let n: u32 = part
+            .parse()
+            .map_err(|_| ManaCostParseError(format!("generic amount \"{part}\" out of range in \"{whole}\"")))?;
+        return Ok(AtomicManaSymbol::Generic(n));
+    }
+    parse_color_letter(part)
+        .map(AtomicManaSymbol::Colored)
+        .map_err(|_| ManaCostParseError(format!("unrecognized hybrid component \"{{{inner}}}\" in \"{whole}\"")))
+}
+
+fn parse_color_letter(s: &str) -> Result<Color, ManaCostParseError> {
+    match s {
+        "W" => Ok(Color::White),
+        "U" => Ok(Color::Blue),
+        "B" => Ok(Color::Black),
+        "R" => Ok(Color::Red),
+        "G" => Ok(Color::Green),
+        other => Err(ManaCostParseError(format!("unknown color letter \"{other}\""))),
+    }
 }
 
 /// A player's floating mana pool. Cleared at the end of each step/phase per
@@ -341,5 +478,101 @@ mod tests {
                 ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
             ]
         );
+    }
+
+    #[test]
+    fn parse_generic_and_colored() {
+        let cost = ManaCost::parse("{1}{R}").unwrap();
+        assert_eq!(
+            cost.symbols,
+            vec![
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_repeated_colored_pips() {
+        let cost = ManaCost::parse("{W}{W}").unwrap();
+        assert_eq!(
+            cost.symbols,
+            vec![
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_color_color_hybrid() {
+        let cost = ManaCost::parse("{W/U}").unwrap();
+        assert_eq!(
+            cost.symbols,
+            vec![ManaSymbol::Hybrid(
+                AtomicManaSymbol::Colored(Color::White),
+                AtomicManaSymbol::Colored(Color::Blue),
+            )]
+        );
+    }
+
+    #[test]
+    fn parse_generic_color_hybrid() {
+        let cost = ManaCost::parse("{2/W}").unwrap();
+        assert_eq!(
+            cost.symbols,
+            vec![ManaSymbol::Hybrid(
+                AtomicManaSymbol::Generic(2),
+                AtomicManaSymbol::Colored(Color::White),
+            )]
+        );
+    }
+
+    #[test]
+    fn parse_plain_phyrexian() {
+        let cost = ManaCost::parse("{W/P}").unwrap();
+        assert_eq!(cost.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::White))]);
+    }
+
+    #[test]
+    fn parse_hybrid_phyrexian() {
+        let cost = ManaCost::parse("{B/G/P}").unwrap();
+        assert_eq!(
+            cost.symbols,
+            vec![ManaSymbol::Hybrid(
+                AtomicManaSymbol::Phyrexian(Color::Black),
+                AtomicManaSymbol::Colored(Color::Green),
+            )]
+        );
+    }
+
+    #[test]
+    fn parse_snow_and_colorless() {
+        let cost = ManaCost::parse("{S}{C}").unwrap();
+        assert_eq!(
+            cost.symbols,
+            vec![
+                ManaSymbol::Atom(AtomicManaSymbol::Snow),
+                ManaSymbol::Atom(AtomicManaSymbol::Colorless),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_x() {
+        let cost = ManaCost::parse("{X}{G}").unwrap();
+        assert_eq!(
+            cost.symbols,
+            vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Green))]
+        );
+    }
+
+    #[test]
+    fn parse_rejects_malformed_strings() {
+        assert!(ManaCost::parse("1R").is_err(), "missing braces");
+        assert!(ManaCost::parse("{1").is_err(), "unterminated brace");
+        assert!(ManaCost::parse("{Q}").is_err(), "unknown letter");
+        assert!(ManaCost::parse("{}").is_err(), "empty group");
+        assert!(ManaCost::parse("{W/U/B}").is_err(), "3-part group not ending in P");
     }
 }
