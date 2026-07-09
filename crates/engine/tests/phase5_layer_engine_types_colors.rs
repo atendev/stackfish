@@ -158,6 +158,7 @@ fn base_state() -> GameState {
         stack: Vec::new(),
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
+        cost_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState { seed: 1, draws_consumed: 0 },

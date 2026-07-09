@@ -107,6 +107,67 @@ impl CostSpec {
     }
 }
 
+/// CR 601.2f/118.9: a static "spells [you cast/of some type] cost `{N}`
+/// more/less to cast" effect (Goblin Warchief, Thalia, ...) — deliberately
+/// **not** a `ContinuousEffect`/CR 613 layer: cost modification isn't a
+/// characteristic query, it's a one-time adjustment applied while
+/// determining a spell's total cost (CR 601.2f), so it needs its own
+/// mechanism rather than extending `layers::effective_characteristics`.
+///
+/// Scoped to spells only this slice (an activated ability's own cost isn't
+/// touched, same "spells first" narrowing `{X}`/alternative-costs both
+/// took) and to a flat, fixed `amount` — no dynamic/count-dependent amounts
+/// (e.g. Affinity), no colored-pip-specific modification (only the generic
+/// component, see `ManaCost::apply_cost_delta`).
+///
+/// `filter`/`controller` reuse `cost.rs`'s existing `FilterSpec` rather than
+/// inventing a parallel "which spells" shape: `FilterSpec::matches` already
+/// takes an arbitrary `&GameObject` + a `viewer: PlayerId` and answers
+/// card_types/relative-controller questions, and a spell being cast is
+/// still a plain `GameObject` (with `.controller` = caster) at the point
+/// `commands.rs` needs to ask "does this modifier apply" — no new type
+/// needed, `viewer` is just `self.controller` (whose "You"/"Opponent"
+/// perspective the modifier's own text is written from).
+///
+/// TODO(CR 613.7-style ordering): when two modifiers could apply at the same
+/// timestamp, the affected player chooses application order; this engine
+/// has no timestamp/ordering-choice concept for cost modifiers yet —
+/// `apply_cost_modifiers` below applies matches in `state.cost_modifiers`'s
+/// registration order instead, un-chosen.
+/// TODO: no `Game.CreateCostModifier` script builder yet — same "Rust
+/// struct-literal fixtures only" bootstrap stance replacement effects and
+/// static abilities each took before their own builder slice landed. Only
+/// constructible today via a direct `CostModifier` literal.
+#[derive(Clone, Debug)]
+pub struct CostModifier {
+    pub source: ObjectId,
+    /// Whose "you"/"opponent" the modifier's own `filter` is relative to —
+    /// e.g. "spells your opponents cast cost {1} more" has `controller` set
+    /// to whoever controls this effect's source, and `filter.controller ==
+    /// Some(FilterController::Opponent)`.
+    pub controller: PlayerId,
+    pub filter: FilterSpec,
+    /// Negative reduces, positive increases the generic component (CR
+    /// 118.9's `{0}` floor is enforced by `ManaCost::apply_cost_delta`, not
+    /// here).
+    pub amount: i32,
+}
+
+/// Applies every `CostModifier` in `modifiers` whose `filter` matches
+/// `spell` (evaluated from that modifier's own `controller`'s perspective),
+/// one at a time in list order, each via `ManaCost::apply_cost_delta` — see
+/// that method's own doc comment for why this isn't "sum every delta, then
+/// clamp once."
+pub fn apply_cost_modifiers(base: &ManaCost, modifiers: &[CostModifier], spell: &GameObject) -> ManaCost {
+    let mut cost = base.clone();
+    for modifier in modifiers {
+        if modifier.filter.matches(spell, modifier.controller) {
+            cost = cost.apply_cost_delta(modifier.amount);
+        }
+    }
+    cost
+}
+
 /// `Color` enum order used to index a fixed-size `[u32; 5]` colored-mana
 /// tally — shared between `PaymentPlan::validate` and `spend` so the two
 /// can't drift apart on which slot means which color.
