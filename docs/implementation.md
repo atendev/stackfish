@@ -3139,6 +3139,78 @@ throughout, no regressions from the mechanical field-addition sweep below.
   `x_value` is simply unchecked whenever an alternative is chosen, flagged with a `TODO` directly in
   `commands.rs`'s `CastSpell` arm.
 
+## Phase 5: phase5/cost-modifiers slice (6d, merged to master)
+
+Branch `phase5/cost-modifiers`, off master. Next item in backlog #6 ("cost system completeness"),
+after 6a (Phyrexian/snow/hybrid mana payment), 6b (`{X}` costs), 6c (flashback/alternative costs).
+Scoped to a static "spells [you cast/of some type] cost `{N}` more/less to cast" effect (Goblin
+Warchief, Thalia) — flat fixed amounts only, generic-component-only, spells only (not activated
+abilities), same narrowing precedent 6b/6c both already established for their own slices.
+
+**Key design point, decided before writing code:** cost modification (CR 601.2f/118.9) is **not**
+part of the CR 613 layer system, despite superficially looking like another "static effect that
+changes something" case `ContinuousEffect`/`layers.rs` already handle. It's a one-time adjustment
+applied while determining a spell's total cost, evaluated once at cast time, not a continuous
+characteristic query re-evaluated on demand. So this needed its own mechanism (`CostModifier`, a
+new flat list on `GameState`) rather than extending `EffectPrimitive`/`Layer`.
+
+**VERIFICATION RESULT:** Pass. New `phase5_cost_modifiers.rs` — 7 tests (reduction lowers the
+generic component only, colored pip untouched; increase raises it; reduction floors at `{0}`
+generic rather than going negative; a non-matching filter has no effect; two modifiers both apply
+in registration order; a modifier scoped to "spells your opponents cast" doesn't apply to its own
+controller's spell; casting with zero registered modifiers is completely unaffected) — all green.
+`cargo test --workspace` green throughout, no regressions from the mechanical sweep below.
+
+**What got implemented:**
+- `ManaCost::apply_cost_delta(delta: i32) -> ManaCost` (mana.rs) — adjusts only a bare
+  `Atom(Generic(_))` component (never a colored pip, never inside a `Hybrid` — same scope
+  `generic_total`'s own doc comment already draws), clamped at `{0}` (CR 118.9). If the cost has no
+  generic component yet, a positive delta still creates one (a cost increase can introduce generic
+  cost where none existed, e.g. Thalia taxing an otherwise-colored-only spell); a non-positive delta
+  with nothing to reduce is a no-op. Mirrors `resolve_x`'s existing "filter/rebuild `symbols`"
+  pattern.
+- `CostModifier { source: ObjectId, controller: PlayerId, filter: FilterSpec, amount: i32 }`
+  (cost.rs) — reuses the existing `FilterSpec` (card_types + relative controller) rather than
+  inventing a parallel "which spells" shape: a spell pre-cast is still a plain `GameObject` (with
+  `.controller` = caster) at the point `commands.rs` needs to ask "does this modifier apply," so
+  `FilterSpec::matches(spell, modifier.controller)` — `viewer` being the modifier's own controller,
+  whose "You"/"Opponent" perspective its filter is written from — just works with zero new type.
+- `apply_cost_modifiers(base, modifiers, spell)` (cost.rs) — applies every matching modifier one at
+  a time in list order via `apply_cost_delta`, not "sum every delta, then clamp once" — matters for
+  the floor-at-zero case (see the doc comments on both functions for why).
+- `GameState.cost_modifiers: Vec<CostModifier>` — new flat list, same "scan-friendly, not nested"
+  convention as `continuous_effects`/`replacement_effects`.
+- `commands.rs`'s `CastSpell` arm: calls `apply_cost_modifiers` on the resolved mana cost right
+  after X-substitution, only on the plain-mana-cost path (`alternative_cost: None`) — never mixed
+  with an alternative cost, same "entirely replacing, never mixing" stance 6c's cost-building branch
+  already took.
+
+**STRUCT DEVIATIONS:** None — matched the pre-slice requirements report exactly.
+
+**INTERFACE DEVIATIONS:** None.
+
+**SCOPE DEVIATIONS:**
+- `GameState.cost_modifiers` rippled through all 33 files with a `GameState` literal — mechanical
+  Python sweep anchored on the pre-existing `replacement_effects: Vec::new(),` line, same shape as
+  6c's `alternative_costs` sweep. Unlike 6c's sweep, no ambiguous anchor collisions this time (the
+  anchor line is unique to `GameState` literals, unlike `target_requirement: None,` which also
+  appeared in unrelated `StackObject` literals) — every insertion landed correctly on the first pass.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Ability cost reduction (Heartstone-style "ability costs of creatures you control cost `{1}` less
+  to activate") — `ActivateAbility`'s cost path is entirely untouched by this slice.
+- Colored-pip-specific reduction/increase (e.g. "costs `{W}` less") and dynamic/count-dependent
+  amounts (Affinity-style, scales with permanents controlled) — `amount` is a fixed `i32` only.
+- No `Game.CreateCostModifier` script builder yet — same "Rust struct-literal fixtures only"
+  bootstrap stance `replacement-prevention-effects`/`static-ability-self-registration` each took
+  before their own builder slice landed.
+- CR 613.7-style "affected player chooses application order" for same-timestamp modifiers isn't
+  modeled — `apply_cost_modifiers` applies matches in `state.cost_modifiers`'s registration order
+  instead, un-chosen.
+- Interaction with 6c's alternative costs (does a cost modifier apply to a flashback cost too?) —
+  real CR 601.2f says yes in principle; this slice's cost modifiers only ever touch the plain
+  mana-cost path, same deferral 6c's own report already flagged from the other direction.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
