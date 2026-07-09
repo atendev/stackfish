@@ -7,11 +7,12 @@ use crate::types::cost::FilterController;
 
 /// CR 613.1 layers, with sublayers for layer 7 (power/toughness).
 /// `TypeChanging` (4), `ColorChanging` (5), `AbilityAdding` (6),
-/// `PowerToughnessSetting` (7b), and `PowerToughnessModifying` (7c) have a
-/// real query/apply path — see `layers::effective_characteristics`. The rest
-/// are named here (so the CR 613.1 layer list is complete and in the right
-/// relative order) but nothing in `state.continuous_effects` can be built
-/// against them yet and the query doesn't look for them:
+/// `PowerToughnessSetting` (7b), `PowerToughnessModifying` (7c), and
+/// `PowerToughnessSwitching` (7e) have a real query/apply path — see
+/// `layers::effective_characteristics`. The rest are named here (so the CR
+/// 613.1 layer list is complete and in the right relative order) but nothing
+/// in `state.continuous_effects` can be built against them yet and the query
+/// doesn't look for them:
 ///
 /// TODO(layer 1, CopyEffects): needs real copy-object semantics (CR 706 —
 /// becoming a copy of another object/printed values), which nothing in this
@@ -115,6 +116,14 @@ pub enum EffectPrimitive {
     /// color(s) in addition to whatever the object already has — e.g.
     /// "enchanted creature is also red". Union, never removes a color.
     AddColor(ColorSet),
+    /// Layer 7e (CR 613.4d): swaps the object's current power and toughness
+    /// — takes whatever value 7b/7c already produced for power and applies
+    /// it to toughness, and vice versa. A toggle, not a value, so no fields.
+    /// Two `SwitchPT` effects on the same object cancel out exactly (CR
+    /// 613.4d's own third example) — a plain swap is its own inverse, so
+    /// applying it twice in `layers::effective_characteristics` naturally
+    /// reproduces that without any special-casing.
+    SwitchPT,
 }
 
 /// A `ContinuousEffect`'s actual effect — either a recognized

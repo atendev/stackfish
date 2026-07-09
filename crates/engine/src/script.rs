@@ -419,6 +419,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPrimitive) -> Resu
             | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
             | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
+            | (Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)
     );
     if paired {
         Ok(())
@@ -972,8 +973,8 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?,
     )?;
 
-    // Only the 5 layers with a real query path (layers::effective_characteristics)
-    // are exposed - a static ability can't request layer 1/2/3/7d/7e at all
+    // Only the 6 layers with a real query path (layers::effective_characteristics)
+    // are exposed - a static ability can't request layer 1/2/3/7d at all
     // (see `Layer`'s own doc comment for what's unbuilt and why).
     let layers = lua.create_table()?;
     layers.set("TypeChanging", LayerTag(Layer::TypeChanging))?;
@@ -981,6 +982,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     layers.set("AbilityAdding", LayerTag(Layer::AbilityAdding))?;
     layers.set("PowerToughnessSetting", LayerTag(Layer::PowerToughnessSetting))?;
     layers.set("PowerToughnessModifying", LayerTag(Layer::PowerToughnessModifying))?;
+    layers.set("PowerToughnessSwitching", LayerTag(Layer::PowerToughnessSwitching))?;
 
     let effects = lua.create_table()?;
     effects.set(
@@ -1016,6 +1018,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
             Ok(EffectPrimitiveTag(EffectPrimitive::AddColor(set)))
         })?,
     )?;
+    effects.set("SwitchPT", EffectPrimitiveTag(EffectPrimitive::SwitchPT))?;
 
     let create_triggered_ability = {
         let registry = Rc::clone(&registry);
