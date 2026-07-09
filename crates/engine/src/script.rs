@@ -16,7 +16,7 @@ use crate::types::effect::{
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
-use crate::types::mana::ColorSet;
+use crate::types::mana::{ColorSet, ManaCost};
 use crate::types::zone::ZoneKind;
 
 /// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
@@ -34,11 +34,24 @@ impl UserData for ConditionTag {}
 struct OperationTag(AbilityEffect);
 impl UserData for OperationTag {}
 
-/// Same idea, for `Game.Costs.*` — e.g. `Game.Costs.TapSelf` is a plain
-/// tagged value, `Game.Costs.Sacrifice({...})` is a Lua function returning
-/// one of these — decoded back out via `decode_additional_cost_value`.
+/// One `:AddCost(...)` component — either an `AdditionalCost` (tap/
+/// sacrifice/discard/life, CR 602.5a-ish) or a real mana-cost component
+/// (CR 107.4, from `Game.Costs.Mana("{1}{R}")`/`ManaCost::parse`). A single
+/// enum rather than two separate builder methods so `:AddCost` stays the
+/// one call every cost component goes through — `Game.Costs.Mana(...)` just
+/// slots into the same `Game.Costs.*` vocabulary as `TapSelf`/`Sacrifice`.
 #[derive(Clone)]
-struct CostTag(AdditionalCost);
+enum CostComponent {
+    Additional(AdditionalCost),
+    Mana(ManaCost),
+}
+
+/// Same idea, for `Game.Costs.*` — e.g. `Game.Costs.TapSelf` is a plain
+/// tagged value, `Game.Costs.Sacrifice({...})`/`Game.Costs.Mana("{1}{R}")`
+/// are Lua functions returning one of these — decoded back out via
+/// `decode_cost_component_value`.
+#[derive(Clone)]
+struct CostTag(CostComponent);
 impl UserData for CostTag {}
 
 /// Same idea, for `Game.Layers.*` — e.g. `Game.Layers.PowerToughnessModifying`
@@ -199,13 +212,14 @@ fn decode_operation_value(
 }
 
 /// Same shape as `decode_condition_value`/`decode_operation_value`, for
-/// `Game.Costs.*` — no `Script` fallback (`AdditionalCost` has no such
-/// variant), so a bare custom function isn't accepted here, unlike the
-/// condition/operation decoders. Shared by `ActivatedAbilityBuilder::AddCost`
-/// and (indirectly, via a plain one-liner eval) any future standalone-cost
-/// loader, same convention `decode_condition_value` follows for
-/// `load_condition`/`TriggeredAbilityBuilder::SetCondition`.
-fn decode_additional_cost_value(value: Value) -> Result<AdditionalCost, ScriptError> {
+/// `Game.Costs.*` — no `Script` fallback (neither `AdditionalCost` nor
+/// `ManaCost` has such a variant), so a bare custom function isn't accepted
+/// here, unlike the condition/operation decoders. Shared by
+/// `ActivatedAbilityBuilder::AddCost` and (indirectly, via a plain one-liner
+/// eval) any future standalone-cost loader, same convention
+/// `decode_condition_value` follows for `load_condition`/
+/// `TriggeredAbilityBuilder::SetCondition`.
+fn decode_cost_component_value(value: Value) -> Result<CostComponent, ScriptError> {
     match value {
         Value::UserData(ud) => {
             let tag: CostTag =
@@ -486,27 +500,30 @@ impl UserData for TriggeredAbilityBuilder {
 /// `TriggeredAbilityBuilder` for CR 602 activated abilities, generalized off
 /// the old single `AbilityCost::Tap` shortcut. `:AddCost` is called once per
 /// cost component (`Game.Costs.TapSelf`, `Sacrifice({...})`, `Discard({...})`,
-/// `TapPermanents({...}, count)`, `Life(n)`) and accumulates onto
-/// `CostSpec.additional` — not a single `:SetCost`, since a real activation
-/// can need more than one component at once (e.g. `{T}, Sacrifice a
-/// creature:`). `:SetOperation` mirrors `TriggeredAbilityBuilder`'s own
-/// setter exactly. `:Register()` queues the finished `RegisteredAbility`
-/// onto the same shared `pending_triggered` list `TriggeredAbilityBuilder`
-/// uses — that queue drains into `state.abilities` regardless of
-/// `AbilityKind` (see `ScriptRegistry::pending_triggered`'s doc comment), so
-/// there's no need for an `Activated`-only queue.
+/// `TapPermanents({...}, count)`, `Life(n)`, `Mana("{1}{R}")`) — the
+/// `AdditionalCost` shapes accumulate onto `CostSpec.additional`,
+/// `Game.Costs.Mana(...)` sets `CostSpec.mana` (parsed via
+/// `ManaCost::parse` — see that method's own doc comment for the closed
+/// "no Lua-facing mana-cost-string parser exists anywhere yet" gap this
+/// resolves). Not a single `:SetCost`, since a real activation can need more
+/// than one component at once (e.g. `{1}{R}, Sacrifice a creature:`).
+/// `:SetOperation` mirrors `TriggeredAbilityBuilder`'s own setter exactly.
+/// `:Register()` queues the finished `RegisteredAbility` onto the same
+/// shared `pending_triggered` list `TriggeredAbilityBuilder` uses — that
+/// queue drains into `state.abilities` regardless of `AbilityKind` (see
+/// `ScriptRegistry::pending_triggered`'s doc comment), so there's no need
+/// for an `Activated`-only queue.
 ///
 /// `kind` is implied the same way `TriggeredAbilityBuilder`'s own doc
 /// comment already explains.
 ///
-/// Mana-cost components on an activated ability's cost stay out of scope —
-/// no Lua-facing mana-cost-string parser exists anywhere yet (same boundary
-/// `CastSpell`'s own cost already has) — so `cost.mana` is always `None`;
-/// `:AddCost` only ever appends to `cost.additional`. `:SetTarget` is
-/// deliberately not bound this slice either, same "nothing built yet to
-/// consume it" stance `TriggeredAbilityBuilder`'s own doc comment takes for
-/// its own `:SetTarget` — a script-registered activated ability is
-/// targetless until that's designed.
+/// `:SetTarget` is deliberately not bound this slice, same "nothing built
+/// yet to consume it" stance `TriggeredAbilityBuilder`'s own doc comment
+/// takes for its own `:SetTarget` — a script-registered activated ability is
+/// targetless until that's designed. `CardDefinition.mana_cost` (spells) is
+/// untouched by `ManaCost::parse` existing now — it's still sourced as a
+/// structured `ManaCost` from the external card database, never parsed from
+/// a string.
 struct ActivatedAbilityBuilder {
     source: ObjectId,
     cost: CostSpec,
@@ -517,8 +534,19 @@ struct ActivatedAbilityBuilder {
 impl UserData for ActivatedAbilityBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method_mut("AddCost", |_, this, value: Value| {
-            let additional = decode_additional_cost_value(value).map_err(to_lua_err)?;
-            this.cost.additional.push(additional);
+            match decode_cost_component_value(value).map_err(to_lua_err)? {
+                CostComponent::Additional(additional) => this.cost.additional.push(additional),
+                CostComponent::Mana(mana) => {
+                    if this.cost.mana.is_some() {
+                        return Err(mlua::Error::RuntimeError(
+                            "AddCost(Game.Costs.Mana(...)) called more than once - an activated \
+                             ability has only one mana-cost component"
+                                .to_string(),
+                        ));
+                    }
+                    this.cost.mana = Some(mana);
+                }
+            }
             Ok(())
         });
         methods.add_method_mut("SetOperation", |lua, this, value: Value| {
@@ -891,31 +919,45 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     ops.set("GainLife", gain_life)?;
 
     let costs = lua.create_table()?;
-    costs.set("TapSelf", CostTag(AdditionalCost::TapSelf))?;
+    costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;
     costs.set(
         "Sacrifice",
         lua.create_function(|_, table: Table| {
             let filter = decode_filter_table(table).map_err(to_lua_err)?;
-            Ok(CostTag(AdditionalCost::Sacrifice { filter }))
+            Ok(CostTag(CostComponent::Additional(AdditionalCost::Sacrifice { filter })))
         })?,
     )?;
     costs.set(
         "Discard",
         lua.create_function(|_, table: Table| {
             let filter = decode_filter_table(table).map_err(to_lua_err)?;
-            Ok(CostTag(AdditionalCost::Discard { filter }))
+            Ok(CostTag(CostComponent::Additional(AdditionalCost::Discard { filter })))
         })?,
     )?;
     costs.set(
         "TapPermanents",
         lua.create_function(|_, (table, count): (Table, u32)| {
             let filter = decode_filter_table(table).map_err(to_lua_err)?;
-            Ok(CostTag(AdditionalCost::TapPermanents { filter, count }))
+            Ok(CostTag(CostComponent::Additional(AdditionalCost::TapPermanents { filter, count })))
         })?,
     )?;
     costs.set(
         "Life",
-        lua.create_function(|_, amount: u32| Ok(CostTag(AdditionalCost::LifePayment { amount })))?,
+        lua.create_function(|_, amount: u32| {
+            Ok(CostTag(CostComponent::Additional(AdditionalCost::LifePayment { amount })))
+        })?,
+    )?;
+    // CR 107.4/202.3: a printed mana-cost string, e.g. `Game.Costs.Mana("{1}{R}")`
+    // - see `ManaCost::parse`'s own doc comment for the grammar and for why
+    // this is the fix for the "no Lua-facing mana-cost-string parser exists
+    // anywhere yet" gap `ActivatedAbilityBuilder` previously flagged.
+    costs.set(
+        "Mana",
+        lua.create_function(|_, s: String| {
+            let mana = ManaCost::parse(&s)
+                .map_err(|e| mlua::Error::RuntimeError(format!("Game.Costs.Mana(\"{s}\"): {}", e.0)))?;
+            Ok(CostTag(CostComponent::Mana(mana)))
+        })?,
     )?;
 
     // Only the 5 layers with a real query path (layers::effective_characteristics)
