@@ -103,28 +103,62 @@ pub enum ConditionPrimitive {
     /// library, ...), not just a death. Same last-known-information
     /// matching shape as `Dies`.
     LeavesBattlefield,
+    /// "Whenever you draw a card" (CR 121) — matches a `ZoneChange` event
+    /// moving *any* card from library to hand, filtered to only the ability
+    /// controller's own draws via `last_known_info.controller` (the pre-move
+    /// object clone every `ZoneChange` carries — no live state lookup
+    /// needed). Deliberately not `source`-scoped like `EntersBattlefield`:
+    /// this condition doesn't care what `source` is, only who controls it
+    /// and who drew. Matches by zone-shape only (`Library`→`Hand`) — there's
+    /// no separate "this was a draw" flag on the event, so a hypothetical
+    /// future non-draw Library→Hand effect (CR 121.5 draws a distinction
+    /// real MTG cares about) would false-positive here; no such effect
+    /// exists in this engine yet.
+    DrawsCard,
+    /// "Whenever a player draws a card" — the controller-agnostic sibling of
+    /// `DrawsCard` (e.g. Underworld Dreams-style effects), same relationship
+    /// `BeginningOfEachUpkeep` has to `BeginningOfYourUpkeep`.
+    EachDrawsCard,
+    /// "At the beginning of combat on your turn" (CR 507) — matches
+    /// `GameEventKind::StepStarted{step: Step::BeginningOfCombat}` only when
+    /// the ability's controller is also the active player. Same reachability
+    /// story as `BeginningOfYourUpkeep`: `AdvanceTurnStep` already routes
+    /// this step's `StepStarted` through the real pipeline, neither `Untap`
+    /// nor `Cleanup` special-casing applies to it.
+    BeginningOfYourCombat,
+    /// "At the beginning of each combat" — the controller-agnostic sibling
+    /// of `BeginningOfYourCombat`.
+    BeginningOfEachCombat,
+    /// "At the beginning of your end step" (CR 512/513) — matches
+    /// `GameEventKind::StepStarted{step: Step::End}` only when the ability's
+    /// controller is also the active player. Same reachability story as
+    /// `BeginningOfYourUpkeep`.
+    BeginningOfYourEndStep,
+    /// "At the beginning of each end step" — the controller-agnostic sibling
+    /// of `BeginningOfYourEndStep`.
+    BeginningOfEachEndStep,
 }
 
-// TODO(trigger system completeness, backlog item 7): "whenever you draw a
-// card," "at the beginning of combat," "at the beginning of the end step,"
-// and other phase/step/zone-change-linked conditions in the same family as
-// BeginningOfYourUpkeep above aren't added yet - cheap follow-ups now that
-// AdvanceTurnStep's events reach collect_triggers for real, just not part of
-// this slice's proof-of-plumbing scope. Untap-step events still can't
-// trigger anything (CR 502.4 grants no priority there, so there's no window
-// to place a trigger before) and Cleanup's own CleanupSbaCheck flow still
-// doesn't run collect_triggers at all (a second, differently-shaped fix,
-// left for its own slice - see docs/implementation.md's backlog item 7a).
+// TODO(backlog item 7, CR 603.10 continued): Dies/LeavesBattlefield are wired
+// for the SBA-driven death path (sba::commit_death) and Sacrifice/Discard
+// cost payment (commands::move_to_graveyard_for_cost, via commit_payment ->
+// Engine::submit_payment) - see move_to_graveyard_for_cost's own doc comment
+// for why the Discard half stays dormant. Two call sites still discard their
+// departed abilities outright: submit_discard's CR 514.1 hand-size discard,
+// and draw_step's library-side retirement - both would be inert to wire
+// today (neither can produce a Battlefield-departure LKI). "Whenever a
+// creature you control dies" (filtered by something other than "is this
+// exact object") also isn't representable yet - Dies/LeavesBattlefield only
+// ever match the ability's own source, not a filter over the dying object's
+// characteristics.
 //
-// TODO(backlog item 7, CR 603.10 continued): Dies/LeavesBattlefield are only
-// wired up for the SBA-driven death path (sba::commit_death) - sacrifice,
-// discard-as-cost, and a resolving spell's other zone departures all still
-// call commands::retire_object but discard its returned abilities, so a
-// "when this dies" ability on a sacrificed/discarded permanent won't fire
-// yet. "Whenever a creature you control dies" (filtered by something other
-// than "is this exact object") also isn't representable yet - Dies/
-// LeavesBattlefield only ever match the ability's own source, not a filter
-// over the dying object's characteristics.
+// TODO(trigger system completeness, backlog item 7): once-per-turn/
+// intervening-if legality (CR 603.2-603.3) is still untouched. Untap-step
+// events still can't trigger anything (CR 502.4 grants no priority there, so
+// there's no window to place a trigger before) and Cleanup's own
+// CleanupSbaCheck flow still doesn't run collect_triggers at all (a second,
+// differently-shaped fix, left for its own slice - see
+// docs/implementation.md's backlog item 7a).
 
 impl ConditionPrimitive {
     /// Zero Lua VM calls — evaluated directly against the event that's being
@@ -172,6 +206,29 @@ impl ConditionPrimitive {
                 GameEventKind::ZoneChange { from: ZoneKind::Battlefield, last_known_info: Some(lki), .. }
                     if lki.object_id == source
             ),
+            ConditionPrimitive::DrawsCard => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Library, to: ZoneKind::Hand, last_known_info: Some(lki), .. }
+                    if lki.controller == controller
+            ),
+            ConditionPrimitive::EachDrawsCard => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Library, to: ZoneKind::Hand, .. }
+            ),
+            ConditionPrimitive::BeginningOfYourCombat => {
+                controller == active_player
+                    && matches!(event, GameEventKind::StepStarted { step: Step::BeginningOfCombat })
+            }
+            ConditionPrimitive::BeginningOfEachCombat => {
+                matches!(event, GameEventKind::StepStarted { step: Step::BeginningOfCombat })
+            }
+            ConditionPrimitive::BeginningOfYourEndStep => {
+                controller == active_player
+                    && matches!(event, GameEventKind::StepStarted { step: Step::End })
+            }
+            ConditionPrimitive::BeginningOfEachEndStep => {
+                matches!(event, GameEventKind::StepStarted { step: Step::End })
+            }
         }
     }
 }
@@ -450,5 +507,161 @@ mod tests {
             last_known_info: Some(dummy_last_known_info(source)),
         };
         assert!(!ConditionPrimitive::LeavesBattlefield.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    fn drawn_card_last_known_info(drawer: PlayerId) -> crate::types::object::GameObject {
+        let mut lki = dummy_last_known_info(ObjectId(42));
+        lki.owner = drawer;
+        lki.controller = drawer;
+        lki.zone = ZoneKind::Library;
+        lki
+    }
+
+    #[test]
+    fn draws_card_matches_the_controllers_own_draw() {
+        let source = ObjectId(0);
+        let drawer = PlayerId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Library,
+            to: ZoneKind::Hand,
+            last_known_info: Some(drawn_card_last_known_info(drawer)),
+        };
+        assert!(ConditionPrimitive::DrawsCard.matches(source, drawer, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn draws_card_does_not_match_a_different_players_draw() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let drawer = PlayerId(1);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Library,
+            to: ZoneKind::Hand,
+            last_known_info: Some(drawn_card_last_known_info(drawer)),
+        };
+        assert!(!ConditionPrimitive::DrawsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn draws_card_does_not_match_a_non_draw_zone_change() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(drawn_card_last_known_info(controller)),
+        };
+        assert!(!ConditionPrimitive::DrawsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn each_draws_card_matches_regardless_of_who_drew() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let drawer = PlayerId(1);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Library,
+            to: ZoneKind::Hand,
+            last_known_info: Some(drawn_card_last_known_info(drawer)),
+        };
+        assert!(ConditionPrimitive::EachDrawsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn each_draws_card_does_not_match_a_non_draw_zone_change() {
+        let source = ObjectId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: None,
+        };
+        assert!(!ConditionPrimitive::EachDrawsCard.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_combat_matches_when_controller_is_active_player() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let event = GameEventKind::StepStarted { step: Step::BeginningOfCombat };
+        assert!(ConditionPrimitive::BeginningOfYourCombat.matches(source, p0, p0, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_combat_does_not_match_someone_elses_combat() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let active_player = PlayerId(1);
+        let event = GameEventKind::StepStarted { step: Step::BeginningOfCombat };
+        assert!(!ConditionPrimitive::BeginningOfYourCombat.matches(source, controller, active_player, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_combat_does_not_match_a_different_step() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let event = GameEventKind::StepStarted { step: Step::Upkeep };
+        assert!(!ConditionPrimitive::BeginningOfYourCombat.matches(source, p0, p0, &event));
+    }
+
+    #[test]
+    fn beginning_of_each_combat_matches_regardless_of_whose_turn_it_is() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let active_player = PlayerId(1);
+        let event = GameEventKind::StepStarted { step: Step::BeginningOfCombat };
+        assert!(ConditionPrimitive::BeginningOfEachCombat.matches(source, controller, active_player, &event));
+    }
+
+    #[test]
+    fn beginning_of_each_combat_does_not_match_a_different_step() {
+        let source = ObjectId(0);
+        let event = GameEventKind::StepStarted { step: Step::End };
+        assert!(!ConditionPrimitive::BeginningOfEachCombat.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_end_step_matches_when_controller_is_active_player() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let event = GameEventKind::StepStarted { step: Step::End };
+        assert!(ConditionPrimitive::BeginningOfYourEndStep.matches(source, p0, p0, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_end_step_does_not_match_someone_elses_end_step() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let active_player = PlayerId(1);
+        let event = GameEventKind::StepStarted { step: Step::End };
+        assert!(!ConditionPrimitive::BeginningOfYourEndStep.matches(source, controller, active_player, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_end_step_does_not_match_a_different_step() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let event = GameEventKind::StepStarted { step: Step::BeginningOfCombat };
+        assert!(!ConditionPrimitive::BeginningOfYourEndStep.matches(source, p0, p0, &event));
+    }
+
+    #[test]
+    fn beginning_of_each_end_step_matches_regardless_of_whose_turn_it_is() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let active_player = PlayerId(1);
+        let event = GameEventKind::StepStarted { step: Step::End };
+        assert!(ConditionPrimitive::BeginningOfEachEndStep.matches(source, controller, active_player, &event));
+    }
+
+    #[test]
+    fn beginning_of_each_end_step_does_not_match_a_different_step() {
+        let source = ObjectId(0);
+        let event = GameEventKind::StepStarted { step: Step::Upkeep };
+        assert!(!ConditionPrimitive::BeginningOfEachEndStep.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 }

@@ -669,7 +669,16 @@ impl Engine {
         // (mana deducted, tap/sacrifice/discard/life side effects applied) -
         // see commands::commit_payment's doc comment for why this trusts
         // validate's check rather than re-deriving anything.
-        let mut events = commands::commit_payment(&mut self.state, payer, &plan.payments);
+        let (mut events, departed) = commands::commit_payment(&mut self.state, payer, &plan.payments);
+        // CR 603.10: a Sacrifice payment can purge a "when this dies"/
+        // "leaves the battlefield" ability off its source before
+        // CollectTriggers ever runs (same gap `commit_death` closes for
+        // SBA-driven deaths) - fold it into the same transient stash so
+        // collect_triggers/PutTriggersApnap can still find it. Populated
+        // here rather than via finish_sba_loop because this pause resumes
+        // straight at SbaLoop (see below), skipping the accumulation point
+        // finish_sba_loop itself provides.
+        self.departed_triggered_abilities.extend(departed);
         if let Some(stack_object) = self.state.stack.iter_mut().find(|s| s.stack_id == stack_id) {
             stack_object.costs_paid = plan.payments;
         }
