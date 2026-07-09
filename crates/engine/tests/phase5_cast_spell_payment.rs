@@ -37,6 +37,7 @@ fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 

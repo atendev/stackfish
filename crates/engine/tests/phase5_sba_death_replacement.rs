@@ -32,6 +32,7 @@ fn creature_definition(toughness: i32) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 
@@ -167,6 +168,7 @@ fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
             keywords: KeywordSet::empty(),
             target_requirement: None,
             alternative_costs: Vec::new(),
+            effect: None,
         },
         owner: controller,
         controller,

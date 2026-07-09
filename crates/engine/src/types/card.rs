@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 
+use crate::types::ability::AbilityEffect;
 use crate::types::counter::{CounterKind, CounterSet};
 use crate::types::mana::{ColorSet, ManaCost};
 
@@ -247,6 +248,18 @@ pub struct CardDefinition {
     /// announces which one (if any) they're invoking, same "announced at
     /// cast time" pattern as `x_value`.
     pub alternative_costs: Vec<crate::types::cost::AlternativeCost>,
+    /// A spell's Rust-native fast-path effect (CR 608.2m resolution) —
+    /// same `AbilityEffect` shape `RegisteredAbility.effect` already uses
+    /// for activated/triggered abilities, e.g. `Some(AbilityEffect::
+    /// Damage(2))` for "Shock deals 2 damage to any target". `None` means
+    /// this spell's effect can only be carried out via the script bridge —
+    /// same gap as `script_ref`'s `operation` lookup, which doesn't exist
+    /// yet either (see `commands::CastSpell`'s own `ScriptHandle(0)`
+    /// placeholder comment). A permanent spell (creature/artifact/
+    /// enchantment) has no use for this field — CR 608.2m says it simply
+    /// enters the battlefield; any ETB behavior is a separate `Triggered`-
+    /// kind `RegisteredAbility`, not this field.
+    pub effect: Option<AbilityEffect>,
 }
 
 impl CardDefinition {

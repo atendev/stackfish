@@ -46,6 +46,7 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 
