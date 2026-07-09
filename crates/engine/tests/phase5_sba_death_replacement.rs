@@ -199,7 +199,7 @@ fn would_die_replacement_exiles_instead_of_dying_to_the_graveyard() {
     state.replacement_effects.push(would_die_exile_effect(bear, ConsumptionPolicy::Repeatable));
 
     let outcome = check_state_based_actions(&mut state, &ScriptRuntime::new());
-    let SbaOutcome::Progressed(events) = outcome else {
+    let SbaOutcome::Progressed(events, _) = outcome else {
         panic!("a single matching replacement must resolve synchronously, not pause");
     };
     assert_eq!(events.len(), 1);

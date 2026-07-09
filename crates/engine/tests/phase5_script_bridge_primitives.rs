@@ -178,7 +178,7 @@ fn primitive_enters_condition_matches_the_bear_entering_the_battlefield() {
     });
 
     let event = zone_change_event(bear, ZoneKind::Hand, ZoneKind::Battlefield);
-    let pending = collect_triggers(&state, &event, &runtime);
+    let pending = collect_triggers(&state, &event, &runtime, &[]);
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].source, bear);
     assert_eq!(pending[0].controller, p0);
@@ -206,7 +206,7 @@ fn primitive_enters_condition_false_on_a_different_object() {
     });
 
     let event = zone_change_event(someone_else, ZoneKind::Hand, ZoneKind::Battlefield);
-    let pending = collect_triggers(&state, &event, &runtime);
+    let pending = collect_triggers(&state, &event, &runtime, &[]);
     assert!(pending.is_empty(), "the bear's ETB condition shouldn't fire for a different object");
 }
 
@@ -231,7 +231,7 @@ fn primitive_enters_condition_false_on_wrong_destination_zone() {
     });
 
     let event = zone_change_event(bear, ZoneKind::Battlefield, ZoneKind::Graveyard);
-    let pending = collect_triggers(&state, &event, &runtime);
+    let pending = collect_triggers(&state, &event, &runtime, &[]);
     assert!(pending.is_empty());
 }
 
@@ -269,7 +269,7 @@ fn primitive_always_condition_matches_an_unrelated_event() {
         caused_by_command: None,
         parent_event: None,
     };
-    let pending = collect_triggers(&state, &event, &runtime);
+    let pending = collect_triggers(&state, &event, &runtime, &[]);
     assert_eq!(pending.len(), 1, "Game.Conditions.Always means no filter - any event matches");
 }
 

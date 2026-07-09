@@ -8,7 +8,7 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::sba::{self, SbaOutcome};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
-use crate::types::ability::{AbilityEffect, ConditionSpec};
+use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
 use crate::types::card::CardTypeSet;
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
@@ -357,6 +357,18 @@ pub struct Engine {
     /// Decided when a pipeline run begins; consumed once that run's
     /// trigger-placement stage finishes to pick the next `ProcessState`.
     pipeline_exit: PipelineExit,
+    /// CR 603.10 last-known-information stash: every `Triggered`-kind
+    /// ability captured off an object that died during this pipeline run's
+    /// `SbaLoop`, *after* `commands::retire_object` already purged it from
+    /// `state.abilities` — same "transient process state, not
+    /// `GameState`" contract `pipeline_context` establishes. `collect_
+    /// triggers`/`PutTriggersApnap`'s ability lookup both fall back to this
+    /// list when a live `state.abilities` lookup misses. Populated by
+    /// `finish_sba_loop`/`resume_sba_death` as deaths are committed; MUST be
+    /// cleared by `end_pipeline_run` (the run's last stage) for the same
+    /// reason `pipeline_context` must be — otherwise a later pipeline run
+    /// would see this run's stale entries piled up alongside its own.
+    departed_triggered_abilities: Vec<RegisteredAbility>,
     /// Dedicated monotonic counter for `CommandId` allocation — see the
     /// same rationale as `GameState::allocate_event_id`; was previously
     /// derived from `ledger.len()`, which doesn't even make sense for
@@ -401,6 +413,7 @@ impl Engine {
             process_state: ProcessState::PriorityWindow,
             pipeline_context: None,
             pipeline_exit: PipelineExit::BackToPriority,
+            departed_triggered_abilities: Vec::new(),
             next_command_id: 0,
             pending_payment: None,
             settings: GameSettings::default(),
@@ -576,8 +589,8 @@ impl Engine {
             },
             ReplacementResumeTarget::SbaDeath { pending_deaths, then } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
-                    let committed = sba::commit_death(&mut self.state, event);
-                    self.resume_sba_death(pending_deaths, vec![committed], then)
+                    let (committed, departed) = sba::commit_death(&mut self.state, event);
+                    self.resume_sba_death(pending_deaths, vec![committed], departed, then)
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
                     ProcessState::AwaitingReplacementChoice {
@@ -738,8 +751,11 @@ impl Engine {
                 .expect("hand zone must exist")
                 .remove(card);
             // CR 400.7: discarded, no remap follows - purge any
-            // RegisteredAbility still pointing at the hand-zone id.
-            commands::retire_object(&mut self.state, card);
+            // RegisteredAbility still pointing at the hand-zone id. Departed
+            // Triggered abilities discarded here - discard-to-hand-size
+            // isn't wired to the CR 603.10 LKI stash this slice (see
+            // retire_object's own doc comment).
+            let _ = commands::retire_object(&mut self.state, card);
             self.state
                 .zone_mut(ZoneKind::Graveyard, Some(owner))
                 .expect("graveyard zone must exist")
@@ -873,6 +889,7 @@ impl Engine {
             process_state: ProcessState::PriorityWindow,
             pipeline_context: None,
             pipeline_exit: PipelineExit::BackToPriority,
+            departed_triggered_abilities: Vec::new(),
             next_command_id: 0,
             pending_payment: None,
             settings,
@@ -1302,6 +1319,7 @@ impl Engine {
     /// transition, however many call sites eventually need it.
     fn end_pipeline_run(&mut self) -> ProcessState {
         self.pipeline_context = None;
+        self.departed_triggered_abilities.clear();
         match std::mem::replace(&mut self.pipeline_exit, PipelineExit::BackToPriority) {
             PipelineExit::BackToPriority => ProcessState::PriorityWindow,
             PipelineExit::ResolveStackTop => ProcessState::ResolveStackTop,
@@ -1684,7 +1702,7 @@ impl Engine {
 
             ProcessState::SbaLoop => {
                 self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
-                    SbaOutcome::Progressed(events) => self.finish_sba_loop(events),
+                    SbaOutcome::Progressed(events, departed) => self.finish_sba_loop(events, departed),
                     SbaOutcome::NeedsOrderingChoice {
                         affected_player,
                         pending_event,
@@ -1713,7 +1731,12 @@ impl Engine {
             ProcessState::CollectTriggers { since } => {
                 let mut pending = Vec::new();
                 for event in &self.state.ledger[since..] {
-                    pending.extend(triggers::collect_triggers(&self.state, event, &self.script_runtime));
+                    pending.extend(triggers::collect_triggers(
+                        &self.state,
+                        event,
+                        &self.script_runtime,
+                        &self.departed_triggered_abilities,
+                    ));
                 }
                 let groups = triggers::group_apnap(&self.state, pending);
                 self.process_state =
@@ -1736,16 +1759,30 @@ impl Engine {
                     // same "nth ability on this source" convention
                     // ActivateAbility already relies on.
                     for trigger in ordered {
-                        let Some(ability) =
-                            commands::find_ability(&self.state, trigger.source, trigger.ability_index)
-                        else {
-                            // Ability no longer resolves (e.g. its source
-                            // left play between being collected and now) -
-                            // TODO(CR 603.3d): a leaves-the-battlefield
-                            // triggered ability still goes on the stack
-                            // using last-known information; not handled
-                            // this slice (see collect_triggers's own note),
-                            // so this trigger is silently dropped instead.
+                        // CR 603.10: a Dies/LeavesBattlefield trigger's
+                        // source never resolves live in state.abilities
+                        // (retire_object already purged it) - fall back to
+                        // the same departed_triggered_abilities stash
+                        // collect_triggers itself consulted to produce this
+                        // PendingTrigger in the first place. Same "nth
+                        // ability for this source, in that list's own
+                        // order" convention triggers::collect_triggers's
+                        // departed-abilities loop counts by.
+                        let ability = commands::find_ability(&self.state, trigger.source, trigger.ability_index)
+                            .or_else(|| {
+                                self.departed_triggered_abilities
+                                    .iter()
+                                    .filter(|a| a.source == trigger.source)
+                                    .nth(trigger.ability_index as usize)
+                            });
+                        let Some(ability) = ability else {
+                            // Neither state.abilities nor the departed stash
+                            // resolved this trigger - TODO(CR 603.3d):
+                            // sacrifice/discard-as-cost/other zone
+                            // departures aren't wired to the departed stash
+                            // yet (see retire_object's own doc comment), so
+                            // a dies-trigger from one of those still lands
+                            // here and gets silently dropped.
                             continue;
                         };
                         let operation = ability.operation;
@@ -1904,7 +1941,14 @@ impl Engine {
 
             ProcessState::CleanupSbaCheck => {
                 self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
-                    SbaOutcome::Progressed(events) => self.finish_cleanup_sba_check(events),
+                    // `departed` (CR 603.10 dies-trigger abilities) is
+                    // discarded here - CleanupSbaCheck's own flow never
+                    // reaches CollectTriggers at all (a second,
+                    // differently-shaped pre-existing gap, backlog item 7a's
+                    // cleanup half), so nothing would ever consume it;
+                    // stashing it on Engine would just leak until the next
+                    // real pipeline run.
+                    SbaOutcome::Progressed(events, _departed) => self.finish_cleanup_sba_check(events),
                     SbaOutcome::NeedsOrderingChoice {
                         affected_player,
                         pending_event,
@@ -1943,7 +1987,12 @@ impl Engine {
     /// transition — pulled out so a resumed CR 616.1 pause
     /// (`resume_sba_death`) and a fresh pass (`SbaLoop`'s own arm) agree on
     /// it instead of duplicating the branch.
-    fn finish_sba_loop(&mut self, events: Vec<GameEvent>) -> ProcessState {
+    fn finish_sba_loop(&mut self, events: Vec<GameEvent>, departed: Vec<RegisteredAbility>) -> ProcessState {
+        // Accumulate across every SbaLoop pass in this pipeline run (CR
+        // 704.3's fixed point may take several passes, each killing more
+        // creatures) - cleared by end_pipeline_run once CollectTriggers/
+        // PutTriggersApnap have both had a chance to consult it.
+        self.departed_triggered_abilities.extend(departed);
         if events.is_empty() {
             let since = self.pipeline_context.as_ref().map(|ctx| ctx.since_ledger).unwrap_or(0);
             ProcessState::CollectTriggers { since }
@@ -1989,13 +2038,18 @@ impl Engine {
         &mut self,
         pending_deaths: VecDeque<ObjectId>,
         mut already_resolved: Vec<GameEvent>,
+        mut already_departed: Vec<RegisteredAbility>,
         then: SbaResumeThen,
     ) -> ProcessState {
         match sba::resolve_deaths(&mut self.state, pending_deaths) {
-            sba::DeathResolution::Done(mut events) => {
+            sba::DeathResolution::Done(mut events, mut departed) => {
                 already_resolved.append(&mut events);
+                already_departed.append(&mut departed);
                 match then {
-                    SbaResumeThen::SbaLoop => self.finish_sba_loop(already_resolved),
+                    SbaResumeThen::SbaLoop => self.finish_sba_loop(already_resolved, already_departed),
+                    // CleanupSbaCheck never reaches CollectTriggers (see the
+                    // CleanupSbaCheck arm's own comment) - already_departed
+                    // is simply dropped here, same as the fresh-pass path.
                     SbaResumeThen::CleanupSbaCheck => self.finish_cleanup_sba_check(already_resolved),
                 }
             }
@@ -2100,8 +2154,11 @@ impl Engine {
             .expect("checked above")
             .remove(card);
         // CR 400.7: drawn, no remap follows - purge any RegisteredAbility
-        // still pointing at the library-zone id.
-        commands::retire_object(&mut self.state, card);
+        // still pointing at the library-zone id. Departed Triggered
+        // abilities discarded here - draw-step library retirement isn't
+        // wired to the CR 603.10 LKI stash this slice (see retire_object's
+        // own doc comment).
+        let _ = commands::retire_object(&mut self.state, card);
         self.state
             .zone_mut(ZoneKind::Hand, Some(active))
             .expect("actor has no hand zone")

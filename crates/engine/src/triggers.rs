@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::script::{ScriptContext, ScriptRuntime};
-use crate::types::ability::{AbilityKind, ConditionSpec};
-use crate::types::event::GameEvent;
+use crate::types::ability::{AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility};
+use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId};
 
@@ -30,20 +30,23 @@ pub struct PendingTrigger {
 /// carried over unchanged from before this function had a real body.
 ///
 /// IMPORTANT (CR 603.10): a condition checking "did this object leave a
-/// zone" must consult event.kind's ZoneChange::last_known_info (if
-/// Some) instead of looking `object` up live via state.object() - by the
-/// time this runs (post-CommitEvents/SbaLoop), a live lookup can miss
+/// zone" consults event.kind's ZoneChange::last_known_info (if Some)
+/// instead of looking `object` up live via state.object() - by the time
+/// this runs (post-CommitEvents/SbaLoop), a live lookup can miss
 /// characteristics the object only had at the moment it left (e.g. an
-/// ability granted by an aura that left in the same batch), or the id
-/// may not resolve to anything at all if the move minted a new
-/// ObjectId. See event.rs's doc comment on ZoneChange for the full case.
-/// Not handled: an ability whose source no longer resolves via
-/// `state.object()` (e.g. it just left the battlefield) is skipped rather
-/// than evaluated against last-known information - only conditions whose
-/// source is still around when checked (ETB, deals/is-dealt-damage,
-/// upkeep, ...) are exercised; leaves-battlefield/dies conditions can't be
-/// added until this gap is fixed (see docs/implementation.md's backlog item
-/// 7, the CR 603.10 last-known-info fallback).
+/// ability granted by an aura that left in the same batch), or the id may
+/// not resolve to anything at all if the move minted a new ObjectId. See
+/// event.rs's doc comment on ZoneChange for the full case. An ability whose
+/// source no longer resolves via `state.object()` (e.g. it just left the
+/// battlefield) is skipped by the main loop below - `departed` is the CR
+/// 603.10 fallback for exactly that case: `Engine`'s stash of `Triggered`
+/// abilities captured (by `commands::retire_object`, via `sba::
+/// commit_death`) off objects that died during this pipeline run, *before*
+/// they were purged from `state.abilities`. Only `Dies`/`LeavesBattlefield`
+/// conditions are evaluated against it (see the second loop below) - a
+/// filtered condition ("whenever a creature you control dies") isn't
+/// representable yet, and every other condition shape assumes a source that
+/// still resolves live, which a departed object's never will again.
 ///
 /// IMPORTANT (CR 601.2i): a "whenever you cast a spell" condition must
 /// NOT match on GameEventKind::StackObjectPushed alone - that event
@@ -65,8 +68,9 @@ pub fn collect_triggers(
     state: &GameState,
     event: &GameEvent,
     runtime: &ScriptRuntime,
+    departed: &[RegisteredAbility],
 ) -> Vec<PendingTrigger> {
-    if !state.abilities.iter().any(|a| a.kind == AbilityKind::Triggered) {
+    if !state.abilities.iter().any(|a| a.kind == AbilityKind::Triggered) && departed.is_empty() {
         // Genuinely nothing to match against - safe to no-op rather than
         // hit the invocation logic below, which only matters once a
         // *triggered* RegisteredAbility actually exists. Activated/static
@@ -92,9 +96,15 @@ pub fn collect_triggers(
             continue;
         }
         let Some(source_object) = state.object(ability.source) else {
-            // Source no longer resolves (e.g. it left the battlefield) -
-            // see the CR 603.10 note above for why this is a real gap, not
-            // fixed here.
+            // Source no longer resolves live, yet this ability is still
+            // sitting in state.abilities - shouldn't happen via any real
+            // zone-change path today (every one either calls remap_abilities
+            // or retire_object, which purges the ability in the same step
+            // the object leaves state.objects - see retire_object's own doc
+            // comment), so this is defensive, not the CR 603.10 case: a
+            // Dies/LeavesBattlefield ability reaches the `departed` loop
+            // below instead, since retire_object already removed it from
+            // this very list before collect_triggers ever ran.
             continue;
         };
         let controller = source_object.controller;
@@ -125,6 +135,46 @@ pub fn collect_triggers(
             pending.push(PendingTrigger { source: ability.source, controller, ability_index: this_index });
         }
     }
+
+    // CR 603.10 last-known-information fallback (see this function's own
+    // doc comment above) - `departed` abilities can never appear in the
+    // loop above (retire_object already purged them from state.abilities by
+    // the time this runs), so this is a genuinely separate source, not a
+    // duplicate scan. `ability_index` here counts "the nth departed ability
+    // for this source in `departed`'s own order" - the same convention
+    // `PutTriggersApnap`'s fallback lookup (engine.rs) walks `departed` with
+    // to resolve a PendingTrigger back into a RegisteredAbility.
+    let mut departed_count: HashMap<ObjectId, u32> = HashMap::new();
+    for ability in departed {
+        let count = departed_count.entry(ability.source).or_insert(0);
+        let this_index = *count;
+        *count += 1;
+
+        // Only Dies/LeavesBattlefield are meaningful for a source that no
+        // longer resolves live - every other condition shape (None/Always/
+        // DealsDamage/a Script condition/...) either assumes a live source
+        // or isn't scoped to this slice (see the TODO on ConditionPrimitive
+        // itself).
+        let Some(ConditionSpec::Primitive(primitive @ (ConditionPrimitive::Dies | ConditionPrimitive::LeavesBattlefield))) =
+            &ability.condition
+        else {
+            continue;
+        };
+        let GameEventKind::ZoneChange { last_known_info: Some(lki), .. } = &event.kind else {
+            continue;
+        };
+        if lki.object_id != ability.source {
+            continue;
+        }
+        if primitive.matches(ability.source, lki.controller, state.active_player, &event.kind) {
+            pending.push(PendingTrigger {
+                source: ability.source,
+                controller: lki.controller,
+                ability_index: this_index,
+            });
+        }
+    }
+
     pending
 }
 

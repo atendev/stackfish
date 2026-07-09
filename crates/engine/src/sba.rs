@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use crate::commands;
 use crate::replacement::{self, ReplacementOutcome};
 use crate::script::ScriptRuntime;
+use crate::types::ability::RegisteredAbility;
 use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
@@ -16,7 +17,12 @@ pub enum SbaOutcome {
     /// same meaning `Vec<GameEvent>::is_empty()` had before this type
     /// existed (every prior caller's `.is_empty()`/`.len()` check on the old
     /// bare-`Vec` return still applies, just one layer inside this variant).
-    Progressed(Vec<GameEvent>),
+    /// The second element is every dying object's own `Triggered`-kind
+    /// abilities (CR 603.10), captured by `commands::retire_object` right
+    /// before it purged them from `state.abilities` — `Engine` folds these
+    /// into its transient last-known-information stash so a "when this
+    /// dies" ability can still be found once `CollectTriggers` runs.
+    Progressed(Vec<GameEvent>, Vec<RegisteredAbility>),
     /// A dying creature's zone-change replacement (CR 614.13, "if this would
     /// die, instead...") matched more than one registered
     /// `ReplacementEffect` and `affected_player` must choose which applies
@@ -66,9 +72,9 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
 
     let dying = collect_dying_creatures(state, script_runtime);
     match resolve_deaths(state, dying.into()) {
-        DeathResolution::Done(death_events) => {
+        DeathResolution::Done(death_events, departed_triggered) => {
             events.extend(death_events);
-            SbaOutcome::Progressed(events)
+            SbaOutcome::Progressed(events, departed_triggered)
         }
         DeathResolution::NeedsOrderingChoice {
             affected_player,
@@ -187,7 +193,11 @@ pub(crate) enum DeathResolution {
     /// Every id in the original `pending_deaths` is either moved or gone —
     /// `Vec<GameEvent>` is every death this call actually committed, ids
     /// already allocated, ready for the caller to append to the ledger.
-    Done(Vec<GameEvent>),
+    /// `Vec<RegisteredAbility>` is those deaths' own `Triggered`-kind
+    /// abilities, captured by `commands::retire_object` (via `commit_death`)
+    /// before it purged them — see `SbaOutcome::Progressed`'s doc comment
+    /// for where this ends up.
+    Done(Vec<GameEvent>, Vec<RegisteredAbility>),
     /// The next dying creature's zone-change replacement matched more than
     /// one registered `ReplacementEffect` (CR 616.1) — `pending_deaths` is
     /// what's left to check (not including the one that paused; it resumes
@@ -222,6 +232,7 @@ pub(crate) fn resolve_deaths(
     mut pending_deaths: VecDeque<ObjectId>,
 ) -> DeathResolution {
     let mut resolved = Vec::new();
+    let mut departed_triggered = Vec::new();
     while let Some(object_id) = pending_deaths.pop_front() {
         let Some(object) = state.object(object_id) else {
             // Already moved by an earlier iteration of this same pass
@@ -238,9 +249,22 @@ pub(crate) fn resolve_deaths(
         };
         match replacement::apply_replacements(state, proposed) {
             ReplacementOutcome::Resolved(final_event) => {
-                resolved.push(commit_death(state, final_event));
+                let (event, mut abilities) = commit_death(state, final_event);
+                resolved.push(event);
+                departed_triggered.append(&mut abilities);
             }
             ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
+                // Pre-existing gap, not introduced by this slice: `resolved`
+                // (and now `departed_triggered`) from any earlier iteration
+                // of this same while loop are dropped here rather than
+                // threaded into `NeedsOrderingChoice` - state itself already
+                // reflects those earlier deaths (commit_death mutated it),
+                // but their ledger events - and now their dies-trigger
+                // abilities - never reach the caller. Only matters when two+
+                // creatures die in the same SBA pass and a later one (not
+                // the first) needs a CR 616.1 ordering choice; not hit by
+                // this slice's own tests. Left as-is rather than silently
+                // fixed mid-slice - flagging for a follow-up.
                 return DeathResolution::NeedsOrderingChoice {
                     affected_player,
                     pending_event: event,
@@ -251,7 +275,7 @@ pub(crate) fn resolve_deaths(
             }
         }
     }
-    DeathResolution::Done(resolved)
+    DeathResolution::Done(resolved, departed_triggered)
 }
 
 /// Actually performs the zone move for one already-replacement-checked death
@@ -264,7 +288,13 @@ pub(crate) fn resolve_deaths(
 /// those for a `ZoneChange`, only `to` (`ReplacementPayload::
 /// ReplaceZoneDestination`) — so `to` is this death's real final
 /// destination: `Graveyard` unless a replacement substituted it.
-pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> GameEvent {
+///
+/// Returns the departing object's own `Triggered`-kind abilities alongside
+/// the ledger event (CR 603.10) — `retire_object` purges them from
+/// `state.abilities` right here, before `collect_triggers` ever runs, so
+/// this is the last point at which they can be captured for a "when this
+/// dies"/"when this leaves the battlefield" ability to still fire.
+pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (GameEvent, Vec<RegisteredAbility>) {
     let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = event else {
         // resolve_deaths only ever feeds this a ZoneChange it just proposed
         // itself - apply_replacements either hands that back unchanged or
@@ -287,7 +317,7 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> GameE
     // CR 400.7: this object is gone for good (no remap follows, unlike
     // PlayLand/CastSpell/ResolveStackTop's "same card, new id" moves) -
     // purge any RegisteredAbility/ContinuousEffect still pointing at it.
-    commands::retire_object(state, old_id);
+    let departed_triggered = commands::retire_object(state, old_id);
     if let Some(zone) = state.zone_mut(to, Some(owner)) {
         zone.push_bottom(new_id);
         state.objects.insert(new_id, new_object);
@@ -297,7 +327,7 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> GameE
 
     let event_id = state.allocate_event_id();
     let sequence_no = state.allocate_sequence_no();
-    GameEvent {
+    let event = GameEvent {
         event_id,
         sequence_no,
         kind: GameEventKind::ZoneChange {
@@ -308,5 +338,6 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> GameE
         },
         caused_by_command: None,
         parent_event: None,
-    }
+    };
+    (event, departed_triggered)
 }
