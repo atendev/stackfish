@@ -1810,8 +1810,7 @@ impl Engine {
             }
 
             ProcessState::AdvanceTurnStep => {
-                let events = self.advance_turn_step();
-                self.log_events(events);
+                let mut events = self.advance_turn_step();
 
                 if self.state.step == Step::Untap {
                     // CR 502.4: no priority window during untap - perform
@@ -1819,7 +1818,12 @@ impl Engine {
                     // back into AdvanceTurnStep instead of opening
                     // PriorityWindow. The next call into this same arm runs
                     // advance_turn_step() again (Untap -> Upkeep), which
-                    // does open priority normally below.
+                    // does open priority normally below. No trigger window
+                    // ever opens here either (CR 502.4 grants no priority to
+                    // place one before), so log_events (not the real
+                    // pipeline) remains correct - unlike the fall-through
+                    // path below.
+                    self.log_events(events);
                     let untap_events = self.untap_step();
                     self.log_events(untap_events);
                     self.process_state = ProcessState::AdvanceTurnStep;
@@ -1831,28 +1835,55 @@ impl Engine {
                     // no priority window.
                     let active = self.state.active_player;
                     if self.state.consume_step_skip(active, Step::Draw) {
+                        // CR 500.8: a skipped step doesn't happen at all -
+                        // still log its own StepStarted marker (unchanged
+                        // pre-existing behavior), but no turn-based action,
+                        // no priority window, and no trigger collection
+                        // either.
+                        self.log_events(events);
                         self.process_state = ProcessState::AdvanceTurnStep;
                         return StepStatus::Progressed;
                     }
                     // CR 504.1: draw is a turn-based action that happens
                     // before priority opens (504.2 still opens it normally
-                    // below, unlike untap).
+                    // below, unlike untap) - its ZoneChange joins the same
+                    // batch routed through the real pipeline below, so a
+                    // future "whenever you draw a card" condition would be
+                    // collected before that priority window too.
                     let draw_events = self.draw_step();
-                    self.log_events(draw_events);
+                    events.extend(draw_events);
                 }
                 if self.state.step == Step::Cleanup {
                     // CR 514.3: normally no priority during cleanup - run
                     // cleanup's turn-based actions (514.1 discard, 514.2
                     // effect expiry) then check SBAs before deciding
                     // whether to open a priority window or advance the turn
-                    // silently. begin_cleanup_step handles all of this.
+                    // silently. begin_cleanup_step handles all of this via
+                    // its own CleanupSbaCheck flow (which still doesn't run
+                    // collect_triggers either - a second, differently-shaped
+                    // gap, left for its own slice per docs/implementation.md's
+                    // backlog item 7a).
+                    self.log_events(events);
                     return self.begin_cleanup_step();
                 }
 
-                // CR 117.3b: priority opens to the active player at the
-                // start of each step/phase.
+                // CR 603.3/117.3b: route through the real pipeline
+                // (replacement check -> SBA -> trigger collection) before
+                // opening the priority window that follows every step/phase
+                // transition except Untap/Cleanup above - same "settle
+                // everything before priority" contract PendingAction/
+                // ResolveStackTop already follow. This is the fix for the
+                // gap ConditionPrimitive::BeginningOfYourUpkeep's own doc
+                // comment (ability.rs) names: AdvanceTurnStep used to push
+                // these events via log_events, which never ran
+                // collect_triggers at all.
                 self.state.priority_player = self.state.active_player;
-                self.process_state = ProcessState::PriorityWindow;
+                let since_ledger = self.state.ledger.len();
+                self.pipeline_context =
+                    Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
+                self.pipeline_exit = PipelineExit::BackToPriority;
+                self.process_state =
+                    ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
                 StepStatus::Progressed
             }
 

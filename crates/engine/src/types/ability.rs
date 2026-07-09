@@ -1,8 +1,9 @@
 use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
-use crate::types::ids::{ObjectId, ScriptHandle, Target};
+use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ManaUnit;
 use crate::types::target::TargetSpec;
+use crate::types::turn::Step;
 use crate::types::zone::ZoneKind;
 
 /// Per ygopro's effect lifecycle (`docs/ygo_pro_reference.md`), generalized
@@ -70,24 +71,47 @@ pub enum ConditionPrimitive {
     /// matches a `Target::Object` target (a player being dealt damage isn't
     /// "this" for a permanent's own ability).
     IsDealtDamage,
+    /// "At the beginning of your upkeep" (CR 502.1's most common trigger
+    /// shape) — matches `GameEventKind::StepStarted{step: Step::Upkeep}`
+    /// only when the ability's controller is also the active player.
+    /// Reachable now that `AdvanceTurnStep` (engine.rs) routes its events
+    /// through the real `ReplacementCheck`→`CommitEvents`→`SbaLoop`→
+    /// `CollectTriggers` pipeline instead of `log_events` (see that
+    /// function's own doc comment) — the concrete condition this slice adds
+    /// to prove the plumbing fix actually works, not just the fix itself.
+    BeginningOfYourUpkeep,
+    /// "At the beginning of each upkeep" — the less common, controller-
+    /// agnostic sibling of `BeginningOfYourUpkeep` (e.g. Waste Not-style
+    /// effects). Matches every `Step::Upkeep` `StepStarted` regardless of
+    /// whose turn it is.
+    BeginningOfEachUpkeep,
 }
 
-// TODO(trigger system completeness, backlog item 7): a phase/step-boundary
-// condition (e.g. "at the beginning of your upkeep") can't be added as a
-// ConditionPrimitive variant yet, even though the event shape
-// (GameEventKind::StepStarted) already exists - engine.rs's AdvanceTurnStep
-// pushes its events via log_events, which appends straight to the ledger and
-// never runs collect_triggers at all. Needs AdvanceTurnStep rewired through
-// the same ReplacementCheck/CommitEvents/CollectTriggers pipeline
-// PendingAction/ResolveStackTop already use before any such condition could
-// ever fire - a real, separate piece of plumbing, not a condition-matching
-// addition like DealsDamage/IsDealtDamage above.
+// TODO(trigger system completeness, backlog item 7): "whenever you draw a
+// card," "at the beginning of combat," "at the beginning of the end step,"
+// and other phase/step/zone-change-linked conditions in the same family as
+// BeginningOfYourUpkeep above aren't added yet - cheap follow-ups now that
+// AdvanceTurnStep's events reach collect_triggers for real, just not part of
+// this slice's proof-of-plumbing scope. Untap-step events still can't
+// trigger anything (CR 502.4 grants no priority there, so there's no window
+// to place a trigger before) and Cleanup's own CleanupSbaCheck flow still
+// doesn't run collect_triggers at all (a second, differently-shaped fix,
+// left for its own slice - see docs/implementation.md's backlog item 7a).
 
 impl ConditionPrimitive {
     /// Zero Lua VM calls — evaluated directly against the event that's being
     /// checked. `source` is the registered ability's source object (not
-    /// necessarily the event's own object).
-    pub fn matches(&self, source: ObjectId, event: &GameEventKind) -> bool {
+    /// necessarily the event's own object); `controller` is that source's
+    /// controller and `active_player` is whoever's turn it currently is —
+    /// both needed for `BeginningOfYourUpkeep`'s "your" relativity, which
+    /// `DealsDamage`/`IsDealtDamage`/`EntersBattlefield` never needed.
+    pub fn matches(
+        &self,
+        source: ObjectId,
+        controller: PlayerId,
+        active_player: PlayerId,
+        event: &GameEventKind,
+    ) -> bool {
         match self {
             ConditionPrimitive::Always => true,
             ConditionPrimitive::EntersBattlefield => matches!(
@@ -103,6 +127,13 @@ impl ConditionPrimitive {
                 event,
                 GameEventKind::DamageDealt { target, .. } if *target == Target::Object(source)
             ),
+            ConditionPrimitive::BeginningOfYourUpkeep => {
+                controller == active_player
+                    && matches!(event, GameEventKind::StepStarted { step: Step::Upkeep })
+            }
+            ConditionPrimitive::BeginningOfEachUpkeep => {
+                matches!(event, GameEventKind::StepStarted { step: Step::Upkeep })
+            }
         }
     }
 }
@@ -169,14 +200,18 @@ pub struct RegisteredAbility {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ids::PlayerId;
+
+    // DealsDamage/IsDealtDamage/EntersBattlefield/Always never consult
+    // controller/active_player - any two PlayerIds work as filler here.
+    const CONTROLLER: PlayerId = PlayerId(0);
+    const ACTIVE_PLAYER: PlayerId = PlayerId(0);
 
     #[test]
     fn deals_damage_matches_when_source_is_the_dealer() {
         let source = ObjectId(0);
         let other = ObjectId(1);
         let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3 };
-        assert!(ConditionPrimitive::DealsDamage.matches(source, &event));
+        assert!(ConditionPrimitive::DealsDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
     #[test]
@@ -185,7 +220,7 @@ mod tests {
         let dealer = ObjectId(1);
         let event =
             GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3 };
-        assert!(!ConditionPrimitive::DealsDamage.matches(source, &event));
+        assert!(!ConditionPrimitive::DealsDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
     #[test]
@@ -194,7 +229,7 @@ mod tests {
         let dealer = ObjectId(1);
         let event =
             GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3 };
-        assert!(ConditionPrimitive::IsDealtDamage.matches(source, &event));
+        assert!(ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
     #[test]
@@ -202,7 +237,7 @@ mod tests {
         let source = ObjectId(0);
         let other = ObjectId(1);
         let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3 };
-        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, &event));
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
     #[test]
@@ -212,14 +247,55 @@ mod tests {
         let source = ObjectId(0);
         let dealer = ObjectId(1);
         let event = GameEventKind::DamageDealt { source: dealer, target: Target::Player(PlayerId(0)), amount: 3 };
-        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, &event));
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
     #[test]
     fn deals_damage_and_is_dealt_damage_dont_match_unrelated_events() {
         let source = ObjectId(0);
         let event = GameEventKind::LifeChanged { player: PlayerId(0), delta: -1 };
-        assert!(!ConditionPrimitive::DealsDamage.matches(source, &event));
-        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, &event));
+        assert!(!ConditionPrimitive::DealsDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_upkeep_matches_when_controller_is_active_player() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let event = GameEventKind::StepStarted { step: Step::Upkeep };
+        assert!(ConditionPrimitive::BeginningOfYourUpkeep.matches(source, p0, p0, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_upkeep_does_not_match_someone_elses_upkeep() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let active_player = PlayerId(1);
+        let event = GameEventKind::StepStarted { step: Step::Upkeep };
+        assert!(!ConditionPrimitive::BeginningOfYourUpkeep.matches(source, controller, active_player, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_upkeep_does_not_match_a_different_step() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let event = GameEventKind::StepStarted { step: Step::Draw };
+        assert!(!ConditionPrimitive::BeginningOfYourUpkeep.matches(source, p0, p0, &event));
+    }
+
+    #[test]
+    fn beginning_of_each_upkeep_matches_regardless_of_whose_turn_it_is() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let active_player = PlayerId(1);
+        let event = GameEventKind::StepStarted { step: Step::Upkeep };
+        assert!(ConditionPrimitive::BeginningOfEachUpkeep.matches(source, controller, active_player, &event));
+    }
+
+    #[test]
+    fn beginning_of_each_upkeep_does_not_match_a_different_step() {
+        let source = ObjectId(0);
+        let event = GameEventKind::StepStarted { step: Step::End };
+        assert!(!ConditionPrimitive::BeginningOfEachUpkeep.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 }
