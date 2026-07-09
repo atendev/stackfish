@@ -2097,7 +2097,21 @@ shift, don't treat it as fixed once written.
 7. **Trigger system completeness** — once-per-turn/intervening-if (CR 603.2-603.3), last-known-
    info fallback for a trigger whose source already left the battlefield (CR 603.10, flagged since
    the script-bridge-trigger slice), non-ETB trigger conditions (leaves-battlefield, upkeep,
-   damage-dealt, etc — only `Game.Conditions.Enters`/`Always` exist today).
+   damage-dealt, etc — only `Game.Conditions.Enters`/`Always` existed before this item started).
+   ~~Damage-dealt conditions~~ — done, `phase5/damage-dealt-triggers` slice (docs/implementation.md,
+   below): `ConditionPrimitive::DealsDamage`/`IsDealtDamage`. Surfaced a new, previously-undocumented
+   gap while scoping this — split out as its own sub-item rather than silently left implicit:
+   7a. **`AdvanceTurnStep` bypasses `CollectTriggers` entirely** — its `StepStarted`/`PhaseStarted`/
+      `TurnStarted` events go through `engine.rs`'s `log_events`, which appends straight to the
+      ledger with no `ReplacementCheck`/`CommitEvents`/`CollectTriggers` pass at all. A phase/step-
+      boundary condition (e.g. "at the beginning of your upkeep") is structurally unfireable until
+      `AdvanceTurnStep` is rewired through the same pipeline `PendingAction`/`ResolveStackTop`
+      already use — real, separate plumbing, not a condition-matching addition.
+   Still open: once-per-turn/intervening-if legality, the CR 603.10 last-known-info fallback (a
+   leaves-battlefield/dies condition can't be added until `collect_triggers`'s `state.object(ability.
+   source)` live-lookup gap is fixed — that lookup fails by design once `retire_object` has already
+   purged the ability, which happens before trigger collection ever runs), and every non-ETB/non-
+   damage-dealt condition shape (upkeep specifically blocked on 7a above).
 8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Damage, Counters, Destroy,
    Exile, Sacrifice, CreateToken — only `GainLife` exists today), and a hidden-information-safe
    `ScriptContext` (currently leaks the full `&GameState`, a standing DESIGN.md open question).
@@ -3280,6 +3294,69 @@ ability-self-registration test file.
 **Backlog item 6 ("cost system completeness") is now fully closed** — every sub-item (alternative
 costs, `{X}` costs, hybrid/Phyrexian/snow mana payment, cost reduction/increase, ability mana-cost
 strings) has landed on master.
+
+## Phase 5: phase5/damage-dealt-triggers slice (backlog item 7, first sub-slice)
+
+Branch `phase5/damage-dealt-triggers`, off master. Backlog item 7 ("trigger system completeness")
+bundles three things: once-per-turn/intervening-if legality, a CR 603.10 last-known-info fallback,
+and new non-ETB trigger conditions (only `Enters`/`Always` existed). Split off the narrowest,
+cleanly-landable piece rather than take the whole item at once — same pattern the layer-engine and
+cost-system backlog items used.
+
+**Key finding before writing code, which reshaped the scope:** two condition shapes looked equally
+easy at a glance — "beginning of your upkeep" and "whenever this deals damage" — but only one
+actually is. `AdvanceTurnStep`'s `StepStarted`/`PhaseStarted`/`TurnStarted` events go through
+`engine.rs`'s `log_events`, which appends straight to the ledger and **never runs `collect_triggers`
+at all** — a genuine, previously-undocumented gap (now backlog item 7a). An upkeep trigger is
+structurally unfireable until `AdvanceTurnStep` is rewired through the same `ReplacementCheck`→
+`CommitEvents`→`CollectTriggers` pipeline `PendingAction`/`ResolveStackTop` already use — real,
+separate plumbing, not a condition-matching addition. `GameEventKind::DamageDealt` (from
+`AssignCombatDamage`), by contrast, already flows through that real pipeline (confirmed via the
+`fix-replacement-bypasses` slice's own notes) — reachable with zero pipeline changes, only new
+`ConditionPrimitive` matching logic. So this slice narrowed to damage-dealt conditions only, and 7a
+became its own named, deferred backlog item instead of silently blocking this one.
+
+**VERIFICATION RESULT:** Pass. 6 new unit tests in `types/ability.rs` (`DealsDamage`/`IsDealtDamage`
+matching/non-matching cases, including a player-target non-match and an unrelated-event non-match).
+New `phase5_damage_dealt_triggers.rs` — 3 end-to-end tests through real combat
+(`AssignCombatDamage` → pipeline → `CollectTriggers` → stack → resolve): an attacker's `DealsDamage`
+ability fires and resolves (`GainLife(1)` applied), a bystander's `DealsDamage` ability that never
+actually dealt damage does not fire, and a blocked attacker's blocker's `IsDealtDamage` ability
+fires on its own controller. `cargo test --workspace` green throughout, no regressions.
+
+**What got implemented:**
+- `ConditionPrimitive` (ability.rs) gained `DealsDamage`/`IsDealtDamage` — zero-Lua-call fast-path
+  matches, same convention `EntersBattlefield` already established. `DealsDamage` matches a
+  `DamageDealt` event whose `source` is the ability's own source; `IsDealtDamage` matches one whose
+  `target` is `Target::Object(source)` — deliberately never matches a `Target::Player` (a player
+  being dealt damage isn't "this" for a permanent's own ability). No combat-vs-noncombat
+  distinction: `DamageDealt` itself carries no such flag, and combat damage is currently its only
+  producer anyway, so this isn't a narrowing, just what already exists.
+- `script.rs`: `Game.Conditions.DealsDamage`/`Game.Conditions.IsDealtDamage` bindings, same
+  `ConditionTag` pattern `Enters`/`Always` already use.
+- Fixed a stale doc comment on `RegisteredAbility.cost` while in the file — it still said mana-cost
+  components on an activated ability's cost were out of scope, left over from before the
+  ability-mana-cost-strings slice (6e) closed that gap. Comment-only, no behavior change.
+
+**STRUCT DEVIATIONS:** None — `ConditionPrimitive::matches`'s signature turned out not to need
+changing (no `controller`/`active_player` param), unlike the pre-slice report's tentative guess —
+both new variants only ever compare `event`'s own fields against `source`, same shape
+`EntersBattlefield` already used.
+
+**INTERFACE DEVIATIONS:** None.
+
+**SCOPE DEVIATIONS:** The stale `RegisteredAbility.cost` doc-comment fix (noted above) — spotted
+while reading the file for this slice, not part of the original plan; small enough to fix inline
+rather than opening a separate throwaway commit for it.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Phase/step-boundary conditions ("beginning of upkeep") — blocked on the newly-named backlog item
+  7a (`AdvanceTurnStep` bypassing `CollectTriggers`), not fixed here.
+- Leaves-battlefield/dies conditions — blocked on the pre-existing `state.object(ability.source)`
+  live-lookup gap in `collect_triggers` (CR 603.10's last-known-info fallback), untouched.
+- Once-per-turn/intervening-if legality (CR 603.2-603.3) — untouched.
+- No "combat damage specifically" vs. "damage in general" distinction, and no "deals damage to a
+  player specifically" shape — `DamageDealt` doesn't carry either distinction today.
 
 ## Mistakes caught (don't repeat)
 
