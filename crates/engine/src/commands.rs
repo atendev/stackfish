@@ -156,7 +156,7 @@ pub(crate) fn has_summoning_sickness(state: &GameState, object: &GameObject) -> 
 /// missing id and just want "no keywords" as the fallback otherwise (mirrors
 /// the pre-existing `Option<&GameObject>` + `is_some_and` shape this
 /// replaces).
-fn effective_keywords(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> KeywordSet {
+pub(crate) fn effective_keywords(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> KeywordSet {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).keywords
     } else {
@@ -1040,14 +1040,18 @@ pub fn execute_command(
                     });
                 }
                 // None (script-bridge-only effect) and Some(GainLife)/
-                // Some(Damage) (a non-mana ActivateAbility whose effect
-                // happens to be a recognized primitive) all take the same
-                // path: unlike CR 605's mana abilities, a non-mana activated
-                // ability uses the stack (CR 602.2) rather than resolving
-                // immediately. Targets are validated below (CR 602.2b/
-                // 601.2c-e) via the same validate_targets CastSpell uses,
-                // before any state mutation (stack push) happens.
-                non_mana_effect @ (None | Some(AbilityEffect::GainLife(_)) | Some(AbilityEffect::Damage(_))) => {
+                // Some(Damage)/Some(Destroy) (a non-mana ActivateAbility
+                // whose effect happens to be a recognized primitive) all
+                // take the same path: unlike CR 605's mana abilities, a
+                // non-mana activated ability uses the stack (CR 602.2)
+                // rather than resolving immediately. Targets are validated
+                // below (CR 602.2b/601.2c-e) via the same validate_targets
+                // CastSpell uses, before any state mutation (stack push)
+                // happens.
+                non_mana_effect @ (None
+                | Some(AbilityEffect::GainLife(_))
+                | Some(AbilityEffect::Damage(_))
+                | Some(AbilityEffect::Destroy)) => {
                     validate_targets(
                         state,
                         script_runtime,

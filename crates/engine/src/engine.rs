@@ -9,7 +9,7 @@ use crate::sba::{self, SbaOutcome};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
 use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
-use crate::types::card::CardTypeSet;
+use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{CostSpec, PaymentPlan};
@@ -17,7 +17,7 @@ use crate::types::counter::CounterSet;
 use crate::types::effect::EffectDuration;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
-use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo};
+use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::mana::ManaPool;
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::PlayerState;
@@ -1616,6 +1616,77 @@ impl Engine {
                                         amount: *amount,
                                     });
                                 }
+                            }
+                            // CR 701.8/614.13/702.12b: unlike Damage, this
+                            // can't be modeled as "push an unapplied event
+                            // and let CommitEvents retroactively apply it" -
+                            // every other ZoneChange in this codebase already
+                            // describes a move that happened. Runs the real
+                            // WouldDie replacement check and sba::commit_death
+                            // inline instead, mirroring resolve_deaths's own
+                            // per-object body (same functions, no new
+                            // plumbing) - the resulting already-replacement-
+                            // checked GameEvent is appended straight to the
+                            // ledger, same "resume exactly where CommitEvents
+                            // would otherwise have gone" convention
+                            // Engine::submit_payment already uses for a
+                            // Sacrifice cost payment.
+                            Some(AbilityEffect::Destroy) => {
+                                if let Some(Target::Object(id)) = top.targets.first().copied() {
+                                    let last_known_info = self
+                                        .state
+                                        .object(id)
+                                        .filter(|obj| obj.zone == ZoneKind::Battlefield)
+                                        .cloned();
+                                    if let Some(last_known_info) = last_known_info {
+                                        // CR 702.12b: an indestructible permanent
+                                        // can't be destroyed at all - not a
+                                        // replacement effect, checked up front.
+                                        let indestructible = commands::effective_keywords(
+                                            &self.state,
+                                            &self.script_runtime,
+                                            id,
+                                        )
+                                        .contains(KeywordSet::INDESTRUCTIBLE);
+                                        if !indestructible {
+                                            let proposed = GameEventKind::ZoneChange {
+                                                object: id,
+                                                from: ZoneKind::Battlefield,
+                                                to: ZoneKind::Graveyard,
+                                                last_known_info: Some(last_known_info),
+                                            };
+                                            match replacement::apply_replacements(&mut self.state, proposed) {
+                                                ReplacementOutcome::Resolved(final_event) => {
+                                                    let (event, departed) =
+                                                        sba::commit_death(&mut self.state, final_event);
+                                                    self.departed_triggered_abilities.extend(departed);
+                                                    self.state.ledger.push(event);
+                                                }
+                                                ReplacementOutcome::NeedsOrderingChoice { .. } => {
+                                                    // TODO(CR 616.1): 2+ replacement
+                                                    // effects matching the same
+                                                    // scripted Destroy can't pause
+                                                    // for the ordering choice yet -
+                                                    // no resume-target shape threads
+                                                    // back into mid-ResolveStackTop.
+                                                    // Deferred, same "narrower than
+                                                    // full rules text" precedent
+                                                    // every slice takes - silently
+                                                    // does nothing rather than
+                                                    // guessing an order.
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // else: target already left the battlefield
+                                    // (or never resolved) - nothing to destroy,
+                                    // same "skip rather than guess" stance as
+                                    // everywhere else in this file.
+                                }
+                                // else: no target, or a Target::Player (Destroy
+                                // only ever affects a permanent) - silent no-op,
+                                // shouldn't be reachable given cast-time target
+                                // validation against a real card's filter.
                             }
                             // AddMana is only ever set on a mana ability, which
                             // resolves immediately and never reaches the stack

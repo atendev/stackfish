@@ -2137,8 +2137,8 @@ shift, don't treat it as fixed once written.
    representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/etc only ever match a fixed identity
    or the ability's own controller, never a characteristic filter over some other object; Untap-step
    triggers stay unfireable regardless (CR 502.4 grants no priority there).
-8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Counters, Destroy, Exile,
-   Sacrifice, CreateToken — only `GainLife` existed before this item started), and a
+8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
+   CreateToken — only `GainLife` existed before this item started), and a
    hidden-information-safe `ScriptContext` (currently leaks the full `&GameState`, a standing
    DESIGN.md open question). ~~Damage~~ — done, `phase5/script-ops-damage` slice
    (docs/implementation.md, below): `AbilityEffect::Damage(u32)`/`Game.Ops.Damage(n)`, reusing the
@@ -2148,9 +2148,13 @@ shift, don't treat it as fixed once written.
    resolved *any* effect at all (only activated/triggered abilities could) — closed as part of the
    same slice rather than left silently narrower: `CardDefinition` gained an `effect: Option<
    AbilityEffect>` field, and `CastSpell` now bakes it onto the pushed `StackObject` instead of a
-   hardcoded `None`. `Destroy` (CR 701.8/702.12b) is next in this item — needs its own zone-move-
-   commit design (no existing generic-`ZoneChange`-commit path to reuse the way `Damage` reused
-   `DamageDealt`'s).
+   hardcoded `None`. ~~Destroy~~ — done, `phase5/script-ops-destroy` slice (docs/implementation.md,
+   below): `AbilityEffect::Destroy`/`Game.Ops.Destroy()` (CR 701.8/702.12b), running the real CR
+   614.13 `WouldDie` replacement check and `sba::commit_death` inline in `ResolveStackTop` (no
+   generic-`ZoneChange`-commit path existed to reuse the way `Damage` reused `DamageDealt`'s, so
+   this mirrors `resolve_deaths`'s own per-object body instead). Narrower than the full rules text —
+   CR 616.1's ordering choice (2+ replacement effects matching the same scripted destroy) isn't
+   supported, silently no-ops rather than guessing an order; see that slice's own UNRESOLVED list.
 9. **Player-input-mid-script (Lua coroutines)** — needed for "choose one," "may," and modal spells.
    `invoke_target`/`Game.SelectTargets` are stubbed synchronous on purpose; real fix needs
    `Lua::create_thread` yield/resume spanning `Engine::step()` calls, flagged unresolved since
@@ -3822,6 +3826,86 @@ decisions above):**
   limit `alternative_costs` already had before its own scenario-field slice, if one ever lands.
 - No "divide damage among any number of targets" or "each opponent" mass-damage shape — single
   fixed target only, per `AbilityEffect::Damage`'s own doc comment.
+
+## Phase 5: phase5/script-ops-destroy slice (backlog item 8, second Script API primitive)
+
+Branch `phase5/script-ops-destroy`, off master. Second of backlog item 8's missing `Game.Ops`
+primitives — `AbilityEffect::Destroy`/`Game.Ops.Destroy()` (CR 701.8), e.g. "Destroy target
+creature," named as its own follow-up when `Damage` landed since it needed a different design.
+
+**Key finding, confirmed before writing code:** `Damage` worked by pushing an unapplied
+`GameEventKind::DamageDealt` event into the normal `events` vec, since `CommitEvents` already
+special-cases that event kind to retroactively apply it. A `ZoneChange` event has no such property
+— every other zone-move site in this codebase (`PlayLand`, discard, `CastSpell`'s own hand→stack
+move) performs the mutation *first*, then pushes `ZoneChange` purely as a description of something
+that already happened. The one place that already does "propose a Battlefield→Graveyard move,
+replacement-check it, then commit it" is `sba.rs`'s `resolve_deaths`/`commit_death` — SBA-specific,
+but `commit_death` itself is a generic, reusable `pub(crate)` function. Reused its per-object body
+inline in `ResolveStackTop` (propose → `replacement::apply_replacements` → `sba::commit_death`),
+same "resume exactly where CommitEvents would otherwise have gone" manual-ledger-append convention
+`Engine::submit_payment` already established for a Sacrifice cost payment.
+
+**Scope decision, confirmed before writing code:** CR 616.1's ordering choice (2+ `ReplacementEffect`s
+matching the same destroy) isn't supported this slice — handling `ReplacementOutcome::Resolved` only
+and no-oping on `NeedsOrderingChoice`, same "narrower than full rules text, named not silently
+skipped" precedent `replacement-prevention-effects` set before `fix-replacement-bypasses` added real
+pause support as its own follow-up.
+
+**VERIFICATION RESULT:** Pass. New `phase5_script_ops_destroy.rs` — 5 end-to-end tests through the
+real engine: a cast "Destroy target creature" spell moves a real creature to its owner's graveyard
+and its own "when this dies" trigger fires (proving the `departed_triggered_abilities` stash reused
+correctly, same mechanism the Sacrifice-cost slice wired up); an indestructible target survives
+completely untouched, no zone change logged at all; a `WouldDie` replacement effect (exile-instead)
+redirects the destroy to exile instead of the graveyard, mirroring `phase5_dies_triggers.rs`'s own
+exile-redirect test; an *activated ability* carrying `Destroy` works identically to a spell (same
+dual-path proof `Damage` established); a fizzled spell (illegal target at resolution) destroys
+nothing. `cargo test --workspace` green throughout, no regressions in any prior suite — notably
+`phase5_dies_triggers`/`phase5_sba_death_replacement`/`phase5_script_ops_damage` all unchanged.
+
+**What got implemented:**
+- `AbilityEffect::Destroy` (types/ability.rs) — unit variant, no fields (a toggle, same shape as
+  `SwitchPT`).
+- `commands::effective_keywords` changed from private to `pub(crate)` — the CR 702.12b
+  indestructible check needed it from `engine.rs`, same visibility every other cross-module helper
+  here already has.
+- `engine.rs`'s `ResolveStackTop`: a new `Some(AbilityEffect::Destroy)` arm. If
+  `top.targets.first()` is `Some(Target::Object(id))` and `id` currently resolves on the
+  battlefield: checks `INDESTRUCTIBLE` via `effective_keywords` first (CR 702.12b — an absolute
+  immunity, not a replacement effect); if not indestructible, proposes
+  `GameEventKind::ZoneChange{object: id, from: Battlefield, to: Graveyard, last_known_info: Some(..)}`
+  and runs it through `replacement::apply_replacements` inline. On `Resolved`, calls
+  `sba::commit_death`, folds the returned departed abilities into
+  `self.departed_triggered_abilities`, and pushes the resulting real `GameEvent` straight onto
+  `self.state.ledger` (already has its own `event_id`/`sequence_no` from `commit_death`, unlike the
+  `events: Vec<GameEventKind>` convention every other arm uses). On `NeedsOrderingChoice`: no-op,
+  per the scope decision above. Any other target shape (player, already-gone object) is a silent
+  no-op.
+- `commands::execute_command`'s `ActivateAbility` arm — `Some(AbilityEffect::Destroy)` added
+  alongside `GainLife`/`Damage` in the "non-mana effect, uses the stack" match pattern.
+- `Game.Ops.Destroy()` binding (script.rs) — a plain zero-arg tagged value (`OperationTag(
+  AbilityEffect::Destroy)`), same convention `Game.Costs.TapSelf`/`Game.Effects.SwitchPT` already
+  use for a fieldless primitive.
+
+**STRUCT DEVIATIONS:** None — matched the pre-slice requirements report exactly.
+
+**INTERFACE DEVIATIONS:** `commands::effective_keywords`'s visibility change (`fn` → `pub(crate) fn`)
+was anticipated by the pre-slice plan (needed from `engine.rs`) — not a deviation.
+
+**SCOPE DEVIATIONS:** None — no `GameState`/`CardDefinition` literal sweep needed (no new fields on
+either type), everything landed in `types/ability.rs`, `commands.rs`, `engine.rs`, `script.rs`, and
+one new test file.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- CR 616.1's ordering choice for a scripted Destroy facing 2+ matching replacement effects — no
+  resume-target shape threads back into mid-`ResolveStackTop` yet; silently no-ops rather than
+  guessing an order. A real follow-up would need a new `ReplacementResumeTarget`-style variant
+  carrying enough context to re-enter `ResolveStackTop`'s tail after the choice.
+- Regeneration (CR 701.19) still isn't modeled at all — but `Destroy` already runs through the real
+  `replacement::apply_replacements` pipeline, so a future regeneration `ReplacementEffect` payload
+  would interact correctly with zero changes needed here.
+- `DrawCards`/`Counters`/`Exile`/`Sacrifice`/`CreateToken` — still no `Game.Ops` primitive; next in
+  backlog item 8.
+- Single fixed target only, same narrowing `Damage`/targeting-basics already established.
 
 ## Mistakes caught (don't repeat)
 
