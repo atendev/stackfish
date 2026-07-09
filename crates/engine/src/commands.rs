@@ -816,6 +816,14 @@ pub fn execute_command(
                             ));
                         }
                     };
+                    // CR 601.2f/118.9: static cost-modification effects
+                    // (Goblin Warchief, Thalia, ...) apply after X is
+                    // resolved, before the cost is locked in for payment -
+                    // see CostModifier's own doc comment (cost.rs) for why
+                    // this only touches the plain mana-cost path (never an
+                    // alternative cost, this slice).
+                    let resolved_mana_cost =
+                        cost::apply_cost_modifiers(&resolved_mana_cost, &state.cost_modifiers, object);
                     (CostSpec::mana_only(resolved_mana_cost), false)
                 }
             };
@@ -1575,6 +1583,7 @@ mod tests {
             stack: Vec::new(),
             continuous_effects: Vec::new(),
             replacement_effects: Vec::new(),
+            cost_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState { seed: 1, draws_consumed: 0 },

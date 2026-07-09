@@ -137,6 +137,48 @@ impl ManaCost {
                 .collect(),
         }
     }
+
+    /// CR 601.2f/118.9: applies one cost-modification effect's signed
+    /// `delta` to this cost's generic component only (a plain `Atom(Generic(_))`
+    /// symbol — same "Generic/numeric only, not colored, not inside a
+    /// Hybrid" scope `generic_total`'s own doc comment already draws) —
+    /// negative `delta` reduces, positive increases, and the result is
+    /// clamped at `{0}` (CR 118.9: generic can't go negative; nothing here
+    /// ever removes a colored pip to compensate). If this cost has no bare
+    /// `Generic` symbol yet, a positive `delta` still creates one (a cost
+    /// increase can introduce a generic component where none existed, e.g.
+    /// Thalia taxing an otherwise-`{R}`-only spell) — a non-positive delta
+    /// with nothing to reduce is simply a no-op.
+    ///
+    /// `cost.rs`'s `apply_cost_modifiers` calls this once per matching
+    /// `CostModifier`, in registration order, rather than summing every
+    /// delta first and clamping once — CR 613.7-style "affected player
+    /// picks the order among same-timestamp effects" isn't modeled (see
+    /// `CostModifier`'s own doc comment), but applying one at a time still
+    /// gets the common case (at most one reduction and one increase
+    /// interacting) right, since clamping is idempotent past zero.
+    pub fn apply_cost_delta(&self, delta: i32) -> ManaCost {
+        let current: i32 = self
+            .symbols
+            .iter()
+            .filter_map(|s| match s {
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(n)) => Some(*n as i32),
+                _ => None,
+            })
+            .sum();
+        let adjusted = (current + delta).max(0) as u32;
+
+        let mut symbols: Vec<ManaSymbol> = self
+            .symbols
+            .iter()
+            .filter(|s| !matches!(s, ManaSymbol::Atom(AtomicManaSymbol::Generic(_))))
+            .copied()
+            .collect();
+        if adjusted > 0 {
+            symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Generic(adjusted)));
+        }
+        ManaCost { symbols }
+    }
 }
 
 /// A player's floating mana pool. Cleared at the end of each step/phase per

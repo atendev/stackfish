@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::types::ability::RegisteredAbility;
 use crate::types::combat::CombatState;
+use crate::types::cost::CostModifier;
 use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::ids::{EventId, ObjectId, PlayerId, SequenceNo};
@@ -70,6 +71,12 @@ pub struct GameState {
     pub stack: Vec<StackObject>,
     pub continuous_effects: Vec<ContinuousEffect>,
     pub replacement_effects: Vec<ReplacementEffect>,
+    /// CR 601.2f/118.9 cost-modification effects (Goblin Warchief, Thalia,
+    /// ...) — flat list, same "scan-friendly, not nested" convention as
+    /// `continuous_effects`/`replacement_effects` above. See `CostModifier`'s
+    /// own doc comment (cost.rs) for why this is a distinct mechanism from
+    /// the CR 613 layer system those two lists feed.
+    pub cost_modifiers: Vec<CostModifier>,
     /// Every card's registered triggered/activated/static abilities, flat —
     /// same reasoning as `continuous_effects`/`replacement_effects` above.
     pub abilities: Vec<RegisteredAbility>,
@@ -198,6 +205,7 @@ mod tests {
             stack: Vec::new(),
             continuous_effects: Vec::new(),
             replacement_effects: Vec::new(),
+            cost_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState { seed: 1, draws_consumed: 0 },
