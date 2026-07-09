@@ -1,6 +1,6 @@
 use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
-use crate::types::ids::{ObjectId, ScriptHandle};
+use crate::types::ids::{ObjectId, ScriptHandle, Target};
 use crate::types::mana::ManaUnit;
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -53,7 +53,35 @@ pub enum ConditionPrimitive {
     /// see `RegisteredAbility::condition`'s doc for why both spellings
     /// exist.
     Always,
+    /// "Whenever this deals damage" (CR 603.2, matched against
+    /// `GameEventKind::DamageDealt`) — `source` is the one dealing the
+    /// damage. Reachable today because combat damage (`AssignCombatDamage`)
+    /// already routes its `DamageDealt` events through the real
+    /// `CommitEvents`→`SbaLoop`→`CollectTriggers` pipeline (see the
+    /// `fix-replacement-bypasses` slice) — unlike a phase/step-boundary
+    /// condition, which `AdvanceTurnStep` currently can't reach at all (see
+    /// this file's own TODO note below and docs/implementation.md's backlog).
+    /// No combat-vs-noncombat distinction: `DamageDealt` itself doesn't
+    /// carry one, so this matches any damage this object deals, by whatever
+    /// means eventually produces the event.
+    DealsDamage,
+    /// "Whenever this is dealt damage" — the mirror image of `DealsDamage`,
+    /// matching on the event's `target` instead of its `source`. Only
+    /// matches a `Target::Object` target (a player being dealt damage isn't
+    /// "this" for a permanent's own ability).
+    IsDealtDamage,
 }
+
+// TODO(trigger system completeness, backlog item 7): a phase/step-boundary
+// condition (e.g. "at the beginning of your upkeep") can't be added as a
+// ConditionPrimitive variant yet, even though the event shape
+// (GameEventKind::StepStarted) already exists - engine.rs's AdvanceTurnStep
+// pushes its events via log_events, which appends straight to the ledger and
+// never runs collect_triggers at all. Needs AdvanceTurnStep rewired through
+// the same ReplacementCheck/CommitEvents/CollectTriggers pipeline
+// PendingAction/ResolveStackTop already use before any such condition could
+// ever fire - a real, separate piece of plumbing, not a condition-matching
+// addition like DealsDamage/IsDealtDamage above.
 
 impl ConditionPrimitive {
     /// Zero Lua VM calls — evaluated directly against the event that's being
@@ -66,6 +94,14 @@ impl ConditionPrimitive {
                 event,
                 GameEventKind::ZoneChange { object, to, .. }
                     if *object == source && *to == ZoneKind::Battlefield
+            ),
+            ConditionPrimitive::DealsDamage => matches!(
+                event,
+                GameEventKind::DamageDealt { source: dealer, .. } if *dealer == source
+            ),
+            ConditionPrimitive::IsDealtDamage => matches!(
+                event,
+                GameEventKind::DamageDealt { target, .. } if *target == Target::Object(source)
             ),
         }
     }
@@ -106,11 +142,12 @@ pub struct RegisteredAbility {
     /// same as an empty `CostSpec` (mana: None, additional: empty), still
     /// routing through `AwaitingPayment` for an explicit (even if empty)
     /// acknowledgment, same CR 118.5a stance `CastSpell`'s mana cost already
-    /// takes. `Some(spec)` is CR 602.2b's real cost — mana-cost components
-    /// on an activated ability's cost stay out of scope (no Lua-facing
-    /// mana-cost-string parser exists anywhere yet), so `spec.mana` is
-    /// always `None` in practice this slice; `spec.additional` is what
-    /// `Game.CreateActivatedAbility`'s `:AddCost` builds up.
+    /// takes. `Some(spec)` is CR 602.2b's real cost — `spec.additional` is
+    /// what `Game.CreateActivatedAbility`'s `:AddCost` accumulates for
+    /// tap/sacrifice/discard/life components; `spec.mana` is set the same
+    /// way from a `Game.Costs.Mana("{1}{R}")` component, parsed via
+    /// `ManaCost::parse` (mana.rs) — no longer always `None`, since the
+    /// ability-mana-cost-strings slice closed that gap.
     pub cost: Option<CostSpec>,
     /// `None` means "no targets required" — same "cast as though it did
     /// not require those targets" stance `CardDefinition::target_requirement`
@@ -127,4 +164,62 @@ pub struct RegisteredAbility {
     /// falls back to invoking `operation` for real through the script
     /// bridge.
     pub effect: Option<AbilityEffect>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ids::PlayerId;
+
+    #[test]
+    fn deals_damage_matches_when_source_is_the_dealer() {
+        let source = ObjectId(0);
+        let other = ObjectId(1);
+        let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3 };
+        assert!(ConditionPrimitive::DealsDamage.matches(source, &event));
+    }
+
+    #[test]
+    fn deals_damage_does_not_match_a_different_dealer() {
+        let source = ObjectId(0);
+        let dealer = ObjectId(1);
+        let event =
+            GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3 };
+        assert!(!ConditionPrimitive::DealsDamage.matches(source, &event));
+    }
+
+    #[test]
+    fn is_dealt_damage_matches_when_source_is_the_target() {
+        let source = ObjectId(0);
+        let dealer = ObjectId(1);
+        let event =
+            GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3 };
+        assert!(ConditionPrimitive::IsDealtDamage.matches(source, &event));
+    }
+
+    #[test]
+    fn is_dealt_damage_does_not_match_a_different_target() {
+        let source = ObjectId(0);
+        let other = ObjectId(1);
+        let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3 };
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, &event));
+    }
+
+    #[test]
+    fn is_dealt_damage_does_not_match_a_player_target() {
+        // A player being dealt damage isn't "this" for a permanent's own
+        // ability - IsDealtDamage only ever matches a Target::Object.
+        let source = ObjectId(0);
+        let dealer = ObjectId(1);
+        let event = GameEventKind::DamageDealt { source: dealer, target: Target::Player(PlayerId(0)), amount: 3 };
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, &event));
+    }
+
+    #[test]
+    fn deals_damage_and_is_dealt_damage_dont_match_unrelated_events() {
+        let source = ObjectId(0);
+        let event = GameEventKind::LifeChanged { player: PlayerId(0), delta: -1 };
+        assert!(!ConditionPrimitive::DealsDamage.matches(source, &event));
+        assert!(!ConditionPrimitive::IsDealtDamage.matches(source, &event));
+    }
 }
