@@ -49,6 +49,19 @@ pub enum AbilityEffect {
     /// `targeting-basics`'s own existing narrowing (see
     /// docs/implementation.md).
     Damage(u32),
+    /// The `Game.Ops.Destroy()` primitive — destroys the resolving
+    /// `StackObject`'s first chosen target (CR 701.8). Unlike `Damage`,
+    /// this can't be modeled as "push a not-yet-applied event and let
+    /// `CommitEvents` retroactively apply it" — every other `ZoneChange`
+    /// event in this codebase describes a move that already happened, so
+    /// `ResolveStackTop` performs the real CR 614.13 `WouldDie` replacement
+    /// check and `sba::commit_death` inline (mirroring `resolve_deaths`'s
+    /// own per-object body), the same way `Engine::submit_payment` already
+    /// does for a Sacrifice cost payment. CR 702.12b: an indestructible
+    /// target is untouched — checked before even proposing the
+    /// replacement-checked event, not a replacement effect itself. No
+    /// fields — a toggle, not a value, same shape as `SwitchPT`.
+    Destroy,
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a
