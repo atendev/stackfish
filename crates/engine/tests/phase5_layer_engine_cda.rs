@@ -26,7 +26,7 @@ use stackfish_engine::*;
 /// wrong, not something to handle gracefully.
 fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     match outcome {
-        SbaOutcome::Progressed(events) => events,
+        SbaOutcome::Progressed(events, _) => events,
         SbaOutcome::NeedsOrderingChoice { .. } => {
             panic!("fixture didn't expect a replacement ordering-choice pause")
         }

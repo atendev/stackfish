@@ -3428,6 +3428,123 @@ while reading the files this slice touches anyway, not part of the original plan
 - Leaves-battlefield/dies conditions and once-per-turn/intervening-if legality — untouched, same as
   the damage-dealt slice's own UNRESOLVED list.
 
+## Phase 5: phase5/dies-triggers slice (backlog item 7, third sub-slice of item 7)
+
+Branch `phase5/dies-triggers`, off master. Closes the gap named since the script-bridge-trigger
+slice and repeated as UNRESOLVED in both prior item-7 sub-slices: CR 603.10's last-known-information
+fallback, specifically for "when this dies"/"when this leaves the battlefield" — the single most
+common real trigger shape. Bigger and more structurally invasive than the damage-dealt/upkeep
+sub-slices, flagged as such in the pre-slice requirements report.
+
+**The gap was two-layered, not one.** `collect_triggers`'s `let Some(source_object) =
+state.object(ability.source) else { continue; }` looked like the whole problem, but it's the
+smaller half: `commands::retire_object` (called synchronously inside `sba::commit_death`, as part
+of the very battlefield→graveyard move that would produce the "dies" event) already purges the
+`RegisteredAbility` from `state.abilities` entirely before `collect_triggers` ever runs. A "when
+this creature dies" ability isn't just unreachable via a live lookup — it's already deleted by the
+time trigger collection happens. Fixing this needed the departing object's `Triggered`-kind
+abilities captured and carried forward through three separate stages: `retire_object` itself,
+`collect_triggers`, and `PutTriggersApnap`'s own `find_ability` lookup (which also scans the
+now-purged `state.abilities` a second time, independently of `collect_triggers`).
+
+**VERIFICATION RESULT:** Pass. 6 new unit tests in `types/ability.rs` (`Dies`/`LeavesBattlefield`
+matching/non-matching cases: battlefield→graveyard by last-known object id, a different object's
+death, a non-death departure, any destination, a move that never left the battlefield). New
+`phase5_dies_triggers.rs` — 5 end-to-end tests through the real engine pipeline: a "when this
+creature dies" ability fires and resolves after real SBA-driven lethal combat damage; an ability on
+a creature that never dies never fires; a "leaves the battlefield" ability fires on a CR 614.13
+"exile instead" redirect (a real non-death departure, reached through the same wired
+`sba::commit_death` path via a `WouldDie` replacement rather than a separate producer); `Dies`
+specifically does *not* fire on that same exile redirect (mirror-image control case); and a
+regression test proving a live `DealsDamage` trigger (damage-dealt-triggers slice) and a
+departed-abilities `Dies` trigger both fire correctly out of the *same* `collect_triggers` pass, from
+one real combat-damage step. `cargo test --workspace` green throughout (333 engine-crate tests),
+including every pre-existing suite (`phase5_damage_dealt_triggers`, `phase5_upkeep_triggers`,
+`phase5_sba_death_replacement`, `phase5_script_self_registration`, etc.) unchanged.
+
+**What got implemented:**
+- `commands::retire_object` changed from `-> ()` to `-> Vec<RegisteredAbility>` — drains and returns
+  the departing object's `Triggered`-kind abilities instead of silently discarding them (still purges
+  everything from `state.abilities`/`state.continuous_effects` as before). Its other 3 call sites
+  (`move_to_graveyard_for_cost` in commands.rs; discard-to-hand-size and draw-step library retirement
+  in engine.rs) discard the return value this slice, each with an inline comment naming the deferral —
+  exactly as scoped in the pre-slice report.
+- `sba::commit_death` changed from `-> GameEvent` to `-> (GameEvent, Vec<RegisteredAbility>)`;
+  `sba::resolve_deaths`'s `DeathResolution::Done` and `sba::check_state_based_actions`'s
+  `SbaOutcome::Progressed` both gained a second `Vec<RegisteredAbility>` field, threading the captured
+  abilities up from `retire_object` through the whole SBA-death call chain. `engine.rs`'s three call
+  sites (`SbaLoop`, `CleanupSbaCheck`, `submit_replacement_choice`'s `SbaDeath` resume branch) and the
+  `resume_sba_death`/`finish_sba_loop`/`finish_cleanup_sba_check` helper trio were all updated to
+  match — `finish_sba_loop` is where the abilities actually land (see below); `finish_cleanup_sba_check`
+  deliberately discards them (see UNRESOLVED).
+- `Engine` gained a new transient field, `departed_triggered_abilities: Vec<RegisteredAbility>` — same
+  "process state, not part of `GameState`" contract `pipeline_context`/`pipeline_exit` already
+  establish. Populated by `finish_sba_loop`/`resume_sba_death` as deaths commit (accumulates across
+  every `SbaLoop` pass in one pipeline run, since CR 704.3's fixed point can take several), consulted
+  by `collect_triggers` and `PutTriggersApnap`'s ability lookup, cleared by `end_pipeline_run` (the
+  same "run's last stage resets it" contract `pipeline_context` follows).
+- `ConditionPrimitive::Dies`/`LeavesBattlefield` (ability.rs) — matched purely by
+  `last_known_info.object_id == source` (NOT the event's own `object` field, which is the *new*
+  `ObjectId` `commit_death` mints for the graveyard/exile-side object per CR 400.7 — the old id only
+  survives inside `last_known_info`). `Dies` additionally requires `from == Battlefield` and
+  `to == Graveyard`; `LeavesBattlefield` only requires `from == Battlefield`, any destination.
+- `triggers::collect_triggers` gained a fourth parameter, `departed: &[RegisteredAbility]`, and a
+  second loop (after the existing live-`state.abilities` loop) that walks it — live and departed
+  abilities never share a `source` (retire_object always empties `state.abilities` for a source before
+  it can appear in `departed`), so this is a genuinely separate source, not a duplicate scan. Only
+  `Dies`/`LeavesBattlefield` conditions are evaluated there (deliberately narrower than the live loop —
+  see UNRESOLVED); `controller` comes from the event's own `last_known_info.controller` rather than a
+  live lookup, since `RegisteredAbility` itself has no controller field and the source object no longer
+  resolves.
+- `engine.rs`'s `PutTriggersApnap` ability lookup: `commands::find_ability(...).or_else(|| self
+  .departed_triggered_abilities.iter().filter(|a| a.source == trigger.source).nth(...))` — the same
+  "nth ability for this source, in that list's own order" convention `collect_triggers`'s new loop
+  counts by, so a `PendingTrigger` produced by the departed-abilities path resolves back to the same
+  `RegisteredAbility` here.
+- `Game.Conditions.Dies`/`Game.Conditions.LeavesBattlefield` bindings (script.rs), same `ConditionTag`
+  pattern every prior primitive condition uses.
+- Updated three stale doc comments while in these files: `collect_triggers`'s own CR 603.10 IMPORTANT
+  note (previously said dies/leaves-battlefield conditions "can't be added until this gap is fixed" —
+  now describes the actual fallback); the live loop's `state.object()`-miss `continue` branch (now
+  correctly scoped to a hypothetical bug case, since the real dies/leaves-battlefield path goes through
+  the new `departed` loop instead); `ConditionPrimitive`'s own TODO block (added a second TODO entry
+  naming exactly which departure paths and filter shapes are still open).
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice report's concrete plan already named
+(`retire_object`'s return type, `Engine`'s new transient field, `PendingTrigger`'s reuse — no new
+fields needed there, since "nth departed ability for this source" fit the existing `ability_index: u32`
+shape without changes). `RegisteredAbility` needed `#[derive(Clone)]` added (it had no derives at all
+before this slice) — not explicitly named in the pre-slice report, but a direct, obvious consequence of
+needing to snapshot abilities into a `Vec` before their source is purged.
+
+**INTERFACE DEVIATIONS:** `sba::commit_death`/`resolve_deaths`/`check_state_based_actions`'s signature
+changes were anticipated by the pre-slice report's concrete plan. One deviation the report didn't
+call out: `resolve_deaths`'s `NeedsOrderingChoice` pause branch already silently dropped any
+`resolved: Vec<GameEvent>` accumulated earlier in the *same* `resolve_deaths` call before this slice
+(a pre-existing bug, not introduced here) — extending that same function to also accumulate
+`departed_triggered: Vec<RegisteredAbility>` means this slice's new data inherits that exact drop-on-
+pause behavior too. Only matters when two-or-more creatures die in the same SBA pass and a later one
+(not the first) needs a CR 616.1 ordering choice; none of this slice's own tests exercise that
+interleaving. Left as-is and flagged inline in sba.rs rather than silently fixed mid-slice — a
+follow-up, not part of this slice's scope.
+
+**SCOPE DEVIATIONS:** None beyond the pre-slice report's own explicitly-scoped narrowing (SBA-death
+path only; source-identity conditions only, not filtered "a creature you control dies" conditions).
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Sacrifice, discard-as-cost, and a resolving spell's other zone departures all still call
+  `commands::retire_object` but discard its returned abilities — a "when this dies" ability on a
+  sacrificed/discarded permanent won't fire yet. Same mechanism (`Engine`'s stash), just not wired at
+  those three call sites this slice.
+- `CleanupSbaCheck`'s own path deliberately discards `departed` rather than stashing it — that flow
+  never reaches `CollectTriggers` at all (backlog item 7a's still-open cleanup half), so nothing would
+  ever consume it; stashing it anyway would just leak until the next real pipeline run.
+- "Whenever a creature you control dies" / any filter over the dying object's characteristics rather
+  than exact source identity — `Dies`/`LeavesBattlefield` only ever match the ability's own source.
+- The pre-existing `resolve_deaths` drop-on-pause bug named above (STRUCT/INTERFACE DEVIATIONS) —
+  surfaced by this slice's own refactor, not fixed by it.
+- Once-per-turn/intervening-if legality (CR 603.2-603.3) — untouched, same as every prior sub-slice.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

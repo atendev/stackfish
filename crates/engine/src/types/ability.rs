@@ -85,6 +85,24 @@ pub enum ConditionPrimitive {
     /// effects). Matches every `Step::Upkeep` `StepStarted` regardless of
     /// whose turn it is.
     BeginningOfEachUpkeep,
+    /// "When this creature dies" (CR 700.4/603.10) — matches a `ZoneChange`
+    /// event moving `source` from the battlefield to a graveyard. Only ever
+    /// reachable via `collect_triggers`'s CR 603.10 last-known-information
+    /// fallback: by the time this is checked, `source` has already left
+    /// `state.objects`/`state.abilities` (purged by `commands::
+    /// retire_object` as part of the very death this condition is matching)
+    /// - see that function's own doc comment. Matched against `last_known_
+    /// info.object_id`, not the event's own `object` field, because a
+    /// battlefield->graveyard move mints a fresh `ObjectId` for the
+    /// graveyard-side object (CR 400.7) - `object` in the committed event is
+    /// that *new* id, never `source`.
+    Dies,
+    /// "When this leaves the battlefield" (CR 603.10) — the broader sibling
+    /// of `Dies`: matches any `ZoneChange` moving `source` off the
+    /// battlefield, regardless of destination (graveyard, exile, hand,
+    /// library, ...), not just a death. Same last-known-information
+    /// matching shape as `Dies`.
+    LeavesBattlefield,
 }
 
 // TODO(trigger system completeness, backlog item 7): "whenever you draw a
@@ -97,6 +115,16 @@ pub enum ConditionPrimitive {
 // to place a trigger before) and Cleanup's own CleanupSbaCheck flow still
 // doesn't run collect_triggers at all (a second, differently-shaped fix,
 // left for its own slice - see docs/implementation.md's backlog item 7a).
+//
+// TODO(backlog item 7, CR 603.10 continued): Dies/LeavesBattlefield are only
+// wired up for the SBA-driven death path (sba::commit_death) - sacrifice,
+// discard-as-cost, and a resolving spell's other zone departures all still
+// call commands::retire_object but discard its returned abilities, so a
+// "when this dies" ability on a sacrificed/discarded permanent won't fire
+// yet. "Whenever a creature you control dies" (filtered by something other
+// than "is this exact object") also isn't representable yet - Dies/
+// LeavesBattlefield only ever match the ability's own source, not a filter
+// over the dying object's characteristics.
 
 impl ConditionPrimitive {
     /// Zero Lua VM calls — evaluated directly against the event that's being
@@ -134,6 +162,16 @@ impl ConditionPrimitive {
             ConditionPrimitive::BeginningOfEachUpkeep => {
                 matches!(event, GameEventKind::StepStarted { step: Step::Upkeep })
             }
+            ConditionPrimitive::Dies => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: Some(lki), .. }
+                    if lki.object_id == source
+            ),
+            ConditionPrimitive::LeavesBattlefield => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Battlefield, last_known_info: Some(lki), .. }
+                    if lki.object_id == source
+            ),
         }
     }
 }
@@ -155,6 +193,7 @@ pub enum ConditionSpec {
 /// `continuous_effects`/`replacement_effects`), not nested under
 /// `GameObject`, so the engine can scan all registered abilities against an
 /// event/timing window without walking every object first.
+#[derive(Clone)]
 pub struct RegisteredAbility {
     pub source: ObjectId,
     pub kind: AbilityKind,
@@ -297,5 +336,119 @@ mod tests {
         let source = ObjectId(0);
         let event = GameEventKind::StepStarted { step: Step::End };
         assert!(!ConditionPrimitive::BeginningOfEachUpkeep.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    // Dies/LeavesBattlefield are only ever matched against last_known_info
+    // (the object itself is already gone by the time these are checked -
+    // see collect_triggers's CR 603.10 fallback) - a minimal GameObject
+    // snapshot stands in for that.
+    fn dummy_last_known_info(object_id: ObjectId) -> crate::types::object::GameObject {
+        use crate::types::card::CardDefinition;
+        use crate::types::card::{CardTypeSet, KeywordSet, PTValue, ScriptReference, SupertypeSet};
+        use crate::types::counter::CounterSet;
+        use crate::types::ids::ObjectLineage;
+        use crate::types::mana::ManaCost;
+        use crate::types::object::{GameObject, VisibilityPolicy};
+
+        GameObject {
+            object_id,
+            lineage: ObjectLineage { previous: None },
+            definition: CardDefinition {
+                definition_id: 1,
+                name: "Test Creature".to_string(),
+                mana_cost: ManaCost { symbols: Vec::new() },
+                color_indicator: None,
+                supertypes: SupertypeSet::empty(),
+                card_types: CardTypeSet::CREATURE,
+                subtypes: Vec::new(),
+                oracle_text: String::new(),
+                power: Some(PTValue::Fixed(1)),
+                toughness: Some(PTValue::Fixed(1)),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::ByKey("test_creature".to_string()),
+                keywords: KeywordSet::empty(),
+                target_requirement: None,
+                alternative_costs: Vec::new(),
+            },
+            owner: CONTROLLER,
+            controller: CONTROLLER,
+            zone: ZoneKind::Battlefield,
+            tapped: false,
+            flipped: false,
+            face_down: false,
+            phased_out: false,
+            damage_marked: 0,
+            deathtouched: false,
+            counters: CounterSet::new(),
+            attachments: Vec::new(),
+            attached_to: None,
+            timestamp: crate::types::ids::SequenceNo(0),
+            controlled_since_turn: 0,
+            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+        }
+    }
+
+    #[test]
+    fn dies_matches_battlefield_to_graveyard_by_last_known_object_id() {
+        let source = ObjectId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999), // the new id minted for the graveyard-side object
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(dummy_last_known_info(source)),
+        };
+        assert!(ConditionPrimitive::Dies.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn dies_does_not_match_a_different_objects_death() {
+        let source = ObjectId(0);
+        let other = ObjectId(1);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(dummy_last_known_info(other)),
+        };
+        assert!(!ConditionPrimitive::Dies.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn dies_does_not_match_a_non_death_departure() {
+        // Battlefield -> Exile (e.g. a CR 614.13 "exile instead" replacement)
+        // is a LeavesBattlefield, not a Dies.
+        let source = ObjectId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Exile,
+            last_known_info: Some(dummy_last_known_info(source)),
+        };
+        assert!(!ConditionPrimitive::Dies.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn leaves_battlefield_matches_any_destination() {
+        let source = ObjectId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Exile,
+            last_known_info: Some(dummy_last_known_info(source)),
+        };
+        assert!(ConditionPrimitive::LeavesBattlefield.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn leaves_battlefield_does_not_match_a_move_that_never_left_the_battlefield() {
+        let source = ObjectId(0);
+        let event = GameEventKind::ZoneChange {
+            object: source,
+            from: ZoneKind::Hand,
+            to: ZoneKind::Battlefield,
+            last_known_info: Some(dummy_last_known_info(source)),
+        };
+        assert!(!ConditionPrimitive::LeavesBattlefield.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 }

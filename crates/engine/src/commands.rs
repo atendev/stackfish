@@ -348,10 +348,31 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
 /// branch) already call `remap_abilities` instead, which is the correct
 /// behavior there (e.g. a mana ability registered against a land while
 /// still in hand must survive the hand→battlefield move).
-pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) {
+///
+/// Returns the departing object's own `Triggered`-kind abilities (CR
+/// 603.10) — a "when this dies"/"when this leaves the battlefield" ability
+/// would otherwise be deleted right here, before `collect_triggers` ever
+/// gets a chance to see it. The SBA-driven death call site (`sba::
+/// commit_death`) threads this return value up to `Engine`'s transient
+/// last-known-information stash so trigger collection can still find it;
+/// the other three call sites (sacrifice/discard cost, draw-step library
+/// retirement) discard it this slice — deliberately deferred, same
+/// mechanism to be wired there once proven on the highest-value death path
+/// (see docs/implementation.md's backlog item 7).
+pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<RegisteredAbility> {
     state.objects.remove(&old_id);
-    state.abilities.retain(|a| a.source != old_id);
+    let mut departed_triggered = Vec::new();
+    state.abilities.retain(|a| {
+        if a.source != old_id {
+            return true;
+        }
+        if a.kind == AbilityKind::Triggered {
+            departed_triggered.push(a.clone());
+        }
+        false
+    });
     state.continuous_effects.retain(|e| e.source != old_id);
+    departed_triggered
 }
 
 /// CR 400.7: moves `id` from `from`/`from_owner` to the graveyard, minting a
@@ -379,7 +400,10 @@ fn move_to_graveyard_for_cost(
     if let Some(zone) = state.zone_mut(from, from_owner) {
         zone.remove(id);
     }
-    retire_object(state, id);
+    // Departed Triggered abilities discarded here - sacrifice/discard cost
+    // isn't wired to the CR 603.10 LKI stash this slice (see
+    // retire_object's own doc comment).
+    let _ = retire_object(state, id);
     if let Some(zone) = state.zone_mut(ZoneKind::Graveyard, Some(owner)) {
         zone.push_bottom(new_id);
     }
@@ -1629,8 +1653,10 @@ mod tests {
         state.continuous_effects.push(dummy_continuous_effect(ObjectId(1)));
         state.continuous_effects.push(dummy_continuous_effect(ObjectId(2)));
 
-        retire_object(&mut state, ObjectId(1));
+        let departed = retire_object(&mut state, ObjectId(1));
 
+        assert_eq!(departed.len(), 1, "the retired object's own Triggered ability is returned");
+        assert_eq!(departed[0].source, ObjectId(1));
         assert_eq!(state.abilities.len(), 1, "only ObjectId(1)'s ability should be purged");
         assert_eq!(state.abilities[0].source, ObjectId(2), "ObjectId(2)'s ability must survive untouched");
         assert_eq!(
