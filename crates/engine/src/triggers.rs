@@ -37,10 +37,13 @@ pub struct PendingTrigger {
 /// ability granted by an aura that left in the same batch), or the id
 /// may not resolve to anything at all if the move minted a new
 /// ObjectId. See event.rs's doc comment on ZoneChange for the full case.
-/// Not handled this slice: an ability whose source no longer resolves via
+/// Not handled: an ability whose source no longer resolves via
 /// `state.object()` (e.g. it just left the battlefield) is skipped rather
-/// than evaluated against last-known information - only ETB-shaped
-/// conditions (source still on the battlefield when checked) are exercised.
+/// than evaluated against last-known information - only conditions whose
+/// source is still around when checked (ETB, deals/is-dealt-damage,
+/// upkeep, ...) are exercised; leaves-battlefield/dies conditions can't be
+/// added until this gap is fixed (see docs/implementation.md's backlog item
+/// 7, the CR 603.10 last-known-info fallback).
 ///
 /// IMPORTANT (CR 601.2i): a "whenever you cast a spell" condition must
 /// NOT match on GameEventKind::StackObjectPushed alone - that event
@@ -101,7 +104,7 @@ pub fn collect_triggers(
             // Rust-native fast path - zero Lua VM calls, see
             // ConditionPrimitive::matches's own doc comment.
             Some(ConditionSpec::Primitive(primitive)) => {
-                primitive.matches(ability.source, &event.kind)
+                primitive.matches(ability.source, controller, state.active_player, &event.kind)
             }
             Some(ConditionSpec::Script(handle)) => {
                 let ctx = ScriptContext {

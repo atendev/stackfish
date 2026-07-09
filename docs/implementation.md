@@ -2101,17 +2101,21 @@ shift, don't treat it as fixed once written.
    ~~Damage-dealt conditions~~ — done, `phase5/damage-dealt-triggers` slice (docs/implementation.md,
    below): `ConditionPrimitive::DealsDamage`/`IsDealtDamage`. Surfaced a new, previously-undocumented
    gap while scoping this — split out as its own sub-item rather than silently left implicit:
-   7a. **`AdvanceTurnStep` bypasses `CollectTriggers` entirely** — its `StepStarted`/`PhaseStarted`/
-      `TurnStarted` events go through `engine.rs`'s `log_events`, which appends straight to the
-      ledger with no `ReplacementCheck`/`CommitEvents`/`CollectTriggers` pass at all. A phase/step-
-      boundary condition (e.g. "at the beginning of your upkeep") is structurally unfireable until
-      `AdvanceTurnStep` is rewired through the same pipeline `PendingAction`/`ResolveStackTop`
-      already use — real, separate plumbing, not a condition-matching addition.
+   7a. ~~**`AdvanceTurnStep` bypasses `CollectTriggers` entirely**~~ — done, `phase5/upkeep-triggers`
+      slice (docs/implementation.md, below). `AdvanceTurnStep`'s normal (non-`Untap`, non-`Cleanup`)
+      step/phase transition now routes its events through the real `ReplacementCheck`/`CommitEvents`/
+      `SbaLoop`/`CollectTriggers` pipeline instead of `log_events`, proven with new
+      `ConditionPrimitive::BeginningOfYourUpkeep`/`BeginningOfEachUpkeep`. `Untap` (CR 502.4: no
+      priority granted, so no trigger window to place one before) and `Cleanup` (its own separate
+      `CleanupSbaCheck` flow, still not wired to `collect_triggers` either) are unaffected — still
+      real, open gaps, not silently expanded into this fix.
    Still open: once-per-turn/intervening-if legality, the CR 603.10 last-known-info fallback (a
    leaves-battlefield/dies condition can't be added until `collect_triggers`'s `state.object(ability.
    source)` live-lookup gap is fixed — that lookup fails by design once `retire_object` has already
-   purged the ability, which happens before trigger collection ever runs), and every non-ETB/non-
-   damage-dealt condition shape (upkeep specifically blocked on 7a above).
+   purged the ability, which happens before trigger collection ever runs), `Cleanup`'s own trigger-
+   collection gap (see 7a above), and every condition shape beyond ETB/damage-dealt/upkeep (e.g.
+   "whenever you draw a card," "at the beginning of combat/end step" — same event family as upkeep,
+   cheap to add now that the pipeline fix has landed, just not done yet).
 8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Damage, Counters, Destroy,
    Exile, Sacrifice, CreateToken — only `GainLife` exists today), and a hidden-information-safe
    `ScriptContext` (currently leaks the full `&GameState`, a standing DESIGN.md open question).
@@ -3357,6 +3361,72 @@ rather than opening a separate throwaway commit for it.
 - Once-per-turn/intervening-if legality (CR 603.2-603.3) — untouched.
 - No "combat damage specifically" vs. "damage in general" distinction, and no "deals damage to a
   player specifically" shape — `DamageDealt` doesn't carry either distinction today.
+
+## Phase 5: phase5/upkeep-triggers slice (backlog item 7a, second sub-slice of item 7)
+
+Branch `phase5/upkeep-triggers`, off master. Direct follow-on to the damage-dealt-triggers slice,
+which named this exact gap: `AdvanceTurnStep`'s `StepStarted`/`PhaseStarted`/`TurnStarted` events go
+through `log_events`, which appends straight to the ledger and never runs `collect_triggers` at all
+— a phase/step-boundary trigger (e.g. "at the beginning of your upkeep") was structurally unfireable
+until this was fixed. Unlike the damage-dealt slice, this one *is* real plumbing work, not just a
+condition-matching addition — the pre-slice requirements report called this out explicitly.
+
+**VERIFICATION RESULT:** Pass. 8 new unit tests in `types/ability.rs`
+(`BeginningOfYourUpkeep`/`BeginningOfEachUpkeep` matching/non-matching on active-player relativity
+and step shape). New `phase5_upkeep_triggers.rs` — 3 end-to-end tests driving the real turn loop
+from `PreGame` into `Upkeep` (mirroring `phase5_beginning_phase.rs`'s own
+`no_priority_during_untap` proof that one full pass-round lands exactly there): a controller's own
+"beginning of your upkeep" ability fires and resolves; the same condition does *not* fire for a
+different controller's permanent on someone else's upkeep; "beginning of each upkeep" fires
+regardless of whose turn it is. `cargo test --workspace` green throughout — critically, the full
+pre-existing `phase5_beginning_phase.rs` suite (untap/draw/skip/empty-library tests) stayed green
+unchanged, confirming the pipeline rewire preserved every existing turn-advancement behavior.
+
+**What got implemented:**
+- `engine.rs`'s `ProcessState::AdvanceTurnStep` arm: the normal (non-`Untap`, non-`Cleanup`) step/
+  phase transition now sets `pipeline_context`/`pipeline_exit` and routes `advance_turn_step()`'s
+  events (plus the draw step's own `ZoneChange`, when not skipped) through
+  `ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() }` — the exact
+  same target pattern `ResolveStackTop` already uses — instead of `log_events` followed immediately
+  by opening `PriorityWindow`. `Untap` (CR 502.4: no priority granted there, so no trigger window to
+  place one before) and `Cleanup` (routes to `begin_cleanup_step`'s own separate `CleanupSbaCheck`
+  flow) both keep calling `log_events` exactly as before — deliberately unfixed, not silently
+  swept into this change. The Draw step's skip-check (CR 500.7/500.8) also keeps its own
+  `log_events` path unchanged: CR 500.8 says a skipped step "doesn't happen at all," so no trigger
+  collection should run against it either.
+- `ConditionPrimitive::BeginningOfYourUpkeep`/`BeginningOfEachUpkeep` (ability.rs) — the concrete
+  condition proving the plumbing fix works, not just the fix itself. `matches` gained
+  `controller: PlayerId`/`active_player: PlayerId` parameters (a real signature change, unlike the
+  damage-dealt slice, which didn't need one) — `BeginningOfYourUpkeep` requires `controller ==
+  active_player` in addition to the `Step::Upkeep` `StepStarted` match; `BeginningOfEachUpkeep`
+  doesn't check controller at all.
+- `Game.Conditions.Upkeep`/`Game.Conditions.EachUpkeep` bindings (script.rs).
+- Fixed two more stale doc comments while in these files: `ConditionPrimitive`'s own "only ETB-shaped
+  conditions... are exercised" note (`triggers.rs`) was already inaccurate as of the damage-dealt
+  slice and is now doubly so; reworded to name the real constraint (source must still resolve via
+  `state.object()`) generically instead of naming ETB specifically.
+
+**STRUCT DEVIATIONS:** `ConditionPrimitive::matches` gaining `controller`/`active_player` was
+explicitly anticipated in the pre-slice report (unlike the damage-dealt slice, where the same
+tentative guess turned out to be unnecessary) — not a deviation, the report called this correctly.
+
+**INTERFACE DEVIATIONS:** None beyond the anticipated `matches` signature change above.
+
+**SCOPE DEVIATIONS:** The two stale doc-comment fixes (`RegisteredAbility.cost` was already fixed in
+the damage-dealt slice; `triggers.rs`'s ETB-specific wording fixed here) — spotted incidentally
+while reading the files this slice touches anyway, not part of the original plan.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- `Cleanup`'s own trigger-collection gap — still open, its own differently-shaped fix (a second
+  `CleanupSbaCheck`-style flow would need the same `CollectTriggers` wiring, plus its pre-existing
+  CR 514.3 incompleteness TODO addressed at the same time or separately).
+- "Whenever you draw a card," "at the beginning of combat," "at the beginning of the end step," etc.
+  — same event family as upkeep, cheap to add now that the plumbing fix has landed, but not added
+  this slice (scope stayed to proving the fix with one condition, per the pre-slice report).
+- Untap-step triggers (e.g. "whenever a permanent untaps") — still unfireable; CR 502.4 grants no
+  priority there regardless, so there's no window to place one before even if collected.
+- Leaves-battlefield/dies conditions and once-per-turn/intervening-if legality — untouched, same as
+  the damage-dealt slice's own UNRESOLVED list.
 
 ## Mistakes caught (don't repeat)
 

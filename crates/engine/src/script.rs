@@ -915,6 +915,8 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     conditions.set("Always", ConditionTag(ConditionPrimitive::Always))?;
     conditions.set("DealsDamage", ConditionTag(ConditionPrimitive::DealsDamage))?;
     conditions.set("IsDealtDamage", ConditionTag(ConditionPrimitive::IsDealtDamage))?;
+    conditions.set("Upkeep", ConditionTag(ConditionPrimitive::BeginningOfYourUpkeep))?;
+    conditions.set("EachUpkeep", ConditionTag(ConditionPrimitive::BeginningOfEachUpkeep))?;
 
     let ops = lua.create_table()?;
     let gain_life = lua.create_function(|_, amount: i32| Ok(OperationTag(AbilityEffect::GainLife(amount))))?;
