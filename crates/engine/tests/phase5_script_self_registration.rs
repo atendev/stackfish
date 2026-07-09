@@ -109,6 +109,7 @@ fn bear_definition(script: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 
@@ -130,6 +131,7 @@ fn land_definition(script: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 

@@ -1516,20 +1516,30 @@ impl Engine {
                     // (ScriptHandle) and invoke it via
                     // ScriptRuntime::invoke_operation to actually carry out
                     // whatever the spell/ability says - blocked on the script
-                    // bridge like every other script-shaped gap. What follows is
-                    // only CR 608.2m's zone-change half of resolution (a spell's
-                    // card moves off the stack once it resolves) - it does not
-                    // run any spell effect.
+                    // bridge like every other script-shaped gap. `top.effect`'s
+                    // Rust-native fast path (below) covers a growing set of
+                    // recognized primitives without a Lua call at all.
+
+                    // CR 608.2m: a permanent type goes to the battlefield as a
+                    // permanent; an instant or sorcery (the only other types
+                    // castable as a spell - see CastSpell's land rejection in
+                    // commands.rs) goes to its owner's graveyard/exile and its
+                    // own effect resolves (see below) - a permanent has no
+                    // effect of its own to resolve here; any ETB behavior is a
+                    // separate Triggered-kind RegisteredAbility, not
+                    // `CardDefinition.effect`. Computed once, up front, before
+                    // the zone move below removes `top.stack_id` from
+                    // `state.objects` (CR 400.7 mints a new id for the
+                    // graveyard/exile-side object).
+                    let is_instant_or_sorcery = matches!(top.kind, StackEntryKind::Spell)
+                        && self.state.object(top.stack_id).is_some_and(|obj| {
+                            obj.definition.card_types.intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY)
+                        });
+
                     if matches!(top.kind, StackEntryKind::Spell) {
-                        // CR 608.2m: a permanent type goes to the
-                        // battlefield as a permanent; an instant or sorcery
-                        // (the only other types castable as a spell - see
-                        // CastSpell's land rejection in commands.rs) goes to
-                        // its owner's graveyard instead - or exile, if this
-                        // was cast via an alternative cost that exiles it on
-                        // resolution (CR 702.34a). Peek the card's types
-                        // before moving it - move_resolving_spell needs the
-                        // destination decided up front.
+                        // Peek the card's types before moving it -
+                        // move_resolving_spell needs the destination decided
+                        // up front.
                         let destination = self.state.object(top.stack_id).map(|obj| {
                             if obj
                                 .definition
@@ -1564,24 +1574,52 @@ impl Engine {
                     // ActivatedAbility/Copy: nothing on a zone moves when these
                     // resolve (CR 608's ability-resolution path doesn't involve
                     // a card) - only the Spell branch above produces a
-                    // ZoneChange. Activated and triggered abilities resolve the
-                    // same way: `top.effect`'s Rust-native fast path when it's a
-                    // recognized primitive (no Lua call at all), falling back to
-                    // the real script bridge (CR 602.2b/603.4/608.2m's
-                    // resolution proper) only when it's None.
+                    // ZoneChange. Activated/triggered abilities and an instant/
+                    // sorcery spell all resolve their effect the same way:
+                    // `top.effect`'s Rust-native fast path when it's a
+                    // recognized primitive (no Lua call at all), falling back
+                    // to the real script bridge (CR 602.2b/603.4/608.2m's
+                    // resolution proper) only when it's None. A permanent
+                    // spell is deliberately excluded (`is_instant_or_sorcery`
+                    // above) - see this block's own doc comment.
                     if matches!(
                         top.kind,
                         StackEntryKind::TriggeredAbility | StackEntryKind::ActivatedAbility
-                    ) {
+                    ) || is_instant_or_sorcery
+                    {
                         match &top.effect {
                             Some(AbilityEffect::GainLife(amount)) => {
                                 if let Some(player) = self.state.player_mut(top.controller) {
                                     player.gain_life(*amount);
                                 }
                             }
+                            // CR 608.2m/614-616: unlike GainLife above, Damage
+                            // doesn't mutate GameState directly - it emits a
+                            // real DamageDealt event and lets it flow through
+                            // the same ReplacementCheck->CommitEvents pipeline
+                            // combat damage already uses (commands::
+                            // apply_damage_event is the sole consumer of that
+                            // event kind and isn't combat-specific), so
+                            // prevention/replacement effects and Lifelink/
+                            // Wither/Infect/Deathtouch apply for free. Single
+                            // fixed target only (top.targets.first()) - no
+                            // "divide among any number of targets" shape yet,
+                            // same narrowing targeting-basics already
+                            // established. Empty targets is a silent no-op
+                            // (shouldn't be reachable given cast-time target
+                            // validation) rather than a panic.
+                            Some(AbilityEffect::Damage(amount)) => {
+                                if let Some(target) = top.targets.first() {
+                                    events.push(GameEventKind::DamageDealt {
+                                        source: top.source,
+                                        target: *target,
+                                        amount: *amount,
+                                    });
+                                }
+                            }
                             // AddMana is only ever set on a mana ability, which
                             // resolves immediately and never reaches the stack
-                            // (CR 605.1a/605.3b) - no StackObject of either kind
+                            // (CR 605.1a/605.3b) - no StackObject of any kind
                             // should ever carry this variant. Defensive no-op
                             // rather than a panic.
                             Some(AbilityEffect::AddMana(_)) => {}
@@ -2498,6 +2536,7 @@ mod tests {
                 keywords: KeywordSet::empty(),
                 target_requirement: None,
                 alternative_costs: Vec::new(),
+                effect: None,
             },
             owner: controller,
             controller,

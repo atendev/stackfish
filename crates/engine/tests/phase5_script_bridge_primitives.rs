@@ -54,6 +54,7 @@ fn bear_definition() -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 

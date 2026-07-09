@@ -29,6 +29,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 
@@ -50,6 +51,7 @@ fn artifact_definition() -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 
@@ -76,6 +78,7 @@ fn bolt_definition() -> CardDefinition {
             count: 1,
         })),
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 
@@ -106,6 +109,7 @@ fn pump_definition() -> CardDefinition {
             count: 1,
         })),
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 

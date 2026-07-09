@@ -30,6 +30,7 @@ fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 

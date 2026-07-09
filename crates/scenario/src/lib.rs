@@ -1005,6 +1005,7 @@ pub fn build_initial_state(
             keywords: parse_keywords(&spec.keywords),
             target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
             alternative_costs: Vec::new(),
+            effect: None,
         };
 
         let owner = PlayerId(entry.player);
@@ -1460,6 +1461,11 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 // literals in Rust integration tests (see
                 // phase5_flashback_alternative_costs.rs).
                 alternative_costs: Vec::new(),
+                // TODO: no TOML scenario field for a Rust-native effect
+                // (Game.Ops.Damage/GainLife/...) yet either - same
+                // "direct struct literal only" limit as alternative_costs
+                // above.
+                effect: None,
             }
         }).collect();
         PlayerConfig { player_id: PlayerId(gp.id), library, life_override: gp.life_override }

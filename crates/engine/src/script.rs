@@ -930,6 +930,8 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     let ops = lua.create_table()?;
     let gain_life = lua.create_function(|_, amount: i32| Ok(OperationTag(AbilityEffect::GainLife(amount))))?;
     ops.set("GainLife", gain_life)?;
+    let damage = lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::Damage(amount))))?;
+    ops.set("Damage", damage)?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;

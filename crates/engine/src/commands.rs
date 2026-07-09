@@ -894,13 +894,20 @@ pub fn execute_command(
             state.objects.insert(new_id, new_object);
             remap_abilities(state, card, new_id);
 
+            // CR 608.2m: a real, Rust-native fast-path effect (e.g. "Shock
+            // deals 2 damage to any target") if the card's own
+            // CardDefinition carries one - see CardDefinition::effect's own
+            // doc comment for why a permanent spell never has one.
+            let effect = last_known_info.definition.effect.clone();
+
             // TODO(script bridge): `operation` should be the card's
             // registered cast/resolution callback (looked up via its
             // ScriptReference) - no such lookup exists yet, same gap as
             // every other ScriptHandle placeholder in this codebase.
             // ScriptHandle(0) here is a stand-in with nothing real bound to
-            // it; resolving this StackObject can't actually run spell
-            // effects until the script bridge fills this in for real.
+            // it - only `effect`'s Rust-native fast path (above) can
+            // actually resolve a spell effect until the script bridge fills
+            // this in for real.
             state.stack.push(StackObject::new(
                 new_id,
                 StackEntryKind::Spell,
@@ -912,7 +919,7 @@ pub fn execute_command(
                 x_value,
                 exile_on_leaving_stack,
                 ScriptHandle(0),
-                None,
+                effect,
             ));
 
             return Ok(CommandOutcome {
@@ -1032,15 +1039,15 @@ pub fn execute_command(
                         battlefield_entries: Vec::new(),
                     });
                 }
-                // None (script-bridge-only effect) and Some(GainLife) (a
-                // non-mana ActivateAbility whose effect happens to be a
-                // recognized primitive) both take the same path: unlike CR
-                // 605's mana abilities, a non-mana activated ability uses
-                // the stack (CR 602.2) rather than resolving immediately.
-                // Targets are validated below (CR 602.2b/601.2c-e) via the
-                // same validate_targets CastSpell uses, before any state
-                // mutation (stack push) happens.
-                non_mana_effect @ (None | Some(AbilityEffect::GainLife(_))) => {
+                // None (script-bridge-only effect) and Some(GainLife)/
+                // Some(Damage) (a non-mana ActivateAbility whose effect
+                // happens to be a recognized primitive) all take the same
+                // path: unlike CR 605's mana abilities, a non-mana activated
+                // ability uses the stack (CR 602.2) rather than resolving
+                // immediately. Targets are validated below (CR 602.2b/
+                // 601.2c-e) via the same validate_targets CastSpell uses,
+                // before any state mutation (stack push) happens.
+                non_mana_effect @ (None | Some(AbilityEffect::GainLife(_)) | Some(AbilityEffect::Damage(_))) => {
                     validate_targets(
                         state,
                         script_runtime,

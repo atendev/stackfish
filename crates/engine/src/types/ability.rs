@@ -36,6 +36,19 @@ pub enum AbilityEffect {
     /// `{ gain_life = n }` Lua operation table from the prior slice, just
     /// resolved on the Rust side instead of via `ScriptRuntime::invoke_operation`.
     GainLife(i32),
+    /// The `Game.Ops.Damage(n)` primitive — deals exactly `n` damage to the
+    /// resolving `StackObject`'s first chosen target (CR 608.2m). Unlike
+    /// `GainLife` above, this does *not* mutate `GameState` directly —
+    /// `ResolveStackTop` emits a real `GameEventKind::DamageDealt` event and
+    /// lets it flow through the normal `ReplacementCheck`→`CommitEvents`
+    /// pipeline, the same one combat damage already uses, so
+    /// prevention/replacement effects (CR 614-616) and Lifelink/Wither/
+    /// Infect/Deathtouch (`commands::apply_damage_event`) apply for free.
+    /// Single fixed target only — no "divide among any number of targets"
+    /// (Arc Trail-style) or "each opponent" mass-damage shape; matches
+    /// `targeting-basics`'s own existing narrowing (see
+    /// docs/implementation.md).
+    Damage(u32),
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a
@@ -427,6 +440,7 @@ mod tests {
                 keywords: KeywordSet::empty(),
                 target_requirement: None,
                 alternative_costs: Vec::new(),
+                effect: None,
             },
             owner: CONTROLLER,
             controller: CONTROLLER,

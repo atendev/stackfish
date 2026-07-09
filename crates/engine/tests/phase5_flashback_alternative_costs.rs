@@ -53,6 +53,7 @@ fn bolt_definition() -> CardDefinition {
             from_zone: ZoneKind::Graveyard,
             exile_on_leaving_stack: true,
         }],
+        effect: None,
     }
 }
 
@@ -74,6 +75,7 @@ fn creature_definition() -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        effect: None,
     }
 }
 

@@ -2137,9 +2137,20 @@ shift, don't treat it as fixed once written.
    representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/etc only ever match a fixed identity
    or the ability's own controller, never a characteristic filter over some other object; Untap-step
    triggers stay unfireable regardless (CR 502.4 grants no priority there).
-8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Damage, Counters, Destroy,
-   Exile, Sacrifice, CreateToken — only `GainLife` exists today), and a hidden-information-safe
-   `ScriptContext` (currently leaks the full `&GameState`, a standing DESIGN.md open question).
+8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Counters, Destroy, Exile,
+   Sacrifice, CreateToken — only `GainLife` existed before this item started), and a
+   hidden-information-safe `ScriptContext` (currently leaks the full `&GameState`, a standing
+   DESIGN.md open question). ~~Damage~~ — done, `phase5/script-ops-damage` slice
+   (docs/implementation.md, below): `AbilityEffect::Damage(u32)`/`Game.Ops.Damage(n)`, reusing the
+   real `ReplacementCheck`→`CommitEvents` pipeline (`commands::apply_damage_event`) combat damage
+   already uses, so prevention/replacement effects and Lifelink/Wither/Infect/Deathtouch apply for
+   free. Surfaced a bigger, previously-undocumented gap while scoping this — a cast spell never
+   resolved *any* effect at all (only activated/triggered abilities could) — closed as part of the
+   same slice rather than left silently narrower: `CardDefinition` gained an `effect: Option<
+   AbilityEffect>` field, and `CastSpell` now bakes it onto the pushed `StackObject` instead of a
+   hardcoded `None`. `Destroy` (CR 701.8/702.12b) is next in this item — needs its own zone-move-
+   commit design (no existing generic-`ZoneChange`-commit path to reuse the way `Damage` reused
+   `DamageDealt`'s).
 9. **Player-input-mid-script (Lua coroutines)** — needed for "choose one," "may," and modal spells.
    `invoke_target`/`Game.SelectTargets` are stubbed synchronous on purpose; real fix needs
    `Lua::create_thread` yield/resume spanning `Engine::step()` calls, flagged unresolved since
@@ -3719,6 +3730,98 @@ either type), everything landed in `effect.rs`, `layers.rs`, `script.rs`, and on
   stance every prior layer-engine slice took before `static-ability-self-registration` landed) — a
   real card script using `Game.Effects.SwitchPT` is exercised the same way any other layer's
   primitive already is via that builder, just not proven with a dedicated test this slice.
+
+## Phase 5: phase5/script-ops-damage slice (backlog item 8, first Script API primitive)
+
+Branch `phase5/script-ops-damage`, off master. First of backlog item 8's missing `Game.Ops`
+primitives beyond `GainLife` — `AbilityEffect::Damage(u32)`/`Game.Ops.Damage(n)`, e.g. "Shock deals
+2 damage to any target."
+
+**Key finding before writing code:** `ResolveStackTop` already builds an `events: Vec<GameEventKind>`
+for whatever's resolving and routes it through the real `ReplacementCheck`→`CommitEvents` pipeline —
+and `CommitEvents` already special-cases `GameEventKind::DamageDealt` by calling `commands::
+apply_damage_event`, which isn't combat-specific (just `source`/`target`/`amount`). So `Damage`
+doesn't mutate `GameState` directly the way `GainLife` does (a real pre-existing gap: `GainLife`
+bypasses replacement checking and doesn't even emit a `LifeChanged` event) — it emits a real
+`DamageDealt` event and reuses the exact pipeline combat damage already runs through, getting
+prevention/replacement effects and Lifelink/Wither/Infect/Deathtouch for free.
+
+**Two scope surprises found mid-implementation, each flagged and resolved with the human before
+proceeding rather than silently improvised:**
+1. `ResolveStackTop`'s effect-application match only ever ran for `StackEntryKind::TriggeredAbility`/
+   `ActivatedAbility` — a cast **spell** got zero effect resolution at all (only the zone-change
+   half), so "Shock deals 2 damage" wouldn't actually work as a real castable spell even with
+   `Damage` added. Decided to widen the match to include instant/sorcery spells too (a permanent
+   spell is deliberately excluded — CR 608.2m says it just enters the battlefield; any ETB behavior
+   is a separate `Triggered`-kind `RegisteredAbility`, not this field).
+2. Widening that match wasn't sufficient on its own: `commands::CastSpell` hardcoded
+   `ScriptHandle(0)`/`None` for every cast spell's `operation`/`effect` — there was no lookup from
+   the card's own definition at all. Decided to go full scope: `CardDefinition` gained a real
+   `effect: Option<AbilityEffect>` field, and `CastSpell` now bakes it onto the pushed `StackObject`.
+
+**VERIFICATION RESULT:** Pass. New `phase5_script_ops_damage.rs` — 5 end-to-end tests through the
+real engine: a cast "deals 2 damage to any target" instant marks damage on a creature target; the
+same spell reduces a player target's life; an *activated ability* (not just a spell) with a
+Lifelink source dealing damage gains its controller life, proving `apply_damage_event`'s existing
+keyword handling is reused, not reimplemented; a `PreventDamage` replacement effect registered
+against the target stops a *scripted spell's* damage the same way it already stops combat damage
+(the concrete proof reusing the real pipeline was worth it over `GainLife`'s shortcut); a fizzled
+spell (illegal target at resolution) deals no damage at all and emits no `DamageDealt` event.
+`cargo test --workspace` green throughout (all pre-existing suites unchanged) — notably including
+every existing `phase5_targeting_basics`/`phase5_cast_spell*`/`phase5_activate_ability_*` test,
+confirming the `CardDefinition.effect` sweep and the widened `ResolveStackTop` gate didn't change
+behavior for any card that doesn't set `effect`.
+
+**What got implemented:**
+- `AbilityEffect::Damage(u32)` (types/ability.rs) — single fixed target only, no "divide among any
+  number of targets" (Arc Trail-style) or "each opponent" mass-damage shape; matches
+  `targeting-basics`'s own existing narrowing.
+- `CardDefinition.effect: Option<AbilityEffect>` (types/card.rs) — a spell's Rust-native fast-path
+  effect, same shape `RegisteredAbility.effect` already uses for abilities. Mechanical sweep: every
+  `CardDefinition` struct literal across the workspace (56 occurrences, 40 files, both
+  `crates/engine` and `crates/scenario`) gained `effect: None,` — a scripted GNU-sed pass anchored
+  on the unique `alternative_costs: Vec::new(),` last-field line, plus one manual fix for the single
+  literal with a non-empty `alternative_costs` (`phase5_flashback_alternative_costs.rs`).
+- `commands::execute_command`'s `CastSpell` arm — reads `last_known_info.definition.effect.clone()`
+  into a new `effect` local (captured from the same clone `last_known_info`/CR 603.10 already takes,
+  before the zone-move mutations that would otherwise require a fresh borrow) and passes it to
+  `StackObject::new` instead of the old hardcoded `None`.
+- `commands::execute_command`'s `ActivateAbility` arm — `Some(AbilityEffect::Damage(_))` added
+  alongside `Some(AbilityEffect::GainLife(_))` in the "non-mana effect, uses the stack" match pattern
+  (`non_mana_effect @ (None | Some(GainLife(_)) | Some(Damage(_)))`).
+- `engine.rs`'s `ResolveStackTop`: a new `is_instant_or_sorcery` bool (computed once, before the
+  zone-move removes `top.stack_id` from `state.objects`) widens the effect-application gate to
+  `StackEntryKind::TriggeredAbility | ActivatedAbility` **or** `is_instant_or_sorcery`. New
+  `Some(AbilityEffect::Damage(amount))` arm: if `top.targets.first()` exists, pushes
+  `GameEventKind::DamageDealt { source: top.source, target: *t, amount }` onto `events` (instead of
+  mutating state directly, unlike `GainLife`'s existing arm) — empty targets is a silent no-op
+  (shouldn't be reachable given cast-time target validation).
+- `Game.Ops.Damage(amount)` binding (script.rs), same one-line pattern `GainLife` already uses.
+
+**STRUCT DEVIATIONS:** `CardDefinition.effect` wasn't part of the original narrow plan (a wider match
+arm) — surfaced mid-implementation as described above, confirmed with the human before proceeding.
+
+**INTERFACE DEVIATIONS:** None beyond the anticipated `CastSpell`/`ResolveStackTop` changes once the
+wider scope was agreed.
+
+**SCOPE DEVIATIONS:** The 40-file `CardDefinition` literal sweep — mechanical, same "scripted pass
+anchored on a unique last-field line" precedent the cost-modifiers slice's own `GameState` sweep
+established, not independently scoped but a direct, necessary consequence of the widened plan.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report and the two scope
+decisions above):**
+- `Destroy` (CR 701.8/702.12b) is next in backlog item 8 — needs its own zone-move-commit design;
+  unlike `Damage`, `CommitEvents`'s generic loop doesn't perform zone moves for an arbitrary
+  `ZoneChange` the way it special-cases `DamageDealt` (that logic today only exists inside
+  `sba.rs`'s SBA-death-specific `resolve_deaths`/`commit_death`).
+  `DrawCards`/`Counters`/`Exile`/`Sacrifice`/`CreateToken` — still no `Game.Ops` primitive.
+- `GainLife`'s own inline-mutate-no-replacement-check shortcut is untouched — a pre-existing gap,
+  now inconsistent with `Damage`'s more correct event-based shape, flagged but not fixed.
+- No TOML scenario field for `CardDefinition.effect` yet (`crates/scenario`'s two `CardDefinition`
+  builders both hardcode `effect: None` with an inline TODO) — same "direct struct literal only"
+  limit `alternative_costs` already had before its own scenario-field slice, if one ever lands.
+- No "divide damage among any number of targets" or "each opponent" mass-damage shape — single
+  fixed target only, per `AbilityEffect::Damage`'s own doc comment.
 
 ## Mistakes caught (don't repeat)
 

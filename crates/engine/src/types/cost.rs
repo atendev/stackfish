@@ -670,6 +670,7 @@ mod tests {
                 keywords: KeywordSet::empty(),
                 target_requirement: None,
                 alternative_costs: Vec::new(),
+                effect: None,
             },
             owner: controller,
             controller,
