@@ -14,17 +14,26 @@ use crate::types::object::GameObject;
 /// `EffectiveCharacteristics` itself.
 ///
 /// Layers 4 (`TypeChanging`), 5 (`ColorChanging`), 6 (`AbilityAdding`), 7a
-/// (`PowerToughnessCDA`), 7b (`PowerToughnessSetting`), and 7c
-/// (`PowerToughnessModifying`) are applied — see `Layer`'s own doc comment
-/// for why the rest (copy/control/text, plus 7d/7e) aren't built yet. Layer
-/// 7d (counters) is folded in from `GameObject.counters` directly via
-/// `PTValue::net_with_counters`/`resolve_base_pt` before any continuous
-/// effect is applied, same as `sba.rs`'s pre-existing toughness check
-/// already did — this is a deliberate simplification, not CR 613.4's
-/// literal timestamp-interleaving of counters alongside other layer-7
-/// effects (flagged, not silently wrong: it gives the same answer as long
-/// as nothing on the board needs counters and a `SetPT`/`ModifyPT` effect
-/// ordered relative to each other by timestamp — which no test exercises).
+/// (`PowerToughnessCDA`), 7b (`PowerToughnessSetting`), 7c
+/// (`PowerToughnessModifying`), and 7e (`PowerToughnessSwitching`) are
+/// applied — see `Layer`'s own doc comment for why the rest (copy/control/
+/// text, plus 7d) aren't built yet. Layer 7d (counters) is folded in from
+/// `GameObject.counters` directly via `PTValue::net_with_counters`/
+/// `resolve_base_pt` before any continuous effect is applied, same as
+/// `sba.rs`'s pre-existing toughness check already did — this is a
+/// deliberate simplification, not CR 613.4's literal timestamp-interleaving
+/// of counters alongside other layer-7 effects (flagged, not silently wrong:
+/// it gives the same answer as long as nothing on the board needs counters
+/// and a `SetPT`/`ModifyPT` effect ordered relative to each other by
+/// timestamp — which no test exercises).
+///
+/// 7e is applied as its own pass *after* 7b/7c have fully resolved, not
+/// timestamp-interleaved with them — this is what makes CR 613.4d's own
+/// worked example (a modify effect at a later timestamp than a switch still
+/// contributes to the *pre-switch* sum) fall out correctly for free: every
+/// `ModifyPT` in 7c is summed into one number regardless of a 7e effect's
+/// relative timestamp, then 7e's swap(s) apply once each, in timestamp
+/// order, atop that already-settled result.
 ///
 /// Layer 7a (characteristic-defining power/toughness, CR 613.4a) is
 /// resolved via `resolve_base_pt` below, *before* 7b/7c apply — a `SetPT`
@@ -107,6 +116,21 @@ pub fn effective_characteristics(
         if let EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) = &effect.effect {
             power = power.map(|p| p + dp);
             toughness = toughness.map(|t| t + dt);
+        }
+    }
+
+    // Layer 7e (CR 613.4d): swaps power/toughness, applied once per matching
+    // effect in timestamp order after 7b/7c have fully settled (see this
+    // function's own doc comment for why that ordering matches the CR's
+    // worked example). Skipped if either side is still unresolved (e.g. no
+    // CDA/SetPT/printed base at all) - same "skip rather than guess" stance
+    // every other unresolvable value in this query already takes.
+    for effect in applicable_effects_in_layer(state, obj, Layer::PowerToughnessSwitching) {
+        if matches!(&effect.effect, EffectPayload::Primitive(EffectPrimitive::SwitchPT)) {
+            if let (Some(p), Some(t)) = (power, toughness) {
+                power = Some(t);
+                toughness = Some(p);
+            }
         }
     }
 

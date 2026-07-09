@@ -2055,7 +2055,10 @@ shift, don't treat it as fixed once written.
       `&ScriptRuntime` param of its own (it currently takes none) to evaluate the predicate; the
       effect-shape decode needs a "Lua asks, Rust decides" table convention like
       `invoke_operation`'s, not designed yet.
-   4. **D: layer 7e** (power/toughness switching) — narrow, low effort once 7b/7c exist.
+   4. ~~**D: layer 7e** (power/toughness switching)~~ — done, `phase5/layer-engine-switching` slice
+      (docs/implementation.md, below). `EffectPrimitive::SwitchPT`, applied as its own pass in
+      `layers::effective_characteristics` after 7b/7c fully resolve — a `Game.Layers.
+      PowerToughnessSwitching`/`Game.Effects.SwitchPT` binding pair, same as every other real layer.
    5. Layers 1/2/3 (copy/control/text-changing) and the CR 613.6-8 dependency system — each needs
       its own real subsystem (copy-object semantics, control-transfer command, text-rewrite
       representation, dependency detection), not just a query extension. Stay last.
@@ -3657,6 +3660,65 @@ two new test files.
 - CR 121.5's "moved without the word 'draw'" distinction — `DrawsCard`/`EachDrawsCard` match by
   zone-shape only (`Library`→`Hand`); no non-draw effect produces that shape in this engine yet, so
   this is a documented limitation, not a live bug.
+
+## Phase 5: phase5/layer-engine-switching slice (backlog item 1, sub-slice D)
+
+Branch `phase5/layer-engine-switching`, off master. Slice backlog item 1's sub-slice D — CR 613.4d
+(layer 7e in this codebase's own local sublayer numbering, since `PowerToughnessCounters`/7d is
+already spoken for by the counters-as-base-simplification `layers.rs` established in the
+layer-engine-basics slice). Last of the 5 real-P/T sublayers; layers 1/2/3 and the CR 613.6-8
+dependency system stay explicitly last per the backlog's own ordering.
+
+**Key finding before writing code:** because layer 7c (`PowerToughnessModifying`) already sums every
+applicable `ModifyPT` into one number before this slice's new 7e pass ever runs, CR 613.4d's own
+worked example (a modify effect at a *later* timestamp than a switch still contributes to the
+pre-switch sum) falls out correctly for free — no timestamp-interleaving logic needed between 7c and
+7e, just a second loop after the existing one.
+
+**VERIFICATION RESULT:** Pass. New `phase5_layer_engine_switching.rs` — 5 tests: a single switch
+swaps power/toughness; CR 613.4d's own first worked example (modify, switch, later modify → `4/6`,
+not `9/1`); CR 613.4d's own third worked example (two switches on the same object cancel out); an
+`EffectFilter` still scopes a switch effect to its intended controller, same as every prior layer
+slice's filter test; a switch effect on an object with no resolvable power/toughness (e.g. a
+non-creature with neither a printed value nor a `SetPT` applying to it) is a no-op, not a panic or a
+fabricated value. `cargo test --workspace` green throughout, no regressions in any prior layer-engine
+suite (`phase5_layer_engine_basics`/`_consumers`/`_types_colors`/`_cda`).
+
+**What got implemented:**
+- `EffectPrimitive::SwitchPT` (effect.rs) — a unit variant (no fields, it's a toggle not a value).
+- `layers::effective_characteristics` — a new loop over `Layer::PowerToughnessSwitching` effects
+  (timestamp order, same `applicable_effects_in_layer` helper every other layer uses), placed after
+  the existing 7c loop. Swaps `power`/`toughness` only when both are already `Some` — skipped
+  otherwise, same "skip rather than guess" stance every other unresolvable value in this query
+  already takes.
+- `script.rs`: `(Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)` added to
+  `validate_layer_effect_pairing`; `Game.Layers.PowerToughnessSwitching` and `Game.Effects.SwitchPT`
+  bindings. `SwitchPT` is bound as a plain tagged value (not a function), same convention
+  `Game.Costs.TapSelf` already uses for a zero-argument tag.
+- Updated three doc comments to stop saying "5 layers"/list 7e among the unbuilt ones:
+  `Layer`'s own doc comment (effect.rs), `layers::effective_characteristics`'s doc comment (added a
+  paragraph explaining why the layer-then-switch pass order reproduces CR 613.4d's example for free),
+  and `bind_game_globals`'s "only N layers are exposed" comment (script.rs).
+
+**STRUCT DEVIATIONS:** None — matched the pre-slice requirements report exactly.
+
+**INTERFACE DEVIATIONS:** None.
+
+**SCOPE DEVIATIONS:** None — no `GameState`/`CardDefinition` literal sweep needed (no new fields on
+either type), everything landed in `effect.rs`, `layers.rs`, `script.rs`, and one new test file.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Layer 7d (counters) stays the pre-existing base-level simplification (folded into the base P/T
+  before any continuous effect, including this slice's own switch, is applied) — not CR 613.4's
+  literal timestamp-interleaving of counters alongside 7b/7c/7e, unchanged by this slice.
+- Layers 1/2/3 (copy/control/text-changing) and the CR 613.6-8 dependency system — untouched, same
+  as every prior layer-engine sub-slice's own UNRESOLVED list. Backlog item 1 is now fully closed
+  except for these, which stay last per the backlog's own explicit ordering.
+- No `Game.AddContinuousEffect`/`Game.CreateStaticAbility`-driven end-to-end test exercises
+  `SwitchPT` yet (this slice's tests build `ContinuousEffect`s via struct literal, same bootstrap
+  stance every prior layer-engine slice took before `static-ability-self-registration` landed) — a
+  real card script using `Game.Effects.SwitchPT` is exercised the same way any other layer's
+  primitive already is via that builder, just not proven with a dedicated test this slice.
 
 ## Mistakes caught (don't repeat)
 
