@@ -3984,6 +3984,67 @@ one new test file.
 - `DrawCards`/`Exile`/`Sacrifice`/`CreateToken` — still no `Game.Ops` primitive; next in backlog
   item 8.
 
+## Phase 5: phase5/script-ops-drawcards slice (backlog item 8, fourth Script API primitive)
+
+Branch `phase5/script-ops-drawcards`, off master. Fourth of backlog item 8's missing `Game.Ops`
+primitives — `AbilityEffect::DrawCards(u32)`/`Game.Ops.DrawCards(n)` (CR 120.3/121), e.g. "Draw two
+cards."
+
+**Key finding, confirmed before writing code:** cheapest of the four so far. A `ZoneChange` always
+describes a move that already happened (`Destroy`'s own doc comment) — `draw_step` already proved
+this convention for the natural draw step: mutate state immediately, then push the resulting real
+event purely so `CollectTriggers`'s ledger scan picks it up. Rather than re-deriving that, extracted
+`draw_step`'s ~15-line body into a shared `Engine::draw_one_card(&mut self, player: PlayerId) ->
+Option<GameEventKind>` helper, parameterized by player instead of hardcoded `active_player`;
+`draw_step` now calls it once, the new `ResolveStackTop` arm calls it in a loop `amount` times. No
+`CommitEvents` special-case needed at all — the only one of the four primitives without one.
+
+**Scope decision, confirmed before writing code:** no target — always draws for `top.controller`,
+mirroring `GainLife`'s exact "controller only" shape rather than `Damage`/`Destroy`/`Counters`'s
+object-target shape, since "Draw a card"/"you draw two cards" is the overwhelmingly common real
+card text vs. "target player draws." `Target::Player` support deferred as a named follow-up.
+
+**VERIFICATION RESULT:** Pass. New `phase5_script_ops_drawcards.rs` — 5 end-to-end tests through the
+real engine: a cast "draw two cards" spell puts two new cards in the caster's hand and empties a
+2-card library; the scripted draw fires an already-existing `DrawsCard`-conditioned trigger (proves
+the real `ZoneChange` event reaches `collect_triggers`, not just a bespoke assertion — first time
+`DrawsCard` fires from anything other than the natural draw step); requesting 2 draws from a
+1-card library draws the 1 available card and stops cleanly, no crash, no phantom card; an
+*activated ability* (not just a spell) with `DrawCards` works identically, same dual-path proof
+every prior primitive established; drawing 2 from a 3-card library preserves order — the correct
+top-two cards land in hand in order, the third stays on top of the library. `cargo test --workspace`
+green throughout, no regressions in any prior suite.
+
+**What got implemented:**
+- `AbilityEffect::DrawCards(u32)` (types/ability.rs).
+- `engine.rs`: `draw_step`'s body extracted into `draw_one_card(&mut self, player: PlayerId) ->
+  Option<GameEventKind>` (same logic, parameterized instead of hardcoding `active_player`);
+  `draw_step` itself now just calls it once for `active_player`.
+- `engine.rs`'s `ResolveStackTop`: a new `Some(AbilityEffect::DrawCards(amount))` arm — loops
+  `0..*amount`, calling `draw_one_card(top.controller)` each time and pushing the returned event
+  into `events`; breaks early (rather than continuing to loop pointlessly) the first time it
+  returns `None` (empty library).
+- `commands.rs`'s `ActivateAbility` non-mana-effect match pattern gained
+  `Some(AbilityEffect::DrawCards(_))` alongside `GainLife`/`Damage`/`Destroy`/`Counters`.
+- `Game.Ops.DrawCards(amount)` binding (script.rs), same one-arg-function pattern `Damage` uses.
+
+**STRUCT DEVIATIONS:** None — matched the pre-slice requirements report exactly.
+
+**INTERFACE DEVIATIONS:** `draw_step`'s body becoming a separate `draw_one_card` helper was
+anticipated by the pre-slice plan (needed for the loop) — not a deviation.
+
+**SCOPE DEVIATIONS:** None — no `GameState`/`CardDefinition` literal sweep needed, everything landed
+in `types/ability.rs`, `engine.rs`, `commands.rs`, `script.rs`, and one new test file.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- `Target::Player` "target player draws N cards" variant — deferred, `DrawCards` only ever draws
+  for `top.controller`.
+- CR 704.5b's empty-library-loss SBA still doesn't exist — pre-existing gap `draw_step` itself
+  already carried, inherited not fixed.
+- No replacement/prevention modeling for draw effects — no `EventFilter::DrawsCard`/"would draw"
+  shape exists; same class of gap `Counters`/`GainLife` already have.
+- `Exile`/`Sacrifice`/`CreateToken` — still no `Game.Ops` primitive; next in backlog item 8.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're

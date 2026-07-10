@@ -77,6 +77,23 @@ pub enum AbilityEffect {
     /// either (no `EventFilter::CounterAdded` shape exists) — same gap
     /// `GainLife` already has, not fixed here.
     Counters { kind: CounterKind, amount: i32 },
+    /// The `Game.Ops.DrawCards(n)` primitive — the resolving `StackObject`'s
+    /// controller draws exactly `n` cards (CR 120.3/121), no target (same
+    /// "always the controller" shape `GainLife` already uses, not `Damage`/
+    /// `Destroy`/`Counters`'s object-target shape — "Draw a card"/"you draw
+    /// two cards" vastly outnumbers "target player draws"). Cheaper than
+    /// even `Counters`: a `ZoneChange` always describes a move that already
+    /// happened (see `Destroy`'s own doc comment), so `ResolveStackTop`
+    /// mutates state immediately via the shared `Engine::draw_one_card`
+    /// helper (extracted from `draw_step`'s own body) and just logs the
+    /// resulting real event — no `CommitEvents` special-case needed, same
+    /// convention `draw_step` already established. Drawing from an empty
+    /// library silently stops rather than looping past it - CR 704.5b's
+    /// empty-library-loss SBA isn't modeled (same TODO `draw_step` already
+    /// carries). No `Target::Player` "target player draws" variant, no
+    /// replacement/prevention modeling for draws (no `EventFilter::
+    /// DrawsCard`/"would draw" shape exists).
+    DrawCards(u32),
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a

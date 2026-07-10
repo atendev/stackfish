@@ -1040,19 +1040,20 @@ pub fn execute_command(
                     });
                 }
                 // None (script-bridge-only effect) and Some(GainLife)/
-                // Some(Damage)/Some(Destroy)/Some(Counters) (a non-mana
-                // ActivateAbility whose effect happens to be a recognized
-                // primitive) all take the same path: unlike CR 605's mana
-                // abilities, a non-mana activated ability uses the stack (CR
-                // 602.2) rather than resolving immediately. Targets are
-                // validated below (CR 602.2b/601.2c-e) via the same
-                // validate_targets CastSpell uses, before any state mutation
-                // (stack push) happens.
+                // Some(Damage)/Some(Destroy)/Some(Counters)/Some(DrawCards)
+                // (a non-mana ActivateAbility whose effect happens to be a
+                // recognized primitive) all take the same path: unlike CR
+                // 605's mana abilities, a non-mana activated ability uses
+                // the stack (CR 602.2) rather than resolving immediately.
+                // Targets are validated below (CR 602.2b/601.2c-e) via the
+                // same validate_targets CastSpell uses, before any state
+                // mutation (stack push) happens.
                 non_mana_effect @ (None
                 | Some(AbilityEffect::GainLife(_))
                 | Some(AbilityEffect::Damage(_))
                 | Some(AbilityEffect::Destroy)
-                | Some(AbilityEffect::Counters { .. })) => {
+                | Some(AbilityEffect::Counters { .. })
+                | Some(AbilityEffect::DrawCards(_))) => {
                     validate_targets(
                         state,
                         script_runtime,
