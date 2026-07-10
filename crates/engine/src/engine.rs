@@ -1704,6 +1704,28 @@ impl Engine {
                                     });
                                 }
                             }
+                            // CR 120.3/121: no target, always top.controller
+                            // (same "controller only" shape GainLife uses).
+                            // Cheaper than Counters - a ZoneChange always
+                            // describes a move that already happened (see
+                            // Destroy's own doc comment above), so this
+                            // mutates state immediately via the shared
+                            // draw_one_card helper (draw_step's own body,
+                            // extracted) and just logs the resulting real
+                            // event - no CommitEvents special-case needed,
+                            // same convention draw_step already established.
+                            // Stops rather than looping past an empty
+                            // library (CR 704.5b's empty-library-loss SBA
+                            // isn't modeled - TODO, same gap draw_step
+                            // itself already carries).
+                            Some(AbilityEffect::DrawCards(amount)) => {
+                                for _ in 0..*amount {
+                                    match self.draw_one_card(top.controller) {
+                                        Some(event) => events.push(event),
+                                        None => break,
+                                    }
+                                }
+                            }
                             // AddMana is only ever set on a mana ability, which
                             // resolves immediately and never reaches the stack
                             // (CR 605.1a/605.3b) - no StackObject of any kind
@@ -2276,12 +2298,20 @@ impl Engine {
     /// CR 704.5b's empty-library SBA isn't modeled yet (TODO).
     fn draw_step(&mut self) -> Vec<GameEventKind> {
         let active = self.state.active_player;
-        let Some(library) = self.state.zone(ZoneKind::Library, Some(active)) else {
-            return Vec::new();
-        };
-        let Some(card) = library.contents.front().copied() else {
-            return Vec::new();
-        };
+        self.draw_one_card(active).into_iter().collect()
+    }
+
+    /// Shared body behind `draw_step` (always `active_player`, exactly one
+    /// card) and `Game.Ops.DrawCards(n)`'s `ResolveStackTop` arm (any
+    /// `player`, looped `n` times) - CR 120.3/121's actual draw mechanic:
+    /// move the library's top card to hand under a new CR 400.7 object id,
+    /// same "new id, no remap" convention `PlayLand`/`CastSpell`/SBA death
+    /// already use. Returns `None` on an empty library (or no library zone
+    /// at all) - CR 704.5b's empty-library-loss SBA isn't modeled yet
+    /// (TODO), so this is a silent no-op rather than a loss.
+    fn draw_one_card(&mut self, player: PlayerId) -> Option<GameEventKind> {
+        let library = self.state.zone(ZoneKind::Library, Some(player))?;
+        let card = library.contents.front().copied()?;
 
         // Snapshot before the move - CR 603.10's last_known_info (see
         // GameEventKind::ZoneChange's doc comment), same ordering PlayLand
@@ -2297,7 +2327,7 @@ impl Engine {
         new_object.timestamp = self.state.allocate_sequence_no();
 
         self.state
-            .zone_mut(ZoneKind::Library, Some(active))
+            .zone_mut(ZoneKind::Library, Some(player))
             .expect("checked above")
             .remove(card);
         // CR 400.7: drawn, no remap follows - purge any RegisteredAbility
@@ -2307,17 +2337,17 @@ impl Engine {
         // own doc comment).
         let _ = commands::retire_object(&mut self.state, card);
         self.state
-            .zone_mut(ZoneKind::Hand, Some(active))
-            .expect("actor has no hand zone")
+            .zone_mut(ZoneKind::Hand, Some(player))
+            .expect("player has no hand zone")
             .push_bottom(new_id);
         self.state.objects.insert(new_id, new_object);
 
-        vec![GameEventKind::ZoneChange {
+        Some(GameEventKind::ZoneChange {
             object: new_id,
             from: ZoneKind::Library,
             to: ZoneKind::Hand,
             last_known_info: Some(last_known_info),
-        }]
+        })
     }
 
     /// CR 514.1/514.2/514.3: entry point for the cleanup step's turn-based
