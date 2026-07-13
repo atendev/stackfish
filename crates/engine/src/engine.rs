@@ -1688,6 +1688,94 @@ impl Engine {
                                 // shouldn't be reachable given cast-time target
                                 // validation against a real card's filter.
                             }
+                            // CR 701.18: exile the first chosen target from the
+                            // battlefield. Unlike Destroy, indestructibility is
+                            // irrelevant - exile bypasses it entirely (CR
+                            // 702.12b is Destroy-specific). Like Destroy, a
+                            // ZoneChange always describes an already-happened
+                            // move, so replacement effects are consulted first
+                            // (apply_replacements) and then the zone move is
+                            // inlined. Cannot reuse sba::commit_death because
+                            // it calls state.zone_mut(to, Some(owner)) - the
+                            // Exile zone is shared (owner = None), so that
+                            // lookup would silently return None and the object
+                            // would never land in exile. Battlefield only -
+                            // TODO: exiling from graveyard/hand requires knowing
+                            // which zone to remove from at resolution time;
+                            // deferred as a named follow-up.
+                            // TODO(CR 616.1): 2+ replacement effects matching
+                            // the same scripted Exile can't pause for an
+                            // ordering choice - same deferred gap as Destroy.
+                            Some(AbilityEffect::Exile) => {
+                                if let Some(Target::Object(id)) = top.targets.first().copied() {
+                                    let last_known_info = self
+                                        .state
+                                        .object(id)
+                                        .filter(|obj| obj.zone == ZoneKind::Battlefield)
+                                        .cloned();
+                                    if let Some(last_known_info) = last_known_info {
+                                        let proposed = GameEventKind::ZoneChange {
+                                            object: id,
+                                            from: ZoneKind::Battlefield,
+                                            to: ZoneKind::Exile,
+                                            last_known_info: Some(last_known_info.clone()),
+                                        };
+                                        match replacement::apply_replacements(&mut self.state, proposed) {
+                                            ReplacementOutcome::Resolved(final_event) => {
+                                                let GameEventKind::ZoneChange { object: old_id, to, .. } = final_event else {
+                                                    unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
+                                                };
+                                                let owner = last_known_info.owner;
+                                                let new_id = self.state.allocate_object_id();
+                                                let mut new_object = last_known_info.clone();
+                                                new_object.object_id = new_id;
+                                                new_object.lineage = ObjectLineage { previous: Some(old_id) };
+                                                new_object.zone = to;
+                                                new_object.timestamp = self.state.allocate_sequence_no();
+
+                                                if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
+                                                    zone.remove(old_id);
+                                                }
+                                                let departed = commands::retire_object(&mut self.state, old_id);
+                                                self.departed_triggered_abilities.extend(departed);
+                                                // Exile is a shared zone (owner = None); per-player
+                                                // graveyard/hand need Some(owner) - this lookup must
+                                                // use None or the object silently disappears.
+                                                let exile_owner = match to {
+                                                    ZoneKind::Exile => None,
+                                                    _ => Some(owner),
+                                                };
+                                                if let Some(zone) = self.state.zone_mut(to, exile_owner) {
+                                                    zone.push_bottom(new_id);
+                                                }
+                                                self.state.objects.insert(new_id, new_object);
+
+                                                let event_id = self.state.allocate_event_id();
+                                                let sequence_no = self.state.allocate_sequence_no();
+                                                let committed = GameEvent {
+                                                    event_id,
+                                                    sequence_no,
+                                                    kind: GameEventKind::ZoneChange {
+                                                        object: new_id,
+                                                        from: ZoneKind::Battlefield,
+                                                        to,
+                                                        last_known_info: Some(last_known_info),
+                                                    },
+                                                    caused_by_command: None,
+                                                    parent_event: None,
+                                                };
+                                                self.state.ledger.push(committed);
+                                            }
+                                            ReplacementOutcome::NeedsOrderingChoice { .. } => {
+                                                // TODO(CR 616.1): same deferred gap as Destroy -
+                                                // silently does nothing rather than guessing an order.
+                                            }
+                                        }
+                                    }
+                                    // else: target already left the battlefield - nothing to exile.
+                                }
+                                // else: no target, or a Target::Player - silent no-op.
+                            }
                             // CR 122.1a: same "push an unapplied event, let
                             // CommitEvents retroactively apply it" pattern as
                             // Damage above - GameEventKind::CounterAdded
