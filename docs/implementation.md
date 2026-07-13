@@ -2139,7 +2139,7 @@ shift, don't treat it as fixed once written.
    triggers stay unfireable regardless (CR 502.4 grants no priority there).
 8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
    CreateToken — only `GainLife` existed before this item started; ~~DrawCards~~, ~~Counters~~,
-   ~~Exile~~ done), and a
+   ~~Exile~~, ~~Sacrifice~~ done), and a
    hidden-information-safe `ScriptContext` (currently leaks the full `&GameState`, a standing
    DESIGN.md open question). ~~Damage~~ — done, `phase5/script-ops-damage` slice
    (docs/implementation.md, below): `AbilityEffect::Damage(u32)`/`Game.Ops.Damage(n)`, reusing the
@@ -4108,6 +4108,57 @@ called out as a pre-slice design decision, not a deviation.
 - No replacement/prevention modeling for exile events — no `EventFilter::WouldExile` shape
   exists; same class of gap `Counters`/`GainLife`/`DrawCards` already have.
 - `Sacrifice`/`CreateToken` — still no `Game.Ops` primitive; next in backlog item 8.
+
+## Phase 5: phase5/script-ops-sacrifice slice (backlog item 8, sixth Script API primitive)
+
+Branch `phase5/script-ops-sacrifice`, off master. Sixth of backlog item 8's missing `Game.Ops`
+primitives — `AbilityEffect::Sacrifice`/`Game.Ops.Sacrifice()`.
+
+**Key finding before writing code:** `sba::commit_death` IS reusable for scripted sacrifice,
+unlike the Exile slice. The destination is the owner's per-player graveyard (`Some(owner)`), so
+`state.zone_mut(to, Some(owner))` finds it correctly. The entire `Sacrifice` arm in
+`ResolveStackTop` is the `Destroy` arm minus the indestructibility check — that's the full
+implementation. "Sacrifice a permanent you control" (player chooses at resolution) needs Lua
+coroutines and is blocked on backlog item 9; self-sacrifice ("sacrifice this permanent," no
+target) is a named follow-up.
+
+**Test setup note:** three tests use `card_object_controlled_by(target, ..., owner: p1, controller: p0)`
+to separate the sacrificed creature's graveyard (p1's) from where the resolved instant lands
+(p0's), matching the Destroy test pattern. The target filter is `FilterController::You`, which
+validates against `controller == caster` (p0 == p0 ✓), so a p1-owned p0-controlled creature is
+a legal target.
+
+**VERIFICATION RESULT:** Pass. New `phase5_script_ops_sacrifice.rs` — 6 end-to-end tests
+through the real engine: a cast "sacrifice target creature you control" spell moves the creature
+to its owner's graveyard; an activated ability with `Sacrifice` works identically (dual-path
+proof); a `Dies`-conditioned trigger fires off the sacrifice ZoneChange (`retire_object` →
+`departed_triggered` path works for scripted sacrifice, not just cost-sacrifice or SBA death);
+a `LeavesBattlefield`-conditioned trigger also fires; an indestructible target is sacrificed
+anyway (Destroy would skip it — Sacrifice does not); sacrificing one of two permanents leaves
+the other untouched. `cargo test --workspace` green throughout, no regressions in any prior suite.
+
+**What got implemented:**
+- `AbilityEffect::Sacrifice` (types/ability.rs) — no fields, toggle shape, same as `Destroy`/`Exile`.
+- `script.rs`: `ops.set("Sacrifice", OperationTag(AbilityEffect::Sacrifice))?` — value binding.
+- `engine.rs`'s `ResolveStackTop`: `Some(AbilityEffect::Sacrifice)` arm — identical to `Destroy`
+  arm with the indestructibility check removed.
+- `commands.rs`'s `ActivateAbility` non-mana-effect match gained `Some(AbilityEffect::Sacrifice)`.
+
+**STRUCT DEVIATIONS:** None.
+
+**INTERFACE DEVIATIONS:** None.
+
+**SCOPE DEVIATIONS:** None — landed in `types/ability.rs`, `engine.rs`, `commands.rs`,
+`script.rs`, and one new test file only.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- "Sacrifice a permanent you control" (player chooses at resolution) — blocked on coroutines
+  (backlog item 9).
+- Self-sacrifice ("sacrifice this permanent," no target) — named follow-up.
+- CR 616.1 ordering choice if 2+ replacement effects intercept — same gap as Destroy/Exile.
+- Pre-existing: `commit_death` silently loses the object if a replacement redirects to Exile
+  (documented on `commit_death` itself, not introduced here).
+- `CreateToken` — still no `Game.Ops` primitive; next in backlog item 8.
 
 ## Mistakes caught (don't repeat)
 

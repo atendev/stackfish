@@ -1052,6 +1052,7 @@ pub fn execute_command(
                 | Some(AbilityEffect::GainLife(_))
                 | Some(AbilityEffect::Damage(_))
                 | Some(AbilityEffect::Destroy)
+                | Some(AbilityEffect::Sacrifice)
                 | Some(AbilityEffect::Exile)
                 | Some(AbilityEffect::Counters { .. })
                 | Some(AbilityEffect::DrawCards(_))) => {
