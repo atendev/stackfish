@@ -94,6 +94,20 @@ pub enum AbilityEffect {
     /// replacement/prevention modeling for draws (no `EventFilter::
     /// DrawsCard`/"would draw" shape exists).
     DrawCards(u32),
+    /// The `Game.Ops.Exile()` primitive — exiles the resolving `StackObject`'s
+    /// first chosen target from the battlefield (CR 701.18). Unlike `Destroy`,
+    /// exile ignores indestructibility entirely (CR 702.12b is Destroy-only).
+    /// Like `Destroy`, a `ZoneChange` always describes a move that already
+    /// happened, so `ResolveStackTop` runs the real `apply_replacements`
+    /// pipeline and then inlines the zone move — but cannot reuse
+    /// `sba::commit_death` because that function hardcodes `Some(owner)` for
+    /// its destination zone lookup, which fails for the shared Exile zone
+    /// (`owner = None`). Battlefield targets only — "exile target
+    /// creature/permanent" vastly outnumbers "exile target card from a
+    /// graveyard," and the latter requires knowing which zone to remove from
+    /// at resolution time; deferred as a named follow-up. No fields — a
+    /// toggle, not a value, same shape as `Destroy`.
+    Exile,
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a

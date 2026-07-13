@@ -2138,7 +2138,8 @@ shift, don't treat it as fixed once written.
    or the ability's own controller, never a characteristic filter over some other object; Untap-step
    triggers stay unfireable regardless (CR 502.4 grants no priority there).
 8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
-   CreateToken — only `GainLife` existed before this item started), and a
+   CreateToken — only `GainLife` existed before this item started; ~~DrawCards~~, ~~Counters~~,
+   ~~Exile~~ done), and a
    hidden-information-safe `ScriptContext` (currently leaks the full `&GameState`, a standing
    DESIGN.md open question). ~~Damage~~ — done, `phase5/script-ops-damage` slice
    (docs/implementation.md, below): `AbilityEffect::Damage(u32)`/`Game.Ops.Damage(n)`, reusing the
@@ -4043,7 +4044,70 @@ in `types/ability.rs`, `engine.rs`, `commands.rs`, `script.rs`, and one new test
   already carried, inherited not fixed.
 - No replacement/prevention modeling for draw effects — no `EventFilter::DrawsCard`/"would draw"
   shape exists; same class of gap `Counters`/`GainLife` already have.
-- `Exile`/`Sacrifice`/`CreateToken` — still no `Game.Ops` primitive; next in backlog item 8.
+- `Sacrifice`/`CreateToken` — still no `Game.Ops` primitive; next in backlog item 8.
+
+## Phase 5: phase5/script-ops-exile slice (backlog item 8, fifth Script API primitive)
+
+Branch `phase5/script-ops-exile`, off master. Fifth of backlog item 8's missing `Game.Ops`
+primitives — `AbilityEffect::Exile`/`Game.Ops.Exile()`.
+
+**Key finding before writing code:** `sba::commit_death` cannot be reused for a scripted Exile
+even though the `Destroy` arm reuses it for SBA-driven deaths. `commit_death` calls
+`state.zone_mut(to, Some(owner))` — that works for Graveyard (per-player zone) and even when
+a replacement redirects a death to Exile (because `commit_death` takes the event's final `to`
+field, and the test fixture happened to use per-player exile zones, a pre-existing
+inconsistency the flashback slice already documented). For a direct `Battlefield → Exile`
+proposal with `to: ZoneKind::Exile` up front, `Some(owner)` finds nothing — the engine's
+shared Exile zone (`owner = None`, built as a single instance in `build_initial_state`) is
+invisible to that lookup. The `Exile` arm in `ResolveStackTop` inlines its own zone move with
+`state.zone_mut(ZoneKind::Exile, None)` (a `match to { ZoneKind::Exile => None, _ => Some(owner) }`
+pick so replacement effects that redirect exile to a per-player zone still land correctly).
+
+Unlike `Destroy`, no indestructibility check — CR 702.12b is Destroy-specific; exile bypasses
+indestructibility entirely. `apply_replacements` is still consulted (someone could replace
+exile with something else via a replacement effect). Battlefield targets only — "exile target
+creature/permanent" is the overwhelming majority of real card text vs. "exile target card from
+a graveyard"; the latter requires a different zone lookup and is a named follow-up.
+
+**VERIFICATION RESULT:** Pass. New `phase5_script_ops_exile.rs` — 5 end-to-end tests through
+the real engine: a cast "exile target creature" spell moves the creature from the battlefield
+to the shared Exile zone (verifies the `None`-owner zone lookup works end-to-end); an
+activated ability with `Exile` works identically, same dual-path proof every prior primitive
+established; exile fires a `LeavesBattlefield`-conditioned trigger (proves `retire_object` →
+`departed_triggered` → `collect_triggers` path works for exile, not just SBA death — the
+trigger resolves and grants 1 life as expected); an indestructible target is exiled anyway
+(Destroy would skip it — Exile does not); exiling one of two permanents leaves the other
+untouched. `cargo test --workspace` green throughout, no regressions in any prior suite.
+
+**What got implemented:**
+- `AbilityEffect::Exile` (types/ability.rs) — no fields, same toggle shape as `Destroy`.
+- `script.rs`: `ops.set("Exile", OperationTag(AbilityEffect::Exile))?` — same value
+  (non-function) binding pattern `Destroy` uses.
+- `engine.rs`'s `ResolveStackTop`: a new `Some(AbilityEffect::Exile)` arm — checks
+  `Target::Object` on battlefield, clones `last_known_info`, proposes `Battlefield → Exile`
+  `ZoneChange`, runs `apply_replacements`, then on `Resolved` inlines the zone move: new id,
+  `zone_mut(Battlefield, None).remove`, `retire_object` (stashing `departed_triggered`),
+  `zone_mut(to, exile_owner).push_bottom` (where `exile_owner` is `None` for `Exile`, else
+  `Some(owner)` for any replacement-redirected destination), `objects.insert`, ledger append.
+- `commands.rs`'s `ActivateAbility` non-mana-effect match pattern gained
+  `Some(AbilityEffect::Exile)` alongside the other primitives.
+
+**STRUCT DEVIATIONS:** None — matched the pre-slice requirements report exactly.
+
+**INTERFACE DEVIATIONS:** None — the inline zone-move approach (no `commit_death` reuse) was
+called out as a pre-slice design decision, not a deviation.
+
+**SCOPE DEVIATIONS:** None — landed in `types/ability.rs`, `engine.rs`, `commands.rs`,
+`script.rs`, and one new test file only.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Non-battlefield exile (from graveyard, hand) — deferred, `Exile` only ever targets the
+  battlefield today.
+- CR 616.1 ordering choice if 2+ replacement effects intercept the same exile —
+  `NeedsOrderingChoice` arm silently does nothing, same gap `Destroy` already carries.
+- No replacement/prevention modeling for exile events — no `EventFilter::WouldExile` shape
+  exists; same class of gap `Counters`/`GainLife`/`DrawCards` already have.
+- `Sacrifice`/`CreateToken` — still no `Game.Ops` primitive; next in backlog item 8.
 
 ## Mistakes caught (don't repeat)
 

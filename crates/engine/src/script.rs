@@ -952,6 +952,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     let damage = lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::Damage(amount))))?;
     ops.set("Damage", damage)?;
     ops.set("Destroy", OperationTag(AbilityEffect::Destroy))?;
+    ops.set("Exile", OperationTag(AbilityEffect::Exile))?;
     let counters = lua.create_function(|_, (kind, amount): (String, i32)| {
         Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
     })?;
