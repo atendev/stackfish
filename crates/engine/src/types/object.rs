@@ -75,6 +75,10 @@ pub struct GameObject {
     /// rather than stored as a bool, since a bool would need imperative
     /// upkeep at every untap-step/control-change site to avoid drifting.
     pub controlled_since_turn: u32,
+    /// True for token permanents (CR 111). Tokens that leave the battlefield
+    /// should cease to exist (CR 111.7), but enforcement is a TODO — they
+    /// currently move to zones like normal cards until that SBA hook exists.
+    pub is_token: bool,
     pub visibility: VisibilityPolicy,
 }
 

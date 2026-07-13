@@ -2137,9 +2137,9 @@ shift, don't treat it as fixed once written.
    representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/etc only ever match a fixed identity
    or the ability's own controller, never a characteristic filter over some other object; Untap-step
    triggers stay unfireable regardless (CR 502.4 grants no priority there).
-8. **Script API expansion** — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
+8. ~~**Script API expansion**~~ — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
    CreateToken — only `GainLife` existed before this item started; ~~DrawCards~~, ~~Counters~~,
-   ~~Exile~~, ~~Sacrifice~~ done), and a
+   ~~Exile~~, ~~Sacrifice~~, ~~CreateToken~~ done — all 6 complete), and a
    hidden-information-safe `ScriptContext` (currently leaks the full `&GameState`, a standing
    DESIGN.md open question). ~~Damage~~ — done, `phase5/script-ops-damage` slice
    (docs/implementation.md, below): `AbilityEffect::Damage(u32)`/`Game.Ops.Damage(n)`, reusing the
@@ -4160,6 +4160,82 @@ the other untouched. `cargo test --workspace` green throughout, no regressions i
   (documented on `commit_death` itself, not introduced here).
 - `CreateToken` — still no `Game.Ops` primitive; next in backlog item 8.
 
+## Phase 5: phase5/script-ops-create-token slice (backlog item 8, final Script API primitive)
+
+Branch `phase5/script-ops-create-token`, off master. Final `Game.Ops.*` primitive in backlog item
+8 — `AbilityEffect::CreateToken { spec: TokenSpec, count: u32 }`, `Game.Tokens.*`, and
+`Game.Ops.CreateToken(spec, count?)`.
+
+**Key design decisions (locked in before writing code, per the requirements discussion):**
+- **API shape:** `Game.Tokens.Clue()` / `Game.Tokens.Food()` / `Game.Tokens.Creature(subtypes, colors, power, toughness, opts?)` / `Game.Tokens.ArtifactCreature(...)` return `TokenSpec`-typed `TokenTag` UserData values; `Game.Ops.CreateToken(spec, count?)` wraps one into an `OperationTag`. No `Game.Tokens.Treasure` — blocked on Lua coroutines (backlog item 9; Treasure needs player input "add one mana of any color"). `count` defaults to 1.
+- **Token zone entry:** direct insertion into `state.objects` + `state.zones[Battlefield]` via `push_bottom` — tokens originate on the battlefield, they don't travel through the stack. Does NOT go through `move_resolving_spell` (which moves an existing stack object).
+- **Named token abilities:** Clue ({2}, Sacrifice → draw a card) and Food ({2}, Sacrifice → gain 3 life) are registered via `register_token_abilities` immediately at `CreateToken` resolution, pushing real `RegisteredAbility` entries into `state.abilities`. Creature tokens have no innate abilities.
+- **`is_token: bool` on `GameObject`:** new field, always `false` on every non-token construction site. CR 111.7 cessation (tokens vanish when they leave the battlefield instead of going to the graveyard) is explicitly a TODO — tokens currently go to the graveyard like any other permanent. `is_token` exists so a future SBA or zone-change handler can key on it.
+- **`run_card_script` skipped for tokens:** tokens have `ScriptReference::Inline("")` (empty). The empty string would fail parsing (`initial_effect` field not found), and token abilities are already registered directly via `register_token_abilities`. The `is_token` field provides the guard if a future cleanup ever needs it.
+- **FilterSpec identity gap for named tokens:** Clue's/Food's sacrifice cost uses `FilterSpec { controller: You, card_types: Artifact, ... }` — this matches *any* artifact you control, not specifically this token. Same pre-existing gap every Sacrifice cost in the codebase shares. TODO comment added on both registrations.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 13 new tests in
+`crates/engine/tests/phase5_script_ops_create_token.rs` (token on battlefield with `is_token: true`,
+Clue ability registration, Food ability registration, 3-at-once count, creature token P/T/subtypes,
+multi-subtype name join, name override, ArtifactCreature card types, token controller tracking,
+Clue ability end-to-end draw, Food ability end-to-end life gain, creature token has no abilities,
+dying token goes to graveyard TODO CR 111.7), all prior tests unaffected. Total: 0 failed.
+
+**What got implemented:**
+- `types/ability.rs`: `NamedToken { Clue, Food }` (Treasure TODO), `CreatureTokenSpec` struct
+  (subtypes/colors/power/toughness/keywords/additional_types/additional_supertypes/name), `TokenSpec
+  { Named(NamedToken), Creature(CreatureTokenSpec) }`. `AbilityEffect::CreateToken { spec, count }`.
+  New imports: `use crate::types::card::{CardTypeSet, KeywordSet, SupertypeSet}` and
+  `use crate::types::mana::{ColorSet, ManaUnit}`.
+- `types/object.rs`: `pub is_token: bool` field added before `visibility` with a TODO for CR 111.7.
+  All 45+ existing `GameObject {}` struct literal sites across the codebase got `is_token: false,`
+  inserted (PowerShell line-by-line patching, not the broken `ScriptBlock -replace` approach from
+  the first attempt — see "Mistakes caught" below).
+- `engine.rs`: two new free functions before `impl Engine`:
+  - `build_token_definition(spec: &TokenSpec) -> CardDefinition` — builds the card definition from
+    scratch: `ManaCost { symbols: Vec::new() }` (not `Option<ManaCost>`), `PTValue::Fixed(i32)` for
+    power/toughness, `ScriptReference::Inline(String::new())`.
+  - `register_token_abilities(state, token_id, spec, controller)` — pushes a `RegisteredAbility` for
+    Clue (`DrawCards(1)`) and Food (`GainLife(3)`); Creature arm is empty.
+  - `AbilityEffect::CreateToken { spec, count }` arm in `Engine::advance` between `DrawCards` and
+    `AddMana`: loops `count` times, calls `build_token_definition`, allocates a new `ObjectId` and
+    `SequenceNo`, constructs a `GameObject` with `is_token: true`, inserts into `state.objects` and
+    the battlefield `Zone`, calls `register_token_abilities`, pushes a `ZoneChange` event.
+  - Imports updated to add `NamedToken`, `TokenSpec`, `CardTypeSet`, `KeywordSet`, `PTValue`,
+    `SupertypeSet`, `AdditionalCost`, `FilterController`, `FilterSpec`.
+- `commands.rs`: `Some(AbilityEffect::CreateToken { .. })` added to the `non_mana_effect` exhaustive
+  match (same pattern as Sacrifice/Exile/Destroy before it).
+- `script.rs`: four new helper functions (`parse_supertype_name`, `parse_color_string`,
+  `decode_subtypes`, `decode_creature_token_opts`); `TokenTag(TokenSpec)` UserData wrapper;
+  `ops.set("CreateToken", ...)` in `bind_game_globals`; a `tokens` table with `Clue`/`Food` value
+  bindings and `Creature`/`ArtifactCreature` function bindings; `game.set("Tokens", tokens)`.
+
+**STRUCT DEVIATIONS:**
+- `GameObject.is_token: bool` — one new field, not anticipated before this slice. Requires touching
+  every `GameObject {}` struct literal in the codebase (45+ sites).
+- `NamedToken`/`CreatureTokenSpec`/`TokenSpec` — anticipated in the pre-slice requirements report.
+- `AbilityEffect::CreateToken` — anticipated; required updating `commands.rs`'s exhaustive match.
+
+**INTERFACE DEVIATIONS:** None beyond what the requirements report scoped.
+
+**SCOPE DEVIATIONS:**
+- 45+ `GameObject {}` struct literal sites across 20+ files required `is_token: false,` — larger
+  footprint than any prior slice's mechanical struct-literal update (the previous high was ~10 sites
+  for `StackObject::effect`). All done via PowerShell line-by-line string replacement rather than
+  the `ScriptBlock` approach that burned the first attempt (see "Mistakes caught" below).
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- **CR 111.7 cessation** — tokens should cease to exist when they leave the battlefield (going to
+  the graveyard, being exiled, etc.) rather than persisting as cards. `is_token` exists as the hook
+  for this future SBA or zone-change handler.
+- `Game.Tokens.Treasure` — blocked on Lua coroutines (backlog item 9), since Treasure's {T},
+  Sacrifice → add one mana of any color needs player input at resolution time.
+- Self-registration for token abilities — Clue/Food abilities are registered via the direct
+  `register_token_abilities` Rust path, not through card-script self-registration. This is by design
+  (tokens have empty scripts and no `initial_effect` entry point).
+- FilterSpec identity gap on Clue/Food sacrifice costs — `FilterSpec::controller: You, card_types:
+  Artifact` matches any artifact, not specifically this Clue/Food. Shared pre-existing gap.
+
 ## Mistakes caught (don't repeat)
 
 - Claimed hybrid Phyrexian mana symbols (`{W/U/P}`) needed a 3-element container because they're
@@ -4167,6 +4243,14 @@ the other untouched. `cargo test --workspace` green throughout, no regressions i
   An atom can itself carry multiple payment options (`Phyrexian(Color)` = color or life), so a
   2-slot `Hybrid` of two atoms can yield more than 2 total ways to pay. Before declaring a data
   shape "can't represent X," check whether an existing variant already absorbs the complexity.
+- **PowerShell 5.1 `-replace` with ScriptBlock** (phase5/script-ops-create-token): `$content -replace
+  "pattern", { ScriptBlock }` is PowerShell 7+ only. In Windows PowerShell 5.1 (the environment here),
+  the ScriptBlock is treated as a literal string — every match site gets `$nl = use std::...` inserted
+  verbatim instead of the intended content. Result: `engine.rs` ballooned from ~2900 lines to 20000+
+  (7 apparent copies of every function). Fix: always use line-by-line PowerShell processing (read with
+  `[System.IO.File]::ReadAllLines`, walk the array, splice at a target index) for any insertion that
+  needs to be position-sensitive. `-replace` with a literal replacement string (no ScriptBlock) is
+  fine. Reverted with `git checkout HEAD -- <files>` and reapplied correctly.
 - First draft of `replacement::apply_replacements`'s CR 616 stabilization loop had no termination
   condition for a `Repeatable`/multi-`LimitedUses` effect matching its own already-rewritten output
   again (`PreventDamage` zeroing an already-zero `amount` doesn't stop its own filter from matching)

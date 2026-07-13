@@ -52,6 +52,7 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
         attached_to: None,
         timestamp: SequenceNo(0),
         controlled_since_turn: 0,
+        is_token: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }

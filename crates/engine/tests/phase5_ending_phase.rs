@@ -49,6 +49,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
         attached_to: None,
         timestamp: SequenceNo(0),
         controlled_since_turn: 1,
+        is_token: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     };
     (id, obj)

@@ -5,9 +5,10 @@ use std::rc::Rc;
 use mlua::{Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{
-    AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility,
+    AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, CreatureTokenSpec, NamedToken,
+    RegisteredAbility, TokenSpec,
 };
-use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference};
+use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, SupertypeSet};
 use crate::types::counter::CounterKind;
 use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{
@@ -34,6 +35,12 @@ impl UserData for ConditionTag {}
 #[derive(Clone)]
 struct OperationTag(AbilityEffect);
 impl UserData for OperationTag {}
+
+/// `Game.Tokens.*` return value — wraps a `TokenSpec` so `Game.Ops.CreateToken`
+/// can receive it as a typed argument instead of parsing a string.
+#[derive(Clone)]
+struct TokenTag(TokenSpec);
+impl UserData for TokenTag {}
 
 /// One `:AddCost(...)` component — either an `AdditionalCost` (tap/
 /// sacrifice/discard/life, CR 602.5a-ish) or a real mana-cost component
@@ -348,6 +355,72 @@ fn parse_filter_controller_name(name: &str) -> Result<FilterController, ScriptEr
             "unknown controller filter '{other}' - expected you/opponent/any"
         ))),
     }
+}
+
+fn parse_supertype_name(name: &str) -> Result<SupertypeSet, ScriptError> {
+    Ok(match name {
+        "Basic" => SupertypeSet::BASIC,
+        "Legendary" => SupertypeSet::LEGENDARY,
+        "Snow" => SupertypeSet::SNOW,
+        "World" => SupertypeSet::WORLD,
+        other => return Err(ScriptError::LoadError(format!("unknown supertype '{other}'"))),
+    })
+}
+
+/// Decodes the `subtypes` argument: either a Lua string `"Soldier"` (one
+/// subtype) or a Lua table `{"Elf", "Warrior"}` (multiple).
+fn decode_subtypes(val: Value) -> Result<Vec<String>, ScriptError> {
+    match val {
+        Value::String(s) => Ok(vec![s.to_str().map_err(|e| ScriptError::LoadError(e.to_string()))?.to_string()]),
+        Value::Table(t) => {
+            let mut out = Vec::new();
+            for pair in t.sequence_values::<String>() {
+                out.push(pair.map_err(|e| ScriptError::LoadError(e.to_string()))?);
+            }
+            Ok(out)
+        }
+        _ => Err(ScriptError::LoadError("subtypes must be a string or table".to_string())),
+    }
+}
+
+/// Parses a WUBRG letter string like `"WU"` or `""` into a `ColorSet`.
+fn parse_color_string(colors: &str) -> Result<ColorSet, ScriptError> {
+    let mut out = ColorSet::empty();
+    for ch in colors.chars() {
+        out |= parse_color_letter(&ch.to_string())?;
+    }
+    Ok(out)
+}
+
+/// Decodes the optional `opts` table for `Game.Tokens.Creature` /
+/// `Game.Tokens.ArtifactCreature`. Returns
+/// `(keywords, name_override, additional_types, additional_supertypes)`.
+fn decode_creature_token_opts(
+    opts: Option<mlua::Table>,
+) -> Result<(KeywordSet, Option<String>, CardTypeSet, SupertypeSet), ScriptError> {
+    let Some(opts) = opts else {
+        return Ok((KeywordSet::empty(), None, CardTypeSet::empty(), SupertypeSet::empty()));
+    };
+    let mut keywords = KeywordSet::empty();
+    if let Ok(Some(kws)) = opts.get::<_, Option<mlua::Table>>("keywords") {
+        for pair in kws.sequence_values::<String>() {
+            keywords |= parse_keyword_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+        }
+    }
+    let name: Option<String> = opts.get("name").ok().flatten();
+    let mut additional_types = CardTypeSet::empty();
+    if let Ok(Some(types)) = opts.get::<_, Option<mlua::Table>>("additional_types") {
+        for pair in types.sequence_values::<String>() {
+            additional_types |= parse_card_type_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+        }
+    }
+    let mut additional_supertypes = SupertypeSet::empty();
+    if let Ok(Some(supers)) = opts.get::<_, Option<mlua::Table>>("additional_supertypes") {
+        for pair in supers.sequence_values::<String>() {
+            additional_supertypes |= parse_supertype_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+        }
+    }
+    Ok((keywords, name, additional_types, additional_supertypes))
 }
 
 /// `TriggeredAbilityBuilder`'s `:SetLayer` decoder — only a `Game.Layers.*`
@@ -960,6 +1033,11 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     ops.set("Counters", counters)?;
     let draw_cards = lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::DrawCards(amount))))?;
     ops.set("DrawCards", draw_cards)?;
+    let create_token = lua.create_function(|_, (spec_ud, count): (mlua::AnyUserData, Option<u32>)| {
+        let spec = spec_ud.borrow::<TokenTag>()?.0.clone();
+        Ok(OperationTag(AbilityEffect::CreateToken { spec, count: count.unwrap_or(1) }))
+    })?;
+    ops.set("CreateToken", create_token)?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;
@@ -1087,12 +1165,45 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?
     };
 
+    let tokens = lua.create_table()?;
+    tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
+    tokens.set("Food", TokenTag(TokenSpec::Named(NamedToken::Food)))?;
+    // TODO: Game.Tokens.Treasure blocked on coroutines (backlog item 9)
+    tokens.set(
+        "Creature",
+        lua.create_function(|_, (subtypes_val, colors_str, power, toughness, opts): (Value, String, i32, i32, Option<mlua::Table>)| {
+            let subtypes = decode_subtypes(subtypes_val).map_err(to_lua_err)?;
+            let colors = parse_color_string(&colors_str).map_err(to_lua_err)?;
+            let (keywords, name, additional_types, additional_supertypes) =
+                decode_creature_token_opts(opts).map_err(to_lua_err)?;
+            Ok(TokenTag(TokenSpec::Creature(CreatureTokenSpec {
+                subtypes, colors, power, toughness,
+                keywords, name, additional_types, additional_supertypes,
+            })))
+        })?,
+    )?;
+    tokens.set(
+        "ArtifactCreature",
+        lua.create_function(|_, (subtypes_val, colors_str, power, toughness, opts): (Value, String, i32, i32, Option<mlua::Table>)| {
+            let subtypes = decode_subtypes(subtypes_val).map_err(to_lua_err)?;
+            let colors = parse_color_string(&colors_str).map_err(to_lua_err)?;
+            let (keywords, name, extra_types, additional_supertypes) =
+                decode_creature_token_opts(opts).map_err(to_lua_err)?;
+            let additional_types = extra_types | CardTypeSet::ARTIFACT;
+            Ok(TokenTag(TokenSpec::Creature(CreatureTokenSpec {
+                subtypes, colors, power, toughness,
+                keywords, name, additional_types, additional_supertypes,
+            })))
+        })?,
+    )?;
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("Ops", ops)?;
     game.set("Costs", costs)?;
     game.set("Layers", layers)?;
     game.set("Effects", effects)?;
+    game.set("Tokens", tokens)?;
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
     game.set("CreateStaticAbility", create_static_ability)?;
     game.set("CreateActivatedAbility", create_activated_ability)?;

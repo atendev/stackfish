@@ -57,6 +57,7 @@ fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -
         // default. Tests exercising sickness itself override this field
         // directly on the object after construction.
         controlled_since_turn: 0,
+        is_token: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }

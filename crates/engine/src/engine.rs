@@ -8,17 +8,17 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::sba::{self, SbaOutcome};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
-use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
-use crate::types::card::{CardTypeSet, KeywordSet};
+use crate::types::ability::{AbilityEffect, AbilityKind, ConditionSpec, NamedToken, RegisteredAbility, TokenSpec};
+use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
-use crate::types::cost::{CostSpec, PaymentPlan};
+use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec, PaymentPlan};
 use crate::types::counter::CounterSet;
 use crate::types::effect::EffectDuration;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
 use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo, Target};
-use crate::types::mana::ManaPool;
+use crate::types::mana::{ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::PlayerState;
 use crate::types::stack::{StackEntryKind, StackObject};
@@ -404,6 +404,130 @@ pub struct Engine {
     /// with the right lifetime to own it, and nothing yet shares one
     /// `ScriptRuntime` across multiple `Engine`s.
     script_runtime: ScriptRuntime,
+}
+
+/// Builds a `CardDefinition` for a token from its spec. Tokens have no mana
+/// cost, no script, and no alternative costs; their color comes from the
+/// color indicator field rather than a mana cost symbol.
+fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
+    match spec {
+        TokenSpec::Named(NamedToken::Clue) => CardDefinition {
+            definition_id: 0,
+            name: "Clue".to_string(),
+            mana_cost: ManaCost { symbols: Vec::new() },
+            color_indicator: None,
+            supertypes: SupertypeSet::empty(),
+            card_types: CardTypeSet::ARTIFACT,
+            subtypes: vec![Subtype("Clue".to_string())],
+            oracle_text: "{2}, Sacrifice this artifact: Draw a card.".to_string(),
+            power: None,
+            toughness: None,
+            loyalty: None,
+            defense: None,
+            script_ref: ScriptReference::Inline(String::new()),
+            keywords: KeywordSet::empty(),
+            target_requirement: None,
+            alternative_costs: Vec::new(),
+            effect: None,
+        },
+        TokenSpec::Named(NamedToken::Food) => CardDefinition {
+            definition_id: 0,
+            name: "Food".to_string(),
+            mana_cost: ManaCost { symbols: Vec::new() },
+            color_indicator: None,
+            supertypes: SupertypeSet::empty(),
+            card_types: CardTypeSet::ARTIFACT,
+            subtypes: vec![Subtype("Food".to_string())],
+            oracle_text: "{2}, Sacrifice this artifact: You gain 3 life.".to_string(),
+            power: None,
+            toughness: None,
+            loyalty: None,
+            defense: None,
+            script_ref: ScriptReference::Inline(String::new()),
+            keywords: KeywordSet::empty(),
+            target_requirement: None,
+            alternative_costs: Vec::new(),
+            effect: None,
+        },
+        TokenSpec::Creature(spec) => {
+            let name = spec.name.clone().unwrap_or_else(|| spec.subtypes.join(" "));
+            let color_indicator = if spec.colors.is_empty() { None } else { Some(spec.colors) };
+            CardDefinition {
+                definition_id: 0,
+                name,
+                mana_cost: ManaCost { symbols: Vec::new() },
+                color_indicator,
+                supertypes: spec.additional_supertypes,
+                card_types: CardTypeSet::CREATURE | spec.additional_types,
+                subtypes: spec.subtypes.iter().map(|s| Subtype(s.clone())).collect(),
+                oracle_text: String::new(),
+                power: Some(PTValue::Fixed(spec.power)),
+                toughness: Some(PTValue::Fixed(spec.toughness)),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::Inline(String::new()),
+                keywords: spec.keywords,
+                target_requirement: None,
+                alternative_costs: Vec::new(),
+                effect: None,
+            }
+        }
+    }
+}
+
+/// Pushes any activated abilities that a named token carries into
+/// `state.abilities`. Creature tokens have no script-side abilities to
+/// register here (keywords live on the definition; richer effects are a
+/// future slice). Named tokens (Clue, Food) get their sacrifice ability
+/// directly as a Rust-native `RegisteredAbility`.
+fn register_token_abilities(
+    state: &mut GameState,
+    token_id: ObjectId,
+    spec: &TokenSpec,
+    _controller: PlayerId,
+) {
+    let artifact_sacrifice_filter = FilterSpec {
+        card_types: Some(CardTypeSet::ARTIFACT),
+        controller: Some(FilterController::You),
+        random: false,
+        extra: None,
+    };
+    match spec {
+        TokenSpec::Named(NamedToken::Clue) => {
+            state.abilities.push(RegisteredAbility {
+                source: token_id,
+                kind: AbilityKind::Activated,
+                condition: None,
+                // TODO: "sacrifice THIS artifact" -- the filter doesn't enforce
+                // identity, only type+controller. Same pre-existing gap as every
+                // other sacrifice-cost site. Blocked on backlog item 9.
+                cost: Some(CostSpec {
+                    mana: ManaCost::parse("{2}").ok(),
+                    additional: vec![AdditionalCost::Sacrifice { filter: artifact_sacrifice_filter }],
+                    alternative: Vec::new(),
+                }),
+                target: None,
+                operation: ScriptHandle(0),
+                effect: Some(AbilityEffect::DrawCards(1)),
+            });
+        }
+        TokenSpec::Named(NamedToken::Food) => {
+            state.abilities.push(RegisteredAbility {
+                source: token_id,
+                kind: AbilityKind::Activated,
+                condition: None,
+                cost: Some(CostSpec {
+                    mana: ManaCost::parse("{2}").ok(),
+                    additional: vec![AdditionalCost::Sacrifice { filter: artifact_sacrifice_filter }],
+                    alternative: Vec::new(),
+                }),
+                target: None,
+                operation: ScriptHandle(0),
+                effect: Some(AbilityEffect::GainLife(3)),
+            });
+        }
+        TokenSpec::Creature(_) => {}
+    }
 }
 
 impl Engine {
@@ -852,6 +976,7 @@ impl Engine {
                     attached_to: None,
                     timestamp: ts,
                     controlled_since_turn: 1,
+                    is_token: false,
                     visibility: VisibilityPolicy { public: false, visible_to: Vec::new() },
                 };
                 lib_zone.contents.push_back(obj_id);
@@ -1856,6 +1981,55 @@ impl Engine {
                                     }
                                 }
                             }
+                            // CR 111: create one or more token permanents on
+                            // the battlefield under the controller's control.
+                            // Named tokens (Clue, Food) get their activated
+                            // abilities registered here. Tokens have empty
+                            // scripts so run_card_script is deliberately
+                            // skipped. TODO: CR 111.7 cessation (tokens
+                            // leaving the battlefield should cease to exist)
+                            // is not enforced — blocked on a zone-watch SBA
+                            // hook (future slice).
+                            Some(AbilityEffect::CreateToken { spec, count }) => {
+                                let controller = top.controller;
+                                for _ in 0..*count {
+                                    let token_def = build_token_definition(spec);
+                                    let token_id = self.state.allocate_object_id();
+                                    let ts = self.state.allocate_sequence_no();
+                                    let token_obj = GameObject {
+                                        object_id: token_id,
+                                        lineage: ObjectLineage { previous: None },
+                                        definition: token_def,
+                                        owner: controller,
+                                        controller,
+                                        zone: ZoneKind::Battlefield,
+                                        tapped: false,
+                                        flipped: false,
+                                        face_down: false,
+                                        phased_out: false,
+                                        damage_marked: 0,
+                                        deathtouched: false,
+                                        counters: CounterSet::new(),
+                                        attachments: Vec::new(),
+                                        attached_to: None,
+                                        timestamp: ts,
+                                        controlled_since_turn: self.state.turn_number,
+                                        is_token: true,
+                                        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+                                    };
+                                    if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
+                                        zone.push_bottom(token_id);
+                                        self.state.objects.insert(token_id, token_obj);
+                                    }
+                                    register_token_abilities(&mut self.state, token_id, spec, controller);
+                                    events.push(GameEventKind::ZoneChange {
+                                        object: token_id,
+                                        from: ZoneKind::Stack,
+                                        to: ZoneKind::Battlefield,
+                                        last_known_info: None,
+                                    });
+                                }
+                            }
                             // AddMana is only ever set on a mana ability, which
                             // resolves immediately and never reaches the stack
                             // (CR 605.1a/605.3b) - no StackObject of any kind
@@ -2812,6 +2986,7 @@ mod tests {
             attached_to: None,
             timestamp: crate::types::ids::SequenceNo(0),
             controlled_since_turn: 0,
+            is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
         }
     }

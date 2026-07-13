@@ -58,6 +58,7 @@ fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -
         // Controlled well before turn 1 started - never summoning sick by
         // default. The sickness test overrides this field directly.
         controlled_since_turn: 0,
+        is_token: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
