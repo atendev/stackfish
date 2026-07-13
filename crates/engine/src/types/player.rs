@@ -33,6 +33,12 @@ pub struct PlayerState {
     /// source. 21+ from a single source means this player loses (CR 903.10a).
     pub commander_damage_taken: Vec<(ObjectId, u32)>,
     pub eliminated: bool,
+    /// CR 704.5b/120.3: set by `Engine::draw_one_card` when a draw is
+    /// attempted against an empty (or missing) library zone. Once `true`,
+    /// `sba::apply_player_loss` eliminates this player on the next SBA pass
+    /// - sticky, never cleared once set (same permanence 704.5a's
+    /// life-based elimination already has).
+    pub drew_from_empty_library: bool,
     /// Number of mulligans this player took during pregame (CR 103.5). Used
     /// after the player keeps their hand to determine how many cards they must
     /// put on the bottom of their library. Reset is not needed — this value is
@@ -50,7 +56,7 @@ impl PlayerState {
         // TODO: PlayerState { player_id, life: starting_life, mana_pool:
         // ManaPool::empty(), counters: CounterSet::new(), emblems: vec![],
         // commander_damage_taken: vec![], eliminated: false,
-        // mulligans_taken: 0, hand_kept: false }.
+        // drew_from_empty_library: false, mulligans_taken: 0, hand_kept: false }.
         todo!()
     }
 
@@ -69,8 +75,6 @@ impl PlayerState {
     /// loses (CR 903.10a) — exposed as a query so the SBA loop can check it
     /// without duplicating the threshold elsewhere.
     pub fn commander_damage_from(&self, source: ObjectId) -> u32 {
-        // TODO: find self.commander_damage_taken entry matching source,
-        // return its u32 or 0 if absent.
-        todo!()
+        self.commander_damage_taken.iter().find(|(s, _)| *s == source).map(|(_, n)| *n).unwrap_or(0)
     }
 }

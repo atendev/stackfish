@@ -5,6 +5,7 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::script::ScriptRuntime;
 use crate::types::ability::RegisteredAbility;
 use crate::types::card::{CardTypeSet, KeywordSet};
+use crate::types::counter::CounterKind;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
@@ -52,9 +53,14 @@ pub enum SbaOutcome {
 /// creature's zone-change replacement needs a CR 616.1 ordering choice,
 /// pausing via `SbaOutcome::NeedsOrderingChoice` instead (see `resolve_deaths`).
 ///
-/// Implemented this pass: 704.5a (player at 0 or less life loses), 704.5f
-/// (creature toughness 0 or less goes to its owner's graveyard, or wherever
-/// a matching `ReplacementEffect` substitutes instead), 704.5g (creature
+/// Implemented this pass: 704.5a (player at 0 or less life loses), 704.5b
+/// (player who attempted to draw from an empty library loses), 704.5c
+/// (player with 10+ poison counters loses), CR 903.10a (player dealt 21+
+/// combat damage by a single commander source loses — see
+/// `apply_player_loss`'s own doc comment for why this check is real but
+/// currently unreachable through actual gameplay), 704.5f (creature
+/// toughness 0 or less goes to its owner's graveyard, or wherever a
+/// matching `ReplacementEffect` substitutes instead), 704.5g (creature
 /// with lethal damage marked is destroyed, folding in 702.2b/c's
 /// Deathtouch — any nonzero deathtouch damage counts as lethal — and
 /// 702.12b's Indestructible — ignores 704.5g/deathtouch entirely, but NOT
@@ -93,10 +99,6 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     }
 
     // TODO: still unimplemented, no prerequisite machinery exists yet:
-    //   - 704.5b: player who attempted to draw from an empty library loses
-    //     (nothing tracks a failed draw attempt yet).
-    //   - 704.5c: player with 10+ poison counters loses (PlayerState.counters
-    //     exists but nothing increments poison yet).
     //   - CDA toughness (PTValue::CharacteristicDefining): now real, via
     //     layers::effective_characteristics's layer 7a resolution (as of the
     //     layer-engine-cda slice) - see collect_dying_creatures's own doc
@@ -111,19 +113,52 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     //     checks (commands.rs) are NOT wired to the layer engine yet.
     //   - regeneration (CR 701.16): would replace 704.5g's destroy, not
     //     modeled, lethal damage always destroys outright here.
-    //   - legend rule (704.5j), world rule (704.5k), planeswalker loyalty 0
-    //     (704.5i - not v1 scope per DESIGN.md), commander damage >= 21
-    //     (PlayerState::commander_damage_from already exposed for this), and
+    //   - legend rule (704.5j), world rule (704.5k) - a structurally different
+    //     "destroy via player choice among duplicates" SBA shape, needs its
+    //     own choice-pause design; split into its own named follow-up rather
+    //     than forced into apply_player_loss's shape.
+    //   - planeswalker loyalty 0 (704.5i - not v1 scope per DESIGN.md), and
     //     the rest of 704.5 - no prerequisite subsystem exists yet.
 }
 
-/// CR 704.5a: a player at 0 or less life loses the game. `eliminated` is
-/// the field this flips (already present on `PlayerState`, just unused
-/// until now); already-eliminated players are skipped so re-running this
-/// pass doesn't re-emit the event every fixed-point iteration.
+/// The four "a player loses the game" state-based actions this engine
+/// checks: CR 704.5a (0 or less life), CR 704.5b (drew from an empty
+/// library — `PlayerState.drew_from_empty_library`, set by
+/// `Engine::draw_one_card`), CR 704.5c (10+ poison counters), and CR
+/// 903.10a (21+ combat damage from a single commander source). One
+/// `GameEventKind::PlayerEliminated` per player regardless of which cause
+/// applied — the event doesn't distinguish cause, same as before this
+/// slice. `eliminated` is the field this flips; already-eliminated players
+/// are skipped so re-running this pass doesn't re-emit the event every
+/// fixed-point iteration.
+///
+/// CR 903.10a's check is real but currently unreachable through actual
+/// gameplay — nothing in this engine increments `commander_damage_taken`
+/// yet (checked: always initialized empty, never mutated elsewhere).
+/// There's no "is this object a player's commander" concept at all —
+/// that's backlog item 11's Commander-format machinery, not this slice's.
+/// Testable via a hand-built `PlayerState.commander_damage_taken` fixture,
+/// not yet through real combat.
+///
+/// CR 704.5j (legend rule) and 704.5k (world rule) are NOT here — both
+/// destroy permanents via a player *choice* among duplicates, a
+/// structurally different SBA shape from "this player loses," needing its
+/// own choice-pause design (like CR 616.1's `NeedsOrderingChoice`, but for
+/// a different decision). Split into its own named follow-up rather than
+/// forced into this function's shape.
 fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
-    let losing: Vec<PlayerId> =
-        state.players.iter().filter(|p| !p.eliminated && p.life <= 0).map(|p| p.player_id).collect();
+    let losing: Vec<PlayerId> = state
+        .players
+        .iter()
+        .filter(|p| {
+            !p.eliminated
+                && (p.life <= 0
+                    || p.drew_from_empty_library
+                    || p.counters.count(&CounterKind::Poison) >= 10
+                    || p.commander_damage_taken.iter().any(|&(_, damage)| damage >= 21))
+        })
+        .map(|p| p.player_id)
+        .collect();
 
     for player in losing {
         if let Some(p) = state.player_mut(player) {

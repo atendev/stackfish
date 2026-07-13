@@ -40,6 +40,21 @@ player = 0
 zone = "hand"
 card = "bolt"
 
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+# This is a solo (1-player) fixture - CR 103.8a's "starting player skips their
+# first draw step" only applies in a two-player game (engine.rs's
+# advance_turn_step checks turn_order.len() == 2), so p0's turn 1 Draw step
+# genuinely runs here and needs a real card to draw (CR 704.5b: an empty
+# library on a real draw attempt is a state-based loss, not a silent no-op).
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
 # A solo player's first PassPriority always counts as "everyone passed", so
 # each of these advances one turn/phase/step (CR 500-514) - PreGame -> Untap
 # (no priority window) -> Upkeep -> Draw -> Main. Same prelude as
@@ -84,4 +99,4 @@ equals = "battlefield"
 
 [[steps]]
 type = "assert_ledger_len"
-equals = 16
+equals = 17

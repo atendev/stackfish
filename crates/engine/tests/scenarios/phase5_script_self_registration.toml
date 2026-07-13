@@ -21,10 +21,25 @@ end
 return s
 """
 
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
 [[setup]]
 player = 0
 zone = "hand"
 card = "bear"
+
+# This is a solo (1-player) fixture - CR 103.8a's "starting player skips their
+# first draw step" only applies in a two-player game (engine.rs's
+# advance_turn_step checks turn_order.len() == 2), so p0's turn 1 Draw step
+# genuinely runs here and needs a real card to draw (CR 704.5b: an empty
+# library on a real draw attempt is a state-based loss, not a silent no-op).
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
 
 [[actions]]
 type = "pass_priority"
@@ -75,4 +90,4 @@ equals = "battlefield"
 
 [[assertions]]
 type = "ledger_len"
-equals = 19
+equals = 20
