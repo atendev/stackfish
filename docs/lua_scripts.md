@@ -276,7 +276,8 @@ why each is unbuilt).
 `ModifyPT(power, toughness)`, `AddKeyword(name)`, `AddCardType(name)`, `AddColor(letter)` — each
 call returns a tagged value for `:SetEffect`. `:Register()` rejects a layer/effect pairing that
 doesn't match (e.g. `SetLayer(TypeChanging)` with `SetEffect(ModifyPT(...))`) with a real error,
-rather than silently building a `ContinuousEffect` the layer engine could never actually apply.
+rather than silently building a `ContinuousEffect` the layer engine could never actually apply —
+this check only runs for a `Game.Effects.*` tag, see the script-backed form below for why.
 
 `:SetAffected` takes a plain table, not its own family of tag factories — every key optional,
 same shape `EffectFilter` (`types/effect.rs`) already has:
@@ -295,14 +296,51 @@ real error, same stance `TriggeredAbilityBuilder`'s `Register()` takes for a mis
 `:SetOperation()`. A card can call `Game.CreateStaticAbility(c)` more than once per
 `initial_effect` — each `:Register()` independently queues, same as multiple triggered abilities.
 
+**Script-backed `:SetAffected`/`:SetEffect`** — both also accept a custom function instead of a
+table/tag, same two-shapes pattern `:SetCondition`/`:SetOperation` already use:
+
+```lua
+-- "Other creatures you control get +1/+1" via a script predicate instead of
+-- the {controller=.., card_types=..} table shape.
+e:SetAffected(function(object, source, controller)
+    return object ~= source
+end)
+
+-- An effect whose shape is decided by a script instead of a Game.Effects.*
+-- tag - the "Lua asks, Rust decides" table convention Game.Ops.* operations
+-- already use, generalized to six recognized keys:
+e:SetEffect(function(source, controller)
+    return { modify_pt = { power = 1, toughness = 1 } }
+    -- also recognized: set_pt = {power=,toughness=}, add_keyword = {"Flying",...},
+    -- add_card_type = {"Creature",...}, add_color = "WU", switch_pt = true
+end)
+```
+
+An affects-predicate is invoked once per candidate object (`ScriptRuntime::invoke_continuous_affects`)
+and must return a plain boolean. An effect-shape script is invoked once per query
+(`ScriptRuntime::invoke_continuous_effect`) and must return a table with exactly one of the six
+recognized keys above — an empty/unrecognized table, or a script that errors, resolves to "no
+effect this call," same "skip rather than guess" stance every other unresolvable script value in
+this engine already takes. Neither call passes `GameState` into Lua (same limitation
+`invoke_cda`/`invoke_condition`/`invoke_operation` already carry) — a script can only decide from
+`object`/`source`/`controller` identity or a constant, not real board state, until `Game.*`
+state-query bindings exist (still open, see `docs/implementation.md`'s slice backlog).
+
+`validate_layer_effect_pairing` can't check a script-backed effect's real shape at `:Register()`
+time (it's only known once the script actually runs) — a mismatch between the declared layer and
+the decoded shape (e.g. `SetLayer(PowerToughnessModifying)` whose script returns `add_keyword`) is
+instead silently skipped at query time, not surfaced as an error. A real, narrower safety net than
+the `Game.Effects.*` tag form gets — flagged, not fixed.
+
 `timestamp` (CR 613.7 ordering) is stamped by `run_card_script`'s drain step, not the builder
 itself — the builder has no `&mut GameState` to allocate one from inside a Lua callback.
 
 Same registration timing and `retire_object` purge as triggered abilities above — no new call
 sites needed; `run_card_script` drains both `pending_triggered` and `pending_static` in one pass.
 
-Real, tested end to end: `crates/engine/tests/phase5_static_ability_self_registration.rs`.
-Scenario TOML fixtures can use this via `CardSpec.script` too — see
+Real, tested end to end: `crates/engine/tests/phase5_static_ability_self_registration.rs` (table/tag
+form) and `crates/engine/tests/phase5_continuous_effects_script.rs` (script-backed form).
+Scenario TOML fixtures can use the table/tag form via `CardSpec.script` too — see
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 
 ## Self-registering an activated ability
@@ -386,10 +424,6 @@ Don't spend time trying these — they're signatures only, or explicitly unbound
 - **A mana ability via Lua** — still wired via `mana_ability` (`docs/scenario_format.md`), not
   `Game.CreateActivatedAbility` — CR 605 mana abilities resolve immediately and never read `.cost`
   at all, out of scope for that builder.
-- **`AffectedFilter::Script`/`EffectPayload::Script`** (script-backed static-ability predicates/
-  effect shapes, as opposed to the `Game.Layers.*`/`Game.Effects.*`/`SetAffected` table primitives
-  above) — still dead code, not evaluable. `docs/implementation.md`'s slice backlog tracks this as
-  its own item (3a).
 - **`ByKey` script resolution** — `run_card_script` only handles `ScriptReference::Inline`;
   `ByKey` is a real error. Real integration is expected to always hand this engine an
   already-resolved `Inline` source (the database crate resolves the key upstream), so this may

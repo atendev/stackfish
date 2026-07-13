@@ -247,7 +247,7 @@ fn decode_cost_component_value(value: Value) -> Result<CostComponent, ScriptErro
 /// `ActivatedAbilityBuilder`'s `:AddCost`/`Game.Costs.Sacrifice`/`Discard`/
 /// `TapPermanents` filter argument — a plain Lua table
 /// (`{controller=.., card_types={..}, random=..}`, every key optional), same
-/// convention `decode_affected_table` already established for
+/// convention `decode_affected_value` already established for
 /// `StaticAbilityBuilder::SetAffected`. `extra` is never settable from Lua
 /// this slice (see `FilterSpec::extra`'s own doc comment) — always `None`.
 fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
@@ -279,7 +279,7 @@ fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
 /// than shared since that's a separate crate with no common string-parsing
 /// utility today. Single-type-at-a-time (`Game.Effects.AddCardType(name)`
 /// takes one name, unlike the scenario crate's `Vec<String>`-per-card
-/// shape) — `decode_affected_table`'s `card_types` list unions these.
+/// shape) — `decode_affected_value`'s `card_types` list unions these.
 fn parse_card_type_name(name: &str) -> Result<CardTypeSet, ScriptError> {
     Ok(match name {
         "Artifact" => CardTypeSet::ARTIFACT,
@@ -443,58 +443,103 @@ fn decode_layer_value(value: Value) -> Result<Layer, ScriptError> {
     }
 }
 
-/// `StaticAbilityBuilder`'s `:SetEffect` decoder — only a `Game.Effects.*`
-/// tag is accepted (no custom-function fallback this slice, see
-/// `EffectPayload::Script`'s own "not evaluable yet" doc comment).
-fn decode_effect_value(value: Value) -> Result<EffectPrimitive, ScriptError> {
+/// `StaticAbilityBuilder`'s `:SetEffect` decoder — same two-shapes pattern
+/// `decode_condition_value`/`decode_operation_value` already established: a
+/// `Game.Effects.*` tag decodes to `EffectPayload::Primitive` with zero
+/// further evaluation, a custom function is registered and returned as
+/// `EffectPayload::Script` (invoked later via
+/// `ScriptRuntime::invoke_continuous_effect`). Needs `&mut ScriptRegistry` to
+/// register the function, same as `decode_condition_value`/
+/// `decode_operation_value`.
+fn decode_effect_value(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    value: Value,
+) -> Result<EffectPayload, ScriptError> {
     match value {
         Value::UserData(ud) => {
             let tag: EffectPrimitiveTag = ud
                 .borrow::<EffectPrimitiveTag>()
                 .map_err(|e| ScriptError::LoadError(e.to_string()))?
                 .clone();
-            Ok(tag.0)
+            Ok(EffectPayload::Primitive(tag.0))
+        }
+        Value::Function(function) => {
+            let key = lua
+                .create_registry_value(function)
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let handle = registry.next_script_handle();
+            registry.scripts.insert(handle, key);
+            Ok(EffectPayload::Script(handle))
         }
         Value::Nil => Err(ScriptError::LoadError(
-            "SetEffect() called with nil - expected a Game.Effects.* value".to_string(),
+            "SetEffect() called with nil - expected a Game.Effects.* value or a function".to_string(),
         )),
         other => Err(ScriptError::LoadError(format!(
-            "SetEffect() expects a Game.Effects.* value, got {}",
+            "SetEffect() expects a Game.Effects.* value or a function, got {}",
             other.type_name()
         ))),
     }
 }
 
-/// `StaticAbilityBuilder`'s `:SetAffected` decoder — a plain Lua table
-/// (`{controller=.., card_types={..}, self_only=..}`, every key optional)
-/// rather than its own family of `Game.Filters.*` tag factories, matching
-/// how `EffectFilter`/the scenario TOML's `ContinuousEffectSpec` already
-/// read as a flat option bag. Omitting the table entirely (or every key in
-/// it) means "no filter, applies to everything" — a real, if unusual, shape
-/// (see `EffectFilter`'s own fields, all optional/defaulted there too).
-fn decode_affected_table(table: Table) -> Result<EffectFilter, ScriptError> {
-    let controller_name: Option<String> =
-        table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+/// `StaticAbilityBuilder`'s `:SetAffected` decoder — same two-shapes pattern
+/// as `decode_effect_value` above: a plain Lua table (`{controller=..,
+/// card_types={..}, self_only=..}`, every key optional) decodes to
+/// `AffectedFilter::Primitive` with zero further evaluation, matching how
+/// `EffectFilter`/the scenario TOML's `ContinuousEffectSpec` already read as
+/// a flat option bag. Omitting the table entirely (or every key in it) means
+/// "no filter, applies to everything" — a real, if unusual, shape (see
+/// `EffectFilter`'s own fields, all optional/defaulted there too). A custom
+/// function is registered and returned as `AffectedFilter::Script` (invoked
+/// later via `ScriptRuntime::invoke_continuous_affects`), same registration
+/// as every other function-fallback decoder in this file.
+fn decode_affected_value(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    value: Value,
+) -> Result<AffectedFilter, ScriptError> {
+    match value {
+        Value::Table(table) => {
+            let controller_name: Option<String> =
+                table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
 
-    let card_types_table: Option<Table> =
-        table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let card_types = match card_types_table {
-        Some(t) => {
-            let mut set = CardTypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                set |= parse_card_type_name(&name)?;
-            }
-            Some(set)
+            let card_types_table: Option<Table> =
+                table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let card_types = match card_types_table {
+                Some(t) => {
+                    let mut set = CardTypeSet::empty();
+                    for entry in t.sequence_values::<String>() {
+                        let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                        set |= parse_card_type_name(&name)?;
+                    }
+                    Some(set)
+                }
+                None => None,
+            };
+
+            let self_only: Option<bool> =
+                table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+
+            Ok(AffectedFilter::Primitive(EffectFilter {
+                controller,
+                card_types,
+                self_only: self_only.unwrap_or(false),
+            }))
         }
-        None => None,
-    };
-
-    let self_only: Option<bool> =
-        table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-
-    Ok(EffectFilter { controller, card_types, self_only: self_only.unwrap_or(false) })
+        Value::Function(function) => {
+            let key = lua
+                .create_registry_value(function)
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let handle = registry.next_script_handle();
+            registry.scripts.insert(handle, key);
+            Ok(AffectedFilter::Script(handle))
+        }
+        other => Err(ScriptError::LoadError(format!(
+            "SetAffected() expects a table or a function, got {}",
+            other.type_name()
+        ))),
+    }
 }
 
 /// CR 613.1's per-layer primitive shape (`Layer`'s own doc comment) — a
@@ -503,7 +548,18 @@ fn decode_affected_table(table: Table) -> Result<EffectFilter, ScriptError> {
 /// `layers::effective_characteristics` can never actually apply (it matches
 /// on `(layer, primitive)` shape internally). Checked explicitly here so a
 /// card script gets a real error instead of a silently-inert effect.
-fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPrimitive) -> Result<(), ScriptError> {
+///
+/// Only checked for `EffectPayload::Primitive` — a `Script` payload's real
+/// shape isn't known until `ScriptRuntime::invoke_continuous_effect` actually
+/// calls it (it could return a different table each call), so there's
+/// nothing to validate at `:Register()` time. A mismatch between a `Script`
+/// effect's declared layer and its decoded shape is instead silently skipped
+/// at query time (`layers::resolve_primitive`'s caller) — a real, narrower
+/// safety net than the `Primitive` case gets, flagged in
+/// docs/implementation.md's continuous-effects-script slice notes rather
+/// than silently accepted as equivalent.
+fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result<(), ScriptError> {
+    let EffectPayload::Primitive(effect) = effect else { return Ok(()) };
     let paired = matches!(
         (layer, effect),
         (Layer::TypeChanging, EffectPrimitive::AddCardType(_))
@@ -682,10 +738,17 @@ impl UserData for ActivatedAbilityBuilder {
 }
 
 /// `Game.CreateStaticAbility(c)`'s return value — mirrors
-/// `TriggeredAbilityBuilder` for CR 604/611 static abilities: `:SetLayer`/
-/// `:SetEffect` each accept a `Game.Layers.*`/`Game.Effects.*` tag,
-/// `:SetAffected` takes a plain filter table (see `decode_affected_table`).
-/// `:Register()` validates the layer/effect pairing (`validate_layer_effect_pairing`)
+/// `TriggeredAbilityBuilder` for CR 604/611 static abilities: `:SetLayer`
+/// accepts a `Game.Layers.*` tag only (no `Script` fallback — a `Layer` has
+/// no such concept, see `decode_layer_value`'s own doc comment). `:SetEffect`/
+/// `:SetAffected` each accept either shape `decode_effect_value`/
+/// `decode_affected_value` recognize — a `Game.Effects.*` tag/plain filter
+/// table (`EffectPayload::Primitive`/`AffectedFilter::Primitive`, zero
+/// further evaluation) or a custom function (`::Script`, invoked later via
+/// `ScriptRuntime::invoke_continuous_effect`/`invoke_continuous_affects` —
+/// see docs/implementation.md's continuous-effects-script slice notes).
+/// `:Register()` validates the layer/effect pairing (`validate_layer_effect_pairing`
+/// — skipped for a `Script` effect, see that function's own doc comment)
 /// and queues the finished `ContinuousEffect` onto the shared registry's
 /// `pending_static` list — `run_card_script` drains it into
 /// `state.continuous_effects`, stamping the real `timestamp` there (the only
@@ -699,8 +762,8 @@ impl UserData for ActivatedAbilityBuilder {
 struct StaticAbilityBuilder {
     source: ObjectId,
     layer: Option<Layer>,
-    effect: Option<EffectPrimitive>,
-    affected: EffectFilter,
+    effect: Option<EffectPayload>,
+    affected: AffectedFilter,
     registry: Rc<RefCell<ScriptRegistry>>,
 }
 
@@ -710,12 +773,18 @@ impl UserData for StaticAbilityBuilder {
             this.layer = Some(decode_layer_value(value).map_err(to_lua_err)?);
             Ok(())
         });
-        methods.add_method_mut("SetEffect", |_, this, value: Value| {
-            this.effect = Some(decode_effect_value(value).map_err(to_lua_err)?);
+        methods.add_method_mut("SetEffect", |lua, this, value: Value| {
+            let mut registry = this.registry.borrow_mut();
+            let payload = decode_effect_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            drop(registry);
+            this.effect = Some(payload);
             Ok(())
         });
-        methods.add_method_mut("SetAffected", |_, this, table: Table| {
-            this.affected = decode_affected_table(table).map_err(to_lua_err)?;
+        methods.add_method_mut("SetAffected", |lua, this, value: Value| {
+            let mut registry = this.registry.borrow_mut();
+            let affected = decode_affected_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            drop(registry);
+            this.affected = affected;
             Ok(())
         });
         methods.add_method_mut("Register", |_, this, ()| {
@@ -725,7 +794,7 @@ impl UserData for StaticAbilityBuilder {
                         .to_string(),
                 )
             })?;
-            let effect = this.effect.ok_or_else(|| {
+            let effect = this.effect.clone().ok_or_else(|| {
                 mlua::Error::RuntimeError(
                     "Register() called with no SetEffect() - a static ability needs an effect"
                         .to_string(),
@@ -735,8 +804,8 @@ impl UserData for StaticAbilityBuilder {
             let continuous_effect = ContinuousEffect {
                 source: this.source,
                 layer,
-                affected: AffectedFilter::Primitive(this.affected),
-                effect: EffectPayload::Primitive(effect),
+                affected: this.affected.clone(),
+                effect,
                 // Placeholder - run_card_script's drain step stamps the real
                 // value (see this struct's own doc comment).
                 timestamp: SequenceNo(0),
@@ -933,6 +1002,99 @@ impl ScriptRuntime {
         function
             .call::<_, i32>((source.0, controller.0))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
+    }
+
+    /// `AffectedFilter::Script`'s real body (CR 613's "affects" predicate,
+    /// evaluated per candidate object) — expects `function(object, source,
+    /// controller) -> bool`. Same "no `GameState` passed into Lua" limitation
+    /// `invoke_cda` already carries (see that method's own doc comment): a
+    /// script can only decide from object/source/controller *identity*, not
+    /// real board state, until `Game.*` state-query bindings exist (backlog
+    /// item 8's hidden-information-safe `ScriptContext`, still open). Called
+    /// from `layers::applicable_effects_in_layer`, not from
+    /// `ContinuousEffect::applies_to` — that method stays `Primitive`-only so
+    /// `types/effect.rs` never needs to depend on `ScriptRuntime`, same
+    /// separation `layers::resolve_base_pt` already keeps for CDA.
+    pub fn invoke_continuous_affects(
+        &self,
+        handle: ScriptHandle,
+        object: ObjectId,
+        source: ObjectId,
+        controller: PlayerId,
+    ) -> Result<bool, ScriptError> {
+        let function = self.function(handle)?;
+        function
+            .call::<_, bool>((object.0, source.0, controller.0))
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))
+    }
+
+    /// `EffectPayload::Script`'s real body — the "Lua asks, Rust decides"
+    /// table convention `invoke_operation` already established, generalized
+    /// to the six `EffectPrimitive` shapes a continuous effect can take
+    /// instead of `invoke_operation`'s single `gain_life` key. Expects
+    /// `function(source, controller) -> table`, same argument shape
+    /// `invoke_cda` uses (no `GameState` passed in — same limitation noted on
+    /// `invoke_continuous_affects` above). Checks each recognized key in a
+    /// fixed order and returns the first match:
+    /// - `set_pt = {power=.., toughness=..}` -> `SetPT`
+    /// - `modify_pt = {power=.., toughness=..}` -> `ModifyPT`
+    /// - `add_keyword = {"Flying", ...}` -> `AddKeyword`
+    /// - `add_card_type = {"Creature", ...}` -> `AddCardType`
+    /// - `add_color = "WU"` -> `AddColor`
+    /// - `switch_pt = true` -> `SwitchPT`
+    ///
+    /// An empty/unrecognized table, or a script that errors, resolves to
+    /// `None` — same "skip rather than guess" stance every other
+    /// unresolvable value in this engine already takes; the caller
+    /// (`layers::resolve_primitive`) doesn't distinguish "no effect this
+    /// call" from "script errored," same as `invoke_cda`'s own caller.
+    pub fn invoke_continuous_effect(
+        &self,
+        handle: ScriptHandle,
+        source: ObjectId,
+        controller: PlayerId,
+    ) -> Result<Option<EffectPrimitive>, ScriptError> {
+        let function = self.function(handle)?;
+        let result: Table = function
+            .call((source.0, controller.0))
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+
+        if let Some(t) = result.get::<_, Option<Table>>("set_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let power: i32 = t.get("power").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let toughness: i32 = t.get("toughness").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            return Ok(Some(EffectPrimitive::SetPT { power, toughness }));
+        }
+        if let Some(t) = result.get::<_, Option<Table>>("modify_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let power: i32 = t.get("power").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let toughness: i32 = t.get("toughness").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            return Ok(Some(EffectPrimitive::ModifyPT { power, toughness }));
+        }
+        if let Some(t) = result.get::<_, Option<Table>>("add_keyword").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let mut set = KeywordSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let Ok(kw) = parse_keyword_name(&name) else { return Ok(None) };
+                set |= kw;
+            }
+            return Ok(Some(EffectPrimitive::AddKeyword(set)));
+        }
+        if let Some(t) = result.get::<_, Option<Table>>("add_card_type").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let mut set = CardTypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let Ok(ct) = parse_card_type_name(&name) else { return Ok(None) };
+                set |= ct;
+            }
+            return Ok(Some(EffectPrimitive::AddCardType(set)));
+        }
+        if let Some(letters) = result.get::<_, Option<String>>("add_color").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let Ok(set) = parse_color_string(&letters) else { return Ok(None) };
+            return Ok(Some(EffectPrimitive::AddColor(set)));
+        }
+        if let Some(true) = result.get::<_, Option<bool>>("switch_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            return Ok(Some(EffectPrimitive::SwitchPT));
+        }
+        Ok(None)
     }
 
     pub fn invoke_cost(&self, handle: ScriptHandle, ctx: &ScriptContext) -> Result<(), ScriptError> {
@@ -1147,7 +1309,11 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
                 source: ObjectId(source),
                 layer: None,
                 effect: None,
-                affected: EffectFilter { controller: None, card_types: None, self_only: false },
+                affected: AffectedFilter::Primitive(EffectFilter {
+                    controller: None,
+                    card_types: None,
+                    self_only: false,
+                }),
                 registry: Rc::clone(&registry),
             })
         })?

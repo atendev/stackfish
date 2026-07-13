@@ -1,7 +1,9 @@
 use crate::script::ScriptRuntime;
 use crate::types::card::{net_counters, PTValue, ScriptReference};
 use crate::types::counter::CounterSet;
-use crate::types::effect::{ContinuousEffect, EffectPayload, EffectPrimitive, EffectiveCharacteristics, Layer};
+use crate::types::effect::{
+    AffectedFilter, ContinuousEffect, EffectPayload, EffectPrimitive, EffectiveCharacteristics, Layer,
+};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId};
 use crate::types::object::GameObject;
@@ -44,15 +46,15 @@ use crate::types::object::GameObject;
 /// already takes, kept infallible here rather than making this whole query
 /// (and every caller) return a `Result`.
 ///
-/// `&ScriptRuntime` is threaded through for layer 7a only.
-/// `AffectedFilter::Script`/`EffectPayload::Script` (continuous effects
-/// backed by a script rather than a primitive) are still NOT evaluated here
-/// despite a `&ScriptRuntime` now being in scope — that's a structurally
-/// different calling convention (a boolean affects-predicate plus an
-/// effect-shape-decoding script, vs. this slice's single numeric CDA query)
-/// and a real design question of its own, deliberately deferred to its own
-/// follow-up rather than bundled in here just because the parameter is now
-/// available (see docs/implementation.md's layer-engine-cda slice notes).
+/// `&ScriptRuntime` is threaded through for layer 7a (`resolve_base_pt`) and,
+/// as of the continuous-effects-script slice, also for `AffectedFilter::Script`
+/// (evaluated in `applicable_effects_in_layer`) and `EffectPayload::Script`
+/// (evaluated via `resolve_primitive` below, called from each per-layer loop)
+/// — see docs/implementation.md's continuous-effects-script slice notes for
+/// the calling convention (an affects-predicate takes `(object, source,
+/// controller) -> bool`; an effect-shape decode takes `(source, controller)
+/// -> table`, same argument shape `invoke_cda`/`invoke_operation` already
+/// use, decoding one of six recognized keys into an `EffectPrimitive`).
 pub fn effective_characteristics(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -80,31 +82,33 @@ pub fn effective_characteristics(
     // Layer 4: additive only (CR 613.1, general "gains types" text) - see
     // EffectPrimitive::AddCardType's doc comment for the deferred overwrite
     // shape.
-    for effect in applicable_effects_in_layer(state, obj, Layer::TypeChanging) {
-        if let EffectPayload::Primitive(EffectPrimitive::AddCardType(added)) = &effect.effect {
-            card_types |= *added;
+    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::TypeChanging) {
+        if let Some(EffectPrimitive::AddCardType(added)) = resolve_primitive(effect, script_runtime, obj.controller) {
+            card_types |= added;
         }
     }
 
     // Layer 5: additive only, same shape as layer 4 above.
-    for effect in applicable_effects_in_layer(state, obj, Layer::ColorChanging) {
-        if let EffectPayload::Primitive(EffectPrimitive::AddColor(added)) = &effect.effect {
-            colors |= *added;
+    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::ColorChanging) {
+        if let Some(EffectPrimitive::AddColor(added)) = resolve_primitive(effect, script_runtime, obj.controller) {
+            colors |= added;
         }
     }
 
-    for effect in applicable_effects_in_layer(state, obj, Layer::AbilityAdding) {
-        if let EffectPayload::Primitive(EffectPrimitive::AddKeyword(added)) = &effect.effect {
-            keywords |= *added;
+    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
+        if let Some(EffectPrimitive::AddKeyword(added)) = resolve_primitive(effect, script_runtime, obj.controller) {
+            keywords |= added;
         }
     }
 
     // Layer 7b: setting replaces whatever came before this layer entirely -
     // later timestamp wins outright, it doesn't stack with an earlier SetPT.
-    for effect in applicable_effects_in_layer(state, obj, Layer::PowerToughnessSetting) {
-        if let EffectPayload::Primitive(EffectPrimitive::SetPT { power: p, toughness: t }) = &effect.effect {
-            power = Some(*p);
-            toughness = Some(*t);
+    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSetting) {
+        if let Some(EffectPrimitive::SetPT { power: p, toughness: t }) =
+            resolve_primitive(effect, script_runtime, obj.controller)
+        {
+            power = Some(p);
+            toughness = Some(t);
         }
     }
 
@@ -112,8 +116,10 @@ pub fn effective_characteristics(
     // timestamp order (order doesn't actually change the sum for a plain
     // add, but the sort is kept anyway - see applicable_effects_in_layer's
     // doc comment on why the sort lives there regardless).
-    for effect in applicable_effects_in_layer(state, obj, Layer::PowerToughnessModifying) {
-        if let EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) = &effect.effect {
+    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessModifying) {
+        if let Some(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) =
+            resolve_primitive(effect, script_runtime, obj.controller)
+        {
             power = power.map(|p| p + dp);
             toughness = toughness.map(|t| t + dt);
         }
@@ -125,8 +131,8 @@ pub fn effective_characteristics(
     // worked example). Skipped if either side is still unresolved (e.g. no
     // CDA/SetPT/printed base at all) - same "skip rather than guess" stance
     // every other unresolvable value in this query already takes.
-    for effect in applicable_effects_in_layer(state, obj, Layer::PowerToughnessSwitching) {
-        if matches!(&effect.effect, EffectPayload::Primitive(EffectPrimitive::SwitchPT)) {
+    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSwitching) {
+        if matches!(resolve_primitive(effect, script_runtime, obj.controller), Some(EffectPrimitive::SwitchPT)) {
             if let (Some(p), Some(t)) = (power, toughness) {
                 power = Some(t);
                 toughness = Some(p);
@@ -155,8 +161,17 @@ pub fn effective_characteristics(
 /// detection). Sorting here rather than at each call site keeps that
 /// contract in one place regardless of which layer's caller in
 /// `effective_characteristics` is walking it.
+///
+/// `AffectedFilter::Script` is evaluated here (not in
+/// `ContinuousEffect::applies_to`, which stays `Primitive`-only so
+/// `types/effect.rs` never needs to depend on `ScriptRuntime` — same
+/// separation `resolve_base_pt` already keeps for CDA). A script that errors
+/// resolves to "doesn't match" rather than guessed, same "skip rather than
+/// guess" stance every other unresolvable script value in this engine
+/// already takes.
 fn applicable_effects_in_layer<'a>(
     state: &'a GameState,
+    script_runtime: &ScriptRuntime,
     object: &GameObject,
     layer: Layer,
 ) -> Vec<&'a ContinuousEffect> {
@@ -171,11 +186,39 @@ fn applicable_effects_in_layer<'a>(
             // than guess, same stance collect_triggers already takes for a
             // trigger whose source no longer resolves (CR 603.10 gap,
             // flagged there too).
-            state.object(e.source).is_some_and(|source| e.applies_to(object, source))
+            let Some(source_obj) = state.object(e.source) else { return false };
+            match &e.affected {
+                AffectedFilter::Primitive(_) => e.applies_to(object, source_obj),
+                AffectedFilter::Script(handle) => script_runtime
+                    .invoke_continuous_affects(*handle, object.object_id, e.source, source_obj.controller)
+                    .unwrap_or(false),
+            }
         })
         .collect();
     effects.sort_by_key(|e| e.timestamp);
     effects
+}
+
+/// Resolves a `ContinuousEffect`'s actual `EffectPrimitive` for this query —
+/// `Primitive` needs no further evaluation, `Script` invokes
+/// `ScriptRuntime::invoke_continuous_effect` (the "Lua asks, Rust decides"
+/// table-decode convention — see that function's own doc comment for the six
+/// recognized keys). A script that errors, or whose decoded shape doesn't
+/// match what the caller's own layer loop expects (checked by the caller,
+/// not here — see this slice's own UNRESOLVED note in
+/// docs/implementation.md), resolves to `None`, same "skip rather than
+/// guess" stance every other unresolvable value in this query already takes.
+fn resolve_primitive(
+    effect: &ContinuousEffect,
+    script_runtime: &ScriptRuntime,
+    controller: PlayerId,
+) -> Option<EffectPrimitive> {
+    match &effect.effect {
+        EffectPayload::Primitive(p) => Some(*p),
+        EffectPayload::Script(handle) => {
+            script_runtime.invoke_continuous_effect(*handle, effect.source, controller).ok().flatten()
+        }
+    }
 }
 
 /// CR 613.4a (layer 7a) + CR 121.3 (counters): resolves `value`'s base
