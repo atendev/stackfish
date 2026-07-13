@@ -1055,7 +1055,8 @@ pub fn execute_command(
                 | Some(AbilityEffect::Sacrifice)
                 | Some(AbilityEffect::Exile)
                 | Some(AbilityEffect::Counters { .. })
-                | Some(AbilityEffect::DrawCards(_))) => {
+                | Some(AbilityEffect::DrawCards(_))
+                | Some(AbilityEffect::CreateToken { .. })) => {
                     validate_targets(
                         state,
                         script_runtime,

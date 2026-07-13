@@ -1033,6 +1033,7 @@ pub fn build_initial_state(
             attached_to: None,
             timestamp: SequenceNo(0),
             controlled_since_turn: entry.controlled_since_turn,
+            is_token: false,
             visibility: VisibilityPolicy { public, visible_to: Vec::new() },
         };
 

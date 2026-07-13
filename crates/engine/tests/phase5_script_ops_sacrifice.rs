@@ -107,6 +107,7 @@ fn card_object_controlled_by(
         attached_to: None,
         timestamp: SequenceNo(0),
         controlled_since_turn: 0,
+        is_token: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }

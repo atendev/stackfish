@@ -69,6 +69,7 @@ fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -
         attached_to: None,
         timestamp: SequenceNo(0),
         controlled_since_turn: 0,
+        is_token: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
