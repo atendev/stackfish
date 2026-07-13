@@ -2167,9 +2167,17 @@ shift, don't treat it as fixed once written.
    `invoke_target`/`Game.SelectTargets` are stubbed synchronous on purpose; real fix needs
    `Lua::create_thread` yield/resume spanning `Engine::step()` calls, flagged unresolved since
    Phase 2 part 3.
-10. **SBA completeness** — empty-library draw loss (704.5b), 10+ poison (704.5c), legend rule
-    (704.5j), commander damage ≥ 21 wiring (`PlayerState::commander_damage_from` already exists,
-    unused).
+10. ~~**SBA completeness (player-loss triad)**~~ — done, `phase5/sba-player-loss` slice
+    (docs/implementation.md, below): 704.5b (empty-library draw loss), 704.5c (10+ poison),
+    CR 903.10a (commander damage ≥21, `PlayerState::commander_damage_from` now real) all fold into
+    `sba::apply_player_loss` alongside the existing 704.5a. The commander-damage check is real but
+    currently unreachable through actual gameplay — nothing increments `commander_damage_taken` yet
+    (no "is this object a commander" concept exists — that's item 11 below). **Split out, not
+    bundled in:**
+    10a. **Legend rule (704.5j) / world rule (704.5k)** — structurally different from the other
+       three: destroys permanents via a *player choice* among duplicates, not a player-loss check.
+       Needs its own choice-pause design (like CR 616.1's `NeedsOrderingChoice`, but for a different
+       decision) — its own named follow-up, still open.
 11. **Multiplayer/Commander generalization** — combat is 2-player only today (`CombatState`/
     `DeclareBlockers` assume one defending player); command-zone tax/damage/elimination-without-
     ending-the-game aren't wired despite being named in DESIGN.md's Commander section.
@@ -4354,6 +4362,111 @@ bear's combat damage from 2 to 3, same real-consumer proof
   unaffected). No CR 606 "as long as" conditional gating beyond the per-object affects-predicate;
   no CR 613.6-8 dependency system; layers 1/2/3/7d and the overwrite ("loses all types/colors")
   shape stay unbuilt — all pre-existing, untouched by this slice.
+
+## Phase 5: phase5/sba-player-loss slice (backlog item 10, player-loss triad)
+
+Branch `phase5/sba-player-loss`, off master. Slice backlog item 10, narrowed before writing code to
+the three genuine "a player loses the game" state-based actions — 704.5b (drew from an empty
+library), 704.5c (10+ poison counters), CR 903.10a (21+ combat damage from a single commander
+source) — all symmetric extensions of the already-real 704.5a. Legend rule (704.5j)/world rule
+(704.5k) split out as their own named follow-up (10a) rather than bundled in: both destroy
+permanents via a player *choice* among duplicates, a structurally different SBA shape from "this
+player loses," needing its own choice-pause design.
+
+**Design, confirmed before writing code:**
+- New `PlayerState.drew_from_empty_library: bool` (default `false`) — set by `Engine::draw_one_card`
+  when the library zone is missing or empty, instead of the prior silent no-op. Sticky, never
+  cleared, same permanence 704.5a's life-based elimination already has. Required a mechanical sweep
+  of every `PlayerState { .. }` struct literal (92 sites across 48 files) — same category as the
+  CreateToken slice's `is_token` sweep, done via the same "PowerShell regex over the whole tree, not
+  `-replace` with a ScriptBlock" method that slice's own "Mistakes caught" note documented.
+- `PlayerState::commander_damage_from` — was `todo!()` despite being named "already exposed for
+  this" in the old backlog text; given a real one-line lookup body.
+- `sba::apply_player_loss`'s filter extended with three more `||` arms: `drew_from_empty_library`,
+  `counters.count(&CounterKind::Poison) >= 10`, and `commander_damage_taken.iter().any(|&(_, d)| d
+  >= 21)` — the last one checked directly against the stored per-source totals rather than via
+  `commander_damage_from` (which needs a specific source id the SBA loop doesn't have one of;
+  `commander_damage_from` is a general-purpose accessor, made real for its own sake). One
+  `GameEventKind::PlayerEliminated` regardless of which cause fired, unchanged from before.
+- Checked before wiring the commander-damage check: nothing in this engine increments
+  `commander_damage_taken` anywhere (grepped — always initialized empty). The check is real and
+  testable via a hand-built fixture, but currently unreachable through actual gameplay — there's no
+  "is this object a player's commander" concept at all yet (backlog item 11's Commander-format
+  machinery, not this slice's).
+- Checked before wiring 704.5c: poison counters *are* already reachable through real gameplay —
+  `commands.rs`'s damage-application already routes Infect damage to a player into
+  `player.counters.add(CounterKind::Poison, ...)` (from the script-ops-damage slice), so the
+  real-consumer test drives actual combat damage, not just a hand-seeded counter total.
+
+**Regression found and fixed while verifying, not silently worked around:** 5 solo (1-player)
+scenario TOML fixtures (`phase5_script_bridge_primitives`, `phase5_script_bridge_trigger`,
+`phase5_script_self_registration`, `phase5_targeting_basics`, plus `phase5_cast_spell_payment` which
+had no ledger-length assertion to break) never seeded a library. CR 103.8a's turn-1-draw-skip only
+applies in a two-player game (`engine.rs`'s `advance_turn_step` checks `turn_order.len() == 2`), so
+each of these solo fixtures' turn-1 Draw step genuinely runs — and with the new 704.5b check real,
+a real draw attempt against a nonexistent library now (correctly) sets the elimination flag, which
+changed the ledger length by one extra event once eliminated. This isn't a bug in the new SBA check
+— it's the new check correctly surfacing a previously-latent gap in five fixtures that assumed the
+empty-library draw would silently do nothing forever, which was true before this slice but was
+never the intended CR behavior. Fixed each fixture the same way `phase5_beginning_phase.toml`
+already seeds a library card, and adjusted each fixture's `ledger_len` assertion by +1 (confirmed
+against the real CLI's actual output per fixture, not guessed).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 9 new tests in
+`crates/engine/tests/phase5_sba_basics.rs` (empty-library draw sets the flag without eliminating
+that same pass, same split 704.5a's life check already has; the flag eliminates on the next SBA
+pass; a real draw with a card present never sets the flag; 9 poison untouched, 10 eliminates; a
+real-consumer test dealing 10 Infect combat damage in one unblocked hit through the actual
+`AssignCombatDamage` pipeline confirms 704.5c fires off real gameplay, not just a hand-seeded
+counter; `commander_damage_from` unit test; 20 commander damage untouched, 21 eliminates), all 422
+prior tests unaffected — full workspace run: 431 passed, 0 failed. Confirmed via the real CLI too:
+re-ran `phase5_targeting_basics.toml` (one of the five regressed fixtures) after the fix —
+`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_targeting_basics.toml` — all
+steps ran, all assertions passed including the corrected `ledger_len == 17`.
+
+**What got implemented:**
+- `types/player.rs`: `PlayerState.drew_from_empty_library: bool` field (with doc comment).
+  `commander_damage_from`'s real body.
+- `engine.rs`: `draw_one_card` restructured around a `let Some(card) = ... else { ... }` — the
+  `else` branch sets `drew_from_empty_library` before returning `None`, replacing the old two
+  early-return `?`s that couldn't attach a side effect. `draw_step`'s and `draw_one_card`'s own doc
+  comments updated to describe the real CR 704.5b split instead of "not modeled yet."
+- `sba.rs`: `apply_player_loss`'s filter extended (three new `||` arms, doc comment rewritten to
+  describe all four causes plus the split-out legend-rule note). New `use
+  crate::types::counter::CounterKind` import. `check_state_based_actions`'s own module doc comment
+  and trailing TODO block updated to match.
+- `crates/engine/tests/phase5_sba_basics.rs`: 9 new tests (see VERIFICATION RESULT), plus a new
+  `drain`/`pass` helper pair (mirrors every other multi-turn-step Rust test file's own convention)
+  used by the two new turn-flow tests.
+- 5 scenario TOML fixtures fixed (see "Regression found" above): each gained a filler library card
+  + setup entry, and (where applicable) a `ledger_len` assertion bumped by 1.
+
+**STRUCT DEVIATIONS:** `PlayerState.drew_from_empty_library` — anticipated in the pre-slice
+requirements report exactly (the mechanical-sweep scope was named upfront, not discovered after the
+fact).
+
+**INTERFACE DEVIATIONS:** None — `draw_one_card`'s signature is unchanged, `apply_player_loss`'s
+signature is unchanged; only the bodies grew.
+
+**SCOPE DEVIATIONS:**
+- The 5 scenario-fixture fixes above were not in the pre-slice requirements report (the report
+  anticipated the mechanical `PlayerState` sweep, not a behavior change to existing fixtures) —
+  surfaced while verifying, fixed as part of this slice rather than left as a newly-broken test
+  suite, per the "regression found and fixed" note above.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Legend rule (704.5j)/world rule (704.5k) — split into their own named follow-up (10a in the
+  backlog list), needs a real choice-pause design.
+- Commander-damage *production* — nothing increments `commander_damage_taken`; the check is real
+  but inert until backlog item 11's Commander-format machinery (identifying a commander, routing
+  its combat damage) exists.
+- `StepStatus::GameOver` is declared but never constructed anywhere, and nothing checks
+  `.eliminated` to skip an eliminated player's turn/priority — checked before starting this slice:
+  this gap already existed for 704.5a (merged, untouched) and is shared by all four causes now, not
+  introduced or expanded by this slice. A player can be `eliminated` and the game mechanically keeps
+  going exactly as before.
+- `submit_discard`'s CR 514.1 hand-size discard and `draw_step`'s library-side retirement still
+  discard departed Triggered abilities outright (pre-existing gap, unrelated, untouched).
 
 ## Mistakes caught (don't repeat)
 

@@ -82,6 +82,7 @@ fn combat_damage_state(combat: CombatState) -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
             },
@@ -93,6 +94,7 @@ fn combat_damage_state(combat: CombatState) -> GameState {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
             },
@@ -395,6 +397,7 @@ fn lose_life_subtracts_from_life_total() {
         emblems: Vec::new(),
         commander_damage_taken: Vec::new(),
         eliminated: false,
+        drew_from_empty_library: false,
         mulligans_taken: 0,
         hand_kept: false,
     };

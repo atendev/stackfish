@@ -98,6 +98,7 @@ fn player_state(id: PlayerId, life: i32) -> PlayerState {
         emblems: Vec::new(),
         commander_damage_taken: Vec::new(),
         eliminated: false,
+        drew_from_empty_library: false,
         mulligans_taken: 0,
         hand_kept: false,
     }

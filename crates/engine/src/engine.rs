@@ -948,6 +948,7 @@ impl Engine {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
             });
@@ -2598,8 +2599,9 @@ impl Engine {
     /// turn - `turn_number == 1` always belongs to the starting player
     /// since `active_player` only rotates at Cleanup, so that check alone
     /// scopes this correctly without tracking who started separately.
-    /// Drawing from an empty library is a silent no-op here, not a loss -
-    /// CR 704.5b's empty-library SBA isn't modeled yet (TODO).
+    /// Drawing from an empty library sets `PlayerState.drew_from_empty_library`
+    /// (see `draw_one_card`) rather than losing outright here - `sba::apply_player_loss`
+    /// is what actually eliminates the player, on the next SBA pass (CR 704.5b).
     fn draw_step(&mut self) -> Vec<GameEventKind> {
         let active = self.state.active_player;
         self.draw_one_card(active).into_iter().collect()
@@ -2611,11 +2613,22 @@ impl Engine {
     /// move the library's top card to hand under a new CR 400.7 object id,
     /// same "new id, no remap" convention `PlayLand`/`CastSpell`/SBA death
     /// already use. Returns `None` on an empty library (or no library zone
-    /// at all) - CR 704.5b's empty-library-loss SBA isn't modeled yet
-    /// (TODO), so this is a silent no-op rather than a loss.
+    /// at all) - CR 704.5b: this sets `PlayerState.drew_from_empty_library`,
+    /// which `sba::apply_player_loss` checks on the next SBA pass. The loss
+    /// isn't immediate here - CR 704.5b is a state-based action, not a
+    /// consequence of the draw attempt itself, same "the SBA loop is what
+    /// actually eliminates" split 704.5a's own life-loss check already has.
     fn draw_one_card(&mut self, player: PlayerId) -> Option<GameEventKind> {
-        let library = self.state.zone(ZoneKind::Library, Some(player))?;
-        let card = library.contents.front().copied()?;
+        let card = self
+            .state
+            .zone(ZoneKind::Library, Some(player))
+            .and_then(|library| library.contents.front().copied());
+        let Some(card) = card else {
+            if let Some(p) = self.state.player_mut(player) {
+                p.drew_from_empty_library = true;
+            }
+            return None;
+        };
 
         // Snapshot before the move - CR 603.10's last_known_info (see
         // GameEventKind::ZoneChange's doc comment), same ordering PlayLand
@@ -2868,6 +2881,7 @@ mod tests {
                 emblems: Vec::new(),
                 commander_damage_taken: Vec::new(),
                 eliminated: false,
+                drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
             }],
