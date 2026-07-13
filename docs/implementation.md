@@ -2049,12 +2049,14 @@ shift, don't treat it as fixed once written.
       `EffectPayload::Script` deliberately **not** paired in despite the `&ScriptRuntime` plumbing
       now being available (see that slice's "Correction to the backlog" note); still dead code,
       now its own explicitly-named follow-up (item 3a below).
-   3a. **Script-backed continuous effects** (`AffectedFilter::Script`/`EffectPayload::Script`) —
-      structurally different from CDA resolution: a boolean affects-predicate script plus an
-      effect-shape-decoding script, not a numeric query. `ContinuousEffect::applies_to` needs a
-      `&ScriptRuntime` param of its own (it currently takes none) to evaluate the predicate; the
-      effect-shape decode needs a "Lua asks, Rust decides" table convention like
-      `invoke_operation`'s, not designed yet.
+   3a. ~~**Script-backed continuous effects**~~ — done, `phase5/continuous-effects-script` slice
+      (docs/implementation.md, below). `AffectedFilter::Script`/`EffectPayload::Script` are real:
+      `layers::applicable_effects_in_layer` evaluates a `Script` affects-predicate
+      (`ScriptRuntime::invoke_continuous_affects`), `layers::resolve_primitive` decodes a `Script`
+      effect payload (`ScriptRuntime::invoke_continuous_effect`, the "Lua asks, Rust decides" table
+      convention `invoke_operation` established, generalized to six recognized keys). `applies_to`
+      itself stays `Primitive`-only — the `&ScriptRuntime` param this note originally proposed for
+      it instead lives in `layers.rs`, same separation `resolve_base_pt` already keeps for CDA.
    4. ~~**D: layer 7e** (power/toughness switching)~~ — done, `phase5/layer-engine-switching` slice
       (docs/implementation.md, below). `EffectPrimitive::SwitchPT`, applied as its own pass in
       `layers::effective_characteristics` after 7b/7c fully resolve — a `Game.Layers.
@@ -2092,11 +2094,16 @@ shift, don't treat it as fixed once written.
    5b. ~~**SBA-driven zone changes bypass replacement checking**~~ — done, same slice. Real CR 616.1
       pause support mid-SBA (not just a deterministic first-match fallback) was built, per the
       human's explicit choice when this fork was raised.
-6. **Cost system completeness** — alternative costs (flashback-style), `{X}` costs, hybrid/
-   Phyrexian/snow mana payment, cost reduction/increase, mana-cost components on an activated
-   ability's own cost (no Lua-facing mana-cost-string parser exists anywhere yet). Structured
-   additional costs (sacrifice/discard/tap-permanents/life) are real as of
-   `phase5/activated-ability-costs` (above) — this item is what's left.
+6. ~~**Cost system completeness**~~ — done, across 5 sub-slices (6a-6e): 6a (Phyrexian/snow/hybrid
+   mana payment, `ManaSymbol`/`AtomicManaSymbol` in `mana.rs`, tested in `phase5_activate_ability_costs.rs`)
+   and 6b (`{X}` costs, `phase5_x_costs.rs`) are real — code and tests exist — but neither ever got
+   its own session write-up appended below; a real documentation gap noticed while scoping the
+   continuous-effects-script slice, flagged here rather than silently patched over with an invented
+   history. 6c (`phase5/flashback-alternative-costs`, alternative costs), 6d (`phase5/cost-modifiers`,
+   cost reduction/increase), and 6e (`phase5/ability-mana-cost-strings`, mana-cost components on an
+   activated ability's own cost via `ManaCost::parse`) all have real write-ups below. Structured
+   additional costs (sacrifice/discard/tap-permanents/life) were already real as of
+   `phase5/activated-ability-costs` (above).
 7. **Trigger system completeness** — once-per-turn/intervening-if (CR 603.2-603.3), last-known-
    info fallback for a trigger whose source already left the battlefield (CR 603.10, flagged since
    the script-bridge-trigger slice), non-ETB trigger conditions (leaves-battlefield, upkeep,
@@ -4235,6 +4242,118 @@ dying token goes to graveyard TODO CR 111.7), all prior tests unaffected. Total:
   (tokens have empty scripts and no `initial_effect` entry point).
 - FilterSpec identity gap on Clue/Food sacrifice costs — `FilterSpec::controller: You, card_types:
   Artifact` matches any artifact, not specifically this Clue/Food. Shared pre-existing gap.
+
+## Phase 5: phase5/continuous-effects-script slice (backlog item 3a)
+
+Branch `phase5/continuous-effects-script`, off master. Slice backlog item 3a, split out of the
+layer-engine-cda slice as its own follow-up: `AffectedFilter::Script`/`EffectPayload::Script` (a
+`ContinuousEffect`'s affects-predicate and actual modification, backed by a script instead of a
+`Primitive`/tag) had been dead code since the layer-engine-basics slice first introduced the
+`Primitive`/`Script` split. Scope, confirmed before writing code: real evaluation for both, plus
+the `Game.CreateStaticAbility` builder sugar (`:SetAffected`/`:SetEffect`) to construct them from a
+card script — narrowed to the same "no `Game.*` state-query bindings exist yet" limitation
+`invoke_cda` already carries (checked again before starting: still true), so every test script
+below decides purely from `object`/`source`/`controller` identity or a constant, never real board
+state.
+
+**Design, confirmed before writing code:**
+- `ContinuousEffect::applies_to` (`types/effect.rs`) stays `Primitive`-only — no `ScriptRuntime`
+  import added to the types module. `AffectedFilter::Script` is evaluated in
+  `layers::applicable_effects_in_layer` instead (which already has `&ScriptRuntime` in scope via
+  `effective_characteristics`), same separation `resolve_base_pt` already keeps for CDA.
+- New `ScriptRuntime::invoke_continuous_affects(&self, handle, object, source, controller) ->
+  Result<bool, ScriptError>` — `function(object, source, controller) -> bool`. New
+  `ScriptRuntime::invoke_continuous_effect(&self, handle, source, controller) ->
+  Result<Option<EffectPrimitive>, ScriptError>` — `function(source, controller) -> table`, same
+  argument shape `invoke_cda`/`invoke_operation` already use. Decodes one of six recognized keys
+  (`set_pt`/`modify_pt`/`add_keyword`/`add_card_type`/`add_color`/`switch_pt`) in a fixed order —
+  the same "Lua asks, Rust decides" one-key-per-shape convention `invoke_operation`'s `gain_life`
+  established, generalized from one key to six. An empty/unrecognized table or a script error both
+  resolve to `None` — "skip rather than guess," same stance every other unresolvable value in this
+  engine already takes.
+- `layers.rs`'s six per-layer loops in `effective_characteristics` were refactored to call a new
+  `resolve_primitive(effect, script_runtime, controller) -> Option<EffectPrimitive>` helper instead
+  of matching `EffectPayload::Primitive(..)` directly — `Primitive(p) => Some(*p)`,
+  `Script(handle) => invoke_continuous_effect(...).ok().flatten()`. A decoded shape that doesn't
+  match what a given loop expects (e.g. an `AbilityAdding`-declared effect whose script never
+  returns `add_keyword`) is silently skipped by the existing `if let Some(EffectPrimitive::X(..))`
+  pattern in each loop — no new mismatch-handling code needed, it falls out for free.
+- `Game.CreateStaticAbility`'s `:SetEffect`/`:SetAffected` gained the same two-shapes pattern
+  `:SetCondition`/`:SetOperation` already use: a `Game.Effects.*` tag / plain filter table decodes
+  to `Primitive` with zero further evaluation, a custom function is registered and returned as
+  `Script`. `StaticAbilityBuilder.effect` changed type from `Option<EffectPrimitive>` to
+  `Option<EffectPayload>`; `.affected` changed from `EffectFilter` to `AffectedFilter`.
+  `validate_layer_effect_pairing` now takes `&EffectPayload` and only checks the `Primitive` case —
+  a `Script` payload's real shape isn't known until invoked, so `:Register()` accepts any
+  layer/`Script` pairing; a mismatch surfaces (silently, per the point above) at query time instead
+  of eagerly at registration.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 12 new tests in
+`crates/engine/tests/phase5_continuous_effects_script.rs` (unit-level: an affects-predicate matches
+only the identical object and errors resolve to `Err` not a panic; effect decode covers
+`modify_pt`/`add_keyword`/`switch_pt`, an empty table resolves to `None`, an erroring script
+resolves to `Err` not a panic; builder-level: `Game.CreateStaticAbility` registers cleanly with a
+function-form `:SetAffected` and, separately, a function-form `:SetEffect`; real-consumer:
+`effective_characteristics` actually applies a script-backed affects-predicate to the matching
+object only, actually applies a script-decoded `add_keyword`, and silently skips a script effect
+whose decoded shape doesn't match its declared layer rather than applying garbage), all 410 prior
+tests unaffected — full workspace run: 422 passed, 0 failed. Confirmed via the real CLI too:
+`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_continuous_effects_script.toml`
+— 20/20 steps ran/passed (an anthem land whose static ability's `:SetEffect` is a script decoding
+`{modify_pt = {power=1,toughness=1}}`, not a `Game.Effects.ModifyPT` tag, still buffs a vanilla
+bear's combat damage from 2 to 3, same real-consumer proof
+`phase5_static_ability_self_registration.toml` established for the tag-only form).
+
+**What got implemented:**
+- `layers.rs`: `applicable_effects_in_layer` gained a `&ScriptRuntime` parameter and now branches on
+  `AffectedFilter::Primitive`/`Script` (the latter via the new `invoke_continuous_affects`, `Err`
+  treated as "doesn't match"). New `resolve_primitive` helper, called from all six per-layer loops
+  in `effective_characteristics` in place of the old direct `EffectPayload::Primitive` match.
+- `script.rs`: `ScriptRuntime::invoke_continuous_affects`/`invoke_continuous_effect` (new methods,
+  next to `invoke_cda`). `decode_effect_value`/`decode_affected_value` (renamed from
+  `decode_affected_table`) both gained the function-fallback branch and now take `&Lua`/`&mut
+  ScriptRegistry` to register a handle, mirroring `decode_condition_value`/`decode_operation_value`
+  exactly. `validate_layer_effect_pairing` signature changed to `&EffectPayload`, early-returns `Ok`
+  for `Script`. `StaticAbilityBuilder` field types updated; its `:SetEffect`/`:SetAffected` methods
+  route through the registry the same way `TriggeredAbilityBuilder`'s setters already do.
+- `docs/lua_scripts.md`: new "Script-backed `:SetAffected`/`:SetEffect`" subsection under
+  "Self-registering a static ability," with a worked example and the same hidden-information caveat
+  every other script-bridge doc section already carries. Removed the stale "Not available yet"
+  bullet for `AffectedFilter::Script`/`EffectPayload::Script`.
+- `crates/engine/tests/scenarios/phase5_continuous_effects_script.toml`: same anthem-land/vanilla-
+  bear/combat-damage fixture `phase5_static_ability_self_registration.toml` uses, except the
+  anthem's `:SetEffect` is a script decoding `modify_pt` instead of a `Game.Effects.ModifyPT` tag.
+
+**STRUCT DEVIATIONS:**
+- `StaticAbilityBuilder.effect: Option<EffectPrimitive>` → `Option<EffectPayload>`,
+  `.affected: EffectFilter` → `AffectedFilter` — both anticipated by the pre-slice requirements
+  report exactly (needed to hold either shape), not a deviation from it.
+
+**INTERFACE DEVIATIONS:** None beyond what the pre-slice report's "Design" section already named —
+`applicable_effects_in_layer` gaining a `&ScriptRuntime` parameter, `decode_effect_value`/
+`decode_affected_value` gaining `&Lua`/`&mut ScriptRegistry` parameters, and
+`validate_layer_effect_pairing`'s signature change were all anticipated, not discovered mid-slice.
+
+**SCOPE DEVIATIONS:**
+- Found (not created) a pre-existing documentation gap while updating the backlog list at the top
+  of this file: backlog item 6a (Phyrexian/snow/hybrid mana payment) and 6b (`{X}` costs) both have
+  real code and tests but never got a session write-up appended here, unlike every other completed
+  sub-item. Flagged in the backlog list itself rather than silently fixed by inventing a plausible-
+  sounding write-up after the fact — the actual pre-slice design conversations for 6a/6b aren't
+  recoverable from this session.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- No `Game.*` state-query bindings — a predicate/effect-shape script can only reason from
+  `object`/`source`/`controller` identity or a constant, not real board state ("for each Zombie you
+  control"-style effects stay unbuildable). Backlog item 8's hidden-information-safe `ScriptContext`
+  is the real unblock, untouched here.
+- A `Script` effect's layer/decoded-shape mismatch is silently skipped at query time, not surfaced
+  as an error the way a `Primitive` mismatch is caught eagerly at `:Register()` — a real, narrower
+  safety net, flagged not fixed.
+- `EffectDuration` stays `Permanent` for any script-registered static ability (pre-existing gap,
+  unaffected). No CR 606 "as long as" conditional gating beyond the per-object affects-predicate;
+  no CR 613.6-8 dependency system; layers 1/2/3/7d and the overwrite ("loses all types/colors")
+  shape stay unbuilt — all pre-existing, untouched by this slice.
 
 ## Mistakes caught (don't repeat)
 
