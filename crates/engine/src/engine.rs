@@ -1617,6 +1617,48 @@ impl Engine {
                                     });
                                 }
                             }
+                            // CR 701.17/614.13: sacrifice the first chosen
+                            // target — identical to the Destroy arm below
+                            // except indestructibility is never checked (CR
+                            // 702.12b is Destroy-specific; sacrifice bypasses
+                            // it). commit_death is reusable here (unlike
+                            // Exile) because the destination is the owner's
+                            // per-player graveyard (Some(owner)), not the
+                            // shared Exile zone. Dies/LeavesBattlefield
+                            // triggers fire the same way as SBA-driven death.
+                            // TODO: "sacrifice a permanent you control"
+                            // (player chooses at resolution) needs coroutines
+                            // — blocked on backlog item 9.
+                            // TODO(CR 616.1): same deferred ordering-choice
+                            // gap as Destroy.
+                            Some(AbilityEffect::Sacrifice) => {
+                                if let Some(Target::Object(id)) = top.targets.first().copied() {
+                                    let last_known_info = self
+                                        .state
+                                        .object(id)
+                                        .filter(|obj| obj.zone == ZoneKind::Battlefield)
+                                        .cloned();
+                                    if let Some(last_known_info) = last_known_info {
+                                        let proposed = GameEventKind::ZoneChange {
+                                            object: id,
+                                            from: ZoneKind::Battlefield,
+                                            to: ZoneKind::Graveyard,
+                                            last_known_info: Some(last_known_info),
+                                        };
+                                        match replacement::apply_replacements(&mut self.state, proposed) {
+                                            ReplacementOutcome::Resolved(final_event) => {
+                                                let (event, departed) =
+                                                    sba::commit_death(&mut self.state, final_event);
+                                                self.departed_triggered_abilities.extend(departed);
+                                                self.state.ledger.push(event);
+                                            }
+                                            ReplacementOutcome::NeedsOrderingChoice { .. } => {
+                                                // TODO(CR 616.1): same deferred gap as Destroy.
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             // CR 701.8/614.13/702.12b: unlike Damage, this
                             // can't be modeled as "push an unapplied event
                             // and let CommitEvents retroactively apply it" -

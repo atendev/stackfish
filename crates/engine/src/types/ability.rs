@@ -94,6 +94,23 @@ pub enum AbilityEffect {
     /// replacement/prevention modeling for draws (no `EventFilter::
     /// DrawsCard`/"would draw" shape exists).
     DrawCards(u32),
+    /// The `Game.Ops.Sacrifice()` primitive — sacrifices the resolving
+    /// `StackObject`'s first chosen target from the battlefield (CR 701.17).
+    /// Unlike `Destroy`, indestructibility does **not** prevent sacrifice (CR
+    /// 702.12b is Destroy-specific). The implementation is identical to the
+    /// `Destroy` arm minus the indestructibility check: proposes
+    /// `Battlefield → Graveyard`, runs `apply_replacements` (CR 614.13's
+    /// "if it would die, exile it instead" applies to sacrifice), then calls
+    /// `sba::commit_death` — which, unlike the `Exile` case, works correctly
+    /// here because the destination is the owner's per-player graveyard
+    /// (`Some(owner)`), not the shared Exile zone. `Dies`/`LeavesBattlefield`
+    /// triggers fire the same way they do off an SBA-driven death.
+    ///
+    /// TODO: "sacrifice a permanent you control" (player chooses at resolution,
+    /// no targeting) requires Lua coroutines — blocked on backlog item 9.
+    /// TODO: self-sacrifice ("sacrifice this permanent," no target) is a useful
+    /// but distinct shape deferred as a named follow-up.
+    Sacrifice,
     /// The `Game.Ops.Exile()` primitive — exiles the resolving `StackObject`'s
     /// first chosen target from the battlefield (CR 701.18). Unlike `Destroy`,
     /// exile ignores indestructibility entirely (CR 702.12b is Destroy-only).
