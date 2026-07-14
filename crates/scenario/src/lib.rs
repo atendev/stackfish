@@ -405,6 +405,11 @@ pub enum ActionSpec {
         #[serde(default)]
         mana: ManaPaymentSpec,
     },
+    /// CR 601.6: abandons a pending `ProcessState::AwaitingPayment` pause
+    /// instead of paying it — same "own entry point, not
+    /// `to_player_action`/`submit_action`" rationale as `SubmitPayment`,
+    /// routed through `Engine::unwind_payment`.
+    UnwindPayment { player: u32 },
     /// CR 514.1: answers a pending `ProcessState::AwaitingDiscard` pause —
     /// `cards` is the list of TOML card keys the player chooses to discard.
     /// Same "own entry point" rationale as `SubmitPayment` — routed through
@@ -496,6 +501,7 @@ impl ActionSpec {
             ActionSpec::SubmitPayment { player, mana } => {
                 format!("submit_payment(player={player}, units={:?})", mana.units)
             }
+            ActionSpec::UnwindPayment { player } => format!("unwind_payment(player={player})"),
             ActionSpec::SubmitDiscard { player, cards } => {
                 format!("submit_discard(player={player}, cards={cards:?})")
             }
@@ -1240,6 +1246,9 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
         ActionSpec::SubmitPayment { .. } => {
             unreachable!("SubmitPayment is handled in run_action_spec, before to_player_action")
         }
+        ActionSpec::UnwindPayment { .. } => {
+            unreachable!("UnwindPayment is handled in run_action_spec, before to_player_action")
+        }
         ActionSpec::SubmitDiscard { .. } => {
             unreachable!("SubmitDiscard is handled in run_action_spec, before to_player_action")
         }
@@ -1332,6 +1341,22 @@ fn run_action(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
 fn run_payment(engine: &mut Engine, plan: PaymentPlan) -> StepOutcome {
     let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
         if let Err(err) = engine.submit_payment(plan) {
+            return StepOutcome::Errored(format!("{err:?}"));
+        }
+        drain(engine)
+    }));
+    match result {
+        Ok(outcome) => outcome,
+        Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
+    }
+}
+
+/// Same shape as `run_payment`, but for the `UnwindPayment` action — answers
+/// a `ProcessState::AwaitingPayment` pause via `Engine::unwind_payment`
+/// instead of `Engine::submit_payment`.
+fn run_unwind_payment(engine: &mut Engine) -> StepOutcome {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
+        if let Err(err) = engine.unwind_payment() {
             return StepOutcome::Errored(format!("{err:?}"));
         }
         drain(engine)
@@ -1746,6 +1771,7 @@ fn run_action_spec(
     let ledger_before = engine.state().ledger.len();
     let outcome = match action_spec {
         ActionSpec::SubmitPayment { mana, .. } => run_payment(engine, build_payment_plan(mana)),
+        ActionSpec::UnwindPayment { .. } => run_unwind_payment(engine),
         ActionSpec::SubmitDiscard { cards, .. } => {
             let card_obj_ids =
                 cards.iter().map(|k| resolve_card(k, card_ids)).collect();

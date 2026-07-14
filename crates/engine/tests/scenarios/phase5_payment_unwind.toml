@@ -1,0 +1,83 @@
+# CR 601.6 payment unwind slice (backlog item 15): a spell with an
+# unaffordable cost (empty pool, {1} to pay) reaches AwaitingPayment same as
+# any other cast, then the player declares they can't/won't pay via the new
+# unwind_payment step (Engine::unwind_payment) instead of submit_payment.
+# The card returns to hand under a fresh CR 400.7 id (not stuck on the stack
+# forever), and priority reopens normally afterward.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+generic_cost = 1
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bear"
+
+# This is a solo (1-player) fixture - CR 103.8a's "starting player skips their
+# first draw step" only applies in a two-player game, so p0's turn 1 Draw
+# step genuinely runs here and needs a real card to draw.
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+# PreGame -> Untap (auto-chains, no priority window) -> Upkeep -> Draw -> Main.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_phase"
+equals = "main"
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "bear"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "stack"
+
+[[steps]]
+type = "unwind_payment"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "hand"
+
+[[steps]]
+type = "assert_phase"
+equals = "main"
+
+[[steps]]
+type = "assert_step"
+equals = "pre_combat_main"
+
+[[steps]]
+type = "assert_ledger_len"
+equals = 15
