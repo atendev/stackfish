@@ -246,6 +246,7 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

@@ -5,8 +5,8 @@ use std::rc::Rc;
 use mlua::{Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{
-    AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, CreatureTokenSpec, NamedToken,
-    RegisteredAbility, TokenSpec,
+    AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, CreatureTokenSpec,
+    InterveningIfPrimitive, InterveningIfSpec, NamedToken, RegisteredAbility, TokenSpec,
 };
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, SupertypeSet};
 use crate::types::counter::CounterKind;
@@ -28,6 +28,17 @@ use crate::types::zone::ZoneKind;
 #[derive(Clone, Copy)]
 struct ConditionTag(ConditionPrimitive);
 impl UserData for ConditionTag {}
+
+/// Thin `mlua::UserData` wrapper around `InterveningIfPrimitive`, same idea
+/// as `ConditionTag` — `Game.InterveningIf.AtOrBelowLife(n)` returns one of
+/// these, consumed directly by `TriggeredAbilityBuilder::SetInterveningIf`
+/// (CR 603.4). No `decode_*` function needed the way `ConditionTag`/
+/// `OperationTag` have one — `SetInterveningIf` is the only place this is
+/// ever consumed, unlike a condition/operation source string which can be
+/// `load_condition`/`load_operation`'d standalone.
+#[derive(Clone, Copy)]
+struct InterveningIfTag(InterveningIfPrimitive);
+impl UserData for InterveningIfTag {}
 
 /// `Game.Conditions.OncePerTurn(tag)`'s return value — wraps whichever
 /// `ConditionPrimitive` `tag` (any other `ConditionTag`) already carries, so
@@ -622,6 +633,10 @@ struct TriggeredAbilityBuilder {
     source: ObjectId,
     condition: Option<ConditionSpec>,
     operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
+    /// CR 603.4's intervening-if clause — see `InterveningIfSpec`'s own doc
+    /// comment. Set via `:SetInterveningIf(Game.InterveningIf.*)`, orthogonal
+    /// to `condition` above (the trigger-event check).
+    intervening_if: Option<InterveningIfSpec>,
     registry: Rc<RefCell<ScriptRegistry>>,
 }
 
@@ -632,6 +647,11 @@ impl UserData for TriggeredAbilityBuilder {
             let spec = decode_condition_value(lua, &mut registry, value).map_err(to_lua_err)?;
             drop(registry);
             this.condition = Some(spec);
+            Ok(())
+        });
+        methods.add_method_mut("SetInterveningIf", |_, this, tag: mlua::AnyUserData| {
+            let primitive = tag.borrow::<InterveningIfTag>()?.0;
+            this.intervening_if = Some(InterveningIfSpec::Primitive(primitive));
             Ok(())
         });
         methods.add_method_mut("SetOperation", |lua, this, value: Value| {
@@ -657,6 +677,7 @@ impl UserData for TriggeredAbilityBuilder {
                 target: None,
                 operation,
                 effect,
+                intervening_if: this.intervening_if,
             };
             this.registry.borrow_mut().pending_triggered.push(ability);
             Ok(())
@@ -749,6 +770,7 @@ impl UserData for ActivatedAbilityBuilder {
                 target: None,
                 operation,
                 effect,
+                intervening_if: None,
             };
             this.registry.borrow_mut().pending_triggered.push(ability);
             Ok(())
@@ -1212,6 +1234,15 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     })?;
     conditions.set("OncePerTurn", once_per_turn)?;
 
+    // CR 603.4: `Game.InterveningIf.*` tags, consumed by
+    // `TriggeredAbilityBuilder:SetInterveningIf` — see `InterveningIfTag`'s
+    // own doc comment for why this is a separate table from `Conditions`.
+    let intervening_if = lua.create_table()?;
+    let at_or_below_life = lua.create_function(|_, threshold: i32| {
+        Ok(InterveningIfTag(InterveningIfPrimitive::ControllerAtOrBelowLife(threshold)))
+    })?;
+    intervening_if.set("AtOrBelowLife", at_or_below_life)?;
+
     let ops = lua.create_table()?;
     let gain_life = lua.create_function(|_, amount: i32| Ok(OperationTag(AbilityEffect::GainLife(amount))))?;
     ops.set("GainLife", gain_life)?;
@@ -1329,6 +1360,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
                 source: ObjectId(source),
                 condition: None,
                 operation: None,
+                intervening_if: None,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -1397,6 +1429,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
 
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
+    game.set("InterveningIf", intervening_if)?;
     game.set("Ops", ops)?;
     game.set("Costs", costs)?;
     game.set("Layers", layers)?;

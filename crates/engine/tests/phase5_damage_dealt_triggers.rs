@@ -178,6 +178,7 @@ fn deals_damage_trigger_fires_when_the_attacker_connects() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);
@@ -218,6 +219,7 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);
@@ -251,6 +253,7 @@ fn is_dealt_damage_trigger_fires_on_the_creature_taking_damage() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

@@ -91,6 +91,7 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 
@@ -168,6 +169,7 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, PlayerId, ObjectId, 
                 target: None,
                 operation: ScriptHandle(0),
                 effect: None,
+                intervening_if: None,
             },
             dies_ability(fodder),
         ],

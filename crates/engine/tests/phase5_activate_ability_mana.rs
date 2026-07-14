@@ -110,6 +110,7 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
             target: None,
             operation: ScriptHandle(0),
             effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)])),
+            intervening_if: None,
         }],
         ledger: Vec::new(),
         rng: RngState { seed: 1, draws_consumed: 0 },
@@ -328,6 +329,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colorless])),
+        intervening_if: None,
     });
     state.abilities.push(RegisteredAbility {
         source: source_b,
@@ -337,6 +339,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)])),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

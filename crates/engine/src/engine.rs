@@ -8,7 +8,9 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::sba::{self, SbaOutcome};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
-use crate::types::ability::{AbilityEffect, AbilityKind, ConditionSpec, NamedToken, RegisteredAbility, TokenSpec};
+use crate::types::ability::{
+    AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, NamedToken, RegisteredAbility, TokenSpec,
+};
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
@@ -542,6 +544,7 @@ fn register_token_abilities(
                 target: None,
                 operation: ScriptHandle(0),
                 effect: Some(AbilityEffect::DrawCards(1)),
+                intervening_if: None,
             });
         }
         TokenSpec::Named(NamedToken::Food) => {
@@ -557,6 +560,7 @@ fn register_token_abilities(
                 target: None,
                 operation: ScriptHandle(0),
                 effect: Some(AbilityEffect::GainLife(3)),
+                intervening_if: None,
             });
         }
         TokenSpec::Creature(_) => {}
@@ -1781,6 +1785,20 @@ impl Engine {
                     _ => false,
                 };
 
+                // CR 603.4/608.2a: an intervening-if clause is rechecked
+                // fresh against current state at resolution too - if it's
+                // now false, the ability is removed from the stack and does
+                // nothing, same observable "no effect, Fizzled logged"
+                // outcome as the target-legality fizzle above (reused
+                // rather than a second bespoke branch). `None` (every
+                // `Spell`/`ActivatedAbility`, and any `TriggeredAbility`
+                // without "if" text) never fizzles this way.
+                let intervening_if_fizzles = match &top.intervening_if {
+                    Some(InterveningIfSpec::Primitive(p)) => !p.holds(&self.state, top.controller),
+                    None => false,
+                };
+                let fizzles = fizzles || intervening_if_fizzles;
+
                 let mut events = Vec::new();
                 if fizzles {
                     // CR 608.2b: doesn't resolve at all - no effect
@@ -2459,6 +2477,7 @@ impl Engine {
                         let operation = ability.operation;
                         let effect = ability.effect.clone();
                         let target_requirement = ability.target;
+                        let intervening_if = ability.intervening_if;
                         let stack_id = self.state.allocate_object_id();
                         // TODO(CR 603.3c): triggered abilities that require
                         // targets ("when this dies, destroy target
@@ -2482,6 +2501,7 @@ impl Engine {
                             false,
                             operation,
                             effect,
+                            intervening_if,
                         ));
                         let event_id = self.state.allocate_event_id();
                         let sequence_no = self.state.allocate_sequence_no();

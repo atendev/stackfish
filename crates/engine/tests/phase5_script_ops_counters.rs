@@ -294,6 +294,7 @@ fn counters_ability_works_the_same_as_a_counters_spell() {
         })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Counters { kind: CounterKind::PlusOnePlusOne, amount: 1 }),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

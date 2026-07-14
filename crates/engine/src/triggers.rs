@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use crate::script::{ScriptContext, ScriptRuntime};
-use crate::types::ability::{AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility};
+use crate::types::ability::{
+    AbilityKind, ConditionPrimitive, ConditionSpec, InterveningIfSpec, RegisteredAbility,
+};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId};
@@ -154,7 +156,18 @@ pub fn collect_triggers(
                 (runtime.invoke_condition(*handle, &ctx).unwrap_or(false), false)
             }
         };
-        if matched {
+        // CR 603.4: the intervening-if clause is checked at trigger time too
+        // - a false intervening-if means the ability never triggers at all,
+        // same outcome as the trigger-event condition itself not matching.
+        // Orthogonal to (and checked in addition to) `matched` above - see
+        // `InterveningIfSpec`'s own doc comment. Rechecked again at
+        // resolution by `Engine`'s `ResolveStackTop` (CR 608.2a), against
+        // whatever `PutTriggersApnap` bakes onto the `StackObject`.
+        let intervening_if_holds = ability
+            .intervening_if
+            .as_ref()
+            .is_none_or(|InterveningIfSpec::Primitive(p)| p.holds(state, controller));
+        if matched && intervening_if_holds {
             pending.push(PendingTrigger { source: ability.source, controller, ability_index: this_index, once_per_turn });
         }
     }
@@ -199,7 +212,12 @@ pub fn collect_triggers(
         if once_per_turn && state.once_per_turn_triggered.contains(&(ability.source, this_index)) {
             continue;
         }
-        if primitive.matches(ability.source, lki.controller, state.active_player, &event.kind) {
+        // CR 603.4 applies here too - see the main loop's own comment above.
+        let intervening_if_holds = ability
+            .intervening_if
+            .as_ref()
+            .is_none_or(|InterveningIfSpec::Primitive(p)| p.holds(state, lki.controller));
+        if intervening_if_holds && primitive.matches(ability.source, lki.controller, state.active_player, &event.kind) {
             pending.push(PendingTrigger {
                 source: ability.source,
                 controller: lki.controller,

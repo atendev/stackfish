@@ -149,6 +149,7 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 
@@ -161,6 +162,7 @@ fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 
@@ -329,6 +331,7 @@ fn deals_damage_and_dies_triggers_both_fire_from_the_same_combat_damage_step() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
     state.abilities.push(dies_ability(blocker));
 

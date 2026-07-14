@@ -2162,14 +2162,17 @@ shift, don't treat it as fixed once written.
    practically unreachable (no card has a library-card ability that cares about itself leaving the
    library). Cost-payment `Discard` (`move_to_graveyard_for_cost`) already reached the real pipeline
    before this fix.
-   Still open: CR 603.4's intervening-if clause ("when/whenever/at X, if Y, Z" — checked once at
-   trigger time and again at resolution per CR 608.2a) — a genuinely separate mechanism from the
-   once-per-turn cap (a state predicate re-checked at two different pipeline points, not a trigger-
-   count cap), deferred as its own follow-up; "whenever a creature you control dies" (filtered by
-   something other than "is this exact object," i.e. a `Script`-backed or filter-scoped condition)
-   isn't representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/`DiscardsCard`/etc only ever match
-   a fixed identity or the ability's own controller, never a characteristic filter over some other
-   object.
+   ~~CR 603.4's intervening-if clause~~ — done, `phase5/intervening-if` slice (docs/implementation.md,
+   below): new `RegisteredAbility.intervening_if: Option<InterveningIfSpec>`, orthogonal to the
+   trigger-event `condition` — checked once in `collect_triggers` at trigger time, baked onto the
+   resulting `StackObject`, and rechecked fresh in `ResolveStackTop` at resolution (CR 608.2a), OR'd
+   into the existing target-legality `fizzles` check. One concrete `InterveningIfPrimitive` this
+   slice: `ControllerAtOrBelowLife(n)`. `Script`-backed intervening-if deferred — `invoke_condition`
+   doesn't pass `&GameState` into Lua at all yet, a separate DESIGN.md gap.
+   Still open: "whenever a creature you control dies" (filtered by something other than "is this
+   exact object," i.e. a `Script`-backed or filter-scoped condition) isn't representable yet —
+   `Dies`/`LeavesBattlefield`/`DrawsCard`/`DiscardsCard`/etc only ever match a fixed identity or the
+   ability's own controller, never a characteristic filter over some other object.
 8. ~~**Script API expansion**~~ — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
    CreateToken — only `GainLife` existed before this item started; ~~DrawCards~~, ~~Counters~~,
    ~~Exile~~, ~~Sacrifice~~, ~~CreateToken~~ done — all 6 complete), and a
@@ -4936,6 +4939,83 @@ real; discarding two cards at once pauses on `AwaitTriggerOrderChoice` with a 2-
 both discards actually triggered rather than the test passing for an unrelated reason. Plus 5 new unit
 tests in `types/ability.rs` mirroring `DrawsCard`/`EachDrawsCard`'s own. All prior tests unaffected —
 full workspace run: 469 passed, 0 failed.
+
+**UNRESOLVED:** none new — see "Explicitly not modeled" above.
+
+## Phase 5: phase5/intervening-if slice (backlog item 7)
+
+Branch `phase5/intervening-if`, off master. Last of the run of backlog-item-7 fixes, but scoped as a
+real vertical slice (its own requirements report, per the human's request) rather than a small
+plumbing fix — CR 603.4's intervening-if clause needs actual new modeling, not just a pipeline-bypass
+wire-up. Scope locked in before writing code: checked that `ConditionPrimitive::matches` is
+event-shaped (always needs a `&GameEventKind`) and can't represent a pure state predicate; checked
+that `ScriptRuntime::invoke_condition`/`invoke_cda` don't pass `&GameState` into Lua at all (no
+`Game.*` state-query binding exists yet — a separate, already-flagged DESIGN.md gap), so
+`InterveningIfSpec` ships `Primitive`-only this slice, `Script` named as a follow-up.
+
+**Design, confirmed before writing code:**
+- New `InterveningIfPrimitive` enum (`types/ability.rs`) with `holds(&self, state, controller) ->
+  bool` — a pure state predicate, deliberately not reusing `ConditionPrimitive::matches`'s
+  event-shaped signature. One concrete variant: `ControllerAtOrBelowLife(i32)` — real, common, and
+  cleanly testable (nothing else needs constructing to flip it, just change life).
+- New `InterveningIfSpec::Primitive(InterveningIfPrimitive)` (no `Script` variant yet, per the scope
+  note above).
+- `RegisteredAbility.intervening_if: Option<InterveningIfSpec>` — a genuine new mandatory struct
+  field (~70 call sites, 28 files), not folded into `ConditionSpec` the way CR 603.2h's once-per-turn
+  cap was. Checked why once-per-turn could reuse `ConditionSpec` but this can't: once-per-turn is
+  still fundamentally "does this match," just capped — intervening-if is checked at a *different*
+  pipeline stage entirely (resolution, not just trigger-time) and is orthogonal to the trigger
+  condition, not another flavor of it. The mechanical field-addition itself is the same bounded,
+  precedented edit `GameState::once_per_turn_triggered` already went through this session.
+- `StackObject.intervening_if`, baked in at push time from `RegisteredAbility.intervening_if` (same
+  "primitive stand-in, decided once at push, not re-derived" contract `effect`/`target_requirement`
+  already establish) — only 3 `StackObject::new` call sites, cheap. A `Spell`/`ActivatedAbility`
+  StackObject always gets `None` here (CR 603.4 is triggered-ability-only text; neither push site has
+  a `RegisteredAbility` with this field set).
+- `triggers::collect_triggers`: checks `ability.intervening_if` (both the main live-ability loop and
+  the CR 603.10 departed-abilities fallback loop, for symmetry) against current state, independent of
+  the existing trigger-event `condition` match — false means the ability never even gets collected as
+  a `PendingTrigger`.
+- `engine.rs`'s `ResolveStackTop`: rechecks `top.intervening_if` fresh against current state, OR'd
+  into the existing CR 608.2b target-legality `fizzles` bool — same "removed from stack, no effect,
+  `Fizzled` logged" observable outcome, no new branch needed.
+- `script.rs`: `Game.InterveningIf.AtOrBelowLife(n)` + `TriggeredAbilityBuilder:SetInterveningIf(tag)`,
+  mirroring `Game.Conditions.*`/`:SetCondition`'s own shape — a new `InterveningIfTag` `UserData`
+  wrapper (not a new `ConditionTag` field) so the two stay distinguishable by type, same "distinguish
+  by wrapper type" convention `OncePerTurnTag` already established.
+
+**Mechanical note:** the ~70-call-site `RegisteredAbility` field addition (and the 3 `StackObject`
+sites) required per-file fixes beyond the usual bulk `perl` pass — several files use CRLF line endings
+(untouched by earlier sessions, unlike this session's own LF-saved files) and a few `RegisteredAbility`
+literals reference `operation`/`effect` via local variables rather than the `ScriptHandle(0)`/`Some(...)`
+literals the bulk regex matched on. Fixed file-by-file once `cargo build --workspace` surfaced each
+remaining `E0063`.
+
+**Explicitly not modeled (named, not silently guessed):**
+- `InterveningIfSpec::Script` — deferred until `ScriptContext`/`invoke_condition` expose `&GameState`
+  to Lua (a separate, already-flagged gap).
+- Only one concrete `InterveningIfPrimitive` variant (life-total). More shapes (hand size, board-state
+  checks, "still on the battlefield") are the same category of follow-up every other primitive in this
+  file started narrow before growing.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 3 new integration tests in
+`crates/engine/tests/phase5_intervening_if.rs` (a trigger whose intervening-if is already false when
+the event fires never triggers at all, stack stays empty; one that stays true throughout resolves
+normally; the real proof of the two-independent-checks claim: a trigger placed while the condition
+holds, then invalidated at resolution by a response spell — cast in response, resolving first since it
+sits on top of the stack — correctly fizzles with no effect and a logged `Fizzled` event, while the
+response spell's own effect still applies), plus 4 new unit tests for `InterveningIfPrimitive::holds`
+in `types/ability.rs`. All prior tests unaffected — full workspace run: 476 passed, 0 failed.
+
+**STRUCT DEVIATIONS:** None — `RegisteredAbility.intervening_if`/`StackObject.intervening_if`/
+`InterveningIfSpec`/`InterveningIfPrimitive` were all anticipated exactly in the pre-slice requirements
+report.
+
+**INTERFACE DEVIATIONS:** None — the `collect_triggers`/`ResolveStackTop` touch-points and the
+`Script`-deferral reasoning were both anticipated in the report before implementation started.
+
+**SCOPE DEVIATIONS:** None — `InterveningIfSpec::Script` and additional primitive shapes were named as
+deferred follow-ups in the pre-slice report, not silently dropped.
 
 **UNRESOLVED:** none new — see "Explicitly not modeled" above.
 

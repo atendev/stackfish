@@ -168,6 +168,7 @@ fn all_pass_with_nonempty_stack_resolves_top_instead_of_advancing_step() {
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),
         effect: None,
+        intervening_if: None,
     });
     let mut engine = Engine::new(state);
 
