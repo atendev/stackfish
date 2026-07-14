@@ -1191,6 +1191,8 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     conditions.set("IsDealtDamage", ConditionTag(ConditionPrimitive::IsDealtDamage))?;
     conditions.set("Upkeep", ConditionTag(ConditionPrimitive::BeginningOfYourUpkeep))?;
     conditions.set("EachUpkeep", ConditionTag(ConditionPrimitive::BeginningOfEachUpkeep))?;
+    conditions.set("Untap", ConditionTag(ConditionPrimitive::BeginningOfYourUntap))?;
+    conditions.set("EachUntap", ConditionTag(ConditionPrimitive::BeginningOfEachUntap))?;
     conditions.set("Dies", ConditionTag(ConditionPrimitive::Dies))?;
     conditions.set("LeavesBattlefield", ConditionTag(ConditionPrimitive::LeavesBattlefield))?;
     conditions.set("DrawsCard", ConditionTag(ConditionPrimitive::DrawsCard))?;

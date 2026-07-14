@@ -237,6 +237,22 @@ pub enum ConditionPrimitive {
     /// effects). Matches every `Step::Upkeep` `StepStarted` regardless of
     /// whose turn it is.
     BeginningOfEachUpkeep,
+    /// "At the beginning of your untap step" (CR 502.4's own trigger shape —
+    /// genuinely rare on real cards, since the step grants no priority, but
+    /// CR 603.3's last sentence still applies: a trigger whose condition is
+    /// met here just waits to go on the stack until the next time a player
+    /// would receive priority, which `AdvanceTurnStep`'s `Untap` branch now
+    /// achieves by routing through the real pipeline with
+    /// `PipelineExit::AdvanceTurnStep` instead of `BackToPriority` — see
+    /// that branch's own doc comment). Matches
+    /// `GameEventKind::StepStarted{step: Step::Untap}` only when the
+    /// ability's controller is also the active player, same "your" shape
+    /// `BeginningOfYourUpkeep` already established.
+    BeginningOfYourUntap,
+    /// "At the beginning of each untap step" — the controller-agnostic
+    /// sibling of `BeginningOfYourUntap`, same relationship
+    /// `BeginningOfEachUpkeep` has to `BeginningOfYourUpkeep`.
+    BeginningOfEachUntap,
     /// "When this creature dies" (CR 700.4/603.10) — matches a `ZoneChange`
     /// event moving `source` from the battlefield to a graveyard. Only ever
     /// reachable via `collect_triggers`'s CR 603.10 last-known-information
@@ -347,6 +363,13 @@ impl ConditionPrimitive {
             }
             ConditionPrimitive::BeginningOfEachUpkeep => {
                 matches!(event, GameEventKind::StepStarted { step: Step::Upkeep })
+            }
+            ConditionPrimitive::BeginningOfYourUntap => {
+                controller == active_player
+                    && matches!(event, GameEventKind::StepStarted { step: Step::Untap })
+            }
+            ConditionPrimitive::BeginningOfEachUntap => {
+                matches!(event, GameEventKind::StepStarted { step: Step::Untap })
             }
             ConditionPrimitive::Dies => matches!(
                 event,
@@ -556,6 +579,47 @@ mod tests {
         let source = ObjectId(0);
         let event = GameEventKind::StepStarted { step: Step::End };
         assert!(!ConditionPrimitive::BeginningOfEachUpkeep.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_untap_matches_when_controller_is_active_player() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let event = GameEventKind::StepStarted { step: Step::Untap };
+        assert!(ConditionPrimitive::BeginningOfYourUntap.matches(source, p0, p0, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_untap_does_not_match_someone_elses_untap() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let active_player = PlayerId(1);
+        let event = GameEventKind::StepStarted { step: Step::Untap };
+        assert!(!ConditionPrimitive::BeginningOfYourUntap.matches(source, controller, active_player, &event));
+    }
+
+    #[test]
+    fn beginning_of_your_untap_does_not_match_a_different_step() {
+        let source = ObjectId(0);
+        let p0 = PlayerId(0);
+        let event = GameEventKind::StepStarted { step: Step::Upkeep };
+        assert!(!ConditionPrimitive::BeginningOfYourUntap.matches(source, p0, p0, &event));
+    }
+
+    #[test]
+    fn beginning_of_each_untap_matches_regardless_of_whose_turn_it_is() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let active_player = PlayerId(1);
+        let event = GameEventKind::StepStarted { step: Step::Untap };
+        assert!(ConditionPrimitive::BeginningOfEachUntap.matches(source, controller, active_player, &event));
+    }
+
+    #[test]
+    fn beginning_of_each_untap_does_not_match_a_different_step() {
+        let source = ObjectId(0);
+        let event = GameEventKind::StepStarted { step: Step::Upkeep };
+        assert!(!ConditionPrimitive::BeginningOfEachUntap.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
     // Dies/LeavesBattlefield are only ever matched against last_known_info

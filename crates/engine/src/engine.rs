@@ -2498,15 +2498,31 @@ impl Engine {
                     // back into AdvanceTurnStep instead of opening
                     // PriorityWindow. The next call into this same arm runs
                     // advance_turn_step() again (Untap -> Upkeep), which
-                    // does open priority normally below. No trigger window
-                    // ever opens here either (CR 502.4 grants no priority to
-                    // place one before), so log_events (not the real
-                    // pipeline) remains correct - unlike the fall-through
-                    // path below.
-                    self.log_events(events);
+                    // does open priority normally below.
+                    //
+                    // Still routed through the real pipeline (ReplacementCheck
+                    // -> CommitEvents -> SbaLoop -> CollectTriggers ->
+                    // PutTriggersApnap), same as every other step - CR
+                    // 603.3's last sentence means an untap-step trigger
+                    // (BeginningOfYourUntap/EachUntap - rare on real cards,
+                    // but real) just waits to go on the stack until the next
+                    // time a player would receive priority, rather than
+                    // never triggering at all. Placing it onto state.stack
+                    // right here (instead of literally deferring the "put on
+                    // stack" action until Upkeep's priority window) is
+                    // functionally equivalent once that window opens - the
+                    // trigger is already sitting there either way.
+                    // PipelineExit::AdvanceTurnStep (not BackToPriority) is
+                    // what keeps this from opening a priority window Untap
+                    // isn't allowed to grant.
                     let untap_events = self.untap_step();
-                    self.log_events(untap_events);
-                    self.process_state = ProcessState::AdvanceTurnStep;
+                    events.extend(untap_events);
+                    let since_ledger = self.state.ledger.len();
+                    self.pipeline_context =
+                        Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
+                    self.pipeline_exit = PipelineExit::AdvanceTurnStep;
+                    self.process_state =
+                        ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
                     return StepStatus::Progressed;
                 }
                 if self.state.step == Step::Draw {
