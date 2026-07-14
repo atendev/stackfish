@@ -130,6 +130,7 @@ fn combat_state() -> GameState {
         next_sequence_no: 0,
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
     }
 }
 
@@ -379,6 +380,7 @@ fn hand_state_outside_main_phase(keywords: KeywordSet) -> (GameState, ObjectId) 
         next_sequence_no: 0,
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
     };
     let object = permanent(card, creature_definition("Ambusher", 2, 2, keywords), p0, 0);
     state.objects.insert(card, object);

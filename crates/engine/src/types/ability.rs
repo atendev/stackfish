@@ -385,15 +385,26 @@ impl ConditionPrimitive {
     }
 }
 
-/// A condition/operation source string resolves to one of these two shapes
+/// A condition/operation source string resolves to one of these shapes
 /// at load time (`ScriptRuntime::load_condition`) — a recognized
 /// `Game.Conditions.*` tag (`Primitive`, no further Lua calls needed ever
-/// again) or a genuine custom Lua function (`Script`, invoked for real via
-/// `ScriptRuntime::invoke_condition` each time, same as before this slice).
+/// again), a genuine custom Lua function (`Script`, invoked for real via
+/// `ScriptRuntime::invoke_condition` each time, same as before this slice),
+/// or `PrimitiveOncePerTurn` (CR 603.2h: "This ability triggers only once
+/// each turn" layered on top of any `ConditionPrimitive`, via
+/// `Game.Conditions.OncePerTurn(tag)` wrapping any other `Game.Conditions.*`
+/// tag). Matching itself is identical to `Primitive`'s own — the cap is
+/// enforced separately, in `triggers::collect_triggers`/`Engine`'s
+/// `CollectTriggers` stage, against `GameState::once_per_turn_triggered`
+/// (keyed by `(source, ability_index)`, reset each turn). Not offered for a
+/// `Script` condition this slice - a custom Lua condition function has no
+/// engine-side ability_index-keyed slot to consult without also threading
+/// one through `ScriptContext`, deferred as a named follow-up.
 #[derive(Clone, Copy, Debug)]
 pub enum ConditionSpec {
     Primitive(ConditionPrimitive),
     Script(ScriptHandle),
+    PrimitiveOncePerTurn(ConditionPrimitive),
 }
 
 /// A card's registered ability, as set up by its script's `initial_effect`-

@@ -1115,6 +1115,7 @@ pub fn build_initial_state(
         next_sequence_no: 0,
         next_object_id,
         pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
     };
 
     (state, card_ids, trigger_scripts)

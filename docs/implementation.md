@@ -2134,16 +2134,29 @@ shift, don't treat it as fixed once written.
    `BeginningOfYourCombat`/`BeginningOfEachCombat`, `BeginningOfYourEndStep`/`BeginningOfEachEndStep`
    — cheap additions once `AdvanceTurnStep`'s pipeline fix (7a) had already landed, exactly as that
    slice's own UNRESOLVED list predicted.
-   Still open: once-per-turn/intervening-if legality (CR 603.2-603.3); `Cleanup`'s own trigger-
-   collection gap (its `CleanupSbaCheck` flow still doesn't run `collect_triggers` at all — a
-   second, differently-shaped fix from 7a's `AdvanceTurnStep` rewire); `submit_discard`'s CR 514.1
-   hand-size discard and `draw_step`'s library-side retirement still discard their departed
-   abilities outright (both would be inert to wire today — neither can produce a
-   Battlefield-departure LKI); "whenever a creature you control dies" (filtered by something other
-   than "is this exact object," i.e. a `Script`-backed or filter-scoped condition) isn't
-   representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/etc only ever match a fixed identity
-   or the ability's own controller, never a characteristic filter over some other object; Untap-step
-   triggers stay unfireable regardless (CR 502.4 grants no priority there).
+   ~~`Cleanup`'s own trigger-collection gap~~ — done, `master` (docs/implementation.md, below,
+   "wire Cleanup's own SBA pass into real trigger collection"): `CleanupSbaCheck` now routes through
+   `CollectTriggers`/`PutTriggersApnap` too, via a new `PipelineExit::CleanupCheck` that decides
+   priority-vs-advance (CR 514.3) only once any triggers raised by cleanup's own SBA pass have
+   actually had a chance to be placed — previously a dies-trigger from a creature dying during
+   cleanup's own SBA check was silently dropped.
+   ~~CR 603.2h ("this ability triggers only once each turn")~~ — done, same session
+   (docs/implementation.md, below, "add CR 603.2h once-per-turn trigger cap"): new
+   `ConditionSpec::PrimitiveOncePerTurn`/`Game.Conditions.OncePerTurn(tag)`, enforced in
+   `triggers::collect_triggers` against a new `GameState::once_per_turn_triggered` set (reset each
+   turn alongside `lands_played_this_turn`) — correctly caps even two qualifying events collected in
+   the *same* batch (e.g. CR 510.1c's multi-blocker damage split), not just across separate turns.
+   Still open: CR 603.4's intervening-if clause ("when/whenever/at X, if Y, Z" — checked once at
+   trigger time and again at resolution per CR 608.2a) — a genuinely separate mechanism from the
+   once-per-turn cap (a state predicate re-checked at two different pipeline points, not a trigger-
+   count cap), deferred as its own follow-up; `submit_discard`'s CR 514.1 hand-size discard and
+   `draw_step`'s library-side retirement still discard their departed abilities outright (both would
+   be inert to wire today — neither can produce a Battlefield-departure LKI); "whenever a creature you
+   control dies" (filtered by something other than "is this exact object," i.e. a `Script`-backed or
+   filter-scoped condition) isn't representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/etc only
+   ever match a fixed identity or the ability's own controller, never a characteristic filter over
+   some other object; Untap-step triggers stay unfireable regardless (CR 502.4 grants no priority
+   there).
 8. ~~**Script API expansion**~~ — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
    CreateToken — only `GainLife` existed before this item started; ~~DrawCards~~, ~~Counters~~,
    ~~Exile~~, ~~Sacrifice~~, ~~CreateToken~~ done — all 6 complete), and a
@@ -4729,6 +4742,105 @@ requirements report.
 
 **SCOPE DEVIATIONS:** None — scry/surveil/search/tutor were named as deferred follow-ups (14a/14b) in
 the pre-slice report, not silently dropped.
+
+**UNRESOLVED:** none new — see "Explicitly not modeled" above.
+
+## Fix: wire Cleanup's own SBA pass into real trigger collection (backlog item 7a, cleanup half)
+
+Committed directly to `master` (no branch) at the human's request — a small, bounded fix picked off
+backlog item 7's own "Still open" list, not a fresh vertical slice. `ProcessState::CleanupSbaCheck`
+decided priority-vs-advance (CR 514.3) straight off its own SBA pass's event count, bypassing
+`CollectTriggers`/`PutTriggersApnap` entirely — a CR 603.10 dies-trigger (or any other trigger) raised
+by a creature dying during cleanup's own SBA check was silently dropped, never placed onto the stack.
+Flagged as an explicit gap since the `upkeep-triggers` slice (7a's first half, `AdvanceTurnStep`'s own
+fix) — this closes the second, differently-shaped half that slice's own doc comment named.
+
+**What got implemented:**
+- `engine_context.rs`: new `PipelineExit::CleanupCheck { since_ledger: usize }` — unlike the other
+  three variants (a fixed destination), the actual next `ProcessState` depends on whether the ledger
+  grew since `since_ledger` (an SBA event committed, or a trigger got pushed onto the stack): grown
+  means CR 514.3 opens a priority window, unchanged means the turn advances silently. Decided in
+  `Engine::end_pipeline_run`'s own new match arm.
+- `engine.rs`: `Engine::finish_cleanup_sba_check` reworked to stash `departed` triggered abilities into
+  `departed_triggered_abilities` and route through `ProcessState::CollectTriggers` (setting
+  `pipeline_exit` to the new `CleanupCheck` variant) instead of deciding priority-vs-advance inline —
+  shared between a fresh `CleanupSbaCheck` pass and one resumed after a paused CR 616.1/704.5j choice
+  (`resume_sba_death`'s `SbaResumeThen::CleanupSbaCheck` arm), same "one shared transition function"
+  convention `finish_sba_loop` already established for `SbaLoop`. `SbaResumeThen::CleanupSbaCheck` now
+  carries `since_ledger` through the pause so a resumed pass reaches the identical fix.
+
+**Explicitly not modeled (named, not silently guessed):**
+- CR 514.3's "another cleanup step begins after this priority window and its stack empties" —
+  `advance_turn_step`'s `(Ending, Cleanup)` arm still just rotates the turn instead of re-running
+  discard/effect-expiry; a pre-existing TODO, unaffected by this fix (still needs its own case to
+  actually reach it before it matters).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 2 new tests in
+`crates/engine/tests/phase5_cleanup_trigger_collection.rs`: a creature that drops to 0-or-less
+effective toughness (CR 704.5f) the instant its until-end-of-turn pump expires at cleanup (not a
+damage-based scenario — CR 514.2 wipes marked damage in that same step, so a lethal-*damage* setup
+can't survive to reach `CleanupSbaCheck`'s own SBA pass) now fires and resolves its Dies trigger for
+real, correctly reopening priority instead of the turn silently advancing (confirmed CR 117.5 also
+holds: priority reopens once more with the stack empty before the turn is finally allowed to advance);
+a healthy creature with nothing to trigger still advances silently as before. All prior tests
+unaffected — full workspace run: 451 passed, 0 failed.
+
+**UNRESOLVED:** none new.
+
+## Fix: add CR 603.2h once-per-turn trigger cap (backlog item 7)
+
+Also committed directly to `master`, same session, second of "a couple commits" picked off backlog
+item 7's own list. Scope: just CR 603.2h ("This ability triggers only once each turn") — CR 603.4's
+intervening-if clause is a genuinely different mechanism (a state predicate re-checked at trigger time
+*and* again at resolution, not a trigger-count cap) and stays a named, separate follow-up.
+
+**Design, confirmed before writing code:**
+- New `ConditionSpec::PrimitiveOncePerTurn(ConditionPrimitive)` variant rather than a new field on
+  `RegisteredAbility` — checked first: `RegisteredAbility` literals exist at 63 call sites across 25
+  files, `ConditionSpec` variants are matched at only 2 (both in `triggers.rs`) with zero existing
+  construction sites forced to change (adding an enum variant doesn't touch code that doesn't use it,
+  unlike a new mandatory struct field). Matching itself is identical to `Primitive`'s own — the cap is
+  a separate check layered on top.
+- New `GameState::once_per_turn_triggered: HashSet<(ObjectId, u32)>` (keyed the same way
+  `PendingTrigger`/`commands::find_ability` already key ability instances) — reset alongside
+  `lands_played_this_turn` at the same turn-rotation point (`advance_turn_step`'s `(Ending, Cleanup)`
+  arm). Touches every existing `GameState` struct literal (52 files) — same kind of mechanical,
+  bounded addition `pending_step_skips` itself was added as, per that field's own precedent already in
+  the codebase.
+- `triggers::PendingTrigger` gained a `once_per_turn: bool` field (only 2 real construction sites, both
+  in `triggers.rs` itself, plus one internal unit-test helper in `engine.rs` — no test file constructs
+  `PendingTrigger` directly) so `Engine`'s `CollectTriggers` arm knows which matches to record.
+- **The subtle part:** two qualifying events can land in the *same* `CollectTriggers` batch (e.g. CR
+  510.1c's attacker-splits-damage-across-2-blockers shape — one `AssignCombatDamage` command, one
+  batch, two `DamageDealt` events). `collect_triggers` itself can't mutate `GameState` (`&GameState`
+  only) to record a match immediately, so `Engine`'s `CollectTriggers` arm does it instead, per event,
+  before the next event in the same batch is checked — confirmed this is sound before writing it:
+  `self.state.ledger` and `self.state.once_per_turn_triggered` are disjoint fields of the same struct,
+  so mutating the latter while the `for event in &self.state.ledger[since..]` loop holds a shared
+  borrow of the former compiles fine (Rust's disjoint-field-borrow support), no restructuring needed.
+- `script.rs`: `Game.Conditions.OncePerTurn(tag)` wraps any other `Game.Conditions.*` tag — a new
+  `OncePerTurnTag` `UserData` wrapper (not a second field on `ConditionTag`) so `decode_condition_value`
+  can tell the two apart by type at its `AnyUserData::borrow` check, same "distinguish by wrapper type"
+  shape the `Primitive`/`Script` split already uses.
+
+**Explicitly not modeled (named, not silently guessed):**
+- CR 603.4's intervening-if clause — a real, separate follow-up (see backlog item 7's updated text).
+- `ConditionSpec::Script` (a custom Lua condition function) can't carry the once-per-turn cap this
+  slice — no engine-side `(source, ability_index)`-keyed slot is threaded into `ScriptContext` for a
+  script to consult itself; deferred, not silently guessed at.
+- The departed-abilities fallback loop (CR 603.10's `Dies`/`LeavesBattlefield` off an already-purged
+  source) got the same once-per-turn treatment for consistency, even though a permanent dying twice in
+  one turn (flicker + re-death) is a rare edge case - free to add alongside the main loop's fix, not
+  separately verified against a real card.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 3 new tests in
+`crates/engine/tests/phase5_trigger_once_per_turn.rs`: an attacker splitting combat damage across two
+blockers (CR 510.1c) triggers a once-per-turn "whenever this deals damage" ability exactly once despite
+two `DamageDealt` events in the same batch; the same setup *without* the cap fires it twice (pauses on
+`AwaitTriggerOrderChoice` with a 2-trigger group — confirms the capped test isn't passing for an
+unrelated reason, like only one `DamageDealt` event existing at all); the cap resets once the turn
+actually rolls over (driven through the real turn structure — Combat → End → Cleanup → next
+Untap/Upkeep — not shortcut). All prior tests unaffected — full workspace run: 454 passed, 0 failed.
 
 **UNRESOLVED:** none new — see "Explicitly not modeled" above.
 

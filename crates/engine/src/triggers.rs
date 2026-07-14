@@ -17,6 +17,13 @@ pub struct PendingTrigger {
     pub source: ObjectId,
     pub controller: PlayerId,
     pub ability_index: u32,
+    /// CR 603.2h: whether this match came from a `ConditionSpec::
+    /// PrimitiveOncePerTurn` condition — `Engine`'s `CollectTriggers` stage
+    /// reads this to know which `(source, ability_index)` pairs to record
+    /// into `GameState::once_per_turn_triggered` once this trigger is
+    /// actually collected, so a second qualifying event later in the same
+    /// turn (even within the same batch) is correctly excluded.
+    pub once_per_turn: bool,
 }
 
 /// Finds every triggered ability that matches `event` and is currently
@@ -24,10 +31,16 @@ pub struct PendingTrigger {
 /// Order in the returned `Vec` is not yet APNAP order; see `group_apnap`.
 ///
 /// `runtime` invokes each ability's `condition` callback (`None` means "no
-/// filter, always matches" per `RegisteredAbility::condition`'s doc). Once-
-/// per-turn/range/timing legality (CR 603.2-603.3) beyond the condition
-/// callback itself is still out of scope — see the IMPORTANT notes below,
-/// carried over unchanged from before this function had a real body.
+/// filter, always matches" per `RegisteredAbility::condition`'s doc).
+/// CR 603.2h ("this ability triggers only once each turn",
+/// `ConditionSpec::PrimitiveOncePerTurn`) is enforced here, against
+/// `state.once_per_turn_triggered` — see that field's own doc comment for
+/// who populates it. Range-of-influence legality (irrelevant outside
+/// multiplayer, backlog item 11) and once-per-turn *cost* restrictions on
+/// activated abilities (CR 602.5b, already handled by `commands.rs` at
+/// activation time, not a triggered-ability concern) remain out of scope —
+/// see the IMPORTANT notes below, carried over unchanged from before this
+/// function had a real body.
 ///
 /// IMPORTANT (CR 603.10): a condition checking "did this object leave a
 /// zone" consults event.kind's ZoneChange::last_known_info (if Some)
@@ -109,12 +122,22 @@ pub fn collect_triggers(
         };
         let controller = source_object.controller;
 
-        let matched = match &ability.condition {
-            None => true,
+        let (matched, once_per_turn) = match &ability.condition {
+            None => (true, false),
             // Rust-native fast path - zero Lua VM calls, see
             // ConditionPrimitive::matches's own doc comment.
             Some(ConditionSpec::Primitive(primitive)) => {
-                primitive.matches(ability.source, controller, state.active_player, &event.kind)
+                (primitive.matches(ability.source, controller, state.active_player, &event.kind), false)
+            }
+            // CR 603.2h: same matching as Primitive above, but excluded if
+            // this (source, ability_index) already triggered once this turn
+            // - see GameState::once_per_turn_triggered's own doc comment.
+            Some(ConditionSpec::PrimitiveOncePerTurn(primitive)) => {
+                let already = state.once_per_turn_triggered.contains(&(ability.source, this_index));
+                (
+                    !already && primitive.matches(ability.source, controller, state.active_player, &event.kind),
+                    true,
+                )
             }
             Some(ConditionSpec::Script(handle)) => {
                 let ctx = ScriptContext {
@@ -128,11 +151,11 @@ pub fn collect_triggers(
                 // match" rather than being surfaced to the caller - no
                 // error-reporting path exists from CollectTriggers back to
                 // a StepStatus yet.
-                runtime.invoke_condition(*handle, &ctx).unwrap_or(false)
+                (runtime.invoke_condition(*handle, &ctx).unwrap_or(false), false)
             }
         };
         if matched {
-            pending.push(PendingTrigger { source: ability.source, controller, ability_index: this_index });
+            pending.push(PendingTrigger { source: ability.source, controller, ability_index: this_index, once_per_turn });
         }
     }
 
@@ -155,10 +178,17 @@ pub fn collect_triggers(
         // DealsDamage/a Script condition/...) either assumes a live source
         // or isn't scoped to this slice (see the TODO on ConditionPrimitive
         // itself).
-        let Some(ConditionSpec::Primitive(primitive @ (ConditionPrimitive::Dies | ConditionPrimitive::LeavesBattlefield))) =
-            &ability.condition
-        else {
-            continue;
+        let (primitive, once_per_turn) = match &ability.condition {
+            Some(ConditionSpec::Primitive(
+                primitive @ (ConditionPrimitive::Dies | ConditionPrimitive::LeavesBattlefield),
+            )) => (primitive, false),
+            // CR 603.2h applies here too - a departed object's own Dies/
+            // LeavesBattlefield trigger is just as capable of carrying "This
+            // ability triggers only once each turn" as a live one's.
+            Some(ConditionSpec::PrimitiveOncePerTurn(
+                primitive @ (ConditionPrimitive::Dies | ConditionPrimitive::LeavesBattlefield),
+            )) => (primitive, true),
+            _ => continue,
         };
         let GameEventKind::ZoneChange { last_known_info: Some(lki), .. } = &event.kind else {
             continue;
@@ -166,11 +196,15 @@ pub fn collect_triggers(
         if lki.object_id != ability.source {
             continue;
         }
+        if once_per_turn && state.once_per_turn_triggered.contains(&(ability.source, this_index)) {
+            continue;
+        }
         if primitive.matches(ability.source, lki.controller, state.active_player, &event.kind) {
             pending.push(PendingTrigger {
                 source: ability.source,
                 controller: lki.controller,
                 ability_index: this_index,
+                once_per_turn,
             });
         }
     }

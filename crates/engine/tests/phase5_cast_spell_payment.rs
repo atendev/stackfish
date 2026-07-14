@@ -113,6 +113,7 @@ fn state_with_pool(pool: ManaPool) -> GameState {
         // same reasoning as phase5_cast_spell.rs.
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
     }
 }
 

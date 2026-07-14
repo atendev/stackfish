@@ -11,7 +11,9 @@
 //! bypasses `CollectTriggers` entirely via `log_events`, a separate,
 //! undocumented-until-now gap; leaves-battlefield/dies conditions - blocked
 //! on the pre-existing "source no longer resolves" gap in `collect_triggers`;
-//! once-per-turn/intervening-if legality (603.2-603.3).
+//! intervening-if legality (CR 603.4). CR 603.2h's "once each turn" cap is
+//! covered too now, but in its own file - see
+//! phase5_trigger_once_per_turn.rs.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -124,6 +126,7 @@ fn combat_damage_state(combat: CombatState) -> GameState {
         next_sequence_no: 0,
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
     }
 }
 

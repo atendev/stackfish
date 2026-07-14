@@ -101,6 +101,7 @@ fn state_with_pool(pool: ManaPool) -> GameState {
         next_sequence_no: 0,
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
     }
 }
 

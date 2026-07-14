@@ -29,6 +29,18 @@ use crate::types::zone::ZoneKind;
 struct ConditionTag(ConditionPrimitive);
 impl UserData for ConditionTag {}
 
+/// `Game.Conditions.OncePerTurn(tag)`'s return value — wraps whichever
+/// `ConditionPrimitive` `tag` (any other `ConditionTag`) already carries, so
+/// `decode_condition_value` can tell "wrap this one as `ConditionSpec::
+/// PrimitiveOncePerTurn` instead of `Primitive`" apart from a bare
+/// `ConditionTag` at decode time (CR 603.2h). A wrapper struct rather than a
+/// second field on `ConditionTag` itself, so the two Lua-visible shapes
+/// (plain tag vs. once-per-turn-wrapped tag) stay distinguishable by type at
+/// the `AnyUserData::borrow` check in `decode_condition_value`.
+#[derive(Clone, Copy)]
+struct OncePerTurnTag(ConditionPrimitive);
+impl UserData for OncePerTurnTag {}
+
 /// Same idea as `ConditionTag`, for `Game.Ops.*` — e.g. `Game.Ops.GainLife(1)`
 /// is a Lua function that returns one of these, decoded back out via
 /// `decode_operation_value`.
@@ -159,11 +171,18 @@ fn decode_condition_value(
 ) -> Result<ConditionSpec, ScriptError> {
     match value {
         Value::UserData(ud) => {
-            let tag: ConditionTag = ud
-                .borrow::<ConditionTag>()
-                .map_err(|e| ScriptError::LoadError(e.to_string()))?
-                .clone();
-            Ok(ConditionSpec::Primitive(tag.0))
+            // Try the plain tag first, then its once-per-turn-wrapped
+            // sibling - see OncePerTurnTag's own doc comment for why these
+            // are two distinct UserData types rather than one with a flag.
+            if let Ok(tag) = ud.borrow::<ConditionTag>() {
+                return Ok(ConditionSpec::Primitive(tag.0));
+            }
+            if let Ok(tag) = ud.borrow::<OncePerTurnTag>() {
+                return Ok(ConditionSpec::PrimitiveOncePerTurn(tag.0));
+            }
+            Err(ScriptError::LoadError(
+                "condition script returned an unrecognized userdata value".to_string(),
+            ))
         }
         Value::Function(function) => {
             let key = lua
@@ -1180,6 +1199,14 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     conditions.set("EachBeginningOfCombat", ConditionTag(ConditionPrimitive::BeginningOfEachCombat))?;
     conditions.set("EndStep", ConditionTag(ConditionPrimitive::BeginningOfYourEndStep))?;
     conditions.set("EachEndStep", ConditionTag(ConditionPrimitive::BeginningOfEachEndStep))?;
+    // CR 603.2h: `Game.Conditions.OncePerTurn(Game.Conditions.X)` wraps any
+    // other tag above so the resulting ability only ever triggers once each
+    // turn - see OncePerTurnTag's own doc comment.
+    let once_per_turn = lua.create_function(|_, tag: mlua::AnyUserData| {
+        let primitive = tag.borrow::<ConditionTag>()?.0;
+        Ok(OncePerTurnTag(primitive))
+    })?;
+    conditions.set("OncePerTurn", once_per_turn)?;
 
     let ops = lua.create_table()?;
     let gain_life = lua.create_function(|_, amount: i32| Ok(OperationTag(AbilityEffect::GainLife(amount))))?;

@@ -166,6 +166,7 @@ fn two_player_state(pool: ManaPool) -> GameState {
         // phase5_cast_spell.rs's two_player_state.
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
     }
 }
 

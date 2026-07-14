@@ -108,6 +108,14 @@ pub struct GameState {
     /// say "skip your next draw step" (etc.) push here; the CR 103.8a
     /// two-player turn-1 draw skip is seeded here at game start.
     pub pending_step_skips: Vec<(PlayerId, Step)>,
+    /// CR 603.2h: which triggered abilities (`(source, ability_index)`,
+    /// same indexing convention `triggers::PendingTrigger`/
+    /// `commands::find_ability` already use) have already triggered this
+    /// turn, for a `ConditionSpec::PrimitiveOncePerTurn` condition ("This
+    /// ability triggers only once each turn"). Checked and populated by
+    /// `triggers::collect_triggers`/`Engine`'s `CollectTriggers` stage;
+    /// reset alongside `lands_played_this_turn` whenever a new turn begins.
+    pub once_per_turn_triggered: std::collections::HashSet<(ObjectId, u32)>,
 }
 
 impl GameState {
@@ -213,6 +221,7 @@ mod tests {
             next_sequence_no: 0,
             next_object_id: 1,
             pending_step_skips: Vec::new(),
+            once_per_turn_triggered: std::collections::HashSet::new(),
         };
 
         let card = ObjectId(0);

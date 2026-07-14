@@ -1142,6 +1142,7 @@ impl Engine {
             next_sequence_no,
             next_object_id,
             pending_step_skips: Vec::new(),
+            once_per_turn_triggered: std::collections::HashSet::new(),
         };
 
         Engine {
@@ -2362,12 +2363,23 @@ impl Engine {
             ProcessState::CollectTriggers { since } => {
                 let mut pending = Vec::new();
                 for event in &self.state.ledger[since..] {
-                    pending.extend(triggers::collect_triggers(
+                    let matches = triggers::collect_triggers(
                         &self.state,
                         event,
                         &self.script_runtime,
                         &self.departed_triggered_abilities,
-                    ));
+                    );
+                    // CR 603.2h: record a once-per-turn match now, before
+                    // the next event in this same batch is checked -
+                    // collect_triggers's own cap check reads this same set,
+                    // so a second qualifying event later in this batch (not
+                    // just a later turn) is correctly excluded too.
+                    for trigger in &matches {
+                        if trigger.once_per_turn {
+                            self.state.once_per_turn_triggered.insert((trigger.source, trigger.ability_index));
+                        }
+                    }
+                    pending.extend(matches);
                 }
                 let groups = triggers::group_apnap(&self.state, pending);
                 self.process_state =
@@ -2997,6 +3009,10 @@ impl Engine {
                 self.state.step = Step::Untap;
                 // CR 305.2's per-turn land-drop count resets with the turn.
                 self.state.lands_played_this_turn.clear();
+                // CR 603.2h's "only once each turn" cap resets with the turn
+                // too - same reasoning, a new turn is a fresh "turn" for
+                // this restriction.
+                self.state.once_per_turn_triggered.clear();
                 // CR 302.6/602.5a: the new active player's most recent
                 // turn now begins at this turn_number.
                 self.state
@@ -3078,11 +3094,12 @@ mod tests {
             next_sequence_no: 0,
             next_object_id: 0,
             pending_step_skips: Vec::new(),
+            once_per_turn_triggered: std::collections::HashSet::new(),
         }
     }
 
     fn trigger(id: u64, controller: PlayerId) -> PendingTrigger {
-        PendingTrigger { source: ObjectId(id), controller, ability_index: 0 }
+        PendingTrigger { source: ObjectId(id), controller, ability_index: 0, once_per_turn: false }
     }
 
     #[test]
