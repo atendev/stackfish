@@ -2174,10 +2174,14 @@ shift, don't treat it as fixed once written.
     currently unreachable through actual gameplay — nothing increments `commander_damage_taken` yet
     (no "is this object a commander" concept exists — that's item 11 below). **Split out, not
     bundled in:**
-    10a. **Legend rule (704.5j) / world rule (704.5k)** — structurally different from the other
-       three: destroys permanents via a *player choice* among duplicates, not a player-loss check.
-       Needs its own choice-pause design (like CR 616.1's `NeedsOrderingChoice`, but for a different
-       decision) — its own named follow-up, still open.
+    10a. ~~**Legend rule (704.5j) / world rule (704.5k)**~~ — done, `phase5/legend-world-rule` slice
+       (docs/implementation.md, below). Legend rule is a real player choice
+       (`SbaOutcome::NeedsLegendRuleChoice`/`Engine::submit_legend_rule_choice`), same
+       `ProcessState`/`StepStatus` pause-and-resume shape CR 616.1's `NeedsOrderingChoice` already
+       established; the losers are destroyed by feeding them into the very same `sba::resolve_deaths`
+       every other SBA death uses, so a "would die, exile instead" replacement effect on a losing
+       legendary still applies for free. World rule is fully deterministic (no player choice — CR
+       704.5k resolves purely on timestamp) and just joins the ordinary dying-permanent list.
 11. **Multiplayer/Commander generalization** — combat is 2-player only today (`CombatState`/
     `DeclareBlockers` assume one defending player); command-zone tax/damage/elimination-without-
     ending-the-game aren't wired despite being named in DESIGN.md's Commander section.
@@ -4467,6 +4471,111 @@ signature is unchanged; only the bodies grew.
   going exactly as before.
 - `submit_discard`'s CR 514.1 hand-size discard and `draw_step`'s library-side retirement still
   discard departed Triggered abilities outright (pre-existing gap, unrelated, untouched).
+
+## Phase 5: phase5/legend-world-rule slice (backlog item 10a)
+
+Branch `phase5/legend-world-rule`, off master. Slice backlog item 10a, split out of the
+sba-player-loss slice: CR 704.5j (legend rule) and CR 704.5k (world rule) — both destroy permanents
+via a mechanism structurally different from "this player loses" (704.5a-c/903.10a), so they got their
+own follow-up rather than being forced into `apply_player_loss`'s shape.
+
+**Design, confirmed before writing code:**
+- **Legend rule reuses `sba::resolve_deaths` for the actual destruction.** The only genuinely new
+  piece is the player's choice of which duplicate to keep — once made, the losers are just another
+  `pending_deaths: VecDeque<ObjectId>` fed into the exact same replacement-checked, CR-400.7-new-id,
+  `commit_death`-based path every other SBA death already uses. No bespoke destruction logic exists
+  anywhere in this slice.
+- New `SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far }` — `sba.rs`'s new
+  `find_legend_rule_group` groups battlefield objects by `(controller, effective name)` where
+  `effective.supertypes` contains `Legendary` (queried via `layers::effective_characteristics`, same
+  "always query through the layer engine" convention `collect_dying_creatures` already established —
+  future-proofs against a not-yet-built "becomes legendary"/name-changing effect for free). Not
+  creature-specific — legend rule applies to any permanent type. Only the *first* violating group
+  pauses; `check_state_based_actions` re-invokes fresh after each choice resolves, so multiple
+  simultaneous violations resolve one at a time across passes, same as CR 616.1's own ordering-choice
+  pause already does. Candidates sorted by `ObjectId` for determinism (`state.objects` is a
+  `HashMap`; iteration order isn't guaranteed) — which required adding `PartialOrd`/`Ord` to
+  `PlayerId`/`ObjectId` (purely a deterministic sort key, no rules meaning).
+- New `SbaOutcome::NeedsLegendRuleChoice` wired at both existing `SbaOutcome::NeedsOrderingChoice`
+  call sites (`ProcessState::SbaLoop` and `CleanupSbaCheck` in `engine.rs`) via a new parallel
+  `ProcessState::AwaitingLegendRuleChoice { player, candidates, then: SbaResumeThen }` and
+  `StepStatus::AwaitingLegendRuleChoice` — `then` reuses the existing `SbaResumeThen` enum
+  `ReplacementResumeTarget::SbaDeath` already has, since both pause shapes resume into the same two
+  possible callers. New `Engine::submit_legend_rule_choice(kept: ObjectId)` validates the candidate,
+  then calls `self.resume_sba_death(losers, Vec::new(), Vec::new(), then)` — the exact same helper
+  `submit_replacement_choice` already uses — so a replacement effect on a losing legendary correctly
+  re-pauses on the existing `AwaitingReplacementChoice`, not silently skipped. New
+  `LegendRuleChoiceError { NotAwaitingChoice, InvalidCandidate }`, mirroring `ReplacementChoiceError`
+  exactly.
+- **World rule is fully deterministic** (CR 704.5k resolves purely on "shortest time as World" —
+  no player choice at all) — new `collect_world_rule_losers` (independent of
+  `collect_dying_creatures`'s creature-only filter, since World permanents aren't necessarily
+  creatures) returns the losing ids directly; `check_state_based_actions` merges them into the same
+  `dying` vec already fed to `resolve_deaths`. "Shortest time as World" = highest `timestamp` (since
+  that value only ever increases as the game proceeds, the most-recently-arrived object has had the
+  supertype the least time) — the one exception, everyone else dies. A tie for the maximum timestamp
+  kills *all* World permanents, not just the tied ones, per CR 704.5k's own explicit tie clause. A
+  duplicate id from a World creature also independently dying to lethal damage is harmless —
+  `resolve_deaths`'s existing "already moved, skip" guard handles it for free, no dedup needed.
+- Checked before writing code: no TOML/CLI scenario fixture exists for the CR 616.1 replacement
+  ordering-choice pause either (`phase5_sba_death_replacement.rs` has no companion `.toml`) — the
+  scenario crate's step vocabulary has never needed a "submit a mid-pipeline choice" step type.
+  Consistent with that precedent, this slice's legend-rule pause/resume is verified via `Engine`
+  tests only, not a new TOML step type (would be new scope, not needed for correctness).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 10 new tests in
+`crates/engine/tests/phase5_legend_world_rule.rs` (two same-name legendaries under one controller
+pause with both candidates offered; three same-name legendaries offer all three, not just one other,
+per CR 704.5j's "the rest" wording; different controllers with the same name aren't grouped;
+`submit_legend_rule_choice` rejects an invalid candidate and rejects when not awaiting; a real
+end-to-end `Engine` pipeline test where choosing one destroys the other through the actual
+replacement-checked pipeline; a "would die, exile instead" replacement effect on the losing
+legendary correctly exiles it instead of touching the graveyard; world rule destroys all but the
+most-recently-arrived permanent automatically, a tie destroys all of them, and a single World
+permanent is untouched), all 431 prior tests unaffected — full workspace run: 441 passed, 0 failed.
+
+**What got implemented:**
+- `types/ids.rs`: `PartialOrd`/`Ord` added to `PlayerId`/`ObjectId` (doc comments note these exist
+  purely as a deterministic sort/map key, not a rules concept).
+- `sba.rs`: `SbaOutcome::NeedsLegendRuleChoice` variant. New `find_legend_rule_group`/
+  `collect_world_rule_losers` functions. `check_state_based_actions` checks legend rule (pausing on
+  the first violation) before creature deaths, and folds world-rule losers into the existing dying
+  list. Module doc comment and trailing TODO block updated to match.
+- `engine.rs`: `LegendRuleChoiceError`, `StepStatus::AwaitingLegendRuleChoice`,
+  `ProcessState::AwaitingLegendRuleChoice`, the "nothing to do until answered" `step()` arm for it,
+  and `Engine::submit_legend_rule_choice`. Both `SbaLoop`/`CleanupSbaCheck` arms gained a
+  `SbaOutcome::NeedsLegendRuleChoice` match case.
+- `crates/scenario/src/lib.rs`: `drain`'s exhaustive `StepStatus` match gained
+  `AwaitingLegendRuleChoice` alongside the other pause variants (same "stop draining, this scenario
+  run reached a pause" treatment every other pause status already gets).
+- 4 existing test files' own exhaustive `SbaOutcome` matches (`phase5_sba_basics.rs`,
+  `phase5_layer_engine_basics.rs`, `phase5_layer_engine_types_colors.rs`,
+  `phase5_layer_engine_cda.rs`) gained a `NeedsLegendRuleChoice` arm (a panic, same as their existing
+  `NeedsOrderingChoice` arm — none of those slices' fixtures expect either pause).
+
+**STRUCT DEVIATIONS:**
+- `PlayerId`/`ObjectId` gaining `PartialOrd`/`Ord` — anticipated in the pre-slice requirements report
+  (needed for deterministic grouping/sorting over a `HashMap`'s unordered iteration), not discovered
+  mid-implementation.
+
+**INTERFACE DEVIATIONS:** None beyond what the pre-slice report's "Design" section already
+named — the new `ProcessState`/`StepStatus` variants and `submit_legend_rule_choice`'s signature
+were all anticipated by mirroring `AwaitingReplacementChoice`/`submit_replacement_choice` exactly.
+
+**SCOPE DEVIATIONS:**
+- 4 existing test files' `SbaOutcome` matches needed a new arm (mechanical, anticipated as expected
+  churn — any exhaustive match over `SbaOutcome` needed updating once a new variant was added, same
+  as every other enum-growing slice in this codebase).
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- CR 801.12's "range of influence" restriction on the world rule — not modeled; applied globally
+  across all players, correct for this engine's 2-player default scope, would need revisiting if
+  true multiplayer (backlog item 11) ever lands.
+- A legendary permanent becoming legendary via a continuous effect, or a name-changing effect (layer
+  3) — neither primitive exists anywhere in this engine yet; the query is future-proofed for the
+  former (via `layers::effective_characteristics`) but nothing can construct either case today.
+- No TOML/CLI scenario fixture — consistent with the pre-existing precedent CR 616.1's own
+  pause-shaped slice already set (see "Design" above), not a gap unique to this slice.
 
 ## Mistakes caught (don't repeat)
 

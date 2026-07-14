@@ -1,11 +1,17 @@
 /// Index into the turn-order player list. Stable for the lifetime of the game.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// `PartialOrd`/`Ord` exist purely as a deterministic sort/map key (e.g.
+/// `sba::find_legend_rule_group`'s `BTreeMap` grouping) — not a meaningful
+/// "which player is greater" rule concept.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct PlayerId(pub u32);
 
 /// Unique per `GameObject` instance. A zone change that creates a "new object"
 /// (per MTG rules) mints a new `ObjectId` rather than reusing the old one.
 /// `Hash`/`Eq` so it can key the object store map in `GameState`.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// `PartialOrd`/`Ord` exist purely as a deterministic sort key (e.g.
+/// `sba::find_legend_rule_group`'s candidate sort) — a `HashMap`'s iteration
+/// order isn't guaranteed, this just gives callers a stable tiebreak.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ObjectId(pub u64);
 
 /// Links a new `ObjectId` back to the object it succeeded, if any.
