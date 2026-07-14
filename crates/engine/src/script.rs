@@ -1200,6 +1200,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         Ok(OperationTag(AbilityEffect::CreateToken { spec, count: count.unwrap_or(1) }))
     })?;
     ops.set("CreateToken", create_token)?;
+    ops.set("Shuffle", OperationTag(AbilityEffect::Shuffle))?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;
