@@ -137,6 +137,22 @@ pub enum AbilityEffect {
     /// enforcement deferred (tokens currently go to graveyard like normal
     /// permanents). Blocked on a zone-watch hook in SBA/replacement layer.
     CreateToken { spec: TokenSpec, count: u32 },
+    /// The `Game.Ops.Shuffle()` primitive — the resolving `StackObject`'s
+    /// controller shuffles their own library (CR 701.19b: "a player who
+    /// shuffles a library shuffles their own unless instructed otherwise").
+    /// No target — same "always the controller" shape `DrawCards`/`GainLife`
+    /// already use, not `Damage`/`Destroy`/`Counters`'s object-target shape.
+    /// Resolved by calling the existing `Engine::shuffle_library` helper
+    /// (previously pregame-setup-only) directly, which already mutates state
+    /// and logs the real `LibraryShuffled`/`RngDrawn` events itself — no
+    /// `CommitEvents` special-case needed, same convention `DrawCards`
+    /// established for `draw_one_card`. No fields — a toggle, not a value,
+    /// same shape as `Destroy`/`Sacrifice`/`Exile`.
+    ///
+    /// TODO: `Target::Player` "target player shuffles their library" is rare
+    /// but real — deferred as a named follow-up, same precedent `DrawCards`
+    /// itself already set for its own target gap.
+    Shuffle,
 }
 
 /// Which named token to create — covers the fixed-spec artifact tokens.

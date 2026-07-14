@@ -2188,8 +2188,17 @@ shift, don't treat it as fixed once written.
 12. **First/double strike (CR 702.4/702.7)** and remaining combat-keyword edges.
 13. **Mana system completeness** — lands/abilities that add more than one mana or a player-chosen
     color, beyond the flat `AbilityEffect::AddMana(Vec<ManaUnit>)` shape.
-14. **Zone/library helpers** — `Zone::new`/`push_top`/`top` still `todo!()`; needed for shuffle/
-    scry/surveil/search/tutor effects.
+14. ~~**Shuffle primitive**~~ — done, `phase5/script-ops-shuffle` slice (docs/implementation.md,
+    below). Correction to this item's original text: `Zone::new`/`push_top`/`top` were never
+    `todo!()` — verified real on inspection, same class of stale-doc gap the 6a/6b cost-completeness
+    items had. `Engine::shuffle_library` also already existed (pregame-setup-only, private); this
+    slice just exposed it as `AbilityEffect::Shuffle`/`Game.Ops.Shuffle()`. Split off as their own
+    follow-ups, too large to bundle here:
+    14a. **Scry/Surveil** — needs a genuine new player-choice pause (look at top N, decide per-card
+    top-or-bottom/graveyard); `PlayerActionKind::MakeChoice` is currently a pure stub. Same magnitude
+    of work as the legend-rule slice's choice-pause, not a helper-function gap.
+    14b. **Search/tutor** — needs the same choice machinery plus a "look at the whole library"
+    visibility exception; this engine's hidden-info model doesn't touch that yet.
 15. ~~**CR 601.6 unwind**~~ — done, `phase5/payment-unwind` slice (docs/implementation.md, below).
     New `Engine::unwind_payment` (and matching `unwind_payment` TOML/CLI step) lets the caller
     explicitly abandon a cast/activation instead of endlessly resubmitting a `PaymentPlan` — reuses
@@ -4669,6 +4678,59 @@ anticipated by name in the report's "Design" section before implementation start
 
 **UNRESOLVED:** none new — see "Explicitly not modeled" above, all named and scoped before writing
 code.
+
+## Phase 5: phase5/script-ops-shuffle slice (backlog item 14)
+
+Branch `phase5/script-ops-shuffle`, off master. Slice backlog item 14. **Correction to the backlog
+first:** `Zone::new`/`push_top`/`top` (the item's literal claim) are not `todo!()` — verified real by
+reading `zone.rs` directly, same class of stale-doc gap the 6a/6b cost-completeness items turned out
+to have. What was actually missing: a real, generic `Engine::shuffle_library(player)` already existed
+(Fisher-Yates over `state.rng`, logs `LibraryShuffled`/`RngDrawn`) — but it was private, called only
+from pregame setup. Nothing let a card/script trigger it mid-game.
+
+Scry/surveil/search/tutor were bundled into this same backlog item originally — too coarse. Each
+needs a genuine new player-choice pause (`PlayerActionKind::MakeChoice` is a pure stub) or a hidden-
+info exception this engine doesn't have yet — the same magnitude of work the legend-rule slice was,
+not a "zone/library helper" gap. Split off as 14a (scry/surveil) and 14b (search/tutor), named but not
+implemented this slice.
+
+**What got implemented:**
+- `types/ability.rs`: `AbilityEffect::Shuffle` — no target, always the resolving `StackObject`'s
+  controller's own library (CR 701.19b), same "controller only" shape `DrawCards`/`GainLife` already
+  established, not `Damage`/`Destroy`'s object-target shape.
+- `engine.rs`'s `ResolveStackTop`: a new `Some(AbilityEffect::Shuffle)` arm calling
+  `self.shuffle_library(top.controller)` directly — that helper already mutates state and logs its
+  own real events, so no `CommitEvents` special-case needed, same convention `DrawCards` established
+  for `draw_one_card`.
+- `commands.rs`'s `ActivateAbility` non-mana-effect match gained `Some(AbilityEffect::Shuffle)`
+  alongside the other primitives.
+- `Game.Ops.Shuffle()` binding (script.rs) — a toggle value, not a function, same pattern
+  `Destroy`/`Sacrifice`/`Exile` already use (no arguments).
+
+**Explicitly not modeled (named, not silently guessed):**
+- `Target::Player` ("target player shuffles their library") — controller-only this slice, same
+  precedent `DrawCards` itself set for its own target gap.
+- Scry/Surveil (14a) and Search/tutor (14b) — split off as their own follow-ups per the correction
+  above.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 4 new tests in
+`crates/engine/tests/phase5_script_ops_shuffle.rs` (a cast spell with `Shuffle` reorders the library
+deterministically under the fixed test seed — same seed run twice produces identical results — and
+logs `LibraryShuffled`; an activated ability with `Shuffle` works identically; shuffling an empty or
+single-card library is a harmless no-op, zero `RngDrawn` events since there's nothing to swap; a
+subsequent `DrawCards` spell actually draws whatever the shuffle put on top, not just "an event
+fired"), all 445 prior tests unaffected — full workspace run: 449 passed, 0 failed.
+
+**STRUCT DEVIATIONS:** None — `AbilityEffect::Shuffle` was anticipated exactly in the pre-slice
+requirements report.
+
+**INTERFACE DEVIATIONS:** None — reusing the existing (now-called-from-a-new-site)
+`Engine::shuffle_library` was the report's stated design.
+
+**SCOPE DEVIATIONS:** None — scry/surveil/search/tutor were named as deferred follow-ups (14a/14b) in
+the pre-slice report, not silently dropped.
+
+**UNRESOLVED:** none new — see "Explicitly not modeled" above.
 
 ## Mistakes caught (don't repeat)
 

@@ -2098,6 +2098,15 @@ impl Engine {
                                     }
                                 }
                             }
+                            // CR 701.19b: no target, always top.controller
+                            // (same "controller only" shape DrawCards/
+                            // GainLife use). shuffle_library already mutates
+                            // state and logs its own LibraryShuffled/RngDrawn
+                            // events - no events pushed here, same "already
+                            // happened" convention DrawCards established.
+                            Some(AbilityEffect::Shuffle) => {
+                                self.shuffle_library(top.controller);
+                            }
                             // CR 111: create one or more token permanents on
                             // the battlefield under the controller's control.
                             // Named tokens (Clue, Food) get their activated
