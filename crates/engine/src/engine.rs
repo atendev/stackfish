@@ -957,8 +957,12 @@ impl Engine {
     /// `StepStatus::AwaitingDiscard` — `cards` must be exactly the right
     /// number of cards from the active player's hand. Moves each hand →
     /// graveyard via the same CR 400.7 new-`ObjectId` convention every other
-    /// zone move uses, then queues `ProcessState::CleanupSbaCheck` so the
-    /// next `step()` decides whether CR 514.3's priority exception applies.
+    /// zone move uses, then routes the resulting `ZoneChange` events through
+    /// `ProcessState::CollectTriggers` (`PipelineExit::CleanupSbaCheck`
+    /// unconditionally continues on to `ProcessState::CleanupSbaCheck` once
+    /// any `DiscardsCard`/`EachDiscardsCard` trigger has had a chance to be
+    /// placed) so the next `step()` decides whether CR 514.3's priority
+    /// exception applies.
     ///
     /// TODO: discard can be replaced (e.g. Leyline of the Void redirects
     /// discarded cards to exile) but replacement effects aren't implemented
@@ -992,6 +996,7 @@ impl Engine {
 
         // Move each card hand → graveyard (CR 400.7: new ObjectId per move).
         let mut events: Vec<GameEventKind> = Vec::with_capacity(cards.len());
+        let mut departed_all: Vec<RegisteredAbility> = Vec::new();
         for card in cards {
             let last_known_info =
                 self.state.object(card).expect("validated above").clone();
@@ -1010,10 +1015,10 @@ impl Engine {
                 .remove(card);
             // CR 400.7: discarded, no remap follows - purge any
             // RegisteredAbility still pointing at the hand-zone id. Departed
-            // Triggered abilities discarded here - discard-to-hand-size
-            // isn't wired to the CR 603.10 LKI stash this slice (see
-            // retire_object's own doc comment).
-            let _ = commands::retire_object(&mut self.state, card);
+            // Triggered abilities stashed below (CR 603.10 LKI) - now that
+            // ConditionPrimitive::DiscardsCard/EachDiscardsCard exist, this
+            // is reachable in practice, unlike before this fix.
+            departed_all.extend(commands::retire_object(&mut self.state, card));
             self.state
                 .zone_mut(ZoneKind::Graveyard, Some(owner))
                 .expect("graveyard zone must exist")
@@ -1028,6 +1033,17 @@ impl Engine {
             });
         }
 
+        // Route through CollectTriggers/PutTriggersApnap instead of
+        // committing directly then jumping straight to CleanupSbaCheck -
+        // this discard's own ZoneChange events (and any DiscardsCard/
+        // EachDiscardsCard trigger they raise) used to bypass trigger
+        // collection entirely, the same AdvanceTurnStep-shaped pipeline gap
+        // this backlog item's Untap fix closed elsewhere.
+        // PipelineExit::CleanupSbaCheck (unconditional, unlike
+        // PipelineExit::CleanupCheck) is what still gets to the SBA check
+        // afterward regardless of whether anything triggered, matching
+        // begin_cleanup_step's own discard-then-SBA-check sequencing.
+        let since_ledger = self.state.ledger.len();
         for kind in events {
             let event_id = self.state.allocate_event_id();
             let sequence_no = self.state.allocate_sequence_no();
@@ -1039,8 +1055,9 @@ impl Engine {
                 parent_event: None,
             });
         }
-
-        self.process_state = ProcessState::CleanupSbaCheck;
+        self.departed_triggered_abilities.extend(departed_all);
+        self.pipeline_exit = PipelineExit::CleanupSbaCheck;
+        self.process_state = ProcessState::CollectTriggers { since: since_ledger };
         Ok(())
     }
 
@@ -1586,13 +1603,24 @@ impl Engine {
             PipelineExit::ResolveStackTop => ProcessState::ResolveStackTop,
             PipelineExit::AdvanceTurnStep => ProcessState::AdvanceTurnStep,
             PipelineExit::CleanupCheck { since_ledger } => {
-                if self.state.ledger.len() > since_ledger {
+                // Ledger growth catches an SBA event or a trigger placed
+                // during *this* pass; `!stack.is_empty()` catches a trigger
+                // placed earlier in the same cleanup sequence (e.g.
+                // Engine::submit_discard's own DiscardsCard trigger,
+                // reached via PipelineExit::CleanupSbaCheck just before
+                // this SBA pass ran) that this pass's own since_ledger
+                // marker can't see, since it was captured after that
+                // trigger already landed. Either one means CR 514.3 says
+                // open a priority window; only both being false means
+                // nothing at all is waiting and the turn advances silently.
+                if self.state.ledger.len() > since_ledger || !self.state.stack.is_empty() {
                     self.state.priority_player = self.state.active_player;
                     ProcessState::PriorityWindow
                 } else {
                     ProcessState::AdvanceTurnStep
                 }
             }
+            PipelineExit::CleanupSbaCheck => ProcessState::CleanupSbaCheck,
         }
     }
 
@@ -2847,10 +2875,12 @@ impl Engine {
             .remove(card);
         // CR 400.7: drawn, no remap follows - purge any RegisteredAbility
         // still pointing at the library-zone id. Departed Triggered
-        // abilities discarded here - draw-step library retirement isn't
-        // wired to the CR 603.10 LKI stash this slice (see retire_object's
-        // own doc comment).
-        let _ = commands::retire_object(&mut self.state, card);
+        // abilities stashed for consistency with every other retire_object
+        // call site, though still practically unreachable - no
+        // ConditionPrimitive matches a Library-departure LKI (a card sitting
+        // in the library wouldn't have a live triggered ability caring about
+        // itself leaving it anyway).
+        self.departed_triggered_abilities.extend(commands::retire_object(&mut self.state, card));
         self.state
             .zone_mut(ZoneKind::Hand, Some(player))
             .expect("player has no hand zone")

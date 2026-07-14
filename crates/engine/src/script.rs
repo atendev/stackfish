@@ -1197,6 +1197,8 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     conditions.set("LeavesBattlefield", ConditionTag(ConditionPrimitive::LeavesBattlefield))?;
     conditions.set("DrawsCard", ConditionTag(ConditionPrimitive::DrawsCard))?;
     conditions.set("EachDrawsCard", ConditionTag(ConditionPrimitive::EachDrawsCard))?;
+    conditions.set("DiscardsCard", ConditionTag(ConditionPrimitive::DiscardsCard))?;
+    conditions.set("EachDiscardsCard", ConditionTag(ConditionPrimitive::EachDiscardsCard))?;
     conditions.set("BeginningOfCombat", ConditionTag(ConditionPrimitive::BeginningOfYourCombat))?;
     conditions.set("EachBeginningOfCombat", ConditionTag(ConditionPrimitive::BeginningOfEachCombat))?;
     conditions.set("EndStep", ConditionTag(ConditionPrimitive::BeginningOfYourEndStep))?;

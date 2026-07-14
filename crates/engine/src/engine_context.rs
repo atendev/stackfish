@@ -31,4 +31,11 @@ pub enum PipelineExit {
     /// window; if not, the turn advances silently instead. See
     /// `Engine::end_pipeline_run`'s own match arm.
     CleanupCheck { since_ledger: usize },
+    /// CR 514.1/514.3: `Engine::submit_discard`'s own exit — unlike
+    /// `CleanupCheck` above, this is unconditional: the cleanup-discard
+    /// turn-based action always falls through to a fresh SBA check
+    /// afterward regardless of whether anything triggered off it, same
+    /// sequencing `begin_cleanup_step` itself already follows for the
+    /// discard-then-SBA-check order.
+    CleanupSbaCheck,
 }

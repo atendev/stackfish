@@ -287,6 +287,25 @@ pub enum ConditionPrimitive {
     /// `DrawsCard` (e.g. Underworld Dreams-style effects), same relationship
     /// `BeginningOfEachUpkeep` has to `BeginningOfYourUpkeep`.
     EachDrawsCard,
+    /// "Whenever you discard a card" — matches a `ZoneChange` event moving
+    /// *any* card from hand to graveyard, filtered to only the ability
+    /// controller's own discards via `last_known_info.controller`, same
+    /// "zone-shape only" matching `DrawsCard` already established (a
+    /// Hand→Graveyard move is always a discard in this engine today — no
+    /// other effect produces that shape yet, matching `DrawsCard`'s own
+    /// "no separate flag on the event" caveat). Reachable now that
+    /// `Engine::submit_discard` (CR 514.1's cleanup hand-size discard)
+    /// routes its events through `CollectTriggers` instead of committing
+    /// them directly — the same `AdvanceTurnStep`-shaped pipeline-bypass gap
+    /// `upkeep-triggers`/this backlog item's Untap fix already closed
+    /// elsewhere. A cost-payment `Discard` (`commands::
+    /// move_to_graveyard_for_cost`) already reached the real pipeline before
+    /// this fix, so both discard sources are covered.
+    DiscardsCard,
+    /// "Whenever a player discards a card" — the controller-agnostic sibling
+    /// of `DiscardsCard` (e.g. Waste Not/Megrim-style effects), same
+    /// relationship `EachDrawsCard` has to `DrawsCard`.
+    EachDiscardsCard,
     /// "At the beginning of combat on your turn" (CR 507) — matches
     /// `GameEventKind::StepStarted{step: Step::BeginningOfCombat}` only when
     /// the ability's controller is also the active player. Same reachability
@@ -389,6 +408,15 @@ impl ConditionPrimitive {
             ConditionPrimitive::EachDrawsCard => matches!(
                 event,
                 GameEventKind::ZoneChange { from: ZoneKind::Library, to: ZoneKind::Hand, .. }
+            ),
+            ConditionPrimitive::DiscardsCard => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Hand, to: ZoneKind::Graveyard, last_known_info: Some(lki), .. }
+                    if lki.controller == controller
+            ),
+            ConditionPrimitive::EachDiscardsCard => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Hand, to: ZoneKind::Graveyard, .. }
             ),
             ConditionPrimitive::BeginningOfYourCombat => {
                 controller == active_player
@@ -810,6 +838,80 @@ mod tests {
             last_known_info: None,
         };
         assert!(!ConditionPrimitive::EachDrawsCard.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    fn discarded_card_last_known_info(discarder: PlayerId) -> crate::types::object::GameObject {
+        let mut lki = dummy_last_known_info(ObjectId(42));
+        lki.owner = discarder;
+        lki.controller = discarder;
+        lki.zone = ZoneKind::Hand;
+        lki
+    }
+
+    #[test]
+    fn discards_card_matches_the_controllers_own_discard() {
+        let source = ObjectId(0);
+        let discarder = PlayerId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(discarded_card_last_known_info(discarder)),
+        };
+        assert!(ConditionPrimitive::DiscardsCard.matches(source, discarder, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn discards_card_does_not_match_a_different_players_discard() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let discarder = PlayerId(1);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(discarded_card_last_known_info(discarder)),
+        };
+        assert!(!ConditionPrimitive::DiscardsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn discards_card_does_not_match_a_non_discard_zone_change() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Library,
+            to: ZoneKind::Hand,
+            last_known_info: Some(discarded_card_last_known_info(controller)),
+        };
+        assert!(!ConditionPrimitive::DiscardsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn each_discards_card_matches_regardless_of_who_discarded() {
+        let source = ObjectId(0);
+        let controller = PlayerId(0);
+        let discarder = PlayerId(1);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(discarded_card_last_known_info(discarder)),
+        };
+        assert!(ConditionPrimitive::EachDiscardsCard.matches(source, controller, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn each_discards_card_does_not_match_a_non_discard_zone_change() {
+        let source = ObjectId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Library,
+            to: ZoneKind::Hand,
+            last_known_info: None,
+        };
+        assert!(!ConditionPrimitive::EachDiscardsCard.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
     #[test]

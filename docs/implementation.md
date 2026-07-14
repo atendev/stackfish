@@ -2146,17 +2146,30 @@ shift, don't treat it as fixed once written.
    `triggers::collect_triggers` against a new `GameState::once_per_turn_triggered` set (reset each
    turn alongside `lands_played_this_turn`) — correctly caps even two qualifying events collected in
    the *same* batch (e.g. CR 510.1c's multi-blocker damage split), not just across separate turns.
+   ~~Untap-step triggers~~ — done, `master` (docs/implementation.md, below, "make Untap-step triggers
+   fireable"): `AdvanceTurnStep`'s `Untap` branch routes through the real pipeline too now, via
+   `PipelineExit::AdvanceTurnStep` instead of `BackToPriority` so it still doesn't open the priority
+   window CR 502.4 doesn't grant — `ConditionPrimitive::BeginningOfYourUntap`/`BeginningOfEachUntap`
+   proves it (rare on real cards, but real).
+   ~~`submit_discard`'s CR 514.1 hand-size discard bypasses `CollectTriggers`~~ — done, `master`
+   (docs/implementation.md, below, "wire submit_discard into real trigger collection"): routes through
+   `CollectTriggers`/`PutTriggersApnap` via a new unconditional `PipelineExit::CleanupSbaCheck`, proven
+   with new `ConditionPrimitive::DiscardsCard`/`EachDiscardsCard`. Surfaced a real bug in the
+   `CleanupCheck` fix above while wiring this — its priority-vs-advance check only looked at ledger
+   growth *since its own since_ledger marker*, missing a trigger placed earlier in the same cleanup
+   sequence (exactly this discard case); fixed by also checking `!stack.is_empty()`. `draw_step`'s
+   library-side retirement also stashes its departed abilities now, for consistency, though still
+   practically unreachable (no card has a library-card ability that cares about itself leaving the
+   library). Cost-payment `Discard` (`move_to_graveyard_for_cost`) already reached the real pipeline
+   before this fix.
    Still open: CR 603.4's intervening-if clause ("when/whenever/at X, if Y, Z" — checked once at
    trigger time and again at resolution per CR 608.2a) — a genuinely separate mechanism from the
    once-per-turn cap (a state predicate re-checked at two different pipeline points, not a trigger-
-   count cap), deferred as its own follow-up; `submit_discard`'s CR 514.1 hand-size discard and
-   `draw_step`'s library-side retirement still discard their departed abilities outright (both would
-   be inert to wire today — neither can produce a Battlefield-departure LKI); "whenever a creature you
-   control dies" (filtered by something other than "is this exact object," i.e. a `Script`-backed or
-   filter-scoped condition) isn't representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/etc only
-   ever match a fixed identity or the ability's own controller, never a characteristic filter over
-   some other object; Untap-step triggers stay unfireable regardless (CR 502.4 grants no priority
-   there).
+   count cap), deferred as its own follow-up; "whenever a creature you control dies" (filtered by
+   something other than "is this exact object," i.e. a `Script`-backed or filter-scoped condition)
+   isn't representable yet — `Dies`/`LeavesBattlefield`/`DrawsCard`/`DiscardsCard`/etc only ever match
+   a fixed identity or the ability's own controller, never a characteristic filter over some other
+   object.
 8. ~~**Script API expansion**~~ — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
    CreateToken — only `GainLife` existed before this item started; ~~DrawCards~~, ~~Counters~~,
    ~~Exile~~, ~~Sacrifice~~, ~~CreateToken~~ done — all 6 complete), and a
@@ -4841,6 +4854,88 @@ two `DamageDealt` events in the same batch; the same setup *without* the cap fir
 unrelated reason, like only one `DamageDealt` event existing at all); the cap resets once the turn
 actually rolls over (driven through the real turn structure — Combat → End → Cleanup → next
 Untap/Upkeep — not shortcut). All prior tests unaffected — full workspace run: 454 passed, 0 failed.
+
+**UNRESOLVED:** none new — see "Explicitly not modeled" above.
+
+## Fix: make Untap-step triggers fireable (backlog item 7)
+
+Third of a run of small, bounded fixes picked off backlog item 7's own "Still open" list, still
+committed directly to `master`. `AdvanceTurnStep`'s `Untap` branch was the one step-transition
+`upkeep-triggers` deliberately left alone (CR 502.4 grants no priority there, so at the time it seemed
+like there was no window to place a trigger before) — but CR 603.3's last sentence means a trigger
+whose condition is met during Untap just waits to go on the stack until the next time a player *would*
+receive priority (Upkeep, immediately after); it doesn't mean the trigger never happens.
+
+**What got implemented:**
+- `engine.rs`'s `Untap` branch now routes its events (plus `untap_step`'s own `Untapped` events) through
+  the real `ReplacementCheck`/`CommitEvents`/`SbaLoop`/`CollectTriggers`/`PutTriggersApnap` pipeline,
+  same as every other step — but with `PipelineExit::AdvanceTurnStep` instead of `BackToPriority`, so it
+  still doesn't open a priority window CR 502.4 doesn't grant. Placing a matched trigger onto
+  `state.stack` immediately (rather than literally deferring the "put on stack" action until Upkeep's
+  window) is functionally equivalent once that window opens — the trigger is already sitting there
+  either way.
+- `types/ability.rs`: `ConditionPrimitive::BeginningOfYourUntap`/`BeginningOfEachUntap`, mirroring
+  `BeginningOfYourUpkeep`/`BeginningOfEachUpkeep` exactly, plus `Game.Conditions.Untap`/`EachUntap`
+  bindings (script.rs).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 3 new integration tests in
+`crates/engine/tests/phase5_untap_triggers.rs` (a `BeginningOfYourUntap` trigger is already on the
+stack by the time Upkeep's priority window opens — the first pause reachable at all — and resolves
+normally; doesn't fire for a different controller; `BeginningOfEachUntap` fires regardless of whose
+turn it is), plus 5 new unit tests in `types/ability.rs` mirroring the Upkeep ones. All prior tests
+unaffected — full workspace run: 462 passed, 0 failed.
+
+**UNRESOLVED:** none new.
+
+## Fix: wire submit_discard into real trigger collection (backlog item 7)
+
+Fourth of the run. `Engine::submit_discard` (CR 514.1's cleanup hand-size discard) committed its
+`ZoneChange` events directly to the ledger and jumped straight to `ProcessState::CleanupSbaCheck`,
+the same `log_events`-shaped pipeline bypass every other fix in this run has been closing — so a
+"whenever you discard a card" trigger off this specific discard source was silently dropped (a
+cost-payment `Discard`, via `move_to_graveyard_for_cost`, already reached the real pipeline).
+
+**What got implemented:**
+- `engine_context.rs`: new `PipelineExit::CleanupSbaCheck` — unconditional (unlike `CleanupCheck`),
+  since a cleanup discard always falls through to a fresh SBA check afterward regardless of whether
+  anything triggered, matching `begin_cleanup_step`'s own discard-then-SBA-check sequencing.
+- `engine.rs`'s `submit_discard`: stashes each discarded card's departed `Triggered` abilities (via
+  `commands::retire_object`) into `departed_triggered_abilities`, then routes its `ZoneChange` events
+  through `ProcessState::CollectTriggers` with `pipeline_exit = PipelineExit::CleanupSbaCheck` instead
+  of committing directly.
+- `types/ability.rs`: `ConditionPrimitive::DiscardsCard`/`EachDiscardsCard`, mirroring
+  `DrawsCard`/`EachDrawsCard` exactly (a Hand→Graveyard `ZoneChange` is always a discard in this engine
+  today, same "zone-shape only" caveat `DrawsCard` already carries) — the concrete condition proving
+  the fix, plus `Game.Conditions.DiscardsCard`/`EachDiscardsCard` bindings.
+- `draw_one_card`'s own `retire_object` call now stashes into `departed_triggered_abilities` too, for
+  consistency with every other call site — still practically unreachable (no card has a library-side
+  ability that cares about itself leaving the library), named rather than silently left as the one
+  remaining `let _ = ...` discard.
+
+**Bug found and fixed while wiring this:** `PipelineExit::CleanupCheck`'s priority-vs-advance check
+(from the earlier "wire Cleanup's own SBA pass" fix) only compared the ledger's length against its own
+`since_ledger` marker — missing a trigger placed *earlier* in the same cleanup sequence, which is
+exactly what happens here: `submit_discard`'s own `DiscardsCard` trigger lands on the stack via
+`PipelineExit::CleanupSbaCheck` *before* `CleanupSbaCheck`'s own SBA pass ever runs, so that pass's
+fresh `since_ledger` marker can't see it and incorrectly concluded nothing was waiting. Fixed by also
+checking `!self.state.stack.is_empty()` — either signal now means CR 514.3 opens a priority window.
+Caught by `discards_card_trigger_fires_off_the_cleanup_hand_size_discard` actually failing (turn
+silently advanced past the pending trigger) before this was added, not discovered by inspection alone.
+
+**Explicitly not modeled (named, not silently guessed):**
+- CR 514.3's "another cleanup step begins after this priority window" — same pre-existing TODO
+  `finish_cleanup_sba_check` already carries, unaffected by this fix.
+- Discard replacement effects (e.g. Leyline of the Void) — `submit_discard`'s own pre-existing TODO,
+  unaffected; events still commit directly rather than passing through `ReplacementCheck`.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 2 new tests in
+`crates/engine/tests/phase5_discard_triggers.rs`: a `DiscardsCard` trigger fires off a single
+cleanup-forced discard, correctly reopening priority (not silently advancing past it) and resolving for
+real; discarding two cards at once pauses on `AwaitTriggerOrderChoice` with a 2-trigger group (same
+"group size proves it" shape `phase5_trigger_once_per_turn.rs`'s own uncapped test uses), confirming
+both discards actually triggered rather than the test passing for an unrelated reason. Plus 5 new unit
+tests in `types/ability.rs` mirroring `DrawsCard`/`EachDrawsCard`'s own. All prior tests unaffected —
+full workspace run: 469 passed, 0 failed.
 
 **UNRESOLVED:** none new — see "Explicitly not modeled" above.
 
