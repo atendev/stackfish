@@ -2190,8 +2190,13 @@ shift, don't treat it as fixed once written.
     color, beyond the flat `AbilityEffect::AddMana(Vec<ManaUnit>)` shape.
 14. **Zone/library helpers** — `Zone::new`/`push_top`/`top` still `todo!()`; needed for shuffle/
     scry/surveil/search/tutor effects.
-15. **CR 601.6 unwind** — a rejected `submit_payment` plan leaves the engine stuck in
-    `AwaitingPayment` forever; nothing returns the card to hand or un-pushes the stack object.
+15. ~~**CR 601.6 unwind**~~ — done, `phase5/payment-unwind` slice (docs/implementation.md, below).
+    New `Engine::unwind_payment` (and matching `unwind_payment` TOML/CLI step) lets the caller
+    explicitly abandon a cast/activation instead of endlessly resubmitting a `PaymentPlan` — reuses
+    `move_resolving_spell` (CR 608.2b's own fizzle-path helper) to return a `Spell`'s card to hand
+    under a fresh id; an `ActivatedAbility`'s stack entry is just removed, source untouched. Not a
+    true CR 733 state rewind (this engine's ledger is append-only, no undo primitive exists) — an
+    honest forward zone-change/removal instead, marked by a new `GameEventKind::CastingUnwound`.
 16. **Planeswalkers/Battles/DFCs/split/Sagas** — explicit non-goals in DESIGN.md's v1 scope;
     lowest priority unless that scope changes.
 
@@ -4576,6 +4581,94 @@ were all anticipated by mirroring `AwaitingReplacementChoice`/`submit_replacemen
   former (via `layers::effective_characteristics`) but nothing can construct either case today.
 - No TOML/CLI scenario fixture — consistent with the pre-existing precedent CR 616.1's own
   pause-shaped slice already set (see "Design" above), not a gap unique to this slice.
+
+## Phase 5: phase5/payment-unwind slice (backlog item 15)
+
+Branch `phase5/payment-unwind`, off master. Slice backlog item 15. Scope: `Engine::submit_payment`
+rejecting an invalid `PaymentPlan` already left `AwaitingPayment` untouched so the caller could retry
+— that part was already correct. The real gap: nothing let a caller declare "I cannot or will not
+pay" and get out. Since the card/ability already moved onto the stack before `AwaitingPayment` is
+ever reached (CR 601.2a happens before cost payment, confirmed in `commands.rs`'s own comment), a
+cost with no valid plan at all left the engine stuck in `AwaitingPayment` forever.
+
+**Design, confirmed before writing code:**
+- New `Engine::unwind_payment(&mut self) -> Result<(), PaymentError>` (CR 601.6: "the game returns to
+  the moment before the casting of that spell was proposed"). Reuses `PaymentError::NotAwaitingPayment`
+  as its only failure mode — no new error type needed.
+- **Reuses `move_resolving_spell` directly** — the exact same Stack-departure helper CR 608.2b's
+  fizzle path already uses (`ResolveStackTop`'s fizzle/normal-resolution branches). Calling
+  `self.move_resolving_spell(stack_id, ZoneKind::Hand, false)` handles the entire card-side move (new
+  CR 400.7 id, `commands::remap_abilities` — not `retire_object`, matching `CastSpell`'s own
+  "same card, new id" convention for its Hand→Stack move rather than a "gone for good" death) with
+  zero duplicated logic. Checked before writing this: `move_resolving_spell` doesn't itself remove
+  the `StackObject` from `state.stack` (its caller does, same as `ResolveStackTop`'s own
+  `state.stack.pop()` at the top of that arm) — `unwind_payment` does this first, by `stack_id`
+  rather than assuming top-of-stack.
+- `StackEntryKind::ActivatedAbility` (the only other case reachable via `AwaitingPayment` today —
+  `TriggeredAbility` never carries a cost per `RegisteredAbility.cost`'s own contract, `Copy` isn't
+  modeled anywhere): just removes the `StackObject`, no zone move at all — the source permanent
+  never left the battlefield to begin with.
+- New `GameEventKind::CastingUnwound { stack_id }` — checked before writing code: this engine's
+  ledger is the single source of truth for replay/scrubbing, so the `ActivatedAbility` case (no
+  accompanying `ZoneChange`) would otherwise be invisible to any replay viewer. Mirrors `Fizzled`'s
+  own precedent exactly ("emitted instead of/alongside a `ZoneChange` depending on what's leaving the
+  stack") — paired with the `ZoneChange` for a spell, alone for an ability.
+- Resumes via the existing `Engine::end_pipeline_run()` (clears `pipeline_context`/
+  `departed_triggered_abilities`, returns whatever `pipeline_exit` says) rather than hardcoding
+  `ProcessState::PriorityWindow` — same hazard that field's own doc comment already flags for any
+  pipeline-exit path.
+- **`crates/scenario/src/lib.rs` gained a matching `ActionSpec::UnwindPayment { player }` TOML/CLI
+  step** (`run_unwind_payment`, mirrors `run_payment` exactly) — checked before writing code:
+  `SubmitPayment` already has full TOML/CLI support (unlike the legend-rule slice's choice-pause,
+  which had no such precedent to extend), so adding the companion step was natural, not new scope.
+
+**Explicitly not modeled (named, not silently guessed):**
+- True CR 733 state rewind (full history erasure) — this engine's ledger is append-only, no undo
+  primitive exists anywhere. `unwind_payment` is an honest forward zone-change/removal instead.
+- No automatic "is any valid plan even possible" pre-check before a cast reaches `AwaitingPayment` —
+  a much harder, near-solver-shaped problem for arbitrary cost combinations. The caller decides when
+  to give up and calls `unwind_payment()` explicitly.
+- Mana already added via mana abilities activated during the payment window (CR 601.2g) is
+  untouched — matches CR 601.2h/601.6's own stance, and moot today since mana abilities apply
+  directly to the pool outside `PaymentPlan` regardless.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 4 new tests in
+`crates/engine/tests/phase5_payment_unwind.rs` (unwinding a cast spell returns the card to hand
+under a new id with the stack cleared, ledger showing `ZoneChange` then `CastingUnwound`; priority
+reopens for the same player afterward, and a rejected `submit_payment` plan beforehand doesn't
+interfere with the later unwind; unwinding an activated ability removes only the stack entry — the
+source permanent stays exactly where it was, no `ZoneChange` at all; `unwind_payment` rejects when
+not awaiting payment), all 441 prior tests unaffected — full workspace run: 445 passed, 0 failed.
+Confirmed via the real CLI too: new
+`crates/engine/tests/scenarios/phase5_payment_unwind.toml` —
+`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_payment_unwind.toml` — 11/11
+steps ran/passed (a spell with an unaffordable `{1}` cost against an empty pool reaches the stack,
+`unwind_payment` returns it to hand, `ledger_len == 15` confirmed against the CLI's actual output,
+not guessed).
+
+**What got implemented:**
+- `types/event.rs`: `GameEventKind::CastingUnwound { stack_id }`.
+- `engine.rs`: `Engine::unwind_payment`, placed directly after `submit_payment`.
+- `crates/scenario/src/lib.rs`: `ActionSpec::UnwindPayment { player }`, `run_unwind_payment`, wired
+  into `run_action_spec`'s dispatch, `describe()`'s one-liner, and the `unreachable!()` guard in
+  `to_player_action` (same three touch-points `SubmitPayment` itself already has).
+- `crates/engine/tests/scenarios/phase5_payment_unwind.toml`: new fixture, cast-then-unwind.
+
+**STRUCT DEVIATIONS:** None — `GameEventKind::CastingUnwound` and `ActionSpec::UnwindPayment` were
+both anticipated exactly in the pre-slice requirements report.
+
+**INTERFACE DEVIATIONS:** None — `unwind_payment`'s signature (mirroring `submit_replacement_choice`/
+`submit_payment`'s own shape) and its reuse of `move_resolving_spell`/`end_pipeline_run` were both
+anticipated by name in the report's "Design" section before implementation started.
+
+**SCOPE DEVIATIONS:**
+- Adding the TOML/CLI `unwind_payment` step wasn't explicitly named in the original pre-slice report
+  (which focused on the `Engine`-level fix) — confirmed and added once `SubmitPayment`'s own existing
+  TOML support was checked, per the "Design" note above, rather than left as a gap the report didn't
+  anticipate.
+
+**UNRESOLVED:** none new — see "Explicitly not modeled" above, all named and scoped before writing
+code.
 
 ## Mistakes caught (don't repeat)
 

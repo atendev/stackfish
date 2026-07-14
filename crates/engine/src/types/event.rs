@@ -65,6 +65,17 @@ pub enum GameEventKind {
     /// owner's graveyard, pushed just before this); a fizzled ability just
     /// stops existing, no `ZoneChange` for it.
     Fizzled { stack_id: ObjectId },
+    /// CR 601.6: `Engine::unwind_payment` abandoned `stack_id`'s cast/
+    /// activation rather than paying its cost - the game "returns to the
+    /// moment before [it] was proposed." Same "emitted instead of/alongside
+    /// a `ZoneChange` depending on what's leaving the stack" shape `Fizzled`
+    /// already establishes: a spell's `stack_id` gets an accompanying
+    /// `ZoneChange` back to hand (pushed just before this), an activated
+    /// ability's doesn't (it just stops existing, same as a fizzled
+    /// ability). Not a true CR 733 state rewind (this engine's ledger is
+    /// append-only, no undo primitive exists anywhere) - an honest forward
+    /// zone-change/removal instead, flagged not silently guessed.
+    CastingUnwound { stack_id: ObjectId },
     TriggerQueued { source: ObjectId, controller: PlayerId },
     ReplacementApplied { source: ObjectId, original_event: EventId },
     StateBasedActionApplied { description: String },

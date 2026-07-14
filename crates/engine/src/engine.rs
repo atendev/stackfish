@@ -884,6 +884,66 @@ impl Engine {
         Ok(())
     }
 
+    /// Answers a pending CR 601.2f-h payment pause by abandoning the cast/
+    /// activation entirely (CR 601.6: "the game returns to the moment before
+    /// the casting of that spell was proposed") — the caller's explicit
+    /// declaration that they cannot or will not pay, distinct from
+    /// resubmitting a different `PaymentPlan` via `submit_payment` (which
+    /// stays valid and keeps the pause open on `PaymentError::InvalidPlan`).
+    /// Without this, a cost with no valid plan at all leaves the engine
+    /// stuck in `AwaitingPayment` forever — nothing else returns the card to
+    /// hand or un-pushes the stack object.
+    ///
+    /// Not a true CR 733 state rewind (this engine's ledger is append-only,
+    /// no undo primitive exists anywhere) — reuses `move_resolving_spell`
+    /// (the same Stack-departure helper CR 608.2b's fizzle path already
+    /// uses) to return a `Spell`'s card to hand under a fresh CR 400.7 id;
+    /// an `ActivatedAbility`'s stack entry is just removed, since no card
+    /// left any zone to activate it — mirrors `Fizzled`'s own "a fizzled
+    /// ability just stops existing, no `ZoneChange`" stance exactly.
+    /// `TriggeredAbility`/`Copy` never reach `AwaitingPayment` (the former
+    /// never carries a cost, the latter isn't modeled) — not handled
+    /// specially, same as `ActivatedAbility`. Either way,
+    /// `GameEventKind::CastingUnwound` marks the ledger so a replay viewer
+    /// can see this happened even when no `ZoneChange` accompanies it.
+    pub fn unwind_payment(&mut self) -> Result<(), PaymentError> {
+        let ProcessState::AwaitingPayment { stack_id, .. } = &self.process_state else {
+            return Err(PaymentError::NotAwaitingPayment);
+        };
+        let stack_id = *stack_id;
+
+        let Some(idx) = self.state.stack.iter().position(|s| s.stack_id == stack_id) else {
+            // Defensive: shouldn't happen - nothing else removes a
+            // StackObject while AwaitingPayment is pending for it.
+            self.process_state = self.end_pipeline_run();
+            return Ok(());
+        };
+        let stack_object = self.state.stack.remove(idx);
+
+        let mut events = Vec::new();
+        if matches!(stack_object.kind, StackEntryKind::Spell) {
+            if let Some(event) = self.move_resolving_spell(stack_id, ZoneKind::Hand, false) {
+                events.push(event);
+            }
+        }
+        events.push(GameEventKind::CastingUnwound { stack_id });
+
+        for kind in events {
+            let event_id = self.state.allocate_event_id();
+            let sequence_no = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no,
+                kind,
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
+
+        self.process_state = self.end_pipeline_run();
+        Ok(())
+    }
+
     /// Answers a pending CR 514.1 discard-to-hand-size choice raised by
     /// `StepStatus::AwaitingDiscard` — `cards` must be exactly the right
     /// number of cards from the active player's hand. Moves each hand →
