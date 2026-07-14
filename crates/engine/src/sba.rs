@@ -4,7 +4,7 @@ use crate::commands;
 use crate::replacement::{self, ReplacementOutcome};
 use crate::script::ScriptRuntime;
 use crate::types::ability::RegisteredAbility;
-use crate::types::card::{CardTypeSet, KeywordSet};
+use crate::types::card::{CardTypeSet, KeywordSet, SupertypeSet};
 use crate::types::counter::CounterKind;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
@@ -44,6 +44,23 @@ pub enum SbaOutcome {
         pending_deaths: VecDeque<ObjectId>,
         resolved_so_far: Vec<GameEvent>,
     },
+    /// CR 704.5j (legend rule): `player` controls 2+ legendary permanents
+    /// sharing the same name (`candidates`, sorted for determinism — found
+    /// by `find_legend_rule_group`) and must choose which one to keep. A
+    /// genuine player decision, not something this pure check can resolve on
+    /// its own — same "surface the pause, don't guess" stance
+    /// `replacement::ReplacementOutcome::NeedsOrderingChoice` already
+    /// established for CR 616.1. `resolved_so_far` (this pass's player-loss
+    /// events) is unaffected by this pause and should be committed to the
+    /// ledger immediately by the caller. Only the *first* group found needing
+    /// a decision pauses — once `Engine::submit_legend_rule_choice` answers
+    /// and the losers are resolved (via `resolve_deaths`, same real
+    /// replacement-checked destruction every other SBA death uses), the
+    /// caller re-invokes `check_state_based_actions` from scratch, which
+    /// finds the *next* group if another one exists. Multiple simultaneous
+    /// violations resolve one pause at a time across passes, same as CR
+    /// 616.1's own ordering-choice pause already does.
+    NeedsLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId>, resolved_so_far: Vec<GameEvent> },
 }
 
 /// One pass of CR 704's state-based actions: finds every applicable SBA and
@@ -58,7 +75,9 @@ pub enum SbaOutcome {
 /// (player with 10+ poison counters loses), CR 903.10a (player dealt 21+
 /// combat damage by a single commander source loses — see
 /// `apply_player_loss`'s own doc comment for why this check is real but
-/// currently unreachable through actual gameplay), 704.5f (creature
+/// currently unreachable through actual gameplay), 704.5j (legend rule —
+/// see `find_legend_rule_group`'s own doc comment), 704.5k (world rule —
+/// see `collect_world_rule_losers`'s own doc comment), 704.5f (creature
 /// toughness 0 or less goes to its owner's graveyard, or wherever a
 /// matching `ReplacementEffect` substitutes instead), 704.5g (creature
 /// with lethal damage marked is destroyed, folding in 702.2b/c's
@@ -76,7 +95,23 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     let mut events = Vec::new();
     apply_player_loss(state, &mut events);
 
-    let dying = collect_dying_creatures(state, script_runtime);
+    // CR 704.5j: checked before creature deaths - a genuine player choice,
+    // pauses this pass outright rather than proceeding past it. Only the
+    // first violating group (if any) pauses; resolving it re-invokes this
+    // whole function fresh next pass, which will find the next group (if
+    // any) or fall through to the checks below once none remain.
+    if let Some((player, candidates)) = find_legend_rule_group(state, script_runtime) {
+        return SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far: events };
+    }
+
+    // CR 704.5k: fully deterministic (no player choice), so its losers just
+    // join the same dying-creature list below - resolve_deaths treats every
+    // id generically (any permanent type, not creature-specific), and its
+    // existing "already moved, skip" guard makes a duplicate id (a World
+    // creature also independently dying to lethal damage) harmless.
+    let mut dying = collect_dying_creatures(state, script_runtime);
+    dying.extend(collect_world_rule_losers(state, script_runtime));
+
     match resolve_deaths(state, dying.into()) {
         DeathResolution::Done(death_events, departed_triggered) => {
             events.extend(death_events);
@@ -113,10 +148,6 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     //     checks (commands.rs) are NOT wired to the layer engine yet.
     //   - regeneration (CR 701.16): would replace 704.5g's destroy, not
     //     modeled, lethal damage always destroys outright here.
-    //   - legend rule (704.5j), world rule (704.5k) - a structurally different
-    //     "destroy via player choice among duplicates" SBA shape, needs its
-    //     own choice-pause design; split into its own named follow-up rather
-    //     than forced into apply_player_loss's shape.
     //   - planeswalker loyalty 0 (704.5i - not v1 scope per DESIGN.md), and
     //     the rest of 704.5 - no prerequisite subsystem exists yet.
 }
@@ -221,6 +252,81 @@ fn collect_dying_creatures(state: &GameState, script_runtime: &ScriptRuntime) ->
             object.damage_marked >= toughness as u32 || (object.deathtouched && object.damage_marked > 0)
         })
         .collect()
+}
+
+/// CR 704.5j: finds the first group of 2+ battlefield permanents that share
+/// a controller and an effective name while all having the `Legendary`
+/// supertype — the shape `Engine::submit_legend_rule_choice` needs a player
+/// decision for. Name/supertypes read via `layers::effective_characteristics`
+/// rather than straight off `CardDefinition`, same "always query through the
+/// layer engine" convention `collect_dying_creatures` already established —
+/// future-proofs against a not-yet-built "becomes legendary"/name-changing
+/// effect for free, even though nothing can construct either today.
+///
+/// Not creature-specific — legend rule applies to any permanent type. Only
+/// the *first* violating group is returned (`check_state_based_actions`
+/// re-invokes this fresh after each pause resolves, so a second
+/// simultaneous violation is found on the next pass, same "one pause at a
+/// time" contract CR 616.1's ordering choice already has). Candidates are
+/// sorted by `ObjectId` for determinism — `state.objects` is a `HashMap`,
+/// iteration order isn't guaranteed, and groups themselves are compared by
+/// their sorted candidates' minimum id so which group is found first is
+/// stable across runs even when more than one violates simultaneously.
+fn find_legend_rule_group(state: &GameState, script_runtime: &ScriptRuntime) -> Option<(PlayerId, Vec<ObjectId>)> {
+    let mut groups: std::collections::BTreeMap<(PlayerId, String), Vec<ObjectId>> = std::collections::BTreeMap::new();
+    for object in state.objects.values().filter(|o| o.zone == ZoneKind::Battlefield) {
+        let effective = crate::layers::effective_characteristics(state, script_runtime, object.object_id);
+        if !effective.supertypes.contains(SupertypeSet::LEGENDARY) {
+            continue;
+        }
+        groups.entry((object.controller, effective.name)).or_default().push(object.object_id);
+    }
+    let mut violating: Vec<(PlayerId, Vec<ObjectId>)> = groups
+        .into_iter()
+        .filter(|(_, ids)| ids.len() >= 2)
+        .map(|((player, _), mut ids)| {
+            ids.sort();
+            (player, ids)
+        })
+        .collect();
+    violating.sort_by_key(|(_, ids)| ids[0]);
+    violating.into_iter().next()
+}
+
+/// CR 704.5k: which battlefield permanents (any type, not creature-specific)
+/// die to the world rule this pass — every World-supertype permanent except
+/// the one that's had the supertype for the shortest amount of time (i.e.
+/// the highest `timestamp`, since that value only ever increases as the game
+/// proceeds — the object that most recently entered the battlefield has had
+/// World for the least time). A tie for shortest time (two or more sharing
+/// the maximum timestamp) kills *all* World permanents, not just the tied
+/// ones — CR 704.5k's own explicit tie clause, not something this function
+/// guesses at. Fully deterministic, no player choice - see this file's own
+/// `check_state_based_actions` for why these losers just join the ordinary
+/// dying-creature list instead of getting their own pause type. Name/
+/// supertypes read via `layers::effective_characteristics`, same convention
+/// `find_legend_rule_group` above uses.
+fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
+    let world_objects: Vec<(ObjectId, crate::types::ids::SequenceNo)> = state
+        .objects
+        .values()
+        .filter(|o| o.zone == ZoneKind::Battlefield)
+        .filter_map(|o| {
+            let effective = crate::layers::effective_characteristics(state, script_runtime, o.object_id);
+            effective.supertypes.contains(SupertypeSet::WORLD).then_some((o.object_id, o.timestamp))
+        })
+        .collect();
+    if world_objects.len() < 2 {
+        return Vec::new();
+    }
+    let max_timestamp = world_objects.iter().map(|(_, ts)| *ts).max().expect("checked len >= 2 above");
+    let survivor_count = world_objects.iter().filter(|(_, ts)| *ts == max_timestamp).count();
+    if survivor_count == 1 {
+        world_objects.into_iter().filter(|(_, ts)| *ts != max_timestamp).map(|(id, _)| id).collect()
+    } else {
+        // Tie for shortest time - no unique survivor, all die.
+        world_objects.into_iter().map(|(id, _)| id).collect()
+    }
 }
 
 /// What one `resolve_deaths` call produced.

@@ -46,6 +46,16 @@ pub enum ReplacementChoiceError {
     InvalidCandidate,
 }
 
+/// Why `submit_legend_rule_choice` rejected an answer to a CR 704.5j
+/// legend-rule choice.
+#[derive(Debug)]
+pub enum LegendRuleChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingLegendRuleChoice`.
+    NotAwaitingChoice,
+    /// `kept` wasn't one of the offered `candidates`.
+    InvalidCandidate,
+}
+
 /// Why `submit_trigger_order` rejected an answer to a CR 603.3b
 /// intra-group ordering choice.
 #[derive(Debug)]
@@ -158,6 +168,12 @@ pub enum StepStatus {
     /// while it's pending (see `submit_action`'s `PriorityWindow`-only
     /// check).
     AwaitingReplacementChoice { player: PlayerId, candidates: Vec<ObjectId> },
+    /// CR 704.5j: `player` controls 2+ legendary permanents sharing a name
+    /// (`candidates`) and must choose which one to keep — the caller should
+    /// prompt and call `submit_legend_rule_choice`, then `step()` again. Same
+    /// "not a `PlayerAction`/priority decision, its own entry point" rationale
+    /// as `AwaitingReplacementChoice`.
+    AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId> },
     /// CR 603.3b: `player` controls more than one trigger that matched the
     /// same batch of events and must choose the order to put them on the
     /// stack — the caller should prompt and call `submit_trigger_order`,
@@ -274,6 +290,14 @@ pub enum ProcessState {
         excluded: Vec<ObjectId>,
         resume: ReplacementResumeTarget,
     },
+    /// CR 704.5j: paused because `sba::find_legend_rule_group` found `player`
+    /// controlling 2+ legendary permanents sharing a name (`candidates`) —
+    /// `player` must choose which to keep. `then` says which SBA pass
+    /// originally raised this (same role it plays on `SbaDeath` above) so
+    /// `submit_legend_rule_choice` knows whether to resume `SbaLoop` or
+    /// `CleanupSbaCheck` once the losers are resolved via the same
+    /// `resume_sba_death` helper `submit_replacement_choice` already uses.
+    AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId>, then: SbaResumeThen },
     /// Checked events ready to become real `GameEvent`s in the ledger.
     CommitEvents { checked: Vec<GameEventKind> },
     /// CR 704.3's fixed-point loop.
@@ -727,6 +751,38 @@ impl Engine {
                 }
             },
         };
+        Ok(())
+    }
+
+    /// Answers a pending CR 704.5j legend-rule choice raised by
+    /// `StepStatus::AwaitingLegendRuleChoice` — `kept` must be one of that
+    /// status's `candidates` (the legendary permanent this player keeps).
+    /// Deliberately a separate entry point from `submit_action`, same reason
+    /// `submit_replacement_choice` is.
+    ///
+    /// Every other candidate is put into `pending_deaths` and resolved via
+    /// the same `resume_sba_death` helper `submit_replacement_choice` already
+    /// uses for `ReplacementResumeTarget::SbaDeath` — the losers' actual
+    /// destruction is ordinary SBA-driven death (real replacement checking,
+    /// CR 400.7 new object id, `retire_object`), not bespoke logic. A
+    /// replacement effect on one of the losers (e.g. "if this would die,
+    /// exile it instead") correctly re-pauses on `AwaitingReplacementChoice`
+    /// via that same helper, rather than being silently skipped.
+    pub fn submit_legend_rule_choice(&mut self, kept: ObjectId) -> Result<(), LegendRuleChoiceError> {
+        let ProcessState::AwaitingLegendRuleChoice { candidates, .. } = &self.process_state else {
+            return Err(LegendRuleChoiceError::NotAwaitingChoice);
+        };
+        if !candidates.contains(&kept) {
+            return Err(LegendRuleChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingLegendRuleChoice { candidates, then, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        let losers: VecDeque<ObjectId> = candidates.into_iter().filter(|id| *id != kept).collect();
+        self.process_state = self.resume_sba_death(losers, Vec::new(), Vec::new(), then);
         Ok(())
     }
 
@@ -2107,6 +2163,15 @@ impl Engine {
                 status
             }
 
+            ProcessState::AwaitingLegendRuleChoice { player, candidates, then } => {
+                // Nothing to do until submit_legend_rule_choice answers -
+                // same "put the exact same state back" pattern
+                // AwaitingReplacementChoice above already uses.
+                let status = StepStatus::AwaitingLegendRuleChoice { player, candidates: candidates.clone() };
+                self.process_state = ProcessState::AwaitingLegendRuleChoice { player, candidates, then };
+                status
+            }
+
             ProcessState::CommitEvents { checked } => {
                 let (caused_by_command, parent_event) = self
                     .pipeline_context
@@ -2197,6 +2262,12 @@ impl Engine {
                             excluded,
                             resume: ReplacementResumeTarget::SbaDeath { pending_deaths, then: SbaResumeThen::SbaLoop },
                         }
+                    }
+                    SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far } => {
+                        // Unaffected by the pause below, same reasoning as
+                        // NeedsOrderingChoice's own resolved_so_far above.
+                        self.state.ledger.extend(resolved_so_far);
+                        ProcessState::AwaitingLegendRuleChoice { player, candidates, then: SbaResumeThen::SbaLoop }
                     }
                 };
                 StepStatus::Progressed
@@ -2441,6 +2512,14 @@ impl Engine {
                                 pending_deaths,
                                 then: SbaResumeThen::CleanupSbaCheck,
                             },
+                        }
+                    }
+                    SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far } => {
+                        self.state.ledger.extend(resolved_so_far);
+                        ProcessState::AwaitingLegendRuleChoice {
+                            player,
+                            candidates,
+                            then: SbaResumeThen::CleanupSbaCheck,
                         }
                     }
                 };

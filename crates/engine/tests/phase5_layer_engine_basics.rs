@@ -28,6 +28,9 @@ fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
         SbaOutcome::NeedsOrderingChoice { .. } => {
             panic!("fixture didn't expect a replacement ordering-choice pause")
         }
+        SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
     }
 }
 
