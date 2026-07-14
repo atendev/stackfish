@@ -115,6 +115,7 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
             target: None,
             operation: ScriptHandle(0),
             effect: Some(AbilityEffect::GainLife(1)),
+            intervening_if: None,
         }],
         ledger: Vec::new(),
         rng: RngState { seed: 1, draws_consumed: 0 },

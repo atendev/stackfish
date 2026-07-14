@@ -180,6 +180,7 @@ fn primitive_enters_condition_matches_the_bear_entering_the_battlefield() {
         target: None,
         operation: ScriptHandle(0), // never invoked by collect_triggers itself
         effect: None,
+        intervening_if: None,
     });
 
     let event = zone_change_event(bear, ZoneKind::Hand, ZoneKind::Battlefield);
@@ -208,6 +209,7 @@ fn primitive_enters_condition_false_on_a_different_object() {
         target: None,
         operation: ScriptHandle(0),
         effect: None,
+        intervening_if: None,
     });
 
     let event = zone_change_event(someone_else, ZoneKind::Hand, ZoneKind::Battlefield);
@@ -233,6 +235,7 @@ fn primitive_enters_condition_false_on_wrong_destination_zone() {
         target: None,
         operation: ScriptHandle(0),
         effect: None,
+        intervening_if: None,
     });
 
     let event = zone_change_event(bear, ZoneKind::Battlefield, ZoneKind::Graveyard);
@@ -263,6 +266,7 @@ fn primitive_always_condition_matches_an_unrelated_event() {
         target: None,
         operation: ScriptHandle(0),
         effect: None,
+        intervening_if: None,
     });
 
     // A totally unrelated event kind - matches anyway, same as a `None`
@@ -377,6 +381,7 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
         target: None,
         operation: poison_pill_operation,
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     engine
@@ -437,6 +442,7 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
         target: None,
         operation,
         effect,
+        intervening_if: None,
     });
 
     let script_condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
@@ -449,6 +455,7 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
         target: None,
         operation: script_operation,
         effect: None,
+        intervening_if: None,
     });
 
     // Cast and resolve the primitive-path bear first.

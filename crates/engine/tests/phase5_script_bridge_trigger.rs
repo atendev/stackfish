@@ -182,6 +182,7 @@ fn collect_triggers_matches_a_real_condition_script() {
         target: None,
         operation: ScriptHandle(0), // never invoked by collect_triggers itself
         effect: None,
+        intervening_if: None,
     });
 
     let event = zone_change_event(bear, ZoneKind::Hand, ZoneKind::Battlefield);
@@ -211,6 +212,7 @@ fn collect_triggers_condition_false_on_a_different_object() {
         target: None,
         operation: ScriptHandle(0),
         effect: None,
+        intervening_if: None,
     });
 
     // A different object entering the battlefield - the condition checks
@@ -238,6 +240,7 @@ fn collect_triggers_condition_false_on_wrong_destination_zone() {
         target: None,
         operation: ScriptHandle(0),
         effect: None,
+        intervening_if: None,
     });
 
     // The bear moving to the graveyard (not the battlefield) shouldn't
@@ -266,6 +269,7 @@ fn collect_triggers_none_condition_matches_any_event() {
         target: None,
         operation: ScriptHandle(0),
         effect: None,
+        intervening_if: None,
     });
 
     // A totally unrelated event kind - matches anyway, since there's no
@@ -336,6 +340,7 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
         target: None,
         operation,
         effect: None,
+        intervening_if: None,
     });
 
     engine
@@ -410,6 +415,7 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
         target: None,
         operation,
         effect: None,
+        intervening_if: None,
     });
 
     engine

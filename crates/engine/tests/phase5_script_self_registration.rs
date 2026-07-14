@@ -343,6 +343,7 @@ fn dying_creatures_registered_ability_is_purged_by_sba() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let script_runtime = ScriptRuntime::new();

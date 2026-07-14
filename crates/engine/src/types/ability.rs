@@ -458,6 +458,48 @@ pub enum ConditionSpec {
     PrimitiveOncePerTurn(ConditionPrimitive),
 }
 
+/// CR 603.4's intervening-if clause ("When/Whenever/At X, if Y, Z") is a
+/// pure state predicate, not event-shaped like `ConditionPrimitive` (whose
+/// `matches` always takes a `&GameEventKind`) — checked once when the
+/// trigger event fires (folded into `triggers::collect_triggers`, alongside
+/// but separate from the ability's own trigger-event `condition`) and again
+/// at resolution (`Engine`'s `ResolveStackTop`, CR 608.2a). One concrete
+/// shape this slice: a real, common, cleanly testable pattern (nothing else
+/// needs constructing to flip it — just change life).
+///
+/// TODO: more shapes (hand size, board-state checks, "still on the
+/// battlefield") are the same category of follow-up every other primitive
+/// in this file started narrow before growing.
+#[derive(Clone, Copy, Debug)]
+pub enum InterveningIfPrimitive {
+    ControllerAtOrBelowLife(i32),
+}
+
+impl InterveningIfPrimitive {
+    pub fn holds(&self, state: &crate::types::game::GameState, controller: PlayerId) -> bool {
+        match self {
+            InterveningIfPrimitive::ControllerAtOrBelowLife(threshold) => {
+                state.player(controller).is_some_and(|p| p.life <= *threshold)
+            }
+        }
+    }
+}
+
+/// See `InterveningIfPrimitive`'s own doc comment. Same `Primitive`/`Script`
+/// shape `ConditionSpec` uses, but `Script` isn't offered yet: checked
+/// before writing this — `ScriptRuntime::invoke_condition` doesn't pass
+/// `&GameState` into Lua at all (see `invoke_cda`'s own doc comment; no
+/// `Game.*` state-query binding exists yet, a separate DESIGN.md gap), so a
+/// script-backed intervening-if couldn't check anything useful today.
+/// `Primitive`-only until that lands.
+///
+/// TODO: `InterveningIfSpec::Script(ScriptHandle)` once `ScriptContext`
+/// exposes `&GameState` to Lua.
+#[derive(Clone, Copy, Debug)]
+pub enum InterveningIfSpec {
+    Primitive(InterveningIfPrimitive),
+}
+
 /// A card's registered ability, as set up by its script's `initial_effect`-
 /// equivalent (`Game.RegisterTriggeredAbility` etc — see `script_api.rs`).
 /// Lives in `GameState.abilities` as a flat list (same pattern as
@@ -505,6 +547,14 @@ pub struct RegisteredAbility {
     /// falls back to invoking `operation` for real through the script
     /// bridge.
     pub effect: Option<AbilityEffect>,
+    /// CR 603.4's intervening-if clause, orthogonal to `condition` above (the
+    /// trigger-event check) — see `InterveningIfSpec`'s own doc comment.
+    /// `None` for every ability without "if" text, which is most of them —
+    /// same "no concept for this ability" stance `cost`/`target` already
+    /// take when `None`. Checked in `triggers::collect_triggers` at trigger
+    /// time and baked onto the resulting `StackObject` (`PutTriggersApnap`)
+    /// for `ResolveStackTop` to recheck at resolution (CR 608.2a).
+    pub intervening_if: Option<InterveningIfSpec>,
 }
 
 #[cfg(test)]
@@ -994,5 +1044,82 @@ mod tests {
         let source = ObjectId(0);
         let event = GameEventKind::StepStarted { step: Step::Upkeep };
         assert!(!ConditionPrimitive::BeginningOfEachEndStep.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    fn state_with_life(player: PlayerId, life: i32) -> crate::types::game::GameState {
+        use crate::types::counter::CounterSet;
+        use crate::types::game::{GameState, RngState};
+        use crate::types::mana::ManaPool;
+        use crate::types::player::PlayerState;
+        use crate::types::turn::Phase;
+        use std::collections::HashMap;
+
+        GameState {
+            players: vec![PlayerState {
+                player_id: player,
+                life,
+                mana_pool: ManaPool::default(),
+                counters: CounterSet::new(),
+                emblems: Vec::new(),
+                commander_damage_taken: Vec::new(),
+                eliminated: false,
+                drew_from_empty_library: false,
+                mulligans_taken: 0,
+                hand_kept: false,
+            }],
+            turn_order: vec![player],
+            active_player: player,
+            turn_number: 1,
+            phase: Phase::Main,
+            step: Step::PreCombatMain,
+            priority_player: player,
+            consecutive_passes: 0,
+            lands_played_this_turn: HashMap::new(),
+            combat: None,
+            last_active_turn_number: HashMap::new(),
+            objects: HashMap::new(),
+            zones: Vec::new(),
+            stack: Vec::new(),
+            continuous_effects: Vec::new(),
+            replacement_effects: Vec::new(),
+            cost_modifiers: Vec::new(),
+            abilities: Vec::new(),
+            ledger: Vec::new(),
+            rng: RngState { seed: 1, draws_consumed: 0 },
+            next_event_id: 0,
+            next_sequence_no: 0,
+            next_object_id: 0,
+            pending_step_skips: Vec::new(),
+            once_per_turn_triggered: std::collections::HashSet::new(),
+        }
+    }
+
+    #[test]
+    fn controller_at_or_below_life_holds_when_life_is_at_the_threshold() {
+        let p0 = PlayerId(0);
+        let state = state_with_life(p0, 5);
+        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0));
+    }
+
+    #[test]
+    fn controller_at_or_below_life_holds_when_life_is_below_the_threshold() {
+        let p0 = PlayerId(0);
+        let state = state_with_life(p0, 3);
+        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0));
+    }
+
+    #[test]
+    fn controller_at_or_below_life_does_not_hold_when_life_is_above_the_threshold() {
+        let p0 = PlayerId(0);
+        let state = state_with_life(p0, 6);
+        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0));
+    }
+
+    #[test]
+    fn controller_at_or_below_life_does_not_hold_for_an_unknown_player() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let state = state_with_life(p0, 1);
+        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p1));
     }
 }

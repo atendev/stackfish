@@ -221,6 +221,7 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
     // Exactly one card over the limit (excess = 1) - keeps this test to a
     // single trigger; the two-discards case (excess = 2, group.len() == 2)
@@ -272,6 +273,7 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
     let ids = add_cards_to_hand(&mut state, p0, 9);
 

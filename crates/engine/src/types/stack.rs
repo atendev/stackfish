@@ -1,4 +1,4 @@
-use crate::types::ability::AbilityEffect;
+use crate::types::ability::{AbilityEffect, InterveningIfSpec};
 use crate::types::cost::CostPayment;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::object::GameObject;
@@ -52,6 +52,15 @@ pub struct StackObject {
     /// `StackObject`, so resolution can apply it directly without a Lua
     /// call. `None` falls back to invoking `operation` for real.
     pub effect: Option<AbilityEffect>,
+    /// CR 603.4/608.2a: baked in at push time from `RegisteredAbility::
+    /// intervening_if` (`PutTriggersApnap`, `None` for a `Spell`/
+    /// `ActivatedAbility` — CR 603.4's "if" clause is triggered-ability-only
+    /// text) — same "primitive stand-in, decided once at push, not
+    /// re-derived" contract `effect`/`target_requirement` already establish.
+    /// `ResolveStackTop` rechecks it fresh against current state at
+    /// resolution, exactly mirroring `target_requirement`'s own CR 608.2b
+    /// recheck.
+    pub intervening_if: Option<InterveningIfSpec>,
 }
 
 impl StackObject {
@@ -73,6 +82,7 @@ impl StackObject {
         exile_on_leaving_stack: bool,
         operation: ScriptHandle,
         effect: Option<AbilityEffect>,
+        intervening_if: Option<InterveningIfSpec>,
     ) -> Self {
         StackObject {
             stack_id,
@@ -91,6 +101,7 @@ impl StackObject {
             costs_paid: Vec::new(),
             operation,
             effect,
+            intervening_if,
         }
     }
 }

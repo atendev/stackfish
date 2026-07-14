@@ -158,6 +158,7 @@ fn beginning_of_your_upkeep_trigger_fires_and_resolves_for_its_controller() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);
@@ -195,6 +196,7 @@ fn beginning_of_your_upkeep_trigger_does_not_fire_for_a_different_controller() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);
@@ -222,6 +224,7 @@ fn beginning_of_each_upkeep_trigger_fires_regardless_of_whose_turn_it_is() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

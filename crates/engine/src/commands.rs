@@ -920,6 +920,9 @@ pub fn execute_command(
                 exile_on_leaving_stack,
                 ScriptHandle(0),
                 effect,
+                // CR 603.4's "if" clause is triggered-ability-only text - a
+                // spell never carries one.
+                None,
             ));
 
             return Ok(CommandOutcome {
@@ -1122,6 +1125,9 @@ pub fn execute_command(
                         false,
                         operation,
                         non_mana_effect,
+                        // CR 603.4's "if" clause is triggered-ability-only
+                        // text - an activated ability never carries one.
+                        None,
                     ));
 
                     return Ok(CommandOutcome {
@@ -1667,6 +1673,7 @@ mod tests {
             target: None,
             operation: ScriptHandle(0),
             effect: Some(AbilityEffect::GainLife(1)),
+            intervening_if: None,
         }
     }
 

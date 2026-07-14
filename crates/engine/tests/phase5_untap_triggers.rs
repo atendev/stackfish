@@ -159,6 +159,7 @@ fn beginning_of_your_untap_trigger_is_already_on_the_stack_by_the_time_upkeep_pr
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);
@@ -196,6 +197,7 @@ fn beginning_of_your_untap_trigger_does_not_fire_for_a_different_controller() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);
@@ -223,6 +225,7 @@ fn beginning_of_each_untap_trigger_fires_regardless_of_whose_turn_it_is() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

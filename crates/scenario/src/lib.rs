@@ -1061,6 +1061,7 @@ pub fn build_initial_state(
                 target: None,
                 operation: ScriptHandle(0),
                 effect: Some(AbilityEffect::AddMana(units)),
+                intervening_if: None,
             });
         }
         if let Some(operation) = &spec.trigger_operation {
@@ -1148,6 +1149,7 @@ fn register_trigger_ability(
         target: None,
         operation,
         effect,
+        intervening_if: None,
     });
 }
 
@@ -1532,6 +1534,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                     target: None,
                     operation: ScriptHandle(0),
                     effect: Some(AbilityEffect::AddMana(units)),
+                    intervening_if: None,
                 });
             }
             if let Some(operation_src) = &spec.trigger_operation {

@@ -260,6 +260,7 @@ fn damage_ability_with_lifelink_source_gains_its_controller_life() {
         target: Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 1 })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Damage(3)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

@@ -100,6 +100,7 @@ fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 
@@ -253,6 +254,7 @@ fn exile_activated_ability_also_works() {
         })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Exile),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

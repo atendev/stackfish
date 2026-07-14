@@ -123,6 +123,7 @@ fn draws_card_trigger_ability(source: ObjectId) -> RegisteredAbility {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 
@@ -325,6 +326,7 @@ fn drawcards_ability_works_the_same_as_a_drawcards_spell() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::DrawCards(1)),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

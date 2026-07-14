@@ -324,6 +324,7 @@ fn shuffle_ability_works_the_same_as_a_shuffle_spell() {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Shuffle),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

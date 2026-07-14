@@ -185,6 +185,7 @@ fn dealsdamage_ability(source: ObjectId, once_per_turn: bool) -> RegisteredAbili
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 

@@ -99,6 +99,7 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 
@@ -313,6 +314,7 @@ fn destroy_ability_works_the_same_as_a_destroy_spell() {
         })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Destroy),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);

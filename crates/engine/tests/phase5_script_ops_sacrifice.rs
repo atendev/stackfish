@@ -121,6 +121,7 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 
@@ -133,6 +134,7 @@ fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
         target: None,
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
     }
 }
 
@@ -285,6 +287,7 @@ fn sacrifice_activated_ability_also_works() {
         })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Sacrifice),
+        intervening_if: None,
     });
 
     let mut engine = Engine::new(state);
