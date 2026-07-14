@@ -20,4 +20,15 @@ pub enum PipelineExit {
     BackToPriority,
     ResolveStackTop,
     AdvanceTurnStep,
+    /// CR 514.3: cleanup's own exit, reached once `CollectTriggers`/
+    /// `PutTriggersApnap` finish placing whatever a cleanup-step SBA pass
+    /// raised. Unlike the other three variants (a fixed destination), the
+    /// actual next `ProcessState` depends on whether anything happened:
+    /// `since_ledger` (the ledger length before this pass's events were
+    /// appended) is compared against the ledger's length once triggers have
+    /// been placed — if it grew (an SBA event committed, or a triggered
+    /// ability got pushed onto the stack), CR 514.3 says open a priority
+    /// window; if not, the turn advances silently instead. See
+    /// `Engine::end_pipeline_run`'s own match arm.
+    CleanupCheck { since_ledger: usize },
 }

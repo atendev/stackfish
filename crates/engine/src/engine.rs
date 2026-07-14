@@ -249,10 +249,14 @@ pub enum ReplacementResumeTarget {
     SbaDeath { pending_deaths: VecDeque<ObjectId>, then: SbaResumeThen },
 }
 
-/// See `ReplacementResumeTarget::SbaDeath`'s own doc comment.
+/// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
+/// carries `since_ledger` (the value `ProcessState::CleanupSbaCheck` captured
+/// before this SBA pass began) through the pause, so `resume_sba_death` can
+/// still hand it to `finish_cleanup_sba_check`/`PipelineExit::CleanupCheck`
+/// once the paused choice is answered.
 pub enum SbaResumeThen {
     SbaLoop,
-    CleanupSbaCheck,
+    CleanupSbaCheck { since_ledger: usize },
 }
 
 pub enum ProcessState {
@@ -347,8 +351,13 @@ pub enum ProcessState {
     /// `Engine::submit_discard` to answer before continuing.
     AwaitingDiscard { player: PlayerId, excess: usize },
     /// CR 514.3: cleanup's turn-based actions (discard, effect expiry) are
-    /// done — run one SBA pass to decide whether priority opens (SBAs fired)
-    /// or the turn advances silently (nothing triggered, normal case).
+    /// done — run one SBA pass, then (via `PipelineExit::CleanupCheck`) route
+    /// through the real `CollectTriggers`/`PutTriggersApnap` stages so any
+    /// CR 603.10 dies-trigger etc raised by that pass actually gets a chance
+    /// to be placed, before deciding whether priority opens (something
+    /// happened) or the turn advances silently (normal case, nothing did).
+    /// Previously bypassed `CollectTriggers` entirely — backlog item 7a's
+    /// cleanup half, closed here.
     CleanupSbaCheck,
     /// CR 601.2f-h: paused mid-pipeline because `CastSpell` pushed
     /// `stack_id` onto the stack but its cost (`cost`) hasn't been paid yet
@@ -1575,6 +1584,14 @@ impl Engine {
             PipelineExit::BackToPriority => ProcessState::PriorityWindow,
             PipelineExit::ResolveStackTop => ProcessState::ResolveStackTop,
             PipelineExit::AdvanceTurnStep => ProcessState::AdvanceTurnStep,
+            PipelineExit::CleanupCheck { since_ledger } => {
+                if self.state.ledger.len() > since_ledger {
+                    self.state.priority_player = self.state.active_player;
+                    ProcessState::PriorityWindow
+                } else {
+                    ProcessState::AdvanceTurnStep
+                }
+            }
         }
     }
 
@@ -2554,15 +2571,11 @@ impl Engine {
             }
 
             ProcessState::CleanupSbaCheck => {
+                let since_ledger = self.state.ledger.len();
                 self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
-                    // `departed` (CR 603.10 dies-trigger abilities) is
-                    // discarded here - CleanupSbaCheck's own flow never
-                    // reaches CollectTriggers at all (a second,
-                    // differently-shaped pre-existing gap, backlog item 7a's
-                    // cleanup half), so nothing would ever consume it;
-                    // stashing it on Engine would just leak until the next
-                    // real pipeline run.
-                    SbaOutcome::Progressed(events, _departed) => self.finish_cleanup_sba_check(events),
+                    SbaOutcome::Progressed(events, departed) => {
+                        self.finish_cleanup_sba_check(events, departed, since_ledger)
+                    }
                     SbaOutcome::NeedsOrderingChoice {
                         affected_player,
                         pending_event,
@@ -2579,7 +2592,7 @@ impl Engine {
                             excluded,
                             resume: ReplacementResumeTarget::SbaDeath {
                                 pending_deaths,
-                                then: SbaResumeThen::CleanupSbaCheck,
+                                then: SbaResumeThen::CleanupSbaCheck { since_ledger },
                             },
                         }
                     }
@@ -2588,7 +2601,7 @@ impl Engine {
                         ProcessState::AwaitingLegendRuleChoice {
                             player,
                             candidates,
-                            then: SbaResumeThen::CleanupSbaCheck,
+                            then: SbaResumeThen::CleanupSbaCheck { since_ledger },
                         }
                     }
                 };
@@ -2626,27 +2639,37 @@ impl Engine {
         }
     }
 
-    /// `CleanupSbaCheck`'s own "what happens once this pass's events are
-    /// known" transition — pulled out for the same reason `finish_sba_loop`
-    /// is.
-    fn finish_cleanup_sba_check(&mut self, events: Vec<GameEvent>) -> ProcessState {
-        if !events.is_empty() {
-            // CR 514.3: SBAs fired during cleanup - open a priority window
-            // so players can respond.
-            // TODO: CR 514.3 says another cleanup step begins after this
-            // priority window and its stack empties - currently
-            // advance_turn_step's (Ending, Cleanup) arm rotates the turn
-            // instead, skipping re-running discard/effect-expiry. Correct
-            // once a case actually reaches this branch.
-            self.state.ledger.extend(events);
-            self.state.priority_player = self.state.active_player;
-            ProcessState::PriorityWindow
-        } else {
-            // CR 514.3: no SBAs, no triggers (collect_triggers is todo!()
-            // for any real ability) - skip priority entirely, advance the
-            // turn.
-            ProcessState::AdvanceTurnStep
-        }
+    /// `CleanupSbaCheck`'s own "what happens once this pass's events (and
+    /// any dying-creature choice) are known" transition — pulled out for the
+    /// same reason `finish_sba_loop` is, and shared the same way between a
+    /// fresh pass (the `CleanupSbaCheck` arm) and one resumed after a paused
+    /// CR 616.1/704.5j choice (`resume_sba_death`).
+    ///
+    /// Stashes `departed` (CR 603.10 dies-trigger abilities) into
+    /// `departed_triggered_abilities` and routes through the real
+    /// `CollectTriggers`/`PutTriggersApnap` stages via
+    /// `PipelineExit::CleanupCheck` instead of deciding priority-vs-advance
+    /// right here — this cleanup path used to bypass `CollectTriggers`
+    /// entirely (backlog item 7a's cleanup half), silently dropping any
+    /// trigger a cleanup-step SBA raised. `since_ledger` (captured before
+    /// this pass began) is what `PipelineExit::CleanupCheck` later compares
+    /// the ledger against to decide CR 514.3's priority-vs-advance question.
+    ///
+    /// TODO: CR 514.3 says another cleanup step begins after a priority
+    /// window opens here and its stack empties - currently
+    /// advance_turn_step's (Ending, Cleanup) arm rotates the turn instead,
+    /// skipping re-running discard/effect-expiry. Correct once a case
+    /// actually reaches this branch.
+    fn finish_cleanup_sba_check(
+        &mut self,
+        events: Vec<GameEvent>,
+        departed: Vec<RegisteredAbility>,
+        since_ledger: usize,
+    ) -> ProcessState {
+        self.departed_triggered_abilities.extend(departed);
+        self.state.ledger.extend(events);
+        self.pipeline_exit = PipelineExit::CleanupCheck { since_ledger };
+        ProcessState::CollectTriggers { since: since_ledger }
     }
 
     /// Continues `sba::resolve_deaths` after a paused CR 616.1 ordering
@@ -2669,10 +2692,9 @@ impl Engine {
                 already_departed.append(&mut departed);
                 match then {
                     SbaResumeThen::SbaLoop => self.finish_sba_loop(already_resolved, already_departed),
-                    // CleanupSbaCheck never reaches CollectTriggers (see the
-                    // CleanupSbaCheck arm's own comment) - already_departed
-                    // is simply dropped here, same as the fresh-pass path.
-                    SbaResumeThen::CleanupSbaCheck => self.finish_cleanup_sba_check(already_resolved),
+                    SbaResumeThen::CleanupSbaCheck { since_ledger } => {
+                        self.finish_cleanup_sba_check(already_resolved, already_departed, since_ledger)
+                    }
                 }
             }
             sba::DeathResolution::NeedsOrderingChoice {
