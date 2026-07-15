@@ -6,11 +6,13 @@
 //! is a plain Lua function that calls `coroutine.yield` directly - not a
 //! Rust-bound callback, since mlua 0.9 without the `async` feature can't
 //! yield from inside a Rust closure). `Engine::submit_script_choice` answers
-//! the pause, resuming the same suspended script with the chosen object.
+//! the pause, resuming the same suspended script with the chosen target.
 //!
 //! Scoped narrowly on purpose: exactly one request shape (`select_target`,
-//! object-only, count always 1) - modal spells, "may" abilities, and
-//! player-target selection are named follow-ups, not attempted here.
+//! count always 1) - modal spells and "may" abilities are still named
+//! follow-ups, not attempted here. Backlog item 9b (player-target selection,
+//! `Game.SelectTargets({ type = "player" })`/`{ type = "any" }`) is covered
+//! by this file's own player/any-target tests below.
 //!
 //! Uses real card-script self-registration (`Game.CreateActivatedAbility`,
 //! same mechanism `phase5_activated_ability_self_registration.rs` already
@@ -34,7 +36,46 @@ function s.initial_effect(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ card_types = { "Creature" } })
-        return { gain_life = target }
+        return { gain_life = target.id }
+    end)
+    e:Register()
+end
+return s
+"#;
+
+/// Backlog item 9b: a player/any-target filter. `target.kind` is folded into
+/// the resulting life total (100 added when `kind == "player"`) so a test
+/// can tell, from the life total alone, that the resumed answer really was
+/// tagged `"player"` rather than falling through to the `"object"` arm by
+/// accident - same "prove the exact resumed value reached the script"
+/// approach the object-only test above already established, no new
+/// effect-shape key needed for it.
+const SELF_REGISTERING_SELECT_PLAYER_THEN_GAIN_LIFE: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:SetOperation(function(source, controller)
+        local target = Game.SelectTargets({ type = "player" })
+        if target.kind == "player" then
+            return { gain_life = 100 + target.id }
+        end
+        return { gain_life = target.id }
+    end)
+    e:Register()
+end
+return s
+"#;
+
+const SELF_REGISTERING_SELECT_ANY_THEN_GAIN_LIFE: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:SetOperation(function(source, controller)
+        local target = Game.SelectTargets({ type = "any" })
+        if target.kind == "player" then
+            return { gain_life = 100 + target.id }
+        end
+        return { gain_life = target.id }
     end)
     e:Register()
 end
@@ -277,7 +318,7 @@ fn submitting_a_legal_target_resumes_and_finishes_the_operation() {
     let (_land, status) = play_activate_and_drain(&mut engine, p0, land);
     assert!(matches!(status, StepStatus::AwaitingScriptChoice { .. }));
 
-    engine.submit_script_choice(creature).expect("the creature is a legal target for the request's filter");
+    engine.submit_script_choice(Target::Object(creature)).expect("the creature is a legal target for the request's filter");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
@@ -308,7 +349,7 @@ fn submitting_an_illegal_target_is_rejected_and_the_pause_stays_open() {
     let mut engine = Engine::new(state);
     play_activate_and_drain(&mut engine, p0, land);
 
-    let err = engine.submit_script_choice(non_creature).unwrap_err();
+    let err = engine.submit_script_choice(Target::Object(non_creature)).unwrap_err();
     assert!(matches!(err, ScriptChoiceError::InvalidCandidate));
     // Still paused on the same request - nothing was consumed.
     assert!(matches!(engine.step().status, StepStatus::AwaitingScriptChoice { .. }));
@@ -316,9 +357,105 @@ fn submitting_an_illegal_target_is_rejected_and_the_pause_stays_open() {
 }
 
 #[test]
+fn a_script_calling_select_targets_with_type_player_pauses_with_a_player_filter() {
+    let p0 = PlayerId(0);
+    let land = ObjectId(0);
+    let mut state = base_state();
+    state.objects.insert(land, card_object(land, land_definition(SELF_REGISTERING_SELECT_PLAYER_THEN_GAIN_LIFE), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+
+    let mut engine = Engine::new(state);
+    let (_land, status) = play_activate_and_drain(&mut engine, p0, land);
+    let StepStatus::AwaitingScriptChoice { request, .. } = status else {
+        panic!("expected the operation to pause on Game.SelectTargets, got {status:?}")
+    };
+    let ScriptChoiceRequest::SelectTarget { filter } = request;
+    assert_eq!(filter, TargetFilter::Player, "the real filter from the script should have reached the pause");
+}
+
+#[test]
+fn submitting_a_player_target_resumes_with_the_tagged_kind_the_script_can_read() {
+    let p0 = PlayerId(0);
+    let land = ObjectId(0);
+    let mut state = base_state();
+    state.objects.insert(land, card_object(land, land_definition(SELF_REGISTERING_SELECT_PLAYER_THEN_GAIN_LIFE), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+
+    let mut engine = Engine::new(state);
+    let (_land, status) = play_activate_and_drain(&mut engine, p0, land);
+    assert!(matches!(status, StepStatus::AwaitingScriptChoice { .. }));
+
+    engine.submit_script_choice(Target::Player(p0)).expect("p0 is a legal player target");
+    drain(&mut engine);
+
+    assert_eq!(
+        engine.state().player(p0).unwrap().life,
+        20 + 100 + p0.0 as i32,
+        "the resumed answer must be tagged kind=\"player\", not fall through to the object arm"
+    );
+}
+
+#[test]
+fn submitting_an_object_target_for_a_player_request_is_rejected() {
+    let p0 = PlayerId(0);
+    let land = ObjectId(0);
+    let creature = ObjectId(1);
+    let mut state = base_state();
+    state.objects.insert(land, card_object(land, land_definition(SELF_REGISTERING_SELECT_PLAYER_THEN_GAIN_LIFE), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+    put_on_battlefield(&mut state, card_object(creature, creature_definition(), p0, ZoneKind::Battlefield));
+
+    let mut engine = Engine::new(state);
+    play_activate_and_drain(&mut engine, p0, land);
+
+    let err = engine.submit_script_choice(Target::Object(creature)).unwrap_err();
+    assert!(matches!(err, ScriptChoiceError::InvalidCandidate), "an object can never satisfy a player-only request");
+}
+
+#[test]
+fn a_script_calling_select_targets_with_type_any_accepts_a_creature() {
+    let p0 = PlayerId(0);
+    let land = ObjectId(0);
+    let creature = ObjectId(1);
+    let mut state = base_state();
+    state.objects.insert(land, card_object(land, land_definition(SELF_REGISTERING_SELECT_ANY_THEN_GAIN_LIFE), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+    put_on_battlefield(&mut state, card_object(creature, creature_definition(), p0, ZoneKind::Battlefield));
+
+    let mut engine = Engine::new(state);
+    let (_land, status) = play_activate_and_drain(&mut engine, p0, land);
+    let StepStatus::AwaitingScriptChoice { request, .. } = status else {
+        panic!("expected a pause, got {status:?}")
+    };
+    let ScriptChoiceRequest::SelectTarget { filter } = request;
+    assert_eq!(filter, TargetFilter::AnyTarget);
+
+    engine.submit_script_choice(Target::Object(creature)).expect("a creature is a legal any-target");
+    drain(&mut engine);
+    assert_eq!(engine.state().player(p0).unwrap().life, 20 + creature.0 as i32);
+}
+
+#[test]
+fn a_script_calling_select_targets_with_type_any_accepts_a_player() {
+    let p0 = PlayerId(0);
+    let land = ObjectId(0);
+    let mut state = base_state();
+    state.objects.insert(land, card_object(land, land_definition(SELF_REGISTERING_SELECT_ANY_THEN_GAIN_LIFE), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+
+    let mut engine = Engine::new(state);
+    let (_land, status) = play_activate_and_drain(&mut engine, p0, land);
+    assert!(matches!(status, StepStatus::AwaitingScriptChoice { .. }));
+
+    engine.submit_script_choice(Target::Player(p0)).expect("p0 is a legal any-target");
+    drain(&mut engine);
+    assert_eq!(engine.state().player(p0).unwrap().life, 20 + 100 + p0.0 as i32);
+}
+
+#[test]
 fn submit_script_choice_rejects_when_not_awaiting() {
     let mut engine = Engine::new(base_state());
-    let err = engine.submit_script_choice(ObjectId(0)).unwrap_err();
+    let err = engine.submit_script_choice(Target::Object(ObjectId(0))).unwrap_err();
     assert!(matches!(err, ScriptChoiceError::NotAwaitingChoice));
 }
 

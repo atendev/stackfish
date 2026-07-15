@@ -2209,9 +2209,10 @@ shift, don't treat it as fixed once written.
    **Split out, not bundled in:**
    9a. **Modal spells / "may" abilities** — same coroutine mechanism, different request shape
       (`ScriptChoiceRequest` gains a variant), not attempted this slice.
-   9b. **Player-target selection via `Game.SelectTargets`** — narrowed to object-only this slice;
-      `Target::Player` deferred, same precedent `DrawCards`/`Shuffle` already set for their own
-      controller-only narrowing.
+   9b. ~~**Player-target selection via `Game.SelectTargets`**~~ — done, `phase5/script-target-players`
+      slice (docs/implementation.md, below). `{ type = "player" }`/`{ type = "any" }` widen the
+      request beyond object-only; the resumed answer is now a tagged `{ kind, id }` table so a
+      script can tell an object answer from a player one.
 10. ~~**SBA completeness (player-loss triad)**~~ — done, `phase5/sba-player-loss` slice
     (docs/implementation.md, below): 704.5b (empty-library draw loss), 704.5c (10+ poison),
     CR 903.10a (commander damage ≥21, `PlayerState::commander_damage_from` now real) all fold into
@@ -5268,5 +5269,60 @@ the bug note above.
 
 **SCOPE DEVIATIONS:** None - both "explicitly not modeled" items were named as deferred in the
 pre-slice report, not silently dropped.
+
+## Phase 5: phase5/script-target-players slice (backlog item 9b)
+
+Branch `phase5/script-target-players`, off master. Slice backlog item 9b, split out of the
+`phase5/script-coroutines` slice - `Game.SelectTargets` widened to accept `Target::Player`/CR
+115.4's "any target", not just `Target::Object`. Confirmed before writing code that the *static*
+targeting path (`TargetFilter::Player`/`AnyTarget`, `commands::target_is_legal`) already handled
+players correctly from the earlier `phase5/targeting-basics` slice - this slice only had to get a
+`Target::Player` value into that existing check from the script-choice (mid-resolution) path, not
+rebuild any legality logic.
+
+**Design:**
+- `decode_target_filter_table` (script.rs) gained a `type` discriminator - `"object"` (default,
+  so every pre-existing script that omits it keeps working unchanged), `"player"`, `"any"` -
+  matching the scenario crate's own TOML `target_requirement.filter` convention
+  (`build_target_requirement` in `crates/scenario/src/lib.rs`) exactly rather than inventing a
+  second vocabulary.
+- `ScriptRuntime::resume_operation`'s `answer` widened from `ObjectId` to `Target`, and
+  `Engine::submit_script_choice`'s `chosen` likewise - `target_is_legal` itself needed zero
+  changes, since it already branched correctly on `Target::Player`/`Target::Object` for
+  `TargetFilter::Player`/`AnyTarget` from the static-targeting slice.
+- Real decision locked in up front: the value resumed into the Lua coroutine changed from a bare
+  number (`answer.0`) to a tagged table `{ kind = "object"|"player", id = n }`. `ObjectId` (`u64`)
+  and `PlayerId` (`u32`) are both plain numbers to Lua - a raw-number answer worked when only
+  objects existed, but once a player answer is possible a script needs an explicit way to tell them
+  apart rather than trusting its own memory of which filter it asked for. This changes the existing
+  test script's `gain_life = target` to `gain_life = target.id` - an expected, up-front-flagged
+  interface deviation, not a surprise found mid-implementation.
+- No new TOML/CLI step - `submit_script_choice` stays engine-API-only, same precedent the original
+  `phase5/script-coroutines` slice already set (no scenario-file surface exists for
+  `AwaitingScriptChoice` at all).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` - 5 new tests in
+`phase5_script_target_selection.rs` (player-filter pause carries `TargetFilter::Player`; submitting
+a legal player answer resumes with `kind == "player"` actually reaching the script, proven by
+folding `target.kind` into the resulting life total rather than adding a new effect-shape key just
+for this test; an object answer against a player-only request is rejected, `InvalidCandidate`;
+`{ type = "any" }` pauses with `TargetFilter::AnyTarget` and accepts both a creature and a player),
+plus the 4 pre-existing tests in that file updated for the tagged-table answer shape. Full
+workspace run: 495 passed, 0 failed (490 prior + 5 new).
+
+**STRUCT DEVIATIONS:** None - `Target`, `TargetFilter::Player`/`AnyTarget` all pre-existed from the
+targeting-basics slice; nothing new was added to either type.
+
+**INTERFACE DEVIATIONS:** None beyond what the requirements report named up front
+(`resume_operation`/`submit_script_choice` widening from `ObjectId` to `Target`, and the resumed
+value's tagged-table shape).
+
+**SCOPE DEVIATIONS:** None.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- `TargetFilter::Player`'s own pre-existing TODO (no controller restriction - "target opponent"
+  specifically vs. any player) stays open, not bundled into this slice.
+- 9a (modal spells / "may" abilities) - untouched, same coroutine mechanism but a different
+  `ScriptChoiceRequest` variant, own follow-up.
 
 **UNRESOLVED:** none new - see "Explicitly not modeled" above.

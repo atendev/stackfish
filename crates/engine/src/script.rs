@@ -1225,22 +1225,41 @@ impl ScriptRuntime {
     }
 
     /// Resumes a `Game.SelectTargets` suspension (`OperationOutcome::
-    /// NeedsChoice`'s own `thread` handle) with the player's chosen object —
+    /// NeedsChoice`'s own `thread` handle) with the player's chosen target —
     /// the real answer to whatever `ScriptChoiceRequest` was yielded.
     /// `Engine::submit_script_choice` is the only intended caller. Same
     /// `handle_operation_result` tail as `invoke_operation` — a script that
     /// yields a *second* time (asks another question) produces another
     /// `NeedsChoice` rather than being assumed to finish after one answer.
+    ///
+    /// `answer` resumes the coroutine as a tagged table (`{ kind = "object"|
+    /// "player", id = n }`), not a bare number: `ObjectId` and `PlayerId`
+    /// are both plain integers to Lua, so an object-only answer could get
+    /// away with a raw number (backlog item 9's original shape), but once a
+    /// player answer is possible the script needs an explicit way to tell
+    /// them apart rather than trusting its own memory of which filter it
+    /// asked for.
     pub fn resume_operation(
         &self,
         thread_handle: ScriptHandle,
         state: &mut GameState,
         controller: PlayerId,
-        answer: ObjectId,
+        answer: Target,
     ) -> Result<OperationOutcome, ScriptError> {
         let thread = self.thread(thread_handle)?;
+        let answer_table = self.lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        match answer {
+            Target::Object(id) => {
+                answer_table.set("kind", "object").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table.set("id", id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            }
+            Target::Player(id) => {
+                answer_table.set("kind", "player").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table.set("id", id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            }
+        }
         let result: Value =
-            thread.resume(answer.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            thread.resume(answer_table).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         self.handle_operation_result(thread, result, state, controller)
     }
 
@@ -1339,28 +1358,43 @@ fn decode_script_choice_request(table: Table) -> Result<ScriptChoiceRequest, Scr
 
 /// `Game.SelectTargets`'s filter argument — same flat option-bag shape
 /// `decode_affected_value`/`decode_filter_table` already use for their own
-/// filter tables, narrowed to `TargetFilter::Object` only this slice (no
-/// player targets, no "any target", no zone override) — matches
-/// `ScriptChoiceRequest`'s own narrowing.
+/// filter tables, plus a `type` discriminator (`"object"` default/`"player"`/
+/// `"any"`) matching the scenario crate's own TOML `target_requirement.filter`
+/// convention (`crates/scenario/src/lib.rs`'s `build_target_requirement`)
+/// exactly, rather than inventing a second vocabulary. `type` defaults to
+/// `"object"` so every pre-existing script that omits it (this slice's own
+/// predecessor) keeps working unchanged. No zone override (backlog item 9's
+/// own narrowing, unchanged by this slice).
 fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError> {
-    let controller_name: Option<String> =
-        table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+    let kind: Option<String> = table.get("type").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    match kind.as_deref().unwrap_or("object") {
+        "player" => Ok(TargetFilter::Player),
+        "any" => Ok(TargetFilter::AnyTarget),
+        "object" => {
+            let controller_name: Option<String> =
+                table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
 
-    let card_types_table: Option<Table> =
-        table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-    let card_types = match card_types_table {
-        Some(t) => {
-            let mut set = CardTypeSet::empty();
-            for entry in t.sequence_values::<String>() {
-                set |= parse_card_type_name(&entry.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
-            }
-            Some(set)
+            let card_types_table: Option<Table> =
+                table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let card_types = match card_types_table {
+                Some(t) => {
+                    let mut set = CardTypeSet::empty();
+                    for entry in t.sequence_values::<String>() {
+                        set |=
+                            parse_card_type_name(&entry.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+                    }
+                    Some(set)
+                }
+                None => None,
+            };
+
+            Ok(TargetFilter::Object { card_types, controller, zone: None })
         }
-        None => None,
-    };
-
-    Ok(TargetFilter::Object { card_types, controller, zone: None })
+        other => Err(ScriptError::LoadError(format!(
+            "unknown Game.SelectTargets filter type '{other}' - expected object/player/any"
+        ))),
+    }
 }
 
 /// Builds the `Game.Conditions`/`Game.Ops`/`Game.Costs`/`Game.Layers`/
