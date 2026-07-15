@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use mlua::{Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
+use mlua::{Function, Lua, RegistryKey, Table, Thread, ThreadStatus, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{
     AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, CreatureTokenSpec,
@@ -19,6 +19,7 @@ use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::mana::{ColorSet, ManaCost};
+use crate::types::target::TargetFilter;
 use crate::types::zone::ZoneKind;
 
 /// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
@@ -126,6 +127,32 @@ pub struct ScriptContext<'a> {
     pub chosen_targets: Vec<Target>,
 }
 
+/// A card script's request for player input mid-resolution (backlog item
+/// 9), yielded from a coroutine-invoked operation via `Game.SelectTargets`.
+/// Only one shape exists this slice — a single object target matching a
+/// `TargetFilter` (no player targets, no "any target", no count > 1, same
+/// narrowing precedent every other targeting-adjacent slice already set —
+/// see `TargetFilter`'s own doc comment). Decoded from the yielded Lua table
+/// by `decode_script_choice_request`.
+#[derive(Clone, Debug)]
+pub enum ScriptChoiceRequest {
+    SelectTarget { filter: TargetFilter },
+}
+
+/// What one `ScriptRuntime::invoke_operation`/`resume_operation` call
+/// produced. `Finished` is the pre-existing synchronous behavior (the
+/// operation ran to completion, any recognized effect key already applied)
+/// — a script that never calls `Game.SelectTargets` only ever produces this,
+/// so nothing about existing scripts' observable behavior changes.
+/// `NeedsChoice` is new: the script yielded a real request and must be
+/// resumed (`resume_operation`) with the player's answer before it can
+/// continue — `Engine::submit_script_choice` is the only intended caller.
+#[derive(Debug)]
+pub enum OperationOutcome {
+    Finished,
+    NeedsChoice { thread: ScriptHandle, request: ScriptChoiceRequest },
+}
+
 /// Shared, interior-mutable store for loaded Lua callbacks plus whatever a
 /// currently-running card script has self-registered so far — wrapped in
 /// `Rc<RefCell<_>>` so a Lua-bound closure (`Game.CreateTriggeredAbility`,
@@ -158,6 +185,16 @@ struct ScriptRegistry {
     /// no `&mut GameState` to call `allocate_sequence_no()` from inside a Lua
     /// callback — the drain step stamps the real value.
     pending_static: Vec<ContinuousEffect>,
+    /// Backlog item 9: a coroutine `Thread` suspended mid-`invoke_operation`
+    /// at a `Game.SelectTargets` call, keyed by the same opaque
+    /// `ScriptHandle` space `scripts` uses (shares `next_handle`, kept in a
+    /// separate map since a suspended thread is consumed exactly once by
+    /// `resume_operation`, unlike a loaded `Function` handle which is
+    /// reusable). Same "`RegistryKey`, not the borrowed value itself"
+    /// rationale as `scripts` — confirmed via a standalone spike
+    /// (`phase5_coroutine_spike.rs`) that `Thread` round-trips through the
+    /// registry the same way `Function` already does.
+    suspended_threads: HashMap<ScriptHandle, RegistryKey>,
 }
 
 impl ScriptRegistry {
@@ -1162,24 +1199,87 @@ impl ScriptRuntime {
     }
 
     /// Real body, narrowed design ("Lua asks, Rust decides"): the loaded
-    /// function is called with `(source, controller)` and returns a plain
-    /// table describing *intent* — it never mutates `state` itself, which
+    /// function is invoked as a coroutine (`Lua::create_thread` +
+    /// `Thread::resume`) rather than a plain call — transparent for any
+    /// script that never yields (a fresh thread's first `resume` behaves
+    /// exactly like calling the function directly, confirmed against real
+    /// mlua in `phase5_coroutine_spike.rs`), and the only way a script can
+    /// later suspend on `Game.SelectTargets` (backlog item 9). See
+    /// `handle_operation_result` for what happens with what comes back —
+    /// it never mutates `state` itself on the "yielded" path, which
     /// sidesteps needing `&mut GameState` reachable from inside a Lua
     /// callback (the mutability gap this function's own TODO used to flag).
-    /// Only the `gain_life` key is decoded this slice; every other effect
-    /// shape (draw, damage, counters, ...) needs its own key + apply arm
-    /// here once a card actually needs it.
     pub fn invoke_operation(
         &self,
         handle: ScriptHandle,
         state: &mut GameState,
         source: ObjectId,
         controller: PlayerId,
-    ) -> Result<(), ScriptError> {
+    ) -> Result<OperationOutcome, ScriptError> {
         let function = self.function(handle)?;
-        let result: Table = function
-            .call((source.0, controller.0))
-            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let thread =
+            self.lua.create_thread(function).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let result: Value =
+            thread.resume((source.0, controller.0)).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        self.handle_operation_result(thread, result, state, controller)
+    }
+
+    /// Resumes a `Game.SelectTargets` suspension (`OperationOutcome::
+    /// NeedsChoice`'s own `thread` handle) with the player's chosen object —
+    /// the real answer to whatever `ScriptChoiceRequest` was yielded.
+    /// `Engine::submit_script_choice` is the only intended caller. Same
+    /// `handle_operation_result` tail as `invoke_operation` — a script that
+    /// yields a *second* time (asks another question) produces another
+    /// `NeedsChoice` rather than being assumed to finish after one answer.
+    pub fn resume_operation(
+        &self,
+        thread_handle: ScriptHandle,
+        state: &mut GameState,
+        controller: PlayerId,
+        answer: ObjectId,
+    ) -> Result<OperationOutcome, ScriptError> {
+        let thread = self.thread(thread_handle)?;
+        let result: Value =
+            thread.resume(answer.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        self.handle_operation_result(thread, result, state, controller)
+    }
+
+    /// Shared tail for `invoke_operation`/`resume_operation`: `thread`
+    /// either yielded again (a real `Game.SelectTargets` ask, decoded into a
+    /// `ScriptChoiceRequest` and stashed via the registry for a later
+    /// `resume_operation` call) or finished for good, in which case `result`
+    /// is the operation's own intent table — same `gain_life` decode
+    /// `invoke_operation` always had, same strictness (a non-table return
+    /// from a finished operation is a real error, not silently ignored —
+    /// matches the old `function.call::<_, Table>()`'s own typed-return
+    /// strictness exactly). TODO(more effect shapes): draw_cards/
+    /// deal_damage/add_counters/etc need their own `result.get::<_,
+    /// Option<_>>("...")` + apply arm here as real cards need them, same
+    /// pre-existing gap this function always had.
+    fn handle_operation_result(
+        &self,
+        thread: Thread,
+        result: Value,
+        state: &mut GameState,
+        controller: PlayerId,
+    ) -> Result<OperationOutcome, ScriptError> {
+        if thread.status() == ThreadStatus::Resumable {
+            let Value::Table(request_table) = result else {
+                return Err(ScriptError::RuntimeError(format!(
+                    "script yielded a non-table request: {}",
+                    result.type_name()
+                )));
+            };
+            let request = decode_script_choice_request(request_table)?;
+            let thread_handle = self.stash_thread(thread)?;
+            return Ok(OperationOutcome::NeedsChoice { thread: thread_handle, request });
+        }
+        let Value::Table(result) = result else {
+            return Err(ScriptError::RuntimeError(format!(
+                "operation must return a table, got {}",
+                result.type_name()
+            )));
+        };
         // TODO(more effect shapes): gain_life is the only key wired this
         // slice - draw_cards/deal_damage/add_counters/etc need their own
         // `result.get::<_, Option<_>>("...")` + apply arm here as real cards
@@ -1191,8 +1291,76 @@ impl ScriptRuntime {
                 player.gain_life(amount);
             }
         }
-        Ok(())
+        Ok(OperationOutcome::Finished)
     }
+
+    /// Backlog item 9's own `function`/registry-lookup sibling — see that
+    /// method's own doc comment for the `RegistryKey` rationale, identical
+    /// here except for `suspended_threads` vs `scripts` and the `T` being
+    /// retrieved (`Thread` vs `Function`).
+    fn thread(&self, handle: ScriptHandle) -> Result<Thread<'_>, ScriptError> {
+        let registry = self.registry.borrow();
+        let key = registry
+            .suspended_threads
+            .get(&handle)
+            .ok_or_else(|| ScriptError::RuntimeError(format!("unknown suspended thread {handle:?}")))?;
+        self.lua.registry_value(key).map_err(|e| ScriptError::RuntimeError(e.to_string()))
+    }
+
+    /// Stashes a just-yielded `Thread` into the registry under a fresh
+    /// handle, mirroring how a loaded `Function` is stashed in
+    /// `decode_condition_value`/`decode_operation_value` — a `RegistryKey`,
+    /// not the borrowed value itself, since `Thread<'lua>` can't outlive
+    /// this call otherwise.
+    fn stash_thread(&self, thread: Thread) -> Result<ScriptHandle, ScriptError> {
+        let key = self.lua.create_registry_value(thread).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let mut registry = self.registry.borrow_mut();
+        let handle = registry.next_script_handle();
+        registry.suspended_threads.insert(handle, key);
+        Ok(handle)
+    }
+}
+
+/// Decodes `Game.SelectTargets`'s yielded request table — `{ op =
+/// "select_target", filter = {...} }`. Only one `op` shape exists this
+/// slice; an unrecognized op is a real error, not guessed at, same stance
+/// `decode_condition_value` takes for an unrecognized shape.
+fn decode_script_choice_request(table: Table) -> Result<ScriptChoiceRequest, ScriptError> {
+    let op: String = table.get("op").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    match op.as_str() {
+        "select_target" => {
+            let filter_table: Table =
+                table.get("filter").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            Ok(ScriptChoiceRequest::SelectTarget { filter: decode_target_filter_table(filter_table)? })
+        }
+        other => Err(ScriptError::RuntimeError(format!("unknown script choice request op '{other}'"))),
+    }
+}
+
+/// `Game.SelectTargets`'s filter argument — same flat option-bag shape
+/// `decode_affected_value`/`decode_filter_table` already use for their own
+/// filter tables, narrowed to `TargetFilter::Object` only this slice (no
+/// player targets, no "any target", no zone override) — matches
+/// `ScriptChoiceRequest`'s own narrowing.
+fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError> {
+    let controller_name: Option<String> =
+        table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+
+    let card_types_table: Option<Table> =
+        table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let card_types = match card_types_table {
+        Some(t) => {
+            let mut set = CardTypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                set |= parse_card_type_name(&entry.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+
+    Ok(TargetFilter::Object { card_types, controller, zone: None })
 }
 
 /// Builds the `Game.Conditions`/`Game.Ops`/`Game.Costs`/`Game.Layers`/
@@ -1429,6 +1597,22 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?,
     )?;
 
+    // Backlog item 9: `Game.SelectTargets(filter)` yields the request
+    // straight to Lua's own `coroutine.yield` - deliberately NOT a
+    // `create_function` Rust closure. mlua 0.9 (no `async` feature enabled
+    // here) only lets code running *as* a coroutine call `coroutine.yield`;
+    // a plain Rust-bound function can't suspend the Lua stack from inside a
+    // callback the way `create_async_function` could. A tiny literal Lua
+    // definition sidesteps needing that entirely - confirmed against real
+    // vendored mlua in `phase5_coroutine_spike.rs` that a plain
+    // `coroutine.yield` inside a `Thread` round-trips real values correctly.
+    // `ScriptRuntime::invoke_operation`/`resume_operation` are what actually
+    // decode the yielded table and drive the resulting pause/resume -
+    // this binding only ever produces the request, never interprets it.
+    let select_targets: Function = lua
+        .load(r#"function(filter) return coroutine.yield({ op = "select_target", filter = filter or {} }) end"#)
+        .eval()?;
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("InterveningIf", intervening_if)?;
@@ -1440,6 +1624,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
     game.set("CreateStaticAbility", create_static_ability)?;
     game.set("CreateActivatedAbility", create_activated_ability)?;
+    game.set("SelectTargets", select_targets)?;
     lua.globals().set("Game", game)
 }
 

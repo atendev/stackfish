@@ -2192,10 +2192,26 @@ shift, don't treat it as fixed once written.
    this mirrors `resolve_deaths`'s own per-object body instead). Narrower than the full rules text —
    CR 616.1's ordering choice (2+ replacement effects matching the same scripted destroy) isn't
    supported, silently no-ops rather than guessing an order; see that slice's own UNRESOLVED list.
-9. **Player-input-mid-script (Lua coroutines)** — needed for "choose one," "may," and modal spells.
-   `invoke_target`/`Game.SelectTargets` are stubbed synchronous on purpose; real fix needs
-   `Lua::create_thread` yield/resume spanning `Engine::step()` calls, flagged unresolved since
-   Phase 2 part 3.
+9. ~~**Player-input-mid-script (Lua coroutines)**~~ — done for `Game.SelectTargets`,
+   `phase5/script-coroutines` slice (docs/implementation.md, below). A spike
+   (`phase5_coroutine_spike.rs`) confirmed the real mechanism against vendored mlua 0.9 before any
+   `Engine`-level plumbing was built: `ScriptRuntime::invoke_operation` now runs a script's operation
+   as a coroutine (`Lua::create_thread`/`Thread::resume`) instead of a plain call — transparent for
+   any script that never yields — and `Game.SelectTargets` is a plain Lua function that calls
+   `coroutine.yield` directly (not a Rust-bound callback; mlua 0.9 without the `async` feature can't
+   yield from inside a Rust closure). A yield pauses the whole pipeline on a new
+   `ProcessState`/`StepStatus::AwaitingScriptChoice`, mirroring `AwaitingReplacementChoice`/
+   `AwaitingLegendRuleChoice` exactly; `Engine::submit_script_choice` resumes the suspended thread
+   (stashed via the registry, same `RegistryKey` mechanism `scripts` already uses for `Function`s).
+   Scoped to exactly one request shape this slice — object-only, count always 1, no player targets,
+   no "any target." `invoke_target`/`TargetSpec::Script` (a *static* target-requirement predicate,
+   a different concept from an operation's own mid-resolution ask) are untouched, still `todo!()`.
+   **Split out, not bundled in:**
+   9a. **Modal spells / "may" abilities** — same coroutine mechanism, different request shape
+      (`ScriptChoiceRequest` gains a variant), not attempted this slice.
+   9b. **Player-target selection via `Game.SelectTargets`** — narrowed to object-only this slice;
+      `Target::Player` deferred, same precedent `DrawCards`/`Shuffle` already set for their own
+      controller-only narrowing.
 10. ~~**SBA completeness (player-loss triad)**~~ — done, `phase5/sba-player-loss` slice
     (docs/implementation.md, below): 704.5b (empty-library draw loss), 704.5c (10+ poison),
     CR 903.10a (commander damage ≥21, `PlayerState::commander_damage_from` now real) all fold into
@@ -5018,6 +5034,125 @@ report.
 deferred follow-ups in the pre-slice report, not silently dropped.
 
 **UNRESOLVED:** none new — see "Explicitly not modeled" above.
+
+## Phase 5: phase5/script-coroutines slice (backlog item 9, `Game.SelectTargets`)
+
+Branch `phase5/script-coroutines`, off master. Slice backlog item 9 — the first real player-input-
+mid-script mechanism, flagged unresolved since Phase 2 part 3. Genuinely open-ended before this
+slice (no prior design beyond two-line stub comments and a DESIGN.md open question), so this one
+started with a spike rather than a locked design.
+
+**Spike, before any `Engine`-level plumbing:** `crates/engine/tests/phase5_coroutine_spike.rs`,
+standalone, no engine code depends on it. Confirmed against the real vendored mlua 0.9.9 (checked
+by reading the crate's own source directly, not from memory): `Thread::resume`/`coroutine.yield`
+round-trip real values correctly and `Thread::status()` distinguishes suspended-at-yield from
+finished-for-good; a suspended `Thread` survives a `create_registry_value`/`registry_value`
+round-trip (confirmed `Thread` implements `IntoLua`/`FromLua` in mlua 0.9.9 from the source) — the
+exact mechanism `ScriptRegistry` already uses for `Function`s via `RegistryKey`. Both passed on the
+first real attempt; the design proceeded exactly as planned with no surprises.
+
+**Design:**
+- `ScriptRuntime::invoke_operation` now runs the loaded function as a coroutine
+  (`Lua::create_thread` + `Thread::resume`) instead of a plain `.call()` — transparent for any
+  script that never yields, since a fresh thread's first `resume` behaves exactly like calling the
+  function directly (confirmed in the spike). This is the only invocation path that gets the
+  coroutine treatment this slice — `invoke_condition`/`invoke_cda` stay synchronous, since a trigger
+  condition or a CDA has no legitimate reason to ask the player anything mid-check.
+- `Game.SelectTargets(filter)` is a **plain Lua function**, not a `create_function` Rust closure —
+  `coroutine.yield` can only be called by code running *as* a coroutine; mlua 0.9 without the
+  `async` feature (not enabled here) has no way for a Rust-bound callback to suspend the Lua stack
+  from inside itself. A tiny literal Lua chunk (`function(filter) return coroutine.yield({ op =
+  "select_target", filter = filter or {} }) end`) sidesteps needing that entirely, loaded once
+  in `bind_game_globals` alongside the rest of the `Game` table.
+- New `ScriptChoiceRequest::SelectTarget { filter: TargetFilter }` — reuses `TargetFilter`
+  (`types/target.rs`) unchanged rather than inventing a second filter vocabulary; narrowed to
+  `TargetFilter::Object` only this slice (no player targets, no "any target," no zone override).
+  New `OperationOutcome::{Finished, NeedsChoice}` is what `invoke_operation`/the new
+  `resume_operation` return instead of the old bare `Result<(), ScriptError>`.
+- New `ScriptRegistry.suspended_threads: HashMap<ScriptHandle, RegistryKey>` — a suspended `Thread`
+  stashed under the same `ScriptHandle` id space `scripts` uses (shares `next_handle`), kept in a
+  separate map since a suspended thread is consumed exactly once by `resume_operation`, unlike a
+  loaded `Function` handle which is reusable.
+- `ProcessState`/`StepStatus::AwaitingScriptChoice` mirror `AwaitingReplacementChoice`/
+  `AwaitingLegendRuleChoice` exactly (same "own entry point, not `submit_action`" rationale). The
+  pause carries `stack_id`/`controller`/`events_so_far` — exactly what `ResolveStackTop` had already
+  built for this resolution before hitting the ask — so `Engine::submit_script_choice` can push the
+  deferred `StackObjectResolved` and continue into `ReplacementCheck` in the same spot once answered,
+  rather than re-deriving any of it. Validates the answer via the existing `commands::
+  target_is_legal` (the same check a spell's static target requirement already uses) — no second
+  bespoke legality check.
+- A script error on `resume_operation` is silently dropped (`Err(_) => {}`), same pre-existing "no
+  path from `ResolveStackTop` back to a `StepStatus` error for a mid-resolution script failure"
+  stance the original (non-yielding) `invoke_operation` call already had — not a new gap this slice
+  introduces.
+
+**Real bug caught while writing the first end-to-end test, not a design flaw:** the first attempt at
+an `Engine`-driven test pre-loaded the operation into a standalone `ScriptRuntime` (mirroring a
+unit-level test pattern used elsewhere) — but `Engine::new` owns its *own* internal `ScriptRuntime`
+(a separate Lua VM entirely), so a `ScriptHandle` from an external one is meaningless to it; the
+call silently errored and got swallowed by the same `Err(_) => {}` stance above, with no crash to
+signal the mistake. Fixed by switching to real card-script self-registration (`Game.
+CreateActivatedAbility`), the same mechanism `phase5_activated_ability_self_registration.rs` already
+proves, so the operation is registered through the engine's own runtime. A second, separate mistake
+in the same debugging pass: forgetting that paying a cost only commits it — the ability still sits
+on the stack until priority passes around (CR 117.4) — caught by a temporary `eprintln!` in
+`ResolveStackTop`'s operation-invocation arm (removed before this commit) showing the arm was never
+even reached.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 2 new spike tests
+(`phase5_coroutine_spike.rs`) plus 6 new tests in `crates/engine/tests/phase5_script_target_selection.rs`
+(a self-registered activated ability calling `Game.SelectTargets` pauses `Engine::step()` with the
+real filter from the script; submitting a legal target resumes the exact suspended script, which
+finishes with its own continuation using the precise resumed value (the chosen creature's own raw
+object id, round-tripped through `gain_life` as proof the value reached the script correctly) and
+the deferred `StackObjectResolved` lands once resolved; an illegal target is rejected with the pause
+left open and no life change; `submit_script_choice` rejects when not awaiting; a script that never
+calls `Game.SelectTargets` still resolves synchronously; `invoke_operation` finishes synchronously
+at the `ScriptRuntime` level directly, unit-style, confirming the coroutine rewrite doesn't change
+existing behavior), all 482 prior tests unaffected — full workspace run: 490 passed, 0 failed.
+
+**What got implemented:**
+- `script.rs`: `ScriptChoiceRequest`, `OperationOutcome` (both `pub`). `ScriptRegistry.
+  suspended_threads`. `invoke_operation` rewritten around `Lua::create_thread`/`Thread::resume`; new
+  `resume_operation`; shared `handle_operation_result` tail (yielded → decode request, stash thread;
+  finished → same `gain_life` decode the old body always had, same typed-return strictness). New
+  `thread`/`stash_thread` registry helpers, mirroring `function`'s own pattern. New
+  `decode_script_choice_request`/`decode_target_filter_table` free functions. `Game.SelectTargets`
+  bound as a literal Lua chunk in `bind_game_globals`.
+- `engine.rs`: `ScriptChoiceError`, `StepStatus`/`ProcessState::AwaitingScriptChoice`, the "nothing
+  to do until answered" `step()` arm for it, `Engine::submit_script_choice`. `ResolveStackTop`'s
+  `None => invoke_operation(...)` arm rewritten to branch on `OperationOutcome`, pausing (early
+  `return StepStatus::Progressed`, same pattern already used elsewhere in `step()`) rather than
+  falling through to `StackObjectResolved`/`ReplacementCheck` when the script yields.
+- `crates/scenario/src/lib.rs`: `drain`'s exhaustive `StepStatus` match gained
+  `AwaitingScriptChoice`, same "stop draining, this run reached a pause" treatment every other pause
+  status already gets. No new TOML/CLI step type — checked before writing code: neither CR 616.1's
+  nor the legend-rule choice-pause has one either (no existing precedent to extend), consistent
+  with that same standing decision, not a gap unique to this slice.
+
+**STRUCT DEVIATIONS:** None — `ScriptChoiceRequest`/`OperationOutcome`/the new `ProcessState`/
+`StepStatus` variants were all anticipated exactly in the pre-slice requirements report.
+
+**INTERFACE DEVIATIONS:** `invoke_operation`'s return type changing from `Result<(), ScriptError>`
+to `Result<OperationOutcome, ScriptError>` was anticipated by name in the report's design section,
+not discovered mid-implementation.
+
+**SCOPE DEVIATIONS:** None beyond the two real bugs already described under their own heading above
+— both caught and fixed while writing this slice's own first end-to-end test, not silently worked
+around.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Modal spells / "may" abilities (backlog item 9a) — same mechanism, different request shape, own
+  follow-up.
+- `Target::Player` selection via `Game.SelectTargets` (backlog item 9b) — object-only this slice,
+  same controller-only-style narrowing `DrawCards`/`Shuffle` already set precedent for.
+- `invoke_target`/`TargetSpec::Script` — a *static* target-requirement predicate (evaluated once at
+  cast/activation time, before the stack), a different concept from an operation's own mid-
+  resolution ask; untouched, still `todo!()`.
+- Nested/sequential asks within one script (ask twice in a row) — the resume design accounts for it
+  structurally (`NeedsChoice` can recur), but no test exercises it this slice.
+- A script error on `resume_operation` is silently dropped, same pre-existing stance the original
+  `invoke_operation` already had — not expanded or newly introduced here.
 
 ## Mistakes caught (don't repeat)
 

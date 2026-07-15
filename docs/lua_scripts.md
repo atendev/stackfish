@@ -398,6 +398,53 @@ Real, tested end to end: `crates/engine/tests/phase5_activated_ability_self_regi
 `crates/engine/tests/phase5_activate_ability_costs.rs` (the latter covers hand-built, non-script
 `CostSpec`s exercising every additional-cost shape).
 
+## Asking the player for a target mid-resolution
+
+`Game.SelectTargets(filter)`, called from inside an operation function, suspends the script and
+asks the player to choose a real target before continuing — the first real player-input-mid-script
+mechanism (backlog item 9), built on Lua coroutines:
+
+```lua
+function s.initial_effect(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:SetOperation(function(source, controller)
+        local target = Game.SelectTargets({ card_types = { "Creature" } })
+        -- target is the chosen creature's object id (a plain integer),
+        -- available here exactly as if the call had returned synchronously
+        return { gain_life = 1 }
+    end)
+    e:Register()
+end
+```
+
+Under the hood, `ScriptRuntime::invoke_operation` runs the operation function as a Lua coroutine
+(`Lua::create_thread`/`Thread::resume`) instead of a plain call. `Game.SelectTargets` itself is a
+plain Lua function (not a Rust-bound one) that calls `coroutine.yield` directly — mlua 0.9 without
+the `async` feature (not enabled in this engine) has no way for a Rust closure to suspend the Lua
+stack from inside itself, so the yield has to happen in real Lua code. The engine sees the yield as
+`StepStatus::AwaitingScriptChoice { player, request }`; the caller prompts and answers via
+`Engine::submit_script_choice(chosen_object_id)`, which resumes the exact suspended script with that
+value and continues its execution from the `Game.SelectTargets(...)` call as if it had returned
+synchronously. A script that never calls `Game.SelectTargets` behaves identically to before this
+existed — nothing about existing operations changes.
+
+`filter` is the same flat option-bag shape `:SetAffected`/cost filters already use:
+`{ card_types = {...}, controller = "you"|"opponent"|"any" }`, every key optional. Narrowed this
+slice: object targets only (no player targets, no "any target," no zone override), and exactly one
+target per call (no "up to N"). An illegal answer to `submit_script_choice` is rejected and the
+pause stays open, same "invalid candidate, no state change" contract every other choice-submit
+method in this engine already has.
+
+Not yet possible: modal spells ("choose one"), "may" abilities, and selecting a *player* as the
+target — same mechanism, different request shapes, all named follow-ups (backlog items 9a/9b) not
+attempted yet. `invoke_target`/`TargetSpec::Script` (a *static* target-requirement predicate,
+checked once at cast/activation time before the stack) is a different, unrelated concept and stays
+unimplemented.
+
+Real, tested end to end: `crates/engine/tests/phase5_coroutine_spike.rs` (the raw coroutine
+mechanism, standalone) and `crates/engine/tests/phase5_script_target_selection.rs` (the full
+pause/resume path through a real `Engine`).
+
 ## Hidden information
 
 A condition function only ever receives `source`/`controller`/`event` as plain values — the full
@@ -414,11 +461,14 @@ forever, and don't add a Lua-visible full-state argument without re-reading
 
 Don't spend time trying these — they're signatures only, or explicitly unbound:
 
-- **`Game.ReplaceEvent`, `Game.CastSpell`, `Game.PayCost`, `Game.SelectTargets`** (`script_api.rs`)
-  — none of these are bound into the Lua VM's globals. A card script cannot call any of them.
+- **`Game.ReplaceEvent`, `Game.CastSpell`, `Game.PayCost`** (`script_api.rs`) — none of these are
+  bound into the Lua VM's globals. A card script cannot call any of them.
   `Game.Conditions.*`/`Game.Ops.*`/`Game.Costs.*`/`Game.Layers.*`/`Game.Effects.*`/
-  `Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`/`Game.CreateActivatedAbility` are what
-  exist on `Game` right now. `Game.AddContinuousEffect` specifically is superseded by
+  `Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`/`Game.CreateActivatedAbility`/
+  `Game.SelectTargets` are what exist on `Game` right now (`Game.SelectTargets` is real as of the
+  script-coroutines slice — see "Asking the player for a target mid-resolution" above; it's a
+  literal Lua function, not a `script_api.rs` binding, which is why it's not grouped with the three
+  unbound ones here). `Game.AddContinuousEffect` specifically is superseded by
   `Game.CreateStaticAbility`'s builder (same relationship the old `register_triggered_ability` free
   function has to `Game.CreateTriggeredAbility`) — it was never bound and isn't expected to be.
 - **A mana ability via Lua** — still wired via `mana_ability` (`docs/scenario_format.md`), not
@@ -435,15 +485,13 @@ Don't spend time trying these — they're signatures only, or explicitly unbound
   only the recognized primitive shapes.
 - **{X} costs, alternative costs (flashback-style), hybrid/Phyrexian/snow mana payment** —
   pre-existing `CostSpec`/`PaymentPlan` gaps, not specific to the script bridge.
-- **Continuous effects and replacement effects** — `ContinuousEffect::applies_to` and
-  `ReplacementEffect::matches` are both `todo!()`. No "as long as you control a Forest" or
-  "if a source would deal damage, prevent it" style effect can be checked yet, scripted or not.
 - **Any event kind other than `ZoneChange`** — `event_to_lua` (`script.rs`) only bridges zone
   changes. A condition wanting to check damage/life-change/tap events will see `nil` and must
   wait on `event_to_lua` being extended.
-- **Player-input mid-script** (asking the player to choose something from inside a script) —
-  needs Lua coroutines spanning multiple `Engine::step()` calls, not designed yet. See
-  `DESIGN.md`'s open questions.
+- **Modal spells, "may" abilities, and player-target selection** — `Game.SelectTargets` (above)
+  covers a single object target only; a script asking "choose one" or offering an optional effect,
+  or selecting a *player* as a target, needs the same coroutine mechanism with a different request
+  shape — not built yet (backlog items 9a/9b).
 
 ## Adding a new primitive
 
