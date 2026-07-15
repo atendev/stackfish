@@ -40,6 +40,12 @@ pub enum Step {
     BeginningOfCombat,
     DeclareAttackers,
     DeclareBlockers,
+    /// CR 510.1a/702.7: only inserted when at least one attacker or blocker
+    /// has first strike or double strike - see
+    /// `engine::Engine::advance_turn_step`'s `DeclareBlockers` arm. Skipped
+    /// entirely otherwise, so combat with no first/double strike is exactly
+    /// the one-step sequence it always was.
+    FirstStrikeDamage,
     CombatDamage,
     EndOfCombat,
     PostCombatMain,

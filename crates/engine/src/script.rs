@@ -341,6 +341,8 @@ fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> {
         "Lifelink" => KeywordSet::LIFELINK,
         "Wither" => KeywordSet::WITHER,
         "Infect" => KeywordSet::INFECT,
+        "FirstStrike" => KeywordSet::FIRST_STRIKE,
+        "DoubleStrike" => KeywordSet::DOUBLE_STRIKE,
         other => return Err(ScriptError::LoadError(format!("unknown keyword '{other}'"))),
     })
 }

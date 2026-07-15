@@ -5044,3 +5044,94 @@ deferred follow-ups in the pre-slice report, not silently dropped.
   per-resolution exclusion set from the start, not just "the rewritten form might not match
   anymore" — a rewrite that doesn't change the property being matched on will match forever
   otherwise. Caught by the test suite (two tests visibly stalled) before merge, not after.
+
+## Phase 5: phase5/first-strike slice (backlog item 12)
+
+Branch `phase5/first-strike`, off master. CR 510.1a/702.4/702.7: first strike and double strike
+split the combat damage step into two (a first-strike step, then the regular step) whenever any
+attacker or blocker has either keyword; otherwise combat is unchanged. Confirmed before writing
+code that `turn.rs`'s `Step` enum had exactly one `CombatDamage` step — the two-step sequence
+didn't exist at all.
+
+**What got implemented:**
+- `types/card.rs`: `KeywordSet::FIRST_STRIKE`/`DOUBLE_STRIKE` (bits 12/13, CR 702.7) plus matching
+  `Keyword` enum variants; wired into `parse_keyword_name` in both `script.rs` and the scenario
+  crate's `parse_keywords`, same as every existing keyword.
+- `types/turn.rs`: new `Step::FirstStrikeDamage`, inserted between `DeclareBlockers` and
+  `CombatDamage`.
+- `engine.rs`'s `advance_turn_step`: the `(Phase::Combat, Step::DeclareBlockers)` arm now checks
+  (via `effective_keywords`, so a layer-6-granted keyword counts too) whether any current attacker
+  or blocker has `FIRST_STRIKE`/`DOUBLE_STRIKE`; if so, next step is `FirstStrikeDamage`, else
+  straight to `CombatDamage` exactly as before this slice. A new `(Phase::Combat,
+  Step::FirstStrikeDamage)` arm unconditionally advances to `CombatDamage` next.
+- `commands.rs`'s `AssignCombatDamage`: accepts either damage step now, and got a real rewrite of
+  its setup rather than a bolted-on branch. New `participates_in_damage_step(keywords, step) ->
+  bool` decides, per creature, whether it assigns/deals damage in the current step. Three derived
+  lists replace direct use of `combat.attackers`/`combat.blocks`:
+  - `attackers`: alive AND itself step-eligible - decides whether an attacker deals damage *at
+    all* this step.
+  - `alive_blocks`: alive only, deliberately **not** filtered by the blocker's own step-eligibility
+    - which step an attacker's damage lands in is decided by the attacker's keywords, not the
+      blocker's, so a first-strike attacker's damage still routes to a perfectly ordinary blocker
+      during the first-strike step. Feeds `blockers_by_attacker`/`multi_blocked` (further scoped to
+      attackers present in `attackers`, so a non-participating attacker never demands a split) and
+      the attacker-side damage-event loop.
+    - `blocks`: `alive_blocks` further filtered by the blocker's own step-eligibility - decides
+    whether a blocker strikes back *this step*, used only by the blocker-side damage-event loop.
+
+**Bug found and fixed while wiring this:** `AssignCombatDamage` previously hard-errored
+(`InvalidTarget`) the instant any attacker/blocker id in `combat` no longer resolved in
+`state.objects` - harmless before first strike (only reachable if a spell killed a combatant in a
+priority window before `CombatDamage`, rarely hit), fatal now that a first-strike kill is the
+central case: a first-striker routinely kills its blocker in the first step, and that blocker's id
+genuinely won't resolve by the time the regular step's `AssignCombatDamage` runs. Fixed by the
+alive-filtering above rather than a special case - a missing id is just an ineligible participant
+now, same code path as any other exclusion.
+
+**Bug found and fixed by the test suite, not anticipated in the requirements report:** an early
+version filtered `alive_blocks` by the blocker's own step-eligibility too (matching a literal
+reading of the pre-implementation design). That broke the core first-strike interaction outright -
+a first-strike attacker blocked by an ordinary creature stopped dealing damage to it at all during
+the first-strike step, because the blocker (no first strike) was filtered out of
+`blockers_by_attacker` and the attacker fell into the "unblocked" branch instead. Real CR 510.1a:
+the *attacker's* keywords decide which step its damage is dealt in, regardless of the blocker's own
+keywords - the blocker's keywords only decide whether *it* strikes back that step. Caught by
+`first_strike_attacker_kills_blocker_before_it_deals_damage_back` actually failing (blocker survived
+undamaged) before this split into two separately-filtered lists (`alive_blocks` vs `blocks`) was
+added.
+
+**Explicitly not modeled (named, not silently guessed):**
+- CR 509.1h-style "attacker removed from combat" bookkeeping beyond the damage consequence itself -
+  `combat.attackers`/`combat.blocks` still list a dead participant's id after it dies mid-combat
+  (no broader blocked/blocking status tracking exists or is touched here, same as every other
+  combat slice so far).
+- A continuous effect granting first/double strike - `effective_keywords` already covers this for
+  free (CR 613 layer 6), not separately implemented or tested this slice (the report's own
+  read-through of `effective_keywords`'s existing doc comment was enough to confirm it, not worth a
+  dedicated test given every other keyword check in this file already relies on the same helper).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` - 6 new integration tests in
+`crates/engine/tests/phase5_first_strike.rs`: no participant with either keyword skips
+`FirstStrikeDamage` entirely (single `AdvanceTurnStep` hop from `DeclareBlockers` lands directly on
+`CombatDamage`); a first-strike attacker's presence inserts `FirstStrikeDamage` in that same single
+hop; an unblocked first striker deals damage only in the first-strike step; an unblocked double
+striker deals damage in both steps (total 2x power); the core interaction - a first-strike attacker
+kills an ordinary blocker in the first-strike step, the blocker never strikes back, and the
+regular step's `AssignCombatDamage` afterward silently skips the now-dead blocker instead of
+`InvalidTarget`-erroring; and a multi-blocked ordinary attacker's split requirement is scoped to the
+step it actually participates in (no split demanded during a first-strike step it sits out, one
+demanded during the regular step it does participate in). All prior tests unaffected - full
+workspace run: 482 passed, 0 failed (476 prior + 6 new).
+
+**STRUCT DEVIATIONS:** `alive_blocks` (a third derived list alongside `attackers`/`blocks`) wasn't
+anticipated in the pre-slice report, which described only two filtered lists. Needed once testing
+surfaced that blocker-side step-eligibility must NOT gate where an attacker's damage routes - see
+the bug note above.
+
+**INTERFACE DEVIATIONS:** None - `participates_in_damage_step`'s signature and the
+`advance_turn_step`/`AssignCombatDamage` touch-points match the pre-slice report exactly.
+
+**SCOPE DEVIATIONS:** None - both "explicitly not modeled" items were named as deferred in the
+pre-slice report, not silently dropped.
+
+**UNRESOLVED:** none new - see "Explicitly not modeled" above.

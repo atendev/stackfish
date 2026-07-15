@@ -3025,6 +3025,35 @@ impl Engine {
               false
             }
             (Phase::Combat, Step::DeclareBlockers) => {
+                // CR 510.1a: two combat damage steps instead of one iff some
+                // attacker or blocker currently has first strike or double
+                // strike - read through effective_keywords (CR 613 layer 6)
+                // so a continuous effect granting the keyword counts too,
+                // not just the printed KeywordSet.
+                let has_first_or_double_strike = self
+                    .state
+                    .combat
+                    .as_ref()
+                    .map(|combat| {
+                        combat
+                            .attackers
+                            .iter()
+                            .map(|(attacker, _)| *attacker)
+                            .chain(combat.blocks.iter().map(|(blocker, _)| *blocker))
+                            .any(|id| {
+                                commands::effective_keywords(&self.state, &self.script_runtime, id)
+                                    .intersects(KeywordSet::FIRST_STRIKE | KeywordSet::DOUBLE_STRIKE)
+                            })
+                    })
+                    .unwrap_or(false);
+                self.state.step = if has_first_or_double_strike {
+                    Step::FirstStrikeDamage
+                } else {
+                    Step::CombatDamage
+                };
+                false
+            }
+            (Phase::Combat, Step::FirstStrikeDamage) => {
                 self.state.step = Step::CombatDamage;
                 false
             }
