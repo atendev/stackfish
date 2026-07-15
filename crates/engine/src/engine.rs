@@ -839,9 +839,13 @@ impl Engine {
     /// Answers a pending backlog-item-9 `Game.SelectTargets` pause raised by
     /// `StepStatus::AwaitingScriptChoice` — `chosen` must satisfy the
     /// request's own `TargetFilter` (checked via the same `target_is_legal`
-    /// a spell's static target requirement already uses). Deliberately a
-    /// separate entry point from `submit_action`, same reason
-    /// `submit_replacement_choice`/`submit_legend_rule_choice` are.
+    /// a spell's static target requirement already uses; that check already
+    /// branches correctly on `Target::Player`/`Target::Object` for
+    /// `TargetFilter::Player`/`AnyTarget`, so widening `chosen` from
+    /// `ObjectId` to `Target` here needed no change to `target_is_legal`
+    /// itself). Deliberately a separate entry point from `submit_action`,
+    /// same reason `submit_replacement_choice`/`submit_legend_rule_choice`
+    /// are.
     ///
     /// Resumes the suspended coroutine (`ScriptRuntime::resume_operation`)
     /// with `chosen`. A script error on resume is silently dropped, same
@@ -849,13 +853,12 @@ impl Engine {
     /// error for a mid-resolution script failure" stance the original
     /// (non-yielding) `invoke_operation` call already had — not a new gap
     /// this method introduces.
-    pub fn submit_script_choice(&mut self, chosen: ObjectId) -> Result<(), ScriptChoiceError> {
+    pub fn submit_script_choice(&mut self, chosen: Target) -> Result<(), ScriptChoiceError> {
         let ProcessState::AwaitingScriptChoice { request, controller, .. } = &self.process_state else {
             return Err(ScriptChoiceError::NotAwaitingChoice);
         };
         let ScriptChoiceRequest::SelectTarget { filter } = request;
-        if !commands::target_is_legal(&self.state, &self.script_runtime, Target::Object(chosen), filter, *controller)
-        {
+        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller) {
             return Err(ScriptChoiceError::InvalidCandidate);
         }
         let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, mut events_so_far, .. } =
