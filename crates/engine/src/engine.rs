@@ -6,7 +6,7 @@ use crate::commands::{self, CommandError, PendingPaymentRequest, PriorityHandoff
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement::{self, ReplacementOutcome};
 use crate::sba::{self, SbaOutcome};
-use crate::script::{ScriptError, ScriptRuntime};
+use crate::script::{OperationOutcome, ScriptChoiceRequest, ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
 use crate::types::ability::{
     AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, NamedToken, RegisteredAbility, TokenSpec,
@@ -24,7 +24,7 @@ use crate::types::mana::{ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::PlayerState;
 use crate::types::stack::{StackEntryKind, StackObject};
-use crate::types::target::TargetSpec;
+use crate::types::target::{TargetFilter, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
 
@@ -55,6 +55,19 @@ pub enum LegendRuleChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingLegendRuleChoice`.
     NotAwaitingChoice,
     /// `kept` wasn't one of the offered `candidates`.
+    InvalidCandidate,
+}
+
+/// Why `submit_script_choice` rejected an answer to a backlog-item-9
+/// `Game.SelectTargets` pause.
+#[derive(Debug)]
+pub enum ScriptChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingScriptChoice`.
+    NotAwaitingChoice,
+    /// `chosen` doesn't satisfy the request's own `TargetFilter` (CR 115) —
+    /// same legality check `target_is_legal` already performs for a spell's
+    /// static target requirement, reused here rather than a second bespoke
+    /// check.
     InvalidCandidate,
 }
 
@@ -176,6 +189,13 @@ pub enum StepStatus {
     /// "not a `PlayerAction`/priority decision, its own entry point" rationale
     /// as `AwaitingReplacementChoice`.
     AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId> },
+    /// Backlog item 9: a card script (via `Game.SelectTargets`) yielded
+    /// mid-resolution, asking `player` to choose a real target matching
+    /// `request` before the operation can finish — the caller should prompt
+    /// and call `submit_script_choice`, then `step()` again. Same "not a
+    /// `PlayerAction`/priority decision, its own entry point" rationale as
+    /// `AwaitingReplacementChoice`/`AwaitingLegendRuleChoice`.
+    AwaitingScriptChoice { player: PlayerId, request: ScriptChoiceRequest },
     /// CR 603.3b: `player` controls more than one trigger that matched the
     /// same batch of events and must choose the order to put them on the
     /// stack — the caller should prompt and call `submit_trigger_order`,
@@ -304,6 +324,23 @@ pub enum ProcessState {
     /// `CleanupSbaCheck` once the losers are resolved via the same
     /// `resume_sba_death` helper `submit_replacement_choice` already uses.
     AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId>, then: SbaResumeThen },
+    /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
+    /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —
+    /// `thread`/`request` are the suspended coroutine's own handle and its
+    /// decoded ask; `stack_id`/`controller`/`events_so_far` are exactly what
+    /// `ResolveStackTop` had already built for this same resolution before
+    /// hitting the ask (the stack object is already popped off `state.stack`
+    /// by this point, same as any other in-progress resolution), carried
+    /// here so `submit_script_choice` can pick up in the same spot — push
+    /// the final `StackObjectResolved` and continue into `ReplacementCheck`
+    /// — rather than re-deriving them.
+    AwaitingScriptChoice {
+        thread: ScriptHandle,
+        request: ScriptChoiceRequest,
+        stack_id: ObjectId,
+        controller: PlayerId,
+        events_so_far: Vec<GameEventKind>,
+    },
     /// Checked events ready to become real `GameEvent`s in the ledger.
     CommitEvents { checked: Vec<GameEventKind> },
     /// CR 704.3's fixed-point loop.
@@ -796,6 +833,50 @@ impl Engine {
 
         let losers: VecDeque<ObjectId> = candidates.into_iter().filter(|id| *id != kept).collect();
         self.process_state = self.resume_sba_death(losers, Vec::new(), Vec::new(), then);
+        Ok(())
+    }
+
+    /// Answers a pending backlog-item-9 `Game.SelectTargets` pause raised by
+    /// `StepStatus::AwaitingScriptChoice` — `chosen` must satisfy the
+    /// request's own `TargetFilter` (checked via the same `target_is_legal`
+    /// a spell's static target requirement already uses). Deliberately a
+    /// separate entry point from `submit_action`, same reason
+    /// `submit_replacement_choice`/`submit_legend_rule_choice` are.
+    ///
+    /// Resumes the suspended coroutine (`ScriptRuntime::resume_operation`)
+    /// with `chosen`. A script error on resume is silently dropped, same
+    /// pre-existing "no path from `ResolveStackTop` back to a `StepStatus`
+    /// error for a mid-resolution script failure" stance the original
+    /// (non-yielding) `invoke_operation` call already had — not a new gap
+    /// this method introduces.
+    pub fn submit_script_choice(&mut self, chosen: ObjectId) -> Result<(), ScriptChoiceError> {
+        let ProcessState::AwaitingScriptChoice { request, controller, .. } = &self.process_state else {
+            return Err(ScriptChoiceError::NotAwaitingChoice);
+        };
+        let ScriptChoiceRequest::SelectTarget { filter } = request;
+        if !commands::target_is_legal(&self.state, &self.script_runtime, Target::Object(chosen), filter, *controller)
+        {
+            return Err(ScriptChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, mut events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        let outcome = self
+            .script_runtime
+            .resume_operation(thread, &mut self.state, controller, chosen)
+            .unwrap_or(OperationOutcome::Finished);
+        self.process_state = match outcome {
+            OperationOutcome::Finished => {
+                events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+                ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
+            }
+            OperationOutcome::NeedsChoice { thread, request } => {
+                ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far }
+            }
+        };
         Ok(())
     }
 
@@ -2227,16 +2308,40 @@ impl Engine {
                             // rather than a panic.
                             Some(AbilityEffect::AddMana(_)) => {}
                             None => {
-                                // TODO: a script error here is silently dropped
-                                // - no path from ResolveStackTop back to a
-                                // StepStatus error exists for a mid-resolution
-                                // script failure yet.
-                                let _ = self.script_runtime.invoke_operation(
+                                // TODO: a script error here is silently
+                                // dropped - no path from ResolveStackTop
+                                // back to a StepStatus error exists for a
+                                // mid-resolution script failure yet.
+                                match self.script_runtime.invoke_operation(
                                     top.operation,
                                     &mut self.state,
                                     top.source,
                                     top.controller,
-                                );
+                                ) {
+                                    Ok(OperationOutcome::Finished) | Err(_) => {}
+                                    // Backlog item 9: the script called
+                                    // Game.SelectTargets and yielded mid-
+                                    // resolution - pause the whole pipeline
+                                    // run right here rather than falling
+                                    // through to StackObjectResolved/
+                                    // ReplacementCheck below. events (this
+                                    // resolution's own progress so far, e.g.
+                                    // a permanent's ETB ZoneChange) moves
+                                    // into events_so_far untouched -
+                                    // submit_script_choice pushes the real
+                                    // StackObjectResolved and continues into
+                                    // ReplacementCheck once answered.
+                                    Ok(OperationOutcome::NeedsChoice { thread, request }) => {
+                                        self.process_state = ProcessState::AwaitingScriptChoice {
+                                            thread,
+                                            request,
+                                            stack_id: top.stack_id,
+                                            controller: top.controller,
+                                            events_so_far: events,
+                                        };
+                                        return StepStatus::Progressed;
+                                    }
+                                }
                             }
                         }
                     }
@@ -2302,6 +2407,16 @@ impl Engine {
                 // AwaitingReplacementChoice above already uses.
                 let status = StepStatus::AwaitingLegendRuleChoice { player, candidates: candidates.clone() };
                 self.process_state = ProcessState::AwaitingLegendRuleChoice { player, candidates, then };
+                status
+            }
+
+            ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far } => {
+                // Nothing to do until submit_script_choice answers - same
+                // "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingScriptChoice { player: controller, request: request.clone() };
+                self.process_state =
+                    ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far };
                 status
             }
 

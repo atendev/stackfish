@@ -1311,6 +1311,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             StepStatus::AwaitingAction { .. }
             | StepStatus::AwaitingReplacementChoice { .. }
             | StepStatus::AwaitingLegendRuleChoice { .. }
+            | StepStatus::AwaitingScriptChoice { .. }
             | StepStatus::AwaitingTriggerOrderChoice { .. }
             | StepStatus::AwaitingPayment { .. }
             | StepStatus::AwaitingDiscard { .. }

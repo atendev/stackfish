@@ -132,11 +132,12 @@ adaptation doc, unchanged from the original plan:
 
 - [ ] Exact mlua <-> Rust binding boundary for hidden information (avoiding leaking, e.g., an
       opponent's hand contents into a Lua callback that shouldn't see it).
-- [ ] Player-input-mid-script: a card script asking for target selection or making the engine
-      cast a spell on a player's behalf needs to suspend and wait for a `PlayerAction` that
-      arrives on a later `Engine::step()` call, not return synchronously. Likely needs Lua
-      coroutines (yield/resume spanning `step()` calls). See `docs/implementation.md`'s script
-      bridge section for where this is currently stubbed wrong-shaped on purpose.
+- [x] Player-input-mid-script: resolved for target selection (`Game.SelectTargets`) via real Lua
+      coroutines (`Lua::create_thread`/`Thread::resume`, yield/resume spanning `Engine::step()`
+      calls) — see `docs/implementation.md`'s script-coroutines slice and `docs/lua_scripts.md`'s
+      "Asking the player for a target mid-resolution". Still open: modal spells, "may" abilities,
+      and selecting a *player* as the target (backlog items 9a/9b) — same mechanism, different
+      request shapes, not built yet.
 - [ ] Snapshot/checkpoint strategy for the event ledger — replaying from event 0 every time you
       want state at event N works for v1, may need periodic snapshots later for performance. Not
       a v1 concern.
