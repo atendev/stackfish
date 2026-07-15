@@ -164,6 +164,19 @@ pub(crate) fn effective_keywords(state: &GameState, script_runtime: &ScriptRunti
     }
 }
 
+/// CR 510.1a/702.7: whether a creature with `keywords` assigns/deals combat
+/// damage during `step` (`FirstStrikeDamage` or `CombatDamage` - any other
+/// `Step` value is unreachable, gated by `AssignCombatDamage`'s own
+/// phase/step check above). `FIRST_STRIKE`/`DOUBLE_STRIKE` are independent
+/// bits - a double striker only needs `DOUBLE_STRIKE` set to take part in
+/// both steps, it doesn't also need `FIRST_STRIKE`.
+fn participates_in_damage_step(keywords: KeywordSet, step: Step) -> bool {
+    match step {
+        Step::FirstStrikeDamage => keywords.intersects(KeywordSet::FIRST_STRIKE | KeywordSet::DOUBLE_STRIKE),
+        _ => !keywords.contains(KeywordSet::FIRST_STRIKE) || keywords.contains(KeywordSet::DOUBLE_STRIKE),
+    }
+}
+
 /// CR 613 layers 7a/7c: `id`'s live power (already netted against counters,
 /// any resolvable characteristic-defining base, and any applicable
 /// `ModifyPT`/`SetPT` continuous effect), via `layers::effective_characteristics`.
@@ -1416,27 +1429,83 @@ pub fn execute_command(
                     "only the active player assigns combat damage".to_string(),
                 ));
             }
-            if state.phase != Phase::Combat || state.step != Step::CombatDamage {
+            if state.phase != Phase::Combat
+                || !matches!(state.step, Step::CombatDamage | Step::FirstStrikeDamage)
+            {
                 return Err(CommandError::IllegalAction(
-                    "combat damage can only be assigned during the combat damage step"
+                    "combat damage can only be assigned during a combat damage step"
                         .to_string(),
                 ));
             }
             let combat = state.combat.as_ref().ok_or_else(|| {
                 CommandError::IllegalAction("no attackers have been declared this combat".to_string())
             })?;
+            let step = state.step;
+
+            // CR 510.1a/702.7: a participant that no longer resolves in
+            // state.objects (killed by a spell in the priority window before
+            // this step, or - the case first strike makes central - by the
+            // first-strike step's own damage) never assigns or deals damage,
+            // full stop, rather than hard-erroring the whole command. Same
+            // treatment for a participant that resolves fine but isn't
+            // eligible for *this* damage step: a plain creature during the
+            // first-strike step, or a first-strike-only creature (no double
+            // strike) during the regular step, sits this step out entirely.
+            let attackers: Vec<(ObjectId, Target)> = combat
+                .attackers
+                .iter()
+                .copied()
+                .filter(|(attacker, _)| {
+                    state.object(*attacker).is_some()
+                        && participates_in_damage_step(
+                            effective_keywords(state, script_runtime, *attacker),
+                            step,
+                        )
+                })
+                .collect();
+            // Alive only, deliberately NOT filtered by the blocker's own
+            // step-eligibility - which step an attacker's damage is dealt in
+            // is decided by the attacker's own keywords, not the blocker's
+            // (a first-strike attacker's damage lands on a plain blocker
+            // during the first-strike step same as always; the blocker's
+            // lack of first strike only decides whether *it* strikes back
+            // this step, handled by the separately-filtered `blocks` below).
+            let alive_blocks: Vec<(ObjectId, ObjectId)> = combat
+                .blocks
+                .iter()
+                .copied()
+                .filter(|(blocker, _)| state.object(*blocker).is_some())
+                .collect();
+            let blocks: Vec<(ObjectId, ObjectId)> = alive_blocks
+                .iter()
+                .copied()
+                .filter(|(blocker, _)| {
+                    participates_in_damage_step(effective_keywords(state, script_runtime, *blocker), step)
+                })
+                .collect();
 
             // CR 510.1c: a real split only exists for an attacker with 2+
             // blockers - every other attacker (0 or 1 blockers) has exactly
             // one legal place for its damage to go, computed below rather
-            // than chosen.
+            // than chosen. Computed from `alive_blocks` (not step-filtered -
+            // see above), so a dead blocker is never required in a split,
+            // but a step-ineligible one still is (its attacker's damage
+            // still has to go somewhere this step).
             let mut blockers_by_attacker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-            for (blocker, attacker) in &combat.blocks {
+            for (blocker, attacker) in &alive_blocks {
                 blockers_by_attacker.entry(*attacker).or_default().push(*blocker);
             }
+            // Also scoped to attackers that themselves participate this step
+            // (alive and step-eligible) - a dead or step-ineligible attacker
+            // deals no damage this step at all, so it can't need a split
+            // either, even if 2+ of its blockers happen to be eligible now.
+            let participating_attackers: HashSet<ObjectId> =
+                attackers.iter().map(|(attacker, _)| *attacker).collect();
             let multi_blocked: HashSet<ObjectId> = blockers_by_attacker
                 .iter()
-                .filter(|(_, blockers)| blockers.len() >= 2)
+                .filter(|(attacker, blockers)| {
+                    blockers.len() >= 2 && participating_attackers.contains(attacker)
+                })
                 .map(|(attacker, _)| *attacker)
                 .collect();
 
@@ -1500,10 +1569,7 @@ pub fn execute_command(
             // CR 510.1b/c/d + 510.2: assign and deal in the same pass - no
             // priority window between them.
             let mut events = Vec::new();
-            for (attacker, target) in &combat.attackers {
-                if state.object(*attacker).is_none() {
-                    return Err(CommandError::InvalidTarget);
-                }
+            for (attacker, target) in &attackers {
                 // CDA power (PTValue::CharacteristicDefining, layer 7a) now
                 // resolves for real if the card's base value carries a
                 // script - a script-less/erroring CDA still skips rather
@@ -1551,10 +1617,7 @@ pub fn execute_command(
                     }
                 }
             }
-            for (blocker, attacker) in &combat.blocks {
-                if state.object(*blocker).is_none() {
-                    return Err(CommandError::InvalidTarget);
-                }
+            for (blocker, attacker) in &blocks {
                 let Some(power) = effective_power(state, script_runtime, *blocker) else {
                     continue;
                 };

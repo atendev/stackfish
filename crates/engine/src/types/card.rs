@@ -157,6 +157,14 @@ bitflags! {
         /// turns damage to a player into poison counters instead of life
         /// loss.
         const INFECT        = 1 << 11;
+        /// CR 702.7 - deals combat damage in the first-strike combat damage
+        /// step instead of the regular one (CR 510.1a/510.4).
+        const FIRST_STRIKE  = 1 << 12;
+        /// CR 702.7 - deals combat damage in both the first-strike and the
+        /// regular combat damage steps (CR 510.1a/510.4). Independent of
+        /// `FIRST_STRIKE` - a creature only needs this bit set to
+        /// participate in both steps, it doesn't also need `FIRST_STRIKE`.
+        const DOUBLE_STRIKE = 1 << 13;
     }
 }
 
@@ -175,6 +183,8 @@ pub enum Keyword {
     Lifelink,
     Wither,
     Infect,
+    FirstStrike,
+    DoubleStrike,
 }
 
 /// Newtype over the subtype string (creature types, land types, spell
