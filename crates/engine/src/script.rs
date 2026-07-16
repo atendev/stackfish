@@ -1493,6 +1493,10 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     })?;
     ops.set("CreateToken", create_token)?;
     ops.set("Shuffle", OperationTag(AbilityEffect::Shuffle))?;
+    let scry = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::Scry(n))))?;
+    ops.set("Scry", scry)?;
+    let surveil = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::Surveil(n))))?;
+    ops.set("Surveil", surveil)?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;

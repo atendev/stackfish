@@ -88,6 +88,19 @@ pub enum GameEventKind {
     /// pregame setup. Useful for replay (marks where the randomness happened)
     /// and for any future "whenever a library is shuffled" triggers.
     LibraryShuffled { player: PlayerId },
+    /// CR 701.22a/701.22d: `player` finished a `Game.Ops.Scry(n)` pause
+    /// (`Engine::submit_scry_choice`) — `kept_on_top`/`put_bottom` are the
+    /// two chosen piles, each in the player's chosen order. One event per
+    /// scry (not per card), same granularity `LibraryShuffled` already uses
+    /// — the reorder itself isn't a `ZoneChange` (nothing left the library).
+    CardsScried { player: PlayerId, kept_on_top: Vec<ObjectId>, put_bottom: Vec<ObjectId> },
+    /// CR 701.25a/701.25d: `player` finished a `Game.Ops.Surveil(n)` pause
+    /// (`Engine::submit_surveil_choice`). `put_graveyard` holds the *new*
+    /// `ObjectId`s minted for the real library -> graveyard move (CR 400.7);
+    /// a separate `ZoneChange` per card is logged alongside this summary
+    /// event, same "summary event plus the real per-object `ZoneChange`s"
+    /// shape `submit_discard` already establishes.
+    CardsSurveiled { player: PlayerId, kept_on_top: Vec<ObjectId>, put_graveyard: Vec<ObjectId> },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

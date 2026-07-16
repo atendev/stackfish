@@ -153,6 +153,38 @@ pub enum AbilityEffect {
     /// but real — deferred as a named follow-up, same precedent `DrawCards`
     /// itself already set for its own target gap.
     Shuffle,
+    /// The `Game.Ops.Scry(n)` primitive (CR 701.22a) — the resolving
+    /// `StackObject`'s controller looks at the top `n` cards of their own
+    /// library, then puts any number on the bottom (any order) and the rest
+    /// on top (any order). Unlike every other primitive above, this can't
+    /// resolve in one step: `ResolveStackTop` peeks the top `n` ids
+    /// (read-only) and pauses on a new `ProcessState::AwaitingScryChoice`
+    /// rather than mutating anything itself — `Engine::submit_scry_choice`
+    /// carries out the actual reorder once the controller answers. CR
+    /// 701.22b: `n == 0` (or an empty library) is a no-op — no pause, no
+    /// event, same "no scry event occurs" text this rule states explicitly.
+    ///
+    /// TODO: CR 701.22d ("whenever a player scries" trigger) — the resulting
+    /// `GameEventKind::CardsScried` event already reaches `CollectTriggers`,
+    /// but no `ConditionPrimitive::Scries` exists yet to match it (extends
+    /// backlog item 7, same "primitive ships before its own trigger
+    /// condition" precedent `Damage`/`DrawCards` already set).
+    /// TODO: CR 701.22c (simultaneous multi-player scry, APNAP ordering) —
+    /// single-player-effect shape only, same narrowing every prior slice
+    /// takes.
+    Scry(u32),
+    /// The `Game.Ops.Surveil(n)` primitive (CR 701.25a) — identical to
+    /// `Scry` except the "not kept on top" pile goes to the controller's
+    /// graveyard instead of the bottom of their library. Unlike `Scry`'s
+    /// pure reorder, the graveyard-bound pile is a real zone move (CR 400.7
+    /// new `ObjectId` per card), same convention `submit_discard` already
+    /// established. CR 701.25c: `n == 0` is a no-op, same as `Scry`.
+    ///
+    /// TODO: CR 701.25d ("whenever a player surveils" trigger) — same
+    /// deferred-condition gap as `Scry`'s own TODO above.
+    /// TODO: CR 701.25b ("look at additional cards while you surveil") not
+    /// modeled — always exactly `n` cards.
+    Surveil(u32),
 }
 
 /// Which named token to create — covers the fixed-spec artifact tokens.
