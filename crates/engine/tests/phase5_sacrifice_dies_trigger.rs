@@ -67,7 +67,7 @@ fn sacrifice_cost() -> CostSpec {
     CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), controller: None, random: false, extra: None },
+            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         }],
         alternative: Vec::new(),
     }
@@ -77,7 +77,7 @@ fn discard_cost() -> CostSpec {
     CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Discard {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), controller: None, random: false, extra: None },
+            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         }],
         alternative: Vec::new(),
     }

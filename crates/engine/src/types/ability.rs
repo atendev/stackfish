@@ -1,5 +1,5 @@
 use crate::types::card::{CardTypeSet, KeywordSet, SupertypeSet};
-use crate::types::cost::CostSpec;
+use crate::types::cost::{CostSpec, FilterSpec};
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
@@ -185,6 +185,48 @@ pub enum AbilityEffect {
     /// TODO: CR 701.25b ("look at additional cards while you surveil") not
     /// modeled — always exactly `n` cards.
     Surveil(u32),
+    /// The `Game.Ops.Search(filter, count, destination, shuffle_after)`
+    /// primitive (CR 701.23a) — the resolving `StackObject`'s controller
+    /// looks through their *entire* library (not just a peeked top-N window
+    /// like `Scry`/`Surveil`) for up to `count` cards matching `filter`,
+    /// puts them into `destination`, then (if `shuffle_after`) shuffles.
+    /// Unlike `Scry`/`Surveil`, no visibility-machinery gap blocks this at
+    /// all — `GameState`/`Zone` already expose full contents freely; the
+    /// only project-wide hidden-info gap (DESIGN.md's open question) is the
+    /// *Lua* callback boundary, which this Rust-native primitive never
+    /// crosses, same as every other `AbilityEffect` here.
+    ///
+    /// CR 701.23b: never mandatory for a quality search — the controller may
+    /// find fewer than `count`, including zero. `ResolveStackTop` pauses on
+    /// `ProcessState::AwaitingSearchChoice` with `candidates` already
+    /// pre-filtered to the ids matching `filter` (evaluated with the
+    /// controller as `viewer`) — `Engine::submit_search_choice` just checks
+    /// the answer is a subset of `candidates` of size <= `count`, no
+    /// re-filtering needed there.
+    ///
+    /// TODO: CR 701.23d (a search for an undefined quality/a bare quantity,
+    /// e.g. "look at the top card" phrasing) is a different, mandatory-find
+    /// shape — not built; this variant is quality-search (701.23a/b) only.
+    /// TODO: CR 701.23e (reveal the found card) — no reveal/visibility-
+    /// transition concept exists in this engine yet; purely cosmetic today
+    /// anyway since hidden info isn't enforced at the Lua boundary either.
+    /// TODO: CR 701.23f (an effect that redirects "search" into "search the
+    /// top N instead") — would need its own `EventFilter::Search`
+    /// replacement shape; doesn't exist.
+    /// TODO: CR 701.23i (simultaneous multiplayer search, APNAP) —
+    /// single-player-effect shape only, same narrowing `Scry`/`Surveil`'s
+    /// own 701.22c/701.25b gaps already took.
+    Search { filter: FilterSpec, count: u32, destination: SearchDestination, shuffle_after: bool },
+}
+
+/// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
+/// overwhelmingly common real destinations. `Battlefield { tapped }` covers
+/// fetch lands (most enter tapped, some don't); no Graveyard/Exile
+/// destination this slice (rare in practice, deferred).
+#[derive(Clone, Copy, Debug)]
+pub enum SearchDestination {
+    Hand,
+    Battlefield { tapped: bool },
 }
 
 /// Which named token to create — covers the fixed-spec artifact tokens.

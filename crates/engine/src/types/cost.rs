@@ -1,17 +1,29 @@
 use crate::{
     AtomicManaSymbol, CardTypeSet, Color, GameObject, GameState, ManaCost, ManaPool, ManaSymbol,
-    ManaUnit, ObjectId, PlayerId, ZoneKind,
+    ManaUnit, ObjectId, PlayerId, Subtype, SupertypeSet, ZoneKind,
 };
 
 /// Structured stand-in for "filter described in oracle text" — e.g.
 /// "sacrifice a creature", "discard a card at random", "tap an untapped
-/// artifact you control". Covers the common, structurally-expressible
-/// shapes; `extra` is a script-bind-time-refined catch-all for filters that
-/// don't reduce to type + controller + count (e.g. "with power 4 or
+/// artifact you control", "search your library for a basic land card".
+/// Covers the common, structurally-expressible shapes; `extra` is a
+/// script-bind-time-refined catch-all for filters that don't reduce to
+/// type/supertype/subtype + controller + count (e.g. "with power 4 or
 /// greater", named-card restrictions).
 #[derive(Clone, Debug)]
 pub struct FilterSpec {
     pub card_types: Option<CardTypeSet>,
+    /// CR 205.4a supertypes — e.g. `Some(SupertypeSet::BASIC)` for "basic
+    /// land card". Added alongside backlog item 14b (Search/tutor), since a
+    /// fetch land's own filter is the overwhelmingly common real-world case
+    /// this was missing; every other `FilterSpec` caller (Sacrifice/Discard/
+    /// TapPermanents costs) benefits for free by leaving this `None`.
+    pub supertypes: Option<SupertypeSet>,
+    /// CR 205.4b/205.4g subtypes — e.g. `Some(vec![Subtype("Forest")])` for
+    /// "Forest card", or `Some(vec![Subtype("Angel")])` for "Angel card".
+    /// Matches if `object` has *any* subtype in this list (an "or", not an
+    /// "and") — no real card asks a search filter for two subtypes at once.
+    pub subtypes: Option<Vec<Subtype>>,
     pub controller: Option<FilterController>,
     pub random: bool,
     pub extra: Option<String>,
@@ -31,6 +43,16 @@ impl FilterSpec {
         }
         if let Some(types) = self.card_types {
             if !object.definition.card_types.intersects(types) {
+                return false;
+            }
+        }
+        if let Some(supertypes) = self.supertypes {
+            if !object.definition.supertypes.intersects(supertypes) {
+                return false;
+            }
+        }
+        if let Some(subtypes) = &self.subtypes {
+            if !subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
                 return false;
             }
         }
@@ -644,7 +666,7 @@ impl PaymentPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::card::{CardDefinition, KeywordSet, PTValue, ScriptReference, SupertypeSet};
+    use crate::types::card::{CardDefinition, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
     use crate::types::counter::CounterSet;
     use crate::types::ids::SequenceNo;
     use crate::types::object::VisibilityPolicy;
@@ -697,6 +719,8 @@ mod tests {
         let p0 = PlayerId(0);
         let filter = FilterSpec {
             card_types: Some(CardTypeSet::CREATURE),
+            supertypes: None,
+            subtypes: None,
             controller: None,
             random: false,
             extra: None,
@@ -711,6 +735,8 @@ mod tests {
         let p1 = PlayerId(1);
         let you_filter = FilterSpec {
             card_types: None,
+            supertypes: None,
+            subtypes: None,
             controller: Some(FilterController::You),
             random: false,
             extra: None,
@@ -720,6 +746,8 @@ mod tests {
 
         let opponent_filter = FilterSpec {
             card_types: None,
+            supertypes: None,
+            subtypes: None,
             controller: Some(FilterController::Opponent),
             random: false,
             extra: None,
@@ -733,11 +761,50 @@ mod tests {
         let p0 = PlayerId(0);
         let filter = FilterSpec {
             card_types: None,
+            supertypes: None,
+            subtypes: None,
             controller: None,
             random: false,
             extra: Some("power 4 or greater".to_string()),
         };
         assert!(!filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
+    }
+
+    #[test]
+    fn supertypes_true_and_false_cases() {
+        let p0 = PlayerId(0);
+        let mut basic_land = creature(p0, CardTypeSet::LAND);
+        basic_land.definition.supertypes = SupertypeSet::BASIC;
+        let nonbasic_land = creature(p0, CardTypeSet::LAND);
+        let filter = FilterSpec {
+            card_types: None,
+            supertypes: Some(SupertypeSet::BASIC),
+            subtypes: None,
+            controller: None,
+            random: false,
+            extra: None,
+        };
+        assert!(filter.matches(&basic_land, p0), "a basic land card matches Some(SupertypeSet::BASIC)");
+        assert!(!filter.matches(&nonbasic_land, p0), "a nonbasic land doesn't match");
+    }
+
+    #[test]
+    fn subtypes_true_and_false_cases() {
+        let p0 = PlayerId(0);
+        let mut forest = creature(p0, CardTypeSet::LAND);
+        forest.definition.subtypes = vec![Subtype("Forest".to_string())];
+        let mut island = creature(p0, CardTypeSet::LAND);
+        island.definition.subtypes = vec![Subtype("Island".to_string())];
+        let filter = FilterSpec {
+            card_types: None,
+            supertypes: None,
+            subtypes: Some(vec![Subtype("Forest".to_string())]),
+            controller: None,
+            random: false,
+            extra: None,
+        };
+        assert!(filter.matches(&forest, p0), "a Forest card matches a Forest-subtype filter");
+        assert!(!filter.matches(&island, p0), "an Island doesn't match a Forest-only filter");
     }
 
     fn spent(colored: [u32; 5], colorless: u32) -> SpentPool {

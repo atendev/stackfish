@@ -163,7 +163,7 @@ fn reduction_lowers_generic_component_only() {
     let modifier = CostModifier {
         source: ObjectId(99),
         controller: p0,
-        filter: FilterSpec { card_types: None, controller: None, random: false, extra: None },
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: -1,
     };
     let mut state = two_player_state(ManaPool { red: 1, colorless: 1, ..ManaPool::default() }, vec![modifier]);
@@ -193,7 +193,7 @@ fn increase_raises_generic_component() {
     let modifier = CostModifier {
         source: ObjectId(99),
         controller: p0,
-        filter: FilterSpec { card_types: None, controller: None, random: false, extra: None },
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: 1,
     };
     let mut state = two_player_state(ManaPool { red: 1, colorless: 1, ..ManaPool::default() }, vec![modifier]);
@@ -228,7 +228,7 @@ fn reduction_floors_at_zero_generic() {
     let modifier = CostModifier {
         source: ObjectId(99),
         controller: p0,
-        filter: FilterSpec { card_types: None, controller: None, random: false, extra: None },
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: -2,
     };
     let mut state = two_player_state(ManaPool { red: 1, ..ManaPool::default() }, vec![modifier]);
@@ -262,6 +262,8 @@ fn nonmatching_filter_has_no_effect() {
         controller: p0,
         filter: FilterSpec {
             card_types: Some(CardTypeSet::CREATURE),
+            supertypes: None,
+            subtypes: None,
             controller: None,
             random: false,
             extra: None,
@@ -301,13 +303,13 @@ fn two_modifiers_both_apply_in_order() {
     let reduce = CostModifier {
         source: ObjectId(98),
         controller: p0,
-        filter: FilterSpec { card_types: None, controller: None, random: false, extra: None },
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: -1,
     };
     let increase = CostModifier {
         source: ObjectId(99),
         controller: p0,
-        filter: FilterSpec { card_types: None, controller: None, random: false, extra: None },
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: 2,
     };
     let mut state =
@@ -344,6 +346,8 @@ fn modifier_scoped_to_opponent_does_not_apply_to_its_own_controllers_spell() {
         controller: p0,
         filter: FilterSpec {
             card_types: None,
+            supertypes: None,
+            subtypes: None,
             controller: Some(FilterController::Opponent),
             random: false,
             extra: None,
