@@ -120,6 +120,32 @@ pub enum DiscardError {
     CardNotInHand,
 }
 
+/// Why `submit_scry_choice` rejected an answer to a CR 701.22
+/// `ProcessState::AwaitingScryChoice` pause.
+#[derive(Debug)]
+pub enum ScryChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingScryChoice`.
+    NotAwaitingChoice,
+    /// `kept_on_top`/`put_bottom` together don't contain exactly the pending
+    /// `cards` set once each — missing a card, duplicating one, or
+    /// including an id that wasn't offered.
+    WrongCards,
+}
+
+/// Why `submit_surveil_choice` rejected an answer to a CR 701.25
+/// `ProcessState::AwaitingSurveilChoice` pause. Same shape as
+/// `ScryChoiceError` — kept as its own type rather than shared, same "one
+/// error type per pause shape" precedent `ScriptChoiceError` vs
+/// `LegendRuleChoiceError` already set.
+#[derive(Debug)]
+pub enum SurveilChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingSurveilChoice`.
+    NotAwaitingChoice,
+    /// `kept_on_top`/`put_graveyard` together don't contain exactly the
+    /// pending `cards` set once each.
+    WrongCards,
+}
+
 /// Why `submit_mulligan_decision` rejected a `KeepHand` or `TakeMulligan`.
 #[derive(Debug)]
 pub enum MulliganError {
@@ -171,6 +197,29 @@ fn is_permutation(chosen: &[PendingTrigger], group: &[PendingTrigger]) -> bool {
     true
 }
 
+/// Whether `a` and `b` together contain exactly `whole`'s ids, each exactly
+/// once (any split, any order) — used by `submit_scry_choice`/
+/// `submit_surveil_choice` to validate the two answered piles against the
+/// pending `cards` set. Same "manual multiset comparison" shape
+/// `is_permutation` above already uses, kept separate since this checks two
+/// lists against one reference set rather than one list being a reordering
+/// of another.
+fn is_exact_partition(a: &[ObjectId], b: &[ObjectId], whole: &[ObjectId]) -> bool {
+    if a.len() + b.len() != whole.len() {
+        return false;
+    }
+    let mut remaining: Vec<ObjectId> = whole.to_vec();
+    for &id in a.iter().chain(b.iter()) {
+        match remaining.iter().position(|&candidate| candidate == id) {
+            Some(idx) => {
+                remaining.remove(idx);
+            }
+            None => return false,
+        }
+    }
+    true
+}
+
 /// What happened on one `step()` call, and what the engine needs next.
 #[derive(Debug)]
 pub enum StepStatus {
@@ -201,6 +250,18 @@ pub enum StepStatus {
     /// `PlayerAction`/priority decision, its own entry point" rationale as
     /// `AwaitingReplacementChoice`/`AwaitingLegendRuleChoice`.
     AwaitingScriptChoice { player: PlayerId, request: ScriptChoiceRequest },
+    /// Backlog item 14a, CR 701.22: a `Game.Ops.Scry(n)` primitive is
+    /// resolving and needs `player` to decide which of `cards` (the top `n`
+    /// of their library, front = top) go on the bottom versus back on top,
+    /// and in what order — the caller should prompt and call
+    /// `submit_scry_choice`, then `step()` again. Same "not a `PlayerAction`/
+    /// priority decision, its own entry point" rationale as
+    /// `AwaitingReplacementChoice`/`AwaitingLegendRuleChoice`.
+    AwaitingScryChoice { player: PlayerId, cards: Vec<ObjectId> },
+    /// Same as `AwaitingScryChoice`, for CR 701.25's `Game.Ops.Surveil(n)` —
+    /// the only difference is `submit_surveil_choice` sends the "not kept on
+    /// top" pile to the graveyard instead of the bottom of the library.
+    AwaitingSurveilChoice { player: PlayerId, cards: Vec<ObjectId> },
     /// CR 603.3b: `player` controls more than one trigger that matched the
     /// same batch of events and must choose the order to put them on the
     /// stack — the caller should prompt and call `submit_trigger_order`,
@@ -345,6 +406,28 @@ pub enum ProcessState {
         stack_id: ObjectId,
         controller: PlayerId,
         events_so_far: Vec<GameEventKind>,
+    },
+    /// Backlog item 14a: paused mid-`ResolveStackTop` because the resolving
+    /// `StackObject`'s effect was `AbilityEffect::Scry(n)` — `cards` is the
+    /// top `n` library ids peeked read-only (front = top; `n` already
+    /// clamped to the library's actual size). `stack_id`/`controller`/
+    /// `events_so_far` are carried through exactly like
+    /// `AwaitingScriptChoice`'s own fields, for the same reason: this
+    /// resolution already popped its `StackObject` and built some events
+    /// before hitting the pause, so `submit_scry_choice` can resume in the
+    /// same spot rather than re-deriving them.
+    AwaitingScryChoice {
+        stack_id: ObjectId,
+        controller: PlayerId,
+        events_so_far: Vec<GameEventKind>,
+        cards: Vec<ObjectId>,
+    },
+    /// Same as `AwaitingScryChoice`, for `AbilityEffect::Surveil(n)`.
+    AwaitingSurveilChoice {
+        stack_id: ObjectId,
+        controller: PlayerId,
+        events_so_far: Vec<GameEventKind>,
+        cards: Vec<ObjectId>,
     },
     /// Checked events ready to become real `GameEvent`s in the ledger.
     CommitEvents { checked: Vec<GameEventKind> },
@@ -928,6 +1011,140 @@ impl Engine {
                 ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far }
             }
         };
+        Ok(())
+    }
+
+    /// Answers a pending CR 701.22 `Game.Ops.Scry(n)` pause raised by
+    /// `StepStatus::AwaitingScryChoice` — `kept_on_top`/`put_bottom`
+    /// together must contain exactly the pending `cards` set once each (see
+    /// `is_exact_partition`), each in the caller's chosen order.
+    /// `kept_on_top[0]` becomes the new top of the library; `put_bottom`'s
+    /// order stacks upward from the library's existing bottom (so
+    /// `put_bottom`'s last entry ends up the new absolute bottom card).
+    /// Deliberately a separate entry point from `submit_action`, same reason
+    /// `submit_replacement_choice`/`submit_legend_rule_choice` are.
+    ///
+    /// Pure reorder within the library — no zone change, no new `ObjectId`s
+    /// (same "mutate `Zone.contents` directly" convention `shuffle_library`
+    /// already uses), so replacement effects never see this at all (there's
+    /// nothing in real Magic that replaces a scry anyway).
+    pub fn submit_scry_choice(
+        &mut self,
+        kept_on_top: Vec<ObjectId>,
+        put_bottom: Vec<ObjectId>,
+    ) -> Result<(), ScryChoiceError> {
+        let ProcessState::AwaitingScryChoice { cards, .. } = &self.process_state else {
+            return Err(ScryChoiceError::NotAwaitingChoice);
+        };
+        if !is_exact_partition(&kept_on_top, &put_bottom, cards) {
+            return Err(ScryChoiceError::WrongCards);
+        }
+        let ProcessState::AwaitingScryChoice { stack_id, controller, mut events_so_far, cards } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        if let Some(lib) = self.state.zone_mut(ZoneKind::Library, Some(controller)) {
+            for id in &cards {
+                lib.remove(*id);
+            }
+            for id in kept_on_top.iter().rev() {
+                lib.push_top(*id);
+            }
+            for id in &put_bottom {
+                lib.push_bottom(*id);
+            }
+        }
+
+        events_so_far.push(GameEventKind::CardsScried {
+            player: controller,
+            kept_on_top,
+            put_bottom,
+        });
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        self.process_state =
+            ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        Ok(())
+    }
+
+    /// Answers a pending CR 701.25 `Game.Ops.Surveil(n)` pause raised by
+    /// `StepStatus::AwaitingSurveilChoice` — same shape as
+    /// `submit_scry_choice` except `put_graveyard` is a real library ->
+    /// graveyard move (CR 400.7 new `ObjectId` per card), same convention
+    /// `submit_discard` already established, rather than a bottom-of-library
+    /// reorder. Departed triggered abilities are stashed for consistency
+    /// (same "captured but practically dormant, no Hand/Library-departure
+    /// LKI condition exists yet" stance `retire_object`'s own doc comment
+    /// already takes for `draw_step`'s library-side retirement).
+    pub fn submit_surveil_choice(
+        &mut self,
+        kept_on_top: Vec<ObjectId>,
+        put_graveyard: Vec<ObjectId>,
+    ) -> Result<(), SurveilChoiceError> {
+        let ProcessState::AwaitingSurveilChoice { cards, .. } = &self.process_state else {
+            return Err(SurveilChoiceError::NotAwaitingChoice);
+        };
+        if !is_exact_partition(&kept_on_top, &put_graveyard, cards) {
+            return Err(SurveilChoiceError::WrongCards);
+        }
+        let ProcessState::AwaitingSurveilChoice { stack_id, controller, mut events_so_far, cards } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        // Remove every offered card from the library up front (both
+        // piles), then put the kept-on-top pile straight back - a pure
+        // reorder, no zone change, no new ObjectIds (same convention
+        // submit_scry_choice's own top pile uses).
+        if let Some(lib) = self.state.zone_mut(ZoneKind::Library, Some(controller)) {
+            for id in &cards {
+                lib.remove(*id);
+            }
+            for id in kept_on_top.iter().rev() {
+                lib.push_top(*id);
+            }
+        }
+
+        let mut new_ids = Vec::with_capacity(put_graveyard.len());
+        for card in &put_graveyard {
+            let last_known_info =
+                self.state.object(*card).expect("validated by is_exact_partition above").clone();
+            let owner = last_known_info.owner;
+
+            let new_id = self.state.allocate_object_id();
+            let mut new_object = last_known_info.clone();
+            new_object.object_id = new_id;
+            new_object.lineage = ObjectLineage { previous: Some(*card) };
+            new_object.zone = ZoneKind::Graveyard;
+            new_object.timestamp = self.state.allocate_sequence_no();
+
+            let departed = commands::retire_object(&mut self.state, *card);
+            self.departed_triggered_abilities.extend(departed);
+            self.state
+                .zone_mut(ZoneKind::Graveyard, Some(owner))
+                .expect("graveyard zone must exist")
+                .push_bottom(new_id);
+            self.state.objects.insert(new_id, new_object);
+
+            events_so_far.push(GameEventKind::ZoneChange {
+                object: new_id,
+                from: ZoneKind::Library,
+                to: ZoneKind::Graveyard,
+                last_known_info: Some(last_known_info),
+            });
+            new_ids.push(new_id);
+        }
+
+        events_so_far.push(GameEventKind::CardsSurveiled {
+            player: controller,
+            kept_on_top,
+            put_graveyard: new_ids,
+        });
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        self.process_state =
+            ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
         Ok(())
     }
 
@@ -2303,6 +2520,51 @@ impl Engine {
                             Some(AbilityEffect::Shuffle) => {
                                 self.shuffle_library(top.controller);
                             }
+                            // CR 701.22a: peek the top n library ids
+                            // read-only (no mutation - the actual reorder
+                            // needs the controller's per-card decision) and
+                            // pause the whole pipeline run right here,
+                            // exactly like the NeedsChoice branch below does
+                            // for Game.SelectTargets. CR 701.22b: n == 0 (or
+                            // an empty library) falls straight through -
+                            // no pause, no event.
+                            Some(AbilityEffect::Scry(n)) => {
+                                let cards: Vec<ObjectId> = self
+                                    .state
+                                    .zone(ZoneKind::Library, Some(top.controller))
+                                    .map_or(Vec::new(), |z| {
+                                        z.contents.iter().take(*n as usize).copied().collect()
+                                    });
+                                if !cards.is_empty() {
+                                    self.process_state = ProcessState::AwaitingScryChoice {
+                                        stack_id: top.stack_id,
+                                        controller: top.controller,
+                                        events_so_far: events,
+                                        cards,
+                                    };
+                                    return StepStatus::Progressed;
+                                }
+                            }
+                            // CR 701.25a: same pause shape as Scry above -
+                            // submit_surveil_choice is what actually differs
+                            // (graveyard destination instead of bottom).
+                            Some(AbilityEffect::Surveil(n)) => {
+                                let cards: Vec<ObjectId> = self
+                                    .state
+                                    .zone(ZoneKind::Library, Some(top.controller))
+                                    .map_or(Vec::new(), |z| {
+                                        z.contents.iter().take(*n as usize).copied().collect()
+                                    });
+                                if !cards.is_empty() {
+                                    self.process_state = ProcessState::AwaitingSurveilChoice {
+                                        stack_id: top.stack_id,
+                                        controller: top.controller,
+                                        events_so_far: events,
+                                        cards,
+                                    };
+                                    return StepStatus::Progressed;
+                                }
+                            }
                             // CR 111: create one or more token permanents on
                             // the battlefield under the controller's control.
                             // Named tokens (Clue, Food) get their activated
@@ -2468,6 +2730,23 @@ impl Engine {
                 let status = StepStatus::AwaitingScriptChoice { player: controller, request: request.clone() };
                 self.process_state =
                     ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far };
+                status
+            }
+
+            ProcessState::AwaitingScryChoice { stack_id, controller, events_so_far, cards } => {
+                // Nothing to do until submit_scry_choice answers - same
+                // "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingScryChoice { player: controller, cards: cards.clone() };
+                self.process_state =
+                    ProcessState::AwaitingScryChoice { stack_id, controller, events_so_far, cards };
+                status
+            }
+
+            ProcessState::AwaitingSurveilChoice { stack_id, controller, events_so_far, cards } => {
+                let status = StepStatus::AwaitingSurveilChoice { player: controller, cards: cards.clone() };
+                self.process_state =
+                    ProcessState::AwaitingSurveilChoice { stack_id, controller, events_so_far, cards };
                 status
             }
 

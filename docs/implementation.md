@@ -2237,7 +2237,12 @@ shift, don't treat it as fixed once written.
 11. **Multiplayer/Commander generalization** — combat is 2-player only today (`CombatState`/
     `DeclareBlockers` assume one defending player); command-zone tax/damage/elimination-without-
     ending-the-game aren't wired despite being named in DESIGN.md's Commander section.
-12. **First/double strike (CR 702.4/702.7)** and remaining combat-keyword edges.
+12. ~~**First/double strike (CR 702.4/702.7)**~~ — done, `phase5/first-strike` slice
+    (docs/implementation.md, below): the combat damage step splits in two (first-strike step, then
+    regular step) whenever any attacker/blocker has first or double strike; `FirstStrikeDamage` event
+    feeds the same damage-assignment machinery `CombatDamage` already uses. Remaining
+    combat-keyword edges (trample, banding, etc) still open — this item was first/double strike
+    only.
 13. **Mana system completeness** — lands/abilities that add more than one mana or a player-chosen
     color, beyond the flat `AbilityEffect::AddMana(Vec<ManaUnit>)` shape.
 14. ~~**Shuffle primitive**~~ — done, `phase5/script-ops-shuffle` slice (docs/implementation.md,
@@ -2246,9 +2251,10 @@ shift, don't treat it as fixed once written.
     items had. `Engine::shuffle_library` also already existed (pregame-setup-only, private); this
     slice just exposed it as `AbilityEffect::Shuffle`/`Game.Ops.Shuffle()`. Split off as their own
     follow-ups, too large to bundle here:
-    14a. **Scry/Surveil** — needs a genuine new player-choice pause (look at top N, decide per-card
-    top-or-bottom/graveyard); `PlayerActionKind::MakeChoice` is currently a pure stub. Same magnitude
-    of work as the legend-rule slice's choice-pause, not a helper-function gap.
+    14a. ~~**Scry/Surveil**~~ — done, `phase5/scry-surveil` slice (docs/implementation.md, below).
+    Correction to this item's original text: didn't end up needing `PlayerActionKind::MakeChoice`
+    at all — resolved as a dedicated `ProcessState`/`StepStatus` pause pair, same "own entry point"
+    shape the legend-rule choice-pause already established, not a generic make-a-choice action.
     14b. **Search/tutor** — needs the same choice machinery plus a "look at the whole library"
     visibility exception; this engine's hidden-info model doesn't touch that yet.
 15. ~~**CR 601.6 unwind**~~ — done, `phase5/payment-unwind` slice (docs/implementation.md, below).
@@ -5487,3 +5493,86 @@ named in the pre-slice report as precedented cost, not discovered mid-slice.
   mechanism offering the caster a pre-filtered legal-modes list.
 - No TOML schema for modal cards — `[[cards.modes]]` or equivalent doesn't exist; same "direct
   struct literal only" limit `effect`/`alternative_costs` already have.
+
+## Phase 5: phase5/scry-surveil slice (backlog item 14a)
+
+Branch `phase5/scry-surveil`, off master. Slice backlog item 14a, split out of the
+`phase5/script-ops-shuffle` slice — CR 701.22 (Scry) and CR 701.25 (Surveil). Bundled together in
+one slice (not split further) since they're mechanically identical past "where does the 'not kept
+on top' pile go" — bottom of library (pure reorder) versus the graveyard (a real zone move).
+
+**What got implemented:**
+- `AbilityEffect::Scry(u32)`/`Surveil(u32)` — `Game.Ops.Scry(n)`/`Game.Ops.Surveil(n)`, same shared
+  enum every other primitive and `CardDefinition.effect` already use, so both an ability's operation
+  script and a directly-cast instant/sorcery get it for free (same "one enum, two producers"
+  precedent `Damage`/`Destroy` already established).
+- Unlike every earlier primitive, these can't resolve in one step. `ResolveStackTop` peeks the
+  controller's top `n` library ids read-only (no mutation), then pauses on a new
+  `ProcessState`/`StepStatus::AwaitingScryChoice`/`AwaitingSurveilChoice` — same "stack_id/
+  controller/events_so_far carried through the pause" shape `AwaitingScriptChoice` established for
+  backlog item 9, but reached directly from `ResolveStackTop`'s own `AbilityEffect` match rather than
+  through the Lua coroutine/`ScriptChoiceRequest` mechanism (there's no player-facing Lua callback
+  mid-resolution here — the whole decision is native). CR 701.22b/701.25c: `n == 0` or an empty
+  library falls straight through — no pause, no event.
+- Two new entry points: `Engine::submit_scry_choice(kept_on_top, put_bottom)` and
+  `submit_surveil_choice(kept_on_top, put_graveyard)`. Both validate the two lists together contain
+  exactly the pending `cards` set once each via a new `is_exact_partition` helper (`is_permutation`'s
+  own sibling — same manual-multiset-comparison shape, kept separate since this checks two lists
+  against one reference set rather than one list against another). Scry's piles are a pure reorder —
+  `Zone::remove`/`push_top`/`push_bottom` directly, no new `ObjectId`s, same convention
+  `shuffle_library` already uses. Surveil's graveyard pile is a real library → graveyard move (CR
+  400.7 new `ObjectId` per card, `commands::retire_object`), same convention `submit_discard` already
+  established. Both resume the paused resolution the same way `submit_script_choice` does: push the
+  new summary event + the deferred `StackObjectResolved`, then continue into `ProcessState::
+  ReplacementCheck`.
+- New `GameEventKind::CardsScried { player, kept_on_top, put_bottom }`/`CardsSurveiled { player,
+  kept_on_top, put_graveyard }` — one event per scry/surveil (not per card), same granularity
+  `LibraryShuffled` already uses. Already reaches `CollectTriggers`/`PutTriggersApnap` for free (same
+  `events` vec every other resolution effect flows through) — but see UNRESOLVED below.
+- New `ScryChoiceError`/`SurveilChoiceError` (`NotAwaitingChoice`, `WrongCards`).
+- `Game.Ops.Scry(n)`/`Game.Ops.Surveil(n)` Lua bindings, same shape as `Game.Ops.GainLife(n)`.
+
+**Mechanical fallout:** none beyond a `match` exhaustiveness ripple — two enum variant additions to
+`AbilityEffect`, not a new struct field, so no `CardDefinition`-literal sweep this time (unlike
+`effect`/`modes`'s own additions). Two non-exhaustive-match compile errors surfaced and were fixed:
+`commands.rs`'s `ActivateAbility` arm (added `Scry`/`Surveil` to its existing non-mana-effect
+or-pattern) and `crates/scenario/src/lib.rs`'s `drain` (added the two new `StepStatus` variants to
+its pass-through match).
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 11 new tests in
+`crates/engine/tests/phase5_scry_surveil.rs` (Scry 2 keeping both on top in a chosen order reorders
+correctly; Scry 2 to bottom in a chosen order; Scry 3 split 1-top/2-bottom; Scry 0 resolves
+synchronously with no pause or event; Scry N greater than library size takes however many cards
+exist, no panic; `submit_scry_choice` rejects a wrong/incomplete answer and leaves the pause open;
+`submit_surveil_choice` rejects answering a pending Scry pause with `NotAwaitingChoice`; Surveil 2
+keeping both on top is a pure reorder with no graveyard move; Surveil 2 to graveyard is a real
+`ZoneChange` per card under new `ObjectId`s; `Game.Ops.Scry`/`Game.Ops.Surveil` Lua bindings decode
+to the right `AbilityEffect`). Full workspace run: 521 passed, 0 failed (510 prior + 11 new).
+
+**STRUCT DEVIATIONS:** None — `AbilityEffect::Scry`/`Surveil`, the two new `ProcessState`/
+`StepStatus` pause-variant pairs, and the two new `GameEventKind` variants all match the pre-slice
+report's shape exactly.
+
+**INTERFACE DEVIATIONS:** None — `submit_scry_choice`/`submit_surveil_choice` match the report's
+signatures exactly. The `is_exact_partition` helper wasn't named in the pre-slice report but is a
+direct, precedented consequence of "validate the two lists together form the pending set" (same
+role `is_permutation` already plays for trigger ordering) — not a surprise, just an implementation
+detail the report described in prose rather than by name.
+
+**SCOPE DEVIATIONS:** None — the `commands.rs`/`scenario` crate match-exhaustiveness fixes were
+anticipated ("adding new `AbilityEffect` variants" always ripples through every exhaustive match on
+that enum) even though the pre-slice report didn't enumerate the exact two call sites by name.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- CR 701.22d/701.25d ("whenever a player scries/surveils" trigger) — the `CardsScried`/
+  `CardsSurveiled` event already reaches `CollectTriggers`, but no `ConditionPrimitive::Scries`/
+  `Surveils` exists yet to match it (extends backlog item 7, same "primitive ships before its own
+  trigger condition" precedent `Damage`/`DrawCards` already set).
+- CR 701.22c (simultaneous multi-player scry, APNAP ordering) — single-player-effect shape only.
+- CR 701.25b ("look at additional cards while you surveil") — not modeled, always exactly `n` cards.
+- CR 616.1 replacement-effect ordering on a scry/surveil — not modeled; no real card replaces a
+  scry/surveil in practice, so this mirrors `Destroy`/`Exile`'s own deferred-ordering stance rather
+  than a new gap.
+- No TOML schema for a Scry/Surveil card — same pre-existing `effect`-has-no-TOML-representation gap
+  every `CardDefinition.effect`-carrying slice already notes; a test fixture needed a direct struct
+  literal.
