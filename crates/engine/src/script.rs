@@ -20,6 +20,7 @@ use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::mana::{ColorSet, ManaCost};
+use crate::types::object::GameObject;
 use crate::types::target::TargetFilter;
 use crate::types::zone::ZoneKind;
 
@@ -117,11 +118,16 @@ fn to_lua_err(e: ScriptError) -> mlua::Error {
 /// Borrowed view handed to a Lua callback for the duration of one
 /// condition/cost/target/operation invocation.
 ///
-/// `state` is currently the full `&GameState` — this is exactly the
-/// hidden-information leak surface DESIGN.md flags as an open question (a
-/// script could enumerate an opponent's hand off a raw state reference).
-/// Needs a visibility-filtered view before this is real; kept as the full
-/// state here only to get the call shape down for this pass.
+/// `state` is the full `&GameState` — but that's fine on the Rust side; this
+/// engine is the omniscient rules authority, not a player, so full access
+/// here isn't itself the leak DESIGN.md's open question warns about. The
+/// leak surface is strictly the Rust->Lua boundary: nothing here ever hands
+/// `state` (or a piece of it) to Lua directly. `invoke_condition` and every
+/// other state-aware `invoke_*` method instead builds a `state_to_lua`
+/// snapshot — a plain table, not a live reference — which is the actual
+/// hidden-information-safe boundary (see that function's own doc comment for
+/// what it does and doesn't expose). `ScriptContext` itself doesn't need
+/// narrowing so long as that invariant holds.
 pub struct ScriptContext<'a> {
     pub state: &'a GameState,
     pub source: ObjectId,
@@ -1155,48 +1161,51 @@ impl ScriptRuntime {
     /// `&mut self`: `Lua::load`/`.eval()`/`.call()` only need `&Lua`, and
     /// this doesn't touch the script registry at all.
     ///
-    /// No `GameState` is passed into the Lua call — nothing in this script
-    /// bridge exposes state-querying `Game.*` bindings yet (checked: neither
-    /// `invoke_condition` nor `invoke_operation` passes state into Lua
-    /// either), so a real "count cards in your graveyard"-style CDA isn't
-    /// buildable until that lands (docs/implementation.md's slice backlog,
-    /// script API expansion). This only wires the calling convention; a
-    /// script is free to compute a constant, or something from `source`/
-    /// `controller` alone, until that binding exists.
+    /// A `state_to_lua` snapshot is passed as a trailing 3rd arg — same
+    /// additive, non-breaking convention `invoke_condition`'s trailing
+    /// state-snapshot arg already established (Lua ignores extra call args a
+    /// function doesn't declare). This is what makes a real "count cards in
+    /// your graveyard"-style CDA buildable — closes backlog item 8's
+    /// hidden-information-safe `ScriptContext` half for CDA specifically.
     pub fn invoke_cda(
         &self,
         source_code: &str,
+        state: &GameState,
         source: ObjectId,
         controller: PlayerId,
     ) -> Result<i32, ScriptError> {
         let function: Function =
             self.lua.load(source_code).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let state_value = state_to_lua(&self.lua, state)?;
         function
-            .call::<_, i32>((source.0, controller.0))
+            .call::<_, i32>((source.0, controller.0, state_value))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
     /// `AffectedFilter::Script`'s real body (CR 613's "affects" predicate,
     /// evaluated per candidate object) — expects `function(object, source,
-    /// controller) -> bool`. Same "no `GameState` passed into Lua" limitation
-    /// `invoke_cda` already carries (see that method's own doc comment): a
-    /// script can only decide from object/source/controller *identity*, not
-    /// real board state, until `Game.*` state-query bindings exist (backlog
-    /// item 8's hidden-information-safe `ScriptContext`, still open). Called
-    /// from `layers::applicable_effects_in_layer`, not from
-    /// `ContinuousEffect::applies_to` — that method stays `Primitive`-only so
-    /// `types/effect.rs` never needs to depend on `ScriptRuntime`, same
-    /// separation `layers::resolve_base_pt` already keeps for CDA.
+    /// controller, state) -> bool`. A `state_to_lua` snapshot is now passed
+    /// as a trailing 4th arg, same convention `invoke_cda` above just picked
+    /// up — a script can decide from real (public) board state, not just
+    /// object/source/controller identity, closing backlog item 8's
+    /// hidden-information-safe `ScriptContext` half for static-ability
+    /// "affects" predicates. Called from `layers::applicable_effects_in_layer`,
+    /// not from `ContinuousEffect::applies_to` — that method stays
+    /// `Primitive`-only so `types/effect.rs` never needs to depend on
+    /// `ScriptRuntime`, same separation `layers::resolve_base_pt` already
+    /// keeps for CDA.
     pub fn invoke_continuous_affects(
         &self,
         handle: ScriptHandle,
+        state: &GameState,
         object: ObjectId,
         source: ObjectId,
         controller: PlayerId,
     ) -> Result<bool, ScriptError> {
         let function = self.function(handle)?;
+        let state_value = state_to_lua(&self.lua, state)?;
         function
-            .call::<_, bool>((object.0, source.0, controller.0))
+            .call::<_, bool>((object.0, source.0, controller.0, state_value))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
@@ -1204,9 +1213,11 @@ impl ScriptRuntime {
     /// table convention `invoke_operation` already established, generalized
     /// to the six `EffectPrimitive` shapes a continuous effect can take
     /// instead of `invoke_operation`'s single `gain_life` key. Expects
-    /// `function(source, controller) -> table`, same argument shape
-    /// `invoke_cda` uses (no `GameState` passed in — same limitation noted on
-    /// `invoke_continuous_affects` above). Checks each recognized key in a
+    /// `function(source, controller, state) -> table` — a `state_to_lua`
+    /// snapshot is now passed as a trailing 3rd arg, same convention
+    /// `invoke_cda`/`invoke_continuous_affects` above pick up, closing
+    /// backlog item 8's hidden-information-safe `ScriptContext` half for
+    /// scripted continuous-effect payloads. Checks each recognized key in a
     /// fixed order and returns the first match:
     /// - `set_pt = {power=.., toughness=..}` -> `SetPT`
     /// - `modify_pt = {power=.., toughness=..}` -> `ModifyPT`
@@ -1223,12 +1234,14 @@ impl ScriptRuntime {
     pub fn invoke_continuous_effect(
         &self,
         handle: ScriptHandle,
+        state: &GameState,
         source: ObjectId,
         controller: PlayerId,
     ) -> Result<Option<EffectPrimitive>, ScriptError> {
         let function = self.function(handle)?;
+        let state_value = state_to_lua(&self.lua, state)?;
         let result: Table = function
-            .call((source.0, controller.0))
+            .call((source.0, controller.0, state_value))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
 
         if let Some(t) = result.get::<_, Option<Table>>("set_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
@@ -1875,23 +1888,126 @@ fn event_to_lua<'lua>(lua: &'lua Lua, event: Option<&GameEvent>) -> Result<Value
     }
 }
 
-/// Minimal state snapshot passed into `invoke_condition`'s trailing arg and
-/// `invoke_intervening_if`'s own — same "convert to a plain Lua table
-/// snapshot, not a live handle" convention `event_to_lua` already
-/// establishes (public info only, safe regardless of the still-open
-/// hidden-info-safe `ScriptContext` question - see that struct's own doc
-/// comment). Currently just per-player life totals (`{ life = { [player_id]
-/// = life, ... } }`) - covers the one Rust-native `InterveningIfPrimitive`
-/// shape that already exists (`ControllerAtOrBelowLife`). No live object-
-/// characteristic queries yet (e.g. "this creature's power") - named as the
-/// next follow-up, not guessed at here.
+/// State snapshot passed as the trailing arg to every state-aware `invoke_*`
+/// call (`invoke_condition`, `invoke_intervening_if`, `invoke_cda`,
+/// `invoke_continuous_affects`, `invoke_continuous_effect`) — same "convert
+/// to a plain Lua table snapshot, not a live handle" convention `event_to_lua`
+/// already established. This is the real resolution of backlog item 8's
+/// hidden-information-safe `ScriptContext` question (see DESIGN.md's open
+/// question, and `ScriptContext`'s own doc comment for why the Rust-side
+/// struct didn't need narrowing — this function is the actual boundary).
+///
+/// Per CR 400.2/402.3: battlefield/graveyard/exile/command are public zones —
+/// full contents exposed as one card-summary table per object (see
+/// `zone_cards_to_lua`/`card_summary_to_lua`). Hand/library are hidden zones
+/// per CR 400.2 (even a fully-revealed hand stays modeled as hidden) — only a
+/// *count* is exposed (`hand_count`/`library_count`), matching CR 402.3's
+/// "may count those cards at any time, but can't look at them" split. There
+/// is deliberately no binding anywhere that returns hand/library contents —
+/// the legitimate ways to see into a hidden zone (search, scry, surveil) are
+/// already their own dedicated `Game.Ops.*` primitives (CR 701.23/701.22d/
+/// 701.25d) that commit a real zone change, not a live peek from an arbitrary
+/// condition/CDA/static-ability script.
+///
+/// Card summaries are base (`CardDefinition`, netted against counters) values
+/// only, not layer-resolved `effective_characteristics` — computing another
+/// object's *effective* P/T to answer this snapshot would mean invoking
+/// *that* object's own CDA/continuous-effect scripts too, which would build
+/// their own snapshot right back through this same function: unbounded
+/// recursion the moment any card on the battlefield has a CDA or scripted
+/// continuous effect. Deferred as a named follow-up (a single-object
+/// effective-characteristics query binding, invoked directly rather than
+/// folded into a whole-board snapshot) rather than guessed at with an ad hoc
+/// depth limit.
+///
+/// The stack (CR 400.2, also public) isn't included — `StackObject` isn't
+/// `GameObject`-shaped (its characteristics come from `source`/`source_lki`),
+/// so it needs its own decode, split out rather than bolted on here.
 fn state_to_lua<'lua>(lua: &'lua Lua, state: &GameState) -> Result<Value<'lua>, ScriptError> {
     let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     let life = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let hand_count = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let library_count = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let graveyard = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let command = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+
     for player in &state.players {
-        life.set(player.player_id.0, player.life).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let pid = player.player_id.0;
+        life.set(pid, player.life).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let hand_len =
+            state.zone(ZoneKind::Hand, Some(player.player_id)).map(|z| z.len()).unwrap_or(0) as u32;
+        hand_count.set(pid, hand_len).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let library_len =
+            state.zone(ZoneKind::Library, Some(player.player_id)).map(|z| z.len()).unwrap_or(0) as u32;
+        library_count.set(pid, library_len).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        graveyard
+            .set(pid, zone_cards_to_lua(lua, state, ZoneKind::Graveyard, Some(player.player_id))?)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        command
+            .set(pid, zone_cards_to_lua(lua, state, ZoneKind::Command, Some(player.player_id))?)
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     }
+
     table.set("life", life).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table.set("hand_count", hand_count).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table.set("library_count", library_count).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("battlefield", zone_cards_to_lua(lua, state, ZoneKind::Battlefield, None)?)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("exile", zone_cards_to_lua(lua, state, ZoneKind::Exile, None)?)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table.set("graveyard", graveyard).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table.set("command", command).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    Ok(Value::Table(table))
+}
+
+/// One public zone's contents as a 1-indexed array of `card_summary_to_lua`
+/// tables, in zone order. `owner` is `None` for the shared battlefield/exile
+/// zones, `Some(player)` for the per-player graveyard/command zones — same
+/// split `Zone`'s own doc comment establishes. An object id present in
+/// `zone.contents` with no matching `GameState::object` entry is skipped
+/// rather than panicking — shouldn't happen (zone contents and the object
+/// store are supposed to stay in sync) but this is a read-only snapshot, not
+/// the place to newly enforce that invariant (Phase 6).
+fn zone_cards_to_lua<'lua>(
+    lua: &'lua Lua,
+    state: &GameState,
+    kind: ZoneKind,
+    owner: Option<PlayerId>,
+) -> Result<Value<'lua>, ScriptError> {
+    let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    if let Some(zone) = state.zone(kind, owner) {
+        for (i, object_id) in zone.contents.iter().enumerate() {
+            if let Some(obj) = state.object(*object_id) {
+                table
+                    .set((i + 1) as i64, card_summary_to_lua(lua, obj)?)
+                    .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            }
+        }
+    }
+    Ok(Value::Table(table))
+}
+
+/// One object's public-safe summary: id, name, base power/toughness (netted
+/// against `+1/+1`/`-1/-1` counters via `PTValue::net_with_counters` — public
+/// information, CR 121.3 — but not layer-resolved, see `state_to_lua`'s own
+/// doc comment for why), whether it's a creature, and controller. Narrower
+/// than the full `EffectiveCharacteristics` shape (no mana cost/colors/full
+/// type or keyword set) — named as a follow-up rather than guessed at; this
+/// slice's own tests only need power/toughness/creature-ness.
+fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'lua>, ScriptError> {
+    let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table.set("id", obj.object_id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table.set("name", obj.definition.name.clone()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let power = obj.definition.power.as_ref().and_then(|p| p.net_with_counters(&obj.counters));
+    table.set("power", power).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let toughness = obj.definition.toughness.as_ref().and_then(|t| t.net_with_counters(&obj.counters));
+    table.set("toughness", toughness).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table
+        .set("is_creature", obj.definition.card_types.contains(CardTypeSet::CREATURE))
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    table.set("controller", obj.controller.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     Ok(Value::Table(table))
 }
 
