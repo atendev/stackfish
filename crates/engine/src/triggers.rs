@@ -163,10 +163,17 @@ pub fn collect_triggers(
         // `InterveningIfSpec`'s own doc comment. Rechecked again at
         // resolution by `Engine`'s `ResolveStackTop` (CR 608.2a), against
         // whatever `PutTriggersApnap` bakes onto the `StackObject`.
-        let intervening_if_holds = ability
-            .intervening_if
-            .as_ref()
-            .is_none_or(|InterveningIfSpec::Primitive(p)| p.holds(state, controller));
+        // TODO: a Script intervening-if error here silently becomes "doesn't
+        // hold" - same pre-existing "no error-surfacing path from
+        // CollectTriggers back to a StepStatus" stance the Script condition
+        // arm above already takes.
+        let intervening_if_holds = match &ability.intervening_if {
+            None => true,
+            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, controller),
+            Some(InterveningIfSpec::Script(handle)) => {
+                runtime.invoke_intervening_if(*handle, state, ability.source, controller).unwrap_or(false)
+            }
+        };
         if matched && intervening_if_holds {
             pending.push(PendingTrigger { source: ability.source, controller, ability_index: this_index, once_per_turn });
         }
@@ -213,10 +220,13 @@ pub fn collect_triggers(
             continue;
         }
         // CR 603.4 applies here too - see the main loop's own comment above.
-        let intervening_if_holds = ability
-            .intervening_if
-            .as_ref()
-            .is_none_or(|InterveningIfSpec::Primitive(p)| p.holds(state, lki.controller));
+        let intervening_if_holds = match &ability.intervening_if {
+            None => true,
+            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, lki.controller),
+            Some(InterveningIfSpec::Script(handle)) => runtime
+                .invoke_intervening_if(*handle, state, ability.source, lki.controller)
+                .unwrap_or(false),
+        };
         if intervening_if_holds && primitive.matches(ability.source, lki.controller, state.active_player, &event.kind) {
             pending.push(PendingTrigger {
                 source: ability.source,

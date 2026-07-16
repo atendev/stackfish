@@ -2104,7 +2104,7 @@ shift, don't treat it as fixed once written.
    activated ability's own cost via `ManaCost::parse`) all have real write-ups below. Structured
    additional costs (sacrifice/discard/tap-permanents/life) were already real as of
    `phase5/activated-ability-costs` (above).
-7. **Trigger system completeness** — once-per-turn/intervening-if (CR 603.2-603.3), last-known-
+7. ~~**Trigger system completeness**~~ — once-per-turn/intervening-if (CR 603.2-603.3), last-known-
    info fallback for a trigger whose source already left the battlefield (CR 603.10, flagged since
    the script-bridge-trigger slice), non-ETB trigger conditions (leaves-battlefield, upkeep,
    damage-dealt, etc — only `Game.Conditions.Enters`/`Always` existed before this item started).
@@ -2167,12 +2167,20 @@ shift, don't treat it as fixed once written.
    trigger-event `condition` — checked once in `collect_triggers` at trigger time, baked onto the
    resulting `StackObject`, and rechecked fresh in `ResolveStackTop` at resolution (CR 608.2a), OR'd
    into the existing target-legality `fizzles` check. One concrete `InterveningIfPrimitive` this
-   slice: `ControllerAtOrBelowLife(n)`. `Script`-backed intervening-if deferred — `invoke_condition`
-   doesn't pass `&GameState` into Lua at all yet, a separate DESIGN.md gap.
-   Still open: "whenever a creature you control dies" (filtered by something other than "is this
-   exact object," i.e. a `Script`-backed or filter-scoped condition) isn't representable yet —
-   `Dies`/`LeavesBattlefield`/`DrawsCard`/`DiscardsCard`/etc only ever match a fixed identity or the
-   ability's own controller, never a characteristic filter over some other object.
+   slice: `ControllerAtOrBelowLife(n)`.
+   ~~`Scries`/`Surveils` conditions, filter-scoped Dies/LeavesBattlefield, Script-backed
+   intervening-if~~ — done, `phase5/trigger-completeness-cleanup` slice (docs/implementation.md,
+   below), all three bundled into one slice: `ConditionPrimitive::Scries`/`EachScries`/`Surveils`/
+   `EachSurveils` (CR 701.22d/701.25d, the deferred half of the `scry-surveil` slice's own TODO);
+   `DiesMatching`/`LeavesBattlefieldMatching(FilterSpec)` (CR 700.4/603.10's "whenever a creature you
+   control dies," checked in `collect_triggers`'s live-source loop against a separate watching
+   permanent, not the departed/LKI fallback loop `Dies`/`LeavesBattlefield` themselves use);
+   `InterveningIfSpec::Script(ScriptHandle)`, invoked via a new `ScriptRuntime::invoke_intervening_if`
+   that passes a minimal `state_to_lua` snapshot (currently just per-player life totals) into the Lua
+   call — the same snapshot now also reaches every ordinary `Script` condition via `invoke_condition`'s
+   widened call signature (additive, non-breaking). `DiesMatching`/`LeavesBattlefieldMatching` reuse
+   `cost.rs`'s `FilterSpec` (including the `supertypes`/`subtypes` fields the prior `search-tutor`
+   slice added) rather than a bespoke filter shape.
 8. ~~**Script API expansion**~~ — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
    CreateToken — only `GainLife` existed before this item started; ~~DrawCards~~, ~~Counters~~,
    ~~Exile~~, ~~Sacrifice~~, ~~CreateToken~~ done — all 6 complete), and a
@@ -5668,3 +5676,89 @@ human-confirmed decision before any code was written, not a surprise found mid-s
   only.
 - No TOML schema for a Search card — same pre-existing `effect`-has-no-TOML-representation gap every
   `CardDefinition.effect`-carrying slice already notes.
+
+## Phase 5: phase5/trigger-completeness-cleanup slice (backlog item 7, remaining threads)
+
+Branch `phase5/trigger-completeness-cleanup`, off master. Closes backlog item 7 entirely — bundles
+the three remaining named gaps into one slice, per explicit instruction rather than three separate
+branches.
+
+**What got implemented:**
+- **`ConditionPrimitive::Scries`/`EachScries`/`Surveils`/`EachSurveils`** (CR 701.22d/701.25d) —
+  matches `GameEventKind::CardsScried`/`CardsSurveiled` (the `Scries`/`Surveils` "your own" checked
+  against `event.player == controller`), same "your" vs "each" split `DrawsCard`/`EachDrawsCard`
+  already established. No plumbing changes needed — those events already reached `CollectTriggers`
+  from the `scry-surveil` slice.
+- **`ConditionPrimitive::DiesMatching`/`LeavesBattlefieldMatching(FilterSpec)`** (CR 700.4/603.10) —
+  the filter-scoped sibling of the identity-scoped `Dies`/`LeavesBattlefield`: matches any qualifying
+  `ZoneChange` where `filter.matches(&last_known_info, controller)`, `controller` being the
+  *watching* ability's own controller (a separate, still-live permanent — Blood Artist-style), not
+  the dying object's. Confirmed by reading `triggers.rs` before writing code: this needed **zero**
+  plumbing changes — it's checked in `collect_triggers`'s ordinary live-source loop, never the CR
+  603.10 departed/LKI fallback loop (which explicitly whitelists only the two identity-scoped
+  variants). `FilterSpec`'s existing `FilterController::You`/`Any` gives "you control" vs "any
+  player controls" for free — no separate `Each*` sibling needed. `Game.Conditions.DiesMatching`/
+  `LeavesBattlefieldMatching(filter_table)` reuse `decode_filter_table`.
+- **`InterveningIfSpec::Script(ScriptHandle)`** (CR 603.4) — the real design work. Traced the actual
+  gap before building anything: `ScriptContext` already carries a live `&GameState`, and
+  `invoke_condition` already receives it, but never passed it (or any state-query capability) into
+  the Lua call. Fixed via the same "convert to a plain Lua table snapshot, not a live handle"
+  convention `event_to_lua` already established: new `state_to_lua` (currently just per-player life
+  totals, `{ life = { [player_id] = life, ... } }` — covers exactly the one existing
+  `InterveningIfPrimitive` shape, `ControllerAtOrBelowLife`). `invoke_condition` gained this snapshot
+  as a 4th Lua call arg (additive/non-breaking — Lua ignores extra args a function doesn't declare,
+  confirmed every existing 3-arg condition script keeps working). New
+  `ScriptRuntime::invoke_intervening_if(handle, state, source, controller)` (no event — CR 603.4's
+  own doc comment already establishes this is "a pure state predicate, not event-shaped").
+  `TriggeredAbilityBuilder::SetInterveningIf` widened to accept a function value too, same two-shape
+  pattern `SetCondition`/`decode_condition_value` already use, inlined rather than a new standalone
+  `decode_*` fn (`SetInterveningIf` is still the only consumer).
+- 3 call sites gained a `Script` arm: `triggers.rs`'s two `InterveningIfSpec`-matching spots (live
+  loop, departed loop) and `engine.rs`'s `ResolveStackTop` CR 608.2a recheck — each calls
+  `invoke_intervening_if`, script error silently treated as "doesn't hold" (consistent conservative
+  default in both places — a script error means the ability just doesn't do anything, same
+  "no-error-surfacing-path-yet" stance every other script-invocation call site already takes).
+
+**Struct fallout, anticipated in the pre-slice report:** `FilterSpec` isn't `Copy` (owns a
+`Vec`/`String`), so `DiesMatching`/`LeavesBattlefieldMatching` carrying one drops `Copy` from
+`ConditionPrimitive` and (in turn) `ConditionSpec`. Ripple, all mechanical: `script.rs`'s
+`ConditionTag`/`OncePerTurnTag` wrapper structs dropped their own `Copy` derive; 3 `tag.0` copy-outs
+from a borrowed `Ref` became `tag.0.clone()`; one `this.condition` move in the `Register()` builder
+method became `.clone()`. `FilterSpec` and `ConditionPrimitive` both gained real `PartialEq`/`Eq`
+derives alongside this (every field already supported them) rather than losing that capability —
+not strictly required by the compiler, added since it was free and useful for test assertions.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 13 new tests in
+`crates/engine/tests/phase5_trigger_completeness.rs`: (A) `Scries`/`Surveils` fire only for the
+ability controller's own scry/surveil, `EachScries`/`EachSurveils` fire regardless; (B)
+`DiesMatching` fires for a creature the watcher's controller controls dying, not for a noncreature
+dying or an opponent's creature dying under a `You`-only filter; `LeavesBattlefieldMatching` fires
+on exile too (not just death, mirroring `LeavesBattlefield` vs `Dies`); the `Game.Conditions.
+DiesMatching` Lua binding decodes correctly; (C) a `Script` intervening-if behaves identically to
+the existing `Primitive` shape across all three cases (false at trigger time never triggers; true
+throughout resolves normally; true at trigger time but invalidated by a response spell fizzles at
+resolution, CR 608.2a); `SetInterveningIf` accepts a function value and self-registers a real,
+callable `Script` handle end-to-end via `run_card_script`. Full workspace run: 546 passed, 0 failed
+(533 prior + 13 new).
+
+**STRUCT DEVIATIONS:** None beyond the `Copy`-removal ripple the pre-slice report already
+anticipated by name.
+
+**INTERFACE DEVIATIONS:** None — `invoke_intervening_if`'s signature and `invoke_condition`'s widened
+call (not signature — the Lua-facing call shape, not the Rust fn signature) both match the report.
+
+**SCOPE DEVIATIONS:** None — every fallout site (the 3 `Copy`-ripple fixes, the 3 `InterveningIfSpec`
+match sites) was named as anticipated in the pre-slice report before writing any code.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- Only a life-total snapshot this slice — hand size, board-state counts, "still on the battlefield"
+  (all named in `InterveningIfPrimitive`'s own doc comment already) stay Rust-native-only or unbuilt.
+- Script errors in `invoke_intervening_if`/a `Script` condition still silently resolve to
+  false/no-match — pre-existing gap, not newly introduced.
+- `ConditionSpec::PrimitiveOncePerTurn` still isn't offered for a `Script` condition (pre-existing,
+  unrelated note already on that type).
+- `AffectedFilter::Script`/`EffectPayload::Script` (backlog item 3a, continuous-effect/CDA scripting)
+  — separate, untouched by this slice.
+- The broader "hidden-info-safe `ScriptContext`" redesign (item 8) is **not** resolved — the
+  life-total snapshot is public info, safe under the existing accepted-debt stance, but this doesn't
+  touch hand/library visibility filtering.

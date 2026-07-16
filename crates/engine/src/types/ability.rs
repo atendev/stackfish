@@ -267,7 +267,16 @@ pub enum TokenSpec {
 /// The two condition shapes `Game.Conditions.*` covers this slice — a
 /// Rust-native fast path so common trigger shapes don't need a full Lua
 /// condition function written out.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+///
+/// `Clone`-only (not `Copy`) since `DiesMatching`/`LeavesBattlefieldMatching`
+/// carry a `FilterSpec`, which owns a `Vec`/`String` — a real, anticipated
+/// consequence of adding those two variants (backlog item 7), not an
+/// oversight. Ripples to `ConditionSpec` below (same reason) and to
+/// `script.rs`'s `ConditionTag`/`OncePerTurnTag` wrappers, which drop their
+/// own `Copy` derive to match. `PartialEq`/`Eq` stay real — `FilterSpec`
+/// gained matching derives alongside this change, since every one of its
+/// own fields already supported them.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ConditionPrimitive {
     /// "Whenever this permanent enters the battlefield" (CR 603 ETB
     /// triggers) — matches a `ZoneChange` event moving `source` to the
@@ -398,6 +407,40 @@ pub enum ConditionPrimitive {
     /// "At the beginning of each end step" — the controller-agnostic sibling
     /// of `BeginningOfYourEndStep`.
     BeginningOfEachEndStep,
+    /// "Whenever you scry" (CR 701.22d) — matches `GameEventKind::CardsScried`
+    /// with `event.player == controller`. Reachable now that
+    /// `Engine::submit_scry_choice` logs that event (`phase5/scry-surveil`
+    /// slice); this is the deferred trigger-condition half that slice's own
+    /// TODO named.
+    Scries,
+    /// "Whenever a player scries" — the controller-agnostic sibling of
+    /// `Scries`, same relationship `EachDrawsCard` has to `DrawsCard`.
+    EachScries,
+    /// "Whenever you surveil" (CR 701.25d) — same shape as `Scries`, against
+    /// `GameEventKind::CardsSurveiled`.
+    Surveils,
+    /// "Whenever a player surveils" — the controller-agnostic sibling of
+    /// `Surveils`.
+    EachSurveils,
+    /// "Whenever a creature you control dies" (CR 700.4/603.10) — the
+    /// filter-scoped sibling of `Dies`: unlike `Dies` (matches only when the
+    /// *ability's own source* is what died), this matches *any* qualifying
+    /// death, checked via `filter.matches(&lki, controller)` — `controller`
+    /// is the ability's own controller, so `FilterSpec { controller:
+    /// Some(FilterController::You), .. }` naturally gives "you control" for
+    /// free (no separate `Each*` sibling needed the way `Dies` never had
+    /// one - `FilterController::Any` already covers that case). The
+    /// ability's `source` here is a separate, still-live permanent watching
+    /// for deaths (Blood Artist-style) - this is checked in
+    /// `collect_triggers`'s ordinary live-source loop, never the CR 603.10
+    /// departed/LKI fallback loop `Dies`/`LeavesBattlefield` themselves rely
+    /// on (that loop explicitly whitelists only those two identity-scoped
+    /// variants).
+    DiesMatching(FilterSpec),
+    /// "Whenever a permanent matching filter leaves the battlefield" — the
+    /// filter-scoped sibling of `LeavesBattlefield`, same relationship
+    /// `DiesMatching` has to `Dies`.
+    LeavesBattlefieldMatching(FilterSpec),
 }
 
 // TODO(backlog item 7, CR 603.10 continued): Dies/LeavesBattlefield are wired
@@ -407,11 +450,10 @@ pub enum ConditionPrimitive {
 // for why the Discard half stays dormant. Two call sites still discard their
 // departed abilities outright: submit_discard's CR 514.1 hand-size discard,
 // and draw_step's library-side retirement - both would be inert to wire
-// today (neither can produce a Battlefield-departure LKI). "Whenever a
-// creature you control dies" (filtered by something other than "is this
-// exact object") also isn't representable yet - Dies/LeavesBattlefield only
-// ever match the ability's own source, not a filter over the dying object's
-// characteristics.
+// today (neither can produce a Battlefield-departure LKI).
+// ~~"Whenever a creature you control dies" (filtered by something other than
+// "is this exact object")~~ - done, DiesMatching/LeavesBattlefieldMatching
+// above (phase5/trigger-completeness-cleanup slice).
 //
 // TODO(trigger system completeness, backlog item 7): once-per-turn/
 // intervening-if legality (CR 603.2-603.3) is still untouched. Untap-step
@@ -506,6 +548,32 @@ impl ConditionPrimitive {
             ConditionPrimitive::BeginningOfEachEndStep => {
                 matches!(event, GameEventKind::StepStarted { step: Step::End })
             }
+            ConditionPrimitive::Scries => matches!(
+                event,
+                GameEventKind::CardsScried { player, .. } if *player == controller
+            ),
+            ConditionPrimitive::EachScries => matches!(event, GameEventKind::CardsScried { .. }),
+            ConditionPrimitive::Surveils => matches!(
+                event,
+                GameEventKind::CardsSurveiled { player, .. } if *player == controller
+            ),
+            ConditionPrimitive::EachSurveils => matches!(event, GameEventKind::CardsSurveiled { .. }),
+            // CR 700.4/603.10: unlike Dies (matched by identity against
+            // `source` in the departed/LKI fallback loop), this is checked
+            // in the ordinary live-source loop against a separate watching
+            // ability - `controller` here is that ability's own controller,
+            // giving FilterSpec's existing `FilterController::You`/`Any` the
+            // "you control"/"any player controls" distinction for free.
+            ConditionPrimitive::DiesMatching(filter) => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: Some(lki), .. }
+                    if filter.matches(lki, controller)
+            ),
+            ConditionPrimitive::LeavesBattlefieldMatching(filter) => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Battlefield, last_known_info: Some(lki), .. }
+                    if filter.matches(lki, controller)
+            ),
         }
     }
 }
@@ -525,7 +593,10 @@ impl ConditionPrimitive {
 /// `Script` condition this slice - a custom Lua condition function has no
 /// engine-side ability_index-keyed slot to consult without also threading
 /// one through `ScriptContext`, deferred as a named follow-up.
-#[derive(Clone, Copy, Debug)]
+/// `Clone`-only (not `Copy`) — see `ConditionPrimitive`'s own doc comment for
+/// why (its `DiesMatching`/`LeavesBattlefieldMatching` variants own a
+/// `FilterSpec`).
+#[derive(Clone, Debug)]
 pub enum ConditionSpec {
     Primitive(ConditionPrimitive),
     Script(ScriptHandle),
@@ -560,18 +631,18 @@ impl InterveningIfPrimitive {
 }
 
 /// See `InterveningIfPrimitive`'s own doc comment. Same `Primitive`/`Script`
-/// shape `ConditionSpec` uses, but `Script` isn't offered yet: checked
-/// before writing this — `ScriptRuntime::invoke_condition` doesn't pass
-/// `&GameState` into Lua at all (see `invoke_cda`'s own doc comment; no
-/// `Game.*` state-query binding exists yet, a separate DESIGN.md gap), so a
-/// script-backed intervening-if couldn't check anything useful today.
-/// `Primitive`-only until that lands.
-///
-/// TODO: `InterveningIfSpec::Script(ScriptHandle)` once `ScriptContext`
-/// exposes `&GameState` to Lua.
+/// shape `ConditionSpec` uses. `Script` (backlog item 7,
+/// `phase5/trigger-completeness-cleanup` slice) is checked via
+/// `ScriptRuntime::invoke_intervening_if`, which passes a minimal state
+/// snapshot (`script.rs`'s `state_to_lua` — currently just per-player life
+/// totals, mirroring the one `Primitive` shape above) into the Lua call as
+/// its 3rd argument: `function(source, controller, snapshot)`. No live
+/// object-characteristic queries yet (e.g. "this creature's power") - named
+/// as the next follow-up, not guessed at here.
 #[derive(Clone, Copy, Debug)]
 pub enum InterveningIfSpec {
     Primitive(InterveningIfPrimitive),
+    Script(ScriptHandle),
 }
 
 /// A card's registered ability, as set up by its script's `initial_effect`-
