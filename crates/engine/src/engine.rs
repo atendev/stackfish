@@ -2290,6 +2290,16 @@ impl Engine {
                 // without "if" text) never fizzles this way.
                 let intervening_if_fizzles = match &top.intervening_if {
                     Some(InterveningIfSpec::Primitive(p)) => !p.holds(&self.state, top.controller),
+                    // TODO: a script error here silently becomes "doesn't
+                    // hold" (unwrap_or(false), same conservative "nothing
+                    // happens" default triggers.rs's own Script
+                    // intervening-if check already takes) - no error-
+                    // surfacing path from ResolveStackTop back to a
+                    // StepStatus exists yet.
+                    Some(InterveningIfSpec::Script(handle)) => !self
+                        .script_runtime
+                        .invoke_intervening_if(*handle, &self.state, top.source, top.controller)
+                        .unwrap_or(false),
                     None => false,
                 };
                 let fizzles = fizzles || intervening_if_fizzles;

@@ -26,8 +26,10 @@ use crate::types::zone::ZoneKind;
 /// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
 /// `Game.Conditions.Enters`/`Game.Conditions.Always` are real Lua values a
 /// condition script can `return` directly — decoded back out via
-/// `decode_condition_value`.
-#[derive(Clone, Copy)]
+/// `decode_condition_value`. `Clone`-only (not `Copy`) since
+/// `ConditionPrimitive` itself dropped `Copy` (its `DiesMatching`/
+/// `LeavesBattlefieldMatching` variants own a `FilterSpec`).
+#[derive(Clone)]
 struct ConditionTag(ConditionPrimitive);
 impl UserData for ConditionTag {}
 
@@ -50,7 +52,7 @@ impl UserData for InterveningIfTag {}
 /// second field on `ConditionTag` itself, so the two Lua-visible shapes
 /// (plain tag vs. once-per-turn-wrapped tag) stay distinguishable by type at
 /// the `AnyUserData::borrow` check in `decode_condition_value`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct OncePerTurnTag(ConditionPrimitive);
 impl UserData for OncePerTurnTag {}
 
@@ -229,10 +231,10 @@ fn decode_condition_value(
             // sibling - see OncePerTurnTag's own doc comment for why these
             // are two distinct UserData types rather than one with a flag.
             if let Ok(tag) = ud.borrow::<ConditionTag>() {
-                return Ok(ConditionSpec::Primitive(tag.0));
+                return Ok(ConditionSpec::Primitive(tag.0.clone()));
             }
             if let Ok(tag) = ud.borrow::<OncePerTurnTag>() {
-                return Ok(ConditionSpec::PrimitiveOncePerTurn(tag.0));
+                return Ok(ConditionSpec::PrimitiveOncePerTurn(tag.0.clone()));
             }
             Err(ScriptError::LoadError(
                 "condition script returned an unrecognized userdata value".to_string(),
@@ -730,9 +732,31 @@ impl UserData for TriggeredAbilityBuilder {
             this.condition = Some(spec);
             Ok(())
         });
-        methods.add_method_mut("SetInterveningIf", |_, this, tag: mlua::AnyUserData| {
-            let primitive = tag.borrow::<InterveningIfTag>()?.0;
-            this.intervening_if = Some(InterveningIfSpec::Primitive(primitive));
+        methods.add_method_mut("SetInterveningIf", |lua, this, value: Value| {
+            let spec = match value {
+                Value::UserData(ud) => {
+                    let primitive = ud.borrow::<InterveningIfTag>()?.0;
+                    InterveningIfSpec::Primitive(primitive)
+                }
+                // Backlog item 7: a real Lua predicate, invoked via
+                // ScriptRuntime::invoke_intervening_if - same registry-
+                // handle mechanism decode_condition_value's own Function arm
+                // already uses.
+                Value::Function(function) => {
+                    let key = lua.create_registry_value(function)?;
+                    let mut registry = this.registry.borrow_mut();
+                    let handle = registry.next_script_handle();
+                    registry.scripts.insert(handle, key);
+                    InterveningIfSpec::Script(handle)
+                }
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "SetInterveningIf expects a Game.InterveningIf.* value or a function, got {}",
+                        other.type_name()
+                    )))
+                }
+            };
+            this.intervening_if = Some(spec);
             Ok(())
         });
         methods.add_method_mut("SetOperation", |lua, this, value: Value| {
@@ -753,7 +777,7 @@ impl UserData for TriggeredAbilityBuilder {
             let ability = RegisteredAbility {
                 source: this.source,
                 kind: AbilityKind::Triggered,
-                condition: this.condition,
+                condition: this.condition.clone(),
                 cost: None,
                 target: None,
                 operation,
@@ -1091,8 +1115,34 @@ impl ScriptRuntime {
     pub fn invoke_condition(&self, handle: ScriptHandle, ctx: &ScriptContext) -> Result<bool, ScriptError> {
         let function = self.function(handle)?;
         let event_value = event_to_lua(&self.lua, ctx.event)?;
+        // Backlog item 7: a minimal state snapshot as a 4th arg - additive
+        // and non-breaking (Lua ignores extra call args a function doesn't
+        // declare), so every existing 3-arg condition script keeps working
+        // unchanged. See state_to_lua's own doc comment for what's in it.
+        let state_value = state_to_lua(&self.lua, ctx.state)?;
         function
-            .call::<_, bool>((ctx.source.0, ctx.controller.0, event_value))
+            .call::<_, bool>((ctx.source.0, ctx.controller.0, event_value, state_value))
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))
+    }
+
+    /// CR 603.4: resolves a `Script`-backed intervening-if predicate.
+    /// Unlike `invoke_condition`, there's no event to bridge - `
+    /// InterveningIfSpec`'s own doc comment already establishes this is "a
+    /// pure state predicate, not event-shaped" - so the Lua call shape is
+    /// `function(source, controller, snapshot)`, mirroring
+    /// `invoke_condition`'s trailing state-snapshot argument without the
+    /// event one.
+    pub fn invoke_intervening_if(
+        &self,
+        handle: ScriptHandle,
+        state: &GameState,
+        source: ObjectId,
+        controller: PlayerId,
+    ) -> Result<bool, ScriptError> {
+        let function = self.function(handle)?;
+        let state_value = state_to_lua(&self.lua, state)?;
+        function
+            .call::<_, bool>((source.0, controller.0, state_value))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
@@ -1488,6 +1538,24 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     conditions.set("EachDrawsCard", ConditionTag(ConditionPrimitive::EachDrawsCard))?;
     conditions.set("DiscardsCard", ConditionTag(ConditionPrimitive::DiscardsCard))?;
     conditions.set("EachDiscardsCard", ConditionTag(ConditionPrimitive::EachDiscardsCard))?;
+    conditions.set("Scries", ConditionTag(ConditionPrimitive::Scries))?;
+    conditions.set("EachScries", ConditionTag(ConditionPrimitive::EachScries))?;
+    conditions.set("Surveils", ConditionTag(ConditionPrimitive::Surveils))?;
+    conditions.set("EachSurveils", ConditionTag(ConditionPrimitive::EachSurveils))?;
+    // CR 700.4/603.10: "whenever a creature you control dies" - filter-
+    // scoped sibling of Dies/LeavesBattlefield, reusing decode_filter_table
+    // (same table shape Game.Ops.Search/Game.Costs.Sacrifice already
+    // accept) rather than a bespoke argument shape.
+    let dies_matching = lua.create_function(|_, table: Table| {
+        let filter = decode_filter_table(table).map_err(to_lua_err)?;
+        Ok(ConditionTag(ConditionPrimitive::DiesMatching(filter)))
+    })?;
+    conditions.set("DiesMatching", dies_matching)?;
+    let leaves_battlefield_matching = lua.create_function(|_, table: Table| {
+        let filter = decode_filter_table(table).map_err(to_lua_err)?;
+        Ok(ConditionTag(ConditionPrimitive::LeavesBattlefieldMatching(filter)))
+    })?;
+    conditions.set("LeavesBattlefieldMatching", leaves_battlefield_matching)?;
     conditions.set("BeginningOfCombat", ConditionTag(ConditionPrimitive::BeginningOfYourCombat))?;
     conditions.set("EachBeginningOfCombat", ConditionTag(ConditionPrimitive::BeginningOfEachCombat))?;
     conditions.set("EndStep", ConditionTag(ConditionPrimitive::BeginningOfYourEndStep))?;
@@ -1496,7 +1564,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     // other tag above so the resulting ability only ever triggers once each
     // turn - see OncePerTurnTag's own doc comment.
     let once_per_turn = lua.create_function(|_, tag: mlua::AnyUserData| {
-        let primitive = tag.borrow::<ConditionTag>()?.0;
+        let primitive = tag.borrow::<ConditionTag>()?.0.clone();
         Ok(OncePerTurnTag(primitive))
     })?;
     conditions.set("OncePerTurn", once_per_turn)?;
@@ -1805,6 +1873,26 @@ fn event_to_lua<'lua>(lua: &'lua Lua, event: Option<&GameEvent>) -> Result<Value
         }
         _ => Ok(Value::Nil),
     }
+}
+
+/// Minimal state snapshot passed into `invoke_condition`'s trailing arg and
+/// `invoke_intervening_if`'s own — same "convert to a plain Lua table
+/// snapshot, not a live handle" convention `event_to_lua` already
+/// establishes (public info only, safe regardless of the still-open
+/// hidden-info-safe `ScriptContext` question - see that struct's own doc
+/// comment). Currently just per-player life totals (`{ life = { [player_id]
+/// = life, ... } }`) - covers the one Rust-native `InterveningIfPrimitive`
+/// shape that already exists (`ControllerAtOrBelowLife`). No live object-
+/// characteristic queries yet (e.g. "this creature's power") - named as the
+/// next follow-up, not guessed at here.
+fn state_to_lua<'lua>(lua: &'lua Lua, state: &GameState) -> Result<Value<'lua>, ScriptError> {
+    let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let life = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    for player in &state.players {
+        life.set(player.player_id.0, player.life).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    }
+    table.set("life", life).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    Ok(Value::Table(table))
 }
 
 fn zone_kind_name(kind: ZoneKind) -> &'static str {

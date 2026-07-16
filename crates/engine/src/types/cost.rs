@@ -10,7 +10,7 @@ use crate::{
 /// script-bind-time-refined catch-all for filters that don't reduce to
 /// type/supertype/subtype + controller + count (e.g. "with power 4 or
 /// greater", named-card restrictions).
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FilterSpec {
     pub card_types: Option<CardTypeSet>,
     /// CR 205.4a supertypes — e.g. `Some(SupertypeSet::BASIC)` for "basic
