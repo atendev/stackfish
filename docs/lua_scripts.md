@@ -423,27 +423,55 @@ plain Lua function (not a Rust-bound one) that calls `coroutine.yield` directly 
 the `async` feature (not enabled in this engine) has no way for a Rust closure to suspend the Lua
 stack from inside itself, so the yield has to happen in real Lua code. The engine sees the yield as
 `StepStatus::AwaitingScriptChoice { player, request }`; the caller prompts and answers via
-`Engine::submit_script_choice(chosen_object_id)`, which resumes the exact suspended script with that
+`Engine::submit_script_choice(chosen)`, which resumes the exact suspended script with that
 value and continues its execution from the `Game.SelectTargets(...)` call as if it had returned
 synchronously. A script that never calls `Game.SelectTargets` behaves identically to before this
 existed — nothing about existing operations changes.
 
-`filter` is the same flat option-bag shape `:SetAffected`/cost filters already use:
-`{ card_types = {...}, controller = "you"|"opponent"|"any" }`, every key optional. Narrowed this
-slice: object targets only (no player targets, no "any target," no zone override), and exactly one
-target per call (no "up to N"). An illegal answer to `submit_script_choice` is rejected and the
-pause stays open, same "invalid candidate, no state change" contract every other choice-submit
-method in this engine already has.
+`filter` is the same flat option-bag shape `:SetAffected`/cost filters already use, plus a `type`
+discriminator: `{ type = "object"|"player"|"any", card_types = {...}, controller = "you"|
+"opponent"|"any" }`, every key optional (`type` defaults to `"object"`). `target` resumes as a
+tagged table, `{ kind = "object"|"player", id = n }` — a script checks `target.kind` to tell an
+object answer from a player one. Exactly one target per call (no "up to N," no zone override). An
+illegal answer to `submit_script_choice` is rejected and the pause stays open, same "invalid
+candidate, no state change" contract every other choice-submit method in this engine already has.
 
-Not yet possible: modal spells ("choose one"), "may" abilities, and selecting a *player* as the
-target — same mechanism, different request shapes, all named follow-ups (backlog items 9a/9b) not
-attempted yet. `invoke_target`/`TargetSpec::Script` (a *static* target-requirement predicate,
-checked once at cast/activation time before the stack) is a different, unrelated concept and stays
-unimplemented.
+`invoke_target`/`TargetSpec::Script` (a *static* target-requirement predicate, checked once at
+cast/activation time before the stack) is a different, unrelated concept and stays unimplemented.
 
 Real, tested end to end: `crates/engine/tests/phase5_coroutine_spike.rs` (the raw coroutine
 mechanism, standalone) and `crates/engine/tests/phase5_script_target_selection.rs` (the full
-pause/resume path through a real `Engine`).
+pause/resume path through a real `Engine`, including the player/any-target filter shapes).
+
+## Asking the player a yes/no question mid-resolution
+
+`Game.MayChoose()` (backlog item 9a, CR 608.2d) is `Game.SelectTargets`'s sibling for a plain
+optional-action choice, with no filter to satisfy:
+
+```lua
+e:SetOperation(function(source, controller)
+    if Game.MayChoose() then
+        return { gain_life = 4 }
+    end
+    return { gain_life = 1 }
+end)
+```
+
+Same coroutine mechanism, same literal-Lua-function-calling-`coroutine.yield` reason as
+`Game.SelectTargets`. The engine sees the yield as `StepStatus::AwaitingScriptChoice { player,
+request: ScriptChoiceRequest::MayChoose }`; the caller answers via `Engine::
+submit_script_may_choice(bool)`, a separate entry point from `submit_script_choice` (one method
+per pause shape, same precedent `submit_replacement_choice`/`submit_legend_rule_choice` already
+set) — any `bool` is a legal answer, there's no `target_is_legal`-style rejection. Calling the
+wrong submit method for the pending request (`submit_script_choice` on a `MayChoose` pause, or
+`submit_script_may_choice` on a `SelectTarget` pause) is rejected with `ScriptChoiceError::
+WrongRequestKind`, not silently misapplied.
+
+Not yet possible: modal spells ("choose one"), where the mode is chosen *before* the stack as
+part of casting (CR 700.2a) — a fundamentally different mechanism from this mid-resolution
+coroutine ask, closer to `TargetRequirement`/`PaymentPlan`. Named, unattempted follow-up.
+
+Real, tested end to end: `crates/engine/tests/phase5_script_may_abilities.rs`.
 
 ## Hidden information
 
@@ -465,10 +493,10 @@ Don't spend time trying these — they're signatures only, or explicitly unbound
   bound into the Lua VM's globals. A card script cannot call any of them.
   `Game.Conditions.*`/`Game.Ops.*`/`Game.Costs.*`/`Game.Layers.*`/`Game.Effects.*`/
   `Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`/`Game.CreateActivatedAbility`/
-  `Game.SelectTargets` are what exist on `Game` right now (`Game.SelectTargets` is real as of the
-  script-coroutines slice — see "Asking the player for a target mid-resolution" above; it's a
-  literal Lua function, not a `script_api.rs` binding, which is why it's not grouped with the three
-  unbound ones here). `Game.AddContinuousEffect` specifically is superseded by
+  `Game.SelectTargets`/`Game.MayChoose` are what exist on `Game` right now (both are real as of the
+  script-coroutines/script-may-abilities slices — see the two "Asking the player..." sections
+  above; they're literal Lua functions, not `script_api.rs` bindings, which is why they're not
+  grouped with the three unbound ones here). `Game.AddContinuousEffect` specifically is superseded by
   `Game.CreateStaticAbility`'s builder (same relationship the old `register_triggered_ability` free
   function has to `Game.CreateTriggeredAbility`) — it was never bound and isn't expected to be.
 - **A mana ability via Lua** — still wired via `mana_ability` (`docs/scenario_format.md`), not
@@ -488,10 +516,9 @@ Don't spend time trying these — they're signatures only, or explicitly unbound
 - **Any event kind other than `ZoneChange`** — `event_to_lua` (`script.rs`) only bridges zone
   changes. A condition wanting to check damage/life-change/tap events will see `nil` and must
   wait on `event_to_lua` being extended.
-- **Modal spells, "may" abilities, and player-target selection** — `Game.SelectTargets` (above)
-  covers a single object target only; a script asking "choose one" or offering an optional effect,
-  or selecting a *player* as a target, needs the same coroutine mechanism with a different request
-  shape — not built yet (backlog items 9a/9b).
+- **Modal spells ("choose one")** — the mode is chosen *before* the stack as part of casting (CR
+  700.2a), a different mechanism from `Game.SelectTargets`/`Game.MayChoose`'s mid-resolution
+  coroutine ask — not built yet, named follow-up split off from backlog item 9a.
 
 ## Adding a new primitive
 

@@ -128,15 +128,20 @@ pub struct ScriptContext<'a> {
 }
 
 /// A card script's request for player input mid-resolution (backlog item
-/// 9), yielded from a coroutine-invoked operation via `Game.SelectTargets`.
-/// Only one shape exists this slice — a single object target matching a
-/// `TargetFilter` (no player targets, no "any target", no count > 1, same
-/// narrowing precedent every other targeting-adjacent slice already set —
-/// see `TargetFilter`'s own doc comment). Decoded from the yielded Lua table
-/// by `decode_script_choice_request`.
+/// 9), yielded from a coroutine-invoked operation via `Game.SelectTargets`/
+/// `Game.MayChoose`. Decoded from the yielded Lua table by
+/// `decode_script_choice_request`.
 #[derive(Clone, Debug)]
 pub enum ScriptChoiceRequest {
+    /// `Game.SelectTargets(filter)` — a single target matching a
+    /// `TargetFilter` (no count > 1, same narrowing precedent every other
+    /// targeting-adjacent slice already set — see `TargetFilter`'s own doc
+    /// comment).
     SelectTarget { filter: TargetFilter },
+    /// `Game.MayChoose()` (backlog item 9a, CR 608.2d) — a plain yes/no
+    /// choice with no filter to satisfy; any `bool` answer is legal, unlike
+    /// `SelectTarget`'s `target_is_legal` check.
+    MayChoose,
 }
 
 /// What one `ScriptRuntime::invoke_operation`/`resume_operation` call
@@ -1263,6 +1268,26 @@ impl ScriptRuntime {
         self.handle_operation_result(thread, result, state, controller)
     }
 
+    /// Resumes a `Game.MayChoose` suspension (backlog item 9a, CR 608.2d)
+    /// with a plain `bool` — unlike `resume_operation`'s tagged `{kind, id}`
+    /// table, `Game.MayChoose()` just wants `coroutine.yield`'s return value
+    /// to be the yes/no answer directly, so this resumes with a raw Lua
+    /// boolean instead. Shares `handle_operation_result` as its tail, same
+    /// as `resume_operation`. `Engine::submit_script_may_choice` is the only
+    /// intended caller.
+    pub fn resume_operation_bool(
+        &self,
+        thread_handle: ScriptHandle,
+        state: &mut GameState,
+        controller: PlayerId,
+        answer: bool,
+    ) -> Result<OperationOutcome, ScriptError> {
+        let thread = self.thread(thread_handle)?;
+        let result: Value =
+            thread.resume(answer).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        self.handle_operation_result(thread, result, state, controller)
+    }
+
     /// Shared tail for `invoke_operation`/`resume_operation`: `thread`
     /// either yielded again (a real `Game.SelectTargets` ask, decoded into a
     /// `ScriptChoiceRequest` and stashed via the registry for a later
@@ -1340,9 +1365,9 @@ impl ScriptRuntime {
     }
 }
 
-/// Decodes `Game.SelectTargets`'s yielded request table — `{ op =
-/// "select_target", filter = {...} }`. Only one `op` shape exists this
-/// slice; an unrecognized op is a real error, not guessed at, same stance
+/// Decodes `Game.SelectTargets`/`Game.MayChoose`'s yielded request table —
+/// `{ op = "select_target", filter = {...} }` or `{ op = "may_choose" }`. An
+/// unrecognized op is a real error, not guessed at, same stance
 /// `decode_condition_value` takes for an unrecognized shape.
 fn decode_script_choice_request(table: Table) -> Result<ScriptChoiceRequest, ScriptError> {
     let op: String = table.get("op").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
@@ -1352,6 +1377,7 @@ fn decode_script_choice_request(table: Table) -> Result<ScriptChoiceRequest, Scr
                 table.get("filter").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             Ok(ScriptChoiceRequest::SelectTarget { filter: decode_target_filter_table(filter_table)? })
         }
+        "may_choose" => Ok(ScriptChoiceRequest::MayChoose),
         other => Err(ScriptError::RuntimeError(format!("unknown script choice request op '{other}'"))),
     }
 }
@@ -1647,6 +1673,15 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         .load(r#"function(filter) return coroutine.yield({ op = "select_target", filter = filter or {} }) end"#)
         .eval()?;
 
+    // Backlog item 9a (CR 608.2d): `Game.MayChoose()` yields a plain yes/no
+    // request the same way `Game.SelectTargets` yields a targeting request —
+    // same "literal Lua function calling coroutine.yield directly" reason
+    // (mlua 0.9 without the `async` feature can't yield from inside a
+    // Rust-bound closure). `resume_operation_bool` resumes with a raw
+    // boolean, which becomes this call's own return value.
+    let may_choose: Function =
+        lua.load(r#"function() return coroutine.yield({ op = "may_choose" }) end"#).eval()?;
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("InterveningIf", intervening_if)?;
@@ -1659,6 +1694,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     game.set("CreateStaticAbility", create_static_ability)?;
     game.set("CreateActivatedAbility", create_activated_ability)?;
     game.set("SelectTargets", select_targets)?;
+    game.set("MayChoose", may_choose)?;
     lua.globals().set("Game", game)
 }
 

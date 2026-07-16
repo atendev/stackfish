@@ -2207,8 +2207,14 @@ shift, don't treat it as fixed once written.
    no "any target." `invoke_target`/`TargetSpec::Script` (a *static* target-requirement predicate,
    a different concept from an operation's own mid-resolution ask) are untouched, still `todo!()`.
    **Split out, not bundled in:**
-   9a. **Modal spells / "may" abilities** — same coroutine mechanism, different request shape
-      (`ScriptChoiceRequest` gains a variant), not attempted this slice.
+   9a. ~~**"May" abilities (CR 608.2d)**~~ — done, `phase5/script-may-abilities` slice
+      (docs/implementation.md, below). `Game.MayChoose()`, same coroutine mechanism as
+      `Game.SelectTargets` with a new `ScriptChoiceRequest::MayChoose` variant. **Split out, not
+      bundled in:**
+      9a-i. **Modal spell mode-selection (CR 700.2a)** — the mode is chosen *before* the stack, as
+         part of casting, not mid-resolution — a different mechanism entirely (closer to
+         `TargetRequirement`/`PaymentPlan` than to a coroutine yield inside an already-resolving
+         operation). Named, not attempted.
    9b. ~~**Player-target selection via `Game.SelectTargets`**~~ — done, `phase5/script-target-players`
       slice (docs/implementation.md, below). `{ type = "player" }`/`{ type = "any" }` widen the
       request beyond object-only; the resumed answer is now a tagged `{ kind, id }` table so a
@@ -5326,3 +5332,81 @@ value's tagged-table shape).
   `ScriptChoiceRequest` variant, own follow-up.
 
 **UNRESOLVED:** none new - see "Explicitly not modeled" above.
+
+## Phase 5: phase5/script-may-abilities slice (backlog item 9a, narrowed to "may" abilities)
+
+Branch `phase5/script-may-abilities`, off master. Slice backlog item 9a, narrowed before writing
+code to CR 608.2d "may" abilities only - a script offering a plain yes/no choice mid-resolution
+("You may sacrifice a creature. If you don't, you lose 4 life."), reusing the exact
+`Game.SelectTargets` coroutine mechanism (`invoke_operation`/`resume_operation`/
+`AwaitingScriptChoice`) with a new request shape, exactly as backlog item 9a's own text predicted.
+True modal spell mode-selection (CR 700.2a - the mode is chosen *before* the stack, as part of
+casting, not mid-resolution) was split out as its own named follow-up (9a-i) rather than guessed
+at - a fundamentally different mechanism, closer to `TargetRequirement`/`PaymentPlan` than to a
+coroutine yield inside an already-resolving operation.
+
+**What got implemented:**
+- `script.rs`: `ScriptChoiceRequest` gained `MayChoose` (no payload - there's nothing to filter,
+  unlike `SelectTarget`'s `TargetFilter`). `decode_script_choice_request` gained the `"may_choose"`
+  `op` arm.
+- A new literal Lua binding `Game.MayChoose()` (`function() return coroutine.yield({ op =
+  "may_choose" }) end`), same "plain Lua function calling `coroutine.yield` directly" pattern
+  `Game.SelectTargets` already established - mlua 0.9 without the `async` feature still can't yield
+  from inside a Rust-bound closure.
+- `ScriptRuntime::resume_operation_bool` - a new sibling to `resume_operation`, resuming the
+  suspended coroutine with a raw Lua boolean instead of `SelectTargets`' tagged `{kind, id}` table
+  (there's nothing to tag - the yielded request only ever means "yes or no"). Shares
+  `handle_operation_result` as its tail, same structure `resume_operation` already uses.
+  `resume_operation` itself is untouched.
+- `Engine::submit_script_may_choice(bool)` - a new sibling to `submit_script_choice`, matching
+  `ScriptChoiceRequest::MayChoose` instead of `SelectTarget`. No legality check: unlike a target
+  answer, any `bool` is legal for a "may" choice. Deliberately a separate entry point rather than
+  widening `submit_script_choice`'s own `chosen: Target` parameter - same "one method per pause
+  shape" precedent `submit_replacement_choice`/`submit_legend_rule_choice` already set.
+- `ScriptChoiceError` gained `WrongRequestKind` - submitting a target answer to a pending
+  `MayChoose` pause, or a bool answer to a pending `SelectTarget` pause, is rejected explicitly
+  rather than silently misapplied or panicking.
+
+**Real, anticipated interface deviation (flagged in the pre-slice report):** `submit_script_choice`'s
+existing body destructured `request` as `let ScriptChoiceRequest::SelectTarget { filter } =
+request;` - an *irrefutable* pattern, since only one variant existed before this slice. Adding
+`MayChoose` made that refutable; fixed to a `let-else` returning the new `WrongRequestKind` error.
+The same now-refutable pattern existed in three tests in the pre-existing
+`phase5_script_target_selection.rs` (added by the `phase5/script-target-players` slice) - all three
+fixed the same way. Neither was a surprise found mid-implementation; both were called out as
+required, anticipated fallout in the pre-slice requirements report.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` - 7 new tests in
+`crates/engine/tests/phase5_script_may_abilities.rs` (a script calling `Game.MayChoose()` pauses
+with a `MayChoose` request; answering `true` resumes into the "yes" branch, proven via a distinct
+life total; answering `false` resumes into the "no" branch; `submit_script_choice` rejects a
+pending `MayChoose` pause with `WrongRequestKind` and the pause stays open; `submit_script_may_choice`
+rejects a pending `SelectTarget` pause the same way; `submit_script_may_choice` rejects when the
+engine isn't awaiting a choice at all; a script that never calls `Game.MayChoose()` still resolves
+synchronously, unaffected regression guard). Full workspace run: 502 passed, 0 failed (495 prior +
+7 new).
+
+**STRUCT DEVIATIONS:** None - `ScriptChoiceRequest::MayChoose` is exactly the payload-free variant
+the pre-slice report described.
+
+**INTERFACE DEVIATIONS:** The `submit_script_choice`/test-file `let-else` fixes above - both
+anticipated in the pre-slice report, not surprises.
+
+**SCOPE DEVIATIONS:** None - modal spell mode-selection was named as a split-off follow-up (9a-i)
+before any code was written, not discovered mid-slice.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- 9a-i (modal spell mode-selection, CR 700.2a) - untouched, needs its own cast-time choice design,
+  not the mid-resolution coroutine mechanism this slice reused.
+- `handle_operation_result` still only decodes `gain_life` from a finished operation's result table
+  - a `MayChoose`-driven script is exactly as limited to that one effect key as every other
+  operation today (pre-existing gap, same TODO already on that function, not expanded here).
+- Nested/repeated `Game.MayChoose()` calls in one script (ask twice) - structurally supported (the
+  same `NeedsChoice`-can-recur design every prior coroutine slice relied on) but not specifically
+  tested this slice, same stance the original `phase5/script-coroutines` slice took for repeated
+  `Game.SelectTargets` calls.
+
+Docs updated: `docs/lua_scripts.md` gained a new "Asking the player a yes/no question
+mid-resolution" section, and its stale "Not yet possible" note (still claiming player-target
+selection wasn't built, despite `phase5/script-target-players` having shipped it) was corrected
+alongside the "may"-abilities addition rather than left half-wrong next to this slice's own edit.

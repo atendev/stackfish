@@ -69,6 +69,11 @@ pub enum ScriptChoiceError {
     /// static target requirement, reused here rather than a second bespoke
     /// check.
     InvalidCandidate,
+    /// The pending request doesn't match the answer shape submitted — e.g.
+    /// `submit_script_choice` (a `Target` answer) called while the pause is
+    /// actually a `ScriptChoiceRequest::MayChoose` (backlog item 9a), or
+    /// vice versa via `submit_script_may_choice`.
+    WrongRequestKind,
 }
 
 /// Why `submit_trigger_order` rejected an answer to a CR 603.3b
@@ -857,7 +862,9 @@ impl Engine {
         let ProcessState::AwaitingScriptChoice { request, controller, .. } = &self.process_state else {
             return Err(ScriptChoiceError::NotAwaitingChoice);
         };
-        let ScriptChoiceRequest::SelectTarget { filter } = request;
+        let ScriptChoiceRequest::SelectTarget { filter } = request else {
+            return Err(ScriptChoiceError::WrongRequestKind);
+        };
         if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller) {
             return Err(ScriptChoiceError::InvalidCandidate);
         }
@@ -870,6 +877,44 @@ impl Engine {
         let outcome = self
             .script_runtime
             .resume_operation(thread, &mut self.state, controller, chosen)
+            .unwrap_or(OperationOutcome::Finished);
+        self.process_state = match outcome {
+            OperationOutcome::Finished => {
+                events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+                ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
+            }
+            OperationOutcome::NeedsChoice { thread, request } => {
+                ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far }
+            }
+        };
+        Ok(())
+    }
+
+    /// Answers a pending backlog-item-9a `Game.MayChoose` pause (CR 608.2d)
+    /// raised by `StepStatus::AwaitingScriptChoice` — sibling of
+    /// `submit_script_choice` for the boolean-answer request shape instead
+    /// of the target-answer one. No legality check: unlike `SelectTarget`,
+    /// any `bool` is a legal answer to a "may" choice. Deliberately a
+    /// separate entry point rather than widening `submit_script_choice`'s
+    /// own `chosen: Target` parameter — same "one method per pause shape"
+    /// precedent `submit_replacement_choice`/`submit_legend_rule_choice`
+    /// already set.
+    pub fn submit_script_may_choice(&mut self, chosen: bool) -> Result<(), ScriptChoiceError> {
+        let ProcessState::AwaitingScriptChoice { request, .. } = &self.process_state else {
+            return Err(ScriptChoiceError::NotAwaitingChoice);
+        };
+        let ScriptChoiceRequest::MayChoose = request else {
+            return Err(ScriptChoiceError::WrongRequestKind);
+        };
+        let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, mut events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        let outcome = self
+            .script_runtime
+            .resume_operation_bool(thread, &mut self.state, controller, chosen)
             .unwrap_or(OperationOutcome::Finished);
         self.process_state = match outcome {
             OperationOutcome::Finished => {
