@@ -189,10 +189,11 @@ fn affects_predicate_matches_only_the_identical_object() {
         .load_function("return function(object, source, controller) return object == source end")
         .expect("loads cleanly");
 
+    let state = base_state();
     let source = ObjectId(1);
     let controller = PlayerId(0);
-    assert_eq!(runtime.invoke_continuous_affects(handle, source, source, controller).unwrap(), true);
-    assert_eq!(runtime.invoke_continuous_affects(handle, ObjectId(2), source, controller).unwrap(), false);
+    assert_eq!(runtime.invoke_continuous_affects(handle, &state, source, source, controller).unwrap(), true);
+    assert_eq!(runtime.invoke_continuous_affects(handle, &state, ObjectId(2), source, controller).unwrap(), false);
 }
 
 #[test]
@@ -200,7 +201,8 @@ fn affects_predicate_erroring_script_is_an_error_not_a_panic() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime.load_function("return function(object, source, controller) error(\"boom\") end").unwrap();
 
-    let result = runtime.invoke_continuous_affects(handle, ObjectId(1), ObjectId(1), PlayerId(0));
+    let state = base_state();
+    let result = runtime.invoke_continuous_affects(handle, &state, ObjectId(1), ObjectId(1), PlayerId(0));
     assert!(result.is_err(), "a script error must not panic - caller treats Err as \"doesn't match\"");
 }
 
@@ -211,7 +213,8 @@ fn effect_decodes_modify_pt() {
         .load_function("return function(source, controller) return { modify_pt = { power = 2, toughness = 3 } } end")
         .unwrap();
 
-    let decoded = runtime.invoke_continuous_effect(handle, ObjectId(1), PlayerId(0)).unwrap();
+    let state = base_state();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0)).unwrap();
     assert!(matches!(decoded, Some(EffectPrimitive::ModifyPT { power: 2, toughness: 3 })));
 }
 
@@ -222,7 +225,8 @@ fn effect_decodes_add_keyword() {
         .load_function("return function(source, controller) return { add_keyword = { \"Flying\", \"Vigilance\" } } end")
         .unwrap();
 
-    let decoded = runtime.invoke_continuous_effect(handle, ObjectId(1), PlayerId(0)).unwrap();
+    let state = base_state();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0)).unwrap();
     assert_eq!(decoded, Some(EffectPrimitive::AddKeyword(KeywordSet::FLYING | KeywordSet::VIGILANCE)));
 }
 
@@ -232,7 +236,8 @@ fn effect_decodes_switch_pt() {
     let handle =
         runtime.load_function("return function(source, controller) return { switch_pt = true } end").unwrap();
 
-    let decoded = runtime.invoke_continuous_effect(handle, ObjectId(1), PlayerId(0)).unwrap();
+    let state = base_state();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0)).unwrap();
     assert!(matches!(decoded, Some(EffectPrimitive::SwitchPT)));
 }
 
@@ -241,7 +246,8 @@ fn effect_with_no_recognized_key_resolves_to_none() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime.load_function("return function(source, controller) return {} end").unwrap();
 
-    let decoded = runtime.invoke_continuous_effect(handle, ObjectId(1), PlayerId(0)).unwrap();
+    let state = base_state();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0)).unwrap();
     assert_eq!(decoded, None, "an empty table has no recognized shape - skip rather than guess");
 }
 
@@ -250,7 +256,8 @@ fn effect_erroring_script_is_an_error_not_a_panic() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime.load_function("return function(source, controller) error(\"boom\") end").unwrap();
 
-    let result = runtime.invoke_continuous_effect(handle, ObjectId(1), PlayerId(0));
+    let state = base_state();
+    let result = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0));
     assert!(result.is_err(), "a script error must not panic - caller (resolve_primitive) treats Err as None");
 }
 

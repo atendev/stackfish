@@ -2184,8 +2184,16 @@ shift, don't treat it as fixed once written.
 8. ~~**Script API expansion**~~ — more `Game.Ops` primitives (DrawCards, Counters, Exile, Sacrifice,
    CreateToken — only `GainLife` existed before this item started; ~~DrawCards~~, ~~Counters~~,
    ~~Exile~~, ~~Sacrifice~~, ~~CreateToken~~ done — all 6 complete), and a
-   hidden-information-safe `ScriptContext` (currently leaks the full `&GameState`, a standing
-   DESIGN.md open question). ~~Damage~~ — done, `phase5/script-ops-damage` slice
+   ~~hidden-information-safe `ScriptContext`~~ — done, `phase5/script-state-query` slice
+   (docs/implementation.md, below). Correction to this item's own framing, found while scoping:
+   `ScriptContext.state: &GameState` was never actually handed to Lua directly (traced every call
+   site) — the real gap was `state_to_lua`'s snapshot only ever carrying per-player life totals, and
+   three `invoke_*` methods (`invoke_cda`/`invoke_continuous_affects`/`invoke_continuous_effect`)
+   passing no state at all. `state_to_lua` is now the actual hidden-information boundary DESIGN.md's
+   open question asked for: full public-zone contents (battlefield/graveyard/exile/command, CR 400.2)
+   as card-summary tables, count-only for hidden zones (hand/library, CR 402.3) — no binding anywhere
+   returns hand/library contents. All 5 state-aware `invoke_*` methods now receive it. Backlog item 8
+   is fully closed. ~~Damage~~ — done, `phase5/script-ops-damage` slice
    (docs/implementation.md, below): `AbilityEffect::Damage(u32)`/`Game.Ops.Damage(n)`, reusing the
    real `ReplacementCheck`→`CommitEvents` pipeline (`commands::apply_damage_event`) combat damage
    already uses, so prevention/replacement effects and Lifelink/Wither/Infect/Deathtouch apply for
@@ -5761,4 +5769,86 @@ match sites) was named as anticipated in the pre-slice report before writing any
   — separate, untouched by this slice.
 - The broader "hidden-info-safe `ScriptContext`" redesign (item 8) is **not** resolved — the
   life-total snapshot is public info, safe under the existing accepted-debt stance, but this doesn't
-  touch hand/library visibility filtering.
+  touch hand/library visibility filtering. **Done as of `phase5/script-state-query`, below.**
+
+## Phase 5: phase5/script-state-query slice (backlog item 8, hidden-information-safe `ScriptContext`)
+
+Branch `phase5/script-state-query`, off master. Closes backlog item 8's remaining half.
+
+**Correction to the pre-slice requirements report, found while reading the code before writing
+any:** the report framed this as "replace `ScriptContext.state: &GameState` with a narrower type."
+Traced every call site first — that field is never handed to Lua directly; every existing
+`invoke_*` method already only used it to build a `state_to_lua` snapshot (a plain table) or ignore
+it entirely. So the Rust-side struct didn't need narrowing — this engine is the omniscient rules
+authority, full access on the Rust side isn't itself the leak. The real gap was two-fold: (1)
+`state_to_lua` only ever built per-player life totals, nothing else; (2) `invoke_cda`,
+`invoke_continuous_affects`, and `invoke_continuous_effect` didn't call it at all — a CDA or
+scripted continuous effect had zero board-state access, only object/source/controller identity.
+`ScriptContext`'s doc comment is updated to explain this instead of flagging a leak that traced out
+false; `state_to_lua` is now the actual documented hidden-info boundary.
+
+**What got implemented:**
+- `state_to_lua` (script.rs) expanded from `{ life = {...} }` into a full public-safe snapshot:
+  `life`, `hand_count`, `library_count` (per player), `battlefield`/`exile` (flat card-summary
+  arrays, shared zones), `graveyard`/`command` (per-player card-summary arrays). Per CR 400.2/402.3:
+  hand/library are hidden zones — only a count is ever exposed, never contents; every other zone is
+  public — full contents exposed. No binding anywhere returns hand/library contents.
+- `card_summary_to_lua`: one object's public-safe summary (id, name, base power/toughness netted
+  against counters via `PTValue::net_with_counters` — CR 121.3, public info — is_creature,
+  controller). Deliberately **base**, not layer-resolved `effective_characteristics` — see the next
+  paragraph for why.
+- `invoke_cda`, `invoke_continuous_affects`, `invoke_continuous_effect` all gained a `state:
+  &GameState` parameter and now pass a `state_to_lua` snapshot as a trailing Lua call arg, same
+  additive/non-breaking convention `invoke_condition`'s existing trailing arg already established.
+  `layers.rs`'s `resolve_base_pt`/`resolve_primitive`/the two call sites feeding them threaded
+  `state` through — no new plumbing needed, `state` was already in scope at every call site inside
+  `effective_characteristics`/`applicable_effects_in_layer`.
+
+**A real design hazard found and designed around, not guessed at:** the obvious version of
+`card_summary_to_lua` — call `layers::effective_characteristics` for each battlefield object so a
+script sees real current P/T — creates unbounded recursion. Building object B's snapshot entry would
+invoke object B's own CDA/scripted-continuous-effect handles, which build *their own* snapshot right
+back through the same `state_to_lua`, which walks the battlefield again, including object B. This
+would recurse the instant any card on the board had a CDA or scripted continuous effect while
+another script's snapshot was being built. Resolved by keeping card summaries to base
+(`CardDefinition`-plus-counters) values only — no re-entrant Lua calls while building a snapshot.
+A single-object *effective*-characteristics query is a real, separate follow-up, not folded in here.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` (`cargo test -p stackfish-engine`): 553
+passed, 0 failed (546 prior + 7 new, in new `crates/engine/tests/phase5_script_state_query.rs`):
+hand/library counts exposed with no `state.hand`/`state.library` content keys present at all; hand
+count readable for an opponent, not just the querying controller (CR 402.3 symmetry); a CDA reading
+`#state.graveyard[controller]` for its base power; card summaries include `+1/+1` counters (CR
+121.3) without invoking the layer engine; a scripted continuous-effect "affects" predicate and
+payload both gating on `state.life[...]`; exile/command zones also exposed as public. Full
+workspace build (`cargo build --workspace`) also clean.
+
+**STRUCT DEVIATIONS:** None — no new struct, `ScriptContext` unchanged (see the Correction above for
+why).
+
+**INTERFACE DEVIATIONS:** `invoke_cda`/`invoke_continuous_affects`/`invoke_continuous_effect` each
+gained a `state: &GameState` parameter, and `layers.rs`'s private `resolve_base_pt`/
+`resolve_primitive` did too — not called out as a signature change in the pre-slice report (which
+assumed the fix lived entirely in `ScriptContext`'s type), but mechanical and expected once the real
+gap was traced.
+
+**SCOPE DEVIATIONS:** `crates/engine/tests/phase5_continuous_effects_script.rs`'s existing
+unit-level tests for `invoke_continuous_affects`/`invoke_continuous_effect` needed a `&GameState`
+argument added at each call site (a `base_state()` helper already existed in that file) — mechanical
+fallout from the interface change above, not a new gap.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- Card summaries are base characteristics only, not layer-resolved effective ones (see the
+  recursion-hazard paragraph above) — a single-object effective-characteristics query binding is a
+  real, separate follow-up.
+- The stack (CR 400.2, also public) isn't included in the snapshot — `StackObject` isn't
+  `GameObject`-shaped (its characteristics come from `source`/`source_lki`), needs its own decode.
+- Card summaries expose name/power/toughness/is_creature/controller only — no mana cost, no full
+  type or keyword set (same `CardDefinition::colors()`/`ManaCost::colors()` still-`todo!()` gap
+  `effective_characteristics` already carries forward, plus a not-yet-built type/keyword-set ->
+  Lua-string-list serializer).
+- Face-down permanents (`GameObject.face_down`) aren't special-cased in `card_summary_to_lua` — a
+  face-down creature's real name/power/toughness would leak if one ever existed on the battlefield.
+  Not fixed: `GameObject::new`'s constructor is still `todo!()` and no morph-style mechanic can put a
+  face-down object into play yet, so this is currently unreachable dead code, not a live bug. Flagged
+  by name so it isn't forgotten once face-down/morph lands.

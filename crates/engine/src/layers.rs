@@ -66,9 +66,9 @@ pub fn effective_characteristics(
     let def = &obj.definition;
 
     let mut power =
-        resolve_base_pt(def.power.as_ref(), &obj.counters, script_runtime, object, obj.controller);
+        resolve_base_pt(def.power.as_ref(), &obj.counters, state, script_runtime, object, obj.controller);
     let mut toughness =
-        resolve_base_pt(def.toughness.as_ref(), &obj.counters, script_runtime, object, obj.controller);
+        resolve_base_pt(def.toughness.as_ref(), &obj.counters, state, script_runtime, object, obj.controller);
     let mut keywords = def.keywords;
     let mut card_types = def.card_types;
     // TODO: CardDefinition::colors()/ManaCost::colors() are both still
@@ -83,20 +83,20 @@ pub fn effective_characteristics(
     // EffectPrimitive::AddCardType's doc comment for the deferred overwrite
     // shape.
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::TypeChanging) {
-        if let Some(EffectPrimitive::AddCardType(added)) = resolve_primitive(effect, script_runtime, obj.controller) {
+        if let Some(EffectPrimitive::AddCardType(added)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
             card_types |= added;
         }
     }
 
     // Layer 5: additive only, same shape as layer 4 above.
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::ColorChanging) {
-        if let Some(EffectPrimitive::AddColor(added)) = resolve_primitive(effect, script_runtime, obj.controller) {
+        if let Some(EffectPrimitive::AddColor(added)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
             colors |= added;
         }
     }
 
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
-        if let Some(EffectPrimitive::AddKeyword(added)) = resolve_primitive(effect, script_runtime, obj.controller) {
+        if let Some(EffectPrimitive::AddKeyword(added)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
             keywords |= added;
         }
     }
@@ -105,7 +105,7 @@ pub fn effective_characteristics(
     // later timestamp wins outright, it doesn't stack with an earlier SetPT.
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSetting) {
         if let Some(EffectPrimitive::SetPT { power: p, toughness: t }) =
-            resolve_primitive(effect, script_runtime, obj.controller)
+            resolve_primitive(effect, state, script_runtime, obj.controller)
         {
             power = Some(p);
             toughness = Some(t);
@@ -118,7 +118,7 @@ pub fn effective_characteristics(
     // doc comment on why the sort lives there regardless).
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessModifying) {
         if let Some(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) =
-            resolve_primitive(effect, script_runtime, obj.controller)
+            resolve_primitive(effect, state, script_runtime, obj.controller)
         {
             power = power.map(|p| p + dp);
             toughness = toughness.map(|t| t + dt);
@@ -132,7 +132,7 @@ pub fn effective_characteristics(
     // CDA/SetPT/printed base at all) - same "skip rather than guess" stance
     // every other unresolvable value in this query already takes.
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSwitching) {
-        if matches!(resolve_primitive(effect, script_runtime, obj.controller), Some(EffectPrimitive::SwitchPT)) {
+        if matches!(resolve_primitive(effect, state, script_runtime, obj.controller), Some(EffectPrimitive::SwitchPT)) {
             if let (Some(p), Some(t)) = (power, toughness) {
                 power = Some(t);
                 toughness = Some(p);
@@ -190,7 +190,7 @@ fn applicable_effects_in_layer<'a>(
             match &e.affected {
                 AffectedFilter::Primitive(_) => e.applies_to(object, source_obj),
                 AffectedFilter::Script(handle) => script_runtime
-                    .invoke_continuous_affects(*handle, object.object_id, e.source, source_obj.controller)
+                    .invoke_continuous_affects(*handle, state, object.object_id, e.source, source_obj.controller)
                     .unwrap_or(false),
             }
         })
@@ -210,13 +210,14 @@ fn applicable_effects_in_layer<'a>(
 /// guess" stance every other unresolvable value in this query already takes.
 fn resolve_primitive(
     effect: &ContinuousEffect,
+    state: &GameState,
     script_runtime: &ScriptRuntime,
     controller: PlayerId,
 ) -> Option<EffectPrimitive> {
     match &effect.effect {
         EffectPayload::Primitive(p) => Some(*p),
         EffectPayload::Script(handle) => {
-            script_runtime.invoke_continuous_effect(*handle, effect.source, controller).ok().flatten()
+            script_runtime.invoke_continuous_effect(*handle, state, effect.source, controller).ok().flatten()
         }
     }
 }
@@ -236,6 +237,7 @@ fn resolve_primitive(
 fn resolve_base_pt(
     value: Option<&PTValue>,
     counters: &CounterSet,
+    state: &GameState,
     script_runtime: &ScriptRuntime,
     source: ObjectId,
     controller: PlayerId,
@@ -243,7 +245,7 @@ fn resolve_base_pt(
     if let Some(PTValue::CharacteristicDefining { script: Some(ScriptReference::Inline(source_code)), .. }) =
         value
     {
-        if let Ok(base) = script_runtime.invoke_cda(source_code, source, controller) {
+        if let Ok(base) = script_runtime.invoke_cda(source_code, state, source, controller) {
             return Some(net_counters(base, counters));
         }
     }
