@@ -9,7 +9,8 @@ use crate::sba::{self, SbaOutcome};
 use crate::script::{OperationOutcome, ScriptChoiceRequest, ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
 use crate::types::ability::{
-    AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, NamedToken, RegisteredAbility, TokenSpec,
+    AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, NamedToken, RegisteredAbility,
+    SearchDestination, TokenSpec,
 };
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
 use crate::types::config::{GameConfig, GameSettings};
@@ -146,6 +147,20 @@ pub enum SurveilChoiceError {
     WrongCards,
 }
 
+/// Why `submit_search_choice` rejected an answer to a CR 701.23
+/// `ProcessState::AwaitingSearchChoice` pause.
+#[derive(Debug)]
+pub enum SearchChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingSearchChoice`.
+    NotAwaitingChoice,
+    /// `chosen.len()` exceeds the pending `count` — CR 701.23b allows
+    /// choosing fewer (including zero), never more.
+    TooMany,
+    /// A chosen id isn't one of the pending `candidates`, or the same id
+    /// was chosen more than once.
+    NotACandidate,
+}
+
 /// Why `submit_mulligan_decision` rejected a `KeepHand` or `TakeMulligan`.
 #[derive(Debug)]
 pub enum MulliganError {
@@ -262,6 +277,13 @@ pub enum StepStatus {
     /// the only difference is `submit_surveil_choice` sends the "not kept on
     /// top" pile to the graveyard instead of the bottom of the library.
     AwaitingSurveilChoice { player: PlayerId, cards: Vec<ObjectId> },
+    /// Backlog item 14b, CR 701.23: a `Game.Ops.Search(...)` primitive is
+    /// resolving and needs `player` to choose up to `count` of `candidates`
+    /// (already pre-filtered to ids matching the search's own `FilterSpec`)
+    /// — the caller should prompt and call `submit_search_choice`, then
+    /// `step()` again. CR 701.23b: choosing fewer than `count` (including
+    /// zero) is always legal.
+    AwaitingSearchChoice { player: PlayerId, candidates: Vec<ObjectId>, count: u32 },
     /// CR 603.3b: `player` controls more than one trigger that matched the
     /// same batch of events and must choose the order to put them on the
     /// stack — the caller should prompt and call `submit_trigger_order`,
@@ -428,6 +450,24 @@ pub enum ProcessState {
         controller: PlayerId,
         events_so_far: Vec<GameEventKind>,
         cards: Vec<ObjectId>,
+    },
+    /// Backlog item 14b: paused mid-`ResolveStackTop` because the resolving
+    /// `StackObject`'s effect was `AbilityEffect::Search { .. }` —
+    /// `candidates` is every library id already pre-filtered against the
+    /// search's own `FilterSpec` (evaluated with the controller as
+    /// `viewer`); `count`/`destination`/`shuffle_after` are copied straight
+    /// off the effect so `submit_search_choice` doesn't need the original
+    /// `FilterSpec` at all (the pre-filtering already happened). `stack_id`/
+    /// `controller`/`events_so_far` carried through for the same reason
+    /// `AwaitingScryChoice` carries them.
+    AwaitingSearchChoice {
+        stack_id: ObjectId,
+        controller: PlayerId,
+        events_so_far: Vec<GameEventKind>,
+        candidates: Vec<ObjectId>,
+        count: u32,
+        destination: SearchDestination,
+        shuffle_after: bool,
     },
     /// Checked events ready to become real `GameEvent`s in the ledger.
     CommitEvents { checked: Vec<GameEventKind> },
@@ -651,6 +691,8 @@ fn register_token_abilities(
 ) {
     let artifact_sacrifice_filter = FilterSpec {
         card_types: Some(CardTypeSet::ARTIFACT),
+        supertypes: None,
+        subtypes: None,
         controller: Some(FilterController::You),
         random: false,
         extra: None,
@@ -1142,6 +1184,110 @@ impl Engine {
             kept_on_top,
             put_graveyard: new_ids,
         });
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        self.process_state =
+            ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        Ok(())
+    }
+
+    /// Answers a pending CR 701.23 `Game.Ops.Search(...)` pause raised by
+    /// `StepStatus::AwaitingSearchChoice` — `chosen` must be a subset of the
+    /// pending `candidates` (already pre-filtered against the search's own
+    /// `FilterSpec`, so no re-filtering happens here), no duplicates, and no
+    /// more than `count` entries (CR 701.23b: fewer, including zero, is
+    /// always legal). Moves each found card Library -> the pause's own
+    /// `destination` (CR 400.7 new `ObjectId` per card): `Hand` mirrors
+    /// `submit_surveil_choice`'s graveyard-move convention (`retire_object`,
+    /// no script); `Battlefield` mirrors `move_resolving_spell`'s own
+    /// battlefield-entry convention instead (`remap_abilities`, a real ETB
+    /// `run_card_script`, `controlled_since_turn` set to the current turn,
+    /// `tapped` applied as requested). Shuffles the library afterward iff
+    /// `shuffle_after` (CR 701.24a), via the existing `shuffle_library`
+    /// helper — same "already logs its own events" convention
+    /// `AbilityEffect::Shuffle` itself already relies on.
+    pub fn submit_search_choice(&mut self, chosen: Vec<ObjectId>) -> Result<(), SearchChoiceError> {
+        let ProcessState::AwaitingSearchChoice { candidates, count, .. } = &self.process_state else {
+            return Err(SearchChoiceError::NotAwaitingChoice);
+        };
+        if chosen.len() > *count as usize {
+            return Err(SearchChoiceError::TooMany);
+        }
+        let mut seen: Vec<ObjectId> = Vec::with_capacity(chosen.len());
+        for &id in &chosen {
+            if seen.contains(&id) || !candidates.contains(&id) {
+                return Err(SearchChoiceError::NotACandidate);
+            }
+            seen.push(id);
+        }
+        let ProcessState::AwaitingSearchChoice {
+            stack_id, controller, mut events_so_far, destination, shuffle_after, ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        for card in &chosen {
+            let last_known_info =
+                self.state.object(*card).expect("validated against candidates above").clone();
+            let owner = last_known_info.owner;
+            let new_id = self.state.allocate_object_id();
+            let mut new_object = last_known_info.clone();
+            new_object.object_id = new_id;
+            new_object.lineage = ObjectLineage { previous: Some(*card) };
+            new_object.timestamp = self.state.allocate_sequence_no();
+
+            match destination {
+                SearchDestination::Hand => {
+                    new_object.zone = ZoneKind::Hand;
+                    self.state
+                        .zone_mut(ZoneKind::Library, Some(owner))
+                        .expect("library zone must exist")
+                        .remove(*card);
+                    let departed = commands::retire_object(&mut self.state, *card);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state
+                        .zone_mut(ZoneKind::Hand, Some(owner))
+                        .expect("hand zone must exist")
+                        .push_bottom(new_id);
+                    self.state.objects.insert(new_id, new_object);
+                    events_so_far.push(GameEventKind::ZoneChange {
+                        object: new_id,
+                        from: ZoneKind::Library,
+                        to: ZoneKind::Hand,
+                        last_known_info: Some(last_known_info),
+                    });
+                }
+                SearchDestination::Battlefield { tapped } => {
+                    new_object.zone = ZoneKind::Battlefield;
+                    new_object.tapped = tapped;
+                    new_object.controlled_since_turn = self.state.turn_number;
+                    self.state
+                        .zone_mut(ZoneKind::Library, Some(owner))
+                        .expect("library zone must exist")
+                        .remove(*card);
+                    let definition_for_script = new_object.definition.clone();
+                    self.state.objects.remove(card);
+                    self.state
+                        .zone_mut(ZoneKind::Battlefield, None)
+                        .expect("battlefield zone must exist")
+                        .push_bottom(new_id);
+                    self.state.objects.insert(new_id, new_object);
+                    commands::remap_abilities(&mut self.state, *card, new_id);
+                    let _ = self.script_runtime.run_card_script(&mut self.state, &definition_for_script, new_id);
+                    events_so_far.push(GameEventKind::ZoneChange {
+                        object: new_id,
+                        from: ZoneKind::Library,
+                        to: ZoneKind::Battlefield,
+                        last_known_info: Some(last_known_info),
+                    });
+                }
+            }
+        }
+
+        if shuffle_after {
+            self.shuffle_library(controller);
+        }
+
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
         self.process_state =
             ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
@@ -2565,6 +2711,42 @@ impl Engine {
                                     return StepStatus::Progressed;
                                 }
                             }
+                            // CR 701.23a: search the controller's *entire*
+                            // library (not a fixed top-N peek like
+                            // Scry/Surveil) and pre-filter to just the ids
+                            // matching `filter` - submit_search_choice only
+                            // has to check the answer's a subset of this
+                            // list, never re-running the filter itself.
+                            // Empty candidates: nothing to choose, falls
+                            // straight through with no pause and no event -
+                            // same "no real decision" stance Scry/Surveil's
+                            // own n == 0 case takes.
+                            Some(AbilityEffect::Search { filter, count, destination, shuffle_after }) => {
+                                let candidates: Vec<ObjectId> = self
+                                    .state
+                                    .zone(ZoneKind::Library, Some(top.controller))
+                                    .map(|z| z.contents.iter().copied().collect::<Vec<_>>())
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .filter(|id| {
+                                        self.state
+                                            .object(*id)
+                                            .is_some_and(|obj| filter.matches(obj, top.controller))
+                                    })
+                                    .collect();
+                                if !candidates.is_empty() {
+                                    self.process_state = ProcessState::AwaitingSearchChoice {
+                                        stack_id: top.stack_id,
+                                        controller: top.controller,
+                                        events_so_far: events,
+                                        candidates,
+                                        count: *count,
+                                        destination: *destination,
+                                        shuffle_after: *shuffle_after,
+                                    };
+                                    return StepStatus::Progressed;
+                                }
+                            }
                             // CR 111: create one or more token permanents on
                             // the battlefield under the controller's control.
                             // Named tokens (Clue, Food) get their activated
@@ -2747,6 +2929,21 @@ impl Engine {
                 let status = StepStatus::AwaitingSurveilChoice { player: controller, cards: cards.clone() };
                 self.process_state =
                     ProcessState::AwaitingSurveilChoice { stack_id, controller, events_so_far, cards };
+                status
+            }
+
+            ProcessState::AwaitingSearchChoice { stack_id, controller, events_so_far, candidates, count, destination, shuffle_after } => {
+                let status =
+                    StepStatus::AwaitingSearchChoice { player: controller, candidates: candidates.clone(), count };
+                self.process_state = ProcessState::AwaitingSearchChoice {
+                    stack_id,
+                    controller,
+                    events_so_far,
+                    candidates,
+                    count,
+                    destination,
+                    shuffle_after,
+                };
                 status
             }
 

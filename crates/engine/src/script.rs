@@ -6,9 +6,10 @@ use mlua::{Function, Lua, RegistryKey, Table, Thread, ThreadStatus, UserData, Us
 
 use crate::types::ability::{
     AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, CreatureTokenSpec,
-    InterveningIfPrimitive, InterveningIfSpec, NamedToken, RegisteredAbility, TokenSpec,
+    InterveningIfPrimitive, InterveningIfSpec, NamedToken, RegisteredAbility, SearchDestination,
+    TokenSpec,
 };
-use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, SupertypeSet};
+use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, Subtype, SupertypeSet};
 use crate::types::counter::CounterKind;
 use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{
@@ -317,11 +318,12 @@ fn decode_cost_component_value(value: Value) -> Result<CostComponent, ScriptErro
 }
 
 /// `ActivatedAbilityBuilder`'s `:AddCost`/`Game.Costs.Sacrifice`/`Discard`/
-/// `TapPermanents` filter argument — a plain Lua table
-/// (`{controller=.., card_types={..}, random=..}`, every key optional), same
-/// convention `decode_affected_value` already established for
-/// `StaticAbilityBuilder::SetAffected`. `extra` is never settable from Lua
-/// this slice (see `FilterSpec::extra`'s own doc comment) — always `None`.
+/// `TapPermanents`/`Game.Ops.Search` filter argument — a plain Lua table
+/// (`{controller=.., card_types={..}, supertypes={..}, subtypes={..},
+/// random=..}`, every key optional), same convention `decode_affected_value`
+/// already established for `StaticAbilityBuilder::SetAffected`. `extra` is
+/// never settable from Lua this slice (see `FilterSpec::extra`'s own doc
+/// comment) — always `None`.
 fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
     let controller_name: Option<String> =
         table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
@@ -341,9 +343,44 @@ fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
         None => None,
     };
 
+    let supertypes_table: Option<Table> =
+        table.get("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let supertypes = match supertypes_table {
+        Some(t) => {
+            let mut set = SupertypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                set |= parse_supertype_name(&name)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+
+    let subtypes_table: Option<Table> =
+        table.get("subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let subtypes = match subtypes_table {
+        Some(t) => {
+            let mut list = Vec::new();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                list.push(Subtype(name));
+            }
+            Some(list)
+        }
+        None => None,
+    };
+
     let random: Option<bool> = table.get("random").map_err(|e| ScriptError::LoadError(e.to_string()))?;
 
-    Ok(FilterSpec { card_types, controller, random: random.unwrap_or(false), extra: None })
+    Ok(FilterSpec {
+        card_types,
+        supertypes,
+        subtypes,
+        controller,
+        random: random.unwrap_or(false),
+        extra: None,
+    })
 }
 
 /// `CardTypeSet` names, by CR 108-ish printed card type — mirrors
@@ -1497,6 +1534,47 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     ops.set("Scry", scry)?;
     let surveil = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::Surveil(n))))?;
     ops.set("Surveil", surveil)?;
+    // `Game.Ops.Search(filter_table, count, opts?)` — `filter_table` reuses
+    // `decode_filter_table` (same table shape `Game.Costs.Sacrifice`/
+    // `Discard`/`TapPermanents` already accept, extended with
+    // `supertypes`/`subtypes` alongside this backlog-item-14b slice).
+    // `opts.destination` is `"hand"` (default) or `"battlefield"`;
+    // `opts.tapped` only matters for `"battlefield"`; `opts.shuffle`
+    // defaults to `true` (CR 701.24a: nearly every real search effect pairs
+    // with "then shuffle").
+    let search = lua.create_function(|_, (filter_table, count, opts): (Table, u32, Option<Table>)| {
+        let filter = decode_filter_table(filter_table).map_err(to_lua_err)?;
+        let destination_name: Option<String> = match &opts {
+            Some(t) => t.get("destination").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+            None => None,
+        };
+        let destination = match destination_name.as_deref() {
+            None | Some("hand") => SearchDestination::Hand,
+            Some("battlefield") => {
+                let tapped: Option<bool> = match &opts {
+                    Some(t) => t.get("tapped").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+                    None => None,
+                };
+                SearchDestination::Battlefield { tapped: tapped.unwrap_or(false) }
+            }
+            Some(other) => {
+                return Err(to_lua_err(ScriptError::LoadError(format!(
+                    "unknown Game.Ops.Search destination '{other}' - expected hand/battlefield"
+                ))))
+            }
+        };
+        let shuffle_after: Option<bool> = match &opts {
+            Some(t) => t.get("shuffle").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+            None => None,
+        };
+        Ok(OperationTag(AbilityEffect::Search {
+            filter,
+            count,
+            destination,
+            shuffle_after: shuffle_after.unwrap_or(true),
+        }))
+    })?;
+    ops.set("Search", search)?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;

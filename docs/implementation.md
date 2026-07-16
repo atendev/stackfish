@@ -2255,8 +2255,13 @@ shift, don't treat it as fixed once written.
     Correction to this item's original text: didn't end up needing `PlayerActionKind::MakeChoice`
     at all — resolved as a dedicated `ProcessState`/`StepStatus` pause pair, same "own entry point"
     shape the legend-rule choice-pause already established, not a generic make-a-choice action.
-    14b. **Search/tutor** — needs the same choice machinery plus a "look at the whole library"
-    visibility exception; this engine's hidden-info model doesn't touch that yet.
+    14b. ~~**Search/tutor**~~ — done, `phase5/search-tutor` slice (docs/implementation.md, below).
+    Correction to this item's original text: no "look at the whole library" visibility exception
+    was ever needed — `GameState`/`Zone` already expose full contents freely; the project's only
+    hidden-info gap is the Lua callback boundary (DESIGN.md's open question), never crossed by this
+    Rust-native primitive. The real blocker turned out to be `cost.rs`'s `FilterSpec` having no
+    supertype/subtype fields at all (couldn't match "basic land card") — fixed as part of this
+    slice, benefiting every other `FilterSpec` caller (Sacrifice/Discard/TapPermanents costs) too.
 15. ~~**CR 601.6 unwind**~~ — done, `phase5/payment-unwind` slice (docs/implementation.md, below).
     New `Engine::unwind_payment` (and matching `unwind_payment` TOML/CLI step) lets the caller
     explicitly abandon a cast/activation instead of endlessly resubmitting a `PaymentPlan` — reuses
@@ -5576,3 +5581,90 @@ that enum) even though the pre-slice report didn't enumerate the exact two call 
 - No TOML schema for a Scry/Surveil card — same pre-existing `effect`-has-no-TOML-representation gap
   every `CardDefinition.effect`-carrying slice already notes; a test fixture needed a direct struct
   literal.
+
+## Phase 5: phase5/search-tutor slice (backlog item 14b)
+
+Branch `phase5/search-tutor`, off master. Slice backlog item 14b — CR 701.23 (Search).
+
+**Correction to the backlog text, confirmed before writing code:** the "look at the whole library
+visibility exception" this item worried about was a non-issue — `GameState`/`Zone` already expose
+full contents freely; the project's only hidden-info gap (DESIGN.md's open question) is the *Lua*
+callback boundary, never crossed by this Rust-native primitive. The real blocker, surfaced while
+scoping: `cost.rs`'s `FilterSpec` (shared by every `AdditionalCost::Sacrifice`/`Discard`/
+`TapPermanents` filter) had no supertype/subtype fields at all, so it couldn't match "basic land
+card" — the single most common real search target. Raised to the human before writing any code;
+decided to extend `FilterSpec` itself (not a narrower Search-only filter type), fixing the gap for
+every existing caller too.
+
+**What got implemented:**
+- `FilterSpec` gained `supertypes: Option<SupertypeSet>` and `subtypes: Option<Vec<Subtype>>`,
+  checked in `matches()` alongside the existing `card_types`/`controller` checks. Both default to
+  `None` on every pre-existing construction site (mechanical sweep across 16 call sites — 2 in
+  `src/`, 14 in tests — same "widen a shared struct, ripple through every literal" cost the `effect`/
+  `modes` fields already paid). `decode_filter_table` (the Lua-table decoder `Game.Costs.Sacrifice`/
+  `Discard`/`TapPermanents` already used) extended to read `supertypes`/`subtypes` arrays too, reusing
+  the existing `parse_supertype_name` helper (already present, unused until now) for the former and a
+  plain `Subtype(String)` wrap for the latter.
+- `AbilityEffect::Search { filter: FilterSpec, count: u32, destination: SearchDestination,
+  shuffle_after: bool }` — `Game.Ops.Search(filter_table, count, opts?)`, same shared enum every
+  other primitive uses. `SearchDestination { Hand, Battlefield { tapped: bool } }` — narrowed to the
+  two overwhelmingly common real destinations.
+- Unlike `Scry`/`Surveil` (fixed top-N peek), `ResolveStackTop` scans the controller's *entire*
+  library, pre-filters to ids matching `filter` (evaluated with the controller as `viewer`), and
+  pauses on a new `ProcessState`/`StepStatus::AwaitingSearchChoice` carrying that pre-filtered
+  `candidates` list plus `count`/`destination`/`shuffle_after` — empty `candidates` falls straight
+  through with no pause and no event, same "nothing to decide" stance `Scry`/`Surveil`'s own `n == 0`
+  case takes.
+- `Engine::submit_search_choice(chosen: Vec<ObjectId>)` — CR 701.23b: `chosen` may be shorter than
+  `count`, including empty; validated against `candidates` directly (no re-filtering — the pre-filter
+  already did that work) plus a duplicate check. `Hand` destination mirrors `submit_surveil_choice`'s
+  graveyard-move convention (`retire_object`, no script); `Battlefield` mirrors
+  `move_resolving_spell`'s own battlefield-entry convention instead (`remap_abilities`, a real ETB
+  `run_card_script`, `controlled_since_turn` set to the current turn, `tapped` applied as requested).
+  Shuffles afterward iff `shuffle_after`, via the existing `shuffle_library` helper — no new event
+  needed for the shuffle itself, it already logs its own `LibraryShuffled`/`RngDrawn`.
+- New `SearchChoiceError` (`NotAwaitingChoice`, `TooMany`, `NotACandidate`).
+- No new summary `GameEventKind` — unlike Scry/Surveil, CR 701.23 has no "whenever you search"
+  trigger rule to eventually wire toward, so the real per-card `ZoneChange` events (Library ->
+  Hand/Battlefield) plus `LibraryShuffled` already say everything a replay/trigger needs.
+
+**Mechanical fallout:** the `FilterSpec` field addition rippled through 16 existing construction
+sites (fixed via `sed` for the 14 single-line ones, by hand for 2 multi-line ones) — anticipated and
+named in the pre-slice report as a scope decision, not a surprise. The new `AbilityEffect::Search`
+variant rippled through the same two exhaustiveness-check call sites `Scry`/`Surveil` already hit
+(`commands.rs`'s `ActivateAbility` non-mana-effect or-pattern, `crates/scenario/src/lib.rs`'s
+`drain`) — also anticipated, same "adding an `AbilityEffect` variant always ripples through every
+exhaustive match on that enum" precedent.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 2 new tests in `cost.rs`'s own test module
+(`supertypes_true_and_false_cases`, `subtypes_true_and_false_cases`) plus 10 new tests in
+`crates/engine/tests/phase5_search_tutor.rs` (finds a basic land and puts it in hand; choosing zero
+is legal per CR 701.23b; rejects choosing more than `count` with the pause left open; rejects a
+non-matching id, proving `candidates` is pre-filtered rather than post-hoc-checked; rejects the same
+id chosen twice; search-to-battlefield-tapped sets `tapped` and runs the real ETB script;
+`shuffle_after` defaults true and logs `LibraryShuffled`; `shuffle_after: false` leaves the remaining
+library order untouched and logs no shuffle; the `Game.Ops.Search` Lua binding decodes filter/count/
+destination/shuffle correctly; and decodes the right defaults — `hand`/`true` — when `opts` is
+omitted entirely). Full workspace run: 533 passed, 0 failed (521 prior + 12 new).
+
+**STRUCT DEVIATIONS:** None beyond the pre-slice report's own named decision — `FilterSpec`'s two new
+fields, `AbilityEffect::Search`, and `SearchDestination` all match the shape described.
+
+**INTERFACE DEVIATIONS:** None — `submit_search_choice`'s signature matches the report exactly.
+
+**SCOPE DEVIATIONS:** None — the `FilterSpec` extension and its mechanical sweep were an explicit,
+human-confirmed decision before any code was written, not a surprise found mid-slice.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- CR 701.23d (a mandatory-quantity search with no quality filter) — different shape, not built;
+  `AbilityEffect::Search` is quality-search (701.23a/b) only.
+- CR 701.23e (reveal the found card) — no reveal/visibility-transition concept exists in this engine
+  yet; purely cosmetic today anyway since hidden info isn't enforced at the Lua boundary either.
+- CR 701.23f (an effect that redirects "search" into "search the top N instead") — would need its
+  own `EventFilter::Search` replacement shape; doesn't exist.
+- CR 701.23i (simultaneous multiplayer search, APNAP) — single-player-effect shape only, same
+  narrowing `Scry`/`Surveil`'s own 701.22c/701.25b gaps already took.
+- Graveyard/Exile as a search destination — not modeled, `SearchDestination` is Hand/Battlefield
+  only.
+- No TOML schema for a Search card — same pre-existing `effect`-has-no-TOML-representation gap every
+  `CardDefinition.effect`-carrying slice already notes.

@@ -190,7 +190,7 @@ fn sacrifice_cost_accepts_legal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), controller: None, random: false, extra: None },
+            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         }],
         alternative: Vec::new(),
     };
@@ -214,7 +214,7 @@ fn sacrifice_cost_rejects_illegal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {
-            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), controller: None, random: false, extra: None },
+            filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         }],
         alternative: Vec::new(),
     };
@@ -237,7 +237,7 @@ fn discard_cost_accepts_legal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Discard {
-            filter: FilterSpec { card_types: None, controller: None, random: false, extra: None },
+            filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         }],
         alternative: Vec::new(),
     };
@@ -261,7 +261,7 @@ fn discard_cost_rejects_illegal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Discard {
-            filter: FilterSpec { card_types: None, controller: None, random: false, extra: None },
+            filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         }],
         alternative: Vec::new(),
     };
@@ -283,7 +283,7 @@ fn tap_permanents_cost_accepts_legal_payment() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::TapPermanents {
-            filter: FilterSpec { card_types: Some(CardTypeSet::ARTIFACT), controller: None, random: false, extra: None },
+            filter: FilterSpec { card_types: Some(CardTypeSet::ARTIFACT), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
             count: 2,
         }],
         alternative: Vec::new(),
@@ -309,7 +309,7 @@ fn tap_permanents_cost_rejects_duplicate_id() {
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::TapPermanents {
-            filter: FilterSpec { card_types: Some(CardTypeSet::ARTIFACT), controller: None, random: false, extra: None },
+            filter: FilterSpec { card_types: Some(CardTypeSet::ARTIFACT), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
             count: 2,
         }],
         alternative: Vec::new(),
@@ -380,7 +380,7 @@ fn combined_tap_self_and_sacrifice_requires_both() {
         additional: vec![
             AdditionalCost::TapSelf,
             AdditionalCost::Sacrifice {
-                filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), controller: None, random: false, extra: None },
+                filter: FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller: None, random: false, extra: None },
             },
         ],
         alternative: Vec::new(),

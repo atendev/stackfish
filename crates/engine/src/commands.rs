@@ -1092,7 +1092,7 @@ pub fn execute_command(
                 }
                 // None (script-bridge-only effect) and Some(GainLife)/
                 // Some(Damage)/Some(Destroy)/Some(Counters)/Some(DrawCards)/
-                // Some(Shuffle)/Some(Scry)/Some(Surveil)
+                // Some(Shuffle)/Some(Scry)/Some(Surveil)/Some(Search)
                 // (a non-mana ActivateAbility whose effect happens to be a
                 // recognized primitive) all take the same path: unlike CR
                 // 605's mana abilities, a non-mana activated ability uses
@@ -1111,7 +1111,8 @@ pub fn execute_command(
                 | Some(AbilityEffect::CreateToken { .. })
                 | Some(AbilityEffect::Shuffle)
                 | Some(AbilityEffect::Scry(_))
-                | Some(AbilityEffect::Surveil(_))) => {
+                | Some(AbilityEffect::Surveil(_))
+                | Some(AbilityEffect::Search { .. })) => {
                     validate_targets(
                         state,
                         script_runtime,
