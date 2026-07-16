@@ -37,6 +37,7 @@ fn creature_definition(name: &str) -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 
@@ -61,6 +62,7 @@ fn heal_spell_definition() -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::GainLife(10)),
+        modes: Vec::new(),
     }
 }
 

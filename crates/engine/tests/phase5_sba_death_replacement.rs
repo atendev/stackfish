@@ -33,6 +33,7 @@ fn creature_definition(toughness: i32) -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 
@@ -172,6 +173,7 @@ fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
             target_requirement: None,
             alternative_costs: Vec::new(),
             effect: None,
+            modes: Vec::new(),
         },
         owner: controller,
         controller,

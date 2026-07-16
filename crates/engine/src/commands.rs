@@ -814,17 +814,46 @@ pub fn execute_command(
                 ));
             }
 
+            // CR 700.2a: a modal card requires the caster to announce their
+            // mode choice here, before targets are chosen (601.2b comes
+            // before 601.2c) - narrowed to "choose exactly one" this slice
+            // (see CardDefinition::modes/SpellMode's own doc comments for
+            // what 700.2's remaining sub-rules are deferred). A non-modal
+            // card (definition.modes empty) is untouched: modes must be
+            // empty, and the card's own singular target_requirement/effect
+            // are used exactly as before this field existed.
+            let (target_requirement, modal_effect): (Option<TargetSpec>, Option<AbilityEffect>) =
+                if object.definition.modes.is_empty() {
+                    if !modes.is_empty() {
+                        return Err(CommandError::IllegalAction(
+                            "this card isn't modal - no modes to choose".to_string(),
+                        ));
+                    }
+                    (object.definition.target_requirement, None)
+                } else {
+                    if modes.len() != 1 {
+                        return Err(CommandError::IllegalAction(
+                            "a modal spell requires choosing exactly one mode".to_string(),
+                        ));
+                    }
+                    let chosen = object
+                        .definition
+                        .modes
+                        .get(modes[0] as usize)
+                        .ok_or_else(|| {
+                            CommandError::IllegalAction("no such mode on this card".to_string())
+                        })?;
+                    (chosen.target_requirement, chosen.effect.clone())
+                };
+
             // CR 601.2c/601.2e: target count/filter/dedup validated below via
             // validate_targets, rejecting the whole cast before anything is
-            // mutated if illegal. TODO(CR 601.2b): no mode-legality check
-            // yet (modes are stored, never validated). TODO(CR 601.2d): no
-            // division/distribution step for effects that split among
-            // targets. TODO: no splice (CR 601.2b/702.47) - a player
-            // revealing other cards in hand to splice their text onto this
-            // spell isn't modeled at all; PlayerAction has nowhere to carry
-            // "which cards I'm splicing," and StackObject has nowhere to
-            // record it either.
-            let target_requirement = object.definition.target_requirement;
+            // mutated if illegal. TODO(CR 601.2d): no division/distribution
+            // step for effects that split among targets. TODO: no splice
+            // (CR 601.2b/702.47) - a player revealing other cards in hand to
+            // splice their text onto this spell isn't modeled at all;
+            // PlayerAction has nowhere to carry "which cards I'm splicing,"
+            // and StackObject has nowhere to record it either.
             validate_targets(
                 state,
                 script_runtime,
@@ -910,8 +939,14 @@ pub fn execute_command(
             // CR 608.2m: a real, Rust-native fast-path effect (e.g. "Shock
             // deals 2 damage to any target") if the card's own
             // CardDefinition carries one - see CardDefinition::effect's own
-            // doc comment for why a permanent spell never has one.
-            let effect = last_known_info.definition.effect.clone();
+            // doc comment for why a permanent spell never has one. For a
+            // modal card, the chosen mode's own effect (resolved above,
+            // before targets) is used instead of the card's singular field.
+            let effect = if last_known_info.definition.modes.is_empty() {
+                last_known_info.definition.effect.clone()
+            } else {
+                modal_effect
+            };
 
             // TODO(script bridge): `operation` should be the card's
             // registered cast/resolution callback (looked up via its

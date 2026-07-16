@@ -33,6 +33,7 @@ fn creature_definition(name: &str) -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 
@@ -55,6 +56,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     };
     GameObject {
         object_id: id,

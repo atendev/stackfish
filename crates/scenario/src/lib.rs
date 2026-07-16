@@ -1015,6 +1015,11 @@ pub fn build_initial_state(
             target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
             alternative_costs: Vec::new(),
             effect: None,
+            // TODO: no TOML schema for modal cards yet (CardSpec has no
+            // `[[cards.modes]]`-style field) - same pre-existing gap as
+            // `effect` above having no TOML representation either. A modal
+            // test fixture needs a direct CardDefinition struct literal.
+            modes: Vec::new(),
         };
 
         let owner = PlayerId(entry.player);
@@ -1500,6 +1505,9 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 // "direct struct literal only" limit as alternative_costs
                 // above.
                 effect: None,
+                // TODO: no TOML scenario field for modal spells (CR 700.2)
+                // either - same "direct struct literal only" limit.
+                modes: Vec::new(),
             }
         }).collect();
         PlayerConfig { player_id: PlayerId(gp.id), library, life_override: gp.life_override }

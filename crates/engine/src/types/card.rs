@@ -269,6 +269,32 @@ pub struct CardDefinition {
     /// enchantment) has no use for this field — CR 608.2m says it simply
     /// enters the battlefield; any ETB behavior is a separate `Triggered`-
     /// kind `RegisteredAbility`, not this field.
+    ///
+    /// Ignored (should be left `None`) for a modal card — see `modes` below,
+    /// which carries the per-mode effect instead once `modes` is non-empty.
+    pub effect: Option<AbilityEffect>,
+    /// CR 700.2 modal spells — empty for the overwhelming majority of
+    /// cards (non-modal), which use `target_requirement`/`effect` above
+    /// directly. Non-empty means "Choose one —"-style: the caster picks
+    /// exactly one entry (`PlayerActionKind::CastSpell::modes` must supply
+    /// exactly one valid index into this `Vec`), and that mode's own
+    /// `target_requirement`/`effect` are used for the rest of casting and
+    /// resolution instead of this struct's own singular fields.
+    ///
+    /// TODO: CR 700.2d (choosing more than one mode, or the same mode
+    /// twice), 700.2e (another player chooses), 700.2h (a mode carrying its
+    /// own additional cost), and 700.2i (pawprint mode budgets) are all
+    /// unimplemented — this only ever accepts exactly one chosen index.
+    /// TODO: CR 700.2b (a modal *activated/triggered* ability, as opposed
+    /// to a modal spell) is untouched — `RegisteredAbility` has no `modes`
+    /// field of its own yet.
+    pub modes: Vec<SpellMode>,
+}
+
+/// One option of a CR 700.2 modal spell — see `CardDefinition::modes`.
+#[derive(Clone, Debug)]
+pub struct SpellMode {
+    pub target_requirement: Option<crate::types::target::TargetSpec>,
     pub effect: Option<AbilityEffect>,
 }
 

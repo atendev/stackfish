@@ -39,6 +39,7 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 
@@ -69,6 +70,7 @@ fn sacrifice_spell_definition() -> CardDefinition {
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Sacrifice),
+        modes: Vec::new(),
     }
 }
 

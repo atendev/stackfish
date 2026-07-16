@@ -37,6 +37,7 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 
@@ -63,6 +64,7 @@ fn destroy_spell_definition() -> CardDefinition {
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Destroy),
+        modes: Vec::new(),
     }
 }
 

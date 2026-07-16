@@ -195,6 +195,7 @@ mod tests {
                 target_requirement: None,
                 alternative_costs: Vec::new(),
                 effect: None,
+                modes: Vec::new(),
             },
             owner: controller,
             controller,

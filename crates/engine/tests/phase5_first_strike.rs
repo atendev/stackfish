@@ -40,6 +40,7 @@ fn creature_definition(name: &str, power: i32, toughness: i32, keywords: Keyword
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 
