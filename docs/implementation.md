@@ -2211,10 +2211,10 @@ shift, don't treat it as fixed once written.
       (docs/implementation.md, below). `Game.MayChoose()`, same coroutine mechanism as
       `Game.SelectTargets` with a new `ScriptChoiceRequest::MayChoose` variant. **Split out, not
       bundled in:**
-      9a-i. **Modal spell mode-selection (CR 700.2a)** — the mode is chosen *before* the stack, as
-         part of casting, not mid-resolution — a different mechanism entirely (closer to
-         `TargetRequirement`/`PaymentPlan` than to a coroutine yield inside an already-resolving
-         operation). Named, not attempted.
+      9a-i. ~~**Modal spell mode-selection (CR 700.2a)**~~ — done, `phase5/script-modal-spells` slice
+         (docs/implementation.md, below). Cast-time, not mid-resolution — confirmed cheaper than
+         this entry originally framed it: `PlayerActionKind::CastSpell::modes` already flowed
+         end-to-end as dead plumbing, no new `ProcessState` pause needed.
    9b. ~~**Player-target selection via `Game.SelectTargets`**~~ — done, `phase5/script-target-players`
       slice (docs/implementation.md, below). `{ type = "player" }`/`{ type = "any" }` widen the
       request beyond object-only; the resumed answer is now a tagged `{ kind, id }` table so a
@@ -5410,3 +5410,80 @@ Docs updated: `docs/lua_scripts.md` gained a new "Asking the player a yes/no que
 mid-resolution" section, and its stale "Not yet possible" note (still claiming player-target
 selection wasn't built, despite `phase5/script-target-players` having shipped it) was corrected
 alongside the "may"-abilities addition rather than left half-wrong next to this slice's own edit.
+
+## Phase 5: phase5/script-modal-spells slice (backlog item 9a-i)
+
+Branch `phase5/script-modal-spells`, off master. Slice backlog item 9a-i, split out of the
+`phase5/script-may-abilities` slice — CR 700.2a modal spell mode-selection, narrowed to "choose
+exactly one" (the common "Choose one —" case). Confirmed before writing code that this entry's own
+framing ("closer to `TargetRequirement`/`PaymentPlan` than to a coroutine yield") undersold how
+cheap it actually was: `PlayerActionKind::CastSpell::modes: Vec<u32>` and the TOML `cast_spell`
+action's matching `modes = []` field already flowed end-to-end (all the way onto
+`StackObject.chosen_modes`) as dead plumbing before this slice — nothing ever read them. No new
+`ProcessState`/`StepStatus` pause was needed at all; mode and targets are announced atomically in
+the same `CastSpell` action already, matching how targets themselves already work (no
+`AwaitingTargets` pause exists either — see `commands.rs`'s `execute_command`).
+
+**What got implemented:**
+- `types/card.rs`: new `SpellMode { target_requirement: Option<TargetSpec>, effect:
+  Option<AbilityEffect> }`. `CardDefinition` gained `modes: Vec<SpellMode>` — empty for the
+  overwhelming majority of (non-modal) cards, which keep using the struct's own singular
+  `target_requirement`/`effect` fields exactly as before this slice.
+- `commands.rs`'s `CastSpell` arm: a new mode-resolution step runs before target validation (CR
+  601.2b precedes 601.2c). Non-modal card (`definition.modes` empty): the action's `modes` must
+  also be empty, or `CommandError::IllegalAction` (reusing the existing catch-all variant — no new
+  error type needed); target requirement/effect come from the card's own singular fields,
+  unchanged. Modal card: the action's `modes` must contain exactly one valid index into
+  `definition.modes`, or `IllegalAction`; the chosen `SpellMode`'s own `target_requirement`/`effect`
+  are used for the rest of casting (`validate_targets`) and for what gets baked onto the pushed
+  `StackObject`, replacing the card's own singular fields entirely for that cast.
+- No TOML schema for modal cards — `effect` already has no TOML representation at all (pre-existing
+  gap noted in the scenario crate), so a modal test fixture is a direct `CardDefinition` struct
+  literal, same precedent `phase5_script_ops_damage.rs`'s `shock_definition()` already set. Noted
+  with a TODO at both scenario-crate `CardDefinition` construction sites.
+
+**Anticipated mechanical fallout (flagged in the pre-slice report, not a surprise):** adding
+`modes: Vec<SpellMode>` to `CardDefinition` broke every existing struct literal — same precedented
+cost the `effect` field's own addition paid (`phase5/script-ops-damage`: "mechanical sweep across
+56 literals/40 files"). Fixed the same way here, but via a small throwaway Python script driving
+`cargo build --tests --message-format=json` in a loop (find every `E0063 missing field \`modes\``
+span, insert `modes: Vec::new(),` before that literal's closing brace, rebuild, repeat) rather than
+by hand — cheaper and immune to human copy-paste error across ~60 files. Six passes to reach zero
+errors; every insertion verified by the final `cargo test --workspace` run, not just "it compiled."
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 8 new tests in
+`crates/engine/tests/phase5_script_modal_spells.rs` (choosing mode 0 resolves `GainLife` and never
+touches mode 1's `AnyTarget` requirement or its `Damage` effect; choosing mode 1 resolves `Damage`
+against the supplied target and never touches mode 0's `GainLife`; mode 1's own target requirement
+rejects a cast with no target the same way a non-modal spell's `target_requirement` does —
+`InvalidTarget`, no special-casing; casting a modal card with zero modes chosen is rejected,
+`IllegalAction`, card stays in hand, ledger empty; choosing two modes is rejected this slice — CR
+700.2d out of scope; an out-of-range mode index is rejected; a non-modal card rejects an announced
+mode choice, symmetric with the modal-card checks; a non-modal card with an empty `modes` list
+still casts exactly as before — regression guard). Full workspace run: 510 passed, 0 failed (502
+prior + 8 new).
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice report named — `SpellMode` and
+`CardDefinition::modes` are exactly the shape described.
+
+**INTERFACE DEVIATIONS:** None — `commands.rs`'s `CastSpell` arm gained a resolution step, not a
+signature change; `PlayerActionKind::CastSpell::modes` and the TOML `cast_spell` action's `modes`
+field both pre-existed untouched.
+
+**SCOPE DEVIATIONS:** None — the mechanical struct-literal sweep was explicitly anticipated and
+named in the pre-slice report as precedented cost, not discovered mid-slice.
+
+**UNRESOLVED (deferred, as scoped in the pre-slice requirements report):**
+- CR 700.2b (a modal *activated/triggered* ability, as opposed to a modal spell) — untouched;
+  `RegisteredAbility` has no `modes` field of its own.
+- CR 700.2d (choosing more than one mode, or the same mode twice), 700.2e (another player chooses),
+  700.2h (a mode carrying its own additional cost), 700.2i (pawprint mode budgets) — all
+  unimplemented; `CardDefinition::modes`'s own doc comment TODOs name each explicitly.
+- CR 700.2g (copying a modal spell copies its mode) — moot, no Copy mechanic exists in the engine
+  at all yet.
+- Pre-filtering illegal modes before the player picks (CR 700.2a: "if one of the modes would be
+  illegal... that mode can't be chosen") — this slice only rejects post-hoc via the existing
+  target-validation error path once a mode is announced, same as any other illegal cast; there's no
+  mechanism offering the caster a pre-filtered legal-modes list.
+- No TOML schema for modal cards — `[[cards.modes]]` or equivalent doesn't exist; same "direct
+  struct literal only" limit `effect`/`alternative_costs` already have.

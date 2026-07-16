@@ -51,6 +51,7 @@ fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> Card
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 
@@ -100,6 +101,7 @@ fn land_definition() -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 

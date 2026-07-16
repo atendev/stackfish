@@ -33,6 +33,7 @@ fn plain_card_def(name: &str) -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 

@@ -30,6 +30,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     };
     let obj = GameObject {
         object_id: id,

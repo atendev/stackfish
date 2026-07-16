@@ -55,6 +55,7 @@ fn bear_definition() -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 

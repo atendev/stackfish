@@ -92,6 +92,7 @@ fn permanent_definition(name: &str, supertypes: SupertypeSet, card_types: CardTy
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 

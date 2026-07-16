@@ -32,6 +32,7 @@ fn spell_definition(mana_cost: ManaCost, card_types: CardTypeSet) -> CardDefinit
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 

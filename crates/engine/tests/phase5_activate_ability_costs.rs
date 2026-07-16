@@ -31,6 +31,7 @@ fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 

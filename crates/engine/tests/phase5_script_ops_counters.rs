@@ -39,6 +39,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
         target_requirement: None,
         alternative_costs: Vec::new(),
         effect: None,
+        modes: Vec::new(),
     }
 }
 
@@ -65,6 +66,7 @@ fn counters_spell_definition(kind: CounterKind, amount: i32) -> CardDefinition {
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Counters { kind, amount }),
+        modes: Vec::new(),
     }
 }
 

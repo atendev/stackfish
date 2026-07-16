@@ -506,6 +506,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
             target_requirement: None,
             alternative_costs: Vec::new(),
             effect: None,
+            modes: Vec::new(),
         },
         TokenSpec::Named(NamedToken::Food) => CardDefinition {
             definition_id: 0,
@@ -525,6 +526,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
             target_requirement: None,
             alternative_costs: Vec::new(),
             effect: None,
+            modes: Vec::new(),
         },
         TokenSpec::Creature(spec) => {
             let name = spec.name.clone().unwrap_or_else(|| spec.subtypes.join(" "));
@@ -547,6 +549,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
                 target_requirement: None,
                 alternative_costs: Vec::new(),
                 effect: None,
+                modes: Vec::new(),
             }
         }
     }
@@ -3430,6 +3433,7 @@ mod tests {
                 target_requirement: None,
                 alternative_costs: Vec::new(),
                 effect: None,
+                modes: Vec::new(),
             },
             owner: controller,
             controller,
