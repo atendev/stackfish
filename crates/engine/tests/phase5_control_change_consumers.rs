@@ -43,6 +43,7 @@ fn creature_definition(name: &str) -> CardDefinition {
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId, controlled_since_turn: u32) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition,
         owner,

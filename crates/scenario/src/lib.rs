@@ -1067,6 +1067,7 @@ pub fn build_initial_state(
             object_id,
             lineage: ObjectLineage { previous: None },
             definition,
+            copiable_override: None,
             owner,
             controller: owner,
             zone: zone_kind,

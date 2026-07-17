@@ -47,6 +47,7 @@ fn creature_definition(power: i32, toughness: i32, script_ref: ScriptReference) 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: creature_definition(power, toughness, ScriptReference::ByKey("vanilla".to_string())),
         owner,
@@ -72,6 +73,7 @@ fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameOb
 fn scripted_creature(id: ObjectId, owner: PlayerId, source: &str) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: creature_definition(2, 2, ScriptReference::Inline(source.to_string())),
         owner,
@@ -150,6 +152,7 @@ fn base_state() -> GameState {
 fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition,
         owner,

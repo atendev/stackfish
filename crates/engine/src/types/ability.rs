@@ -229,6 +229,30 @@ pub enum AbilityEffect {
     /// single-player-effect shape only, same narrowing `Scry`/`Surveil`'s
     /// own 701.22c/701.25b gaps already took.
     Search { filter: FilterSpec, count: u32, destination: SearchDestination, shuffle_after: bool },
+    /// The `Game.Ops.BecomeCopy()` primitive (CR 707.2/707.3, layer 1) — the
+    /// resolving `StackObject`'s own source becomes a copy of its first
+    /// chosen target's current copiable values (e.g. Vesuvan Doppelganger's
+    /// "become a copy of target creature"). No fields — a toggle, not a
+    /// value, same shape as `Destroy`/`Sacrifice`/`Exile`/`Shuffle`; the
+    /// target lives on the `StackObject`, not here.
+    ///
+    /// Unlike `Destroy`/`Sacrifice`/`Exile`, this never moves anything
+    /// between zones — CR 707.4 is explicit that becoming a copy while
+    /// remaining on the battlefield does not trigger ETB/LTB — so
+    /// `ResolveStackTop` just mutates the source `GameObject.
+    /// copiable_override` in place (see that field's own doc comment for
+    /// why layer 1 is a real mutation, not a `ContinuousEffect` query like
+    /// every other layer) and re-runs `run_card_script` against the new
+    /// snapshot after purging whatever the source had self-registered
+    /// under its old identity (CR 707.2a: "doesn't wind up with two values
+    /// of each ability").
+    ///
+    /// TODO(CR 707.9): no exception/modification support - always a bare
+    /// copy. TODO(CR 707.6): "as ~ enters" choices aren't re-prompted here
+    /// - out of scope for this path, since it never re-enters the
+    /// battlefield; only relevant once a real ETB-replacement "enters as a
+    /// copy" path (Clone itself) exists, a separate follow-up.
+    BecomeCopy,
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
@@ -274,6 +298,20 @@ pub struct CreatureTokenSpec {
 pub enum TokenSpec {
     Named(NamedToken),
     Creature(CreatureTokenSpec),
+    /// CR 707.10f/111: "create a token that's a copy of [object]" — the
+    /// `ObjectId` being copied. Unlike `Named`/`Creature`, this token's
+    /// `CardDefinition` isn't built from this spec at all (see
+    /// `build_token_definition`'s own doc comment) — `ResolveStackTop`'s
+    /// `CreateToken` arm reads the copied object's *current* copiable
+    /// values (its `copiable_override` if it's itself a copy, per CR
+    /// 707.3, else its own `definition`) instead, and re-runs
+    /// `ScriptRuntime::run_card_script` against that snapshot so the
+    /// token's copied triggered/static abilities actually self-register
+    /// (CR 707.2a: abilities are copiable) — every other `TokenSpec` skips
+    /// that call entirely since a Named/Creature token has no script.
+    /// TODO(CR 707.9): no exception/modification support - always a bare
+    /// copy of the target's current values.
+    CopyOf(ObjectId),
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a
@@ -892,6 +930,7 @@ mod tests {
                 effect: None,
                 modes: Vec::new(),
             },
+            copiable_override: None,
             owner: CONTROLLER,
             controller: CONTROLLER,
             zone: ZoneKind::Battlefield,

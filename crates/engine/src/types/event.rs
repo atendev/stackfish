@@ -109,6 +109,13 @@ pub enum GameEventKind {
     /// event, same "summary event plus the real per-object `ZoneChange`s"
     /// shape `submit_discard` already establishes.
     CardsSurveiled { player: PlayerId, kept_on_top: Vec<ObjectId>, put_graveyard: Vec<ObjectId> },
+    /// CR 707.2/613.1a (layer 1): `object` became a copy of `copied`'s
+    /// current copiable values (`Engine`'s `AbilityEffect::BecomeCopy`
+    /// resolution). No "whenever this becomes a copy" trigger condition
+    /// exists yet to match this — same "primitive ships before its own
+    /// trigger condition" precedent `Scry`/`Surveil` already set for their
+    /// own events.
+    BecameCopy { object: ObjectId, copied: ObjectId },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

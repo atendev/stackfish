@@ -637,8 +637,16 @@ pub struct Engine {
 /// Builds a `CardDefinition` for a token from its spec. Tokens have no mana
 /// cost, no script, and no alternative costs; their color comes from the
 /// color indicator field rather than a mana cost symbol.
+///
+/// Never called with `TokenSpec::CopyOf` — the `CreateToken` resolution site
+/// builds that variant's `CardDefinition` from the copied object's own
+/// current copiable values instead (see `TokenSpec::CopyOf`'s own doc
+/// comment), before this function would ever be reached.
 fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
     match spec {
+        TokenSpec::CopyOf(_) => unreachable!(
+            "TokenSpec::CopyOf is built from the copied object's snapshot, not build_token_definition"
+        ),
         TokenSpec::Named(NamedToken::Clue) => CardDefinition {
             definition_id: 0,
             name: "Clue".to_string(),
@@ -762,6 +770,10 @@ fn register_token_abilities(
             });
         }
         TokenSpec::Creature(_) => {}
+        // A copy token's abilities come from run_card_script against its
+        // copied CardDefinition (see the CreateToken resolution site), not
+        // from this hand-built-Rust-native path.
+        TokenSpec::CopyOf(_) => {}
     }
 }
 
@@ -1676,6 +1688,7 @@ impl Engine {
                     object_id: obj_id,
                     lineage: ObjectLineage { previous: None },
                     definition: card_def.clone(),
+                    copiable_override: None,
                     owner: pid,
                     controller: pid,
                     zone: ZoneKind::Library,
@@ -1714,6 +1727,7 @@ impl Engine {
                     object_id: obj_id,
                     lineage: ObjectLineage { previous: None },
                     definition: card_def.clone(),
+                    copiable_override: None,
                     owner: pid,
                     controller: pid,
                     zone: ZoneKind::Command,
@@ -2882,25 +2896,101 @@ impl Engine {
                                     return StepStatus::Progressed;
                                 }
                             }
+                            // CR 707.2/707.3/613.1a (layer 1): top.source
+                            // becomes a copy of its first chosen target's
+                            // current copiable values - a real mutation
+                            // written once (GameObject.copiable_override),
+                            // not a live-queried ContinuousEffect (see that
+                            // field's own doc comment for why layer 1 can't
+                            // fit the other layers' shape). CR 707.4: this
+                            // never triggers ETB/LTB (top.source stays on
+                            // the battlefield, same ObjectId) - but CR
+                            // 707.2a's abilities are copiable, so whatever
+                            // top.source had self-registered under its
+                            // pre-copy identity is purged first and
+                            // run_card_script re-runs against the new
+                            // snapshot right after.
+                            Some(AbilityEffect::BecomeCopy) => {
+                                if let Some(Target::Object(target_id)) = top.targets.first().copied() {
+                                    let snapshot = self.state.object(target_id).map(|obj| {
+                                        obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
+                                    });
+                                    if let Some(snapshot) = snapshot {
+                                        let source_id = top.source;
+                                        let became_copy =
+                                            self.state.objects.get_mut(&source_id).is_some_and(|source_obj| {
+                                                if source_obj.zone == ZoneKind::Battlefield {
+                                                    source_obj.copiable_override = Some(snapshot.clone());
+                                                    true
+                                                } else {
+                                                    false
+                                                }
+                                            });
+                                        if became_copy {
+                                            commands::purge_granted_abilities(&mut self.state, source_id);
+                                            // TODO: a script error here is silently
+                                            // dropped, same gap every other
+                                            // run_card_script call site in this file
+                                            // already flags.
+                                            let _ = self.script_runtime.run_card_script(
+                                                &mut self.state,
+                                                &snapshot,
+                                                source_id,
+                                            );
+                                            events.push(GameEventKind::BecameCopy {
+                                                object: source_id,
+                                                copied: target_id,
+                                            });
+                                        }
+                                    }
+                                }
+                                // else: no target, or a Target::Player
+                                // (BecomeCopy only ever targets a permanent)
+                                // - silent no-op, same stance every other
+                                // arm here takes for an unreachable target
+                                // shape.
+                            }
                             // CR 111: create one or more token permanents on
                             // the battlefield under the controller's control.
                             // Named tokens (Clue, Food) get their activated
                             // abilities registered here. Tokens have empty
                             // scripts so run_card_script is deliberately
-                            // skipped. TODO: CR 111.7 cessation (tokens
-                            // leaving the battlefield should cease to exist)
-                            // is not enforced — blocked on a zone-watch SBA
-                            // hook (future slice).
+                            // skipped - except `TokenSpec::CopyOf` (CR
+                            // 707.10f), whose "definition" is a real
+                            // snapshot of another object's copiable values
+                            // (see `TokenSpec::CopyOf`'s own doc comment),
+                            // abilities and all, so its self-registration
+                            // does need to run. TODO: CR 111.7 cessation
+                            // (tokens leaving the battlefield should cease
+                            // to exist) is not enforced — blocked on a
+                            // zone-watch SBA hook (future slice).
                             Some(AbilityEffect::CreateToken { spec, count }) => {
                                 let controller = top.controller;
+                                let copy_snapshot = match spec {
+                                    TokenSpec::CopyOf(source_id) => self.state.object(*source_id).map(|obj| {
+                                        obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
+                                    }),
+                                    _ => None,
+                                };
                                 for _ in 0..*count {
-                                    let token_def = build_token_definition(spec);
+                                    let token_def = match (&copy_snapshot, spec) {
+                                        (Some(def), _) => def.clone(),
+                                        (None, TokenSpec::CopyOf(_)) => {
+                                            // Source no longer resolves - skip rather
+                                            // than guess, same stance every other
+                                            // unresolvable reference in this engine
+                                            // already takes.
+                                            continue;
+                                        }
+                                        (None, _) => build_token_definition(spec),
+                                    };
                                     let token_id = self.state.allocate_object_id();
                                     let ts = self.state.allocate_sequence_no();
                                     let token_obj = GameObject {
                                         object_id: token_id,
                                         lineage: ObjectLineage { previous: None },
-                                        definition: token_def,
+                                        definition: token_def.clone(),
+                                        copiable_override: None,
                                         owner: controller,
                                         controller,
                                         zone: ZoneKind::Battlefield,
@@ -2924,6 +3014,12 @@ impl Engine {
                                         self.state.objects.insert(token_id, token_obj);
                                     }
                                     register_token_abilities(&mut self.state, token_id, spec, controller);
+                                    if matches!(spec, TokenSpec::CopyOf(_)) {
+                                        // TODO: a script error here is silently dropped,
+                                        // same gap every other run_card_script call site
+                                        // in this file already flags.
+                                        let _ = self.script_runtime.run_card_script(&mut self.state, &token_def, token_id);
+                                    }
                                     events.push(GameEventKind::ZoneChange {
                                         object: token_id,
                                         from: ZoneKind::Stack,
@@ -4112,6 +4208,7 @@ mod tests {
                 effect: None,
                 modes: Vec::new(),
             },
+            copiable_override: None,
             owner: controller,
             controller,
             zone: crate::types::zone::ZoneKind::Battlefield,

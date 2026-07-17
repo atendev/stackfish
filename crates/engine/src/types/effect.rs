@@ -15,13 +15,21 @@ use crate::script::ScriptRuntime;
 /// in `state.continuous_effects` can be built against them yet and the query
 /// doesn't look for them:
 ///
-/// TODO(layer 1, CopyEffects): needs real copy-object semantics (CR 707,
-/// "Copying Objects" — becoming a copy of another object/printed values;
-/// not CR 706, which is die-rolling), which nothing in this engine models
-/// at all yet (no "copy" command, no copiable-values snapshot distinct from
-/// `CardDefinition`). Blocks any "create a token that's a copy of X" /
-/// clone effect. See docs/implementation.md's backlog item 5c for the
-/// planned slice.
+/// Layer 1 (CopyEffects, CR 707/613.1a): unlike every layer below, this has
+/// no `ContinuousEffect`/`EffectPrimitive` case and `layers::
+/// applicable_effects_in_layer` never queries it - CR 707.2b/707.2c require
+/// a copy's granted values to freeze at the moment it's applied, which a
+/// live re-derived-every-call query (this engine's shape for layers 2/4-7)
+/// would violate outright. Real support is `GameObject.copiable_override`
+/// instead: a frozen snapshot written once by whatever produced the copy
+/// (`AbilityEffect::BecomeCopy` for an existing permanent re-copying
+/// something, `TokenSpec::CopyOf` for a freshly created copy-token), read by
+/// `layers::effective_characteristics` ahead of `definition`. Two real
+/// gaps, not silently narrowed: no CR 707.9 exception/modification support
+/// (always a bare copy of the target's current values) and no ETB-
+/// replacement "enters the battlefield as a copy" path (Clone itself) -
+/// only the two entry points above exist. See docs/implementation.md's
+/// `phase5/layer-engine-copy` slice notes.
 ///
 /// Layer 2 (ControlChangingEffects, CR 108.4/613.1): `layers::
 /// effective_controller` has a real query path now (`EffectPrimitive::
@@ -532,6 +540,7 @@ mod tests {
                 effect: None,
                 modes: Vec::new(),
             },
+            copiable_override: None,
             owner: controller,
             controller,
             zone,

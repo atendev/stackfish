@@ -1703,6 +1703,11 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         }))
     })?;
     ops.set("Search", search)?;
+    // `Game.Ops.BecomeCopy()` (CR 707.2, layer 1) - no arguments, same
+    // toggle shape as `Game.Ops.Destroy`/`Sacrifice`/`Exile`/`Shuffle`; the
+    // copy target is whatever the ability's own targeting already resolved,
+    // not a value passed here.
+    ops.set("BecomeCopy", OperationTag(AbilityEffect::BecomeCopy))?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;
@@ -1865,6 +1870,13 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
                 keywords, name, additional_types, additional_supertypes,
             })))
         })?,
+    )?;
+    // `Game.Tokens.CopyOf(objectId)` (CR 707.10f) - see `TokenSpec::CopyOf`'s
+    // own doc comment for why this token's `CardDefinition` isn't built
+    // from any of the opts the other `Game.Tokens.*` entries above take.
+    tokens.set(
+        "CopyOf",
+        lua.create_function(|_, source: u64| Ok(TokenTag(TokenSpec::CopyOf(ObjectId(source)))))?,
     )?;
 
     // Backlog item 9: `Game.SelectTargets(filter)` yields the request

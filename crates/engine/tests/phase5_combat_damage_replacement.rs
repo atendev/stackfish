@@ -37,6 +37,7 @@ fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition,
         owner,

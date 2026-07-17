@@ -394,6 +394,22 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
 /// there would be inert until a hand/library-departure condition shape
 /// exists to consume it — deliberately left, not an oversight (see
 /// docs/implementation.md's backlog item 7).
+
+/// CR 707.2a (layer 1, "becomes a copy of"): removes every `RegisteredAbility`
+/// and `ContinuousEffect` still sourced from `id`, *without* removing `id`
+/// itself from `state.objects` or purging any zone — unlike `retire_object`,
+/// the object being copied stays exactly where it is (CR 707.4: it remains
+/// on the battlefield, same identity, same `ObjectId`). Callers ordinarily
+/// call `ScriptRuntime::run_card_script` against the copy's new `CardDefinition`
+/// right after this to re-register whatever the *new* copiable text grants -
+/// this function only clears out what the object had self-registered under
+/// its pre-copy identity, so the two don't end up stacked (CR 707.2a: "it
+/// doesn't wind up with two values of each ability").
+pub(crate) fn purge_granted_abilities(state: &mut GameState, id: ObjectId) {
+    state.abilities.retain(|a| a.source != id);
+    state.continuous_effects.retain(|e| e.source != id);
+}
+
 pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<RegisteredAbility> {
     state.objects.remove(&old_id);
     let mut departed_triggered = Vec::new();
@@ -1252,14 +1268,14 @@ pub fn execute_command(
                 }
                 // None (script-bridge-only effect) and Some(GainLife)/
                 // Some(Damage)/Some(Destroy)/Some(Counters)/Some(DrawCards)/
-                // Some(Shuffle)/Some(Scry)/Some(Surveil)/Some(Search)
-                // (a non-mana ActivateAbility whose effect happens to be a
-                // recognized primitive) all take the same path: unlike CR
-                // 605's mana abilities, a non-mana activated ability uses
-                // the stack (CR 602.2) rather than resolving immediately.
-                // Targets are validated below (CR 602.2b/601.2c-e) via the
-                // same validate_targets CastSpell uses, before any state
-                // mutation (stack push) happens.
+                // Some(Shuffle)/Some(Scry)/Some(Surveil)/Some(Search)/
+                // Some(BecomeCopy) (a non-mana ActivateAbility whose effect
+                // happens to be a recognized primitive) all take the same
+                // path: unlike CR 605's mana abilities, a non-mana activated
+                // ability uses the stack (CR 602.2) rather than resolving
+                // immediately. Targets are validated below (CR 602.2b/
+                // 601.2c-e) via the same validate_targets CastSpell uses,
+                // before any state mutation (stack push) happens.
                 non_mana_effect @ (None
                 | Some(AbilityEffect::GainLife(_))
                 | Some(AbilityEffect::Damage(_))
@@ -1272,7 +1288,8 @@ pub fn execute_command(
                 | Some(AbilityEffect::Shuffle)
                 | Some(AbilityEffect::Scry(_))
                 | Some(AbilityEffect::Surveil(_))
-                | Some(AbilityEffect::Search { .. })) => {
+                | Some(AbilityEffect::Search { .. })
+                | Some(AbilityEffect::BecomeCopy)) => {
                     validate_targets(
                         state,
                         script_runtime,

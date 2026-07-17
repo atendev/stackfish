@@ -32,7 +32,9 @@ impl VisibilityPolicy {
 /// Mutable runtime instance of a card, token, or emblem. Copiable values are
 /// resolved at construction from `definition`; the continuous-effect layer
 /// engine applies modifications on top at query time, not by mutating this
-/// struct directly.
+/// struct directly. `copiable_override` (CR 707/613.1a, layer 1) is the one
+/// exception — see its own doc comment below for why layer 1 can't fit the
+/// query-only shape every other layer uses.
 ///
 /// No in-zone ordering field here — that's the zone container's job (see
 /// `GameState`'s per-zone `VecDeque<ObjectId>`s in `game.rs`), so there's a
@@ -43,6 +45,25 @@ pub struct GameObject {
     pub object_id: ObjectId,
     pub lineage: ObjectLineage,
     pub definition: CardDefinition,
+    /// CR 707.2/707.2b/707.2c (layer 1, CR 613.1a): a frozen snapshot of
+    /// another object's copiable values, taken at the moment this object
+    /// became a copy. `None` (the overwhelming common case) means "use
+    /// `definition` as-is" — every other layer (2, 4-7) is a live query
+    /// re-derived from current state on every call, but layer 1 can't be:
+    /// CR 707.2b says changing the original's copiable values after the
+    /// copy exists must NOT change the copy, and CR 707.2c freezes a copy
+    /// effect's granted values at the moment it first applies. A live query
+    /// re-reading the source every time would violate both, so this is a
+    /// real mutation written once (by whatever command implements "becomes
+    /// a copy of"), not a `ContinuousEffect` in `state.continuous_effects`.
+    /// `layers::effective_characteristics` reads this ahead of `definition`
+    /// when present; nothing else consults `definition` directly without
+    /// going through that query already gets this for free. Cloned forward
+    /// unmodified by every zone-change site that clones the prior
+    /// `GameObject`, same as `is_commander`'s own "rides along automatically"
+    /// note — a site that mints a genuinely fresh identity (a non-copy
+    /// token) sets this `None` instead, same as that field sets `false`.
+    pub copiable_override: Option<CardDefinition>,
     pub owner: PlayerId,
     pub controller: PlayerId,
     pub zone: ZoneKind,

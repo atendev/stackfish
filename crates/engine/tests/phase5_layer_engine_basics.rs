@@ -63,6 +63,7 @@ fn creature_definition(power: i32, toughness: i32, keywords: KeywordSet) -> Card
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: creature_definition(power, toughness, KeywordSet::empty()),
         owner,

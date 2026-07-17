@@ -75,6 +75,7 @@ fn cda_creature_definition(power_script: Option<&str>, toughness_script: Option<
 fn cda_creature(id: ObjectId, owner: PlayerId, power_script: Option<&str>, toughness_script: Option<&str>) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: cda_creature_definition(power_script, toughness_script),
         owner,
@@ -123,6 +124,7 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: creature_definition(power, toughness),
         owner,
