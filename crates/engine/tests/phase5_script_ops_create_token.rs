@@ -567,7 +567,12 @@ fn clue_ability_draws_a_card_when_activated() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: token_id, ability_index: 0, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source: token_id,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("Clue ability is available");
 
@@ -631,7 +636,12 @@ fn food_ability_gains_life_when_activated() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: token_id, ability_index: 0, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source: token_id,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("Food ability is available");
 

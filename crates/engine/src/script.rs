@@ -19,7 +19,7 @@ use crate::types::effect::{
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
-use crate::types::mana::{ColorSet, ManaCost};
+use crate::types::mana::{Color, ColorSet, ManaCost, ManaUnit};
 use crate::types::object::GameObject;
 use crate::types::target::TargetFilter;
 use crate::types::zone::ZoneKind;
@@ -509,6 +509,28 @@ fn parse_color_string(colors: &str) -> Result<ColorSet, ScriptError> {
         out |= parse_color_letter(&ch.to_string())?;
     }
     Ok(out)
+}
+
+/// `Game.Ops.AddMana`'s single-symbol vocabulary — WUBRG plus `"C"` for
+/// colorless (`ManaUnit::Colorless`, CR 605's actual literal-unit shape, not
+/// a `Color` at all). No `SnowColored`/`SnowColorless` letter yet - real
+/// snow-producing lands are rare enough to defer rather than invent an
+/// unvalidated letter convention for them now (named in this slice's own
+/// UNRESOLVED note).
+fn parse_mana_unit_letter(letter: &str) -> Result<ManaUnit, ScriptError> {
+    Ok(match letter {
+        "W" => ManaUnit::Colored(Color::White),
+        "U" => ManaUnit::Colored(Color::Blue),
+        "B" => ManaUnit::Colored(Color::Black),
+        "R" => ManaUnit::Colored(Color::Red),
+        "G" => ManaUnit::Colored(Color::Green),
+        "C" => ManaUnit::Colorless,
+        other => {
+            return Err(ScriptError::LoadError(format!(
+                "unknown mana unit letter '{other}' - expected W/U/B/R/G/C"
+            )))
+        }
+    })
 }
 
 /// Decodes the optional `opts` table for `Game.Tokens.Creature` /
@@ -1592,6 +1614,31 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     intervening_if.set("AtOrBelowLife", at_or_below_life)?;
 
     let ops = lua.create_table()?;
+    // CR 605: `Game.Ops.AddMana(letter, count?)` - `letter` is a single
+    // WUBRG/"C" (colorless) symbol, `count` (default 1) repeats that same
+    // fixed unit - covers the vast majority of real mana abilities ("add
+    // {G}", "add two colorless"). No mixed-color-in-one-call shape (e.g.
+    // "add one white and one blue") - named as a follow-up in this slice's
+    // own UNRESOLVED note rather than guessed at.
+    let add_mana = lua.create_function(|_, (letter, count): (String, Option<u32>)| {
+        let unit = parse_mana_unit_letter(&letter).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::AddMana(vec![unit; count.unwrap_or(1) as usize])))
+    })?;
+    ops.set("AddMana", add_mana)?;
+    // CR 605's "add mana of any color" shape -
+    // `Game.Ops.AddManaChoice(count, colors)`: `count` is how many
+    // independently-chosen mana this ability produces, `colors` is a WUBRG
+    // letter string (reuses `parse_color_string`, same vocabulary
+    // `Game.Effects.AddColor` already uses) naming which colors are allowed.
+    // The actual color(s) picked arrive later on `PlayerActionKind::
+    // ActivateAbility::chosen_colors`, at activation time (CR 602.2b) - this
+    // binding only declares the shape, same "Lua asks, Rust decides" split
+    // every other primitive in this table already follows.
+    let add_mana_choice = lua.create_function(|_, (count, colors): (u32, String)| {
+        let choices = parse_color_string(&colors).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::AddManaChoice { count, choices }))
+    })?;
+    ops.set("AddManaChoice", add_mana_choice)?;
     let gain_life = lua.create_function(|_, amount: i32| Ok(OperationTag(AbilityEffect::GainLife(amount))))?;
     ops.set("GainLife", gain_life)?;
     let damage = lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::Damage(amount))))?;

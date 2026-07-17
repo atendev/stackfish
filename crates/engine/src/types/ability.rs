@@ -33,6 +33,18 @@ pub enum AbilityEffect {
     /// cost shape" vocabulary `CostPayment::Mana` already uses, just added
     /// instead of spent.
     AddMana(Vec<ManaUnit>),
+    /// CR 605's "add one mana of any color" shape (and its "add N mana,
+    /// each any color among {...}" generalization) — unlike `AddMana` above,
+    /// the color of each of the `count` mana produced isn't fixed on the
+    /// ability itself; it's chosen when the ability is activated (CR
+    /// 602.2b's choice-as-part-of-activation process), carried on
+    /// `PlayerActionKind::ActivateAbility::chosen_colors`. `commands.rs`'s
+    /// `ActivateAbility` arm validates `chosen_colors.len() == count` and
+    /// every entry is a member of `choices` before converting each to
+    /// `ManaUnit::Colored` and adding to the pool, same as `AddMana` does
+    /// for its own fixed units. No `SnowColored` choice variant yet (see
+    /// this slice's own UNRESOLVED note in docs/implementation.md).
+    AddManaChoice { count: u32, choices: ColorSet },
     /// The `Game.Ops.GainLife(n)` primitive — gains the controller exactly
     /// `n` life, no script invocation needed. Mirrors the hand-written
     /// `{ gain_life = n }` Lua operation table from the prior slice, just

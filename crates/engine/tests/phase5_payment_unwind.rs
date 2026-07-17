@@ -255,7 +255,12 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("player holds priority");
     let stack_id = match drain(&mut engine) {

@@ -1,5 +1,6 @@
 use crate::types::cost::PaymentPlan;
 use crate::types::ids::{CommandId, ObjectId, PlayerId, Target};
+use crate::types::mana::Color;
 
 /// `EngineCommand` deliberately mirrors `PlayerActionKind` 1:1 rather than
 /// decomposing into a lower tier ("pay cost", "push onto stack", ...). The
@@ -35,7 +36,23 @@ pub enum PlayerActionKind {
         /// card to actually be in the chosen alternative's `from_zone`.
         alternative_cost: Option<usize>,
     },
-    ActivateAbility { source: ObjectId, ability_index: u32, targets: Vec<Target> },
+    ActivateAbility {
+        source: ObjectId,
+        ability_index: u32,
+        targets: Vec<Target>,
+        /// CR 602.2b (activation follows the CR 601.2b-i casting process):
+        /// the color(s) chosen for an `AbilityEffect::AddManaChoice` mana
+        /// ability ("add one mana of any color"), locked in as part of
+        /// activation itself, not a mid-resolution pause - a mana ability
+        /// never uses the stack (CR 605.3b), so there's no resolution step
+        /// to pause during anyway. Empty for every other ability, same
+        /// "always-present, usually-empty" convention `targets`/`modes`
+        /// already follow on `CastSpell`. `commands.rs`'s `ActivateAbility`
+        /// arm rejects a non-empty value against any ability that isn't
+        /// `AddManaChoice`, and rejects a length mismatch against
+        /// `AddManaChoice`'s own `count`.
+        chosen_colors: Vec<Color>,
+    },
     PlayLand { card: ObjectId },
     PassPriority,
     /// Each attacker paired with what it's attacking — a player, or a

@@ -2259,8 +2259,15 @@ shift, don't treat it as fixed once written.
     feeds the same damage-assignment machinery `CombatDamage` already uses. Remaining
     combat-keyword edges (trample, banding, etc) still open — this item was first/double strike
     only.
-13. **Mana system completeness** — lands/abilities that add more than one mana or a player-chosen
-    color, beyond the flat `AbilityEffect::AddMana(Vec<ManaUnit>)` shape.
+13. ~~**Mana system completeness**~~ — done, `phase5/mana-add-choice` slice (docs/implementation.md,
+    below). Correction to this item's original text, found while scoping: "more than one fixed mana"
+    already worked mechanically (`AddMana` is a `Vec`, never tested with 2+ units) — the two real
+    gaps were no `Game.Ops.AddMana`/`Game.Ops.AddManaChoice` Lua binding at all (a card script
+    couldn't define a mana ability, only Rust test fixtures could) and no player-chosen-color
+    mechanism. Both closed: new `AbilityEffect::AddManaChoice { count, choices: ColorSet }`, chosen
+    color(s) carried on a new `PlayerActionKind::ActivateAbility::chosen_colors: Vec<Color>` field
+    (CR 602.2b — the choice is locked in at activation, not a mid-resolution pause, since a mana
+    ability never uses the stack, CR 605.3b).
 14. ~~**Shuffle primitive**~~ — done, `phase5/script-ops-shuffle` slice (docs/implementation.md,
     below). Correction to this item's original text: `Zone::new`/`push_top`/`top` were never
     `todo!()` — verified real on inspection, same class of stale-doc gap the 6a/6b cost-completeness
@@ -5852,3 +5859,85 @@ fallout from the interface change above, not a new gap.
   Not fixed: `GameObject::new`'s constructor is still `todo!()` and no morph-style mechanic can put a
   face-down object into play yet, so this is currently unreachable dead code, not a live bug. Flagged
   by name so it isn't forgotten once face-down/morph lands.
+
+## Phase 5: phase5/mana-add-choice slice (backlog item 13, mana system completeness)
+
+Branch `phase5/mana-add-choice`, off master. Closes backlog item 13.
+
+**Correction to the pre-slice requirements report, found while reading the code before writing any:**
+the report's framing ("lands/abilities that add more than one mana... beyond the flat
+`AbilityEffect::AddMana(Vec<ManaUnit>)` shape") was half stale. `AddMana` is already a `Vec` —
+`commands.rs`'s apply loop (`for unit in &units { pool.add_unit(*unit); }`) already handles 2+ units
+mechanically; it had just never been exercised by a test with more than one. The two real gaps were
+bigger than "more than one": (1) **no `Game.Ops.AddMana` Lua binding existed at all** — grepped
+`script.rs` for `AddMana` before writing anything and got zero hits; every existing
+`phase5_activate_ability_mana.rs` test builds `AbilityEffect::AddMana(...)` directly as a Rust
+fixture, meaning a card script could not define a mana ability, full stop. (2) No player-chosen-color
+mechanism for "add one mana of any color" text.
+
+**What got implemented:**
+- `AbilityEffect::AddManaChoice { count: u32, choices: ColorSet }` (types/ability.rs) — CR 605's
+  "add N mana, each any color among `choices`" shape. The color of each of the `count` mana isn't
+  fixed on the ability; it's chosen at activation.
+- `PlayerActionKind::ActivateAbility` gained `chosen_colors: Vec<Color>` (types/command.rs) — empty
+  for every ability that isn't `AddManaChoice`, same "always-present, usually-empty" convention
+  `targets`/`modes` already follow on `CastSpell`. Per CR 602.2b (activation follows the CR 601.2b-i
+  casting process), the color choice is locked in as part of activation itself, not a mid-resolution
+  pause — no coroutine/pause plumbing needed, since a mana ability never uses the stack (CR 605.3b)
+  and so has no resolution step to pause during anyway.
+- `commands.rs`'s `ActivateAbility` arm: the `AddMana` match arm widened to `AddMana(_) |
+  AddManaChoice { .. }` so both share the same tap/summoning-sickness/no-target preamble, then
+  branches internally to compute the actual `Vec<ManaUnit>` to add — `AddMana` uses its fixed units
+  directly, `AddManaChoice` validates `chosen_colors.len() == count` and every entry is a member of
+  `choices` (via new `ColorSet::contains_color`, mana.rs) before converting each to
+  `ManaUnit::Colored`. A top-level check rejects any non-empty `chosen_colors` against an ability
+  that isn't `AddManaChoice` (loud error, not a silently-dropped value).
+- `Game.Ops.AddMana(letter, count?)` (script.rs) — `letter` is a single WUBRG/`"C"` (colorless)
+  symbol via new `parse_mana_unit_letter`, `count` (default 1) repeats that fixed unit. Closes the
+  "can't script this at all" gap directly.
+- `Game.Ops.AddManaChoice(count, colors)` — `colors` is a WUBRG letter string decoded via the
+  existing `parse_color_string` (same vocabulary `Game.Effects.AddColor` already uses).
+- `engine.rs`'s `ResolveStackTop` defensive no-op arm (`Some(AbilityEffect::AddMana(_)) => {}`,
+  "should never reach the stack") widened to include `AddManaChoice` too, same reasoning.
+- `mana::parse_color_letter` (previously crate-private, used internally by `ManaCost::parse`) made
+  `pub` so the scenario crate's TOML `chosen_colors: Vec<String>` field (on `ActionSpec::
+  ActivateAbility`, `#[serde(default)]`) can reuse the same WUBRG vocabulary instead of a second
+  parser.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 562 passed, 0 failed (553 prior + 9 new, in
+new `crates/engine/tests/phase5_mana_add_choice.rs`): a fixed `AddMana` ability with 2 units actually
+adds both (closes the untested "more than one" gap directly); `AddManaChoice` adds the chosen colors
+and taps the source; wrong `chosen_colors` count is rejected with no partial mutation; a color outside
+the allowed `choices` set is rejected; `chosen_colors` supplied against a plain `AddMana` ability is
+rejected; `Game.Ops.AddMana`/`Game.Ops.AddManaChoice` decode correctly (fixed unit with default count,
+repeated colorless, unknown letter rejected, count+colors for the choice shape). Full workspace build
+also clean.
+
+**STRUCT DEVIATIONS:** `PlayerActionKind::ActivateAbility` gaining `chosen_colors` was anticipated in
+the pre-slice report. `ColorSet::contains_color` (mana.rs) and `parse_mana_unit_letter` (script.rs)
+were not named in the report but are small, expected mechanical additions once the real design was
+being written.
+
+**INTERFACE DEVIATIONS:** None beyond the struct field above — no existing function signature changed
+shape, only `ActivateAbility`'s literal fields.
+
+**SCOPE DEVIATIONS:** Every existing `ActivateAbility { ... }` struct-literal call site across the
+engine's test suite (16 files, ~19 occurrences) and the scenario crate (`ActionSpec::ActivateAbility`'s
+`describe()` and TOML-to-engine conversion) needed `chosen_colors` added — mechanical fallout from the
+new field, anticipated in kind (though not in exact count) by the pre-slice report's own framing of
+this as a struct change.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- `Game.Ops.AddMana(letter, count?)` only accepts one repeated fixed symbol per call — no
+  mixed-color-in-one-call shape ("add one white and one blue"). Real cards with that exact text are
+  rare enough to defer rather than guess a table-based calling convention now.
+- No `SnowColored`/`SnowColorless` letter in `parse_mana_unit_letter` — snow-producing lands are rare
+  enough to defer rather than invent an unvalidated letter convention for them.
+- Restricted/tagged mana (CR 106.4-adjacent errata target: "spend this mana only to cast a creature
+  spell," Command Tower-style, filter mana) — `ManaPool`/`ManaUnit` don't model a spending
+  restriction at all. Separate, larger follow-up, not attempted here.
+- Mana abilities that also trigger something else ("Add {C}. When you do, ...") — no hook exists for
+  a paired triggered ability off a mana ability's own activation/resolution (CR 605.1b's triggered-
+  mana-ability case is untouched).
+- No replacement/prevention modeling for `ManaAdded` — pre-existing gap, same one `GainLife` already
+  carries, not fixed here.

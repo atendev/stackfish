@@ -12,6 +12,7 @@ use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
+use crate::types::mana::ManaUnit;
 use crate::types::object::GameObject;
 use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::target::{TargetFilter, TargetSpec};
@@ -1002,7 +1003,7 @@ pub fn execute_command(
                 battlefield_entries: Vec::new(),
             });
         }
-        PlayerActionKind::ActivateAbility { source, ability_index, targets } => {
+        PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors } => {
             // CR 602.2a/117.3c: activating an ability follows the same
             // process as casting a spell - the activator must hold priority
             // to begin with.
@@ -1041,8 +1042,20 @@ pub fn execute_command(
             let operation = ability.operation;
             let target_requirement = ability.target;
 
+            // CR 602.2b: `chosen_colors` is only meaningful alongside
+            // `AddManaChoice` - reject rather than silently ignore it
+            // against any other ability (a plain `AddMana`'s units are
+            // fixed, and no non-mana ability has a color choice at all), so
+            // a caller passing it by mistake gets a loud error instead of a
+            // quietly-dropped value.
+            if !chosen_colors.is_empty() && !matches!(effect, Some(AbilityEffect::AddManaChoice { .. })) {
+                return Err(CommandError::IllegalAction(
+                    "chosen_colors given but this ability has no mana-color choice to make".to_string(),
+                ));
+            }
+
             match effect {
-                Some(AbilityEffect::AddMana(units)) => {
+                Some(effect @ (AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. })) => {
                     // CR 605.1a: a mana ability never has a target.
                     if !targets.is_empty() {
                         return Err(CommandError::IllegalAction(
@@ -1065,6 +1078,29 @@ pub fn execute_command(
                             "source has summoning sickness".to_string(),
                         ));
                     }
+
+                    let units: Vec<ManaUnit> = match effect {
+                        AbilityEffect::AddMana(units) => units,
+                        AbilityEffect::AddManaChoice { count, choices } => {
+                            if chosen_colors.len() != count as usize {
+                                return Err(CommandError::IllegalAction(format!(
+                                    "expected {count} chosen color(s), got {}",
+                                    chosen_colors.len()
+                                )));
+                            }
+                            let mut units = Vec::with_capacity(chosen_colors.len());
+                            for color in &chosen_colors {
+                                if !choices.contains_color(*color) {
+                                    return Err(CommandError::IllegalAction(format!(
+                                        "chosen color {color:?} is not among this ability's allowed colors"
+                                    )));
+                                }
+                                units.push(ManaUnit::Colored(*color));
+                            }
+                            units
+                        }
+                        _ => unreachable!("matched only AddMana/AddManaChoice above"),
+                    };
 
                     state.object_mut(source).ok_or(CommandError::InvalidTarget)?.tapped = true;
                     let pool = &mut state

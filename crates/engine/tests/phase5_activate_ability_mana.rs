@@ -137,7 +137,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets },
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new() },
         })
         .expect("player holds priority");
 }
@@ -262,7 +262,12 @@ fn reject_when_actor_does_not_hold_priority() {
     let err = engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .unwrap_err();
     assert!(matches!(err, engine::ActionError::NotYourTurn));
@@ -278,7 +283,12 @@ fn reject_nonexistent_ability_index() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 1, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 1,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .unwrap();
     let status = drain(&mut engine);
@@ -349,7 +359,12 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: source_a, ability_index: 1, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source: source_a,
+                ability_index: 1,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .unwrap();
     drain(&mut engine);

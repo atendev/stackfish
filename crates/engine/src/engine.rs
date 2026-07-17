@@ -2806,12 +2806,12 @@ impl Engine {
                                     });
                                 }
                             }
-                            // AddMana is only ever set on a mana ability, which
-                            // resolves immediately and never reaches the stack
-                            // (CR 605.1a/605.3b) - no StackObject of any kind
-                            // should ever carry this variant. Defensive no-op
-                            // rather than a panic.
-                            Some(AbilityEffect::AddMana(_)) => {}
+                            // AddMana/AddManaChoice are only ever set on a mana
+                            // ability, which resolves immediately and never
+                            // reaches the stack (CR 605.1a/605.3b) - no
+                            // StackObject of any kind should ever carry either
+                            // variant. Defensive no-op rather than a panic.
+                            Some(AbilityEffect::AddMana(_)) | Some(AbilityEffect::AddManaChoice { .. }) => {}
                             None => {
                                 // TODO: a script error here is silently
                                 // dropped - no path from ResolveStackTop

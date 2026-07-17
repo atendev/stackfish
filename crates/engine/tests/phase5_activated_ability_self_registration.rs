@@ -370,7 +370,12 @@ fn play_land_self_registered_activated_ability_can_be_activated_paid_and_resolve
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: new_land_id, ability_index: 0, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source: new_land_id,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("p0 controls the land and holds priority");
     let status = drain(&mut engine);
@@ -419,7 +424,12 @@ fn play_land_self_registered_activated_ability_with_mana_cost_can_be_activated_p
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: new_land_id, ability_index: 0, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source: new_land_id,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("p0 controls the land and holds priority");
     let status = drain(&mut engine);
