@@ -2398,6 +2398,80 @@ shift, don't treat it as fixed once written.
     functions (`crates/engine/src/color_identity.rs`), not enforced by `Engine::new_game` or any
     command.
 
+## Known unresolved gaps (not their own backlog items, tracked for awareness)
+
+Compiled after backlog item 1 (the continuous-effect layer engine) closed and items 1-15/17 were all
+struck through above, leaving only item 16 (explicit non-goal) unstarted. These are real, smaller
+loose threads surfaced across already-closed slices' own UNRESOLVED notes, plus a sweep of live
+`TODO` markers in `crates/engine/src` cross-checked against current code (not stale doc history) - not
+promoted to numbered backlog items themselves, but worth keeping visible rather than letting them
+scatter across individual slices' write-ups. Re-derive/update this list rather than trusting it
+verbatim once enough time has passed for the underlying code to have moved.
+
+- **Layer 2 (control) internal filtering**: `layers.rs`'s own `applicable_effects_in_layer`/
+  `ContinuousEffect::applies_to` still read the raw `GameObject.controller` field for every layer, not
+  `layers::effective_controller` - a control-changed permanent's card_types/keywords won't correctly
+  gate *other* continuous effects' own `EffectFilter` checks against it. Deliberate (migrating it would
+  make layer 2's own resolution recursively call itself), not an oversight - see the
+  `layer-engine-control-consumers` slice's own design finding.
+- **Layer 1 (copy)**: no CR 707.9 exception/modification support (always a bare copy of the target's
+  current values), no ETB-replacement "enters the battlefield as a copy" path (Clone itself) - only
+  `AbilityEffect::BecomeCopy`/`TokenSpec::CopyOf` exist as entry points.
+- **Layer 3 (text-changing)**: general CR 612.2 "correct usage" word/symbol substitution and the
+  single-card rules (612.5 Exchange of Words, 612.6 Volrath's Shapeshifter, 612.7 Spy Kit, 612.9 name
+  stickers, 612.10 splice) stay unmodeled - only CR 612.8 name-setting is real. "Loses all abilities"
+  (a text-removal shape) isn't modeled either.
+- **CR 613.6-8 dependency**: `EffectPayload::Script` effects never participate in dependency ordering
+  (always treated as independent); cross-layer/cross-sublayer dependency isn't modeled (this one is by
+  rule - CR 613.8 is explicitly same-layer/sublayer only - not a real gap).
+- **Targeting**: no "up to N" target counts, no spell with more than one distinct "target" word, no
+  partial fizzle (CR 608.2b is all-or-nothing here), `TargetSpec::Script`/`ScriptRuntime::invoke_target`
+  still `todo!()`.
+- **Static abilities**: `EffectDuration` is always `Permanent` for a self-registered static ability -
+  no "as long as ..." conditional gating (`WhileConditionHolds` exists as an enum variant, nothing
+  produces one).
+- **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
+  not a stable id - fragile if a card's own ability list ever needs to change shape.
+- **Replacement effects**: `EventFilter` only has two shapes (`DamageDealt`, `WouldDie`); no
+  `Game.CreateReplacementEffect`-style Lua builder exists yet.
+- **Triggers**: Discard's own LKI stash is captured (`commands::move_to_graveyard_for_cost`/cost
+  payment) but stays dormant - no condition matches a Hand-departure LKI yet, so "when this is
+  discarded" abilities can't fire. `draw_step`'s library-side LKI stash is likewise real but
+  practically unreachable (no card has a library-card ability that cares about itself leaving the
+  library).
+- **Script-error swallowing (cross-cutting, not tracked anywhere else)**: a Lua runtime error mid-
+  resolution is silently treated as "no effect"/"condition false" rather than surfaced as a real
+  engine-level error, in several separate spots - `engine.rs` (script-backed operation/condition/
+  intervening-if resolution, several call sites) and `triggers.rs` (condition/intervening-if
+  evaluation during `collect_triggers`). Each site's own comment flags it individually; nothing ties
+  them together as one systemic gap until now.
+- **`Destroy` script op**: CR 616.1's ordering choice (2+ replacement effects matching the same
+  scripted destroy) isn't supported - silently no-ops rather than pausing for a choice, unlike the
+  real `NeedsOrderingChoice` path every other SBA-driven death uses.
+- **Combat keywords beyond first/second strike**: trample, banding, and the rest of CR 702's combat
+  keyword list are unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7.
+- **CR 111.7 (token cessation)**: a token that leaves the battlefield doesn't actually cease to exist,
+  it just retires like any other object - blocked on a zone-watch SBA hook that doesn't exist yet
+  (`engine.rs`'s `CreateToken` resolution TODO).
+- **CR 402.2 (max hand size)**: hardcoded to a literal `7` in Cleanup's discard check - doesn't consult
+  `state.continuous_effects` for "you have no maximum hand size"-style effects, since no query API for
+  that exists yet (`engine.rs`).
+- **Regeneration (CR 701.16)**: not modeled at all - lethal damage always destroys outright, there's no
+  "instead, regenerate" replacement shield mechanic (`sba.rs`'s own dying-creature TODO, which is
+  otherwise stale re: the other items it lists - CDA toughness and layer 7c/6 consumers it names as
+  still-missing were actually closed by the layer-engine sub-slices since it was written).
+- **CR 601.6/733 unwind**: `Engine::unwind_payment` is an honest forward zone-change/removal, not a
+  true state rewind - this engine's ledger is append-only with no undo primitive, a permanent
+  architectural choice rather than a gap expected to close later.
+- **Color identity/deck validation**: `color_identity.rs` is pure query functions - nothing enforces
+  deck legality anywhere (`Engine::new_game` or otherwise), matching DESIGN.md's original scoping.
+- **Dead Phase-3 stub methods, zero callers anywhere**: `Subtype::new`/`Subtype::as_str`,
+  `CardDefinition::has_type`/`has_supertype`/`has_subtype`, and several `mana.rs` constructors
+  (`ManaCost::from_symbols`/`from_pool`, `ManaPool::add`, etc.) are still bare `todo!()` bodies left
+  over from the Phase 3 stubbing pass. Confirmed via a real grep for callers, not assumed - nothing in
+  `crates/engine/src` or its tests calls any of them, so they're inert today, but a landmine (an
+  instant panic) if anything ever starts calling them without filling them in first.
+
 ## Phase 5: phase5/layer-engine-basics slice
 
 Branch `phase5/layer-engine-basics`, off master. Slice backlog item 1 (above). Scope, locked in
