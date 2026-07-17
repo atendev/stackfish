@@ -6833,3 +6833,76 @@ of migrated.
   deliberate, uniform exclusion (see the design finding above) - a control-changed permanent's
   keywords/card_types won't correctly gate *other* continuous/replacement effects' own `EffectFilter`
   checks against it. No test in this engine's current surface exercises that combination.
+
+## Phase 5: phase5/layer-engine-text slice (backlog item 1, sub-slice 5d — final layer-engine sub-slice)
+
+Branch `phase5/layer-engine-text`, off master. Closes backlog item 1's last open sub-slice — CR
+613.1c layer 3 (text-changing effects), narrowed to CR 612.8 name-setting only, exactly as that
+item's own pre-existing text recommended scoping it once this slice's requirements pass happened.
+The general CR 612.2 "correct usage" word/symbol substitution case, and the single-card rules
+(612.5-612.7/612.9/612.10), stay unmodeled.
+
+**What got implemented:** `EffectPrimitive::SetName(String)`, the first non-`Copy` variant of that
+enum (`EffectPrimitive` dropped its `Copy` derive to accommodate it — `layers::resolve_primitive`'s
+`EffectPayload::Primitive(p) => Some(*p)` became `Some(p.clone())`; `script.rs`'s `EffectPrimitiveTag`
+wrapper dropped `Copy` too, keeping `Clone`). Wired into `layers::effective_characteristics` as a new
+`Layer::TextChanging` pass, positioned before layers 4-7 (CR 613.3's ordering), same override-wins-
+outright shape `GainControl`/`SetPT` already established — a later-timestamp `SetName` replaces an
+earlier one's result entirely, doesn't combine with it, so no CR 613.8a dependency case applies (same
+reasoning `GainControl`'s own doc comment gives). `Game.Layers.TextChanging`/`Game.Effects.SetName(str)`
+Lua binding pair added alongside the other six; `invoke_continuous_effect`'s "Lua asks, Rust decides"
+decode table gained a seventh recognized key, `set_name = "..."`, checked first in the fixed order.
+`validate_layer_effect_pairing` gained the matching `(Layer::TextChanging, EffectPrimitive::SetName(_))`
+pair so a script mismatching layer and effect still gets a real `:Register()`-time error, not a
+silently inert effect.
+
+**Real consumer found for free, not built this slice:** `sba.rs`'s `find_legend_rule_group` already
+groups by `effective_characteristics(...).name`, not the raw `CardDefinition` field (predates this
+slice — it was already reading the effective query's output, just one that always equaled the raw
+name until now). A renamed legendary immediately participates in CR 704.5j correctly with zero new
+plumbing, the same "turned out to need no new plumbing" finding the layer-engine-consumers sub-slice
+hit for combat damage/blocking. Proven directly: `renaming_a_legendary_to_match_another_triggers_
+the_legend_rule` in the new test file confirms two differently-named legendaries under one controller
+don't violate the rule until a `SetName` effect makes one's effective name collide with the other's,
+at which point `check_state_based_actions` really does pause on `NeedsLegendRuleChoice`.
+
+**Deliberately not migrated:** `commander_casts` (`commands.rs`, keyed by `definition.name`) and
+color-identity stay on the raw printed name, not `effective_characteristics(...).name`. Commander tax
+and color identity track the commander's *printed* identity, not whatever a renamed-in-play object's
+name happens to be this turn — a deliberate distinction, not a missed migration (the opposite of why
+`layers.rs`'s own internal filtering couldn't migrate to `effective_controller` in the control-
+consumers slice — that was a recursion hazard; this is an intentional identity-vs-live-name split).
+
+**No TOML/CLI scenario fixture this slice** — a deliberate scope match with the sibling sub-slices
+immediately before this one (layer-engine-control, -switching, -dependency, -copy all shipped without
+one too), not an oversight. `ContinuousEffectSpec`'s TOML DSL (`scenario/src/lib.rs`) only ever covered
+type/color/PT-setting/PT-modifying layers — extending it to cover `SetName` would be its own small
+scope-creep, not something this "narrow it hard" slice's own pre-existing recommendation asked for.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 5 new tests in
+`crates/engine/tests/phase5_layer_engine_text.rs` (no-effect baseline, `SetName` overriding the base
+name, later-timestamp `SetName` winning outright over an earlier one, `self_only` filter scoping, and
+the legend-rule real-consumer test above), all prior tests unaffected (638 total, 0 failed). Confirmed
+via `cargo build --workspace` too — dropping `EffectPrimitive`'s `Copy` derive compiled clean with no
+other call site relying on it.
+
+**STRUCT DEVIATIONS:** None beyond the one predicted going in (`EffectPrimitive::SetName(String)`
+itself) — the `Copy`-derive removal was anticipated risk, not a surprise, once a `String`-carrying
+variant was the plan.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- General CR 612.2 text-substitution ("changes only correctly-used words") and the single-card rules
+  (612.5 Exchange of Words, 612.6 Volrath's Shapeshifter, 612.7 Spy Kit, 612.9 name stickers, 612.10
+  splice) are all still unbuilt — `CardDefinition.oracle_text` remains a plain, never-parsed `String`.
+- "Loses all abilities" (a text-removal shape, CR 612.3's own carve-out notwithstanding — a card can
+  say this directly) still isn't modeled; layer 6's `AddKeyword` stays union-only, same as before this
+  slice.
+- No `ContinuousEffectSpec`/TOML DSL support for `SetName` — test fixtures build it via Rust struct
+  literal or the new Lua binding, not the scenario format.
+- This closes backlog item 1 in its entirety — layers 1 (copy, `phase5/layer-engine-copy`), 2
+  (control, `phase5/layer-engine-control`/`-control-consumers`), 3 (text, this slice), 4/5 (type/color,
+  `phase5/layer-engine-types-colors`), 6/7b/7c (`phase5/layer-engine-basics`), 7a (CDA,
+  `phase5/layer-engine-cda`), 7d (counters, folded into `resolve_base_pt`), 7e (switching,
+  `phase5/layer-engine-switching`), and the CR 613.6-8 dependency system (`phase5/layer-engine-
+  dependency`) are all real now. Only backlog item 16 (Planeswalkers/Battles/DFCs/split/Sagas,
+  explicit non-goal) remains open in the slice backlog.

@@ -92,7 +92,7 @@ impl UserData for CostTag {}
 
 /// Same idea, for `Game.Layers.*` — e.g. `Game.Layers.PowerToughnessModifying`
 /// is a plain tagged value, decoded back out via `decode_layer_value`. Only
-/// the 5 layers with a real query path (`layers::effective_characteristics`)
+/// the 7 layers with a real query path (`layers::effective_characteristics`)
 /// are ever bound onto `Game.Layers` — see `bind_game_globals`.
 #[derive(Clone, Copy)]
 struct LayerTag(Layer);
@@ -101,7 +101,7 @@ impl UserData for LayerTag {}
 /// Same idea, for `Game.Effects.*` — e.g. `Game.Effects.ModifyPT(1, 1)` is a
 /// Lua function returning one of these, decoded back out via
 /// `decode_effect_value`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct EffectPrimitiveTag(EffectPrimitive);
 impl UserData for EffectPrimitiveTag {}
 
@@ -703,7 +703,8 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
     let EffectPayload::Primitive(effect) = effect else { return Ok(()) };
     let paired = matches!(
         (layer, effect),
-        (Layer::TypeChanging, EffectPrimitive::AddCardType(_))
+        (Layer::TextChanging, EffectPrimitive::SetName(_))
+            | (Layer::TypeChanging, EffectPrimitive::AddCardType(_))
             | (Layer::ColorChanging, EffectPrimitive::AddColor(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
@@ -1233,7 +1234,7 @@ impl ScriptRuntime {
 
     /// `EffectPayload::Script`'s real body — the "Lua asks, Rust decides"
     /// table convention `invoke_operation` already established, generalized
-    /// to the six `EffectPrimitive` shapes a continuous effect can take
+    /// to the seven `EffectPrimitive` shapes a continuous effect can take
     /// instead of `invoke_operation`'s single `gain_life` key. Expects
     /// `function(source, controller, state) -> table` — a `state_to_lua`
     /// snapshot is now passed as a trailing 3rd arg, same convention
@@ -1241,6 +1242,7 @@ impl ScriptRuntime {
     /// backlog item 8's hidden-information-safe `ScriptContext` half for
     /// scripted continuous-effect payloads. Checks each recognized key in a
     /// fixed order and returns the first match:
+    /// - `set_name = "..."` -> `SetName`
     /// - `set_pt = {power=.., toughness=..}` -> `SetPT`
     /// - `modify_pt = {power=.., toughness=..}` -> `ModifyPT`
     /// - `add_keyword = {"Flying", ...}` -> `AddKeyword`
@@ -1266,6 +1268,9 @@ impl ScriptRuntime {
             .call((source.0, controller.0, state_value))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
 
+        if let Some(new_name) = result.get::<_, Option<String>>("set_name").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            return Ok(Some(EffectPrimitive::SetName(new_name)));
+        }
         if let Some(t) = result.get::<_, Option<Table>>("set_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
             let power: i32 = t.get("power").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             let toughness: i32 = t.get("toughness").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
@@ -1751,10 +1756,11 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?,
     )?;
 
-    // Only the 6 layers with a real query path (layers::effective_characteristics)
-    // are exposed - a static ability can't request layer 1/2/3/7d at all
-    // (see `Layer`'s own doc comment for what's unbuilt and why).
+    // Only the 7 layers with a real query path (layers::effective_characteristics)
+    // are exposed - a static ability can't request layer 1/2/7d at all (see
+    // `Layer`'s own doc comment for what's unbuilt and why).
     let layers = lua.create_table()?;
+    layers.set("TextChanging", LayerTag(Layer::TextChanging))?;
     layers.set("TypeChanging", LayerTag(Layer::TypeChanging))?;
     layers.set("ColorChanging", LayerTag(Layer::ColorChanging))?;
     layers.set("AbilityAdding", LayerTag(Layer::AbilityAdding))?;
@@ -1763,6 +1769,10 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     layers.set("PowerToughnessSwitching", LayerTag(Layer::PowerToughnessSwitching))?;
 
     let effects = lua.create_table()?;
+    effects.set(
+        "SetName",
+        lua.create_function(|_, new_name: String| Ok(EffectPrimitiveTag(EffectPrimitive::SetName(new_name))))?,
+    )?;
     effects.set(
         "SetPT",
         lua.create_function(|_, (power, toughness): (i32, i32)| {

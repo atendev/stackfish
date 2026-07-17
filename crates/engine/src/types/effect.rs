@@ -44,11 +44,16 @@ use crate::script::ScriptRuntime;
 /// result yet — see docs/implementation.md's `phase5/layer-engine-control`
 /// slice notes for why that migration is its own follow-up, not bundled in.
 ///
-/// TODO(layer 3, TextChanging): needs some representation of "this object's
-/// rules text is treated as different text" (CR 613.1 layer 3, e.g.
-/// "removes all abilities" or text-box swaps) — no such representation
-/// exists; `CardDefinition.oracle_text` is a plain immutable `String`, not a
-/// live/rewritable characteristic.
+/// Layer 3 (TextChanging, CR 613.1c/612): narrowed to name-setting only (CR
+/// 612.8, "some cards create a continuous effect that sets the name of an
+/// object") — see `EffectPrimitive::SetName`/`layers::effective_characteristics`.
+/// The general case (CR 612.2's "changes only correctly-used words" word/
+/// symbol substitution, 612.6/612.7/612.10's single-card rules, 612.9's name
+/// stickers) stays unmodeled; `CardDefinition.oracle_text` is still a plain
+/// immutable `String`, never parsed. "Loses all abilities" is a text-removal
+/// shape too (CR 612.3 says ability-adding effects aren't touched by this,
+/// but a card can still say "loses all abilities" directly) — also
+/// unmodeled, tracked here rather than under layer 6's `AddKeyword` TODO.
 ///
 /// Layers 4/5 (CR 613.1) don't have CR-defined sublayers the way layer 7
 /// does (CR 613.3 only lettered-sublayers layers 3, 4, 6, and 7 — and layer
@@ -108,8 +113,19 @@ pub enum Layer {
 /// addition to its other types") isn't modeled — `EffectiveCharacteristics.
 /// supertypes`/`.subtypes` stay a straight `CardDefinition` copy. Natural
 /// next extension of the same `AddCardType` pattern once needed.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum EffectPrimitive {
+    /// Layer 3 (CR 612.8): sets the object's name outright — it "loses any
+    /// names it had and has only the specified name," so this overrides
+    /// whatever came before this layer entirely, same override-not-additive
+    /// shape as `GainControl`/`SetPT` (a later-timestamp `SetName` replaces
+    /// an earlier one's result, it doesn't combine with it). Never depends
+    /// on another effect in the same layer for the same reason `GainControl`
+    /// doesn't (CR 613.8a) — a flat override's result only depends on
+    /// timestamp, which plain CR 613.7 ordering already handles. The only
+    /// non-`Copy` `EffectPrimitive` variant — see `layers::resolve_primitive`
+    /// for why the type dropped `Copy` to accommodate it.
+    SetName(String),
     /// Layer 2 (CR 108.4/613.1): the object's controller becomes this
     /// player — overrides whatever came before this layer entirely, exactly
     /// like `SetPT`'s override semantics for layer 7b (a later-timestamp
