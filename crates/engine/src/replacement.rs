@@ -1,3 +1,4 @@
+use crate::script::ScriptRuntime;
 use crate::types::effect::ConsumptionPolicy;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -43,16 +44,20 @@ pub enum ReplacementOutcome {
 /// only so this stays a total function rather than something that could
 /// panic if a future `Script`-backed filter ever matches a different event
 /// shape.
-fn affected_player_for(event: &GameEventKind, state: &GameState) -> PlayerId {
+fn affected_player_for(event: &GameEventKind, state: &GameState, script_runtime: &ScriptRuntime) -> PlayerId {
     let fallback = || state.turn_order.first().copied().expect("a game always has players");
     match event {
         GameEventKind::DamageDealt { target, .. } => match target {
             Target::Player(pid) => *pid,
-            Target::Object(id) => state.object(*id).map(|o| o.controller).unwrap_or_else(fallback),
+            Target::Object(id) => state
+                .object(*id)
+                .map(|_| crate::layers::effective_controller(state, script_runtime, *id))
+                .unwrap_or_else(fallback),
         },
-        GameEventKind::ZoneChange { object, .. } => {
-            state.object(*object).map(|o| o.controller).unwrap_or_else(fallback)
-        }
+        GameEventKind::ZoneChange { object, .. } => state
+            .object(*object)
+            .map(|_| crate::layers::effective_controller(state, script_runtime, *object))
+            .unwrap_or_else(fallback),
         _ => fallback(),
     }
 }
@@ -97,8 +102,12 @@ pub(crate) fn apply_one_replacement(
 /// requirement). Thin wrapper over `apply_replacements_from` starting with
 /// nothing excluded — the entry point every fresh event (one that hasn't
 /// been through any replacement checking yet) uses.
-pub fn apply_replacements(state: &mut GameState, proposed: GameEventKind) -> ReplacementOutcome {
-    apply_replacements_from(state, proposed, Vec::new())
+pub fn apply_replacements(
+    state: &mut GameState,
+    script_runtime: &ScriptRuntime,
+    proposed: GameEventKind,
+) -> ReplacementOutcome {
+    apply_replacements_from(state, script_runtime, proposed, Vec::new())
 }
 
 /// Real body of `apply_replacements` — separated out so `Engine::
@@ -117,6 +126,7 @@ pub fn apply_replacements(state: &mut GameState, proposed: GameEventKind) -> Rep
 /// this same resolution, appended to as each single match applies.
 pub(crate) fn apply_replacements_from(
     state: &mut GameState,
+    script_runtime: &ScriptRuntime,
     proposed: GameEventKind,
     mut excluded: Vec<ObjectId>,
 ) -> ReplacementOutcome {
@@ -130,7 +140,7 @@ pub(crate) fn apply_replacements_from(
         let matching: Vec<ObjectId> = state
             .replacement_effects
             .iter()
-            .filter(|r| !excluded.contains(&r.source) && r.matches(&event, state))
+            .filter(|r| !excluded.contains(&r.source) && r.matches(&event, state, script_runtime))
             .map(|r| r.source)
             .collect();
 
@@ -145,7 +155,7 @@ pub(crate) fn apply_replacements_from(
                 excluded.push(*only);
             }
             _ => {
-                let affected_player = affected_player_for(&event, state);
+                let affected_player = affected_player_for(&event, state, script_runtime);
                 return ReplacementOutcome::NeedsOrderingChoice {
                     affected_player,
                     event,
@@ -285,7 +295,7 @@ mod tests {
     fn resolves_unchanged_with_nothing_registered() {
         let mut state = state_with(Vec::new());
         let event = GameEventKind::DamageDealt { source: ObjectId(0), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, event) else {
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event) else {
             panic!("expected Resolved with no replacement effects registered");
         };
         assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 5, .. }));
@@ -307,7 +317,7 @@ mod tests {
         });
         // Target is an Artifact, not a Creature - the filter doesn't match.
         let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Object(effect_source), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, event) else {
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event) else {
             panic!("expected Resolved - filter doesn't match");
         };
         assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 5, .. }));
@@ -327,7 +337,7 @@ mod tests {
         });
 
         let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, event) else {
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event) else {
             panic!("expected a single match to resolve");
         };
         assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 0, .. }));
@@ -348,14 +358,14 @@ mod tests {
         });
 
         let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        apply_replacements(&mut state, event());
+        apply_replacements(&mut state, &ScriptRuntime::new(), event());
         assert_eq!(
             state.replacement_effects.first().map(|r| r.consumption),
             Some(ConsumptionPolicy::LimitedUses(1)),
             "first use decrements 2 -> 1, doesn't remove"
         );
 
-        apply_replacements(&mut state, event());
+        apply_replacements(&mut state, &ScriptRuntime::new(), event());
         assert!(state.replacement_effects.is_empty(), "second use exhausts LimitedUses(1) and removes it");
     }
 
@@ -373,8 +383,8 @@ mod tests {
         });
 
         let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        apply_replacements(&mut state, event());
-        apply_replacements(&mut state, event());
+        apply_replacements(&mut state, &ScriptRuntime::new(), event());
+        apply_replacements(&mut state, &ScriptRuntime::new(), event());
         assert_eq!(state.replacement_effects.len(), 1, "Repeatable is never removed or decremented");
     }
 
@@ -399,7 +409,7 @@ mod tests {
 
         let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
         let ReplacementOutcome::NeedsOrderingChoice { affected_player, candidates, .. } =
-            apply_replacements(&mut state, event)
+            apply_replacements(&mut state, &ScriptRuntime::new(), event)
         else {
             panic!("expected a pause - two effects match the same event");
         };
@@ -445,7 +455,7 @@ mod tests {
         });
 
         let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p1), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, event) else {
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event) else {
             panic!("only one effect matches at any single point - never a real multi-match pause here");
         };
         assert!(

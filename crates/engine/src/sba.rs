@@ -134,7 +134,7 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     let mut dying = collect_dying_creatures(state, script_runtime);
     dying.extend(collect_world_rule_losers(state, script_runtime));
 
-    match resolve_deaths(state, dying.into()) {
+    match resolve_deaths(state, script_runtime, dying.into()) {
         DeathResolution::Done(death_events, departed_triggered) => {
             events.extend(death_events);
             SbaOutcome::Progressed(events, departed_triggered)
@@ -360,7 +360,10 @@ fn find_legend_rule_group(state: &GameState, script_runtime: &ScriptRuntime) -> 
         if !effective.supertypes.contains(SupertypeSet::LEGENDARY) {
             continue;
         }
-        groups.entry((object.controller, effective.name)).or_default().push(object.object_id);
+        // CR 704.5j: the legend rule groups by *current* controller
+        // (layers::effective_controller), not the raw field.
+        let controller = crate::layers::effective_controller(state, script_runtime, object.object_id);
+        groups.entry((controller, effective.name)).or_default().push(object.object_id);
     }
     let mut violating: Vec<(PlayerId, Vec<ObjectId>)> = groups
         .into_iter()
@@ -475,6 +478,7 @@ pub(crate) enum DeathResolution {
 /// this function with the same `pending_deaths` it was given.
 pub(crate) fn resolve_deaths(
     state: &mut GameState,
+    script_runtime: &ScriptRuntime,
     mut pending_deaths: VecDeque<ObjectId>,
 ) -> DeathResolution {
     let mut resolved = Vec::new();
@@ -493,7 +497,7 @@ pub(crate) fn resolve_deaths(
             to: ZoneKind::Graveyard,
             last_known_info: Some(last_known_info),
         };
-        match replacement::apply_replacements(state, proposed) {
+        match replacement::apply_replacements(state, script_runtime, proposed) {
             ReplacementOutcome::Resolved(final_event) => {
                 let (event, mut abilities) = commit_death(state, final_event);
                 resolved.push(event);

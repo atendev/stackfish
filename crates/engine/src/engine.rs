@@ -928,7 +928,7 @@ impl Engine {
         // pause can't reapply to the same event after it.
         let rewritten = replacement::apply_one_replacement(&mut self.state, chosen, pending_event);
         excluded.push(chosen);
-        let outcome = replacement::apply_replacements_from(&mut self.state, rewritten, excluded);
+        let outcome = replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, excluded);
 
         self.process_state = match resume {
             ReplacementResumeTarget::ReplacementCheck { remaining, mut checked } => match outcome {
@@ -1413,7 +1413,7 @@ impl Engine {
             let ProcessState::AwaitingPayment { cost, .. } = &self.process_state else {
                 unreachable!("checked above");
             };
-            plan.validate(cost, &self.state, payer, source)
+            plan.validate(cost, &self.state, &self.script_runtime, payer, source)
         };
         if !valid {
             return Err(PaymentError::InvalidPlan);
@@ -2575,7 +2575,7 @@ impl Engine {
                                             to: ZoneKind::Graveyard,
                                             last_known_info: Some(last_known_info),
                                         };
-                                        match replacement::apply_replacements(&mut self.state, proposed) {
+                                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed) {
                                             ReplacementOutcome::Resolved(final_event) => {
                                                 let (event, departed) =
                                                     sba::commit_death(&mut self.state, final_event);
@@ -2627,7 +2627,7 @@ impl Engine {
                                                 to: ZoneKind::Graveyard,
                                                 last_known_info: Some(last_known_info),
                                             };
-                                            match replacement::apply_replacements(&mut self.state, proposed) {
+                                            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed) {
                                                 ReplacementOutcome::Resolved(final_event) => {
                                                     let (event, departed) =
                                                         sba::commit_death(&mut self.state, final_event);
@@ -2692,7 +2692,7 @@ impl Engine {
                                             to: ZoneKind::Exile,
                                             last_known_info: Some(last_known_info.clone()),
                                         };
-                                        match replacement::apply_replacements(&mut self.state, proposed) {
+                                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed) {
                                             ReplacementOutcome::Resolved(final_event) => {
                                                 let GameEventKind::ZoneChange { object: old_id, to, .. } = final_event else {
                                                     unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
@@ -2858,9 +2858,15 @@ impl Engine {
                                     .unwrap_or_default()
                                     .into_iter()
                                     .filter(|id| {
+                                        // A library card's `.controller`
+                                        // always equals its owner in this
+                                        // engine (no GainControl effect
+                                        // targets a non-battlefield card,
+                                        // CR 108.4) - the raw field is
+                                        // exactly correct here.
                                         self.state
                                             .object(*id)
-                                            .is_some_and(|obj| filter.matches(obj, top.controller))
+                                            .is_some_and(|obj| filter.matches(obj, obj.controller, top.controller))
                                     })
                                     .collect();
                                 if !candidates.is_empty() {
@@ -2989,7 +2995,7 @@ impl Engine {
                     self.process_state = ProcessState::CommitEvents { checked };
                     return StepStatus::Progressed;
                 };
-                match replacement::apply_replacements(&mut self.state, event) {
+                match replacement::apply_replacements(&mut self.state, &self.script_runtime, event) {
                     ReplacementOutcome::Resolved(event) => {
                         checked.push(event);
                         self.process_state = ProcessState::ReplacementCheck { remaining, checked };
@@ -3595,7 +3601,7 @@ impl Engine {
         mut already_departed: Vec<RegisteredAbility>,
         then: SbaResumeThen,
     ) -> ProcessState {
-        match sba::resolve_deaths(&mut self.state, pending_deaths) {
+        match sba::resolve_deaths(&mut self.state, &self.script_runtime, pending_deaths) {
             sba::DeathResolution::Done(mut events, mut departed) => {
                 already_resolved.append(&mut events);
                 already_departed.append(&mut departed);
@@ -3652,11 +3658,18 @@ impl Engine {
     /// yet - same gap `PlayLand`'s land-limit TODO already flags).
     fn untap_step(&mut self) -> Vec<GameEventKind> {
         let active = self.state.active_player;
+        // CR 502.3: untaps what the active player *currently* controls
+        // (layers::effective_controller), not the raw field.
         let mut ids: Vec<ObjectId> = self
             .state
             .objects
             .iter()
-            .filter(|(_, o)| o.zone == ZoneKind::Battlefield && o.controller == active && o.tapped)
+            .filter(|(_, o)| {
+                o.zone == ZoneKind::Battlefield
+                    && o.tapped
+                    && crate::layers::effective_controller(&self.state, &self.script_runtime, o.object_id)
+                        == active
+            })
             .map(|(id, _)| *id)
             .collect();
         // HashMap iteration order is unstable - sort so the ledger is
