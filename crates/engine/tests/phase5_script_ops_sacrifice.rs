@@ -67,6 +67,7 @@ fn sacrifice_spell_definition() -> CardDefinition {
                 zone: None,
             },
             count: 1,
+            up_to: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Sacrifice),
@@ -291,6 +292,7 @@ fn sacrifice_activated_ability_also_works() {
         target: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: Some(FilterController::You), zone: None },
             count: 1,
+            up_to: false,
         })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Sacrifice),

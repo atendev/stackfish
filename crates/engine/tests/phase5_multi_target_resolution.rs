@@ -62,6 +62,7 @@ fn doom_blast_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
             count: 2,
+            up_to: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Damage(2)),
@@ -89,6 +90,7 @@ fn slay_two_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
             count: 2,
+            up_to: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Destroy),

@@ -2421,9 +2421,15 @@ impl Engine {
                     _ => top.targets.clone(),
                 };
                 let fizzles = match &top.target_requirement {
-                    // A requirement of `None`/count 0 never fizzles, same as
-                    // if it had no targets to begin with.
-                    Some(TargetSpec::Primitive(req)) if req.count > 0 => legal_targets.is_empty(),
+                    // Gated on whether any target was actually *chosen*
+                    // (`top.targets`), not on the requirement's own `count`
+                    // schema field - those coincided before CR 601.2c/115.6
+                    // "up to N" existed (an exact-count requirement always
+                    // had `targets.len() == count`), but "up to N" can
+                    // legally choose zero targets, which must never fizzle
+                    // (same as a `None`/count-0 requirement) even though
+                    // `req.count` itself is still nonzero.
+                    Some(TargetSpec::Primitive(_)) if !top.targets.is_empty() => legal_targets.is_empty(),
                     _ => false,
                 };
 

@@ -62,6 +62,7 @@ fn shock_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::AnyTarget,
             count: 1,
+            up_to: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Damage(2)),
@@ -264,7 +265,7 @@ fn damage_ability_with_lifelink_source_gains_its_controller_life() {
         kind: AbilityKind::Activated,
         condition: None,
         cost: Some(CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() }),
-        target: Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 1 })),
+        target: Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 1, up_to: false })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Damage(3)),
         intervening_if: None,

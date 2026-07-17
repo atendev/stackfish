@@ -39,13 +39,17 @@ pub enum TargetFilter {
     AnyTarget,
 }
 
-/// A fixed number of targets matching `filter`, chosen once for one
-/// instance of the word "target" (CR 601.2c/115.3's dedup applies within
-/// this one requirement, not across several). `count` is exact.
+/// A number of targets matching `filter`, chosen once for one instance of
+/// the word "target" (CR 601.2c/115.3's dedup applies within this one
+/// requirement, not across several). `count` is the maximum — exactly
+/// `count` if `up_to` is `false` (the common case, e.g. "target creature"),
+/// or anywhere from 0 to `count` if `up_to` is `true` (CR 601.2c/115.6,
+/// e.g. "choose up to three target creatures"). Choosing zero under `up_to`
+/// is a legal, common outcome — CR 601.2c doesn't require a caster to use
+/// the full allowance.
 ///
-/// TODO(CR 601.2c/115.6): variable ("up to N") and "N or more" shapes
-/// aren't modeled — every real requirement this slice needs is a fixed
-/// count.
+/// TODO(CR 601.2c/115.6): "N or more" isn't modeled — rare enough on real
+/// cards that it wasn't worth bundling into this slice alongside "up to N".
 ///
 /// TODO: a spell/ability with more than one distinct "target" word (e.g.
 /// "target creature and target player") needs more than one
@@ -55,6 +59,7 @@ pub enum TargetFilter {
 pub struct TargetRequirement {
     pub filter: TargetFilter,
     pub count: u32,
+    pub up_to: bool,
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this

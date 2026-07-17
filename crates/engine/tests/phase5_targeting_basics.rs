@@ -78,6 +78,7 @@ fn bolt_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::AnyTarget,
             count: 1,
+            up_to: false,
         })),
         alternative_costs: Vec::new(),
         effect: None,
@@ -110,6 +111,7 @@ fn pump_definition() -> CardDefinition {
                 zone: None,
             },
             count: 1,
+            up_to: false,
         })),
         alternative_costs: Vec::new(),
         effect: None,
@@ -323,7 +325,7 @@ fn cast_spell_rejects_duplicate_targets() {
     // reuse bolt_definition's shape but bump count to 2 inline.
     let mut two_target_bolt = bolt_definition();
     two_target_bolt.target_requirement =
-        Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 2 }));
+        Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 2, up_to: false }));
     let card = ObjectId(2);
     state.objects.insert(card, card_object(card, two_target_bolt, p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
