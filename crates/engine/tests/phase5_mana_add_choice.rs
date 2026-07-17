@@ -84,6 +84,7 @@ fn state_with_ability(source: ObjectId, controller: PlayerId, effect: AbilityEff
             drew_from_empty_library: false,
             mulligans_taken: 0,
             hand_kept: false,
+            commander_casts: std::collections::HashMap::new(),
         }],
         turn_order: vec![controller],
         active_player: controller,

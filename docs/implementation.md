@@ -2289,8 +2289,10 @@ shift, don't treat it as fixed once written.
        zone) — without it a commander could only ever be cast once per game, leaving 11d/11e
        untestable through real repeated-death gameplay. 903.9b (hand/library redirect) stays
        deferred.
-    11d. **Commander tax (CR 903.9)** — generic cost +{2} per prior cast from the command zone this
-       game. Small increment on top of 11c.
+    11d. ~~**Commander tax (CR 903.8)**~~ — done, `phase5/commander-tax` slice (docs/implementation.md,
+       below). Generic cost +{2} per prior cast from the command zone this game, tracked per
+       commander by name (not `ObjectId`, which churns every cast) so Partner commanders
+       (CR 702.124d) get independent counters automatically.
     11e. **Commander damage production** — closes backlog item 10's own dangling note (that slice's
        commander-damage SBA check is real but "inert until backlog item 11's Commander-format
        machinery... exists"). Routes a commander's combat damage into `PlayerState.
@@ -6257,3 +6259,82 @@ mid-slice.
   `submit_legend_rule_choice` either) — drive both directly via `Engine` methods in a Rust test.
 - Backlog items 11d (commander tax) and 11e (commander damage production) — the two slices this one
   was explicitly built to unblock, not attempted here.
+
+## Phase 5: phase5/commander-tax slice
+
+Branch `phase5/commander-tax`, off master. Closes backlog item 11d.
+
+**Correction to this item's original backlog text, found while scoping:** the tax itself is
+CR 903.8, not 903.9 (903.9 is the return-to-command-zone rule 11c already closed) — the backlog
+text had cited the wrong sub-rule.
+
+**What got implemented:**
+- `PlayerState.commander_casts: HashMap<String, u32>` (types/player.rs) — how many times this
+  player has cast each commander from the command zone this game, keyed by `CardDefinition.name`
+  rather than `ObjectId`. `ObjectId` doesn't work as the key: CR 400.7 mints a fresh id on every
+  cast *and* every 11c/903.9a return, so nothing about an id survives a cast → death → return →
+  recast cycle the way a card's name does. Every real `PlayerState` struct literal in the crate
+  (~68 sites: `src/` construction sites plus every test fixture's own hand-built one) needed the
+  new field — same bulk-`sed`-after-a-shared-last-field sweep 11c used for `is_commander`, anchored
+  on each literal's existing `hand_kept: false,` line (the field immediately before
+  `commander_casts` in the struct) rather than guessed at per-file.
+- `commands.rs`'s `CastSpell`, `None`-alternative-cost branch (i.e. the plain CR 601.2f mana-cost
+  path, which is the only path a 903.8 command-zone cast ever takes — an announced alternative cost
+  is a different, mutually exclusive branch entirely): when `cast_from_command_zone` (11c's own
+  flag), looks up this player's `commander_casts` count for `object.definition.name` and applies
+  `ManaCost::apply_cost_delta(2 * prior_casts)` — the same generic-only, clamped-at-zero helper
+  static cost-modifier effects (Thalia, etc) already use, applied *after* `apply_cost_modifiers` so
+  a static tax effect and CR 903.8 stack rather than one clobbering the other. The counter itself
+  increments right where the cast actually commits (the zone-move to the stack, a few lines below
+  cost computation) — not merely attempted, matching CR 903.8's "cast," not "announced and later
+  abandoned."
+- CR 702.124d (Partner): falls out for free from keying by name — two differently-named commanders
+  never collide in the same `HashMap`, no special-casing needed.
+
+**Regression avoided, not introduced:** none — the `commander_casts` field sweep across every
+`PlayerState` literal came back to a clean `cargo test --workspace` on the first full run after the
+struct-literal churn, before the tax computation itself was added, same "plumbing first, logic
+second" order 11c's `is_commander` sweep followed.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 589 passed, 0 failed (583 prior + 6 new, in
+new `crates/engine/tests/phase5_commander_tax.rs`): a commander's first cast from the command zone
+carries no tax at all; a second cast (after a manually-driven return to the command zone, same
+CR 400.7 shape 11c's own 903.9a acceptance path produces) costs the base amount plus {2}; a third
+costs base plus {4}, with `commander_casts` itself reading back `3` afterward; two same-player
+Partner commanders keep fully independent counters — recasting one twice doesn't tax the other's
+first cast at all; casting the same-named card from hand (not `is_commander`, not the command zone)
+is never taxed, confirming the check is gated on the 903.8 path specifically, not just a name match;
+a card with a real printed `{2}{G}` cost still carries its colored pip after tax is computed,
+confirming the tax adds to the existing generic component rather than replacing the whole cost with
+a bare `{2}`. All 583 prior tests unaffected. Confirmed via the real CLI too: `cargo run -p
+stackfish-cli -- crates/engine/tests/scenarios/phase5_commander_tax.toml` — 6/6 actions ran, 2/2
+assertions passed (a commander with a real `{1}` printed cost cast from the command zone through the
+full TOML → Engine → CLI pipeline, mana pool debited by exactly 1, no phantom tax on an untaxed
+first cast). The scenario only covers the untaxed baseline through the real CLI pipeline, not a
+taxed repeat cast — see UNRESOLVED below.
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice report scoped — `PlayerState.commander_casts`
+was named directly.
+
+**INTERFACE DEVIATIONS:** None — no new `Engine`/`commands` public functions, only a lookup-and-add
+inline in `CastSpell`'s existing cost computation.
+
+**SCOPE DEVIATIONS:** None — the ~68-site `PlayerState` literal sweep was anticipated in the
+pre-slice report (named as an expected consequence of the struct change, not discovered mid-slice).
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- `Engine::unwind_payment` (CR 601.6) doesn't roll back a `commander_casts` increment when a
+  commander cast is abandoned mid-payment — the counter increments at zone-move time, before
+  payment is even requested, and `unwind_payment` has no matching decrement. Compounding
+  pre-existing gap: `unwind_payment` already hardcodes returning *any* unwound spell to
+  `ZoneKind::Hand` regardless of its real origin zone, so an unwound commander cast already loses
+  its command-zone recastability independent of this slice's own gap. Flagged, not fixed — a real
+  CR 601.6 fix for commander casts specifically would need to know the origin zone, not just always
+  target hand, which is a wider fix than this tax-only slice's scope.
+- No scenario TOML action exists for CR 903.9a's return-to-command-zone choice (11c's own
+  pre-existing UNRESOLVED item, still open) — so the taxed-repeat-cast cases can only be driven
+  through a Rust test (which manually replicates the return by hand, same shape
+  `phase5_commander.rs`'s own fixtures already use), not through the real TOML → CLI pipeline like
+  the untaxed baseline is.
+- Backlog item 11e (commander damage production) — the other slice 11c was explicitly built to
+  unblock, not attempted here either.

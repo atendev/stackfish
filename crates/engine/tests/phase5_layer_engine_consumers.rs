@@ -79,6 +79,7 @@ fn player_state(id: PlayerId) -> PlayerState {
         drew_from_empty_library: false,
         mulligans_taken: 0,
         hand_kept: false,
+        commander_casts: std::collections::HashMap::new(),
     }
 }
 

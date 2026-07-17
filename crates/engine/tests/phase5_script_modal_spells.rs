@@ -152,6 +152,7 @@ fn two_player_state() -> GameState {
                 drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
+                commander_casts: std::collections::HashMap::new(),
             },
             PlayerState {
                 player_id: p1,
@@ -164,6 +165,7 @@ fn two_player_state() -> GameState {
                 drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
+                commander_casts: std::collections::HashMap::new(),
             },
         ],
         turn_order: vec![p0, p1],
