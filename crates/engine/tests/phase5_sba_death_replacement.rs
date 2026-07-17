@@ -40,6 +40,7 @@ fn creature_definition(toughness: i32) -> CardDefinition {
 fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: creature_definition(toughness),
         owner,
@@ -157,6 +158,7 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
 fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: CardDefinition {
             definition_id: 2,

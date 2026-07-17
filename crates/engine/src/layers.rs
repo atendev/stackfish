@@ -63,7 +63,12 @@ pub fn effective_characteristics(
     let obj = state
         .object(object)
         .unwrap_or_else(|| panic!("effective_characteristics called with unknown ObjectId {object:?}"));
-    let def = &obj.definition;
+    // CR 613.1a/707 (layer 1): a copy's copiable values come from the
+    // frozen `copiable_override` snapshot, not the object's own printed
+    // `definition`, when one is present - see `GameObject.copiable_override`'s
+    // own doc comment for why this is a stored snapshot rather than a layer
+    // 1 `ContinuousEffect` query like every layer below.
+    let def = obj.copiable_override.as_ref().unwrap_or(&obj.definition);
 
     let mut power =
         resolve_base_pt(def.power.as_ref(), &obj.counters, state, script_runtime, object, obj.controller);

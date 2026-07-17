@@ -34,6 +34,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
     };
     let obj = GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition,
         owner,

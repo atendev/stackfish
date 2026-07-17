@@ -60,6 +60,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     };
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition,
         owner,
@@ -85,6 +86,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition,
         owner,

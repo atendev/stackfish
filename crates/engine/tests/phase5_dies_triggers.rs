@@ -49,6 +49,7 @@ fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition
 fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: creature_definition("Test Creature", 2, toughness),
         owner,

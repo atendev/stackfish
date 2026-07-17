@@ -720,6 +720,7 @@ mod tests {
                 effect: None,
                 modes: Vec::new(),
             },
+            copiable_override: None,
             owner: controller,
             controller,
             zone: ZoneKind::Battlefield,

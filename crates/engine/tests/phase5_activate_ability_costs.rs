@@ -38,6 +38,7 @@ fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
 fn object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition,
         owner,

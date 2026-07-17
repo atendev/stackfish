@@ -101,6 +101,7 @@ fn permanent_definition(name: &str, supertypes: SupertypeSet, card_types: CardTy
 fn legendary_creature(id: ObjectId, owner: PlayerId, name: &str, timestamp: u64) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: permanent_definition(name, SupertypeSet::LEGENDARY, CardTypeSet::CREATURE),
         owner,
@@ -126,6 +127,7 @@ fn legendary_creature(id: ObjectId, owner: PlayerId, name: &str, timestamp: u64)
 fn world_permanent(id: ObjectId, owner: PlayerId, timestamp: u64) -> GameObject {
     GameObject {
         object_id: id,
+        copiable_override: None,
         lineage: ObjectLineage { previous: None },
         definition: permanent_definition("Test World Permanent", SupertypeSet::WORLD, CardTypeSet::ENCHANTMENT),
         owner,
