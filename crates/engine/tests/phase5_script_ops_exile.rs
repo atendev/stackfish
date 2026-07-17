@@ -263,7 +263,12 @@ fn exile_activated_ability_also_works() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: vec![Target::Object(target)] },
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: vec![Target::Object(target)],
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("player holds priority");
     let status = drain(&mut engine);

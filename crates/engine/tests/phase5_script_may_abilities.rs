@@ -172,7 +172,12 @@ fn play_activate_and_drain(engine: &mut Engine, player: PlayerId, land_in_hand: 
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source: land, ability_index: 0, targets: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility {
+                source: land,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("player controls the land and holds priority");
     let status = drain(engine);

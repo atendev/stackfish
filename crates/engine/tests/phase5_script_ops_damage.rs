@@ -269,7 +269,12 @@ fn damage_ability_with_lifelink_source_gains_its_controller_life() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: vec![Target::Player(p1)] },
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: vec![Target::Player(p1)],
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("player holds priority");
     let status = drain(&mut engine);

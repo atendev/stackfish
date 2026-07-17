@@ -303,7 +303,12 @@ fn counters_ability_works_the_same_as_a_counters_spell() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: vec![Target::Object(target)] },
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: vec![Target::Object(target)],
+                chosen_colors: Vec::new(),
+            },
         })
         .expect("player holds priority");
     let status = drain(&mut engine);

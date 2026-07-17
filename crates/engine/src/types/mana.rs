@@ -21,6 +21,22 @@ bitflags! {
     }
 }
 
+impl ColorSet {
+    /// Membership test against a single `Color` — used by
+    /// `AbilityEffect::AddManaChoice` to validate a player's chosen color is
+    /// actually among the ability's allowed set.
+    pub fn contains_color(&self, color: Color) -> bool {
+        let bit = match color {
+            Color::White => ColorSet::WHITE,
+            Color::Blue => ColorSet::BLUE,
+            Color::Black => ColorSet::BLACK,
+            Color::Red => ColorSet::RED,
+            Color::Green => ColorSet::GREEN,
+        };
+        self.contains(bit)
+    }
+}
+
 /// A single indivisible mana symbol — the smallest unit a hybrid symbol
 /// chooses between. Not itself a full cost symbol (see `ManaSymbol`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -307,7 +323,10 @@ fn parse_hybrid_atom(part: &str, inner: &str, whole: &str) -> Result<AtomicManaS
         .map_err(|_| ManaCostParseError(format!("unrecognized hybrid component \"{{{inner}}}\" in \"{whole}\"")))
 }
 
-fn parse_color_letter(s: &str) -> Result<Color, ManaCostParseError> {
+/// `pub` rather than crate-private — the scenario crate's TOML loader
+/// (`chosen_colors: Vec<String>` on its `ActivateAbility` action spec) reuses
+/// this same WUBRG-letter vocabulary rather than inventing a second parser.
+pub fn parse_color_letter(s: &str) -> Result<Color, ManaCostParseError> {
     match s {
         "W" => Ok(Color::White),
         "U" => Ok(Color::Blue),
