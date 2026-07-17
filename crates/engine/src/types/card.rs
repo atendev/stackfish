@@ -165,6 +165,13 @@ bitflags! {
         /// `FIRST_STRIKE` - a creature only needs this bit set to
         /// participate in both steps, it doesn't also need `FIRST_STRIKE`.
         const DOUBLE_STRIKE = 1 << 13;
+        /// CR 702.19 - modifies combat damage assignment: once every
+        /// blocker is assigned lethal damage, the controller may assign the
+        /// rest to the defending player instead. Trample-over-planeswalkers
+        /// (CR 702.19c/e/f/g) is a separate keyword, not modeled - this bit
+        /// only ever spills excess to a `Target::Player`, never a
+        /// planeswalker/battle `Target::Object` (unmodeled per DESIGN.md).
+        const TRAMPLE       = 1 << 14;
     }
 }
 

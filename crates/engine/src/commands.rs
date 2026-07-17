@@ -202,6 +202,46 @@ fn effective_power(state: &GameState, script_runtime: &ScriptRuntime, id: Object
     }
 }
 
+/// Same as `effective_power` above, for toughness — used by trample's
+/// lethal-damage check (CR 702.19b).
+fn effective_toughness(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> Option<i32> {
+    if state.object(id).is_some() {
+        crate::layers::effective_characteristics(state, script_runtime, id).toughness
+    } else {
+        None
+    }
+}
+
+/// CR 702.19b: the minimum amount of combat damage `AssignCombatDamage` must
+/// give `blocker` before a trampling attacker may send any excess to the
+/// defending player — effective toughness minus damage already marked (from
+/// an earlier step, e.g. first strike, or a non-combat source this turn),
+/// floored at 0, netted down to 1 if `attacker_has_deathtouch` (CR 702.2b:
+/// any nonzero deathtouch damage is lethal regardless of toughness). An
+/// unresolved toughness (missing CDA script, same "skip rather than guess"
+/// stance as `effective_power`) reads as "needs everything" (`u32::MAX`) so
+/// a trampler can never claim to have satisfied a lethal requirement it
+/// can't actually compute — safer than silently treating unknown as 0.
+fn lethal_damage_needed(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    blocker: ObjectId,
+    attacker_has_deathtouch: bool,
+) -> u32 {
+    let Some(toughness) = effective_toughness(state, script_runtime, blocker) else {
+        return u32::MAX;
+    };
+    let already_marked = state.object(blocker).map(|o| o.damage_marked).unwrap_or(0);
+    let remaining = (toughness as i64 - already_marked as i64).max(0);
+    if remaining == 0 {
+        0
+    } else if attacker_has_deathtouch {
+        1
+    } else {
+        remaining as u32
+    }
+}
+
 /// CR 115/601.2c-e: whether `target` satisfies `filter`, evaluated against
 /// current `state` (used both at cast/activation time and, unchanged, again
 /// at `ResolveStackTop` for the CR 608.2b recheck — legality is defined the
@@ -1710,13 +1750,33 @@ pub fn execute_command(
                 })
                 .collect();
 
+            // CR 509.1h/510.1c: "blocked" is decided once, at declare-
+            // blockers time, and doesn't change even if every blocker
+            // assigned to an attacker later leaves combat (dies to a spell,
+            // etc) before damage is assigned — a blocked attacker with zero
+            // *living* blockers still deals no combat damage at all, unless
+            // it has trample (CR 702.19d, the one case where it's treated as
+            // though every blocker got lethal damage). Computed from the raw
+            // `combat.blocks` (unfiltered by aliveness), deliberately
+            // distinct from `blockers_by_attacker` below (which only tracks
+            // *living* blockers) - conflating the two was a real pre-
+            // existing bug: an attacker whose blockers all died before this
+            // step fell into the same "no entry" case as a never-blocked
+            // attacker and incorrectly dealt full damage to the defending
+            // player regardless of trample.
+            let declared_blocked_attackers: HashSet<ObjectId> =
+                combat.blocks.iter().map(|(_, attacker)| *attacker).collect();
+
             // CR 510.1c: a real split only exists for an attacker with 2+
-            // blockers - every other attacker (0 or 1 blockers) has exactly
-            // one legal place for its damage to go, computed below rather
-            // than chosen. Computed from `alive_blocks` (not step-filtered -
-            // see above), so a dead blocker is never required in a split,
-            // but a step-ineligible one still is (its attacker's damage
-            // still has to go somewhere this step).
+            // living blockers, or exactly 1 living blocker if it has trample
+            // (CR 702.19b - even a single blocker needs a chosen lethal-vs-
+            // excess split once trample is in play). Every other attacker
+            // (0 living blockers, or 1 with no trample) has exactly one
+            // legal place for its damage to go, computed below rather than
+            // chosen. Computed from `alive_blocks` (not step-filtered - see
+            // above), so a dead blocker is never required in a split, but a
+            // step-ineligible one still is (its attacker's damage still has
+            // to go somewhere this step).
             let mut blockers_by_attacker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
             for (blocker, attacker) in &alive_blocks {
                 blockers_by_attacker.entry(*attacker).or_default().push(*blocker);
@@ -1727,22 +1787,27 @@ pub fn execute_command(
             // either, even if 2+ of its blockers happen to be eligible now.
             let participating_attackers: HashSet<ObjectId> =
                 attackers.iter().map(|(attacker, _)| *attacker).collect();
-            let multi_blocked: HashSet<ObjectId> = blockers_by_attacker
+            let requires_assignment: HashSet<ObjectId> = blockers_by_attacker
                 .iter()
                 .filter(|(attacker, blockers)| {
-                    blockers.len() >= 2 && participating_attackers.contains(attacker)
+                    participating_attackers.contains(attacker)
+                        && (blockers.len() >= 2
+                            || (blockers.len() == 1
+                                && effective_keywords(state, script_runtime, **attacker)
+                                    .contains(KeywordSet::TRAMPLE)))
                 })
                 .map(|(attacker, _)| *attacker)
                 .collect();
 
             // CR 510.1e atomicity: `assignments` must cover exactly the
-            // multi-blocked set - no extra (nothing to split for a 0/1-
-            // blocker attacker), no missing (the engine can't guess a
-            // split).
+            // set that needs one - no extra (nothing to split for an
+            // attacker with 0, or 1 non-trampling, blocker), no missing (the
+            // engine can't guess a split).
             let submitted: HashSet<ObjectId> = assignments.iter().map(|(attacker, _)| *attacker).collect();
-            if submitted != multi_blocked {
+            if submitted != requires_assignment {
                 return Err(CommandError::IllegalAction(
-                    "assignments must cover exactly the attackers with two or more blockers"
+                    "assignments must cover exactly the attackers that need a chosen split \
+                     (two or more blockers, or one blocker with trample)"
                         .to_string(),
                 ));
             }
@@ -1758,6 +1823,9 @@ pub fn execute_command(
                 let power =
                     effective_power(state, script_runtime, *attacker).map(|p| p.max(0) as u32).unwrap_or(0);
                 let blockers = &blockers_by_attacker[attacker];
+                let attacker_keywords = effective_keywords(state, script_runtime, *attacker);
+                let has_trample = attacker_keywords.contains(KeywordSet::TRAMPLE);
+                let has_deathtouch = attacker_keywords.contains(KeywordSet::DEATHTOUCH);
 
                 let mut seen = Vec::with_capacity(splits.len());
                 let mut sum: u32 = 0;
@@ -1782,10 +1850,36 @@ pub fn execute_command(
                             .to_string(),
                     ));
                 }
-                if sum != power {
-                    return Err(CommandError::IllegalAction(
-                        "a split's amounts must sum to exactly the attacker's power".to_string(),
-                    ));
+                if !has_trample {
+                    if sum != power {
+                        return Err(CommandError::IllegalAction(
+                            "a split's amounts must sum to exactly the attacker's power".to_string(),
+                        ));
+                    }
+                } else {
+                    // CR 702.19b: a trampler may send the remainder to the
+                    // defending player (handled in the assign-and-deal pass
+                    // below), but only once every blocker in the split has
+                    // been given at least its own lethal amount - short one
+                    // and *nothing* can go to the player, all of `power`
+                    // must stay on blockers instead.
+                    if sum > power {
+                        return Err(CommandError::IllegalAction(
+                            "a split's amounts can't sum to more than the attacker's power".to_string(),
+                        ));
+                    }
+                    if sum < power {
+                        for (blocker, amount) in splits {
+                            let needed = lethal_damage_needed(state, script_runtime, *blocker, has_deathtouch);
+                            if *amount < needed {
+                                return Err(CommandError::IllegalAction(
+                                    "trample can't send excess damage to the defending player until \
+                                     every blocker has been assigned its own lethal amount"
+                                        .to_string(),
+                                ));
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1811,9 +1905,22 @@ pub fn execute_command(
                     continue;
                 }
 
+                let has_trample =
+                    effective_keywords(state, script_runtime, *attacker).contains(KeywordSet::TRAMPLE);
+
                 match blockers_by_attacker.get(attacker) {
+                    None if declared_blocked_attackers.contains(attacker) && !has_trample => {
+                        // CR 509.1h/510.1c: blocked, but every blocker is
+                        // gone by damage time, no trample - deals no combat
+                        // damage at all, not "falls back to the original
+                        // target" (that's only the genuinely-unblocked case
+                        // below, or the trample case CR 702.19d covers).
+                    }
                     None => {
-                        // 510.1b: unblocked - all damage to the original target.
+                        // 510.1b (never blocked), or 702.19d (blocked, no
+                        // living blockers left, trample - as though every
+                        // blocker got lethal damage) - all damage to the
+                        // original target either way.
                         events.push(GameEventKind::DamageDealt {
                             source: *attacker,
                             target: *target,
@@ -1821,9 +1928,9 @@ pub fn execute_command(
                             is_combat_damage: true,
                         });
                     }
-                    Some(blockers) if blockers.len() == 1 => {
-                        // 510.1c: exactly one blocker - no choice, all
-                        // damage there.
+                    Some(blockers) if blockers.len() == 1 && !has_trample => {
+                        // 510.1c: exactly one blocker, no trample - no
+                        // choice, all damage there.
                         events.push(GameEventKind::DamageDealt {
                             source: *attacker,
                             target: Target::Object(blockers[0]),
@@ -1832,8 +1939,16 @@ pub fn execute_command(
                         });
                     }
                     Some(_) => {
-                        // 510.1c: 2+ blockers - the validated split above.
+                        // 510.1c (2+ blockers) or a single trampling blocker
+                        // (CR 702.19b) - the validated split above, plus
+                        // whatever it left unassigned spilling to the
+                        // original target (CR 702.19b's "excess... assigned
+                        // as its controller chooses"; validation above
+                        // already confirmed every blocker got its lethal
+                        // amount whenever this remainder is nonzero).
+                        let mut assigned_to_blockers = 0u32;
                         for (blocker, amount) in assignment_map[attacker] {
+                            assigned_to_blockers += *amount;
                             if *amount > 0 {
                                 events.push(GameEventKind::DamageDealt {
                                     source: *attacker,
@@ -1842,6 +1957,15 @@ pub fn execute_command(
                                     is_combat_damage: true,
                                 });
                             }
+                        }
+                        let remainder = power - assigned_to_blockers;
+                        if remainder > 0 {
+                            events.push(GameEventKind::DamageDealt {
+                                source: *attacker,
+                                target: *target,
+                                amount: remainder,
+                                is_combat_damage: true,
+                            });
                         }
                     }
                 }

@@ -2448,8 +2448,10 @@ verbatim once enough time has passed for the underlying code to have moved.
 - **`Destroy` script op**: CR 616.1's ordering choice (2+ replacement effects matching the same
   scripted destroy) isn't supported - silently no-ops rather than pausing for a choice, unlike the
   real `NeedsOrderingChoice` path every other SBA-driven death uses.
-- **Combat keywords beyond first/second strike**: trample, banding, and the rest of CR 702's combat
-  keyword list are unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7.
+- **Combat keywords beyond first/second strike/trample**: banding and the rest of CR 702's combat
+  keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
+  trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
+  Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
 - **CR 111.7 (token cessation)**: a token that leaves the battlefield doesn't actually cease to exist,
   it just retires like any other object - blocked on a zone-watch SBA hook that doesn't exist yet
   (`engine.rs`'s `CreateToken` resolution TODO).
@@ -6980,3 +6982,69 @@ variant was the plan.
   `phase5/layer-engine-switching`), and the CR 613.6-8 dependency system (`phase5/layer-engine-
   dependency`) are all real now. Only backlog item 16 (Planeswalkers/Battles/DFCs/split/Sagas,
   explicit non-goal) remains open in the slice backlog.
+
+## Phase 5: phase5/trample slice (CR 702.19a/b/d)
+
+Branch `phase5/trample`, off master. Not its own numbered backlog item — picked off the "Known
+unresolved gaps" list's combat-keywords entry (above) as the highest-value next slice once backlog
+item 1 closed: trample is common on real cards, unlike banding, and is a bounded extension of the
+`first-strike` slice's own combat-damage-assignment code rather than a new subsystem. Scoped to CR
+702.19a/b/d only — trample over planeswalkers (702.19c/e/f/g) is a separate keyword, not modeled,
+since planeswalkers/battles are backlog item 16's explicit non-goal (every attack target in practice
+is `Target::Player`).
+
+**Real pre-existing bug found while scoping, fixed as part of this slice (not split out — squarely
+blocks correct trample semantics):** `AssignCombatDamage` built its per-attacker blocker map
+(`blockers_by_attacker`) only from *living* blockers. An attacker whose blockers had all died before
+the damage-assignment step (declared blocked, then removed from combat by some other effect) fell into
+the exact same `None` branch as a never-blocked attacker, and so dealt its full power straight to the
+defending player — contradicting CR 509.1h/510.1c ("blocked" is fixed at declare-blockers time and
+doesn't change even if every blocker later leaves; a blocked attacker with zero living blockers deals
+*no* combat damage, unless it has trample — CR 702.19d is the one case that *does* send it to the
+player). Fixed by tracking `declared_blocked_attackers` from the raw, unfiltered `combat.blocks`,
+kept deliberately separate from `blockers_by_attacker`'s alive-only view.
+
+**What got implemented:**
+- `KeywordSet::TRAMPLE` (bit 14), parsed in `script.rs`'s `parse_keyword_name` and `scenario/src/
+  lib.rs`'s `parse_keywords` — same two sites every prior combat keyword touched, no layer-engine
+  changes (trample is read via `effective_keywords`, same as first/double strike, not a continuous-
+  effect primitive).
+- Two new `commands.rs` helpers: `effective_toughness` (mirrors `effective_power`) and
+  `lethal_damage_needed` (CR 702.19b: effective toughness minus already-marked damage, floored at 0,
+  netted to 1 under the attacker's Deathtouch per CR 702.2b — an unresolved toughness reads as
+  `u32::MAX`, "needs everything," rather than silently treating unknown as satisfied).
+- `AssignCombatDamage`'s "who must submit a chosen split" set widened from "2+ living blockers" to
+  "2+ living blockers, OR exactly 1 living blocker with trample" — a single trampling blocker still
+  needs a player-chosen lethal-vs-excess split, unlike the old hardcoded "sole blocker gets
+  everything" shortcut.
+- Split validation for a trampler: the blocker-amounts sum may now be *less* than the attacker's
+  power (the shortfall implicitly spills to the original target) — but only once every blocker in the
+  split has been assigned at least `lethal_damage_needed`. Falling short of any blocker's lethal
+  amount forces the entire assigned amount to stay on blockers (CR 702.19b's own "in that case can't
+  assign any damage to the player" clause), rejected outright rather than silently clamped.
+- The assign-and-deal pass computes the remainder (`power - assigned_to_blockers`) for any attacker
+  that submitted a split and emits an extra `DamageDealt` to the original target when it's nonzero —
+  covers both the widened single-blocker-trample case and the pre-existing 2+-blocker case uniformly.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 9 new tests in
+`crates/engine/tests/phase5_trample.rs` (unblocked trample is a no-op; a single trampling blocker now
+requires a split; the split correctly divides lethal-vs-excess; shorting a blocker's lethal blocks any
+excess from reaching the player; assigning everything to the blocker leaves the player untouched;
+multi-blocker trample; Deathtouch+trample needing only 1 damage to call a blocker lethal; the CR
+509.1h/510.1c bug-fix regression itself, both without and with trample per CR 702.19d), all prior
+tests unaffected (647 total, 0 failed) — including every pre-existing multi-blocker split test in
+`phase5_combat_damage.rs`/`phase5_first_strike.rs`, confirming the widened validation didn't change
+behavior for a non-trampling attacker.
+
+**STRUCT DEVIATIONS:** None — no new fields on any existing type, only the one new keyword bit and
+two new free functions in `commands.rs`, exactly as scoped going in.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- Trample over planeswalkers (CR 702.19c/e/f/g) stays unmodeled — a separate keyword this engine has
+  no reason to add until planeswalkers themselves exist (backlog item 16).
+- No `ContinuousEffectSpec`/TOML DSL support for `Trample` — same deliberate scope match with the
+  layer-engine sub-slices immediately before this one; test fixtures build it via the Rust keyword
+  bitflag directly.
+- Banding, and the rest of CR 702's combat-keyword list beyond first/double strike/trample, are still
+  unbuilt — updated the "Known unresolved gaps" list (above) to reflect trample closing rather than
+  leaving it stale.
