@@ -818,6 +818,7 @@ fn parse_keywords(names: &[String]) -> KeywordSet {
             "Infect" => KeywordSet::INFECT,
             "FirstStrike" => KeywordSet::FIRST_STRIKE,
             "DoubleStrike" => KeywordSet::DOUBLE_STRIKE,
+            "Trample" => KeywordSet::TRAMPLE,
             other => panic!("unknown keyword in scenario file: {other}"),
         };
     }
