@@ -2388,24 +2388,42 @@ impl Engine {
                 self.pipeline_exit = PipelineExit::BackToPriority;
 
                 // CR 608.2b: before doing anything else, recheck every
-                // target against current game state. Only fizzles if there
-                // was a real (count > 0) requirement and every target now
-                // fails it - a requirement of `None`/count 0 never fizzles,
-                // same as if it had no targets to begin with.
+                // target against current game state. `legal_targets` is the
+                // subset of `top.targets` that's still legal right now -
+                // used both for the fizzle decision below (every target
+                // illegal -> `legal_targets` empty -> full fizzle, CR
+                // 608.2b's first sentence) and, when it's not empty, by the
+                // effect-resolution arms further down to skip only the
+                // individually-illegal targets rather than guessing which
+                // one the original single-target-only code path meant (CR
+                // 608.2b's second sentence - "still resolves, but it won't
+                // affect those targets that are illegal, if any").
+                let legal_targets: Vec<Target> = match &top.target_requirement {
+                    Some(TargetSpec::Primitive(req)) => top
+                        .targets
+                        .iter()
+                        .copied()
+                        .filter(|t| {
+                            commands::target_is_legal(
+                                &self.state,
+                                &self.script_runtime,
+                                *t,
+                                &req.filter,
+                                top.controller,
+                            )
+                        })
+                        .collect(),
+                    // `None` (no targets required) or a `Script`-backed
+                    // requirement (not evaluable this slice, see
+                    // `TargetSpec`'s own doc comment) - every submitted
+                    // target passes through unfiltered, same as before this
+                    // slice.
+                    _ => top.targets.clone(),
+                };
                 let fizzles = match &top.target_requirement {
-                    Some(TargetSpec::Primitive(req)) if req.count > 0 => top.targets.iter().all(|t| {
-                        !commands::target_is_legal(
-                            &self.state,
-                            &self.script_runtime,
-                            *t,
-                            &req.filter,
-                            top.controller,
-                        )
-                    }),
-                    // `None` (no targets required), count-0 requirement, or
-                    // a `Script`-backed requirement (not evaluable this
-                    // slice, see `TargetSpec`'s own doc comment) - never
-                    // fizzles.
+                    // A requirement of `None`/count 0 never fizzles, same as
+                    // if it had no targets to begin with.
+                    Some(TargetSpec::Primitive(req)) if req.count > 0 => legal_targets.is_empty(),
                     _ => false,
                 };
 
@@ -2545,14 +2563,20 @@ impl Engine {
                             // commander-damage tracking only counts CR 510
                             // combat damage, never a spell/ability's own
                             // damage effect, even from a commander source.
-                            // Single fixed target only (top.targets.first())
-                            // - no "divide among any number of targets" shape
-                            // yet, same narrowing targeting-basics already
-                            // established. Empty targets is a silent no-op
-                            // (shouldn't be reachable given cast-time target
-                            // validation) rather than a panic.
+                            // CR 601.2d: every *legal* target takes the full
+                            // `amount` independently - "divide as you
+                            // choose" (a player-chosen split among targets)
+                            // isn't modeled, still a real, named gap, not
+                            // silently guessed at. CR 608.2b: a target that's
+                            // individually illegal by now is skipped (not a
+                            // fizzle of the whole spell/ability - that
+                            // decision already happened above), which is
+                            // exactly what `legal_targets` already is. Empty
+                            // targets is a silent no-op (shouldn't be
+                            // reachable given cast-time target validation)
+                            // rather than a panic.
                             Some(AbilityEffect::Damage(amount)) => {
-                                if let Some(target) = top.targets.first() {
+                                for target in &legal_targets {
                                     events.push(GameEventKind::DamageDealt {
                                         source: top.source,
                                         target: *target,
@@ -2561,22 +2585,28 @@ impl Engine {
                                     });
                                 }
                             }
-                            // CR 701.17/614.13: sacrifice the first chosen
-                            // target — identical to the Destroy arm below
-                            // except indestructibility is never checked (CR
-                            // 702.12b is Destroy-specific; sacrifice bypasses
-                            // it). commit_death is reusable here (unlike
-                            // Exile) because the destination is the owner's
-                            // per-player graveyard (Some(owner)), not the
-                            // shared Exile zone. Dies/LeavesBattlefield
-                            // triggers fire the same way as SBA-driven death.
+                            // CR 701.17/614.13: sacrifice every legal
+                            // target independently — identical to the
+                            // Destroy arm below except indestructibility is
+                            // never checked (CR 702.12b is Destroy-specific;
+                            // sacrifice bypasses it). commit_death is
+                            // reusable here (unlike Exile) because the
+                            // destination is the owner's per-player
+                            // graveyard (Some(owner)), not the shared Exile
+                            // zone. Dies/LeavesBattlefield triggers fire the
+                            // same way as SBA-driven death. A non-Object
+                            // legal target (a `Target::Player`, if this were
+                            // ever paired with a filter that allowed one) is
+                            // skipped, same "silent no-op" stance as before.
                             // TODO: "sacrifice a permanent you control"
                             // (player chooses at resolution) needs coroutines
                             // — blocked on backlog item 9.
                             // TODO(CR 616.1): same deferred ordering-choice
                             // gap as Destroy.
                             Some(AbilityEffect::Sacrifice) => {
-                                if let Some(Target::Object(id)) = top.targets.first().copied() {
+                                for target in &legal_targets {
+                                    let Target::Object(id) = target else { continue };
+                                    let id = *id;
                                     let last_known_info = self
                                         .state
                                         .object(id)
@@ -2618,7 +2648,14 @@ impl Engine {
                             // Engine::submit_payment already uses for a
                             // Sacrifice cost payment.
                             Some(AbilityEffect::Destroy) => {
-                                if let Some(Target::Object(id)) = top.targets.first().copied() {
+                                // Every legal target, independently - a
+                                // Target::Player (Destroy only ever affects a
+                                // permanent) is skipped, shouldn't be
+                                // reachable given cast-time target validation
+                                // against a real card's filter.
+                                for target in &legal_targets {
+                                    let Target::Object(id) = target else { continue };
+                                    let id = *id;
                                     let last_known_info = self
                                         .state
                                         .object(id)
@@ -2669,10 +2706,6 @@ impl Engine {
                                     // same "skip rather than guess" stance as
                                     // everywhere else in this file.
                                 }
-                                // else: no target, or a Target::Player (Destroy
-                                // only ever affects a permanent) - silent no-op,
-                                // shouldn't be reachable given cast-time target
-                                // validation against a real card's filter.
                             }
                             // CR 701.18: exile the first chosen target from the
                             // battlefield. Unlike Destroy, indestructibility is
@@ -2693,7 +2726,12 @@ impl Engine {
                             // the same scripted Exile can't pause for an
                             // ordering choice - same deferred gap as Destroy.
                             Some(AbilityEffect::Exile) => {
-                                if let Some(Target::Object(id)) = top.targets.first().copied() {
+                                // Every legal target, independently - a
+                                // Target::Player is skipped, same "silent
+                                // no-op" stance as before this slice.
+                                for target in &legal_targets {
+                                    let Target::Object(id) = target else { continue };
+                                    let id = *id;
                                     let last_known_info = self
                                         .state
                                         .object(id)
@@ -2760,19 +2798,21 @@ impl Engine {
                                     }
                                     // else: target already left the battlefield - nothing to exile.
                                 }
-                                // else: no target, or a Target::Player - silent no-op.
                             }
                             // CR 122.1a: same "push an unapplied event, let
                             // CommitEvents retroactively apply it" pattern as
                             // Damage above - GameEventKind::CounterAdded
-                            // already existed with this exact shape (dead
-                            // code until now). Object targets only - a
-                            // Target::Player or empty targets is a silent
-                            // no-op, same stance every other arm here takes.
+                            // already existed with this exact shape. Every
+                            // legal target gets the full `amount`
+                            // independently, same CR 601.2d "no division
+                            // modeled" stance as Damage. Object targets only
+                            // - a Target::Player is skipped, same stance
+                            // every other arm here takes.
                             Some(AbilityEffect::Counters { kind, amount }) => {
-                                if let Some(Target::Object(id)) = top.targets.first().copied() {
+                                for target in &legal_targets {
+                                    let Target::Object(id) = target else { continue };
                                     events.push(GameEventKind::CounterAdded {
-                                        object: id,
+                                        object: *id,
                                         kind: kind.clone(),
                                         amount: *amount,
                                     });
