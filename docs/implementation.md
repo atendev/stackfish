@@ -2063,7 +2063,54 @@ shift, don't treat it as fixed once written.
       PowerToughnessSwitching`/`Game.Effects.SwitchPT` binding pair, same as every other real layer.
    5. Layers 1/2/3 (copy/control/text-changing) and the CR 613.6-8 dependency system — each needs
       its own real subsystem (copy-object semantics, control-transfer command, text-rewrite
-      representation, dependency detection), not just a query extension. Stay last.
+      representation, dependency detection), not just a query extension. Turned out to be four
+      more slices, not one - split below (research pass over `layers.rs`/`types/effect.rs`/
+      `types/object.rs`/`types/command.rs` before splitting, not guessed at), ordered by what's
+      actually self-contained vs. what blocks on something else:
+      5a. **Dependency system (CR 613.6-8)** — `layers.rs`'s `applicable_effects_in_layer` sorts
+          effects within a layer by `timestamp` only (a plain `sort_by_key`, no dependency
+          detection at all) - `Layer`'s own doc comment already names this as a real gap, not a
+          hypothetical one. Decoupled from layers 1/2/3 below - dependency can already occur among
+          today's *implemented* layers (e.g. a script-backed `ModifyPT`/`AddCardType` effect whose
+          own calculation reads another effect's current output), so this doesn't need to wait on
+          copy/control/text-changing to exist first. CR 613.8a's "depends on" test (same layer/
+          sublayer, applying the other would change the first's text/existence/targets/effect, not
+          both CDAs) plus 613.8b's wait-until-resolved ordering and 613.8c's re-evaluate-after-each-
+          step requirement (a genuine topological-ish sort with cycle detection, re-run per
+          application, not a one-time stable sort) is the real algorithmic core here - the fiddly
+          part is the reordering logic, not new data plumbing.
+      5b. **Layer 2 (control-changing effects, CR 613.1b/108.4)** — `GameObject.controller` is read
+          everywhere (targeting, combat, triggers, `layers.rs` itself) but mutated nowhere except at
+          object construction; `controlled_since_turn`'s own doc comment already flags "no 'gain
+          control' effect exists in this engine" as the reason summoning-sickness tracking can't
+          react to a control change yet. Also closes two gaps flagged and deliberately left open by
+          earlier slices: 11b's `StackObject.controller`-as-owner-stand-in (CR 800.4a/800.4c, "no
+          control-changing effect exists yet to make the distinction observable") and the general
+          "no 'gain control of target permanent' effect" gap named in the targeting/layer-engine
+          slices. Self-contained - no dependency on 5a/5c/5d. Real design question to resolve during
+          this slice's own requirements pass (not decided here): whether control is a genuine
+          layer-7-style live query (recomputed every time, like P/T) or a durable state mutation
+          with its own expiry tracking - CR 613.1b's placement in the layer list is about relative
+          *timestamp* ordering against other effects, not necessarily proof it must be query-shaped
+          like layers 4-7e are.
+      5c. **Layer 1 (copy effects, CR 613.1a/613.2, CR 707 "Copying Objects")** — nothing exists:
+          no copy/clone command, no copiable-values snapshot distinct from `CardDefinition`, no
+          "create a token that's a copy of object X" path (`AbilityEffect::CreateToken` only builds
+          from its own `TokenSpec` today). **Correction to this item's own pre-existing doc
+          comment** (`types/effect.rs`'s `Layer::CopyEffects`): it cites CR 706, which is actually
+          the dice-rolling rule - the real governing rule is CR 707. Largest of the four sub-slices:
+          CR 707.2b's "a copy freezes at copy-time, doesn't track the original afterward" needs a
+          real distinct copiable-values concept, not just a pointer back to the source
+          `CardDefinition`. Foundational for the other layers (1 feeds 2-7) but not blocking them
+          today, since they all still read `CardDefinition` directly - a real implementation here
+          would ideally sit underneath 5b/5d once both exist, but doesn't have to land first.
+      5d. **Layer 3 (text-changing effects, CR 613.1c/612)** — nothing exists; `oracle_text` is a
+          plain `String`, never parsed or treated as overridable anywhere in engine logic. Smallest
+          of the four *if* scoped narrowly (CR 612.8's name-setting case is the common real-world
+          one) - scoped to CR 612.2's general "correct usage" in-text word substitution instead, this
+          is actually the most open-ended of the four, since nothing parses `oracle_text` at all
+          today. Recommend narrowing hard to name-setting only when this slice's own requirements
+          pass happens, not deciding the general case unilaterally now.
 2. ~~**Targeting system**~~ — done, `phase5/targeting-basics` slice (docs/implementation.md,
    below). `CastSpell`/`ActivateAbility` now validate count/filter/dedup before pushing to the
    stack (CR 601.2c-e/602.2b), and `ResolveStackTop` fizzles on CR 608.2b (all targets illegal at

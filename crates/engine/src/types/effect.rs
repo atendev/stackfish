@@ -14,11 +14,13 @@ use crate::types::cost::FilterController;
 /// in `state.continuous_effects` can be built against them yet and the query
 /// doesn't look for them:
 ///
-/// TODO(layer 1, CopyEffects): needs real copy-object semantics (CR 706 —
-/// becoming a copy of another object/printed values), which nothing in this
-/// engine models at all yet (no "copy" command, no copiable-values snapshot
-/// distinct from `CardDefinition`). Blocks any "create a token that's a copy
-/// of X" / clone effect.
+/// TODO(layer 1, CopyEffects): needs real copy-object semantics (CR 707,
+/// "Copying Objects" — becoming a copy of another object/printed values;
+/// not CR 706, which is die-rolling), which nothing in this engine models
+/// at all yet (no "copy" command, no copiable-values snapshot distinct from
+/// `CardDefinition`). Blocks any "create a token that's a copy of X" /
+/// clone effect. See docs/implementation.md's backlog item 5c for the
+/// planned slice.
 ///
 /// TODO(layer 2, ControlChangingEffects): needs a real control-transfer
 /// mechanism (CR 108.4/613.1 layer 2) — `GameObject.controller` exists and
