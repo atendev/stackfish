@@ -53,10 +53,22 @@ impl AtomicManaSymbol {
     /// Colors this atom contributes to a card's color (CR 202.2) — empty for
     /// `Generic`/`Colorless`/`Snow`.
     pub fn colors(&self) -> ColorSet {
-        // TODO: Colored(c) -> ColorSet with just c set. Phyrexian(c) -> same
-        // (CR 107.4f: Phyrexian symbols are colored symbols). Generic/
-        // Colorless/Snow -> ColorSet::empty().
-        todo!()
+        match self {
+            AtomicManaSymbol::Colored(c) | AtomicManaSymbol::Phyrexian(c) => {
+                let mut set = ColorSet::empty();
+                set.insert(match c {
+                    Color::White => ColorSet::WHITE,
+                    Color::Blue => ColorSet::BLUE,
+                    Color::Black => ColorSet::BLACK,
+                    Color::Red => ColorSet::RED,
+                    Color::Green => ColorSet::GREEN,
+                });
+                set
+            }
+            AtomicManaSymbol::Generic(_) | AtomicManaSymbol::Colorless | AtomicManaSymbol::Snow => {
+                ColorSet::empty()
+            }
+        }
     }
 }
 
@@ -82,10 +94,11 @@ impl ManaSymbol {
     /// a hybrid symbol is all of its component colors (CR 107.4e/f), not
     /// just one.
     pub fn colors(&self) -> ColorSet {
-        // TODO: Atom(a) -> a.colors(). Hybrid(a, b) -> a.colors() | b.colors()
-        // (CR 107.4e/f: a hybrid symbol is all of its component colors).
-        // X -> ColorSet::empty() (X has no inherent color).
-        todo!()
+        match self {
+            ManaSymbol::Atom(a) => a.colors(),
+            ManaSymbol::Hybrid(a, b) => a.colors() | b.colors(),
+            ManaSymbol::X => ColorSet::empty(),
+        }
     }
 }
 
@@ -124,8 +137,7 @@ impl ManaCost {
 
     /// Union of colors across all symbols (CR 202.2).
     pub fn colors(&self) -> ColorSet {
-        // TODO: union ManaSymbol::colors() across self.symbols.
-        todo!()
+        self.symbols.iter().fold(ColorSet::empty(), |acc, s| acc | s.colors())
     }
 
     /// Whether this cost has an `{X}` in it (CR 107.3a) — the caller's cue

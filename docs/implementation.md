@@ -2343,6 +2343,12 @@ shift, don't treat it as fixed once written.
     honest forward zone-change/removal instead, marked by a new `GameEventKind::CastingUnwound`.
 16. **Planeswalkers/Battles/DFCs/split/Sagas** — explicit non-goals in DESIGN.md's v1 scope;
     lowest priority unless that scope changes.
+17. ~~**Commander color identity (CR 903.4/903.5c/d)**~~ — done, `phase5/color-identity` slice
+    (docs/implementation.md, below). DESIGN.md originally scoped this out entirely ("not in scope
+    for the engine itself unless deck validation is wanted later") - revisited as a small,
+    self-contained slice once the rest of the Commander sub-sequence (item 11) closed. Pure query
+    functions (`crates/engine/src/color_identity.rs`), not enforced by `Engine::new_game` or any
+    command.
 
 ## Phase 5: phase5/layer-engine-basics slice
 
@@ -6437,3 +6443,76 @@ confirmed with the human before implementation started, not decided unilaterally
 - This closes the entire 11a-11e Commander sub-sequence (backlog item 11). Only the item's own
   explicit non-goal remains: color identity/deck-construction legality, already scoped out by
   DESIGN.md.
+
+## Phase 5: phase5/color-identity slice
+
+Branch `phase5/color-identity`, off master. Closes backlog item 17 - DESIGN.md's own "explicitly
+out of scope unless revisited" open question, revisited now that the rest of the Commander
+sub-sequence (item 11) is closed.
+
+**Scope decision confirmed with the human before writing code:** whether CR 903.5c/d deck legality
+should be automatically enforced by `Engine::new_game` (changing its signature to
+`Result<Engine, _>`, an interface break touching every existing call site) or exposed as a pure
+query a caller checks itself. Confirmed: pure query only - matches the precedent the
+commander-marking slice (11c) already set for CR 903.3a ("can be your commander" card text also
+isn't engine-enforced, chosen at `GameConfig`/scenario-setup time regardless of what the card's own
+text says).
+
+**What got implemented:**
+- Filled in four pre-existing `todo!()` stubs that turned out to be entirely dead code (zero
+  callers anywhere) and exact prerequisites for this slice: `AtomicManaSymbol::colors`/
+  `ManaSymbol::colors`/`ManaCost::colors` (mana.rs, CR 202.2/107.4e-f) and `CardDefinition::colors`
+  (card.rs, CR 105.2a) - each implemented exactly per its own pre-existing doc comment, not
+  redesigned.
+- New `crates/engine/src/color_identity.rs`: `color_identity(card) -> ColorSet` (CR 903.4) unions
+  `CardDefinition::colors()` with every mana symbol found in `oracle_text`, after stripping
+  parenthetical reminder text first (CR 903.4c) - each `{...}` group found by a plain brace scan is
+  parsed via the existing public `ManaCost::parse` (rewrapped in its own braces) rather than
+  duplicating `mana.rs`'s private symbol-group grammar. `commander_color_identity(commanders)` (CR
+  702.124c) unions across Partner commanders. `illegal_cards_for_color_identity(identity, cards)`
+  (CR 903.5c) filters to cards whose own identity isn't a subset - CR 903.5d (basic lands) needed no
+  separate logic, since a basic land's own `{T}: Add {G}`-shaped oracle text is already covered by
+  the same general mechanism.
+
+**Regression avoided, not introduced:** none - the four `todo!()` fills had no existing callers to
+regress, confirmed via a repo-wide search before writing them.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 609 passed, 0 failed (595 prior + 14 new,
+in new `crates/engine/tests/phase5_color_identity.rs`): `ManaCost::colors` correctly unions colored/
+hybrid (both colors)/Phyrexian (counts as colored) symbols and excludes generic/colorless/snow;
+`CardDefinition::colors` falls back from color indicator to mana-cost colors to colorless correctly;
+CR 903.4's own worked example reproduced verbatim (Bosh, Iron Golem: `{8}` cost, red identity from
+its ability text alone); reminder text is excluded (a card whose only colored symbol sits in
+parentheses has empty identity); a card's identity includes colors from both its mana cost and its
+rules text together; Partner commander union works; CR 903.5c's own worked example reproduced
+verbatim (Wort, the Raidmother: a red card legal, a blue card illegal under her red/green identity);
+basic land legality falls out of the general mechanism correctly (a Forest legal under green,
+illegal under mono-blue, and vice versa for a Mountain). All 595 prior tests unaffected. No CLI
+scenario for this slice - these are pure library functions with no `PlayerAction`/command surface to
+drive through the TOML → Engine → CLI pipeline (nothing in the real engine pipeline calls them,
+matching the confirmed "not wired into `new_game`" scope decision), so Rust test coverage is the
+whole verification story here, same as any other pure-function slice (e.g. `cost.rs`'s
+`apply_cost_delta`).
+
+**STRUCT DEVIATIONS:** None - no new fields on any existing type, only new free functions in a new
+module.
+
+**INTERFACE DEVIATIONS:** None beyond what the pre-slice report scoped - `color_identity`/
+`commander_color_identity`/`illegal_cards_for_color_identity` were all named directly, with the
+exact signatures used.
+
+**SCOPE DEVIATIONS:** None - the four `todo!()` fills were anticipated in the pre-slice report
+("small side-effect... fills in several `todo!()` stubs"), not discovered mid-slice.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- Colors defined by characteristic-defining abilities (CR 903.4's own CDA clause) aren't included -
+  no color-CDA mechanism exists in this engine (only P/T CDAs, via `PTValue::CharacteristicDefining`).
+- A double-faced card's back face (CR 903.4d) and Adventure alternative characteristics (CR 903.4e)
+  aren't included - neither mechanic exists in this engine (explicit non-goals elsewhere in this
+  backlog).
+- CR 903.4b (a commander granting a player a color choice before the game) isn't modeled - no card
+  in this engine's test surface produces that kind of pregame choice.
+- CR 903.5a/b (100-card deck size, unique English names) stay explicitly out of scope -
+  `PlayerConfig.library: Vec<CardDefinition>` has no deck-list identity to check either rule
+  against; a caller assembling one from an external decklist would need to enforce these itself
+  before ever building a `GameConfig`.

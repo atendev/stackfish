@@ -302,11 +302,10 @@ impl CardDefinition {
     /// Per CR 105.2a: color comes from mana cost symbols and/or an explicit
     /// `color_indicator`, not stored as its own redundant field.
     pub fn colors(&self) -> ColorSet {
-        // TODO: CR 105.2a: if color_indicator is Some, use it as-is.
-        // Otherwise union mana_cost.colors() across all symbols (delegate to
-        // ManaCost::colors, mana.rs). A card with no colored symbols and no
-        // indicator is colorless (empty ColorSet), not an error.
-        todo!()
+        match self.color_indicator {
+            Some(indicator) => indicator,
+            None => self.mana_cost.colors(),
+        }
     }
 
     pub fn has_type(&self, card_type: CardType) -> bool {

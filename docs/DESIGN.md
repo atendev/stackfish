@@ -112,8 +112,11 @@ adaptation doc, unchanged from the original plan:
   players; APNAP = active player first, then remaining players in turn order.
 - Commander-specific: Command zone holds commander(s), commander tax (generic cost increase per
   prior cast from command zone), commander damage (21 cumulative from a single commander source ->
-  that player loses), color identity (affects deck legality, not in scope for the engine itself
-  unless deck validation is wanted later), player elimination without ending the whole game.
+  that player loses), color identity (CR 903.4/903.5c/d/702.124c - `color_identity`/
+  `commander_color_identity`/`illegal_cards_for_color_identity` in `crates/engine/src/
+  color_identity.rs`; pure query functions, not enforced by `Engine::new_game` or any command - a
+  deck-builder or test harness calls them itself, same "engine trusts the setup" stance CR 903.3a's
+  commander eligibility already takes), player elimination without ending the whole game.
 - Multiplayer affects: attack target selection (attacking player chooses among multiple
   opponents), trigger/SBA evaluation across N players, what happens to zones the affected
   state when a player is eliminated (their cards leave the game — exile, generally).
@@ -141,8 +144,10 @@ adaptation doc, unchanged from the original plan:
 - [ ] Snapshot/checkpoint strategy for the event ledger — replaying from event 0 every time you
       want state at event N works for v1, may need periodic snapshots later for performance. Not
       a v1 concern.
-- [ ] Deck/format legality validation (color identity for Commander, etc.) — explicitly out of
-      scope unless revisited.
+- [x] Deck/format legality validation (color identity for Commander) — resolved as pure query
+      functions (`crates/engine/src/color_identity.rs`, CR 903.4/903.5c/d), not automatically
+      enforced anywhere. Card-count/unique-name deck-list rules (CR 903.5a/b) stay out of scope —
+      `PlayerConfig` has no deck-list concept to check.
 
 ## Verification
 
