@@ -87,6 +87,13 @@ pub struct GamePlayerSpec {
     /// Card keys (from `[[cards]]`) in library order, top to bottom. May repeat.
     #[serde(default)]
     pub library: Vec<String>,
+    /// CR 903.6: card keys (from `[[cards]]`) for this player's commander(s)
+    /// — placed in the command zone by `Engine::new_game` instead of being
+    /// shuffled into `library`. A list (not a single key) since Partner
+    /// commanders mean more than one is legal. Empty (the default) for a
+    /// non-Commander game.
+    #[serde(default)]
+    pub commanders: Vec<String>,
     /// Overrides `settings.starting_life` for this player only.
     pub life_override: Option<u32>,
 }
@@ -316,6 +323,13 @@ pub struct SetupEntry {
     /// control" producer.
     #[serde(default)]
     pub damage_marked: u32,
+    /// CR 903.3: marks this specific setup instance as its player's
+    /// commander. Only meaningful paired with `zone = "command"`, but not
+    /// enforced here — casting/legality checks are the engine's job, not
+    /// the scenario loader's (same "engine trusts the setup" stance every
+    /// other `[[setup]]` field already takes).
+    #[serde(default)]
+    pub is_commander: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1054,6 +1068,7 @@ pub fn build_initial_state(
             timestamp: SequenceNo(0),
             controlled_since_turn: entry.controlled_since_turn,
             is_token: false,
+            is_commander: entry.is_commander,
             visibility: VisibilityPolicy { public, visible_to: Vec::new() },
         };
 
@@ -1130,6 +1145,7 @@ pub fn build_initial_state(
         next_object_id,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     };
 
     (state, card_ids, trigger_scripts)
@@ -1326,6 +1342,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             StepStatus::AwaitingAction { .. }
             | StepStatus::AwaitingReplacementChoice { .. }
             | StepStatus::AwaitingLegendRuleChoice { .. }
+            | StepStatus::AwaitingCommanderReturnChoice { .. }
             | StepStatus::AwaitingScriptChoice { .. }
             | StepStatus::AwaitingScryChoice { .. }
             | StepStatus::AwaitingSurveilChoice { .. }
@@ -1523,7 +1540,39 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 modes: Vec::new(),
             }
         }).collect();
-        PlayerConfig { player_id: PlayerId(gp.id), library, life_override: gp.life_override }
+        // CR 903.6: minted after this player's library, matching
+        // `Engine::new_game`'s own id-allocation order exactly (library
+        // cards first, then commanders, per player) - see this block's own
+        // leading comment on why `card_ids`/`next_id` have to mirror that
+        // order precisely.
+        let commanders = gp.commanders.iter().map(|key| {
+            let spec = card_specs.get(key.as_str())
+                .unwrap_or_else(|| panic!("game.players commanders references unknown card key '{key}'"));
+            card_ids.insert(key.clone(), ObjectId(next_id));
+            next_id += 1;
+            let symbols = mana_symbols(spec.generic_cost, &spec.colors);
+            CardDefinition {
+                definition_id: 0,
+                name: spec.name.clone(),
+                mana_cost: ManaCost { symbols },
+                color_indicator: None,
+                supertypes: SupertypeSet::empty(),
+                card_types: parse_card_types(&spec.types),
+                subtypes: Vec::new(),
+                oracle_text: String::new(),
+                power: build_pt(spec.power, &spec.power_script),
+                toughness: build_pt(spec.toughness, &spec.toughness_script),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
+                keywords: parse_keywords(&spec.keywords),
+                target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
+                alternative_costs: Vec::new(),
+                effect: None,
+                modes: Vec::new(),
+            }
+        }).collect();
+        PlayerConfig { player_id: PlayerId(gp.id), library, commanders, life_override: gp.life_override }
     }).collect();
 
     let turn_order: Vec<PlayerId> = if game.turn_order.is_empty() {

@@ -73,6 +73,7 @@ fn permanent(
         timestamp: SequenceNo(0),
         controlled_since_turn,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -132,6 +133,7 @@ fn combat_state() -> GameState {
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     }
 }
 
@@ -382,6 +384,7 @@ fn hand_state_outside_main_phase(keywords: KeywordSet) -> (GameState, ObjectId) 
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     };
     let object = permanent(card, creature_definition("Ambusher", 2, 2, keywords), p0, 0);
     state.objects.insert(card, object);

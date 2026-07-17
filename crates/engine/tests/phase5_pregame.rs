@@ -48,11 +48,13 @@ fn two_player_config(p0_cards: usize, p1_cards: usize, settings: GameSettings) -
             PlayerConfig {
                 player_id: p0,
                 library: (0..p0_cards).map(|i| plain_card_def(&format!("p0_card_{i}"))).collect(),
+                commanders: Vec::new(),
                 life_override: None,
             },
             PlayerConfig {
                 player_id: p1,
                 library: (0..p1_cards).map(|i| plain_card_def(&format!("p1_card_{i}"))).collect(),
+                commanders: Vec::new(),
                 life_override: None,
             },
         ],
@@ -165,11 +167,13 @@ fn life_override_per_player() {
             PlayerConfig {
                 player_id: p0,
                 library: (0..7).map(|i| plain_card_def(&format!("c{i}"))).collect(),
+                commanders: Vec::new(),
                 life_override: Some(40), // commander life
             },
             PlayerConfig {
                 player_id: p1,
                 library: (0..7).map(|i| plain_card_def(&format!("d{i}"))).collect(),
+                commanders: Vec::new(),
                 life_override: None, // use default (20)
             },
         ],

@@ -63,6 +63,7 @@ fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -
         timestamp: SequenceNo(0),
         controlled_since_turn: 0,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -121,6 +122,7 @@ fn state_with_ability(source: ObjectId, controller: PlayerId, effect: AbilityEff
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     }
 }
 

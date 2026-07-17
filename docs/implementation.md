@@ -2279,11 +2279,16 @@ shift, don't treat it as fixed once written.
        verification (a solo test fixture's own empty-library-on-turn-1 quirk got treated as a real
        elimination and had its objects wiped) — fixed with a `turn_order.len() >= 2` guard, not
        worked around.
-    11c. **Commander marking + casting from the command zone** — no "is this a commander" concept
-       exists anywhere (`PlayerState`/`GameObject`/`CardDefinition` all lack it, checked).
-       `ZoneKind::Command` exists as an enum variant but is fully inert - nothing is ever placed there
-       or cast from it (`CastSpell` only reads `Hand` or an `AlternativeCost::Replacement` zone).
-       Foundational for 11d/11e below.
+    11c. ~~**Commander marking + casting from the command zone**~~ — done, `phase5/commander-
+       marking-and-casting` slice (docs/implementation.md, below). `GameObject.is_commander: bool`
+       (CR 903.3, rides along automatically through every real zone-change clone in this crate);
+       `CastSpell` accepts a commander cast from the command zone by its owner (CR 903.8, normal
+       mana cost, tax deferred to 11d); `Engine::new_game`/`PlayerConfig.commanders` mints them into
+       a real command zone (CR 903.6). Scope grew by one deliberate, human-confirmed addition beyond
+       the literal text: CR 903.9a (owner may return a commander from graveyard/exile to the command
+       zone) — without it a commander could only ever be cast once per game, leaving 11d/11e
+       untestable through real repeated-death gameplay. 903.9b (hand/library redirect) stays
+       deferred.
     11d. **Commander tax (CR 903.9)** — generic cost +{2} per prior cast from the command zone this
        game. Small increment on top of 11c.
     11e. **Commander damage production** — closes backlog item 10's own dangling note (that slice's
@@ -6152,3 +6157,103 @@ report but was the obvious mechanical counterpart to constructing the already-de
 - Teams/Emperor multiplayer variants (CR 104.2c/d, 104.3g/i) — explicitly out of scope, this engine
   has no team concept.
 - Backlog items 11c/11d/11e (Commander marking/tax/damage) — separate slices, not attempted here.
+
+## Phase 5: phase5/commander-marking-and-casting slice
+
+Branch `phase5/commander-marking-and-casting`, off master. Closes backlog item 11c.
+
+**Scope decision made before writing code, per the pre-slice report:** the literal backlog text
+("marking + casting from the command zone") would only ever exercise a commander once per game —
+without some return-to-command-zone path, a commander that dies just sits in the graveyard forever,
+leaving 11d's tax counter and 11e's repeated-recast scenarios untestable through real gameplay
+(the same "inert until the next slice" gap 11e is itself closing for backlog item 10). Confirmed
+with the human before starting: CR 903.9a (owner may return a commander from graveyard/exile to the
+command zone — a genuine SBA-driven player choice) is included in this slice; CR 903.9b (the rarer
+hand/library-redirect replacement effect) stays deferred.
+
+**What got implemented:**
+- `GameObject.is_commander: bool` (types/object.rs) — CR 903.3: an attribute of the specific card
+  object, not its `CardDefinition` (a definition can be shared by non-commander copies). Every real
+  zone-change site in this crate builds the successor object via an explicit struct literal or a
+  `.clone()` of the original (`GameObject::new` itself is dead code, `todo!()`, never called) — so
+  adding this field made the compiler enumerate every construction site as a `E0063` error until
+  each one explicitly chose `is_commander: object.is_commander` (zone-move sites, via `.clone()` —
+  automatic, no site touched) vs `is_commander: false` (freshly-minted tokens). Self-auditing, not
+  guessed at.
+- `commands.rs`'s `CastSpell` zone-permission check gained a third legal source alongside
+  `Hand`/`AlternativeCost::Replacement`: `object.is_commander && object.zone == ZoneKind::Command &&
+  object.owner == command.actor` (CR 903.8's "owner," not controller — matches the rule text). No
+  alternative cost involved — normal mana cost, just a different source zone (the tax itself is
+  11d's job).
+- `PlayerConfig.commanders: Vec<CardDefinition>` (types/config.rs) — a `Vec`, not `Option`
+  (DESIGN.md: "Command zone holds commander(s)," plural, for Partner). `Engine::new_game` mints
+  these with `is_commander: true` into a new per-player `ZoneKind::Command` zone, right after that
+  player's library (same id-allocation order the scenario crate's `card_ids` tracking depends on
+  matching exactly — see below).
+- CR 903.9a: `sba::find_commander_return_candidate` (mirrors `find_legend_rule_group`'s exact
+  shape) finds the first (by `ObjectId`, for determinism) commander sitting in a graveyard or exile
+  not yet in the new `GameState.commander_return_offered: HashSet<ObjectId>` — a one-time-per-arrival
+  window (CR 903.9a's "since state-based actions were last checked"), so a *declined* offer isn't
+  re-asked every subsequent pass. New `SbaOutcome::NeedsCommanderReturnChoice` /
+  `ProcessState::AwaitingCommanderReturnChoice` / `StepStatus::AwaitingCommanderReturnChoice` /
+  `Engine::submit_commander_return_choice(returned: bool)` — same pause/resume shape
+  `find_legend_rule_group`/`AwaitingLegendRuleChoice`/`submit_legend_rule_choice` already
+  established. Accepting calls new `sba::move_commander_to_command_zone` (graveyard/exile → command,
+  CR 400.7 new `ObjectId`, `is_commander` preserved via clone) — **deliberately NOT routed through
+  CR 614-616 replacement checking**, unlike `commit_death`/legend rule's own losers: no card in this
+  engine produces a competing replacement effect on this specific event yet, and 903.9b (the natural
+  vehicle for one) is out of scope this slice. Flagged below, not silently done.
+- Scenario TOML: `[[setup]]` gained `is_commander` (optional bool, default `false`) — `"command"`
+  already worked as a `[[setup]]` zone destination before this slice, just never paired with the
+  flag. `[[game.players]]` gained `commanders` (optional `Vec<String>` of card keys, mirroring
+  `library`) for the real `new_game` bootstrap path — minted after that player's `library` in the
+  scenario crate's own id-tracking, matching `Engine::new_game`'s allocation order exactly (both
+  loops share the same `next_id` counter, in the same sequence).
+
+**Regression avoided, not introduced:** none this time — the whole plumbing sweep (is_commander
+across ~30 test fixtures via a bulk `sed` insertion, `commander_return_offered` the same way,
+`PlayerConfig.commanders` at 4 call sites) came back to a clean `cargo test --workspace` on the
+first full run after the struct-literal churn, before any new commander-specific logic was added.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 583 passed, 0 failed (573 prior + 10 new,
+in new `crates/engine/tests/phase5_commander.rs`): a commander cast from the command zone keeps
+`is_commander` through both the Command→Stack and Stack→Battlefield CR 400.7 remaps; a non-commander
+card sitting in the command zone is rejected (the flag gates permission, not the zone alone); a
+commander owned by a different player is rejected; `Engine::new_game` with `PlayerConfig.commanders`
+populated places them in the command zone (not the library) with `is_commander: true`, and a
+commander-less player gets an empty (but present) command zone; a commander freshly in the graveyard
+pauses for the CR 903.9a choice; declining leaves it in the graveyard and marks it so a later pass
+doesn't re-ask; accepting moves it to the command zone under a new id with `is_commander` intact; a
+non-commander creature dying never pauses at all; `submit_commander_return_choice` outside the pause
+state is rejected. All 573 prior tests unaffected. Confirmed via the real CLI too:
+`cargo run -p stackfish-cli -- crates/engine/tests/scenarios/phase5_commander.toml` — 6/6 actions
+ran, 3/3 assertions passed (a command-zone commander cast for real through the TOML pipeline,
+resolving to the battlefield).
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice report scoped — `GameObject.is_commander`,
+`PlayerConfig.commanders`, and `GameState.commander_return_offered` were all named directly.
+
+**INTERFACE DEVIATIONS:** `Engine::submit_commander_return_choice`/`CommanderReturnChoiceError`
+weren't named by field/method name in the report, but were the obvious mechanical counterpart to
+the report's own "same pause/resume shape as legend rule" framing for CR 903.9a.
+
+**SCOPE DEVIATIONS:** None beyond the CR 903.9a inclusion itself, which was confirmed with the
+human as a scope question before implementation started (see above), not decided unilaterally
+mid-slice.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- CR 903.9b (a commander redirected from hand/library into the command zone instead — a replacement
+  effect) — deferred, rarer interaction than 903.9a, separate follow-up.
+- `move_commander_to_command_zone`'s zone move skips CR 614-616 replacement checking entirely (see
+  above) — a real gap once a card exists that would want to intercept this specific event.
+- CR 903.3a (a card granting "can be your commander" via its own text) — `commanders` is chosen at
+  `GameConfig`/scenario-setup time regardless of what the card's own text says, same "engine trusts
+  the setup" stance DESIGN.md already takes elsewhere.
+- CR 903.4/903.5 (color identity, deck-construction legality) — DESIGN.md already explicitly scopes
+  this out.
+- Melded/merged/partner commander edge cases (CR 903.3b/c) — no meld/merge mechanic exists in this
+  engine.
+- No scenario TOML action exists yet for `submit_commander_return_choice` (or, pre-existing gap,
+  `submit_legend_rule_choice` either) — drive both directly via `Engine` methods in a Rust test.
+- Backlog items 11d (commander tax) and 11e (commander damage production) — the two slices this one
+  was explicitly built to unblock, not attempted here.

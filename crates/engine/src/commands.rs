@@ -799,6 +799,17 @@ pub fn execute_command(
                 ),
                 None => None,
             };
+            // CR 903.8: a commander may be cast from the command zone by its
+            // owner (not just controller - matching the rule text) at the
+            // normal mana cost, no alternative cost announced. Checked
+            // before the general zone-permission rule below rather than
+            // folded into `required_zone`, since this path cares about
+            // ownership, not control, and only applies with no
+            // `alternative_cost` at all.
+            let cast_from_command_zone = alternative.is_none()
+                && object.is_commander
+                && object.zone == ZoneKind::Command
+                && object.owner == command.actor;
             // TODO: doesn't require casting from the graveyard specifically
             // for flashback's own zone permission to have been granted at
             // all (e.g. nothing here checks the card actually has a
@@ -811,7 +822,9 @@ pub fn execute_command(
                 Some(AlternativeCost::Replacement { from_zone, .. }) => *from_zone,
                 None => ZoneKind::Hand,
             };
-            if object.zone != required_zone || object.controller != command.actor {
+            if !cast_from_command_zone
+                && (object.zone != required_zone || object.controller != command.actor)
+            {
                 return Err(CommandError::IllegalAction(
                     "card is not in the zone required to cast it this way".to_string(),
                 ));
@@ -1829,6 +1842,7 @@ mod tests {
             next_object_id: 0,
             pending_step_skips: Vec::new(),
             once_per_turn_triggered: std::collections::HashSet::new(),
+            commander_return_offered: std::collections::HashSet::new(),
         }
     }
 

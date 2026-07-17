@@ -57,6 +57,15 @@ pub struct PlayerConfig {
     /// is true, the engine shuffles this before any draws occur; otherwise the
     /// order is preserved exactly as given (deterministic for testing).
     pub library: Vec<CardDefinition>,
+    /// CR 903.6: this player's designated commander(s), placed in the
+    /// command zone at game setup instead of being shuffled into `library`.
+    /// A `Vec` (not `Option`) since Partner commanders mean a player can
+    /// have more than one (DESIGN.md's Multiplayer/Commander section: "Command
+    /// zone holds commander(s)"). Empty for a non-Commander game — no
+    /// Command zone-specific behavior is reachable unless a `GameObject`
+    /// actually has `is_commander: true`, so an empty `Vec` here is a
+    /// complete no-op, not a special case.
+    pub commanders: Vec<CardDefinition>,
     /// Starting life total. If `None`, `GameSettings::starting_life` is used;
     /// if `Some`, this overrides the setting for this player only (e.g. for
     /// life-modifier vanguard cards or individual test overrides).

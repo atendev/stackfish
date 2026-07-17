@@ -64,6 +64,7 @@ fn base_state() -> GameState {
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     }
 }
 
@@ -116,6 +117,7 @@ fn legendary_creature(id: ObjectId, owner: PlayerId, name: &str, timestamp: u64)
         timestamp: SequenceNo(timestamp),
         controlled_since_turn: 0,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -140,6 +142,7 @@ fn world_permanent(id: ObjectId, owner: PlayerId, timestamp: u64) -> GameObject 
         timestamp: SequenceNo(timestamp),
         controlled_since_turn: 0,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
