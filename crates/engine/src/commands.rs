@@ -395,6 +395,38 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     departed_triggered
 }
 
+/// CR 800.4b: an eliminated player's turns and priority are skipped
+/// entirely. Walks forward from `after` in `turn_order`, wrapping, until it
+/// finds a player who hasn't left the game. Safe to call unconditionally —
+/// `Engine` never lets fewer than 2 non-eliminated players remain without
+/// constructing `GameOver` first (`finish_sba_loop`/`finish_cleanup_sba_check`
+/// in engine.rs), so this is guaranteed to find one before wrapping all the
+/// way back to `after` itself.
+pub(crate) fn next_active_player(state: &GameState, after: PlayerId) -> PlayerId {
+    let start_idx = state.turn_order.iter().position(|p| *p == after).unwrap_or(0);
+    for offset in 1..=state.turn_order.len() {
+        let idx = (start_idx + offset) % state.turn_order.len();
+        let candidate = state.turn_order[idx];
+        if !state.player(candidate).is_some_and(|p| p.eliminated) {
+            return candidate;
+        }
+    }
+    after
+}
+
+/// Every player still in the game, in `turn_order` order. Shared by the
+/// "everyone passed" threshold (`consecutive_passes` needs to count only
+/// players who can still be asked for priority) and the `GameOver` check
+/// (CR 104.2a: last one standing wins; CR 104.4a: zero remaining is a draw).
+pub(crate) fn non_eliminated_players(state: &GameState) -> Vec<PlayerId> {
+    state
+        .turn_order
+        .iter()
+        .copied()
+        .filter(|p| !state.player(*p).is_some_and(|pl| pl.eliminated))
+        .collect()
+}
+
 /// CR 400.7: moves `id` from `from`/`from_owner` to the graveyard, minting a
 /// fresh `ObjectId` (same convention every other zone move in this codebase
 /// uses) and purging any ability/continuous-effect the old id left behind
@@ -620,22 +652,19 @@ pub fn execute_command(
     match command.action {
         PlayerActionKind::PassPriority => {
             // CR 117.3c: priority moves to the next player in turn_order
-            // after whoever just passed. Read-only against turn_order -
-            // does not touch state.priority_player/consecutive_passes,
-            // both of which engine.rs owns (see PriorityHandoff/
-            // broke_pass_chain doc comments above).
-            let current_idx = state
-                .turn_order
-                .iter()
-                .position(|p| *p == command.actor)
-                .ok_or_else(|| {
-                    CommandError::IllegalAction("actor not in turn_order".to_string())
-                })?;
-            let next_idx = (current_idx + 1) % state.turn_order.len();
+            // after whoever just passed - skipping anyone eliminated (CR
+            // 800.4b). Read-only against turn_order - does not touch
+            // state.priority_player/consecutive_passes, both of which
+            // engine.rs owns (see PriorityHandoff/broke_pass_chain doc
+            // comments above).
+            if !state.turn_order.contains(&command.actor) {
+                return Err(CommandError::IllegalAction("actor not in turn_order".to_string()));
+            }
+            let next_player = next_active_player(state, command.actor);
             return Ok(CommandOutcome {
                 events: vec![GameEventKind::PriorityPassed { player: command.actor }],
                 broke_pass_chain: false,
-                priority_handoff: PriorityHandoff::To(state.turn_order[next_idx]),
+                priority_handoff: PriorityHandoff::To(next_player),
                 requires_payment: None,
                 battlefield_entries: Vec::new(),
             });

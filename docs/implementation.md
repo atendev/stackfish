@@ -2270,14 +2270,15 @@ shift, don't treat it as fixed once written.
        blockers_declared: bool` became `declared_defenders: Vec<PlayerId>` (CR 509.1 as a turn-based
        action repeated once per defending player, not once total); `combat.blocks` now accumulates
        across each defending player's own submission instead of one submission overwriting another.
-    11b. **Player elimination actually affects the game** — `sba::apply_player_loss` already marks
-       `eliminated=true` per player, N-safe. Nothing downstream reads it: turn order/priority still
-       hands an eliminated player turns, nothing exiles their zones' contents, and `StepStatus::
-       GameOver` is declared but never constructed anywhere in the crate (checked - zero call sites).
-       That last part isn't multiplayer-specific either — a 2-player game today never formally ends.
-       Scope: skip eliminated players in turn order/priority, handle their objects leaving the game,
-       construct `GameOver` once only one player remains (covers both the 2-player and N-player case
-       in the same mechanism).
+    11b. ~~**Player elimination actually affects the game**~~ — done, `phase5/player-elimination`
+       slice (docs/implementation.md, below). `GameOver` now actually constructs (CR 104.2a/104.4a,
+       covers both the 2-player and N-player case the same way); `PassPriority`/Cleanup-step turn
+       rotation skip an eliminated player (CR 800.4b); their objects leave the game — per-owner
+       zones drained, shared zones/stack filtered by ownership, purged via the same
+       `retire_object` a normal death uses (CR 800.4a). Caught a real regression during
+       verification (a solo test fixture's own empty-library-on-turn-1 quirk got treated as a real
+       elimination and had its objects wiped) — fixed with a `turn_order.len() >= 2` guard, not
+       worked around.
     11c. **Commander marking + casting from the command zone** — no "is this a commander" concept
        exists anywhere (`PlayerState`/`GameObject`/`CardDefinition` all lack it, checked).
        `ZoneKind::Command` exists as an enum variant but is fully inert - nothing is ever placed there
@@ -6046,3 +6047,108 @@ untouched) held up exactly as scoped once the code was actually read.
   continuous-effects query gap `is_sorcery_speed` already carries, untouched.
 - Backlog items 11b (player elimination), 11c/11d/11e (Commander marking/tax/damage) — separate
   slices, not attempted here.
+
+## Phase 5: phase5/player-elimination slice
+
+Branch `phase5/player-elimination`, off master. Closes backlog item 11b.
+
+`sba::apply_player_loss` already flipped `PlayerState.eliminated` (a prior slice); checked before
+writing code and confirmed, again, zero downstream consumers. Three independent gaps, same slice
+per the backlog grouping:
+
+**What got implemented:**
+- `StepStatus::GameOver { winner: Option<PlayerId> }` (already declared, zero call sites, checked)
+  now actually gets constructed — new `ProcessState::GameOver` variant (engine.rs), terminal: once
+  reached, `step()` keeps returning it without mutating anything further, and `submit_action`
+  already rejects new actions outside `PriorityWindow` so nothing more can be submitted either.
+  `Engine::game_over_check` (called from both `finish_sba_loop` and `finish_cleanup_sba_check`,
+  the two places an SBA pass's events actually commit) counts non-eliminated players in
+  `turn_order`: 1 remaining constructs `GameOver { winner: Some(that player) }` (CR 104.2a), 0
+  remaining (simultaneous elimination in one SBA pass) constructs `GameOver { winner: None }` (CR
+  104.4a draw). Guarded by `turn_order.len() < 2` — a one-player test/scenario fixture (common
+  throughout this crate, unrelated to this feature) reaching 0 life would otherwise read as "game
+  over" after its very first SBA pass; CR 104.2a presupposes an opponent to win against.
+- CR 800.4b (eliminated player's turns/priority skipped): `commands::next_active_player` (new,
+  commands.rs) walks `turn_order` from a given player, skipping anyone `.eliminated`, used by both
+  `PassPriority`'s handoff (commands.rs) and the Cleanup-step active-player rotation (engine.rs) —
+  previously both did a blind `(idx + 1) % turn_order.len()`. `commands::non_eliminated_players`
+  (new) replaces the "everyone passed" `consecutive_passes >= turn_order.len()` threshold too — an
+  eliminated player is never asked to pass, so the old threshold could never be reached again once
+  anyone was eliminated.
+- CR 800.4a (eliminated player's objects leave the game): `sba::remove_players_objects` (new),
+  called from `apply_player_loss` right after `.eliminated` flips. Per-owner zones
+  (library/hand/graveyard/command) are drained wholesale; shared zones (battlefield/exile) are
+  filtered by `GameObject.owner`; the stack (not a `Zone`) is filtered by `StackObject.controller`
+  (see UNRESOLVED — not a perfect proxy for "owner"). Each removed object is purged the same way
+  `commands::retire_object` already purges a normal death (abilities/continuous-effects sourced
+  from it) — reused directly, not reimplemented. `retire_object`'s returned `Vec<RegisteredAbility>`
+  (what a normal death feeds into `CollectTriggers` for a Dies/LeavesBattlefield trigger) is
+  deliberately discarded here: the departing object's own triggered abilities are controlled by the
+  very player who just left, and CR 800.4d says a triggered ability controlled by a player who's
+  left the game never goes on the stack — so this is a correct read of the rule, not a shortcut.
+  Same `turn_order.len() >= 2` guard as `game_over_check`, for the identical reason (a one-player
+  fixture has nothing to "leave into").
+
+**Regression found and fixed during verification** (not a design change, a real bug caught by the
+existing suite): the object-purge, before the `turn_order.len() >= 2` guard was added, wiped a
+solo scenario fixture's own hand/battlefield the instant it hit an empty-library draw on turn 1 (a
+pre-existing, previously-harmless quirk: `Engine`'s two-player draw-skip only checks
+`turn_order.len() == 2`, so a one-player fixture always draws on its first turn - with no library
+seeded, that's every such fixture, immediately marking the fixture's only player `eliminated` -
+harmless before this slice since nothing read the flag, actively destructive once purging was
+added). Caught by `phase5_cast_spell_payment.toml` failing for real (not just an assertion mismatch
+- the cast card had vanished from the engine's state entirely). Fixed by gating both new mutating
+behaviors (`game_over_check`, `remove_players_objects`) behind "at least 2 players in the game."
+
+**Pre-existing tests updated to the newly-correct behavior** (not broken by this slice - they were
+asserting the exact gap this slice closes):
+- `phase5_beginning_phase.rs`'s `draw_from_empty_library_is_noop` (renamed
+  `draw_from_empty_library_is_a_noop_draw_not_a_panic`) — a two-player game where p0 draws from an
+  empty library now correctly ends the game (p1 wins) instead of silently continuing.
+- `phase5_sba_basics.rs`'s infect/poison-elimination test — now asserts `GameOver { winner: p0 }`
+  instead of continuing priority past p1's elimination.
+- `phase5_script_ops_drawcards.rs`'s `drawing_more_than_the_library_holds_stops_without_crashing` —
+  same empty-library-mid-game shape as the beginning-phase fix.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 573 passed, 0 failed (565 prior + 8 new, in
+new `crates/engine/tests/phase5_player_elimination.rs`): two-player zero-life ends the game and
+`step()`/`submit_action` stay frozen/rejecting afterward; simultaneous zero-life for both remaining
+players is a draw (`winner: None`); a one-player fixture at zero life never triggers `GameOver`
+(the SBA itself still fires, unrelated); a three-player `PassPriority` skips an already-eliminated
+middle player; the Cleanup-step active-player rotation does the same, landing back on the one
+other survivor; an eliminated player's battlefield permanent is gone from `state.objects` and the
+battlefield zone, its triggered ability purged, with zero abilities fed toward
+`CollectTriggers` (CR 800.4d); an eliminated player's hand/library are fully drained while a
+non-eliminated player's own zones stay untouched. All 565 prior tests unaffected once the two
+pre-existing-gap tests above were updated and the solo-fixture regression was fixed. Also confirmed
+via the real CLI: `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/
+phase5_cast_spell_payment.toml` (the scenario the regression broke) — 6/6 actions ran, 5/5
+assertions passed.
+
+**STRUCT DEVIATIONS:** `ProcessState::GameOver` (engine.rs) wasn't explicitly named in the pre-slice
+report but was the obvious mechanical counterpart to constructing the already-declared
+`StepStatus::GameOver` — anticipated in kind by the report's "hook is `finish_sba_loop`" framing.
+
+**INTERFACE DEVIATIONS:** None beyond the two new `pub(crate)` helpers (`next_active_player`,
+`non_eliminated_players`) named directly in the report's own plan.
+
+**SCOPE DEVIATIONS:**
+- The `turn_order.len() < 2` guard (both `game_over_check` and `remove_players_objects`) wasn't
+  anticipated in the pre-slice report — found via the regression above, not guessed at in advance.
+- Three pre-existing tests needed updating to the new correct behavior (listed above) - the report
+  anticipated this in general ("regression: existing 2-player tests... unaffected") but didn't (and
+  couldn't, without running them) name which ones would actually need a behavior-assertion change
+  versus truly regress.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- `replacement_effects`/`cost_modifiers` sourced from a purged object are never purged — checked,
+  this is true of *every* object departure in this engine already (not even `retire_object` does
+  it for a normal death), not introduced or widened by this slice.
+- Stack-object removal is scoped by `StackObject.controller`, not a true "owner" (CR 800.4a) — no
+  `owner` field exists on `StackObject` separately, and no control-changing effect exists yet in
+  this engine to make the distinction observable. Pragmatic approximation, flagged not fixed.
+- CR 800.4c (an object exiled when a control-granting effect from a departed player ends) —
+  unreachable, no control-changing effects exist in this engine yet.
+- Teams/Emperor multiplayer variants (CR 104.2c/d, 104.3g/i) — explicitly out of scope, this engine
+  has no team concept.
+- Backlog items 11c/11d/11e (Commander marking/tax/damage) — separate slices, not attempted here.
