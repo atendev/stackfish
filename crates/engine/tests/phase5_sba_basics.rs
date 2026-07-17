@@ -412,7 +412,11 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
             other => break other,
         }
     };
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }));
+    // 704.5c eliminates p1; in this two-player game that immediately ends
+    // the game (CR 104.2a: p0 is the sole remaining player) - backlog item
+    // 11b wiring GameOver up to actually fire once elimination is real,
+    // rather than the SBA pass being reachable but inert past this point.
+    assert!(matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p0));
 
     assert_eq!(engine.state().player(p1).unwrap().life, 20, "702.90b: infect damage doesn't cause life loss");
     assert_eq!(engine.state().player(p1).unwrap().counters.count(&CounterKind::Poison), 10);

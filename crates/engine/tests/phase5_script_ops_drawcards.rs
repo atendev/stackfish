@@ -305,9 +305,12 @@ fn drawing_more_than_the_library_holds_stops_without_crashing() {
     pay_free_and_drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    assert_eq!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.len(), 1, "only the one available card was drawn");
-    assert!(engine.state().zone(ZoneKind::Library, Some(p0)).unwrap().contents.is_empty());
+    // CR 120.3/104.3c: the one available card is drawn, then the second
+    // attempt (from an empty library) marks p0 for the loss SBA - in this
+    // two-player game that immediately ends it (CR 104.2a), backlog item
+    // 11b wiring GameOver up to actually fire once elimination is real.
+    assert!(matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p1));
+    assert!(engine.state().player(p0).unwrap().eliminated);
 }
 
 #[test]

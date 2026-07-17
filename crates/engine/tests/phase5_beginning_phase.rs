@@ -302,7 +302,7 @@ fn draw_skipped_on_turn_1_two_player() {
 }
 
 #[test]
-fn draw_from_empty_library_is_noop() {
+fn draw_from_empty_library_is_a_noop_draw_not_a_panic() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -313,8 +313,16 @@ fn draw_from_empty_library_is_noop() {
     let mut engine = Engine::new(state);
     let status = pass_both(&mut engine, p0, p1);
 
-    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "no panic on empty library");
-    assert_eq!(engine.state().step, Step::Draw);
+    // CR 104.3c/704.5b: no panic on an empty library - it's a real state-
+    // based loss, not a crash. In a two-player game, the SBA pass that
+    // catches it (before the Draw step's priority window would otherwise
+    // open) immediately ends the game (CR 104.2a: sole opponent wins) -
+    // backlog item 11b closing the "eliminated player keeps getting turns"
+    // gap this test used to assert (see docs/implementation.md).
+    assert!(
+        matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p1),
+        "p0 attempted to draw from an empty library - p1 is the last player standing"
+    );
     assert!(zone_change_events(&engine).is_empty());
     assert!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.is_empty());
 }

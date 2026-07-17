@@ -195,6 +195,15 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
         if let Some(p) = state.player_mut(player) {
             p.eliminated = true;
         }
+        // CR 800.4a presupposes a game with opponents to continue without
+        // this player - a single-player fixture (many exist; this engine's
+        // own test/scenario harness has no real multiplayer setup) has
+        // nothing to "leave into," so purging its only player's objects
+        // would just be data loss with no rule behind it. Same guard
+        // `Engine::game_over_check` (engine.rs) uses for the same reason.
+        if state.turn_order.len() >= 2 {
+            remove_players_objects(state, player);
+        }
         let event_id = state.allocate_event_id();
         let sequence_no = state.allocate_sequence_no();
         events.push(GameEvent {
@@ -204,6 +213,56 @@ fn apply_player_loss(state: &mut GameState, events: &mut Vec<GameEvent>) {
             caused_by_command: None,
             parent_event: None,
         });
+    }
+}
+
+/// CR 800.4a: every object owned by a player who's left the game leaves the
+/// game too, immediately — not a normal zone change (no `ZoneChange` event,
+/// no destination), so nothing routes through `CollectTriggers` here. This
+/// is deliberate, not an oversight: the departing object's own triggered
+/// abilities are controlled by the very player who just left, and CR 800.4d
+/// says a triggered ability controlled by a player who's left the game never
+/// goes on the stack — so `commands::retire_object`'s returned abilities are
+/// correctly discarded rather than fed anywhere.
+///
+/// Per-owner zones (library/hand/graveyard/command) belong wholly to
+/// `player` and are drained outright. Shared zones (battlefield/exile) keep
+/// every other player's objects, only this player's own leave. The stack
+/// isn't a `Zone` — `StackObject` has no separate owner field, only
+/// `controller`, so a spell/ability this player controls is treated as
+/// theirs to remove (CR 800.4a's true "owned by," e.g. a control-changed
+/// spell, isn't representable yet — no control-changing effect exists in
+/// this engine to raise the distinction).
+fn remove_players_objects(state: &mut GameState, player: PlayerId) {
+    let owned_zone_ids: Vec<ObjectId> = state
+        .zones
+        .iter_mut()
+        .filter(|z| z.owner == Some(player))
+        .flat_map(|z| std::mem::take(&mut z.contents))
+        .collect();
+
+    let shared_zone_ids: Vec<ObjectId> = state
+        .zones
+        .iter()
+        .filter(|z| z.owner.is_none())
+        .flat_map(|z| z.contents.iter().copied())
+        .filter(|id| state.objects.get(id).is_some_and(|o| o.owner == player))
+        .collect();
+    for &id in &shared_zone_ids {
+        for zone in state.zones.iter_mut().filter(|z| z.owner.is_none()) {
+            zone.remove(id);
+        }
+    }
+
+    for id in owned_zone_ids.into_iter().chain(shared_zone_ids) {
+        commands::retire_object(state, id);
+    }
+
+    let stack_ids: Vec<ObjectId> =
+        state.stack.iter().filter(|so| so.controller == player).map(|so| so.stack_id).collect();
+    state.stack.retain(|so| so.controller != player);
+    for id in stack_ids {
+        commands::retire_object(state, id);
     }
 }
 

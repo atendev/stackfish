@@ -537,6 +537,14 @@ pub enum ProcessState {
     /// `commands::PendingPaymentRequest::source`'s doc comment) — needed by
     /// `PaymentPlan::validate` to check `AdditionalCost::TapSelf`.
     AwaitingPayment { stack_id: ObjectId, payer: PlayerId, cost: CostSpec, source: ObjectId },
+    /// CR 104.2a/104.4a: at most one non-eliminated player remains —
+    /// `winner` is that player, or `None` if the last remaining players were
+    /// eliminated simultaneously (a draw). Terminal: `step()` keeps
+    /// returning `StepStatus::GameOver` without mutating anything further,
+    /// same "frozen once reached" contract `Error` already has, and
+    /// `submit_action` already rejects new actions outside `PriorityWindow`
+    /// so nothing more can be submitted either.
+    GameOver { winner: Option<PlayerId> },
 }
 
 /// The step-able rules processor (DESIGN.md's "step-able core"). Wraps
@@ -2217,8 +2225,11 @@ impl Engine {
                     self.pipeline_exit = PipelineExit::BackToPriority;
                 } else {
                     self.state.consecutive_passes += 1;
+                    // CR 800.4b: an eliminated player is never asked for
+                    // priority, so "everyone passed" only needs a pass from
+                    // each player still in the game.
                     self.pipeline_exit = if self.state.consecutive_passes as usize
-                        >= self.state.turn_order.len()
+                        >= commands::non_eliminated_players(&self.state).len()
                     {
                         self.state.consecutive_passes = 0;
                         if !self.state.stack.is_empty() {
@@ -3343,6 +3354,10 @@ impl Engine {
                 self.process_state = ProcessState::AwaitingBottomCardChoice { player, count, remaining };
                 StepStatus::AwaitingBottomCardChoice { player, count }
             }
+            ProcessState::GameOver { winner } => {
+                self.process_state = ProcessState::GameOver { winner };
+                StepStatus::GameOver { winner }
+            }
         }
     }
 
@@ -3356,7 +3371,7 @@ impl Engine {
         // creatures) - cleared by end_pipeline_run once CollectTriggers/
         // PutTriggersApnap have both had a chance to consult it.
         self.departed_triggered_abilities.extend(departed);
-        if events.is_empty() {
+        let next = if events.is_empty() {
             let since = self.pipeline_context.as_ref().map(|ctx| ctx.since_ledger).unwrap_or(0);
             ProcessState::CollectTriggers { since }
         } else {
@@ -3364,6 +3379,32 @@ impl Engine {
             // Re-enter SbaLoop next step() - CR 704.3's fixed point, not a
             // single pass.
             ProcessState::SbaLoop
+        };
+        self.game_over_check(next)
+    }
+
+    /// CR 104.2a/104.4a: overrides `next` with `GameOver` if at most one
+    /// player remains in a game that started with more than one — checked
+    /// after every SBA pass commits its events, since `sba::
+    /// apply_player_loss` (the only place `PlayerState.eliminated` flips)
+    /// always runs inside one of those passes. `winner` is the sole
+    /// remainder, or `None` if the last players standing were eliminated
+    /// simultaneously (a draw).
+    ///
+    /// The `turn_order.len() < 2` guard matters: a single-player test
+    /// fixture (many exist, unrelated to this feature) has exactly one
+    /// never-eliminated player, which would otherwise read as "game over"
+    /// after the very first SBA pass — CR 104.2a presupposes opponents to
+    /// win against, so there's nothing to end here.
+    fn game_over_check(&self, next: ProcessState) -> ProcessState {
+        if self.state.turn_order.len() < 2 {
+            return next;
+        }
+        let remaining = commands::non_eliminated_players(&self.state);
+        if remaining.len() <= 1 {
+            ProcessState::GameOver { winner: remaining.first().copied() }
+        } else {
+            next
         }
     }
 
@@ -3397,7 +3438,7 @@ impl Engine {
         self.departed_triggered_abilities.extend(departed);
         self.state.ledger.extend(events);
         self.pipeline_exit = PipelineExit::CleanupCheck { since_ledger };
-        ProcessState::CollectTriggers { since: since_ledger }
+        self.game_over_check(ProcessState::CollectTriggers { since: since_ledger })
     }
 
     /// Continues `sba::resolve_deaths` after a paused CR 616.1 ordering
@@ -3743,14 +3784,9 @@ impl Engine {
                 false
             }
             (Phase::Ending, Step::Cleanup) => {
-                let current_idx = self
-                    .state
-                    .turn_order
-                    .iter()
-                    .position(|p| *p == self.state.active_player)
-                    .unwrap_or(0);
-                let next_idx = (current_idx + 1) % self.state.turn_order.len();
-                self.state.active_player = self.state.turn_order[next_idx];
+                // CR 800.4b: the next turn skips any eliminated player.
+                self.state.active_player =
+                    commands::next_active_player(&self.state, self.state.active_player);
                 self.state.turn_number += 1;
                 self.state.phase = Phase::Beginning;
                 self.state.step = Step::Untap;
