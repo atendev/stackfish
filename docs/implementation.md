@@ -2262,12 +2262,14 @@ shift, don't treat it as fixed once written.
        (`commands.rs`'s `DeclareAttackers` arm validates each against `state.turn_order` generically).
        `triggers.rs`'s APNAP ordering (`group_apnap`) is also already generalized over
        `state.turn_order`, not hardcoded to two players. Neither needs a slice.
-    11a. **N-player combat: defending player per attacker** — the real gap. `DeclareBlockers`
-       (`commands.rs`) picks "the first non-active player in `turn_order`" as *the* single defending
-       player, ignoring that attackers may have declared different targets/defenders (CR 508.5a's
-       multiplayer ambiguity) — its own comment already admits "this engine only models 2-player
-       combat." Needs each block's legality/damage-assignment resolved per the attacker's own
-       declared defender instead of one engine-wide defending player.
+    11a. ~~**N-player combat: defending player per attacker**~~ — done, `phase5/multiplayer-
+       defending-player` slice (docs/implementation.md, below). The real gap was narrower than the
+       backlog text worried: only `DeclareBlockers`'s hardcoded "first non-active player" defender
+       lookup was actually broken (CR 508.5a) — `AssignCombatDamage`'s damage-assignment was already
+       per-attacker-target, confirmed by reading the code before writing any. `CombatState.
+       blockers_declared: bool` became `declared_defenders: Vec<PlayerId>` (CR 509.1 as a turn-based
+       action repeated once per defending player, not once total); `combat.blocks` now accumulates
+       across each defending player's own submission instead of one submission overwriting another.
     11b. **Player elimination actually affects the game** — `sba::apply_player_loss` already marks
        `eliminated=true` per player, N-safe. Nothing downstream reads it: turn order/priority still
        hands an eliminated player turns, nothing exiles their zones' contents, and `StepStatus::
@@ -5977,3 +5979,70 @@ this as a struct change.
   mana-ability case is untouched).
 - No replacement/prevention modeling for `ManaAdded` — pre-existing gap, same one `GainLife` already
   carries, not fixed here.
+
+## Phase 5: phase5/multiplayer-defending-player slice
+
+Branch `phase5/multiplayer-defending-player`, off master. Closes backlog item 11a.
+
+Scope, narrowed during the pre-slice research pass over `combat.rs`/`commands.rs`/`engine.rs`
+(recorded in the backlog entry itself before writing code): `DeclareBlockers` (`commands.rs`) was
+the one real hardcoded spot — it picked "the first non-active player in `turn_order`" as *the*
+single defending player, ignoring CR 508.5a (multiplayer: the defending player is individually
+determined per attacker, not one engine-wide value). Everything else the backlog item's own text
+worried might also be broken turned out fine on inspection: `CombatState`/`DeclareAttackers` were
+already N-safe (each attacker independently names its own `Target`), and `AssignCombatDamage`'s
+damage-dealing already routes each attacker's damage to that attacker's own recorded `Target`, not
+a hardcoded defender — the doc's "damage-assignment resolved per the attacker's own declared
+defender" phrasing was already true there, confirmed by reading the code rather than assumed.
+
+**What got implemented:**
+- `CombatState.blockers_declared: bool` (`types/combat.rs`) replaced with `declared_defenders:
+  Vec<PlayerId>` — CR 509.1 is a turn-based action performed once per defending player
+  (CR 101.4 APNAP order among however many defending players exist this combat), not once total.
+  Tracks who has already submitted, both to reject a repeat submission and to distinguish
+  "declared zero blockers" from "hasn't declared yet."
+- `commands.rs`'s `DeclareBlockers` arm: the hardcoded `defending_player` lookup is gone. Legality
+  is now "does any attacker in `combat.attackers` target `command.actor` (directly via
+  `Target::Player`, or via `Target::Object` where the object's controller is `command.actor` —
+  CR 506.4d's planeswalker/battle case)?" — same check the per-block `attacking_this_defender`
+  validation already ran, just promoted to the entry gate instead of a single precomputed player.
+  `combat.blocks` now `.extend()`s across submissions instead of overwriting, so a second defending
+  player's blocks land alongside the first's rather than replacing them.
+- All per-block validation (flying/reach, menace count, uncontrolled/tapped blocker,
+  attacker-isn't-attacking-this-defender) needed no changes — it already compared against
+  `command.actor`, not the broken hardcoded variable, so it was correct for any player count once
+  the entry gate was fixed.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 565 passed, 0 failed (562 prior + 3 new,
+in `crates/engine/tests/phase5_combat_declarations.rs`, which gained a `combat_state_3p()` fixture
+— the repo's first 3-player test fixture): two different defending players each declare their own
+blocks in sequence and both end up in `combat.blocks` (not the second overwriting the first); a
+player nobody is attacking is rejected from submitting `DeclareBlockers`; a 3-player case where the
+attacker targets a planeswalker controlled by the *second* nonactive player in `turn_order` proves
+the fix isn't just "pick a different fixed player" — the first nonactive player is correctly
+rejected and the planeswalker's actual controller is correctly accepted. All 562 prior tests
+unaffected, including every existing 2-player combat-damage fixture (`blockers_declared: true`
+mechanically became `declared_defenders: vec![p1]` across ~30 call sites, `blockers_declared:
+false`/no-attacker cases became `Vec::new()`).
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice report scoped — `CombatState`'s field rename
+was named directly in the report as the fix.
+
+**INTERFACE DEVIATIONS:** None. `PlayerActionKind::DeclareBlockers`'s shape (`blocks: Vec<(ObjectId,
+ObjectId)>`) didn't need to change — a defending player's blocks are already disjoint from every
+other defending player's (a blocker must be controlled by the actor, and each attacker has exactly
+one defending player), so the flat accumulated list needed no restructuring into a per-player map.
+
+**SCOPE DEVIATIONS:** None. The backlog entry's own narrowing (AssignCombatDamage/DeclareAttackers
+untouched) held up exactly as scoped once the code was actually read.
+
+**UNRESOLVED (pre-existing, not this slice's to fix):**
+- Turn-based actions still don't block priority from opening before they're performed
+  (`engine.rs`'s `submit_action` doc comment already names this as a whole-engine simplification,
+  not specific to combat) — nothing forces every applicable defending player to actually submit
+  `DeclareBlockers` before the game moves on; a defending player who never declares simply never
+  blocks, same pre-existing gap the 2-player case already had.
+- Block restrictions (CR 509.1b, "effects that say a creature can't block") — same
+  continuous-effects query gap `is_sorcery_speed` already carries, untouched.
+- Backlog items 11b (player elimination), 11c/11d/11e (Commander marking/tax/damage) — separate
+  slices, not attempted here.

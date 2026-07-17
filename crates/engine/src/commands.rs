@@ -1337,8 +1337,11 @@ pub fn execute_command(
                 events
                     .push(GameEventKind::AttackerDeclared { attacker: *attacker, target: *target });
             }
-            state.combat =
-                Some(CombatState { attackers, blocks: Vec::new(), blockers_declared: false });
+            state.combat = Some(CombatState {
+                attackers,
+                blocks: Vec::new(),
+                declared_defenders: Vec::new(),
+            });
 
             return Ok(CommandOutcome {
                 events,
@@ -1349,24 +1352,6 @@ pub fn execute_command(
             });
         }
         PlayerActionKind::DeclareBlockers { blocks } => {
-            // CR 509.1: a turn-based action of the defending player. This
-            // engine only models 2-player combat (CR 506.2's nonactive
-            // player is the defending player) - multiplayer's "which
-            // defending player" ambiguity (CR 508.5a) isn't representable
-            // yet.
-            let defending_player = state
-                .turn_order
-                .iter()
-                .copied()
-                .find(|p| *p != state.active_player)
-                .ok_or_else(|| {
-                    CommandError::IllegalAction("no defending player exists".to_string())
-                })?;
-            if command.actor != defending_player {
-                return Err(CommandError::IllegalAction(
-                    "only the defending player declares blockers".to_string(),
-                ));
-            }
             if state.phase != Phase::Combat || state.step != Step::DeclareBlockers {
                 return Err(CommandError::IllegalAction(
                     "blockers can only be declared during the declare blockers step".to_string(),
@@ -1375,9 +1360,26 @@ pub fn execute_command(
             let combat = state.combat.as_ref().ok_or_else(|| {
                 CommandError::IllegalAction("no attackers have been declared this combat".to_string())
             })?;
-            if combat.blockers_declared {
+            if combat.declared_defenders.contains(&command.actor) {
                 return Err(CommandError::IllegalAction(
-                    "blockers have already been declared this combat".to_string(),
+                    "this player has already declared blockers this combat".to_string(),
+                ));
+            }
+            // CR 509.1: a turn-based action, one per defending player (CR
+            // 508.5a - multiplayer can have more than one defending player
+            // this combat, each individually determined by which attacker
+            // is aimed at them or a planeswalker/battle they control, CR
+            // 506.4d). `command.actor` is only legal here if some attacker
+            // is actually aimed at them.
+            let is_defending_player = combat.attackers.iter().any(|(_, target)| match target {
+                Target::Player(pid) => *pid == command.actor,
+                Target::Object(target_id) => {
+                    state.object(*target_id).is_some_and(|o| o.controller == command.actor)
+                }
+            });
+            if !is_defending_player {
+                return Err(CommandError::IllegalAction(
+                    "this player is not a defending player this combat".to_string(),
                 ));
             }
 
@@ -1483,8 +1485,8 @@ pub fn execute_command(
                 });
             }
             let combat = state.combat.as_mut().expect("checked Some above");
-            combat.blocks = blocks;
-            combat.blockers_declared = true;
+            combat.blocks.extend(blocks);
+            combat.declared_defenders.push(command.actor);
 
             return Ok(CommandOutcome {
                 events,

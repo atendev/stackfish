@@ -432,7 +432,7 @@ fn deathtouch_source_kills_a_bigger_creature_with_one_damage() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Deathtoucher", 1, 1, KeywordSet::DEATHTOUCH), p0, 0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Giant", 8, 8, KeywordSet::empty()), p1, 0));
@@ -455,7 +455,7 @@ fn indestructible_creature_survives_lethal_marked_damage() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 5, 5, KeywordSet::empty()), p0, 0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Golem", 1, 3, KeywordSet::INDESTRUCTIBLE), p1, 0));
@@ -468,7 +468,7 @@ fn indestructible_creature_survives_lethal_marked_damage() {
 
 #[test]
 fn indestructible_creature_still_dies_to_zero_toughness() {
-    let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), blockers_declared: true });
+    let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: Vec::new() });
     let creature = ObjectId(0);
     let mut object = permanent(creature, creature_definition("Golem", 1, 1, KeywordSet::INDESTRUCTIBLE), PlayerId(0), 0);
     object.counters.add(CounterKind::MinusOneMinusOne, 1);
@@ -494,7 +494,7 @@ fn lifelink_source_gains_its_controller_life_on_combat_damage() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Lifelinker", 3, 3, KeywordSet::LIFELINK), p0, 0));
 
@@ -517,7 +517,7 @@ fn wither_damage_becomes_counters_not_marked_damage() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Wither Beast", 3, 3, KeywordSet::WITHER), p0, 0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Bear", 2, 5, KeywordSet::empty()), p1, 0));
@@ -541,7 +541,7 @@ fn infect_damage_to_a_player_becomes_poison_counters() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Infector", 3, 3, KeywordSet::INFECT), p0, 0));
 
@@ -560,7 +560,7 @@ fn infect_damage_to_a_creature_becomes_minus_counters() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Infector", 3, 3, KeywordSet::INFECT), p0, 0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Bear", 2, 5, KeywordSet::empty()), p1, 0));

@@ -150,7 +150,7 @@ fn prevent_damage_effect_stops_combat_damage_from_landing() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
     put_on_battlefield(&mut state, permanent(shield_source, creature_definition("Ward", 0, 1), p1));
@@ -192,7 +192,7 @@ fn redirect_damage_effect_changes_who_actually_loses_life() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
     put_on_battlefield(&mut state, permanent(redirect_source, creature_definition("Redirector", 0, 1), p1));

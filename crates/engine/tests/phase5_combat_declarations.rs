@@ -123,6 +123,30 @@ fn combat_state() -> GameState {
     }
 }
 
+/// Three players, `p0` active, `p1`/`p2` both nonactive - CR 508.5a's
+/// multiplayer case, where "the defending player" isn't a single
+/// engine-wide value but individually determined per attacker. Otherwise
+/// identical to `combat_state()`.
+fn combat_state_3p() -> GameState {
+    let mut state = combat_state();
+    let p2 = PlayerId(2);
+    state.players.push(PlayerState {
+        player_id: p2,
+        life: 20,
+        mana_pool: ManaPool::default(),
+        counters: CounterSet::new(),
+        emblems: Vec::new(),
+        commander_damage_taken: Vec::new(),
+        eliminated: false,
+        drew_from_empty_library: false,
+        mulligans_taken: 0,
+        hand_kept: false,
+    });
+    state.turn_order.push(p2);
+    state.last_active_turn_number.insert(p2, 0);
+    state
+}
+
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
@@ -203,7 +227,7 @@ fn declare_attackers_taps_and_records_combat_state() {
     assert!(engine.state().object(attacker).unwrap().tapped, "508.1f: attacking taps it");
     let combat = engine.state().combat.as_ref().expect("attackers recorded");
     assert_eq!(combat.attackers, vec![(attacker, Target::Player(p1))]);
-    assert!(!combat.blockers_declared);
+    assert!(combat.declared_defenders.is_empty());
     assert_eq!(engine.state().consecutive_passes, 0, "508: declaring breaks the pass chain");
 
     let kinds: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
@@ -389,7 +413,7 @@ fn declare_blockers_records_blocks() {
 
     let combat = engine.state().combat.as_ref().unwrap();
     assert_eq!(combat.blocks, vec![(blocker, attacker)]);
-    assert!(combat.blockers_declared);
+    assert!(combat.declared_defenders.contains(&p1));
     assert!(!engine.state().object(blocker).unwrap().tapped, "509: blocking doesn't tap");
 
     let kinds: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
@@ -445,7 +469,7 @@ fn declare_blockers_rejects_wrong_step() {
     state.combat = Some(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
-        blockers_declared: false,
+        declared_defenders: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
 
@@ -469,7 +493,7 @@ fn declare_blockers_rejects_redeclaration() {
     pass_to_declare_blockers(&mut engine);
     declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
     // Step/phase haven't changed between calls (only AdvanceTurnStep moves
-    // those) - this isolates the `blockers_declared` redeclaration check.
+    // those) - this isolates the `declared_defenders` redeclaration check.
     let status = declare_blockers(&mut engine, p1, Vec::new());
     assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
 }
@@ -581,4 +605,94 @@ fn combat_state_clears_at_end_of_combat() {
     }
     assert_eq!(engine.state().step, Step::PostCombatMain);
     assert!(engine.state().combat.is_none(), "506.4: combat status ends with the combat phase");
+}
+
+// ---------------------------------------------------------------------
+// N-player DeclareBlockers (CR 508.5a: defending player individually
+// determined per attacker, not one engine-wide value)
+// ---------------------------------------------------------------------
+
+#[test]
+fn three_player_each_defending_player_declares_blockers_separately() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let p2 = PlayerId(2);
+    let attacker_p1 = ObjectId(0);
+    let attacker_p2 = ObjectId(1);
+    let blocker_p1 = ObjectId(2);
+    let blocker_p2 = ObjectId(3);
+    let mut state = combat_state_3p();
+    put_on_battlefield(&mut state, permanent(attacker_p1, creature_definition("Bear1"), p0, 0));
+    put_on_battlefield(&mut state, permanent(attacker_p2, creature_definition("Bear2"), p0, 0));
+    put_on_battlefield(&mut state, permanent(blocker_p1, creature_definition("Wall1"), p1, 0));
+    put_on_battlefield(&mut state, permanent(blocker_p2, creature_definition("Wall2"), p2, 0));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(
+        &mut engine,
+        p0,
+        vec![(attacker_p1, Target::Player(p1)), (attacker_p2, Target::Player(p2))],
+    );
+    pass_to_declare_blockers(&mut engine);
+
+    // p1 declares first - only their own block shows up so far.
+    declare_blockers(&mut engine, p1, vec![(blocker_p1, attacker_p1)]);
+    let combat = engine.state().combat.as_ref().unwrap();
+    assert_eq!(combat.blocks, vec![(blocker_p1, attacker_p1)]);
+    assert_eq!(combat.declared_defenders, vec![p1]);
+
+    // p2 declares second - accumulates onto p1's block rather than
+    // overwriting it.
+    let status = declare_blockers(&mut engine, p2, vec![(blocker_p2, attacker_p2)]);
+    assert!(matches!(status, StepStatus::AwaitingAction { .. }));
+    let combat = engine.state().combat.as_ref().unwrap();
+    assert_eq!(combat.blocks, vec![(blocker_p1, attacker_p1), (blocker_p2, attacker_p2)]);
+    assert_eq!(combat.declared_defenders, vec![p1, p2]);
+}
+
+#[test]
+fn declare_blockers_rejects_a_player_nobody_is_attacking() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let p2 = PlayerId(2);
+    let attacker = ObjectId(0);
+    let mut state = combat_state_3p();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+
+    let mut engine = Engine::new(state);
+    // Only p1 is attacked - p2 has no defending-player role this combat.
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    pass_to_declare_blockers(&mut engine);
+    let status = declare_blockers(&mut engine, p2, Vec::new());
+    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+}
+
+#[test]
+fn declare_blockers_planeswalker_controller_is_the_defending_player() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let p2 = PlayerId(2);
+    let attacker = ObjectId(0);
+    let planeswalker = ObjectId(1);
+    let mut state = combat_state_3p();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 0));
+    let mut pw_definition = creature_definition("Walker");
+    pw_definition.card_types = CardTypeSet::PLANESWALKER;
+    put_on_battlefield(&mut state, permanent(planeswalker, pw_definition, p2, 0));
+
+    let mut engine = Engine::new(state);
+    // p1 comes first in turn_order among the nonactive players, but the
+    // attacker is aimed at p2's planeswalker (CR 506.4d) - p2 is the real
+    // defending player here, not "the first nonactive player."
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Object(planeswalker))]);
+    pass_to_declare_blockers(&mut engine);
+
+    let status = declare_blockers(&mut engine, p1, Vec::new());
+    assert!(
+        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
+        "p1 controls nothing being attacked - not a defending player this combat"
+    );
+
+    let status = declare_blockers(&mut engine, p2, Vec::new());
+    assert!(matches!(status, StepStatus::AwaitingAction { .. }));
 }

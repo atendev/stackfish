@@ -203,7 +203,7 @@ fn once_per_turn_dealsdamage_trigger_fires_only_once_from_two_events_in_the_same
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker1, attacker), (blocker2, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Ogre", 3, 3), p0));
     put_on_battlefield(&mut state, permanent(blocker1, creature_definition("Wall", 0, 5), p1));
@@ -251,7 +251,7 @@ fn without_the_cap_the_same_two_events_fire_the_trigger_twice() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker1, attacker), (blocker2, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Ogre", 3, 3), p0));
     put_on_battlefield(&mut state, permanent(blocker1, creature_definition("Wall", 0, 5), p1));
@@ -285,7 +285,7 @@ fn once_per_turn_trigger_resets_after_a_new_turn_begins() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker1, attacker), (blocker2, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Ogre", 3, 3), p0));
     put_on_battlefield(&mut state, permanent(blocker1, creature_definition("Wall", 0, 5), p1));

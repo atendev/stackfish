@@ -320,7 +320,7 @@ fn deals_damage_and_dies_triggers_both_fire_from_the_same_combat_damage_step() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, creature(attacker, p0, 5, 0));
     put_on_battlefield(&mut state, creature(blocker, p1, 1, 0)); // dies to 3 damage
