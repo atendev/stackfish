@@ -348,13 +348,14 @@ impl ReplacementEffect {
     pub fn apply(&self, event: GameEventKind) -> GameEventKind {
         let ReplacementSpec::Primitive { payload, .. } = &self.spec else { return event };
         match (payload, event) {
-            (ReplacementPayload::PreventDamage, GameEventKind::DamageDealt { source, target, .. }) => {
-                GameEventKind::DamageDealt { source, target, amount: 0 }
-            }
+            (
+                ReplacementPayload::PreventDamage,
+                GameEventKind::DamageDealt { source, target, is_combat_damage, .. },
+            ) => GameEventKind::DamageDealt { source, target, amount: 0, is_combat_damage },
             (
                 ReplacementPayload::RedirectDamage(new_target),
-                GameEventKind::DamageDealt { source, amount, .. },
-            ) => GameEventKind::DamageDealt { source, target: *new_target, amount },
+                GameEventKind::DamageDealt { source, amount, is_combat_damage, .. },
+            ) => GameEventKind::DamageDealt { source, target: *new_target, amount, is_combat_damage },
             (
                 ReplacementPayload::ReplaceZoneDestination(new_zone),
                 GameEventKind::ZoneChange { object, from, last_known_info, .. },
@@ -596,13 +597,15 @@ mod tests {
             ReplacementPayload::PreventDamage,
         );
 
-        let matching = GameEventKind::DamageDealt { source: creature, target: Target::Object(creature), amount: 3 };
+        let matching =
+            GameEventKind::DamageDealt { source: creature, target: Target::Object(creature), amount: 3, is_combat_damage: false };
         assert!(effect.matches(&matching, &state));
 
         let land = ObjectId(2);
         let mut state2 = state;
         state2.objects.insert(land, object(land, p0, CardTypeSet::LAND, ZoneKind::Battlefield));
-        let non_matching = GameEventKind::DamageDealt { source: land, target: Target::Object(land), amount: 3 };
+        let non_matching =
+            GameEventKind::DamageDealt { source: land, target: Target::Object(land), amount: 3, is_combat_damage: false };
         assert!(!effect.matches(&non_matching, &state2));
     }
 
@@ -622,9 +625,11 @@ mod tests {
             ReplacementPayload::PreventDamage,
         );
 
-        let to_p0 = GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3 };
+        let to_p0 =
+            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
         assert!(effect.matches(&to_p0, &state));
-        let to_p1 = GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p1), amount: 3 };
+        let to_p1 =
+            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p1), amount: 3, is_combat_damage: false };
         assert!(!effect.matches(&to_p1, &state));
     }
 
@@ -680,10 +685,10 @@ mod tests {
         let source = ObjectId(1);
         let target = Target::Object(ObjectId(2));
         let rewritten =
-            effect.apply(GameEventKind::DamageDealt { source, target, amount: 5 });
+            effect.apply(GameEventKind::DamageDealt { source, target, amount: 5, is_combat_damage: false });
         assert!(matches!(
             rewritten,
-            GameEventKind::DamageDealt { source: s, target: t, amount: 0 } if s == source && t == target
+            GameEventKind::DamageDealt { source: s, target: t, amount: 0, .. } if s == source && t == target
         ));
     }
 
@@ -700,10 +705,11 @@ mod tests {
             source,
             target: Target::Player(PlayerId(0)),
             amount: 5,
+            is_combat_damage: false,
         });
         assert!(matches!(
             rewritten,
-            GameEventKind::DamageDealt { source: s, target, amount: 5 } if s == source && target == new_target
+            GameEventKind::DamageDealt { source: s, target, amount: 5, .. } if s == source && target == new_target
         ));
     }
 

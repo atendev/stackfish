@@ -1,0 +1,103 @@
+# Commander damage production slice (backlog item 11e, CR 903.10a): a
+# creature marked is_commander that connects with unblocked combat damage
+# accumulates into the defending player's commander-damage count
+# (PlayerState.commander_damage_taken, real since item 10's slice but never
+# written to until this one). The non-combat-damage and non-commander
+# exclusion cases, Infect interaction, and the 21-damage loss SBA are
+# exercised exhaustively in crates/engine/tests/phase5_commander_damage.rs -
+# this fixture only proves the real end-to-end pipeline (TOML -> Engine ->
+# CLI) wires the commander-damage write through correctly.
+seed = 1
+
+[[players]]
+id = 0
+life = 40
+
+[[players]]
+id = 1
+life = 40
+
+[[cards]]
+key = "general"
+name = "Test General"
+types = ["Creature"]
+power = 5
+toughness = 5
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "general"
+is_commander = true
+
+# Two players, so every step transition needs both to pass in a row
+# (CR 117.4) - 4 step transitions to reach the declare attackers step, same
+# sequence phase5_combat_damage.toml's own comment documents.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "general", target = 1 },
+]
+
+# One more pair of passes to reach the declare blockers step.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = []
+
+# One more pair of passes to reach the combat damage step.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 35
+
+[[steps]]
+type = "assert_commander_damage"
+player = 1
+source_card = "general"
+equals = 5

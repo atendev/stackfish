@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn resolves_unchanged_with_nothing_registered() {
         let mut state = state_with(Vec::new());
-        let event = GameEventKind::DamageDealt { source: ObjectId(0), target: Target::Player(PlayerId(0)), amount: 5 };
+        let event = GameEventKind::DamageDealt { source: ObjectId(0), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
         let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, event) else {
             panic!("expected Resolved with no replacement effects registered");
         };
@@ -306,7 +306,7 @@ mod tests {
             consumption: ConsumptionPolicy::Repeatable,
         });
         // Target is an Artifact, not a Creature - the filter doesn't match.
-        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Object(effect_source), amount: 5 };
+        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Object(effect_source), amount: 5, is_combat_damage: false };
         let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, event) else {
             panic!("expected Resolved - filter doesn't match");
         };
@@ -326,7 +326,7 @@ mod tests {
             consumption: ConsumptionPolicy::OneShot,
         });
 
-        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5 };
+        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
         let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, event) else {
             panic!("expected a single match to resolve");
         };
@@ -347,7 +347,7 @@ mod tests {
             consumption: ConsumptionPolicy::LimitedUses(2),
         });
 
-        let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5 };
+        let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
         apply_replacements(&mut state, event());
         assert_eq!(
             state.replacement_effects.first().map(|r| r.consumption),
@@ -372,7 +372,7 @@ mod tests {
             consumption: ConsumptionPolicy::Repeatable,
         });
 
-        let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5 };
+        let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
         apply_replacements(&mut state, event());
         apply_replacements(&mut state, event());
         assert_eq!(state.replacement_effects.len(), 1, "Repeatable is never removed or decremented");
@@ -397,7 +397,7 @@ mod tests {
             });
         }
 
-        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(PlayerId(0)), amount: 5 };
+        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
         let ReplacementOutcome::NeedsOrderingChoice { affected_player, candidates, .. } =
             apply_replacements(&mut state, event)
         else {
@@ -444,7 +444,7 @@ mod tests {
             consumption: ConsumptionPolicy::Repeatable,
         });
 
-        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p1), amount: 5 };
+        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p1), amount: 5, is_combat_damage: false };
         let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, event) else {
             panic!("only one effect matches at any single point - never a real multi-match pause here");
         };

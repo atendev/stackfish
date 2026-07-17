@@ -577,6 +577,11 @@ pub enum AssertionSpec {
     /// Checks a `PlayerState.counters` count by kind - the way to confirm
     /// Infect actually gave a player poison counters instead of life loss.
     PlayerCounters { player: u32, kind: String, equals: i32 },
+    /// Checks `PlayerState.commander_damage_taken` (CR 903.10a) for one
+    /// commander source - the way to confirm a commander's combat damage
+    /// actually accumulated (and that a non-commander source, or a
+    /// commander's non-combat damage, didn't).
+    CommanderDamage { player: u32, source_card: String, equals: u32 },
 }
 
 /// Same assertions as `AssertionSpec` but with `assert_` prefixed type names,
@@ -611,6 +616,8 @@ pub enum AssertionStepSpec {
     ObjectCounters { card: String, kind: String, equals: i32 },
     #[serde(rename = "assert_player_counters")]
     PlayerCounters { player: u32, kind: String, equals: i32 },
+    #[serde(rename = "assert_commander_damage")]
+    CommanderDamage { player: u32, source_card: String, equals: u32 },
 }
 
 impl AssertionStepSpec {
@@ -632,6 +639,9 @@ impl AssertionStepSpec {
             }
             Self::PlayerCounters { player, kind, equals } => {
                 AssertionSpec::PlayerCounters { player: *player, kind: kind.clone(), equals: *equals }
+            }
+            Self::CommanderDamage { player, source_card, equals } => {
+                AssertionSpec::CommanderDamage { player: *player, source_card: source_card.clone(), equals: *equals }
             }
         }
     }
@@ -675,6 +685,9 @@ impl AssertionSpec {
             }
             AssertionSpec::PlayerCounters { player, kind, equals } => {
                 format!("player_counters(player={player}, kind={kind:?}) == {equals}")
+            }
+            AssertionSpec::CommanderDamage { player, source_card, equals } => {
+                format!("commander_damage(player={player}, source_card={source_card:?}) == {equals}")
             }
         }
     }
@@ -1784,6 +1797,20 @@ fn check_assertion(
             let counter_kind = parse_counter_kind(kind);
             let actual =
                 state.players.iter().find(|p| p.player_id == pid).map(|p| p.counters.count(&counter_kind));
+            if actual == Some(*equals) {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+            }
+        }
+        AssertionSpec::CommanderDamage { player, source_card, equals } => {
+            let pid = PlayerId(*player);
+            let source_id = resolve_card(source_card, card_ids);
+            let actual = state
+                .players
+                .iter()
+                .find(|p| p.player_id == pid)
+                .map(|p| p.commander_damage_from(source_id));
             if actual == Some(*equals) {
                 AssertionOutcome::Passed
             } else {

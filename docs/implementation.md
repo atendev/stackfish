@@ -2293,10 +2293,13 @@ shift, don't treat it as fixed once written.
        below). Generic cost +{2} per prior cast from the command zone this game, tracked per
        commander by name (not `ObjectId`, which churns every cast) so Partner commanders
        (CR 702.124d) get independent counters automatically.
-    11e. **Commander damage production** — closes backlog item 10's own dangling note (that slice's
+    11e. ~~**Commander damage production**~~ — done, `phase5/commander-damage` slice
+       (docs/implementation.md, below). Closes backlog item 10's own dangling note (that slice's
        commander-damage SBA check is real but "inert until backlog item 11's Commander-format
-       machinery... exists"). Routes a commander's combat damage into `PlayerState.
-       commander_damage_taken` (already real, just never written to).
+       machinery... exists"). Routes a commander's *combat* damage into `PlayerState.
+       commander_damage_taken` (already real, just never written to) — required a new
+       `GameEventKind::DamageDealt.is_combat_damage` field, since nothing previously distinguished
+       CR 510 combat damage from a spell/ability's own damage effect.
     **Explicitly not a slice:** color identity/deck validation — DESIGN.md already scopes it out
     ("not in scope for the engine itself unless deck validation is wanted later").
 12. ~~**First/double strike (CR 702.4/702.7)**~~ — done, `phase5/first-strike` slice
@@ -6338,3 +6341,99 @@ pre-slice report (named as an expected consequence of the struct change, not dis
   the untaxed baseline is.
 - Backlog item 11e (commander damage production) — the other slice 11c was explicitly built to
   unblock, not attempted here either.
+
+## Phase 5: phase5/commander-damage slice
+
+Branch `phase5/commander-damage`, off master. Closes backlog item 11e — the last item in the
+11a-11e Commander sub-sequence.
+
+**Two scope decisions confirmed with the human before writing code (per the pre-slice report):**
+1. `GameEventKind::DamageDealt` needed a new `is_combat_damage: bool` field, since nothing
+   previously distinguished CR 510 combat damage from a spell/ability's own damage effect, and
+   CR 903.10a only counts the former. Confirmed: add it.
+2. `PlayerState.commander_damage_taken`'s existing `ObjectId` key (from item 10's slice, predating
+   11c's commander-return mechanism) has a real gap — a recast commander gets a new id (CR 400.7)
+   and its damage count resets to 0 instead of accumulating against "the same commander." Confirmed:
+   leave it as-is (matches the backlog's own "already real, just wire up the write side" framing;
+   the tested `sba.rs`/`commander_damage_from` surface stays untouched), flag the gap rather than
+   widen the field to name-keying like `commander_casts` did for the identical problem in 11d.
+
+**What got implemented:**
+- `GameEventKind::DamageDealt` gained `is_combat_damage: bool` (types/event.rs). `commands.rs`'s
+  `AssignCombatDamage` sets it `true` at all 4 event-construction sites (unblocked, single-blocker,
+  multi-blocker split, blocker-strikes-back) - the only real combat-damage producer. `engine.rs`'s
+  script bridge for `AbilityEffect::Damage` (a spell/ability's own damage effect, resolved through
+  the same `ReplacementCheck`→`CommitEvents` pipeline combat damage uses) sets it `false` - never
+  combat, even from a commander source. `effect.rs`'s `ReplacementEffect::apply` (the
+  `PreventDamage`/`RedirectDamage` rewrite arms) now threads the field through unchanged rather than
+  losing it, so a prevented/redirected combat-damage event is still recognized as combat damage once
+  it reaches `apply_damage_event`. Every literal `DamageDealt` construction elsewhere (~30 sites,
+  entirely lower-level unit tests in `replacement.rs`/`ability.rs`/`effect.rs`/`engine.rs`'s own
+  `#[cfg(test)]` modules, none of them exercising real combat) got `is_combat_damage: false`; every
+  bare pattern match got a trailing `..` instead, since those only care about `source`/`target`/
+  `amount`.
+- `commands::apply_damage_event` gained an `is_combat_damage: bool` parameter. In the `Target::
+  Player` arm, when `is_combat_damage && source.is_commander`, accumulates `amount` into
+  `commander_damage_taken` (find-or-insert by `source` `ObjectId`) - runs unconditionally before the
+  existing life-loss/poison branching, not nested inside either arm, since CR 903.10a's count is a
+  parallel tracking system, not a redirect of the same number (an infect commander's damage still
+  counts even though the player takes poison counters instead of life loss).
+- New `AssertionSpec::CommanderDamage`/`assert_commander_damage` (crates/scenario/src/lib.rs),
+  resolving `source_card` through the same `resolve_card`/`card_ids` CR 400.7-remap-following
+  lookup `assert_object_zone`/`assert_tapped` already use, then reading
+  `PlayerState::commander_damage_from` (item 10's own pre-existing query method) - no scenario
+  assertion existed for this field at all before this slice.
+
+**Regression avoided, not introduced:** none - the `is_combat_damage` field sweep (production sites
+first, then the ~30 lower-level test-literal sites) came back to a clean `cargo test --workspace` on
+the first full run after the struct-literal churn, before `apply_damage_event`'s own commander-damage
+write was added.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 595 passed, 0 failed (589 prior + 6 new, in
+new `crates/engine/tests/phase5_commander_damage.rs`): an unblocked commander attacker's combat
+damage accumulates into the defending player's `commander_damage_taken` (life loss still happens
+normally alongside it); two different commanders (Partner-style) attacking the same player track
+fully independently; a non-commander creature's combat damage never touches
+`commander_damage_taken` at all, even though life loss still happens; an Infect commander's combat
+damage still accumulates the full commander-damage count even though the player takes poison
+counters instead of life loss; a commander's own activated-ability damage effect (not combat) never
+counts, confirmed via the same `{T}: deal damage` stack-resolution shape
+`phase5_script_ops_damage.rs`'s lifelink test already established; 21+ cumulative commander combat
+damage in one hit actually ends the game now (`StepStatus::GameOver`), integrating with item 10's
+previously-inert SBA check for the first time. All 589 prior tests unaffected. Confirmed via the
+real CLI too: `cargo run -p stackfish-cli -- crates/engine/tests/scenarios/
+phase5_commander_damage.toml` - 15/15 actions ran, 2/2 assertions passed (a commander attacks
+unblocked through the full TOML → Engine → CLI pipeline, both life loss and the new
+`assert_commander_damage` assertion confirmed).
+
+**STRUCT DEVIATIONS:** `AssertionSpec::CommanderDamage`/`AssertionStepSpec::CommanderDamage`
+weren't named in the pre-slice report (which only discussed the engine-side struct changes) - added
+once writing the CLI-scenario test surfaced that no way existed to check this field from TOML at
+all, same "found while writing the test, not guessed at" shape other slices' own scope additions
+have taken.
+
+**INTERFACE DEVIATIONS:** `commands::apply_damage_event` and `commands::AssignCombatDamage`'s event
+constructors both gained the `is_combat_damage` parameter/field exactly as the pre-slice report's
+decision-1 framing anticipated - no deviation beyond what was already flagged for confirmation.
+
+**SCOPE DEVIATIONS:** None beyond the `AssertionSpec` addition noted above (STRUCT DEVIATIONS) -
+both scope questions (the event field, and leaving `commander_damage_taken`'s key alone) were
+confirmed with the human before implementation started, not decided unilaterally mid-slice.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- `PlayerState.commander_damage_taken` stays keyed by `ObjectId` (decision 2 above) - a commander
+  that dies and returns via CR 903.9a gets a new id, and its damage count resets to 0 instead of
+  continuing to accumulate against "the same commander" the way CR 903.10a's own text means it.
+  Deliberately left as-is per the confirmed scope decision, not silently narrowed - a real follow-up
+  fix would mirror `commander_casts`' name-keying, touching the same tested `sba.rs`/
+  `commander_damage_from` surface this slice deliberately avoided widening.
+- Planeswalker/battle damage (CR 120.3c/d) still isn't modeled (`apply_damage_event`'s own
+  pre-existing TODO, untouched by this slice) - irrelevant to 903.10a specifically (that rule is
+  player-damage-only) but worth naming since a commander could in principle also deal combat damage
+  to a planeswalker/battle, which this engine still can't represent at all.
+- No TOML action exists for CR 903.9a's return-to-command-zone choice (11c's own open gap, still
+  open) - a scenario proving the recast-reset gap above through the real CLI pipeline isn't possible
+  yet either.
+- This closes the entire 11a-11e Commander sub-sequence (backlog item 11). Only the item's own
+  explicit non-goal remains: color identity/deck-construction legality, already scoped out by
+  DESIGN.md.
