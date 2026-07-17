@@ -79,6 +79,16 @@ pub struct GameObject {
     /// should cease to exist (CR 111.7), but enforcement is a TODO — they
     /// currently move to zones like normal cards until that SBA hook exists.
     pub is_token: bool,
+    /// CR 903.3: this specific card is a player's designated commander — an
+    /// attribute of the card/object itself, not its `CardDefinition` (a
+    /// definition can be shared by non-commander copies of the same card),
+    /// and one that "retains this designation even when it changes zones."
+    /// Every real zone-change site in this crate builds the successor
+    /// `GameObject` from an explicit struct literal or a `.clone()` of the
+    /// original, so this rides along automatically wherever a site clones
+    /// forward — a site that mints a fresh object (a token, a copy) sets
+    /// this `false` instead, since neither is ever a commander.
+    pub is_commander: bool,
     pub visibility: VisibilityPolicy,
 }
 

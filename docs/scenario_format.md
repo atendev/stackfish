@@ -126,12 +126,19 @@ Each entry defines one player's library. All fields except `id` are optional.
 [[game.players]]
 id = 0                                              # u32, required - becomes PlayerId(id)
 library = ["bear", "bear", "forest", "forest"]      # card keys from [[cards]], top to bottom
+commanders = ["general"]                            # optional, default [] - CR 903.6, see below
 life_override = 40                                  # optional u32, overrides starting_life for this player only
 ```
 
 `library` is a list of `[[cards]]` keys in top-to-bottom order. Keys may repeat for multiple
 copies. If `shuffle_libraries = true` (default), the engine shuffles before drawing so the order
 only matters for deterministic (`shuffle_libraries = false`) runs.
+
+`commanders` (CR 903.6) is a list of `[[cards]]` keys placed in the command zone instead of the
+library — a list, not a single key, since Partner commanders mean a player can legally have more
+than one. `Engine::new_game` mints these with `is_commander: true` right after that player's
+library (matching id-allocation order exactly), so card keys resolve the same way library keys do
+(see below) once pregame completes.
 
 **Card keys work on the new-game path.** The scenario crate reconstructs the object-id sequence
 that `Engine::new_game` assigns (sequential, one per library card, in player/library order), then
@@ -355,6 +362,7 @@ zone = "battlefield" # see Zones below
 card = "bear"         # matches a [[cards]] key
 controlled_since_turn = 0   # optional u32, default 0 - see Summoning sickness below
 damage_marked = 0           # optional u32, default 0 - see Damage marking below
+is_commander = false        # optional bool, default false - CR 903.3, see Commander below
 ```
 
 **Damage marking (CR 704.5g):** `damage_marked` defaults to `0`. No combat-damage step (CR 510)
@@ -369,6 +377,14 @@ less than any real `turn_number` (the game's first turn seeds `last_active_turn_
 setup time) - so a setup card is **never** summoning sick by default. To build a fixture that *is*
 sick (a creature that just entered the battlefield this turn), set this to the scenario's current
 `turn_number`. No haste override exists - haste isn't modeled in this engine yet.
+
+**Commander (CR 903.3):** `is_commander` defaults to `false`. Set it `true` (typically paired with
+`zone = "command"`) to mark that specific setup instance as its player's commander — CR 903.8
+lets its owner cast it from the command zone like any other spell, no alternative cost needed. Not
+enforced against `zone` here — casting/legality checks are the engine's job (`CastSpell`), not the
+scenario loader's, same "engine trusts the setup" stance every other `[[setup]]` field takes. CR
+903.9a (owner may return a commander from graveyard/exile to the command zone) has no scenario
+action yet — drive it directly via `Engine::submit_commander_return_choice` in a Rust test instead.
 
 Each `[[setup]]` entry creates a new object instance — list the same card key twice to get two
 copies on the battlefield, each with its own `ObjectId`. Visibility defaults to CR's normal zone

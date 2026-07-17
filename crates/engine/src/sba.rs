@@ -61,6 +61,19 @@ pub enum SbaOutcome {
     /// violations resolve one pause at a time across passes, same as CR
     /// 616.1's own ordering-choice pause already does.
     NeedsLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId>, resolved_so_far: Vec<GameEvent> },
+    /// CR 903.9a: `commander` (owned by `player`) is sitting in a graveyard
+    /// or exile and hasn't yet been offered the "may put it into the
+    /// command zone" choice (`GameState::commander_return_offered` — see
+    /// that field's own doc comment for why this is a one-time-per-arrival
+    /// window, not a standing question). A genuine "may," not something
+    /// this pure check can resolve on its own. `resolved_so_far` (this
+    /// pass's player-loss events) is unaffected by this pause and should be
+    /// committed to the ledger immediately by the caller. Only the *first*
+    /// qualifying commander (by `ObjectId`, for determinism) pauses per
+    /// pass — once `Engine::submit_commander_return_choice` answers, the
+    /// caller re-invokes `check_state_based_actions` from scratch, which
+    /// finds the next one if another qualifies.
+    NeedsCommanderReturnChoice { player: PlayerId, commander: ObjectId, resolved_so_far: Vec<GameEvent> },
 }
 
 /// One pass of CR 704's state-based actions: finds every applicable SBA and
@@ -102,6 +115,15 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     // any) or fall through to the checks below once none remain.
     if let Some((player, candidates)) = find_legend_rule_group(state, script_runtime) {
         return SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far: events };
+    }
+
+    // CR 903.9a: same "genuine player choice pauses this pass outright"
+    // shape as the legend rule above - only the first qualifying commander
+    // (if any) pauses per pass; resolving it (accept or decline) re-invokes
+    // this whole function fresh next pass, which finds the next one (if
+    // any) or falls through once none remain.
+    if let Some((player, commander)) = find_commander_return_candidate(state) {
+        return SbaOutcome::NeedsCommanderReturnChoice { player, commander, resolved_so_far: events };
     }
 
     // CR 704.5k: fully deterministic (no player choice), so its losers just
@@ -352,6 +374,30 @@ fn find_legend_rule_group(state: &GameState, script_runtime: &ScriptRuntime) -> 
     violating.into_iter().next()
 }
 
+/// CR 903.9a: the first (by `ObjectId`, for determinism against
+/// `state.objects`' unordered `HashMap` iteration) commander sitting in a
+/// graveyard or exile that hasn't already been offered the "may return to
+/// the command zone" choice this arrival (`GameState::
+/// commander_return_offered` — see that field's doc comment). Owner is
+/// `object.owner`, matching CR 903.8/903.9a's "owner" wording (not
+/// controller — a graveyard/exile card has no meaningful controller
+/// distinct from its owner anyway).
+fn find_commander_return_candidate(state: &GameState) -> Option<(PlayerId, ObjectId)> {
+    let mut candidates: Vec<ObjectId> = state
+        .objects
+        .values()
+        .filter(|o| {
+            o.is_commander
+                && matches!(o.zone, ZoneKind::Graveyard | ZoneKind::Exile)
+                && !state.commander_return_offered.contains(&o.object_id)
+        })
+        .map(|o| o.object_id)
+        .collect();
+    candidates.sort();
+    let commander = candidates.into_iter().next()?;
+    Some((state.object(commander)?.owner, commander))
+}
+
 /// CR 704.5k: which battlefield permanents (any type, not creature-specific)
 /// die to the world rule this pass — every World-supertype permanent except
 /// the one that's had the supertype for the shortest amount of time (i.e.
@@ -540,4 +586,62 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (Game
         parent_event: None,
     };
     (event, departed_triggered)
+}
+
+/// CR 903.9a: performs the *accepted* "return commander to the command
+/// zone" choice — graveyard/exile to the command zone, CR 400.7 new
+/// `ObjectId` (no remap follows, same convention every other zone-change
+/// move in this crate uses), `is_commander`/`owner` preserved via clone
+/// (see `GameObject::is_commander`'s own doc comment). `None` if
+/// `old_id` no longer resolves (e.g. some other effect already moved it
+/// between the choice pausing and being answered) — same defensive stance
+/// `commit_death`'s own callers take for a participant that stopped
+/// resolving mid-pipeline.
+///
+/// Deliberately NOT routed through CR 614-616 replacement checking, unlike
+/// `commit_death` — no card in this engine produces a competing
+/// replacement effect on this specific event yet, and CR 903.9b (the
+/// "would go to hand/library, put in the command zone instead" redirect)
+/// — the natural vehicle for one — is out of scope this slice. A real gap,
+/// flagged rather than silently glossed over.
+pub(crate) fn move_commander_to_command_zone(state: &mut GameState, old_id: ObjectId) -> Option<GameEvent> {
+    let object = state.object(old_id)?;
+    let from = object.zone;
+    let owner = object.owner;
+    let last_known_info = object.clone();
+
+    let new_id = state.allocate_object_id();
+    let mut new_object = last_known_info.clone();
+    new_object.object_id = new_id;
+    new_object.lineage = ObjectLineage { previous: Some(old_id) };
+    new_object.zone = ZoneKind::Command;
+    new_object.timestamp = state.allocate_sequence_no();
+
+    // Graveyard is per-owner; exile is shared (owner: None on the Zone
+    // itself) - same distinction `remove_players_objects` above already
+    // has to make.
+    let from_zone_owner = if from == ZoneKind::Exile { None } else { Some(owner) };
+    if let Some(zone) = state.zone_mut(from, from_zone_owner) {
+        zone.remove(old_id);
+    }
+    commands::retire_object(state, old_id);
+    if let Some(zone) = state.zone_mut(ZoneKind::Command, Some(owner)) {
+        zone.push_bottom(new_id);
+        state.objects.insert(new_id, new_object);
+    }
+
+    let event_id = state.allocate_event_id();
+    let sequence_no = state.allocate_sequence_no();
+    Some(GameEvent {
+        event_id,
+        sequence_no,
+        kind: GameEventKind::ZoneChange {
+            object: new_id,
+            from,
+            to: ZoneKind::Command,
+            last_known_info: Some(last_known_info),
+        },
+        caused_by_command: None,
+        parent_event: None,
+    })
 }

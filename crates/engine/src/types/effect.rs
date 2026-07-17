@@ -505,6 +505,7 @@ mod tests {
             attached_to: None,
             timestamp: SequenceNo(0),
             controlled_since_turn: 0,
+            is_commander: false,
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
         }
@@ -564,6 +565,7 @@ mod tests {
             next_object_id: 1000,
             pending_step_skips: Vec::new(),
             once_per_turn_triggered: std::collections::HashSet::new(),
+            commander_return_offered: std::collections::HashSet::new(),
         }
     }
 

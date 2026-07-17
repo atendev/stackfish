@@ -86,6 +86,7 @@ fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: 
         timestamp: SequenceNo(0),
         controlled_since_turn: 0,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -167,6 +168,7 @@ fn two_player_state(p0_life: i32) -> GameState {
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     }
 }
 

@@ -59,6 +59,14 @@ pub enum LegendRuleChoiceError {
     InvalidCandidate,
 }
 
+/// Why `submit_commander_return_choice` rejected an answer to a CR 903.9a
+/// commander-return choice.
+#[derive(Debug)]
+pub enum CommanderReturnChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingCommanderReturnChoice`.
+    NotAwaitingChoice,
+}
+
 /// Why `submit_script_choice` rejected an answer to a backlog-item-9
 /// `Game.SelectTargets` pause.
 #[derive(Debug)]
@@ -258,6 +266,13 @@ pub enum StepStatus {
     /// "not a `PlayerAction`/priority decision, its own entry point" rationale
     /// as `AwaitingReplacementChoice`.
     AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId> },
+    /// CR 903.9a: `commander` (owned by `player`) is in a graveyard or exile
+    /// and `player` may put it into the command zone — the caller should
+    /// prompt and call `submit_commander_return_choice`, then `step()`
+    /// again. Same "not a `PlayerAction`/priority decision, its own entry
+    /// point" rationale as `AwaitingReplacementChoice`/
+    /// `AwaitingLegendRuleChoice`.
+    AwaitingCommanderReturnChoice { player: PlayerId, commander: ObjectId },
     /// Backlog item 9: a card script (via `Game.SelectTargets`) yielded
     /// mid-resolution, asking `player` to choose a real target matching
     /// `request` before the operation can finish — the caller should prompt
@@ -412,6 +427,11 @@ pub enum ProcessState {
     /// `CleanupSbaCheck` once the losers are resolved via the same
     /// `resume_sba_death` helper `submit_replacement_choice` already uses.
     AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId>, then: SbaResumeThen },
+    /// CR 903.9a: paused because `sba::find_commander_return_candidate`
+    /// found `commander` (owned by `player`) sitting in a graveyard or
+    /// exile, not yet offered the "may return" choice. `then` plays the
+    /// same role it does on `AwaitingLegendRuleChoice` above.
+    AwaitingCommanderReturnChoice { player: PlayerId, commander: ObjectId, then: SbaResumeThen },
     /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
     /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —
     /// `thread`/`request` are the suspended coroutine's own handle and its
@@ -974,6 +994,49 @@ impl Engine {
 
         let losers: VecDeque<ObjectId> = candidates.into_iter().filter(|id| *id != kept).collect();
         self.process_state = self.resume_sba_death(losers, Vec::new(), Vec::new(), then);
+        Ok(())
+    }
+
+    /// Answers a pending CR 903.9a commander-return choice raised by
+    /// `StepStatus::AwaitingCommanderReturnChoice`. `returned = true`
+    /// performs the zone move (`sba::move_commander_to_command_zone`);
+    /// `false` declines, leaving the card exactly where it is. Either way,
+    /// the commander is marked in `GameState::commander_return_offered` so
+    /// this exact arrival isn't re-asked about on a later pass.
+    ///
+    /// Deliberately a separate entry point from `submit_action`, same
+    /// reason `submit_legend_rule_choice` is. Doesn't route through
+    /// `resume_sba_death`/`resolve_deaths` like that method does — there's
+    /// no "death" here to replacement-check, just a direct zone move (see
+    /// `move_commander_to_command_zone`'s own doc comment for why that move
+    /// itself skips CR 614-616 replacement checking).
+    pub fn submit_commander_return_choice(
+        &mut self,
+        returned: bool,
+    ) -> Result<(), CommanderReturnChoiceError> {
+        if !matches!(self.process_state, ProcessState::AwaitingCommanderReturnChoice { .. }) {
+            return Err(CommanderReturnChoiceError::NotAwaitingChoice);
+        }
+        let ProcessState::AwaitingCommanderReturnChoice { commander, then, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        self.state.commander_return_offered.insert(commander);
+        let mut events = Vec::new();
+        if returned {
+            if let Some(event) = sba::move_commander_to_command_zone(&mut self.state, commander) {
+                events.push(event);
+            }
+        }
+
+        self.process_state = match then {
+            SbaResumeThen::SbaLoop => self.finish_sba_loop(events, Vec::new()),
+            SbaResumeThen::CleanupSbaCheck { since_ledger } => {
+                self.finish_cleanup_sba_check(events, Vec::new(), since_ledger)
+            }
+        };
         Ok(())
     }
 
@@ -1627,6 +1690,7 @@ impl Engine {
                     timestamp: ts,
                     controlled_since_turn: 1,
                     is_token: false,
+                    is_commander: false,
                     visibility: VisibilityPolicy { public: false, visible_to: Vec::new() },
                 };
                 lib_zone.contents.push_back(obj_id);
@@ -1635,6 +1699,44 @@ impl Engine {
             zones.push(lib_zone);
             zones.push(Zone::new(ZoneKind::Hand, Some(pid)));
             zones.push(Zone::new(ZoneKind::Graveyard, Some(pid)));
+
+            // CR 903.6: commander(s) go to the command zone, not the
+            // library - minted the same way library cards just were above,
+            // just with is_commander: true and a different destination.
+            let mut command_zone = Zone::new(ZoneKind::Command, Some(pid));
+            for card_def in &player_cfg.commanders {
+                let obj_id = ObjectId(next_object_id);
+                next_object_id += 1;
+                let ts = SequenceNo(next_sequence_no);
+                next_sequence_no += 1;
+                let obj = GameObject {
+                    object_id: obj_id,
+                    lineage: ObjectLineage { previous: None },
+                    definition: card_def.clone(),
+                    owner: pid,
+                    controller: pid,
+                    zone: ZoneKind::Command,
+                    tapped: false,
+                    flipped: false,
+                    face_down: false,
+                    phased_out: false,
+                    damage_marked: 0,
+                    deathtouched: false,
+                    counters: CounterSet::new(),
+                    attachments: Vec::new(),
+                    attached_to: None,
+                    timestamp: ts,
+                    controlled_since_turn: 1,
+                    is_token: false,
+                    is_commander: true,
+                    // CR 408: the command zone's contents are public, same
+                    // default as the battlefield/graveyard/exile.
+                    visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+                };
+                command_zone.contents.push_back(obj_id);
+                objects.insert(obj_id, obj);
+            }
+            zones.push(command_zone);
         }
 
         // Shared zones
@@ -1667,6 +1769,7 @@ impl Engine {
             next_object_id,
             pending_step_skips: Vec::new(),
             once_per_turn_triggered: std::collections::HashSet::new(),
+            commander_return_offered: std::collections::HashSet::new(),
         };
 
         Engine {
@@ -2802,6 +2905,7 @@ impl Engine {
                                         timestamp: ts,
                                         controlled_since_turn: self.state.turn_number,
                                         is_token: true,
+                                        is_commander: false,
                                         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
                                     };
                                     if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
@@ -2923,6 +3027,14 @@ impl Engine {
                 // AwaitingReplacementChoice above already uses.
                 let status = StepStatus::AwaitingLegendRuleChoice { player, candidates: candidates.clone() };
                 self.process_state = ProcessState::AwaitingLegendRuleChoice { player, candidates, then };
+                status
+            }
+
+            ProcessState::AwaitingCommanderReturnChoice { player, commander, then } => {
+                // Nothing to do until submit_commander_return_choice
+                // answers - same "put the exact same state back" pattern.
+                let status = StepStatus::AwaitingCommanderReturnChoice { player, commander };
+                self.process_state = ProcessState::AwaitingCommanderReturnChoice { player, commander, then };
                 status
             }
 
@@ -3064,6 +3176,14 @@ impl Engine {
                         // NeedsOrderingChoice's own resolved_so_far above.
                         self.state.ledger.extend(resolved_so_far);
                         ProcessState::AwaitingLegendRuleChoice { player, candidates, then: SbaResumeThen::SbaLoop }
+                    }
+                    SbaOutcome::NeedsCommanderReturnChoice { player, commander, resolved_so_far } => {
+                        self.state.ledger.extend(resolved_so_far);
+                        ProcessState::AwaitingCommanderReturnChoice {
+                            player,
+                            commander,
+                            then: SbaResumeThen::SbaLoop,
+                        }
                     }
                 };
                 StepStatus::Progressed
@@ -3340,6 +3460,14 @@ impl Engine {
                         ProcessState::AwaitingLegendRuleChoice {
                             player,
                             candidates,
+                            then: SbaResumeThen::CleanupSbaCheck { since_ledger },
+                        }
+                    }
+                    SbaOutcome::NeedsCommanderReturnChoice { player, commander, resolved_so_far } => {
+                        self.state.ledger.extend(resolved_so_far);
+                        ProcessState::AwaitingCommanderReturnChoice {
+                            player,
+                            commander,
                             then: SbaResumeThen::CleanupSbaCheck { since_ledger },
                         }
                     }
@@ -3878,6 +4006,7 @@ mod tests {
             next_object_id: 0,
             pending_step_skips: Vec::new(),
             once_per_turn_triggered: std::collections::HashSet::new(),
+            commander_return_offered: std::collections::HashSet::new(),
         }
     }
 
@@ -3971,6 +4100,7 @@ mod tests {
             attached_to: None,
             timestamp: crate::types::ids::SequenceNo(0),
             controlled_since_turn: 0,
+            is_commander: false,
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
         }

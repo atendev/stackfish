@@ -77,6 +77,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
         timestamp: SequenceNo(0),
         controlled_since_turn: 1,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -101,6 +102,7 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
         timestamp: SequenceNo(0),
         controlled_since_turn: 1,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -170,6 +172,7 @@ fn state_at_end_step() -> GameState {
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     }
 }
 

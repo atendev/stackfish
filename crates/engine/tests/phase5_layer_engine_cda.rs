@@ -33,6 +33,9 @@ fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
         SbaOutcome::NeedsLegendRuleChoice { .. } => {
             panic!("fixture didn't expect a legend-rule choice pause")
         }
+        SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
     }
 }
 
@@ -89,6 +92,7 @@ fn cda_creature(id: ObjectId, owner: PlayerId, power_script: Option<&str>, tough
         timestamp: SequenceNo(0),
         controlled_since_turn: 0,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -136,6 +140,7 @@ fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameOb
         timestamp: SequenceNo(0),
         controlled_since_turn: 0,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -188,6 +193,7 @@ fn base_state() -> GameState {
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     }
 }
 

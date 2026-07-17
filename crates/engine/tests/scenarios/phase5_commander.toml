@@ -1,0 +1,66 @@
+# Commander marking + casting from the command zone slice (backlog item
+# 11c, CR 903.3/903.6/903.8): a card marked is_commander sitting in the
+# command zone can be cast by its owner like any other spell, no
+# alternative cost needed, and resolves to the battlefield normally. The
+# reject paths (non-commander in the command zone, wrong owner) and CR
+# 903.9a's return-to-command-zone choice are exercised exhaustively in
+# crates/engine/tests/phase5_commander.rs - this fixture only proves the
+# real end-to-end pipeline (TOML -> Engine -> CLI) wires CastSpell's new
+# command-zone permission through correctly.
+seed = 1
+
+[[players]]
+id = 0
+life = 40
+
+[[cards]]
+key = "general"
+name = "Test General"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "command"
+card = "general"
+is_commander = true
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "general"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+mana = { units = [] }
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "general"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_phase"
+equals = "main"
+
+[[steps]]
+type = "assert_step"
+equals = "pre_combat_main"

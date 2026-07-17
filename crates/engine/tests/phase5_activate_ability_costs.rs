@@ -55,6 +55,7 @@ fn object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneK
         timestamp: SequenceNo(0),
         controlled_since_turn: 0,
         is_token: false,
+        is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
     }
 }
@@ -148,6 +149,7 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, ObjectId, ObjectId, 
         next_object_id: 1000,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
     };
     (state, p0, source, fodder, hand_card, tappable_a)
 }

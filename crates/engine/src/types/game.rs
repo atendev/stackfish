@@ -116,6 +116,17 @@ pub struct GameState {
     /// `triggers::collect_triggers`/`Engine`'s `CollectTriggers` stage;
     /// reset alongside `lands_played_this_turn` whenever a new turn begins.
     pub once_per_turn_triggered: std::collections::HashSet<(ObjectId, u32)>,
+    /// CR 903.9a: which commander object ids currently sitting in a
+    /// graveyard or exile have already been offered the "owner may put it
+    /// into the command zone" state-based choice — a *declined* offer must
+    /// not be re-asked on every subsequent SBA pass; this is a one-time
+    /// window per arrival ("since state-based actions were last checked"),
+    /// not a standing question. An *accepted* return mints a new `ObjectId`
+    /// on the way to the command zone (CR 400.7), so its old id here becomes
+    /// moot. Entries are never removed, only ever grow — same low-cost,
+    /// never-reused-id bookkeeping `once_per_turn_triggered` already
+    /// accepts, just not reset per-turn since this isn't a per-turn cap.
+    pub commander_return_offered: std::collections::HashSet<ObjectId>,
 }
 
 impl GameState {
@@ -222,6 +233,7 @@ mod tests {
             next_object_id: 1,
             pending_step_skips: Vec::new(),
             once_per_turn_triggered: std::collections::HashSet::new(),
+            commander_return_offered: std::collections::HashSet::new(),
         };
 
         let card = ObjectId(0);
