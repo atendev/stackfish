@@ -579,12 +579,12 @@ impl ConditionPrimitive {
             ConditionPrimitive::DiesMatching(filter) => matches!(
                 event,
                 GameEventKind::ZoneChange { from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: Some(lki), .. }
-                    if filter.matches(lki, controller)
+                    if filter.matches(lki, lki.controller, controller)
             ),
             ConditionPrimitive::LeavesBattlefieldMatching(filter) => matches!(
                 event,
                 GameEventKind::ZoneChange { from: ZoneKind::Battlefield, last_known_info: Some(lki), .. }
-                    if filter.matches(lki, controller)
+                    if filter.matches(lki, lki.controller, controller)
             ),
         }
     }

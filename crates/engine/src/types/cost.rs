@@ -2,6 +2,7 @@ use crate::{
     AtomicManaSymbol, CardTypeSet, Color, GameObject, GameState, ManaCost, ManaPool, ManaSymbol,
     ManaUnit, ObjectId, PlayerId, Subtype, SupertypeSet, ZoneKind,
 };
+use crate::script::ScriptRuntime;
 
 /// Structured stand-in for "filter described in oracle text" — e.g.
 /// "sacrifice a creature", "discard a card at random", "tap an untapped
@@ -32,12 +33,17 @@ pub struct FilterSpec {
 impl FilterSpec {
     /// Whether `object` satisfies this filter, from `viewer`'s perspective
     /// (`FilterController::You`/`Opponent` are relative to whoever is paying
-    /// the cost). `random` doesn't affect matching itself — only which
+    /// the cost). `object_controller` is `object`'s controller, pre-resolved
+    /// by the caller via `layers::effective_controller` (CR 108.4) rather
+    /// than read off `object.controller` here — this type deliberately never
+    /// depends on `ScriptRuntime` (same boundary `ContinuousEffect::
+    /// applies_to` keeps), so resolving the *live* controller is the
+    /// caller's job. `random` doesn't affect matching itself — only which
     /// matching object gets picked, irrelevant here. `extra` requires the
     /// script bridge, not available from this signature — a filter with
     /// `extra` set is treated as "doesn't match" rather than guessed at (see
     /// this struct's own doc comment for why `extra` exists at all).
-    pub fn matches(&self, object: &GameObject, viewer: PlayerId) -> bool {
+    pub fn matches(&self, object: &GameObject, object_controller: PlayerId, viewer: PlayerId) -> bool {
         if self.extra.is_some() {
             return false;
         }
@@ -58,8 +64,8 @@ impl FilterSpec {
         }
         if let Some(fc) = self.controller {
             let ok = match fc {
-                FilterController::You => object.controller == viewer,
-                FilterController::Opponent => object.controller != viewer,
+                FilterController::You => object_controller == viewer,
+                FilterController::Opponent => object_controller != viewer,
                 FilterController::Any => true,
             };
             if !ok {
@@ -183,7 +189,11 @@ pub struct CostModifier {
 pub fn apply_cost_modifiers(base: &ManaCost, modifiers: &[CostModifier], spell: &GameObject) -> ManaCost {
     let mut cost = base.clone();
     for modifier in modifiers {
-        if modifier.filter.matches(spell, modifier.controller) {
+        // `spell`'s own `.controller` is used directly here, not a resolved
+        // effective_controller - it's a spell on the stack, not a
+        // battlefield permanent, and no GainControl effect (CR 108.4) can
+        // target something in that zone.
+        if modifier.filter.matches(spell, spell.controller, modifier.controller) {
             cost = cost.apply_cost_delta(modifier.amount);
         }
     }
@@ -537,7 +547,14 @@ impl PaymentPlan {
     /// unstructured-text cost. Returning `bool` here as a placeholder — real
     /// version will likely return a `Result` with a reason once validation
     /// failure modes are designed.
-    pub fn validate(&self, spec: &CostSpec, state: &GameState, payer: PlayerId, source: ObjectId) -> bool {
+    pub fn validate(
+        &self,
+        spec: &CostSpec,
+        state: &GameState,
+        script_runtime: &ScriptRuntime,
+        payer: PlayerId,
+        source: ObjectId,
+    ) -> bool {
         if !spec.alternative.is_empty() {
             return false;
         }
@@ -616,7 +633,8 @@ impl PaymentPlan {
                         if obj.tapped || obj.zone != ZoneKind::Battlefield {
                             return false;
                         }
-                        if !filter.matches(obj, payer) {
+                        let controller = crate::layers::effective_controller(state, script_runtime, *id);
+                        if !filter.matches(obj, controller, payer) {
                             return false;
                         }
                         used.push(*id);
@@ -625,21 +643,28 @@ impl PaymentPlan {
                 AdditionalCost::Sacrifice { filter } => {
                     let Some(CostPayment::Sacrifice(id)) = payments.next() else { return false };
                     let Some(obj) = state.object(*id) else { return false };
-                    // CR 701.20a: you can only sacrifice a permanent you control.
-                    if obj.zone != ZoneKind::Battlefield || obj.controller != payer {
+                    // CR 701.20a: you can only sacrifice a permanent you
+                    // *currently* control (layers::effective_controller).
+                    let controller = crate::layers::effective_controller(state, script_runtime, *id);
+                    if obj.zone != ZoneKind::Battlefield || controller != payer {
                         return false;
                     }
-                    if !filter.matches(obj, payer) {
+                    if !filter.matches(obj, controller, payer) {
                         return false;
                     }
                 }
                 AdditionalCost::Discard { filter } => {
                     let Some(CostPayment::Discard(id)) = payments.next() else { return false };
                     let Some(obj) = state.object(*id) else { return false };
+                    // A hand card's `.controller` always equals its owner in
+                    // this engine (no GainControl effect targets a
+                    // non-battlefield card, CR 108.4) - the raw field is
+                    // exactly correct here, not a stand-in for the resolved
+                    // query.
                     if obj.zone != ZoneKind::Hand || obj.controller != payer {
                         return false;
                     }
-                    if !filter.matches(obj, payer) {
+                    if !filter.matches(obj, obj.controller, payer) {
                         return false;
                     }
                 }
@@ -726,8 +751,8 @@ mod tests {
             random: false,
             extra: None,
         };
-        assert!(filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
-        assert!(!filter.matches(&creature(p0, CardTypeSet::LAND), p0));
+        assert!(filter.matches(&creature(p0, CardTypeSet::CREATURE), p0, p0));
+        assert!(!filter.matches(&creature(p0, CardTypeSet::LAND), p0, p0));
     }
 
     #[test]
@@ -742,8 +767,8 @@ mod tests {
             random: false,
             extra: None,
         };
-        assert!(you_filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
-        assert!(!you_filter.matches(&creature(p1, CardTypeSet::CREATURE), p0));
+        assert!(you_filter.matches(&creature(p0, CardTypeSet::CREATURE), p0, p0));
+        assert!(!you_filter.matches(&creature(p1, CardTypeSet::CREATURE), p1, p0));
 
         let opponent_filter = FilterSpec {
             card_types: None,
@@ -753,8 +778,8 @@ mod tests {
             random: false,
             extra: None,
         };
-        assert!(opponent_filter.matches(&creature(p1, CardTypeSet::CREATURE), p0));
-        assert!(!opponent_filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
+        assert!(opponent_filter.matches(&creature(p1, CardTypeSet::CREATURE), p1, p0));
+        assert!(!opponent_filter.matches(&creature(p0, CardTypeSet::CREATURE), p0, p0));
     }
 
     #[test]
@@ -768,7 +793,7 @@ mod tests {
             random: false,
             extra: Some("power 4 or greater".to_string()),
         };
-        assert!(!filter.matches(&creature(p0, CardTypeSet::CREATURE), p0));
+        assert!(!filter.matches(&creature(p0, CardTypeSet::CREATURE), p0, p0));
     }
 
     #[test]
@@ -785,8 +810,8 @@ mod tests {
             random: false,
             extra: None,
         };
-        assert!(filter.matches(&basic_land, p0), "a basic land card matches Some(SupertypeSet::BASIC)");
-        assert!(!filter.matches(&nonbasic_land, p0), "a nonbasic land doesn't match");
+        assert!(filter.matches(&basic_land, p0, p0), "a basic land card matches Some(SupertypeSet::BASIC)");
+        assert!(!filter.matches(&nonbasic_land, p0, p0), "a nonbasic land doesn't match");
     }
 
     #[test]
@@ -804,8 +829,8 @@ mod tests {
             random: false,
             extra: None,
         };
-        assert!(filter.matches(&forest, p0), "a Forest card matches a Forest-subtype filter");
-        assert!(!filter.matches(&island, p0), "an Island doesn't match a Forest-only filter");
+        assert!(filter.matches(&forest, p0, p0), "a Forest card matches a Forest-subtype filter");
+        assert!(!filter.matches(&island, p0, p0), "an Island doesn't match a Forest-only filter");
     }
 
     fn spent(colored: [u32; 5], colorless: u32) -> SpentPool {

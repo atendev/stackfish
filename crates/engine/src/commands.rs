@@ -134,12 +134,21 @@ fn is_sorcery_speed(state: &GameState, player: PlayerId) -> bool {
 /// turn began. Derived from `GameObject.controlled_since_turn` against
 /// `GameState.last_active_turn_number` rather than a stored bool - see
 /// those fields' doc comments for why. CR 702.10b/c: Haste bypasses this
-/// check entirely.
-pub(crate) fn has_summoning_sickness(state: &GameState, object: &GameObject) -> bool {
+/// check entirely. Checks against `object`'s *live* controller
+/// (`layers::effective_controller`), not the raw field - CR 302.6 cares who
+/// controls the creature right now, which matters the moment a
+/// `GainControl` effect exists (`controlled_since_turn` itself still isn't
+/// bumped by one - see this slice's own UNRESOLVED note).
+pub(crate) fn has_summoning_sickness(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    object: &GameObject,
+) -> bool {
     if object.definition.keywords.contains(KeywordSet::HASTE) {
         return false;
     }
-    match state.last_active_turn_number.get(&object.controller) {
+    let controller = crate::layers::effective_controller(state, script_runtime, object.object_id);
+    match state.last_active_turn_number.get(&controller) {
         Some(&since) => object.controlled_since_turn >= since,
         // The controller has no recorded turn start at all - shouldn't
         // happen past the very first turn (PreGame seeds this), but "no
@@ -230,9 +239,15 @@ pub(crate) fn target_is_legal(
                 }
             }
             if let Some(fc) = controller {
+                // CR 108.4: "you"/"opponent" resolve against the object's
+                // live controller (layers::effective_controller), not the
+                // raw GameObject.controller field - a control-changed
+                // permanent must be targetable/untargetable per its current
+                // controller, not whoever it started under.
+                let effective_controller = crate::layers::effective_controller(state, script_runtime, id);
                 let matches_controller = match fc {
-                    FilterController::You => obj.controller == caster,
-                    FilterController::Opponent => obj.controller != caster,
+                    FilterController::You => effective_controller == caster,
+                    FilterController::Opponent => effective_controller != caster,
                     FilterController::Any => true,
                 };
                 if !matches_controller {
@@ -584,7 +599,13 @@ pub(crate) fn apply_damage_event(
     let replaces_with_counters = source_keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT);
     let is_infect = source_keywords.contains(KeywordSet::INFECT);
     let has_deathtouch = source_keywords.contains(KeywordSet::DEATHTOUCH);
-    let source_controller = state.object(source).map(|o| o.controller);
+    // CR 702.15b: lifelink's life gain goes to whoever *currently* controls
+    // the damage source (layers::effective_controller), not whoever
+    // controlled it when the damage was dealt if a GainControl effect has
+    // since changed hands - though in practice these are the same instant.
+    let source_controller = state
+        .object(source)
+        .map(|_| crate::layers::effective_controller(state, script_runtime, source));
     let source_is_commander = state.object(source).map(|o| o.is_commander).unwrap_or(false);
 
     match target {
@@ -1114,7 +1135,10 @@ pub fn execute_command(
             }
 
             let source_object = state.object(source).ok_or(CommandError::InvalidTarget)?;
-            let controller = source_object.controller;
+            // CR 602.2a: only the source's *current* controller may activate
+            // it - layers::effective_controller, not the raw field, so a
+            // GainControl'd permanent's abilities follow its new controller.
+            let controller = crate::layers::effective_controller(state, script_runtime, source);
             if controller != command.actor {
                 return Err(CommandError::IllegalAction(
                     "actor does not control the ability's source".to_string(),
@@ -1172,7 +1196,7 @@ pub fn execute_command(
                     // creature's {T}/{Q} abilities - non-creature permanents
                     // (lands, artifacts, ...) ignore it entirely.
                     if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
-                        && has_summoning_sickness(state, source_object)
+                        && has_summoning_sickness(state, script_runtime, source_object)
                     {
                         return Err(CommandError::IllegalAction(
                             "source has summoning sickness".to_string(),
@@ -1286,7 +1310,7 @@ pub fn execute_command(
                             ));
                         }
                         if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
-                            && has_summoning_sickness(state, source_object)
+                            && has_summoning_sickness(state, script_runtime, source_object)
                         {
                             return Err(CommandError::IllegalAction(
                                 "source has summoning sickness".to_string(),
@@ -1361,7 +1385,9 @@ pub fn execute_command(
             // mutating anything, so an illegal batch taps nobody.
             for (attacker, target) in &attackers {
                 let object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
-                if object.controller != command.actor {
+                // CR 508.1a: attacking requires *current* control, per
+                // layers::effective_controller.
+                if crate::layers::effective_controller(state, script_runtime, *attacker) != command.actor {
                     return Err(CommandError::IllegalAction(
                         "actor does not control a chosen attacker".to_string(),
                     ));
@@ -1380,7 +1406,7 @@ pub fn execute_command(
                 }
                 // CR 508.1a/302.6/702.10b: has_summoning_sickness itself
                 // grants Haste's bypass.
-                if has_summoning_sickness(state, object) {
+                if has_summoning_sickness(state, script_runtime, object) {
                     return Err(CommandError::IllegalAction(
                         "a chosen attacker has summoning sickness".to_string(),
                     ));
@@ -1402,7 +1428,11 @@ pub fn execute_command(
                     Target::Object(target_id) => {
                         let target_object =
                             state.object(*target_id).ok_or(CommandError::InvalidTarget)?;
-                        if target_object.controller == command.actor {
+                        // CR 508.1b: the target permanent's *current*
+                        // controller must be an opponent.
+                        if crate::layers::effective_controller(state, script_runtime, *target_id)
+                            == command.actor
+                        {
                             return Err(CommandError::IllegalAction(
                                 "an attacker's target permanent must be controlled by an \
                                  opponent"
@@ -1471,11 +1501,13 @@ pub fn execute_command(
             // is aimed at them or a planeswalker/battle they control, CR
             // 506.4d). `command.actor` is only legal here if some attacker
             // is actually aimed at them.
+            // CR 508.5a: "defending player" is resolved against a targeted
+            // permanent's *current* controller.
             let is_defending_player = combat.attackers.iter().any(|(_, target)| match target {
                 Target::Player(pid) => *pid == command.actor,
-                Target::Object(target_id) => {
-                    state.object(*target_id).is_some_and(|o| o.controller == command.actor)
-                }
+                Target::Object(target_id) => state.object(*target_id).is_some_and(|_| {
+                    crate::layers::effective_controller(state, script_runtime, *target_id) == command.actor
+                }),
             });
             if !is_defending_player {
                 return Err(CommandError::IllegalAction(
@@ -1496,7 +1528,8 @@ pub fn execute_command(
                 seen_blockers.push(*blocker);
 
                 let blocker_object = state.object(*blocker).ok_or(CommandError::InvalidTarget)?;
-                if blocker_object.controller != command.actor {
+                // CR 509.1a: blocking requires *current* control.
+                if crate::layers::effective_controller(state, script_runtime, *blocker) != command.actor {
                     return Err(CommandError::IllegalAction(
                         "actor does not control a chosen blocker".to_string(),
                     ));
@@ -1525,9 +1558,9 @@ pub fn execute_command(
                     })?;
                 let attacking_this_defender = match attacking {
                     Target::Player(pid) => *pid == command.actor,
-                    Target::Object(target_id) => state
-                        .object(*target_id)
-                        .is_some_and(|o| o.controller == command.actor),
+                    Target::Object(target_id) => state.object(*target_id).is_some_and(|_| {
+                        crate::layers::effective_controller(state, script_runtime, *target_id) == command.actor
+                    }),
                 };
                 if !attacking_this_defender {
                     return Err(CommandError::IllegalAction(

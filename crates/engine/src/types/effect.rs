@@ -4,6 +4,7 @@ use crate::{
 };
 use crate::types::card::KeywordSet;
 use crate::types::cost::FilterController;
+use crate::script::ScriptRuntime;
 
 /// CR 613.1 layers, with sublayers for layer 7 (power/toughness).
 /// `TypeChanging` (4), `ColorChanging` (5), `AbilityAdding` (6),
@@ -351,23 +352,27 @@ pub struct ReplacementEffect {
 
 impl ReplacementEffect {
     /// Whether `event` is one this effect would replace. Real body for
-    /// `ReplacementSpec::Primitive` — resolves `self.source`'s controller
-    /// (for `FilterController::You`/`Opponent`, same convention
-    /// `ContinuousEffect::applies_to` uses) and the event's own
-    /// object/player via `state`. `Script` isn't evaluable yet (nothing can
-    /// construct it) — treated as "doesn't match," same "skip rather than
-    /// guess" stance every other unresolvable-script case in this codebase
-    /// already takes.
-    pub fn matches(&self, event: &GameEventKind, state: &GameState) -> bool {
+    /// `ReplacementSpec::Primitive` — resolves `self.source`'s *live*
+    /// controller (`layers::effective_controller`, CR 108.4 - not the raw
+    /// field, so a control-changed source's "you"/"opponent" reads correctly)
+    /// and the event's own object/player via `state`. `Script` isn't
+    /// evaluable yet (nothing can construct it) — treated as "doesn't
+    /// match," same "skip rather than guess" stance every other
+    /// unresolvable-script case in this codebase already takes. No recursion
+    /// risk resolving control here (unlike `ContinuousEffect::applies_to`,
+    /// evaluated from inside the layer engine's own query) - replacement
+    /// effects are a wholly separate `state.replacement_effects` list, never
+    /// consulted while computing `effective_controller` itself.
+    pub fn matches(&self, event: &GameEventKind, state: &GameState, script_runtime: &ScriptRuntime) -> bool {
         let ReplacementSpec::Primitive { filter, .. } = &self.spec else { return false };
         match (filter, event) {
             (EventFilter::DamageDealt { affected }, GameEventKind::DamageDealt { target, .. }) => {
-                event_target_matches(affected, *target, state, self.source)
+                event_target_matches(affected, *target, state, script_runtime, self.source)
             }
             (
                 EventFilter::WouldDie { affected },
                 GameEventKind::ZoneChange { object, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, .. },
-            ) => event_target_matches(affected, Target::Object(*object), state, self.source),
+            ) => event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source),
             _ => false,
         }
     }
@@ -409,9 +414,13 @@ fn event_target_matches(
     filter: &EffectFilter,
     target: Target,
     state: &GameState,
+    script_runtime: &ScriptRuntime,
     effect_source: ObjectId,
 ) -> bool {
-    let Some(source_obj) = state.object(effect_source) else { return false };
+    if state.object(effect_source).is_none() {
+        return false;
+    }
+    let source_controller = crate::layers::effective_controller(state, script_runtime, effect_source);
     match target {
         Target::Player(pid) => {
             if filter.card_types.is_some() || filter.self_only {
@@ -421,8 +430,8 @@ fn event_target_matches(
                 return false;
             }
             match filter.controller {
-                Some(FilterController::You) => pid == source_obj.controller,
-                Some(FilterController::Opponent) => pid != source_obj.controller,
+                Some(FilterController::You) => pid == source_controller,
+                Some(FilterController::Opponent) => pid != source_controller,
                 Some(FilterController::Any) | None => true,
             }
         }
@@ -432,9 +441,10 @@ fn event_target_matches(
                 return false;
             }
             if let Some(fc) = filter.controller {
+                let object_controller = crate::layers::effective_controller(state, script_runtime, id);
                 let matches_controller = match fc {
-                    FilterController::You => object.controller == source_obj.controller,
-                    FilterController::Opponent => object.controller != source_obj.controller,
+                    FilterController::You => object_controller == source_controller,
+                    FilterController::Opponent => object_controller != source_controller,
                     FilterController::Any => true,
                 };
                 if !matches_controller {
@@ -629,14 +639,14 @@ mod tests {
 
         let matching =
             GameEventKind::DamageDealt { source: creature, target: Target::Object(creature), amount: 3, is_combat_damage: false };
-        assert!(effect.matches(&matching, &state));
+        assert!(effect.matches(&matching, &state, &ScriptRuntime::new()));
 
         let land = ObjectId(2);
         let mut state2 = state;
         state2.objects.insert(land, object(land, p0, CardTypeSet::LAND, ZoneKind::Battlefield));
         let non_matching =
             GameEventKind::DamageDealt { source: land, target: Target::Object(land), amount: 3, is_combat_damage: false };
-        assert!(!effect.matches(&non_matching, &state2));
+        assert!(!effect.matches(&non_matching, &state2, &ScriptRuntime::new()));
     }
 
     #[test]
@@ -657,10 +667,10 @@ mod tests {
 
         let to_p0 =
             GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
-        assert!(effect.matches(&to_p0, &state));
+        assert!(effect.matches(&to_p0, &state, &ScriptRuntime::new()));
         let to_p1 =
             GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p1), amount: 3, is_combat_damage: false };
-        assert!(!effect.matches(&to_p1, &state));
+        assert!(!effect.matches(&to_p1, &state, &ScriptRuntime::new()));
     }
 
     #[test]
@@ -686,7 +696,7 @@ mod tests {
             to: ZoneKind::Graveyard,
             last_known_info: None,
         };
-        assert!(effect.matches(&own_death, &state));
+        assert!(effect.matches(&own_death, &state, &ScriptRuntime::new()));
 
         let other_death = GameEventKind::ZoneChange {
             object: other,
@@ -694,7 +704,7 @@ mod tests {
             to: ZoneKind::Graveyard,
             last_known_info: None,
         };
-        assert!(!effect.matches(&other_death, &state), "self_only must not match a different object's death");
+        assert!(!effect.matches(&other_death, &state, &ScriptRuntime::new()), "self_only must not match a different object's death");
 
         let non_death = GameEventKind::ZoneChange {
             object: this,
@@ -702,7 +712,7 @@ mod tests {
             to: ZoneKind::Battlefield,
             last_known_info: None,
         };
-        assert!(!effect.matches(&non_death, &state), "only Battlefield -> Graveyard counts as \"would die\"");
+        assert!(!effect.matches(&non_death, &state, &ScriptRuntime::new()), "only Battlefield -> Graveyard counts as \"would die\"");
     }
 
     #[test]

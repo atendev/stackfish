@@ -2075,19 +2075,25 @@ shift, don't treat it as fixed once written.
           primitive, `EffectPrimitive::DoublePT` (layer 7c, e.g. Berserk), added as part of this
           slice rather than proving the algorithm against synthetic-only fixtures with no card-text
           equivalent.
-      5b. ~~**Layer 2 (control-changing effects, CR 613.1b/108.4) — query half**~~ — done,
-          `phase5/layer-engine-control` slice (docs/implementation.md, below). Real design question
-          this item's own text flagged (live query vs. durable mutation) resolved with the human in
-          favor of the live query, once reading the code showed the mutation shortcut would leave
-          `Layer::ControlChangingEffects` permanently dead and require hand-rolling a grant-stack/
-          revert system the layer engine's own CR 613.7/613.8 ordering already solves generically.
-          Split into two slices rather than one, matching how the base layer-engine work itself was
-          split into "prove the query" vs. "wire the deferred consumers": this slice is query-only
-          (`layers::effective_controller`); migrating the ~15 real `GameObject.controller` read-sites
-          (combat, targeting, cost filters, `has_summoning_sickness`, `EffectFilter`/`FilterSpec`) to
-          consume it is its own follow-up, not bundled in. Still closes the `controlled_since_turn`/
-          11b `StackObject.controller`-as-owner-stand-in gaps' *query* half only - those read-sites
-          stay unmigrated until the follow-up.
+      5b. ~~**Layer 2 (control-changing effects, CR 613.1b/108.4)**~~ — done, across two slices.
+          `phase5/layer-engine-control` (query half, docs/implementation.md, below): real design
+          question this item's own text flagged (live query vs. durable mutation) resolved with the
+          human in favor of the live query, once reading the code showed the mutation shortcut would
+          leave `Layer::ControlChangingEffects` permanently dead and require hand-rolling a
+          grant-stack/revert system the layer engine's own CR 613.7/613.8 ordering already solves
+          generically. `phase5/layer-engine-control-consumers` (docs/implementation.md, below):
+          migrated the real `GameObject.controller` read-sites (combat, targeting, cost filters,
+          `has_summoning_sickness`, `EffectFilter`/`FilterSpec`, replacement effects) to consume
+          `layers::effective_controller` instead of the raw field - split into its own slice rather
+          than bundled with the query, matching how the base layer-engine work itself split "prove
+          the query" from "wire the deferred consumers." One real design finding surfaced while
+          implementing the consumer migration (not anticipated in either slice's own pre-slice
+          report): `layers.rs`'s own internal filtering (`applicable_effects_in_layer`/
+          `ContinuousEffect::applies_to`) could NOT be migrated to `effective_controller` - doing so
+          would make layer 2's own resolution recursively call itself. Left as raw-field reads,
+          deliberately, not silently forgotten. Still doesn't close 11b's `StackObject.controller`-
+          as-owner-stand-in gap (`sba.rs`'s `remove_players_objects`) - `StackObject` has no owner
+          field at all, unrelated to this migration.
       5c. **Layer 1 (copy effects, CR 613.1a/613.2, CR 707 "Copying Objects")** — nothing exists:
           no copy/clone command, no copiable-values snapshot distinct from `CardDefinition`, no
           "create a token that's a copy of object X" path (`AbilityEffect::CreateToken` only builds
@@ -6717,3 +6723,113 @@ with the human before implementation started, not decided unilaterally mid-slice
   `remove_players_objects`) is still open - `StackObject` has no separate owner field, and this
   slice's query isn't consulted there either, since that's part of the same deferred read-site
   migration.
+
+## Phase 5: phase5/layer-engine-control-consumers slice
+
+Branch `phase5/layer-engine-control-consumers`, off master. Closes the consumer half of backlog
+item 1.5b - migrates every real `GameObject.controller` read-site to `layers::effective_controller`
+instead of the raw field, the follow-up split out from the `phase5/layer-engine-control` query slice.
+
+**Real design finding surfaced while implementing, not anticipated in either slice's pre-slice
+report:** `layers.rs`'s own internals (`applicable_effects_in_layer`'s `AffectedFilter::Script`
+resolution, `ContinuousEffect::applies_to`'s `EffectFilter::controller` check) could NOT be migrated
+to `effective_controller` - `effective_controller` itself calls `applicable_effects_in_layer(...,
+Layer::ControlChangingEffects)`, so resolving layer 2's own filtering through `effective_controller`
+would make that call recurse into itself infinitely the moment `applicable_effects_in_layer` is asked
+to filter layer 2 effects. Every *other* layer (4,5,6,7a,7b,7c,7e) would be safe to migrate this way
+(no mutual recursion), but migrating only some layers while leaving layer 2 raw would be an
+inconsistent, easy-to-forget special case for a marginal correctness gain (nothing filters on a
+control-changed source's card_types/keywords in a way this actually changes today). Decision: leave
+`layers.rs`'s own internal filtering exactly as it was, for every layer uniformly - this is a
+deliberate, structural exclusion, not an oversight, and confirmed safe by construction rather than
+guessed at.
+
+**What got migrated (all real `GameObject.controller` reads that could observe a `GainControl`
+effect):**
+- `commands.rs`: `target_is_legal`'s `TargetFilter::Object` controller check; `apply_damage_event`'s
+  Lifelink life-gain destination; `ActivateAbility`'s "you control the source" check;
+  `DeclareAttackers`/`DeclareBlockers`'s five controller checks; `has_summoning_sickness` (gained a
+  `&ScriptRuntime` param - all 3 callers already had one in scope).
+- `engine.rs`: `untap_step`'s "untap what the active player controls."
+- `sba.rs`: `find_legend_rule_group`'s CR 704.5j controller/name grouping.
+- `types/cost.rs`: `FilterSpec::matches` gained an `object_controller: PlayerId` parameter (kept the
+  type itself `ScriptRuntime`-free, same as `ContinuousEffect::applies_to` - the caller resolves the
+  live controller and passes it in) - real callers are `PaymentPlan::validate`'s Sacrifice/
+  TapPermanents checks (which also gained a `&ScriptRuntime` param, since it discovers candidate
+  objects mid-iteration and can't pre-resolve them all up front the way a single-object caller can).
+- `types/effect.rs`: `event_target_matches`/`ReplacementEffect::matches` gained a `&ScriptRuntime`
+  param directly (a different treatment than `FilterSpec::matches` - justified since `PaymentPlan::
+  validate` had already broken the "no ScriptRuntime" convention for the same practical reason, and
+  replacement effects are a wholly separate `state.replacement_effects` list from `state.
+  continuous_effects`, so no recursion risk exists here the way it does for `ContinuousEffect::
+  applies_to`). `replacement.rs`'s `affected_player_for`/`apply_replacements`/`apply_replacements_from`
+  threaded `&ScriptRuntime` through to reach it; `sba.rs`'s `resolve_deaths` too (its own call into
+  `apply_replacements`).
+
+**Explicitly excluded, named not silently skipped (found by tracing each site, not assumed):**
+- `commands.rs`'s `PlayLand`/`CastSpell` zone checks, `engine.rs`'s `submit_discard`, `engine.rs`'s
+  search/tutor candidate filter, `PaymentPlan::validate`'s Discard cost, `types/cost.rs`'s
+  `apply_cost_modifiers` - all check `.controller` on a Hand/Graveyard/Command/Library-zone card or a
+  spell on the stack, where it always equals `.owner` in this engine and no `GainControl` effect (CR
+  108.4, permanents only) can realistically target something in those zones. Migrating would be a
+  functional no-op; left as raw-field reads with a comment explaining why at each site.
+- `types/ability.rs`'s `DiesMatching`/`LeavesBattlefieldMatching` conditions read `lki.controller` (a
+  frozen `LastKnownInfo` snapshot, CR 603.10) - correctly stays raw, matching how LKI is treated
+  everywhere else in this codebase (frozen at capture time, never re-resolved live).
+- `script.rs`'s `state_to_lua`/`card_summary_to_lua` (the Lua-visible `controller` field) - left as
+  the raw/base value, consistent with that same function's own pre-existing, already-documented
+  "not layer-resolved" stance for power/toughness.
+- `StackObject.controller`/`RegisteredAbility`/`LastKnownInfo.controller` throughout `engine.rs`/
+  `triggers.rs` - different fields entirely, already frozen/baked-in-at-push-time by design.
+
+**Regression avoided, not introduced:** none - every migrated site produces the identical result to
+before whenever no `GainControl` effect is active (confirmed by the full prior test suite passing
+unmodified), since `effective_controller` degrades to the plain field read in that case.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 626 passed, 0 failed (618 prior + 8 new, in
+new `crates/engine/tests/phase5_control_change_consumers.rs`, driving the real `Engine`/
+`execute_command` pipeline, not just the bare query): the effective (not original) controller can
+declare a `GainControl`'d creature as an attacker/blocker/activate its ability, and the original
+owner can no longer do any of the three; summoning sickness is checked against the new controller's
+own `last_active_turn_number` - a creature controlled since turn 5 reads as sick under a new
+controller whose own most recent turn started on turn 1 (`5 >= 1`), even though the *same* creature
+would read as long-since-controlled and not sick if (incorrectly) checked against a veteran original
+owner whose last active turn was 10 (`5 >= 10` false) - the concrete case this migration fixes, not
+just a synthetic assertion; a `GainControl`'d creature can be sacrificed by its new controller to pay
+a "sacrifice a creature you control" cost even though a different player owns it. All 618 prior tests
+unaffected.
+
+**STRUCT DEVIATIONS:** None - no new fields, only signature changes to existing functions/methods
+exactly as the pre-slice report scoped (`FilterSpec::matches`, `ContinuousEffect::applies_to` -
+except the recursion finding excluded it after all, see below).
+
+**INTERFACE DEVIATIONS:** `has_summoning_sickness`, `PaymentPlan::validate`, `event_target_matches`/
+`ReplacementEffect::matches`, `apply_replacements`/`apply_replacements_from`/`resolve_deaths` all
+gained a `&ScriptRuntime` parameter - anticipated in the pre-slice report's "needs `&ScriptRuntime`
+threaded one level in" bucket, not a deviation. `FilterSpec::matches` gained a plain `PlayerId`
+parameter instead (pre-resolved by the caller) - exactly the "pre-resolve-and-pass-in" treatment the
+report proposed for it.
+
+**SCOPE DEVIATIONS:** `ContinuousEffect::applies_to` (and `layers.rs`'s own internal `AffectedFilter::
+Script`/`EffectFilter::controller` resolution) was in the pre-slice report's "needs the pre-resolve-
+and-pass-in treatment" bucket - discovered while implementing that this would create infinite
+recursion for layer 2 specifically (see the design finding above) and pulled out into its own
+deliberate exclusion instead. `engine.rs`'s search/tutor filter and `PaymentPlan::validate`'s Discard
+cost were originally scoped as real migration sites in the pre-slice report; re-examining them while
+implementing showed both check a Library/Hand-zone card, the same "no-op, no `GainControl` effect can
+reach here" reasoning already applied to `PlayLand`/`CastSpell` - moved to the exclusion list instead
+of migrated.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- No command/`AbilityEffect`/script binding produces a `GainControl` effect yet - test fixtures build
+  it via struct literal, same bootstrap convention every layer-engine sub-slice used. `controlled_
+  since_turn` still isn't bumped by anything resembling a real "gain control" mutation event either
+  (the query-only slice's own UNRESOLVED note, still true) - this slice's summoning-sickness test
+  demonstrates the *query* is now correct by directly constructing a `controlled_since_turn` value,
+  not by proving a real gameplay action updates it.
+- 11b's `StackObject.controller`-as-owner-stand-in gap (`sba.rs`'s `remove_players_objects`) is still
+  open - unrelated to this migration, `StackObject` has no owner field at all to migrate.
+- `layers.rs`'s own internal filtering stays on the raw field for every layer (not just layer 2), a
+  deliberate, uniform exclusion (see the design finding above) - a control-changed permanent's
+  keywords/card_types won't correctly gate *other* continuous/replacement effects' own `EffectFilter`
+  checks against it. No test in this engine's current surface exercises that combination.
