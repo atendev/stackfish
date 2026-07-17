@@ -15,11 +15,12 @@ use crate::types::object::GameObject;
 /// every call rather than cached — see the no-mutable-cache rationale on
 /// `EffectiveCharacteristics` itself.
 ///
-/// Layers 4 (`TypeChanging`), 5 (`ColorChanging`), 6 (`AbilityAdding`), 7a
+/// Layer 3 (`TextChanging`, narrowed to CR 612.8 name-setting only), 4
+/// (`TypeChanging`), 5 (`ColorChanging`), 6 (`AbilityAdding`), 7a
 /// (`PowerToughnessCDA`), 7b (`PowerToughnessSetting`), 7c
 /// (`PowerToughnessModifying`), and 7e (`PowerToughnessSwitching`) are
-/// applied — see `Layer`'s own doc comment for why the rest (copy/control/
-/// text, plus 7d) aren't built yet. Layer 7d (counters) is folded in from
+/// applied — see `Layer`'s own doc comment for why the rest (copy/control,
+/// plus 7d) aren't built yet. Layer 7d (counters) is folded in from
 /// `GameObject.counters` directly via `PTValue::net_with_counters`/
 /// `resolve_base_pt` before any continuous effect is applied, same as
 /// `sba.rs`'s pre-existing toughness check already did — this is a
@@ -54,7 +55,7 @@ use crate::types::object::GameObject;
 /// the calling convention (an affects-predicate takes `(object, source,
 /// controller) -> bool`; an effect-shape decode takes `(source, controller)
 /// -> table`, same argument shape `invoke_cda`/`invoke_operation` already
-/// use, decoding one of six recognized keys into an `EffectPrimitive`).
+/// use, decoding one of seven recognized keys into an `EffectPrimitive`).
 pub fn effective_characteristics(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -83,6 +84,16 @@ pub fn effective_characteristics(
     // the layer-engine-basics slice; this slice's layer 5 union applies on
     // top of whatever this stopgap produces, not blocked on fixing it.
     let mut colors = def.color_indicator.unwrap_or(crate::ColorSet::empty());
+
+    // Layer 3 (CR 612.8): override-wins-outright, same shape as layer 2's
+    // GainControl/layer 7b's SetPT - a later-timestamp SetName replaces an
+    // earlier one entirely, doesn't combine.
+    let mut name = def.name.clone();
+    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::TextChanging) {
+        if let Some(EffectPrimitive::SetName(new_name)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
+            name = new_name;
+        }
+    }
 
     // Layer 4: additive only (CR 613.1, general "gains types" text) - see
     // EffectPrimitive::AddCardType's doc comment for the deferred overwrite
@@ -156,7 +167,7 @@ pub fn effective_characteristics(
     }
 
     EffectiveCharacteristics {
-        name: def.name.clone(),
+        name,
         mana_cost: def.mana_cost.clone(),
         colors,
         card_types,
@@ -320,7 +331,7 @@ fn resolve_primitive(
     controller: PlayerId,
 ) -> Option<EffectPrimitive> {
     match &effect.effect {
-        EffectPayload::Primitive(p) => Some(*p),
+        EffectPayload::Primitive(p) => Some(p.clone()),
         EffectPayload::Script(handle) => {
             script_runtime.invoke_continuous_effect(*handle, state, effect.source, controller).ok().flatten()
         }
