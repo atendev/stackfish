@@ -2067,18 +2067,14 @@ shift, don't treat it as fixed once written.
       more slices, not one - split below (research pass over `layers.rs`/`types/effect.rs`/
       `types/object.rs`/`types/command.rs` before splitting, not guessed at), ordered by what's
       actually self-contained vs. what blocks on something else:
-      5a. **Dependency system (CR 613.6-8)** — `layers.rs`'s `applicable_effects_in_layer` sorts
-          effects within a layer by `timestamp` only (a plain `sort_by_key`, no dependency
-          detection at all) - `Layer`'s own doc comment already names this as a real gap, not a
-          hypothetical one. Decoupled from layers 1/2/3 below - dependency can already occur among
-          today's *implemented* layers (e.g. a script-backed `ModifyPT`/`AddCardType` effect whose
-          own calculation reads another effect's current output), so this doesn't need to wait on
-          copy/control/text-changing to exist first. CR 613.8a's "depends on" test (same layer/
-          sublayer, applying the other would change the first's text/existence/targets/effect, not
-          both CDAs) plus 613.8b's wait-until-resolved ordering and 613.8c's re-evaluate-after-each-
-          step requirement (a genuine topological-ish sort with cycle detection, re-run per
-          application, not a one-time stable sort) is the real algorithmic core here - the fiddly
-          part is the reordering logic, not new data plumbing.
+      5a. ~~**Dependency system (CR 613.6-8)**~~ — done, `phase5/layer-engine-dependency` slice
+          (docs/implementation.md, below). Correction to this item's own pre-existing framing, found
+          while scoping: none of today's primitives can actually produce a CR 613.8a dependency (every
+          `EffectPrimitive` is a fixed value or union, and `EffectFilter`/`Script` payloads only read
+          immutable base data) - real dependency needed one new "reads the current running value"
+          primitive, `EffectPrimitive::DoublePT` (layer 7c, e.g. Berserk), added as part of this
+          slice rather than proving the algorithm against synthetic-only fixtures with no card-text
+          equivalent.
       5b. **Layer 2 (control-changing effects, CR 613.1b/108.4)** — `GameObject.controller` is read
           everywhere (targeting, combat, triggers, `layers.rs` itself) but mutated nowhere except at
           object construction; `controlled_since_turn`'s own doc comment already flags "no 'gain
@@ -6563,3 +6559,87 @@ exact signatures used.
   `PlayerConfig.library: Vec<CardDefinition>` has no deck-list identity to check either rule
   against; a caller assembling one from an external decklist would need to enforce these itself
   before ever building a `GameConfig`.
+
+## Phase 5: phase5/layer-engine-dependency slice
+
+Branch `phase5/layer-engine-dependency`, off master. Closes backlog item 1.5a (CR 613.6-613.8, the
+dependency system that can override timestamp ordering within a single layer/sublayer) - the first
+of the four sub-slices (5a-5d) split out from the original layer-engine backlog item once layers
+1/2/3 (copy/control/text) and the dependency system turned out to need their own design passes.
+
+**Scope decision confirmed with the human before writing code:** a real finding surfaced while
+reading `layers.rs`/`types/effect.rs` before writing anything - none of today's `EffectPrimitive`
+variants (`SetPT`/`ModifyPT`/`AddKeyword`/`AddCardType`/`AddColor`/`SwitchPT`) can actually produce
+an observable CR 613.8a dependency (they're all fixed values or unions, never a function of another
+effect's current output), and `EffectFilter`/`AffectedFilter::Primitive` only ever read immutable
+`CardDefinition` data. Proving the reorder algorithm would have had nothing real to test against
+without also adding one "reads the running value" primitive. Confirmed: add
+`EffectPrimitive::DoublePT` (layer 7c, CR 613.3 - e.g. Berserk's "target creature's power is
+doubled") as part of this slice rather than proving the algorithm only against synthetic fixtures
+with no card-text equivalent.
+
+**What got implemented:**
+- `types/effect.rs`: new `EffectPrimitive::DoublePT { power: bool, toughness: bool }` - doubles
+  whichever field is `true`, layer 7c. Its result is defined by whatever value is already there,
+  which is exactly CR 613.8a's dependency condition, so it always depends on a same-field `ModifyPT`
+  (or another `DoublePT`) in the same sublayer. `Layer`'s own doc comment (previously a TODO
+  explaining the gap) rewritten to describe what's real now and what's still open (see UNRESOLVED).
+- `layers.rs`: new `order_by_dependency` - given a single layer's already-filtered effects, repeatedly
+  picks the earliest-timestamp effect among those with no still-unplaced dependency (CR 613.8b:
+  independent effects and simultaneously-ready dependents both order by timestamp), falling back to
+  a plain timestamp sort of everything still unplaced the moment nothing is ever "ready" (CR 613.8b's
+  last sentence - a dependency loop). New `depends_on(effect, other)` - CR 613.8a's actual test,
+  scoped to what can be checked today: `DoublePT` depends on any same-field `ModifyPT` in the same
+  sublayer, and on another `DoublePT` sharing a field (a real mutual/2-cycle case - doubling is
+  commutative so the numeric result doesn't actually depend on order, but the dependency relationship
+  itself is real per the rule's letter, making it a genuine test of the cycle-fallback path). Every
+  other primitive pairing returns `false` (independent) - `Script`-payload effects too, always
+  independent this slice. `applicable_effects_in_layer` now calls `order_by_dependency` instead of a
+  bare `sort_by_key`; CR 613.8c's "re-evaluate after each step" requirement falls out for free
+  architecturally, since `effective_characteristics` (and this reorder within it) is recomputed from
+  scratch on every call, nothing cached. `effective_characteristics`'s layer-7c loop gained a
+  `DoublePT` arm alongside `ModifyPT`.
+
+**Regression avoided, not introduced:** none - `order_by_dependency` produces the exact same order
+plain timestamp sorting would whenever nothing is dependent (every prior layer-engine test file
+still passes unmodified), since a `depends_on` check against any non-`DoublePT` pairing is `false`.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 614 passed, 0 failed (609 prior + 5 new, in
+new `crates/engine/tests/phase5_layer_engine_dependency.rs`): two independent `ModifyPT`s still just
+sum regardless of order (regression check); a `DoublePT` at an *earlier* timestamp than the
+`ModifyPT` it depends on still waits for the modify to apply first (2/2 base, +2/+2, then doubled =
+8/8) - the test that actually proves dependency overrides timestamp, not just agrees with it by
+coincidence; the same scenario with timestamps the other way around gives the identical 8/8, showing
+dependency and timestamp agreeing isn't what made the first case work; a `DoublePT{power: true,
+toughness: false}` only depends on/touches power, toughness ordering and value unaffected; two
+mutually-dependent `DoublePT`s (a 2-cycle) don't hang or panic, falling back to timestamp order with
+the (order-invariant, since doubling commutes) correct 8/8 result. All 609 prior tests unaffected,
+including every existing `phase5_layer_engine_*` test file. No CLI/TOML scenario - matches precedent
+from the 7a (CDA) and 7e (switching) sub-slices, where layer-ordering fixtures were Rust-integration-
+test-only; `crates/scenario/src/lib.rs`'s `ContinuousEffectSpec` still only wires 4 of the (now 8)
+built primitives into TOML, unchanged by this slice.
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice report scoped exactly (`EffectPrimitive::
+DoublePT`, confirmed with the human before writing code) - this *is* the plan, not a deviation.
+
+**INTERFACE DEVIATIONS:** None - `order_by_dependency`/`depends_on` are both new, internal to
+`layers.rs`, exactly the shape anticipated (a generic reorder over a pluggable `depends_on`
+predicate, not hardcoded to `DoublePT` specifically, so future layers can plug in without rework).
+
+**SCOPE DEVIATIONS:** None - the `DoublePT` addition was confirmed with the human before
+implementation started (see the scope decision above), not decided unilaterally mid-slice.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- `EffectPayload::Script`/`AffectedFilter::Script` effects are always treated as independent - a
+  script-declared dependency would need the script bridge to expose partial/in-progress layer state
+  mid-computation, which `state_to_lua`'s snapshot deliberately doesn't do yet (it's a full-board
+  snapshot taken once, not layer-resolved - see that function's own doc comment).
+- Cross-layer/cross-sublayer dependency isn't modeled - CR 613.8 is explicitly same-layer/sublayer
+  only; cross-layer sequencing is already handled by the fixed layer order in
+  `effective_characteristics`, not by this algorithm, so this is faithful to the rule rather than a
+  gap.
+- Layers 4/5/6/7b/7e keep plain timestamp ordering - nothing in them is shaped as a function of
+  another effect's output, so no same-layer dependency can arise there with today's primitives; only
+  7c (`ModifyPT` vs. `DoublePT`) gets real dependency-aware ordering this slice.
+- Layers 1/2/3 (copy/control/text-changing) still don't exist at all - untouched, per backlog items
+  5b/5c/5d, next in this sub-sequence.
