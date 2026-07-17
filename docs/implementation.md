@@ -7156,3 +7156,57 @@ the 20-site test-fixture ripple was anticipated risk of adding a new struct fiel
 - Multi-"target"-word spells and `TargetSpec::Script`/`invoke_target` — unrelated to this slice, still
   open from before it.
 - CR 601.2d's division/distribution — still unmodeled, unrelated to count shape.
+
+## TEMP — pending slice requirements report (not started, not a branch yet)
+
+Delete this section once `phase5/conditional-continuous-effects` (or whatever it ends up named)
+actually branches and gets its own real pre-slice write-up — this is a handoff note, not a slice
+record.
+
+### Next slice: CR 611.2c — conditional ("as long as ...") continuous effects
+
+**Found while scoping — bigger than expected:** `ContinuousEffect.duration` (`EffectDuration`) is
+consulted in exactly **one** place in the whole engine — `engine.rs`'s Cleanup step purges
+`UntilEndOfTurn` effects. Every other variant (`UntilYourNextTurn`, `UntilEndOfCombat`,
+`WhileSourceOnBattlefield`, `UntilSourceLeaves`, `WhileConditionHolds`, `Custom`) behaves identically
+to `Permanent` today — nothing ever expires them. `WhileSourceOnBattlefield`/`UntilSourceLeaves`
+happen to work anyway, since `retire_object` unconditionally purges any effect whose source has left
+the battlefield regardless of what `duration` says — so those two labels are redundant, not broken.
+But `UntilYourNextTurn`/`UntilEndOfCombat` are a real, separate, timing-based-expiry gap. **This slice
+doesn't fix that** — scoping tightly to `WhileConditionHolds` only.
+
+**Design, reusing what's already there:** `InterveningIfPrimitive`/`InterveningIfSpec` (currently used
+only for CR 603.4 trigger intervening-if clauses) already are exactly "evaluate a live board-state
+predicate, get a bool" — the same shape CR 611.2c's "applies only as long as X is true" needs. Rather
+than inventing a second predicate type:
+- `ContinuousEffect` gains `pub condition: Option<InterveningIfSpec>` (`None` = unconditional, today's
+  behavior for every existing effect).
+- `InterveningIfPrimitive` gains a new variant: `ControllerControlsAtLeast { filter: FilterSpec, count:
+  u32 }` — "the effect source's controller controls `count`-or-more permanents matching `filter`"
+  (reuses `cost.rs`'s `FilterSpec`, same reuse precedent `DiesMatching`/`LeavesBattlefieldMatching`
+  already set) — covers the overwhelmingly common real "as long as you control a [type]" / "three or
+  more [things]" pattern.
+- `layers::applicable_effects_in_layer` (the one call-site every layer already funnels through)
+  additionally drops an effect whose `condition` doesn't currently hold — checked fresh on every
+  call, no caching/cleanup needed at all, matching `EffectiveCharacteristics`'s existing "recompute
+  everything, no mutable cache" architecture.
+- `StaticAbilityBuilder` (script.rs) gains `:SetCondition(Game.InterveningIf.*)`, mirroring
+  `TriggeredAbilityBuilder::SetInterveningIf`'s existing decode logic exactly (same `InterveningIfTag`/
+  `Primitive`-or-`Function` shape) — the builder still always sets `duration: Permanent` (orthogonal
+  now; `condition` is the real gate).
+
+**CR requirements:** 611.2c (a continuous effect can be conditional, re-evaluated continuously rather
+than fixed at generation time). One concrete condition shape this slice: "controls N+ matching
+permanents." `holds()` resolves "you" via the effect source's *current* controller
+(`layers::effective_controller`), same as `EffectFilter::controller` does elsewhere.
+
+**TODOs to mark:** `EffectDuration`'s broader inert-duration gap (`UntilYourNextTurn`/
+`UntilEndOfCombat` never expire) — named explicitly as NOT touched here. Only one
+`InterveningIfPrimitive` condition shape built (life-total and control-count exist; hand size, "still
+on the battlefield," etc. stay follow-ups, same as that enum's own pre-existing TODO already said).
+
+**Tests:** a conditional anthem-shaped effect (e.g. "creatures you control get +1/+1 as long as you
+control three or more artifacts") — applies when the count is met, stops applying the instant it drops
+below (re-derived fresh, no stale state); an unconditional effect is completely unaffected
+(regression); the `Game.InterveningIf.*`/`:SetCondition` Lua round-trip; a `Script`-backed condition
+via the existing `invoke_intervening_if` plumbing.
