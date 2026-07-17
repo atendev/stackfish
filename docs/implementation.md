@@ -2075,20 +2075,19 @@ shift, don't treat it as fixed once written.
           primitive, `EffectPrimitive::DoublePT` (layer 7c, e.g. Berserk), added as part of this
           slice rather than proving the algorithm against synthetic-only fixtures with no card-text
           equivalent.
-      5b. **Layer 2 (control-changing effects, CR 613.1b/108.4)** — `GameObject.controller` is read
-          everywhere (targeting, combat, triggers, `layers.rs` itself) but mutated nowhere except at
-          object construction; `controlled_since_turn`'s own doc comment already flags "no 'gain
-          control' effect exists in this engine" as the reason summoning-sickness tracking can't
-          react to a control change yet. Also closes two gaps flagged and deliberately left open by
-          earlier slices: 11b's `StackObject.controller`-as-owner-stand-in (CR 800.4a/800.4c, "no
-          control-changing effect exists yet to make the distinction observable") and the general
-          "no 'gain control of target permanent' effect" gap named in the targeting/layer-engine
-          slices. Self-contained - no dependency on 5a/5c/5d. Real design question to resolve during
-          this slice's own requirements pass (not decided here): whether control is a genuine
-          layer-7-style live query (recomputed every time, like P/T) or a durable state mutation
-          with its own expiry tracking - CR 613.1b's placement in the layer list is about relative
-          *timestamp* ordering against other effects, not necessarily proof it must be query-shaped
-          like layers 4-7e are.
+      5b. ~~**Layer 2 (control-changing effects, CR 613.1b/108.4) — query half**~~ — done,
+          `phase5/layer-engine-control` slice (docs/implementation.md, below). Real design question
+          this item's own text flagged (live query vs. durable mutation) resolved with the human in
+          favor of the live query, once reading the code showed the mutation shortcut would leave
+          `Layer::ControlChangingEffects` permanently dead and require hand-rolling a grant-stack/
+          revert system the layer engine's own CR 613.7/613.8 ordering already solves generically.
+          Split into two slices rather than one, matching how the base layer-engine work itself was
+          split into "prove the query" vs. "wire the deferred consumers": this slice is query-only
+          (`layers::effective_controller`); migrating the ~15 real `GameObject.controller` read-sites
+          (combat, targeting, cost filters, `has_summoning_sickness`, `EffectFilter`/`FilterSpec`) to
+          consume it is its own follow-up, not bundled in. Still closes the `controlled_since_turn`/
+          11b `StackObject.controller`-as-owner-stand-in gaps' *query* half only - those read-sites
+          stay unmigrated until the follow-up.
       5c. **Layer 1 (copy effects, CR 613.1a/613.2, CR 707 "Copying Objects")** — nothing exists:
           no copy/clone command, no copiable-values snapshot distinct from `CardDefinition`, no
           "create a token that's a copy of object X" path (`AbilityEffect::CreateToken` only builds
@@ -6643,3 +6642,78 @@ implementation started (see the scope decision above), not decided unilaterally 
   7c (`ModifyPT` vs. `DoublePT`) gets real dependency-aware ordering this slice.
 - Layers 1/2/3 (copy/control/text-changing) still don't exist at all - untouched, per backlog items
   5b/5c/5d, next in this sub-sequence.
+
+## Phase 5: phase5/layer-engine-control slice
+
+Branch `phase5/layer-engine-control`, off master. Closes the query half of backlog item 1.5b (CR
+613.1b/108.4, control-changing effects) - the second of the four sub-slices (5a-5d) split out from
+the original layer-engine backlog item.
+
+**Scope decision confirmed with the human before writing code:** the item's own pre-existing text
+named a real fork - model control as a genuine layer-2 live query (recomputed every call, like
+power/toughness) or as a durable state mutation (a `GainControl` event directly mutates
+`GameObject.controller`, matching the `Tapped`/`Untapped` convention). Initially proposed the
+mutation shortcut as smaller and self-contained; the human asked to scope the full query-based
+implementation instead, on the reasoning that the mutation approach would need its own hand-rolled
+grant-stack to correctly handle overlapping/expiring control effects - duplicating exactly what the
+layer engine's own CR 613.7/613.8 timestamp/dependency ordering (built in the immediately prior
+`phase5/layer-engine-dependency` slice) already solves generically, and would leave `Layer::
+ControlChangingEffects` permanently dead code. Confirmed: go with the live query, but split it from
+the read-site migration - this slice proves `effective_controller` in isolation (same "prove the
+query, wire consumers later" bootstrap pattern the very first `phase5/layer-engine-basics` slice
+used for the whole layer engine), a follow-up slice migrates the ~15 real `GameObject.controller`
+read-sites once this exists.
+
+**What got implemented:**
+- `types/effect.rs`: new `EffectPrimitive::GainControl(PlayerId)` - layer 2, override semantics
+  (later timestamp replaces earlier outright, not additive - same shape as `SetPT`/layer 7b). No new
+  CR 613.8 dependency case needed: a `GainControl`'s result never depends on whether another
+  `GainControl` already applied (it's a flat override, not a function of a running value the way
+  `DoublePT` is), so `depends_on`'s existing wildcard fallthrough plus plain CR 613.7 timestamp
+  ordering is already correct here - confirmed by reading `layers::depends_on` before writing any
+  new code, not assumed. `Layer`'s own doc comment (the layer-2 TODO block) rewritten to describe
+  what's real now and what's still deferred.
+- `layers.rs`: new `pub fn effective_controller(state, script_runtime, object) -> PlayerId` -
+  mirrors `effective_characteristics`'s own 7b loop exactly: starts from `GameObject.controller` (the
+  base value, still the sole source of truth - nothing mutates it), then the last (by timestamp)
+  applicable `GainControl` effect in `Layer::ControlChangingEffects` overrides it, reusing the
+  existing `applicable_effects_in_layer`/`resolve_primitive` machinery unchanged.
+
+**Regression avoided, not introduced:** none - `effective_controller` is a new, standalone function;
+nothing existing calls it yet, so nothing existing could regress.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace`: 618 passed, 0 failed (614 prior + 4 new, in
+new `crates/engine/tests/phase5_layer_engine_control.rs`): no `GainControl` effect returns the
+object's plain `controller` field unchanged (base case); one `GainControl` effect overrides the base
+controller; two `GainControl` effects at different timestamps - the later one wins outright, not
+additively, mirroring `SetPT`'s own override test; an `EffectFilter`-scoped `GainControl` (Opponent-
+only) affects only the matching object, leaving an unscoped one's controller untouched. All 614
+prior tests unaffected. No CLI/TOML scenario - matches precedent from every other layer-ordering
+sub-slice (7a/7c/7e/dependency), Rust-integration-test-only; `crates/scenario/src/lib.rs`'s
+`ContinuousEffectSpec` unchanged by this slice (still only wires 4 of the now-9 built primitives into
+TOML).
+
+**STRUCT DEVIATIONS:** None beyond what the pre-slice report scoped exactly (`EffectPrimitive::
+GainControl`, confirmed with the human before writing code).
+
+**INTERFACE DEVIATIONS:** None - `effective_controller`'s signature is exactly `effective_characteristics`'s
+own shape (`state, script_runtime, object -> value`), as anticipated.
+
+**SCOPE DEVIATIONS:** None - the query-only split (deferring the read-site migration) was confirmed
+with the human before implementation started, not decided unilaterally mid-slice.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- Nothing in live gameplay can observe a `GainControl` effect's result yet - the ~15 real
+  `GameObject.controller` read-sites (combat, targeting, cost filters, `has_summoning_sickness`,
+  `EffectFilter::applies_to`/`FilterSpec::matches`) still read the raw field directly. Named
+  follow-up slice, not a gap introduced silently - see this item's own backlog note (above) for why
+  that migration is a real design fork of its own (whether `EffectFilter::applies_to`/`FilterSpec::
+  matches`, deliberately `&ScriptRuntime`-free today, take a pre-resolved effective-controller
+  parameter instead of reading `.controller` directly, or some other shape).
+- No command/`AbilityEffect`/script binding produces a `GainControl` effect yet (no
+  `Game.Ops.GainControl`) - test fixtures build it via struct literal, same bootstrap-before-scripting
+  convention every other layer-engine sub-slice used.
+- 11b's `StackObject.controller`-as-owner-stand-in gap (CR 800.4a/800.4c, `sba.rs`'s
+  `remove_players_objects`) is still open - `StackObject` has no separate owner field, and this
+  slice's query isn't consulted there either, since that's part of the same deferred read-site
+  migration.

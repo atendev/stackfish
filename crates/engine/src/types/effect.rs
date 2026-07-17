@@ -1,5 +1,5 @@
 use crate::{
-    CardTypeSet, Subtype, SupertypeSet, ObjectId, SequenceNo, ColorSet, ManaCost,
+    CardTypeSet, Subtype, SupertypeSet, ObjectId, PlayerId, SequenceNo, ColorSet, ManaCost,
     GameObject, GameState, GameEventKind, ScriptHandle, Target, ZoneKind,
 };
 use crate::types::card::KeywordSet;
@@ -22,10 +22,18 @@ use crate::types::cost::FilterController;
 /// clone effect. See docs/implementation.md's backlog item 5c for the
 /// planned slice.
 ///
-/// TODO(layer 2, ControlChangingEffects): needs a real control-transfer
-/// mechanism (CR 108.4/613.1 layer 2) — `GameObject.controller` exists and
-/// is mutated by nothing today except object creation. Blocks any "gain
-/// control of target permanent" effect.
+/// Layer 2 (ControlChangingEffects, CR 108.4/613.1): `layers::
+/// effective_controller` has a real query path now (`EffectPrimitive::
+/// GainControl`, same "later timestamp overrides outright" semantics as
+/// `SetPT`/layer 7b — no CR 613.8 dependency case needed, since one
+/// `GainControl`'s result never depends on whether another has already
+/// applied). Deliberately not wired into any real consumer yet — every
+/// gameplay site that reads `GameObject.controller` directly (combat,
+/// targeting, cost filters, `has_summoning_sickness`, `EffectFilter::
+/// applies_to`/`FilterSpec::matches`) still reads the raw, never-mutated
+/// field, so nothing in live gameplay can observe a `GainControl` effect's
+/// result yet — see docs/implementation.md's `phase5/layer-engine-control`
+/// slice notes for why that migration is its own follow-up, not bundled in.
 ///
 /// TODO(layer 3, TextChanging): needs some representation of "this object's
 /// rules text is treated as different text" (CR 613.1 layer 3, e.g.
@@ -93,6 +101,17 @@ pub enum Layer {
 /// next extension of the same `AddCardType` pattern once needed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EffectPrimitive {
+    /// Layer 2 (CR 108.4/613.1): the object's controller becomes this
+    /// player — overrides whatever came before this layer entirely, exactly
+    /// like `SetPT`'s override semantics for layer 7b (a later-timestamp
+    /// `GainControl` replaces an earlier one's result, it doesn't combine
+    /// with it — only one player can control an object at a time). Unlike
+    /// `DoublePT`, this never depends on another effect in the same layer
+    /// (CR 613.8a) — a flat override's result doesn't change based on
+    /// whether some other `GainControl` already applied, only on which one
+    /// has the latest timestamp, which plain CR 613.7 ordering already
+    /// handles. See `layers::effective_controller`.
+    GainControl(PlayerId),
     /// Layer 7b (CR 613.3): sets power/toughness to an exact value,
     /// overriding whatever came before this layer (not additive — a later
     /// `SetPT` at a later timestamp replaces an earlier one's result
