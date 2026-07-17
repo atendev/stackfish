@@ -139,6 +139,7 @@ fn set_name(source: ObjectId, new_name: &str, filter: EffectFilter, timestamp: u
         effect: EffectPayload::Primitive(EffectPrimitive::SetName(new_name.to_string())),
         timestamp: SequenceNo(timestamp),
         duration: EffectDuration::Permanent,
+        condition: None,
     }
 }
 

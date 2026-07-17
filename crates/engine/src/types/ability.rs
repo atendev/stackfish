@@ -658,16 +658,34 @@ pub enum ConditionSpec {
 /// `matches` always takes a `&GameEventKind`) — checked once when the
 /// trigger event fires (folded into `triggers::collect_triggers`, alongside
 /// but separate from the ability's own trigger-event `condition`) and again
-/// at resolution (`Engine`'s `ResolveStackTop`, CR 608.2a). One concrete
-/// shape this slice: a real, common, cleanly testable pattern (nothing else
-/// needs constructing to flip it — just change life).
+/// at resolution (`Engine`'s `ResolveStackTop`, CR 608.2a). Reused as-is for
+/// CR 611.2c's conditional continuous effects (`ContinuousEffect::condition`)
+/// — the same "evaluate a live board-state predicate, get a bool" shape both
+/// features need, see that field's own doc comment.
 ///
-/// TODO: more shapes (hand size, board-state checks, "still on the
-/// battlefield") are the same category of follow-up every other primitive
-/// in this file started narrow before growing.
-#[derive(Clone, Copy, Debug)]
+/// `ControllerControlsAtLeast` resolves "you" as `object_controller`, always
+/// the raw `GameObject.controller` field rather than `layers::
+/// effective_controller` — same Layer 2 gap `ContinuousEffect::applies_to`'s
+/// own `FilterController` check already has (see `Layer::ControlChangingEffects`'s
+/// doc comment: nothing in live gameplay resolves effective control yet), and
+/// avoids `applicable_effects_in_layer` recursing into `effective_controller`
+/// (which itself calls `applicable_effects_in_layer`) to evaluate a
+/// condition.
+///
+/// TODO: more shapes (hand size, "still on the battlefield") are the same
+/// category of follow-up every other primitive in this file started narrow
+/// before growing.
+///
+/// `Clone`-only (not `Copy`) — `ControllerControlsAtLeast` carries a
+/// `FilterSpec`, same reason `ConditionPrimitive` dropped `Copy` for
+/// `DiesMatching`/`LeavesBattlefieldMatching`. Ripples to `InterveningIfSpec`
+/// below (same reason).
+#[derive(Clone, Debug)]
 pub enum InterveningIfPrimitive {
     ControllerAtOrBelowLife(i32),
+    /// CR 611.2c's overwhelmingly common real shape: "as long as you
+    /// control `count` or more permanents matching `filter`."
+    ControllerControlsAtLeast { filter: FilterSpec, count: u32 },
 }
 
 impl InterveningIfPrimitive {
@@ -675,6 +693,15 @@ impl InterveningIfPrimitive {
         match self {
             InterveningIfPrimitive::ControllerAtOrBelowLife(threshold) => {
                 state.player(controller).is_some_and(|p| p.life <= *threshold)
+            }
+            InterveningIfPrimitive::ControllerControlsAtLeast { filter, count } => {
+                let matching = state
+                    .objects
+                    .values()
+                    .filter(|o| o.zone == ZoneKind::Battlefield)
+                    .filter(|o| filter.matches(o, o.controller, controller))
+                    .count();
+                matching as u32 >= *count
             }
         }
     }
@@ -689,7 +716,8 @@ impl InterveningIfPrimitive {
 /// its 3rd argument: `function(source, controller, snapshot)`. No live
 /// object-characteristic queries yet (e.g. "this creature's power") - named
 /// as the next follow-up, not guessed at here.
-#[derive(Clone, Copy, Debug)]
+/// `Clone`-only (not `Copy`) — see `InterveningIfPrimitive`'s own doc comment.
+#[derive(Clone, Debug)]
 pub enum InterveningIfSpec {
     Primitive(InterveningIfPrimitive),
     Script(ScriptHandle),
@@ -1321,5 +1349,125 @@ mod tests {
         let p1 = PlayerId(1);
         let state = state_with_life(p0, 1);
         assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p1));
+    }
+
+    /// A minimal battlefield permanent for `ControllerControlsAtLeast`
+    /// fixtures - same idea as `dummy_last_known_info` above, parameterized
+    /// on controller/card_types instead of hardcoded to `CONTROLLER`/
+    /// `CREATURE`.
+    fn battlefield_object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet) -> crate::types::object::GameObject {
+        use crate::types::card::CardDefinition;
+        use crate::types::card::{KeywordSet, PTValue, ScriptReference, SupertypeSet};
+        use crate::types::counter::CounterSet;
+        use crate::types::ids::ObjectLineage;
+        use crate::types::mana::ManaCost;
+        use crate::types::object::{GameObject, VisibilityPolicy};
+
+        GameObject {
+            object_id: id,
+            lineage: ObjectLineage { previous: None },
+            definition: CardDefinition {
+                definition_id: 1,
+                name: "Test Permanent".to_string(),
+                mana_cost: ManaCost { symbols: Vec::new() },
+                color_indicator: None,
+                supertypes: SupertypeSet::empty(),
+                card_types,
+                subtypes: Vec::new(),
+                oracle_text: String::new(),
+                power: Some(PTValue::Fixed(1)),
+                toughness: Some(PTValue::Fixed(1)),
+                loyalty: None,
+                defense: None,
+                script_ref: ScriptReference::ByKey("test_permanent".to_string()),
+                keywords: KeywordSet::empty(),
+                target_requirement: None,
+                alternative_costs: Vec::new(),
+                effect: None,
+                modes: Vec::new(),
+            },
+            copiable_override: None,
+            owner: controller,
+            controller,
+            zone: ZoneKind::Battlefield,
+            tapped: false,
+            flipped: false,
+            face_down: false,
+            phased_out: false,
+            damage_marked: 0,
+            deathtouched: false,
+            counters: CounterSet::new(),
+            attachments: Vec::new(),
+            attached_to: None,
+            timestamp: crate::types::ids::SequenceNo(0),
+            controlled_since_turn: 0,
+            is_commander: false,
+            is_token: false,
+            visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+        }
+    }
+
+    fn artifacts_filter() -> FilterSpec {
+        FilterSpec {
+            card_types: Some(CardTypeSet::ARTIFACT),
+            supertypes: None,
+            subtypes: None,
+            controller: Some(crate::types::cost::FilterController::You),
+            random: false,
+            extra: None,
+        }
+    }
+
+    #[test]
+    fn controls_at_least_holds_when_the_count_is_exactly_met() {
+        let p0 = PlayerId(0);
+        let mut state = state_with_life(p0, 20);
+        state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
+        state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
+        state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT));
+        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
+        assert!(primitive.holds(&state, p0));
+    }
+
+    #[test]
+    fn controls_at_least_does_not_hold_when_below_the_count() {
+        let p0 = PlayerId(0);
+        let mut state = state_with_life(p0, 20);
+        state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
+        state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
+        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
+        assert!(!primitive.holds(&state, p0));
+    }
+
+    #[test]
+    fn controls_at_least_drops_the_instant_a_matching_permanent_leaves() {
+        let p0 = PlayerId(0);
+        let mut state = state_with_life(p0, 20);
+        state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
+        state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
+        state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT));
+        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
+        assert!(primitive.holds(&state, p0), "3 artifacts meets the threshold");
+
+        // Re-derived fresh, no stale state - removing one below the
+        // threshold flips the same query without needing to invalidate a
+        // cache anywhere.
+        state.objects.remove(&ObjectId(2));
+        assert!(!primitive.holds(&state, p0), "down to 2 artifacts, no longer holds");
+    }
+
+    #[test]
+    fn controls_at_least_with_a_you_filter_ignores_an_opponents_matching_permanents() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let mut state = state_with_life(p0, 20);
+        state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
+        state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p1, CardTypeSet::ARTIFACT));
+        state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p1, CardTypeSet::ARTIFACT));
+        let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
+        assert!(
+            !primitive.holds(&state, p0),
+            "p0 controls only 1 artifact - the opponent's 2 don't count toward p0's threshold"
+        );
     }
 }

@@ -2,6 +2,7 @@ use crate::{
     CardTypeSet, Subtype, SupertypeSet, ObjectId, PlayerId, SequenceNo, ColorSet, ManaCost,
     GameObject, GameState, GameEventKind, ScriptHandle, Target, ZoneKind,
 };
+use crate::types::ability::InterveningIfSpec;
 use crate::types::card::KeywordSet;
 use crate::types::cost::FilterController;
 use crate::script::ScriptRuntime;
@@ -260,6 +261,18 @@ pub struct ContinuousEffect {
     pub effect: EffectPayload,
     pub timestamp: SequenceNo,
     pub duration: EffectDuration,
+    /// CR 611.2c: "applies only as long as X is true," re-evaluated fresh on
+    /// every `layers::applicable_effects_in_layer` call rather than fixed at
+    /// generation time — `None` (every effect before this slice) means
+    /// unconditional, today's behavior unchanged. Orthogonal to `duration`
+    /// above: a `WhileConditionHolds` duration is the CR-613.7-adjacent label
+    /// for this shape, but nothing reads `duration` to decide whether an
+    /// effect is currently active — `condition` is the actual gate, checked
+    /// the same "recompute everything, no cache" way every other layer-engine
+    /// query already is. Reuses `InterveningIfSpec` (CR 603.4's trigger
+    /// intervening-if) rather than inventing a second predicate type — both
+    /// are "evaluate a live board-state predicate, get a bool."
+    pub condition: Option<InterveningIfSpec>,
 }
 
 impl ContinuousEffect {

@@ -101,6 +101,7 @@ fn gain_control(source: ObjectId, new_controller: PlayerId) -> ContinuousEffect 
         effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
+        condition: None,
     }
 }
 

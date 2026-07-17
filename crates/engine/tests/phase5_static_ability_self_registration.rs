@@ -339,6 +339,7 @@ fn dying_creatures_registered_static_ability_is_purged_by_sba() {
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
+        condition: None,
     });
 
     let script_runtime = ScriptRuntime::new();

@@ -1,0 +1,69 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "anthem"
+name = "Conditional Anthem"
+types = ["Enchantment"]
+
+# CR 611.2c: +1/+1 to creatures you control, but only as long as you control
+# 2 or more artifacts - see ContinuousEffectSpec::condition_count's own doc
+# comment. Only 1 artifact is on the battlefield in this fixture's setup, so
+# the condition never holds and the bear below gets no boost at all -
+# contrast with phase5_layer_engine_basics.toml's unconditional anthem,
+# which always boosts.
+[cards.continuous_effect]
+layer = "power_toughness_modifying"
+power = 1
+toughness = 1
+filter_controller = "you"
+filter_card_types = ["Creature"]
+condition_card_types = ["Artifact"]
+condition_count = 2
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "trinket"
+name = "Test Trinket"
+types = ["Artifact"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "anthem"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "trinket"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+# Lethal against the printed 2 toughness. The anthem's condition (2+
+# artifacts) isn't met with only 1 artifact on the battlefield, so - unlike
+# the unconditional anthem fixture - no boost saves it.
+damage_marked = 2
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "graveyard"

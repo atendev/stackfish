@@ -40,8 +40,10 @@ impl UserData for ConditionTag {}
 /// (CR 603.4). No `decode_*` function needed the way `ConditionTag`/
 /// `OperationTag` have one — `SetInterveningIf` is the only place this is
 /// ever consumed, unlike a condition/operation source string which can be
-/// `load_condition`/`load_operation`'d standalone.
-#[derive(Clone, Copy)]
+/// `load_condition`/`load_operation`'d standalone. `Clone`-only (not `Copy`)
+/// since `InterveningIfPrimitive` itself dropped `Copy` (its
+/// `ControllerControlsAtLeast` variant owns a `FilterSpec`).
+#[derive(Clone)]
 struct InterveningIfTag(InterveningIfPrimitive);
 impl UserData for InterveningIfTag {}
 
@@ -765,7 +767,7 @@ impl UserData for TriggeredAbilityBuilder {
         methods.add_method_mut("SetInterveningIf", |lua, this, value: Value| {
             let spec = match value {
                 Value::UserData(ud) => {
-                    let primitive = ud.borrow::<InterveningIfTag>()?.0;
+                    let primitive = ud.borrow::<InterveningIfTag>()?.0.clone();
                     InterveningIfSpec::Primitive(primitive)
                 }
                 // Backlog item 7: a real Lua predicate, invoked via
@@ -812,7 +814,7 @@ impl UserData for TriggeredAbilityBuilder {
                 target: None,
                 operation,
                 effect,
-                intervening_if: this.intervening_if,
+                intervening_if: this.intervening_if.clone(),
             };
             this.registry.borrow_mut().pending_triggered.push(ability);
             Ok(())
@@ -940,6 +942,11 @@ struct StaticAbilityBuilder {
     layer: Option<Layer>,
     effect: Option<EffectPayload>,
     affected: AffectedFilter,
+    /// CR 611.2c's "applies only as long as X is true" — see
+    /// `ContinuousEffect::condition`'s own doc comment. Set via
+    /// `:SetCondition(Game.InterveningIf.*)`, same decode shape
+    /// `TriggeredAbilityBuilder::SetInterveningIf` already uses.
+    condition: Option<InterveningIfSpec>,
     registry: Rc<RefCell<ScriptRegistry>>,
 }
 
@@ -961,6 +968,31 @@ impl UserData for StaticAbilityBuilder {
             let affected = decode_affected_value(lua, &mut registry, value).map_err(to_lua_err)?;
             drop(registry);
             this.affected = affected;
+            Ok(())
+        });
+        // CR 611.2c - mirrors TriggeredAbilityBuilder::SetInterveningIf's own
+        // decode logic exactly (same InterveningIfTag/Function shape).
+        methods.add_method_mut("SetCondition", |lua, this, value: Value| {
+            let spec = match value {
+                Value::UserData(ud) => {
+                    let primitive = ud.borrow::<InterveningIfTag>()?.0.clone();
+                    InterveningIfSpec::Primitive(primitive)
+                }
+                Value::Function(function) => {
+                    let key = lua.create_registry_value(function)?;
+                    let mut registry = this.registry.borrow_mut();
+                    let handle = registry.next_script_handle();
+                    registry.scripts.insert(handle, key);
+                    InterveningIfSpec::Script(handle)
+                }
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "SetCondition expects a Game.InterveningIf.* value or a function, got {}",
+                        other.type_name()
+                    )))
+                }
+            };
+            this.condition = Some(spec);
             Ok(())
         });
         methods.add_method_mut("Register", |_, this, ()| {
@@ -986,6 +1018,7 @@ impl UserData for StaticAbilityBuilder {
                 // value (see this struct's own doc comment).
                 timestamp: SequenceNo(0),
                 duration: EffectDuration::Permanent,
+                condition: this.condition.clone(),
             };
             this.registry.borrow_mut().pending_static.push(continuous_effect);
             Ok(())
@@ -1611,13 +1644,22 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     conditions.set("OncePerTurn", once_per_turn)?;
 
     // CR 603.4: `Game.InterveningIf.*` tags, consumed by
-    // `TriggeredAbilityBuilder:SetInterveningIf` — see `InterveningIfTag`'s
-    // own doc comment for why this is a separate table from `Conditions`.
+    // `TriggeredAbilityBuilder:SetInterveningIf` and (CR 611.2c)
+    // `StaticAbilityBuilder:SetCondition` — see `InterveningIfTag`'s own doc
+    // comment for why this is a separate table from `Conditions`.
     let intervening_if = lua.create_table()?;
     let at_or_below_life = lua.create_function(|_, threshold: i32| {
         Ok(InterveningIfTag(InterveningIfPrimitive::ControllerAtOrBelowLife(threshold)))
     })?;
     intervening_if.set("AtOrBelowLife", at_or_below_life)?;
+    // CR 611.2c's overwhelmingly common real shape - "as long as you control
+    // N or more [filter]" - reusing decode_filter_table (same table shape
+    // Game.Conditions.DiesMatching/Game.Costs.Sacrifice already accept).
+    let controls_at_least = lua.create_function(|_, (table, count): (Table, u32)| {
+        let filter = decode_filter_table(table).map_err(to_lua_err)?;
+        Ok(InterveningIfTag(InterveningIfPrimitive::ControllerControlsAtLeast { filter, count }))
+    })?;
+    intervening_if.set("ControlsAtLeast", controls_at_least)?;
 
     let ops = lua.create_table()?;
     // CR 605: `Game.Ops.AddMana(letter, count?)` - `letter` is a single
@@ -1834,6 +1876,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
                     card_types: None,
                     self_only: false,
                 }),
+                condition: None,
                 registry: Rc::clone(&registry),
             })
         })?

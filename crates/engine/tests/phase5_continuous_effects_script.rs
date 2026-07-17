@@ -182,7 +182,7 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
 }
 
 fn script_effect(source: ObjectId, layer: Layer, affected: AffectedFilter, effect: EffectPayload) -> ContinuousEffect {
-    ContinuousEffect { source, layer, affected, effect, timestamp: SequenceNo(0), duration: EffectDuration::Permanent }
+    ContinuousEffect { source, layer, affected, effect, timestamp: SequenceNo(0), duration: EffectDuration::Permanent, condition: None }
 }
 
 // ---------------------------------------------------------------------

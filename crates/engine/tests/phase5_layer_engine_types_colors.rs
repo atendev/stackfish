@@ -209,6 +209,7 @@ fn continuous_effect(
         effect: EffectPayload::Primitive(effect),
         timestamp: SequenceNo(timestamp),
         duration: EffectDuration::Permanent,
+        condition: None,
     }
 }
 

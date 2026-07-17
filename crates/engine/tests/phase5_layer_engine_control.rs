@@ -137,6 +137,7 @@ fn gain_control(source: ObjectId, new_controller: PlayerId, filter: EffectFilter
         effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
         timestamp: SequenceNo(timestamp),
         duration: EffectDuration::Permanent,
+        condition: None,
     }
 }
 

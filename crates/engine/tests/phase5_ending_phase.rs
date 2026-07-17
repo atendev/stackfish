@@ -346,6 +346,7 @@ fn until_end_of_turn_continuous_effects_drained_at_cleanup() {
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::UntilEndOfTurn,
+        condition: None,
     });
     state.continuous_effects.push(ContinuousEffect {
         source: ObjectId(2),
@@ -354,6 +355,7 @@ fn until_end_of_turn_continuous_effects_drained_at_cleanup() {
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
         timestamp: SequenceNo(1),
         duration: EffectDuration::Permanent,
+        condition: None,
     });
 
     let mut engine = Engine::new(state);
@@ -384,6 +386,7 @@ fn permanent_effects_survive_cleanup() {
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
+        condition: None,
     });
 
     let mut engine = Engine::new(state);
