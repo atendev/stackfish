@@ -44,6 +44,7 @@ fn bolt_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
             count: 1,
+            up_to: false,
         })),
         alternative_costs: vec![AlternativeCost::Replacement {
             description: "Flashback {R}".to_string(),

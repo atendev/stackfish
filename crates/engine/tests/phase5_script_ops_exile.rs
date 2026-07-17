@@ -62,6 +62,7 @@ fn exile_spell_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
             count: 1,
+            up_to: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Exile),
@@ -258,6 +259,7 @@ fn exile_activated_ability_also_works() {
         target: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
             count: 1,
+            up_to: false,
         })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Exile),

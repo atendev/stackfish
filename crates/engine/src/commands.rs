@@ -326,8 +326,9 @@ pub(crate) fn target_is_legal(
 /// targets submitted anyway are rejected rather than silently ignored,
 /// since nothing asked for them.
 ///
-/// TODO(CR 601.2c/115.6): `requirement.count` is exact only - "up to N"/
-/// variable-count spells aren't modeled, see `TargetRequirement`'s own doc.
+/// CR 601.2c/115.6: "up to N" (`TargetRequirement::up_to`) accepts anywhere
+/// from 0 to `count` chosen - "N or more" still isn't modeled, see
+/// `TargetRequirement`'s own doc.
 /// TODO(CR 601.2d): no division/distribution step for effects that split
 /// among several targets.
 fn validate_targets(
@@ -353,7 +354,11 @@ fn validate_targets(
         // uses.
         Some(TargetSpec::Script(_)) => Ok(()),
         Some(TargetSpec::Primitive(req)) => {
-            if targets.len() != req.count as usize {
+            // CR 601.2c/115.6: "up to N" accepts anywhere from 0 to `count`
+            // chosen - the common exact-count case still requires exactly
+            // `count`.
+            let count_ok = if req.up_to { targets.len() <= req.count as usize } else { targets.len() == req.count as usize };
+            if !count_ok {
                 return Err(CommandError::InvalidTarget);
             }
             // CR 115.3/601.2c: the same target can't be chosen twice for one

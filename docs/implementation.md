@@ -2424,10 +2424,11 @@ verbatim once enough time has passed for the underlying code to have moved.
 - **CR 613.6-8 dependency**: `EffectPayload::Script` effects never participate in dependency ordering
   (always treated as independent); cross-layer/cross-sublayer dependency isn't modeled (this one is by
   rule - CR 613.8 is explicitly same-layer/sublayer only - not a real gap).
-- **Targeting**: no "up to N" target counts, no spell with more than one distinct "target" word,
-  `TargetSpec::Script`/`ScriptRuntime::invoke_target` still `todo!()`. Real multi-target effect
-  resolution and CR 608.2b's actual partial-fizzle text closed separately, `phase5/multi-target-
-  resolution` (docs/implementation.md, below).
+- **Targeting**: no spell with more than one distinct "target" word, `TargetSpec::Script`/
+  `ScriptRuntime::invoke_target` still `todo!()`, "N or more" counts unmodeled. Real multi-target
+  effect resolution and CR 608.2b's actual partial-fizzle text closed separately, `phase5/multi-
+  target-resolution`; "up to N" counts closed separately too, `phase5/targeting-up-to-n` (both
+  docs/implementation.md, below).
 - **Static abilities**: `EffectDuration` is always `Permanent` for a self-registered static ability -
   no "as long as ..." conditional gating (`WhileConditionHolds` exists as an enum variant, nothing
   produces one).
@@ -7102,3 +7103,56 @@ inline in `ResolveStackTop`, not stored anywhere.
 - CR 601.2d's actual division/distribution (a player choosing how to split a fixed amount among
   several targets, e.g. "divide 3 damage among one or two target creatures") — still unmodeled; this
   slice's `Damage` gives every legal target the *full* amount independently, not a chosen split.
+
+## Phase 5: phase5/targeting-up-to-n slice (CR 601.2c/115.6)
+
+Branch `phase5/targeting-up-to-n`, off master. Not its own numbered backlog item — the previous
+slice's own UNRESOLVED section named this as the natural next follow-up.
+
+**Found while designing this, fixed as part of the same slice:** `ResolveStackTop`'s fizzle check
+used to gate on `req.count > 0` as a proxy for "were any targets actually chosen." That coincided with
+reality under the old exact-count-only requirement (`validate_targets` always forced `targets.len()
+== count`, so `count > 0` implied at least one target was chosen) — but breaks once "up to N" lets a
+caster legally choose zero targets while `count` itself stays nonzero. Fixed by gating on
+`!top.targets.is_empty()` (what was actually chosen) instead of `req.count` (the schema's own max).
+
+**What got implemented:**
+- `TargetRequirement` (types/target.rs) gains `up_to: bool` — `false` (default, unchanged behavior)
+  means exactly `count`; `true` means anywhere from 0 to `count` (CR 601.2c/115.6). "N or more" stays
+  unmodeled, named explicitly rather than silently guessed at.
+- `commands.rs`'s `validate_targets`: accepts `targets.len() <= count` under `up_to`, still `==`
+  otherwise — dedup and per-target legality checks are unchanged, applying to whatever subset was
+  actually chosen.
+- `engine.rs`'s `ResolveStackTop` fizzle gate: `!top.targets.is_empty()` instead of `req.count > 0`,
+  per the finding above.
+- `scenario/src/lib.rs`'s `TargetRequirementSpec` gains a matching `#[serde(default)] up_to: bool`.
+  Confirmed (again) there's no Lua/script-builder path for target requirements at all — `CardDefinition.
+  target_requirement` is still a static field only Rust fixtures/the scenario TOML populate.
+- Every existing test fixture across the workspace constructing a `TargetRequirement` struct literal
+  needed a new `up_to: false` field (20 call sites across 11 test files) — a mechanical ripple, not a
+  behavior change; confirmed via `cargo test --workspace --no-run` catching every site before running
+  anything.
+
+**No TOML/CLI scenario fixture this slice** — considered, but the scenario format's assertion
+vocabulary (`assert_object_zone`/`assert_ledger_len`/etc.) can't actually distinguish "resolved
+normally with zero targets chosen" from "fizzled" here: a fizzled spell still moves to the graveyard
+just like a normal resolution does, and with zero targets chosen there's no `DamageDealt` event
+either way to check for. The real behavior (no `Fizzled` event logged) needs direct ledger inspection,
+which only the Rust integration tests below can do - a bespoke assertion step just for this would be
+its own small feature, not worth it for one slice's fixture.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 7 new tests in
+`crates/engine/tests/phase5_targeting_up_to_n.rs` (0 targets chosen is legal and resolves; 0 targets
+chosen never logs a `Fizzled` event, the gate-fix's own regression test; 1 of 2 allowed targets is
+legal; the maximum (2) is legal; 3 (over max) is rejected; a duplicate among the chosen is rejected;
+the lone chosen target becoming illegal before resolution still fully fizzles), all prior tests
+unaffected (659 total, 0 failed).
+
+**STRUCT DEVIATIONS:** None beyond the one predicted going in (`TargetRequirement::up_to` itself) —
+the 20-site test-fixture ripple was anticipated risk of adding a new struct field, not a surprise.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- "N or more" (CR 601.2c/115.6's other variable shape) — still unmodeled.
+- Multi-"target"-word spells and `TargetSpec::Script`/`invoke_target` — unrelated to this slice, still
+  open from before it.
+- CR 601.2d's division/distribution — still unmodeled, unrelated to count shape.

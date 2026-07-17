@@ -76,6 +76,7 @@ fn modal_spell_definition() -> CardDefinition {
                 target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
                     filter: TargetFilter::AnyTarget,
                     count: 1,
+                    up_to: false,
                 })),
                 effect: Some(AbilityEffect::Damage(2)),
             },
@@ -104,6 +105,7 @@ fn shock_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::AnyTarget,
             count: 1,
+            up_to: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Damage(2)),
