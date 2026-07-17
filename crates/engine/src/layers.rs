@@ -165,6 +165,33 @@ pub fn effective_characteristics(
     }
 }
 
+/// CR 108.4/613.1 layer 2: `object`'s live controller — its plain
+/// `GameObject.controller` field (still the sole source of truth; nothing
+/// mutates it), overridden by the last (highest-timestamp) applicable
+/// `EffectPrimitive::GainControl` in `Layer::ControlChangingEffects`, same
+/// override-not-additive shape as `effective_characteristics`'s own 7b
+/// (`SetPT`) loop. Not yet consulted by any real gameplay site (combat,
+/// targeting, cost filters, `EffectFilter::applies_to`/`FilterSpec::matches`,
+/// `has_summoning_sickness` all still read `GameObject.controller` directly)
+/// — see docs/implementation.md's `phase5/layer-engine-control` slice notes
+/// for why that migration is a deliberate follow-up, not bundled here.
+pub fn effective_controller(state: &GameState, script_runtime: &ScriptRuntime, object: ObjectId) -> PlayerId {
+    let obj = state
+        .object(object)
+        .unwrap_or_else(|| panic!("effective_controller called with unknown ObjectId {object:?}"));
+    let mut controller = obj.controller;
+
+    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::ControlChangingEffects) {
+        if let Some(EffectPrimitive::GainControl(new_controller)) =
+            resolve_primitive(effect, state, script_runtime, controller)
+        {
+            controller = new_controller;
+        }
+    }
+
+    controller
+}
+
 /// Every `ContinuousEffect` in `layer` whose `affected` filter matches
 /// `object`, ordered per CR 613.7 (timestamp) and CR 613.8 (dependency
 /// overrides timestamp where it applies) — see `order_by_dependency`.
