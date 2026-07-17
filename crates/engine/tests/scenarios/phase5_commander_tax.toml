@@ -1,0 +1,67 @@
+# Commander tax slice (backlog item 11d, CR 903.8): a commander cast from
+# the command zone for the first time pays no tax at all - base mana cost
+# only. The taxed-repeat-cast cases (second/third cast, Partner
+# independence) are exercised exhaustively in
+# crates/engine/tests/phase5_commander_tax.rs - no TOML action exists yet
+# for CR 903.9a's return-to-command-zone choice (a pre-existing gap 11c's
+# own report already flagged), so a repeat cast can't be driven through the
+# real TOML -> Engine -> CLI pipeline yet. This fixture only proves the tax
+# computation is wired into the real pipeline for the untaxed baseline, with
+# a real (non-{0}) printed cost.
+seed = 1
+
+[[players]]
+id = 0
+life = 40
+mana_pool = { colorless = 5 }
+
+[[cards]]
+key = "general"
+name = "Test General"
+generic_cost = 1
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "command"
+card = "general"
+is_commander = true
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "general"
+
+[[steps]]
+type = "submit_payment"
+player = 0
+mana = { units = ["C"] }
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "general"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "colorless"
+equals = 4

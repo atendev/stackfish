@@ -953,6 +953,24 @@ pub fn execute_command(
                     // alternative cost, this slice).
                     let resolved_mana_cost =
                         cost::apply_cost_modifiers(&resolved_mana_cost, &state.cost_modifiers, object);
+                    // CR 903.8/702.124d: commander tax - {2} generic per
+                    // prior time this player has cast *this* commander (by
+                    // name, not ObjectId - see PlayerState::commander_casts'
+                    // own doc comment for why) from the command zone this
+                    // game. Only the 903.8 path taxes; a normal hand cast or
+                    // an announced alternative cost never does (`alternative`
+                    // being `None` is this whole match arm's own condition,
+                    // and `cast_from_command_zone` narrows it further).
+                    let resolved_mana_cost = if cast_from_command_zone {
+                        let prior_casts = state
+                            .player(command.actor)
+                            .and_then(|p| p.commander_casts.get(&object.definition.name))
+                            .copied()
+                            .unwrap_or(0);
+                        resolved_mana_cost.apply_cost_delta(2 * prior_casts as i32)
+                    } else {
+                        resolved_mana_cost
+                    };
                     (CostSpec::mana_only(resolved_mana_cost), false)
                 }
             };
@@ -978,6 +996,22 @@ pub fn execute_command(
             state.objects.remove(&card);
             state.objects.insert(new_id, new_object);
             remap_abilities(state, card, new_id);
+
+            // CR 903.8: this cast counts toward the *next* commander tax
+            // once it actually commits (the zone move above, not merely
+            // attempted) - matches where the tax was computed above (this
+            // player's own count, at the point of casting). TODO: if this
+            // cast is later abandoned via `Engine::unwind_payment` (CR
+            // 601.6), this increment isn't rolled back - a real gap, same
+            // family as `unwind_payment`'s own pre-existing bug of returning
+            // any unwound spell to hand regardless of its real origin zone
+            // (so an unwound commander cast already loses its command-zone
+            // recastability independent of this). Flagged, not fixed here.
+            if cast_from_command_zone {
+                if let Some(p) = state.player_mut(command.actor) {
+                    *p.commander_casts.entry(last_known_info.definition.name.clone()).or_insert(0) += 1;
+                }
+            }
 
             // CR 608.2m: a real, Rust-native fast-path effect (e.g. "Shock
             // deals 2 damage to any target") if the card's own
@@ -1817,6 +1851,7 @@ mod tests {
                 drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
+                commander_casts: std::collections::HashMap::new(),
             }],
             turn_order: vec![p0],
             active_player: p0,

@@ -49,6 +49,14 @@ pub struct PlayerState {
     /// `next_mulligan_player` skips players where this is `true`; all players
     /// start `false` so they all get a decision before the first turn.
     pub hand_kept: bool,
+    /// CR 903.8 (commander tax): how many times this player has cast each
+    /// commander from the command zone so far this game, keyed by
+    /// `CardDefinition.name` rather than `ObjectId` — CR 400.7 mints a new
+    /// id every cast (and every 903.9a return), so an id can't track "the
+    /// same commander" across a cast/death/return/recast cycle the way a
+    /// card's name can. Partner commanders (CR 702.124d) get independent
+    /// entries automatically, since they have different names.
+    pub commander_casts: std::collections::HashMap<String, u32>,
 }
 
 impl PlayerState {
@@ -56,7 +64,8 @@ impl PlayerState {
         // TODO: PlayerState { player_id, life: starting_life, mana_pool:
         // ManaPool::empty(), counters: CounterSet::new(), emblems: vec![],
         // commander_damage_taken: vec![], eliminated: false,
-        // drew_from_empty_library: false, mulligans_taken: 0, hand_kept: false }.
+        // drew_from_empty_library: false, mulligans_taken: 0, hand_kept: false,
+        // commander_casts: HashMap::new() }.
         todo!()
     }
 

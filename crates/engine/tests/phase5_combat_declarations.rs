@@ -83,6 +83,7 @@ fn combat_state() -> GameState {
                 drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
+                commander_casts: std::collections::HashMap::new(),
             },
             PlayerState {
                 player_id: p1,
@@ -95,6 +96,7 @@ fn combat_state() -> GameState {
                 drew_from_empty_library: false,
                 mulligans_taken: 0,
                 hand_kept: false,
+                commander_casts: std::collections::HashMap::new(),
             },
         ],
         turn_order: vec![p0, p1],
@@ -143,6 +145,7 @@ fn combat_state_3p() -> GameState {
         drew_from_empty_library: false,
         mulligans_taken: 0,
         hand_kept: false,
+        commander_casts: std::collections::HashMap::new(),
     });
     state.turn_order.push(p2);
     state.last_active_turn_number.insert(p2, 0);
