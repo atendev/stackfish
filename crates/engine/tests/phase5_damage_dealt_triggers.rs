@@ -168,7 +168,7 @@ fn deals_damage_trigger_fires_when_the_attacker_connects() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
     state.abilities.push(RegisteredAbility {
@@ -206,7 +206,7 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
     // Registered on a bystander that isn't attacking/blocking at all -
@@ -242,7 +242,7 @@ fn is_dealt_damage_trigger_fires_on_the_creature_taking_damage() {
     let mut state = combat_damage_state(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 5), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));

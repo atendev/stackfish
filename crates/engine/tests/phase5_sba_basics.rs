@@ -390,7 +390,7 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
     state.combat = Some(CombatState {
         attackers: vec![(infector, Target::Player(p1))],
         blocks: Vec::new(),
-        blockers_declared: true,
+        declared_defenders: vec![p1],
     });
     let mut object = creature(infector, p0, 3, 0);
     // 10 power - a single unblocked hit is enough to reach the 10-poison
