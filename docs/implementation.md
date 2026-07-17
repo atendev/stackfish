@@ -7157,56 +7157,118 @@ the 20-site test-fixture ripple was anticipated risk of adding a new struct fiel
   open from before it.
 - CR 601.2d's division/distribution — still unmodeled, unrelated to count shape.
 
-## TEMP — pending slice requirements report (not started, not a branch yet)
+## Phase 5: phase5/conditional-continuous-effects slice (CR 611.2c)
 
-Delete this section once `phase5/conditional-continuous-effects` (or whatever it ends up named)
-actually branches and gets its own real pre-slice write-up — this is a handoff note, not a slice
-record.
+Branch `phase5/conditional-continuous-effects`, off master. Scoped tightly to
+`InterveningIfPrimitive::ControllerControlsAtLeast` — the pre-slice write-up's one concrete
+condition shape — per its own explicit note that `EffectDuration`'s broader inert-duration gap
+(`UntilYourNextTurn`/`UntilEndOfCombat` never expire) stays untouched.
 
-### Next slice: CR 611.2c — conditional ("as long as ...") continuous effects
+**Deviation found while implementing — dropping `Copy`:** `InterveningIfPrimitive` and
+`InterveningIfSpec` derived `Clone, Copy, Debug` going in. Adding `ControllerControlsAtLeast {
+filter: FilterSpec, count: u32 }` broke `Copy` (`FilterSpec` owns a `Vec`/`String`) — anticipated
+(the pre-slice note already flagged the same `Clone`-only fate `ConditionPrimitive` hit for the same
+reason), but the ripple was two real call sites, not zero: `engine.rs`'s `ResolveStackTop` read
+`ability.intervening_if` by value out of a `&RegisteredAbility`, and `script.rs`'s
+`TriggeredAbilityBuilder::Register` did the same out of `&mut self` — both became `.clone()`. Also
+`InterveningIfTag` (script.rs's `mlua::UserData` wrapper) had to drop `Copy` the same way
+`ConditionTag` already had, and its one consumer (`SetInterveningIf`'s `ud.borrow::<InterveningIfTag>
+()?.0`) needed a `.clone()` added.
 
-**Found while scoping — bigger than expected:** `ContinuousEffect.duration` (`EffectDuration`) is
-consulted in exactly **one** place in the whole engine — `engine.rs`'s Cleanup step purges
-`UntilEndOfTurn` effects. Every other variant (`UntilYourNextTurn`, `UntilEndOfCombat`,
-`WhileSourceOnBattlefield`, `UntilSourceLeaves`, `WhileConditionHolds`, `Custom`) behaves identically
-to `Permanent` today — nothing ever expires them. `WhileSourceOnBattlefield`/`UntilSourceLeaves`
-happen to work anyway, since `retire_object` unconditionally purges any effect whose source has left
-the battlefield regardless of what `duration` says — so those two labels are redundant, not broken.
-But `UntilYourNextTurn`/`UntilEndOfCombat` are a real, separate, timing-based-expiry gap. **This slice
-doesn't fix that** — scoping tightly to `WhileConditionHolds` only.
+**Deviation from the pre-slice note — raw controller, not `effective_controller`:** the note said
+`holds()` would resolve "you" via `layers::effective_controller`, "same as `EffectFilter::controller`
+does elsewhere." Checking that claim while implementing found it was wrong: `ContinuousEffect::
+applies_to`'s own `FilterController` check reads the raw `GameObject.controller` field directly, not
+`effective_controller` — confirmed by `Layer::ControlChangingEffects`'s own doc comment, which already
+states plainly that "nothing in live gameplay can observe a `GainControl` effect's result yet."
+Matched that existing convention instead: `ControllerControlsAtLeast` resolves both "you" (the
+source's controller) and each candidate permanent's controller off the raw field. This also sidesteps
+a real recursion risk the note didn't call out — `effective_controller` itself calls
+`applicable_effects_in_layer`, so having a condition check inside that same function call back into
+`effective_controller` would recurse for any conditional effect sitting in `Layer::
+ControlChangingEffects` itself (not a shape this slice's tests exercise, but worth naming rather than
+silently building in a latent stack-overflow).
 
-**Design, reusing what's already there:** `InterveningIfPrimitive`/`InterveningIfSpec` (currently used
-only for CR 603.4 trigger intervening-if clauses) already are exactly "evaluate a live board-state
-predicate, get a bool" — the same shape CR 611.2c's "applies only as long as X is true" needs. Rather
-than inventing a second predicate type:
-- `ContinuousEffect` gains `pub condition: Option<InterveningIfSpec>` (`None` = unconditional, today's
-  behavior for every existing effect).
-- `InterveningIfPrimitive` gains a new variant: `ControllerControlsAtLeast { filter: FilterSpec, count:
-  u32 }` — "the effect source's controller controls `count`-or-more permanents matching `filter`"
-  (reuses `cost.rs`'s `FilterSpec`, same reuse precedent `DiesMatching`/`LeavesBattlefieldMatching`
-  already set) — covers the overwhelmingly common real "as long as you control a [type]" / "three or
-  more [things]" pattern.
-- `layers::applicable_effects_in_layer` (the one call-site every layer already funnels through)
-  additionally drops an effect whose `condition` doesn't currently hold — checked fresh on every
-  call, no caching/cleanup needed at all, matching `EffectiveCharacteristics`'s existing "recompute
-  everything, no mutable cache" architecture.
-- `StaticAbilityBuilder` (script.rs) gains `:SetCondition(Game.InterveningIf.*)`, mirroring
-  `TriggeredAbilityBuilder::SetInterveningIf`'s existing decode logic exactly (same `InterveningIfTag`/
-  `Primitive`-or-`Function` shape) — the builder still always sets `duration: Permanent` (orthogonal
-  now; `condition` is the real gate).
+**Found while writing the TOML fixture — scenario DSL had no way to express this at all:**
+`ContinuousEffectSpec` (scenario/src/lib.rs) had no field for a condition. Added
+`condition_card_types: Vec<String>` / `condition_count: Option<u32>` (the latter present = build a
+`ControllerControlsAtLeast` condition, same "presence signals the feature" convention `up_to`/
+`condition_count` siblings elsewhere already use) — not explicitly scoped by the pre-slice note, but
+needed to write a real `[[scenarios]]` regression test rather than only Rust integration tests, and
+mechanical given `build_continuous_effect` already existed as the one conversion site.
 
-**CR requirements:** 611.2c (a continuous effect can be conditional, re-evaluated continuously rather
-than fixed at generation time). One concrete condition shape this slice: "controls N+ matching
-permanents." `holds()` resolves "you" via the effect source's *current* controller
-(`layers::effective_controller`), same as `EffectFilter::controller` does elsewhere.
+**What got implemented:**
+- `types/effect.rs`: `ContinuousEffect` gains `pub condition: Option<InterveningIfSpec>` — `None`
+  (every effect built before this slice) is unconditional, unchanged behavior.
+- `types/ability.rs`: `InterveningIfPrimitive::ControllerControlsAtLeast { filter: FilterSpec, count:
+  u32 }`; `holds()`'s new arm counts `state.objects` in `ZoneKind::Battlefield` matching `filter` from
+  `controller`'s perspective and compares against `count`.
+- `layers.rs`: `applicable_effects_in_layer` (the one call-site every layer already funnels through)
+  checks `e.condition` — `None` passes through, `Some(Primitive(p))` calls `p.holds(...)`,
+  `Some(Script(handle))` calls `script_runtime.invoke_intervening_if(...)` (same fallback-to-`false`-
+  on-error stance every other unresolvable script value in this engine already takes) — before the
+  existing affected-filter match, so a condition-failing effect contributes nothing to the layer at
+  all, re-evaluated fresh on every call.
+- `script.rs`: `Game.InterveningIf.ControlsAtLeast(filter_table, count)` (reuses `decode_filter_table`,
+  same table shape `Game.Conditions.DiesMatching`/`Game.Costs.Sacrifice` already accept) alongside the
+  existing `AtOrBelowLife`; `StaticAbilityBuilder` gains a `condition` field and `:SetCondition(Game.
+  InterveningIf.* | function)`, decode logic copied verbatim from `TriggeredAbilityBuilder::
+  SetInterveningIf`; `Register()` carries `this.condition.clone()` onto the built `ContinuousEffect`.
+- `scenario/src/lib.rs`: `ContinuousEffectSpec.condition_card_types`/`condition_count`;
+  `build_continuous_effect` builds the matching `InterveningIfSpec::Primitive(ControllerControlsAtLeast
+  { .. })` when `condition_count` is set, always with `FilterController::You` (the one real pattern
+  this slice covers, "as long as *you* control...").
+- Every existing `ContinuousEffect { .. }` struct literal across the workspace (18 files, ~19 call
+  sites) needed a new `condition: None` field — a mechanical ripple confirmed via `cargo test
+  --workspace --no-run` catching every site before running anything, same pattern the `up_to` slice's
+  own 20-site ripple already established.
 
-**TODOs to mark:** `EffectDuration`'s broader inert-duration gap (`UntilYourNextTurn`/
-`UntilEndOfCombat` never expire) — named explicitly as NOT touched here. Only one
-`InterveningIfPrimitive` condition shape built (life-total and control-count exist; hand size, "still
-on the battlefield," etc. stay follow-ups, same as that enum's own pre-existing TODO already said).
+**CR requirements:** 611.2c (a continuous effect can be conditional on a state that's checked
+continuously, not fixed when the effect starts existing). One concrete condition shape this slice:
+"controls N+ matching permanents" — the overwhelmingly common real card-text pattern ("as long as you
+control a [type]", "for each — as long as you control three or more [things]").
 
-**Tests:** a conditional anthem-shaped effect (e.g. "creatures you control get +1/+1 as long as you
-control three or more artifacts") — applies when the count is met, stops applying the instant it drops
-below (re-derived fresh, no stale state); an unconditional effect is completely unaffected
-(regression); the `Game.InterveningIf.*`/`:SetCondition` Lua round-trip; a `Script`-backed condition
-via the existing `invoke_intervening_if` plumbing.
+**TODOs marked, not silently narrowed:**
+- `EffectDuration`'s broader inert-duration gap (`UntilYourNextTurn`/`UntilEndOfCombat` never expire)
+  — explicitly not touched, per the pre-slice note's own scoping.
+- Only one `InterveningIfPrimitive` condition shape now exists for continuous effects (life-total and
+  control-count); hand size, "still on the battlefield," and other board-state shapes stay follow-ups
+  — same pre-existing TODO on that enum, now shared by both its consumers (trigger intervening-if and
+  continuous-effect condition).
+- `ControllerControlsAtLeast` reads raw `GameObject.controller`, not `layers::effective_controller` —
+  named above, not a silent gap; revisit once the `phase5/layer-engine-control` migration (backlog)
+  actually threads effective control into live gameplay consumers.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 669 total, 0 failed, including:
+  - 4 new unit tests in `types/ability.rs` (`holds()` directly: count exactly met; below the count;
+    drops the instant a matching permanent leaves state.objects, re-derived fresh; a `you`-controller
+    filter ignores an opponent's matching permanents).
+  - 6 new integration tests in `crates/engine/tests/phase5_conditional_continuous_effects.rs`: a
+    conditional anthem applies when the control count is met / doesn't when it isn't / stops applying
+    the instant a matching permanent leaves (no cache to invalidate); an unconditional effect
+    (`condition: None`) is completely unaffected; the `Game.InterveningIf.ControlsAtLeast`/
+    `:SetCondition` Lua round-trip end to end through `run_card_script`; a `Script`-backed
+    `:SetCondition(function...)` condition resolving via `invoke_intervening_if`.
+  - 1 new TOML scenario fixture (`phase5_conditional_continuous_effects.toml`), same indirect-
+    assertion technique `phase5_layer_engine_basics.toml`'s unconditional anthem fixture already uses
+    (the scenario DSL has no direct P/T assertion — CR 611.2c's live-recompute condition is validated
+    indirectly via CR 704.5g's lethal-toughness SBA: a bear the anthem *would* save from 2 marked
+    damage stays lethal and dies here, since the fixture's single artifact never meets the anthem's
+    2-artifact condition).
+  - all prior tests unaffected.
+
+**STRUCT DEVIATIONS:** `InterveningIfPrimitive`/`InterveningIfSpec`/`InterveningIfTag` dropped `Copy`
+(anticipated in the pre-slice note, but not spelled out as a struct deviation there) — see above for
+the two real call-site ripples that caused. `ContinuousEffectSpec` gained two fields
+(`condition_card_types`/`condition_count`) not named in the pre-slice note at all.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- "N or more" was already the shape built (not "exactly N" or "N or fewer") — no further variable-
+  count gap here, unlike the `up_to`/targeting slice's own separate "N or more" targeting gap.
+- Conditional effects targeting `Layer::ControlChangingEffects` itself could recurse through
+  `effective_controller` if this slice's raw-controller choice is ever revisited — flagged above, not
+  exercised by any test since no card needs it yet.
+- No TOML/CLI support for a `Script`-backed condition (only the `Primitive` `ControlsAtLeast` shape) —
+  the scenario format builds `ContinuousEffect` directly as a Rust struct with no script bridge at
+  that layer at all (same standing gap `ContinuousEffectSpec`'s own doc comment already named before
+  this slice).

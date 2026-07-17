@@ -272,6 +272,16 @@ pub struct ContinuousEffectSpec {
     pub filter_card_types: Vec<String>,
     #[serde(default)]
     pub filter_self_only: bool,
+    /// CR 611.2c: if set (alongside `condition_count`), this effect only
+    /// applies while its source's controller controls `condition_count` or
+    /// more permanents with any of these card types — the one
+    /// `InterveningIfPrimitive::ControllerControlsAtLeast` shape this slice
+    /// ships. `None`/absent (the common case) means the effect is
+    /// unconditional, same as before this slice.
+    #[serde(default)]
+    pub condition_card_types: Vec<String>,
+    #[serde(default)]
+    pub condition_count: Option<u32>,
 }
 
 /// `CardSpec.target_requirement`'s shape — `filter` picks which
@@ -870,6 +880,23 @@ fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> Con
         card_types: (!spec.filter_card_types.is_empty()).then(|| parse_card_types(&spec.filter_card_types)),
         self_only: spec.filter_self_only,
     };
+    // CR 611.2c: `condition_count` present means this effect is
+    // conditional — see `ContinuousEffectSpec::condition_count`'s own doc
+    // comment.
+    let condition = spec.condition_count.map(|count| {
+        InterveningIfSpec::Primitive(InterveningIfPrimitive::ControllerControlsAtLeast {
+            filter: FilterSpec {
+                card_types: (!spec.condition_card_types.is_empty())
+                    .then(|| parse_card_types(&spec.condition_card_types)),
+                supertypes: None,
+                subtypes: None,
+                controller: Some(FilterController::You),
+                random: false,
+                extra: None,
+            },
+            count,
+        })
+    });
     ContinuousEffect {
         source,
         layer,
@@ -877,6 +904,7 @@ fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> Con
         effect: EffectPayload::Primitive(effect),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
+        condition,
     }
 }
 

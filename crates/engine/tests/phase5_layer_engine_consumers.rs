@@ -199,6 +199,7 @@ fn a_modify_pt_boost_increases_combat_damage_dealt() {
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 2, toughness: 2 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
+        condition: None,
     });
 
     let mut engine = Engine::new(state);
@@ -246,6 +247,7 @@ fn granted_flying_via_continuous_effect_still_enforces_blocking_legality() {
         effect: EffectPayload::Primitive(EffectPrimitive::AddKeyword(KeywordSet::FLYING)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
+        condition: None,
     });
 
     let mut engine = Engine::new(state);

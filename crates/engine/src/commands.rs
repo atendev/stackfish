@@ -2113,6 +2113,7 @@ mod tests {
             effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
             timestamp: SequenceNo(0),
             duration: EffectDuration::Permanent,
+            condition: None,
         }
     }
 

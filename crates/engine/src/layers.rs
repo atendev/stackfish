@@ -1,4 +1,5 @@
 use crate::script::ScriptRuntime;
+use crate::types::ability::InterveningIfSpec;
 use crate::types::card::{net_counters, PTValue, ScriptReference};
 use crate::types::counter::CounterSet;
 use crate::types::effect::{
@@ -222,6 +223,15 @@ pub fn effective_controller(state: &GameState, script_runtime: &ScriptRuntime, o
 /// resolves to "doesn't match" rather than guessed, same "skip rather than
 /// guess" stance every other unresolvable script value in this engine
 /// already takes.
+///
+/// CR 611.2c: `e.condition` (if set) is checked here too, before the
+/// affected-filter match — an effect whose condition doesn't currently hold
+/// contributes nothing this call, the same "recompute everything, no cache"
+/// shape as the rest of this query. "You" resolves to `source_obj.controller`
+/// (the raw field, not `layers::effective_controller`) — same Layer 2 gap
+/// `e.applies_to`'s own `FilterController` check already has one line below,
+/// and avoids this function recursing into `effective_controller` (which
+/// itself calls this function) to evaluate a condition.
 fn applicable_effects_in_layer<'a>(
     state: &'a GameState,
     script_runtime: &ScriptRuntime,
@@ -240,6 +250,16 @@ fn applicable_effects_in_layer<'a>(
             // trigger whose source no longer resolves (CR 603.10 gap,
             // flagged there too).
             let Some(source_obj) = state.object(e.source) else { return false };
+            let condition_holds = match &e.condition {
+                None => true,
+                Some(InterveningIfSpec::Primitive(p)) => p.holds(state, source_obj.controller),
+                Some(InterveningIfSpec::Script(handle)) => script_runtime
+                    .invoke_intervening_if(*handle, state, e.source, source_obj.controller)
+                    .unwrap_or(false),
+            };
+            if !condition_holds {
+                return false;
+            }
             match &e.affected {
                 AffectedFilter::Primitive(_) => e.applies_to(object, source_obj),
                 AffectedFilter::Script(handle) => script_runtime

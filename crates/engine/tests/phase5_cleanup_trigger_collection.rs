@@ -193,6 +193,7 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: -5 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
+        condition: None,
     });
     state.continuous_effects.push(ContinuousEffect {
         source,
@@ -201,6 +202,7 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 5 }),
         timestamp: SequenceNo(1),
         duration: EffectDuration::UntilEndOfTurn,
+        condition: None,
     });
 
     let mut engine = Engine::new(state);
