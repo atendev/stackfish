@@ -2252,7 +2252,43 @@ shift, don't treat it as fixed once written.
        704.5k resolves purely on timestamp) and just joins the ordinary dying-permanent list.
 11. **Multiplayer/Commander generalization** — combat is 2-player only today (`CombatState`/
     `DeclareBlockers` assume one defending player); command-zone tax/damage/elimination-without-
-    ending-the-game aren't wired despite being named in DESIGN.md's Commander section.
+    ending-the-game aren't wired despite being named in DESIGN.md's Commander section. Turned out to
+    be big enough to split into its own sequence rather than one item, same as items 1/9/10 — sub-
+    slices below, compiled after a real research pass over `combat.rs`/`commands.rs`/`triggers.rs`/
+    `sba.rs`/`player.rs`/`engine.rs` (not guessed at) to separate what's already N-player-safe from
+    what's actually hardcoded to 2 players or entirely unbuilt:
+    1. `CombatState` itself (`attackers: Vec<(ObjectId, Target)>`) and `DeclareAttackers` are already
+       N-player-safe — each attacker independently names its defender via `Target`
+       (`commands.rs`'s `DeclareAttackers` arm validates each against `state.turn_order` generically).
+       `triggers.rs`'s APNAP ordering (`group_apnap`) is also already generalized over
+       `state.turn_order`, not hardcoded to two players. Neither needs a slice.
+    11a. **N-player combat: defending player per attacker** — the real gap. `DeclareBlockers`
+       (`commands.rs`) picks "the first non-active player in `turn_order`" as *the* single defending
+       player, ignoring that attackers may have declared different targets/defenders (CR 508.5a's
+       multiplayer ambiguity) — its own comment already admits "this engine only models 2-player
+       combat." Needs each block's legality/damage-assignment resolved per the attacker's own
+       declared defender instead of one engine-wide defending player.
+    11b. **Player elimination actually affects the game** — `sba::apply_player_loss` already marks
+       `eliminated=true` per player, N-safe. Nothing downstream reads it: turn order/priority still
+       hands an eliminated player turns, nothing exiles their zones' contents, and `StepStatus::
+       GameOver` is declared but never constructed anywhere in the crate (checked - zero call sites).
+       That last part isn't multiplayer-specific either — a 2-player game today never formally ends.
+       Scope: skip eliminated players in turn order/priority, handle their objects leaving the game,
+       construct `GameOver` once only one player remains (covers both the 2-player and N-player case
+       in the same mechanism).
+    11c. **Commander marking + casting from the command zone** — no "is this a commander" concept
+       exists anywhere (`PlayerState`/`GameObject`/`CardDefinition` all lack it, checked).
+       `ZoneKind::Command` exists as an enum variant but is fully inert - nothing is ever placed there
+       or cast from it (`CastSpell` only reads `Hand` or an `AlternativeCost::Replacement` zone).
+       Foundational for 11d/11e below.
+    11d. **Commander tax (CR 903.9)** — generic cost +{2} per prior cast from the command zone this
+       game. Small increment on top of 11c.
+    11e. **Commander damage production** — closes backlog item 10's own dangling note (that slice's
+       commander-damage SBA check is real but "inert until backlog item 11's Commander-format
+       machinery... exists"). Routes a commander's combat damage into `PlayerState.
+       commander_damage_taken` (already real, just never written to).
+    **Explicitly not a slice:** color identity/deck validation — DESIGN.md already scopes it out
+    ("not in scope for the engine itself unless deck validation is wanted later").
 12. ~~**First/double strike (CR 702.4/702.7)**~~ — done, `phase5/first-strike` slice
     (docs/implementation.md, below): the combat damage step splits in two (first-strike step, then
     regular step) whenever any attacker/blocker has first or double strike; `FirstStrikeDamage` event
