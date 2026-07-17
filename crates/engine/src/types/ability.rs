@@ -727,7 +727,7 @@ mod tests {
     fn deals_damage_matches_when_source_is_the_dealer() {
         let source = ObjectId(0);
         let other = ObjectId(1);
-        let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3 };
+        let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3, is_combat_damage: false };
         assert!(ConditionPrimitive::DealsDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
@@ -736,7 +736,7 @@ mod tests {
         let source = ObjectId(0);
         let dealer = ObjectId(1);
         let event =
-            GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3 };
+            GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3, is_combat_damage: false };
         assert!(!ConditionPrimitive::DealsDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
@@ -745,7 +745,7 @@ mod tests {
         let source = ObjectId(0);
         let dealer = ObjectId(1);
         let event =
-            GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3 };
+            GameEventKind::DamageDealt { source: dealer, target: Target::Object(source), amount: 3, is_combat_damage: false };
         assert!(ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
@@ -753,7 +753,7 @@ mod tests {
     fn is_dealt_damage_does_not_match_a_different_target() {
         let source = ObjectId(0);
         let other = ObjectId(1);
-        let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3 };
+        let event = GameEventKind::DamageDealt { source, target: Target::Object(other), amount: 3, is_combat_damage: false };
         assert!(!ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
@@ -763,7 +763,7 @@ mod tests {
         // ability - IsDealtDamage only ever matches a Target::Object.
         let source = ObjectId(0);
         let dealer = ObjectId(1);
-        let event = GameEventKind::DamageDealt { source: dealer, target: Target::Player(PlayerId(0)), amount: 3 };
+        let event = GameEventKind::DamageDealt { source: dealer, target: Target::Player(PlayerId(0)), amount: 3, is_combat_damage: false };
         assert!(!ConditionPrimitive::IsDealtDamage.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 

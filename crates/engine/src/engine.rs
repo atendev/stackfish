@@ -2525,12 +2525,15 @@ impl Engine {
                             // the same ReplacementCheck->CommitEvents pipeline
                             // combat damage already uses (commands::
                             // apply_damage_event is the sole consumer of that
-                            // event kind and isn't combat-specific), so
-                            // prevention/replacement effects and Lifelink/
-                            // Wither/Infect/Deathtouch apply for free. Single
-                            // fixed target only (top.targets.first()) - no
-                            // "divide among any number of targets" shape yet,
-                            // same narrowing targeting-basics already
+                            // event kind), so prevention/replacement effects
+                            // and Lifelink/Wither/Infect/Deathtouch apply for
+                            // free. `is_combat_damage: false` - CR 903.10a's
+                            // commander-damage tracking only counts CR 510
+                            // combat damage, never a spell/ability's own
+                            // damage effect, even from a commander source.
+                            // Single fixed target only (top.targets.first())
+                            // - no "divide among any number of targets" shape
+                            // yet, same narrowing targeting-basics already
                             // established. Empty targets is a silent no-op
                             // (shouldn't be reachable given cast-time target
                             // validation) rather than a panic.
@@ -2540,6 +2543,7 @@ impl Engine {
                                         source: top.source,
                                         target: *target,
                                         amount: *amount,
+                                        is_combat_damage: false,
                                     });
                                 }
                             }
@@ -3095,8 +3099,15 @@ impl Engine {
                     // (amount/target may have been prevented/redirected).
                     // See commands::apply_damage_event's own doc comment for
                     // why this can't happen any earlier than here.
-                    if let GameEventKind::DamageDealt { source, target, amount } = &kind {
-                        commands::apply_damage_event(&mut self.state, &self.script_runtime, *source, *target, *amount);
+                    if let GameEventKind::DamageDealt { source, target, amount, is_combat_damage } = &kind {
+                        commands::apply_damage_event(
+                            &mut self.state,
+                            &self.script_runtime,
+                            *source,
+                            *target,
+                            *amount,
+                            *is_combat_damage,
+                        );
                     }
                     // CR 122.1a: same "describes an effect that hasn't
                     // happened to state yet" shape as DamageDealt above -
@@ -4131,7 +4142,7 @@ mod tests {
         state.replacement_effects.push(prevent_all_damage(effect_source));
 
         let mut engine = Engine::new(state);
-        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(p0), amount: 7 };
+        let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(p0), amount: 7, is_combat_damage: false };
         engine.process_state =
             ProcessState::ReplacementCheck { remaining: VecDeque::from([event]), checked: Vec::new() };
 
@@ -4161,6 +4172,7 @@ mod tests {
                 source: ObjectId(9),
                 target: Target::Player(PlayerId(0)),
                 amount: 1,
+                is_combat_damage: false,
             },
             candidates: vec![ObjectId(1), ObjectId(2)],
             excluded: Vec::new(),
@@ -4184,7 +4196,7 @@ mod tests {
         state.replacement_effects.push(prevent_all_damage(b));
 
         let mut engine = Engine::new(state);
-        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p0), amount: 7 };
+        let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p0), amount: 7, is_combat_damage: false };
         engine.process_state =
             ProcessState::ReplacementCheck { remaining: VecDeque::from([event]), checked: Vec::new() };
 

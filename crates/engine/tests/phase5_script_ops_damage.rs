@@ -201,7 +201,7 @@ fn damage_dealt_events(engine: &Engine) -> Vec<(ObjectId, Target, u32)> {
         .ledger
         .iter()
         .filter_map(|e| match e.kind {
-            GameEventKind::DamageDealt { source, target, amount } => Some((source, target, amount)),
+            GameEventKind::DamageDealt { source, target, amount, .. } => Some((source, target, amount)),
             _ => None,
         })
         .collect()

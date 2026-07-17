@@ -25,7 +25,15 @@ pub enum GameEventKind {
     /// the zone-change-event equivalent.
     ZoneChange { object: ObjectId, from: ZoneKind, to: ZoneKind, last_known_info: Option<GameObject> },
     LifeChanged { player: PlayerId, delta: i32 },
-    DamageDealt { source: ObjectId, target: Target, amount: u32 },
+    /// `is_combat_damage` (CR 903.10a): whether this damage was dealt via
+    /// CR 510 combat damage (`commands::AssignCombatDamage`, the only
+    /// producer that sets `true`) rather than a spell/ability's own damage
+    /// effect (the script bridge's `Game.Ops.Damage`, always `false`) — a
+    /// commander's *combat* damage to a player counts toward CR 903.10a's
+    /// 21-damage loss condition, but the same commander's damage from an
+    /// activated/triggered ability never does, even though `source` is
+    /// identical either way. `apply_damage_event` is the only reader.
+    DamageDealt { source: ObjectId, target: Target, amount: u32, is_combat_damage: bool },
     CounterAdded { object: ObjectId, kind: CounterKind, amount: i32 },
     /// First real tap producer (CR 602.5a's tap-cost activation, e.g. a
     /// mana ability) — nothing minted this event before now.

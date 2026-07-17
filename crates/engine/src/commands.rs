@@ -574,6 +574,7 @@ pub(crate) fn apply_damage_event(
     source: ObjectId,
     target: Target,
     amount: u32,
+    is_combat_damage: bool,
 ) {
     // CR 702.15/702.80/702.90: looked up once, up front, so the borrow ends
     // before the target mutations below (which may need a mutable borrow of
@@ -584,9 +585,32 @@ pub(crate) fn apply_damage_event(
     let is_infect = source_keywords.contains(KeywordSet::INFECT);
     let has_deathtouch = source_keywords.contains(KeywordSet::DEATHTOUCH);
     let source_controller = state.object(source).map(|o| o.controller);
+    let source_is_commander = state.object(source).map(|o| o.is_commander).unwrap_or(false);
 
     match target {
         Target::Player(pid) => {
+            // CR 903.10a: a commander's *combat* damage to a player
+            // accumulates regardless of how that damage otherwise manifests
+            // (life loss below, or poison via infect) - a parallel tracking
+            // system, not a redirect of the life-loss/poison branching, so
+            // this runs unconditionally before that branch rather than
+            // inside either arm of it. TODO: keyed by this specific
+            // ObjectId, which changes across a CR 903.9a return
+            // (cast/die/return/recast) - a recast commander's damage count
+            // resets to 0 under this key instead of accumulating against
+            // "the same commander" the way CR 903.10a's own text means it.
+            // Pre-existing field (item 10's slice), not changed here - see
+            // docs/implementation.md's phase5/commander-damage slice notes
+            // for why this was deliberately left as-is rather than widened
+            // to name-keying like PlayerState::commander_casts.
+            if is_combat_damage && source_is_commander && amount > 0 {
+                if let Some(player) = state.player_mut(pid) {
+                    match player.commander_damage_taken.iter_mut().find(|(s, _)| *s == source) {
+                        Some((_, total)) => *total += amount,
+                        None => player.commander_damage_taken.push((source, amount)),
+                    }
+                }
+            }
             // CR 702.90b: Infect damage to a player becomes poison
             // counters, not life loss.
             if is_infect {
@@ -1744,6 +1768,7 @@ pub fn execute_command(
                             source: *attacker,
                             target: *target,
                             amount: power,
+                            is_combat_damage: true,
                         });
                     }
                     Some(blockers) if blockers.len() == 1 => {
@@ -1753,6 +1778,7 @@ pub fn execute_command(
                             source: *attacker,
                             target: Target::Object(blockers[0]),
                             amount: power,
+                            is_combat_damage: true,
                         });
                     }
                     Some(_) => {
@@ -1763,6 +1789,7 @@ pub fn execute_command(
                                     source: *attacker,
                                     target: Target::Object(*blocker),
                                     amount: *amount,
+                                    is_combat_damage: true,
                                 });
                             }
                         }
@@ -1784,6 +1811,7 @@ pub fn execute_command(
                     source: *blocker,
                     target: Target::Object(*attacker),
                     amount: power,
+                    is_combat_damage: true,
                 });
             }
 

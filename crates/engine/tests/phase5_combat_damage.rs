@@ -178,7 +178,7 @@ fn unblocked_attacker_deals_damage_to_original_target() {
     let kinds: Vec<_> = engine.state().ledger.iter().map(|e| &e.kind).collect();
     assert!(kinds.iter().any(|k| matches!(
         k,
-        GameEventKind::DamageDealt { source, target: Target::Player(t), amount } if *source == attacker && *t == p1 && *amount == 3
+        GameEventKind::DamageDealt { source, target: Target::Player(t), amount, .. } if *source == attacker && *t == p1 && *amount == 3
     )));
 }
 
