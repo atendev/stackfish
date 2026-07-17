@@ -2424,9 +2424,10 @@ verbatim once enough time has passed for the underlying code to have moved.
 - **CR 613.6-8 dependency**: `EffectPayload::Script` effects never participate in dependency ordering
   (always treated as independent); cross-layer/cross-sublayer dependency isn't modeled (this one is by
   rule - CR 613.8 is explicitly same-layer/sublayer only - not a real gap).
-- **Targeting**: no "up to N" target counts, no spell with more than one distinct "target" word, no
-  partial fizzle (CR 608.2b is all-or-nothing here), `TargetSpec::Script`/`ScriptRuntime::invoke_target`
-  still `todo!()`.
+- **Targeting**: no "up to N" target counts, no spell with more than one distinct "target" word,
+  `TargetSpec::Script`/`ScriptRuntime::invoke_target` still `todo!()`. Real multi-target effect
+  resolution and CR 608.2b's actual partial-fizzle text closed separately, `phase5/multi-target-
+  resolution` (docs/implementation.md, below).
 - **Static abilities**: `EffectDuration` is always `Permanent` for a self-registered static ability -
   no "as long as ..." conditional gating (`WhileConditionHolds` exists as an enum variant, nothing
   produces one).
@@ -7048,3 +7049,56 @@ two new free functions in `commands.rs`, exactly as scoped going in.
 - Banding, and the rest of CR 702's combat-keyword list beyond first/double strike/trample, are still
   unbuilt — updated the "Known unresolved gaps" list (above) to reflect trample closing rather than
   leaving it stale.
+
+## Phase 5: phase5/multi-target-resolution slice (CR 601.2d/608.2b)
+
+Branch `phase5/multi-target-resolution`, off master. Not its own numbered backlog item — pulled from
+the "Known unresolved gaps" list's targeting entry.
+
+**Found while scoping, bigger than the gaps-list entry named:** every `AbilityEffect` resolution arm
+in `engine.rs` (`Damage`, `Sacrifice`, `Destroy`, `Exile`, `Counters`) read `top.targets.first()` only
+— already documented at each site as a deliberate narrowing ("single fixed target only... same
+narrowing targeting-basics already established"), so not a hidden bug the way trample's dead-blocker
+conflation was, just a bigger pre-existing narrowing than the gaps list called out by name: a
+`TargetRequirement` with `count: 2+` validated fine at cast time, but only ever affected the first
+chosen target at resolution — the rest were silently ignored. Combined with CR 608.2b's fizzle check
+already being correctly all-or-nothing for the *resolve-or-not* decision, this meant the actual
+partial-fizzle text ("still resolves, but won't affect those targets that are illegal") had never
+been exercisable, since there was never more than one real target in play.
+
+**What got implemented:**
+- `ResolveStackTop`'s fizzle computation now derives `legal_targets: Vec<Target>` — the subset of
+  `top.targets` still legal against `top.target_requirement`'s filter — once, up front. `fizzles`
+  becomes `legal_targets.is_empty()` (for a real, count > 0 requirement), an equivalent but simpler
+  refactor of the previous `.all(|t| !target_is_legal(...))` check.
+- All five `AbilityEffect` resolution arms changed from `top.targets.first()` to iterating every
+  entry in `legal_targets` independently: `Damage` deals its full `amount` to each (CR 601.2d's
+  "divide as you choose" stays unmodeled — no split, every legal target gets the whole amount);
+  `Sacrifice`/`Destroy`/`Exile`/`Counters` apply their own per-object body to each `Target::Object`
+  entry, skipping any non-Object entry the same "silent no-op" way the single-target code already
+  did.
+- Net effect is CR 608.2b's real partial fizzle for free: a target that's individually illegal by
+  resolution time is simply absent from `legal_targets`, so it's skipped during effect application
+  without needing a second bespoke check.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 5 new tests in
+`crates/engine/tests/phase5_multi_target_resolution.rs` (a 2-target Damage spell hits both targets
+independently, not split; one target leaving the battlefield before resolution only skips that one,
+doesn't fizzle the spell; both targets leaving fully fizzles it; a 2-target Destroy spell kills both
+independently; one target already gone still lets Destroy affect the other), all prior tests
+unaffected (652 total, 0 failed) — including every existing single-target (`count: 1`) test across
+`phase5_script_ops_damage.rs`/`phase5_script_ops_destroy.rs`/`phase5_script_ops_exile.rs`/etc., proving
+the refactor didn't change count=1 behavior at all.
+
+**STRUCT DEVIATIONS:** None — no new fields on any type; `legal_targets` is a local `Vec` computed
+inline in `ResolveStackTop`, not stored anywhere.
+
+**UNRESOLVED (named during this slice, not silently narrowed):**
+- CR 601.2c/115.6 "up to N"/variable target counts — `TargetRequirement::count` still exact only,
+  deliberately deferred as its own smaller, separable follow-up rather than bundled in here.
+- Multi-"target"-word spells ("target creature and target player") — `CardDefinition.target_
+  requirement` is still a single `Option<TargetSpec>`, not modeled.
+- `TargetSpec::Script`/`ScriptRuntime::invoke_target` — still dead code, unrelated to this slice.
+- CR 601.2d's actual division/distribution (a player choosing how to split a fixed amount among
+  several targets, e.g. "divide 3 damage among one or two target creatures") — still unmodeled; this
+  slice's `Damage` gives every legal target the *full* amount independently, not a chosen split.
