@@ -1,3 +1,4 @@
+pub mod color_identity;
 pub mod commands;
 pub mod engine;
 pub mod engine_context;
