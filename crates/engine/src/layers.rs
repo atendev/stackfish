@@ -112,16 +112,26 @@ pub fn effective_characteristics(
         }
     }
 
-    // Layer 7c: modifying is additive across every applicable effect, in
-    // timestamp order (order doesn't actually change the sum for a plain
-    // add, but the sort is kept anyway - see applicable_effects_in_layer's
-    // doc comment on why the sort lives there regardless).
+    // Layer 7c: modifying is additive across every applicable effect
+    // (order doesn't change the sum for a plain add), and doubling (CR
+    // 613.8a-dependent on any modify touching the same field - see
+    // `applicable_effects_in_layer`'s ordering, which already places
+    // `ModifyPT` before a dependent `DoublePT`).
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessModifying) {
-        if let Some(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) =
-            resolve_primitive(effect, state, script_runtime, obj.controller)
-        {
-            power = power.map(|p| p + dp);
-            toughness = toughness.map(|t| t + dt);
+        match resolve_primitive(effect, state, script_runtime, obj.controller) {
+            Some(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) => {
+                power = power.map(|p| p + dp);
+                toughness = toughness.map(|t| t + dt);
+            }
+            Some(EffectPrimitive::DoublePT { power: double_power, toughness: double_toughness }) => {
+                if double_power {
+                    power = power.map(|p| p * 2);
+                }
+                if double_toughness {
+                    toughness = toughness.map(|t| t * 2);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -156,11 +166,11 @@ pub fn effective_characteristics(
 }
 
 /// Every `ContinuousEffect` in `layer` whose `affected` filter matches
-/// `object`, sorted by `timestamp` (CR 613.4's ordering within a layer — see
-/// `Layer`'s doc comment for why this is timestamp-only, no dependency
-/// detection). Sorting here rather than at each call site keeps that
-/// contract in one place regardless of which layer's caller in
-/// `effective_characteristics` is walking it.
+/// `object`, ordered per CR 613.7 (timestamp) and CR 613.8 (dependency
+/// overrides timestamp where it applies) — see `order_by_dependency`.
+/// Ordering here rather than at each call site keeps that contract in one
+/// place regardless of which layer's caller in `effective_characteristics`
+/// is walking it.
 ///
 /// `AffectedFilter::Script` is evaluated here (not in
 /// `ContinuousEffect::applies_to`, which stays `Primitive`-only so
@@ -175,7 +185,7 @@ fn applicable_effects_in_layer<'a>(
     object: &GameObject,
     layer: Layer,
 ) -> Vec<&'a ContinuousEffect> {
-    let mut effects: Vec<&ContinuousEffect> = state
+    let effects: Vec<&ContinuousEffect> = state
         .continuous_effects
         .iter()
         .filter(|e| e.layer == layer)
@@ -195,8 +205,71 @@ fn applicable_effects_in_layer<'a>(
             }
         })
         .collect();
-    effects.sort_by_key(|e| e.timestamp);
-    effects
+    order_by_dependency(effects)
+}
+
+/// CR 613.8's dependency system: within the single layer `applicable_effects_in_layer`
+/// already filtered down to, reorders effects so a dependent effect (CR
+/// 613.8a) applies after whatever it depends on (CR 613.8b), falling back to
+/// plain `timestamp` order for effects with no unresolved dependency and, per
+/// 613.8b's last sentence, for a dependency loop (detected as "no remaining
+/// effect is ever un-blocked" - see the `is_empty()` fallback below).
+///
+/// Only `depends_on` below can report a real dependency today (`DoublePT` on
+/// a same-field `ModifyPT`/`DoublePT` in layer 7c - see `EffectPrimitive::
+/// DoublePT`'s own doc comment for why no other primitive combination can);
+/// for every other layer/primitive pairing this produces the exact same
+/// order plain timestamp sorting would, since every candidate is
+/// immediately "ready" (CR 613.8c's re-evaluation is architecturally free
+/// here too - this whole query, and this reorder, is recomputed from
+/// scratch on every call, never cached).
+fn order_by_dependency(mut remaining: Vec<&ContinuousEffect>) -> Vec<&ContinuousEffect> {
+    let mut placed: Vec<&ContinuousEffect> = Vec::with_capacity(remaining.len());
+
+    while !remaining.is_empty() {
+        let ready: Vec<usize> = (0..remaining.len())
+            .filter(|&i| {
+                (0..remaining.len()).all(|j| i == j || !depends_on(remaining[i], remaining[j]))
+            })
+            .collect();
+
+        if ready.is_empty() {
+            // CR 613.8b: a dependency loop among everything still
+            // unresolved - ignore dependency for the rest and fall back to
+            // timestamp order.
+            remaining.sort_by_key(|e| e.timestamp);
+            placed.extend(remaining);
+            return placed;
+        }
+
+        let next = *ready.iter().min_by_key(|&&i| remaining[i].timestamp).unwrap();
+        placed.push(remaining.remove(next));
+    }
+
+    placed
+}
+
+/// CR 613.8a: does `effect` depend on `other` (must apply after it)? Both
+/// arguments are already known to share a layer (the only caller,
+/// `order_by_dependency`, is always given a single layer's effects), so this
+/// only needs the "applying the other would change what this one does"
+/// clause - the CDA carve-out (613.8a clause c) is moot here since a CDA
+/// (layer 7a) is resolved inline via `resolve_base_pt`, never stored as a
+/// `ContinuousEffect`. A `Script`-payload effect is always independent (see
+/// `Layer`'s doc comment) - only `Primitive` pairs can produce a real
+/// dependency yet.
+fn depends_on(effect: &ContinuousEffect, other: &ContinuousEffect) -> bool {
+    let (EffectPayload::Primitive(this), EffectPayload::Primitive(that)) = (&effect.effect, &other.effect) else {
+        return false;
+    };
+    match (this, that) {
+        (EffectPrimitive::DoublePT { power, toughness }, EffectPrimitive::ModifyPT { .. }) => *power || *toughness,
+        (
+            EffectPrimitive::DoublePT { power: p1, toughness: t1 },
+            EffectPrimitive::DoublePT { power: p2, toughness: t2 },
+        ) => (*p1 && *p2) || (*t1 && *t2),
+        _ => false,
+    }
 }
 
 /// Resolves a `ContinuousEffect`'s actual `EffectPrimitive` for this query —

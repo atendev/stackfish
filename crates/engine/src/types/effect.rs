@@ -43,22 +43,22 @@ use crate::types::cost::FilterController;
 /// — a full overwrite ("loses all other types/colors") isn't modeled; see
 /// `EffectPrimitive`'s own TODO for that.
 ///
-/// TODO(dependency system, CR 613.6-613.8): even once more layers exist,
-/// `layers::effective_characteristics` only sorts effects *within* a layer
-/// by `timestamp` — it does not detect or honor *dependency* between
-/// effects (an effect whose own text or amount depends on another effect's
-/// current characteristics, e.g. two P/T-doubling effects where the order
-/// they're applied in changes the final number, or an effect that only
-/// applies "if [some other effect] is applying to this object"). CR 613.8's
-/// actual rule requires inspecting what each effect's calculation depends on
-/// and reordering around cycles arbitrarily (picked by the affected
-/// player/APNAP when genuinely undecidable) — this is a real, separate rules
-/// problem, not a sort-stability tweak, and needs its own design pass before
-/// attempting it. Timestamp-only order is correct for the large majority of
-/// simple static effects (this slice's whole test surface); it will give
-/// the *wrong* answer the moment two effects on the board actually depend on
-/// each other. Flagging here rather than silently shipping a subtly-wrong
-/// dependency model.
+/// Dependency system (CR 613.6-613.8): `layers::order_by_dependency`
+/// reorders a layer's effects around real CR 613.8a dependency (today, only
+/// `EffectPrimitive::DoublePT` vs. `ModifyPT`/`DoublePT` in layer 7c actually
+/// produces one — see `DoublePT`'s own doc comment for why no other
+/// primitive can), falling back to plain timestamp order for everything
+/// else and for dependency loops (CR 613.8b's last sentence). Two real
+/// gaps still open, not silently narrowed:
+/// - `EffectPayload::Script`/`AffectedFilter::Script` effects are always
+///   treated as independent (never depend on anything, nothing depends on
+///   them) — a script-declared dependency would need the script bridge to
+///   expose partial/in-progress layer state mid-computation, which
+///   `state_to_lua`'s snapshot deliberately doesn't do yet.
+/// - Cross-layer/cross-sublayer dependency isn't modeled — CR 613.8 is
+///   explicitly same-layer/sublayer only, and cross-layer sequencing is
+///   already handled by the fixed layer order in `effective_characteristics`,
+///   not by this algorithm.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Layer {
     CopyEffects,            // 1
@@ -102,6 +102,15 @@ pub enum EffectPrimitive {
     /// power/toughness. Additive across every applicable effect in this
     /// layer, applied in timestamp order.
     ModifyPT { power: i32, toughness: i32 },
+    /// Layer 7c (CR 613.3): doubles the object's current power and/or
+    /// toughness (e.g. Berserk's "target creature's power is doubled") —
+    /// whichever field is `true` gets doubled, the other is untouched. Not a
+    /// fixed delta like `ModifyPT` — its result is defined by whatever value
+    /// is already there, which is exactly CR 613.8a's dependency condition:
+    /// this effect always depends on any `ModifyPT` in the same sublayer
+    /// that touches the same field (applying the `ModifyPT` first changes
+    /// what number this effect doubles). See `layers::order_by_dependency`.
+    DoublePT { power: bool, toughness: bool },
     /// Layer 6 (CR 613.1): grants the listed keyword(s) in addition to
     /// whatever the object already has. Union, never removes a keyword —
     /// "loses all abilities" (also layer 6, but a text-removal shape) isn't
