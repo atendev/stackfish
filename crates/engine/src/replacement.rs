@@ -32,6 +32,11 @@ pub enum ReplacementOutcome {
         event: GameEventKind,
         candidates: Vec<ObjectId>,
         excluded: Vec<ObjectId>,
+        /// Carried forward so a resumed `apply_replacements_from` call (once
+        /// the player answers) rechecks the rewritten event with the same
+        /// "is this genuinely a destroy" meaning it started with — see
+        /// `ReplacementEffect::matches`'s own doc comment.
+        is_destroy: bool,
     },
 }
 
@@ -106,8 +111,9 @@ pub fn apply_replacements(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
     proposed: GameEventKind,
+    is_destroy: bool,
 ) -> ReplacementOutcome {
-    apply_replacements_from(state, script_runtime, proposed, Vec::new())
+    apply_replacements_from(state, script_runtime, proposed, is_destroy, Vec::new())
 }
 
 /// Real body of `apply_replacements` — separated out so `Engine::
@@ -128,6 +134,7 @@ pub(crate) fn apply_replacements_from(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
     proposed: GameEventKind,
+    is_destroy: bool,
     mut excluded: Vec<ObjectId>,
 ) -> ReplacementOutcome {
     let mut event = proposed;
@@ -140,7 +147,7 @@ pub(crate) fn apply_replacements_from(
         let matching: Vec<ObjectId> = state
             .replacement_effects
             .iter()
-            .filter(|r| !excluded.contains(&r.source) && r.matches(&event, state, script_runtime))
+            .filter(|r| !excluded.contains(&r.source) && r.matches(&event, is_destroy, state, script_runtime))
             .map(|r| r.source)
             .collect();
 
@@ -161,6 +168,7 @@ pub(crate) fn apply_replacements_from(
                     event,
                     candidates: matching,
                     excluded,
+                    is_destroy,
                 };
             }
         }
@@ -296,7 +304,7 @@ mod tests {
     fn resolves_unchanged_with_nothing_registered() {
         let mut state = state_with(Vec::new());
         let event = GameEventKind::DamageDealt { source: ObjectId(0), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event) else {
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
             panic!("expected Resolved with no replacement effects registered");
         };
         assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 5, .. }));
@@ -318,7 +326,7 @@ mod tests {
         });
         // Target is an Artifact, not a Creature - the filter doesn't match.
         let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Object(effect_source), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event) else {
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
             panic!("expected Resolved - filter doesn't match");
         };
         assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 5, .. }));
@@ -338,7 +346,7 @@ mod tests {
         });
 
         let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event) else {
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
             panic!("expected a single match to resolve");
         };
         assert!(matches!(resolved, GameEventKind::DamageDealt { amount: 0, .. }));
@@ -359,14 +367,14 @@ mod tests {
         });
 
         let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        apply_replacements(&mut state, &ScriptRuntime::new(), event());
+        apply_replacements(&mut state, &ScriptRuntime::new(), event(), false);
         assert_eq!(
             state.replacement_effects.first().map(|r| r.consumption),
             Some(ConsumptionPolicy::LimitedUses(1)),
             "first use decrements 2 -> 1, doesn't remove"
         );
 
-        apply_replacements(&mut state, &ScriptRuntime::new(), event());
+        apply_replacements(&mut state, &ScriptRuntime::new(), event(), false);
         assert!(state.replacement_effects.is_empty(), "second use exhausts LimitedUses(1) and removes it");
     }
 
@@ -384,8 +392,8 @@ mod tests {
         });
 
         let event = || GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
-        apply_replacements(&mut state, &ScriptRuntime::new(), event());
-        apply_replacements(&mut state, &ScriptRuntime::new(), event());
+        apply_replacements(&mut state, &ScriptRuntime::new(), event(), false);
+        apply_replacements(&mut state, &ScriptRuntime::new(), event(), false);
         assert_eq!(state.replacement_effects.len(), 1, "Repeatable is never removed or decremented");
     }
 
@@ -410,7 +418,7 @@ mod tests {
 
         let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(PlayerId(0)), amount: 5, is_combat_damage: false };
         let ReplacementOutcome::NeedsOrderingChoice { affected_player, candidates, .. } =
-            apply_replacements(&mut state, &ScriptRuntime::new(), event)
+            apply_replacements(&mut state, &ScriptRuntime::new(), event, false)
         else {
             panic!("expected a pause - two effects match the same event");
         };
@@ -456,7 +464,7 @@ mod tests {
         });
 
         let event = GameEventKind::DamageDealt { source: ObjectId(2), target: Target::Player(p1), amount: 5, is_combat_damage: false };
-        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event) else {
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
             panic!("only one effect matches at any single point - never a real multi-match pause here");
         };
         assert!(

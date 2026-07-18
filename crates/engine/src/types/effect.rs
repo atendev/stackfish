@@ -341,8 +341,14 @@ pub enum EventFilter {
     /// `ContinuousEffect::applies_to` already checks a `GameObject`.
     DamageDealt { affected: EffectFilter },
     /// Matches a `GameEventKind::ZoneChange` moving `object` from
-    /// `Battlefield` to `Graveyard` (CR 704.5g's "dies"), where `object`
-    /// satisfies `affected`.
+    /// `Battlefield` to `Graveyard` (CR 700.4's "dies" - any cause, not just
+    /// destruction), where `object` satisfies `affected`. A
+    /// `ReplacementPayload::Regenerate` effect is also paired with this same
+    /// filter shape (no dedicated `EventFilter` variant of its own) but
+    /// additionally requires the proposed event to be tagged as genuine
+    /// destruction (CR 614.8) — see `ReplacementEffect::matches`'s own doc
+    /// comment for why that's a separate `is_destroy` parameter rather than
+    /// data carried on the event itself.
     WouldDie { affected: EffectFilter },
 }
 
@@ -369,6 +375,12 @@ pub enum ReplacementPayload {
     /// instead of putting it into its owner's graveyard") — the matched
     /// `ZoneChange`'s `to` becomes this zone instead.
     ReplaceZoneDestination(ZoneKind),
+    /// CR 614.8/701.19: regeneration. Rewrites the matched destroy
+    /// `ZoneChange` into a `GameEventKind::Regenerated` instead of a
+    /// different zone move — see that variant's own doc comment for why
+    /// this can't be expressed as a `ReplaceZoneDestination` (the permanent
+    /// doesn't change zones at all, so there's no destination to substitute).
+    Regenerate,
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this
@@ -400,8 +412,28 @@ impl ReplacementEffect {
     /// evaluated from inside the layer engine's own query) - replacement
     /// effects are a wholly separate `state.replacement_effects` list, never
     /// consulted while computing `effective_controller` itself.
-    pub fn matches(&self, event: &GameEventKind, state: &GameState, script_runtime: &ScriptRuntime) -> bool {
-        let ReplacementSpec::Primitive { filter, .. } = &self.spec else { return false };
+    ///
+    /// `is_destroy`: whether the caller is proposing `event` as genuine
+    /// destruction (CR 614.8) rather than merely some other battlefield ->
+    /// graveyard move (CR 704.5f zero toughness, CR 704.5k world rule -
+    /// neither is "destroy"). A plain data field on `GameEventKind::
+    /// ZoneChange` was considered and rejected: nothing but the CR 704.5g
+    /// SBA path and a "Destroy" effect ever needs to say this, so threading
+    /// it as a call parameter (only `sba::resolve_deaths` sets it `true`
+    /// this slice - see that function's own doc comment) avoids rippling a
+    /// new field through every one of this codebase's ~60 unrelated
+    /// `ZoneChange` construction sites. Irrelevant to every filter except
+    /// `WouldDie` paired with `ReplacementPayload::Regenerate` - a
+    /// non-destroy `WouldDie` effect ("if this would die, exile it
+    /// instead") still matches regardless, per CR 700.4's broader "dies."
+    pub fn matches(
+        &self,
+        event: &GameEventKind,
+        is_destroy: bool,
+        state: &GameState,
+        script_runtime: &ScriptRuntime,
+    ) -> bool {
+        let ReplacementSpec::Primitive { filter, payload } = &self.spec else { return false };
         match (filter, event) {
             (EventFilter::DamageDealt { affected }, GameEventKind::DamageDealt { target, .. }) => {
                 event_target_matches(affected, *target, state, script_runtime, self.source)
@@ -409,7 +441,12 @@ impl ReplacementEffect {
             (
                 EventFilter::WouldDie { affected },
                 GameEventKind::ZoneChange { object, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, .. },
-            ) => event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source),
+            ) => {
+                if matches!(payload, ReplacementPayload::Regenerate) && !is_destroy {
+                    return false;
+                }
+                event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source)
+            }
             _ => false,
         }
     }
@@ -432,6 +469,9 @@ impl ReplacementEffect {
                 ReplacementPayload::ReplaceZoneDestination(new_zone),
                 GameEventKind::ZoneChange { object, from, last_known_info, .. },
             ) => GameEventKind::ZoneChange { object, from, to: *new_zone, last_known_info },
+            (ReplacementPayload::Regenerate, GameEventKind::ZoneChange { object, .. }) => {
+                GameEventKind::Regenerated { object }
+            }
             (_, other) => other,
         }
     }
@@ -677,14 +717,14 @@ mod tests {
 
         let matching =
             GameEventKind::DamageDealt { source: creature, target: Target::Object(creature), amount: 3, is_combat_damage: false };
-        assert!(effect.matches(&matching, &state, &ScriptRuntime::new()));
+        assert!(effect.matches(&matching, false, &state, &ScriptRuntime::new()));
 
         let land = ObjectId(2);
         let mut state2 = state;
         state2.objects.insert(land, object(land, p0, CardTypeSet::LAND, ZoneKind::Battlefield));
         let non_matching =
             GameEventKind::DamageDealt { source: land, target: Target::Object(land), amount: 3, is_combat_damage: false };
-        assert!(!effect.matches(&non_matching, &state2, &ScriptRuntime::new()));
+        assert!(!effect.matches(&non_matching, false, &state2, &ScriptRuntime::new()));
     }
 
     #[test]
@@ -705,10 +745,10 @@ mod tests {
 
         let to_p0 =
             GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
-        assert!(effect.matches(&to_p0, &state, &ScriptRuntime::new()));
+        assert!(effect.matches(&to_p0, false, &state, &ScriptRuntime::new()));
         let to_p1 =
             GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p1), amount: 3, is_combat_damage: false };
-        assert!(!effect.matches(&to_p1, &state, &ScriptRuntime::new()));
+        assert!(!effect.matches(&to_p1, false, &state, &ScriptRuntime::new()));
     }
 
     #[test]
@@ -734,7 +774,7 @@ mod tests {
             to: ZoneKind::Graveyard,
             last_known_info: None,
         };
-        assert!(effect.matches(&own_death, &state, &ScriptRuntime::new()));
+        assert!(effect.matches(&own_death, true, &state, &ScriptRuntime::new()));
 
         let other_death = GameEventKind::ZoneChange {
             object: other,
@@ -742,7 +782,7 @@ mod tests {
             to: ZoneKind::Graveyard,
             last_known_info: None,
         };
-        assert!(!effect.matches(&other_death, &state, &ScriptRuntime::new()), "self_only must not match a different object's death");
+        assert!(!effect.matches(&other_death, true, &state, &ScriptRuntime::new()), "self_only must not match a different object's death");
 
         let non_death = GameEventKind::ZoneChange {
             object: this,
@@ -750,7 +790,7 @@ mod tests {
             to: ZoneKind::Battlefield,
             last_known_info: None,
         };
-        assert!(!effect.matches(&non_death, &state, &ScriptRuntime::new()), "only Battlefield -> Graveyard counts as \"would die\"");
+        assert!(!effect.matches(&non_death, true, &state, &ScriptRuntime::new()), "only Battlefield -> Graveyard counts as \"would die\"");
     }
 
     #[test]

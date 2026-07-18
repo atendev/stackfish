@@ -116,6 +116,17 @@ pub enum GameEventKind {
     /// trigger condition" precedent `Scry`/`Surveil` already set for their
     /// own events.
     BecameCopy { object: ObjectId, copied: ObjectId },
+    /// CR 614.8/701.19: a regeneration shield intercepted `object`'s
+    /// destruction — emitted by `replacement::ReplacementEffect::apply`
+    /// *instead of* the `ZoneChange` that was proposed, per CR 614.6 ("if an
+    /// event is replaced, it never happens - a modified event occurs
+    /// instead"). Not a `ZoneChange`: the permanent never leaves the
+    /// battlefield, so unlike every real death in this engine, no new
+    /// `ObjectId` is minted (CR 400.7 only applies to an actual zone move).
+    /// `sba::commit_regeneration` is this event's only producer/committer -
+    /// see its own doc comment for the CR 701.19a/b side effects (damage
+    /// removed, tapped, removed from combat).
+    Regenerated { object: ObjectId },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.
