@@ -2443,11 +2443,12 @@ verbatim once enough time has passed for the underlying code to have moved.
   not a stable id - fragile if a card's own ability list ever needs to change shape.
 - **Replacement effects**: `EventFilter` only has two shapes (`DamageDealt`, `WouldDie`); no
   `Game.CreateReplacementEffect`-style Lua builder exists yet.
-- **Triggers**: Discard's own LKI stash is captured (`commands::move_to_graveyard_for_cost`/cost
-  payment) but stays dormant - no condition matches a Hand-departure LKI yet, so "when this is
-  discarded" abilities can't fire. `draw_step`'s library-side LKI stash is likewise real but
-  practically unreachable (no card has a library-card ability that cares about itself leaving the
-  library).
+- **Triggers**: this bullet was stale - both the player-relative shape (`DiscardsCard`/
+  `EachDiscardsCard`) and the self-referential shape (`ConditionPrimitive::Discarded`, "when *this*
+  card is discarded", `phase5/discarded-trigger`, docs/implementation.md below) are now real, off
+  either discard source (cost payment or the cleanup hand-size discard). `draw_step`'s library-side LKI
+  stash is likewise real but practically unreachable (no card has a library-card ability that cares
+  about itself leaving the library) - not fixed here, same standing note.
 - **Script-error swallowing (cross-cutting, not tracked anywhere else)**: a Lua runtime error mid-
   resolution is silently treated as "no effect"/"condition false" rather than surfaced as a real
   engine-level error, in several separate spots - `engine.rs` (script-backed operation/condition/
@@ -7719,3 +7720,62 @@ more pattern.
 
 **UNRESOLVED:** see the TODOs above — no generic temporary-effect builder, and per-target division of
 the pump amount isn't modeled (same standing gap `Damage`/`Counters` already carry).
+
+## Phase 5: phase5/discarded-trigger slice (CR 603.10-style, `ConditionPrimitive::Discarded`)
+
+Branch `phase5/discarded-trigger`, off master. Picked from the "Known unresolved gaps" list's Discard
+bullet — which turned out to be stale before any code was written: `ConditionPrimitive::DiscardsCard`/
+`EachDiscardsCard` ("whenever you/a player discards *a* card") were already closed by the earlier
+`phase5/trigger-completeness-cleanup` slice, for both discard sources. What was actually still missing
+is the self-referential shape real oracle text also uses: "when *this* card is discarded" — no
+condition matched "the discarded object is this ability's own source," the same way `Dies`/
+`LeavesBattlefield` already do for a battlefield departure.
+
+**What got implemented:**
+- `types/ability.rs`: new `ConditionPrimitive::Discarded`, matching a `ZoneChange{from: Hand, to:
+  Graveyard, last_known_info: Some(lki), ..}` event where `lki.object_id == source` — byte-for-byte the
+  same shape `Dies` already uses, just Hand→Graveyard instead of Battlefield→Graveyard.
+- `triggers.rs`: `collect_triggers`'s departed-ability LKI fallback loop only let `Dies`/
+  `LeavesBattlefield` through (a source that no longer resolves live needs this special path — every
+  other condition shape assumes a live source). Added `Discarded` to both of that loop's match arms
+  (the plain and `PrimitiveOncePerTurn` cases) — this was the one actual reachability gate; without it,
+  the new variant would exist but never fire.
+- `script.rs`: `Game.Conditions.Discarded` binding, alongside the existing `Dies`/`LeavesBattlefield`/
+  `DiscardsCard` ones.
+- `commands.rs`: fixed a stale doc comment on `move_to_graveyard_for_cost` that still claimed "no
+  `ConditionPrimitive` shape matches a Hand-departure LKI yet" — true before the `DiscardsCard` fix,
+  false since.
+
+**CR grounding, stated honestly:** the look-back-in-time mechanism is CR 603.10, but 603.10a's own
+enumerated list doesn't explicitly name "leaves the hand" among its categories (it lists leaves-the-
+battlefield, sacrifice, leaves-a-graveyard, and object-all-players-can-see-enters-hand/library). This
+extends the same mechanism by symmetry with `Dies`/`LeavesBattlefield`, not a chapter-and-verse CR
+match — noted rather than over-cited.
+
+**TODOs marked, not silently narrowed:** none new — both discard paths already stash their departed
+`Triggered` abilities (closed by the earlier `DiscardsCard` fix), so there was no plumbing gap left to
+flag here, only the condition-matching gap this slice closes.
+
+**Tests added:**
+- `types/ability.rs` unit tests (3 new, mirroring `Dies`'s own): `Discarded` matches a Hand→Graveyard
+  move by last-known object id; doesn't match a different card's discard; doesn't match a battlefield
+  death (proving it's not just `Dies` misfiring on shared last-known-info shape).
+- `crates/engine/tests/phase5_discarded_trigger.rs` (3 new): a `Discarded` trigger fires off a cost-
+  payment discard (activating an ability with a `Discard` additional cost, paid with the watching card
+  itself) and resolves for real (`GainLife(1)` applied); fires off the cleanup hand-size discard the
+  same way; does *not* fire when a *different* card from the same hand is discarded instead (proving
+  identity, not just zone-shape, gates it).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none new).
+`cargo test --workspace` — all test binaries green, 0 failures, including the 6 new tests (3 unit + 3
+integration); all prior tests unaffected.
+
+**STRUCT DEVIATIONS:** none — no fields added, only a new unit variant.
+
+**INTERFACE DEVIATIONS:** none.
+
+**SCOPE DEVIATIONS:** none — landed in exactly the three files (plus one stale-comment fix) the scoping
+report named.
+
+**UNRESOLVED:** none new. `draw_step`'s library-side LKI stash remains the one still-dormant sibling
+(practically unreachable, no card needs it) — unaffected by this slice, same standing note.

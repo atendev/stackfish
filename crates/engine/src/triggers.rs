@@ -193,20 +193,28 @@ pub fn collect_triggers(
         let this_index = *count;
         *count += 1;
 
-        // Only Dies/LeavesBattlefield are meaningful for a source that no
-        // longer resolves live - every other condition shape (None/Always/
-        // DealsDamage/a Script condition/...) either assumes a live source
-        // or isn't scoped to this slice (see the TODO on ConditionPrimitive
-        // itself).
+        // Only Dies/LeavesBattlefield/Discarded are meaningful for a source
+        // that no longer resolves live - every other condition shape (None/
+        // Always/DealsDamage/a Script condition/...) either assumes a live
+        // source or isn't scoped to this slice (see the TODO on
+        // ConditionPrimitive itself). Discarded joined this list in
+        // `phase5/discarded-trigger` - a discarded card's own abilities are
+        // purged from `state.abilities` by `retire_object` exactly like a
+        // battlefield departure's, so it needs the same LKI fallback.
         let (primitive, once_per_turn) = match &ability.condition {
             Some(ConditionSpec::Primitive(
-                primitive @ (ConditionPrimitive::Dies | ConditionPrimitive::LeavesBattlefield),
+                primitive @ (ConditionPrimitive::Dies
+                | ConditionPrimitive::LeavesBattlefield
+                | ConditionPrimitive::Discarded),
             )) => (primitive, false),
             // CR 603.2h applies here too - a departed object's own Dies/
-            // LeavesBattlefield trigger is just as capable of carrying "This
-            // ability triggers only once each turn" as a live one's.
+            // LeavesBattlefield/Discarded trigger is just as capable of
+            // carrying "This ability triggers only once each turn" as a live
+            // one's.
             Some(ConditionSpec::PrimitiveOncePerTurn(
-                primitive @ (ConditionPrimitive::Dies | ConditionPrimitive::LeavesBattlefield),
+                primitive @ (ConditionPrimitive::Dies
+                | ConditionPrimitive::LeavesBattlefield
+                | ConditionPrimitive::Discarded),
             )) => (primitive, true),
             _ => continue,
         };

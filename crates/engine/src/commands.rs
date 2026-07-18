@@ -513,10 +513,9 @@ pub(crate) fn non_eliminated_players(state: &GameState) -> Vec<PlayerId> {
 /// Returns the departed `Triggered`-kind abilities alongside the event (CR
 /// 603.10) — for a `Sacrifice` (Battlefield→Graveyard), this is what lets
 /// `Dies`/`LeavesBattlefield` fire the same way they do off an SBA-driven
-/// death. For a `Discard` (Hand→Graveyard), the departed abilities are
-/// still captured and returned here for the caller to stash, but stay
-/// dormant in practice — no `ConditionPrimitive` shape matches a
-/// Hand-departure LKI yet.
+/// death. For a `Discard` (Hand→Graveyard), the departed abilities let
+/// `DiscardsCard`/`EachDiscardsCard` (player-relative) and `Discarded`
+/// (self-referential, `phase5/discarded-trigger`) fire the same way.
 fn move_to_graveyard_for_cost(
     state: &mut GameState,
     id: ObjectId,
