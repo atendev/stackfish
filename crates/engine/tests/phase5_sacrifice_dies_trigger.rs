@@ -165,6 +165,7 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, PlayerId, ObjectId, 
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
         abilities: vec![
             RegisteredAbility {
                 source,

@@ -107,6 +107,7 @@ fn state_with_ability(source: ObjectId, controller: PlayerId, effect: AbilityEff
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
         abilities: vec![RegisteredAbility {
             source,
             kind: AbilityKind::Activated,

@@ -180,6 +180,7 @@ fn two_player_state(library: Vec<ObjectId>) -> GameState {
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState { seed: 1, draws_consumed: 0 },

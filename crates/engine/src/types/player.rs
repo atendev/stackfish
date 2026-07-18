@@ -1,5 +1,6 @@
+use crate::types::cost::FilterController;
 use crate::types::counter::CounterSet;
-use crate::types::ids::{ObjectId, PlayerId};
+use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
 use crate::types::mana::ManaPool;
 
 /// Emblems live in a player's command zone (CR 114.1) but aren't cards from
@@ -85,5 +86,66 @@ impl PlayerState {
     /// without duplicating the threshold elsewhere.
     pub fn commander_damage_from(&self, source: ObjectId) -> u32 {
         self.commander_damage_taken.iter().find(|(s, _)| *s == source).map(|(_, n)| *n).unwrap_or(0)
+    }
+}
+
+/// CR 402.2's two real shapes: "you have no maximum hand size" and "your
+/// maximum hand size is N" — deliberately not a third generic "delta" shape
+/// (no real card says "your maximum hand size is two more"), matching this
+/// engine's "model the shapes that exist" stance elsewhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandSizeEffect {
+    NoMaximum,
+    SetTo(u32),
+}
+
+/// CR 402.2: a static "you/each player/your opponents have no maximum hand
+/// size"-style effect — deliberately **not** a `ContinuousEffect`/CR 613
+/// layer, same reasoning `cost.rs`'s `CostModifier` already established for
+/// cost modification: hand size isn't a characteristic query, and `Layer` is
+/// meant to be exactly the CR 613.1 layer list, nothing else. `controller`/
+/// `affected` mirror `CostModifier`'s own `controller`/`filter.controller`
+/// split exactly — whose "you"/"opponent" perspective this modifier's text
+/// is written from, and which player(s) it actually affects.
+///
+/// TODO: no `Game.CreateHandSizeModifier`-style Lua builder yet — same
+/// "direct Rust struct-literal fixtures only" bootstrap stance `CostModifier`
+/// itself took before any script builder existed for it.
+#[derive(Clone, Debug)]
+pub struct HandSizeModifier {
+    pub source: ObjectId,
+    pub controller: PlayerId,
+    pub affected: FilterController,
+    pub effect: HandSizeEffect,
+    /// CR 613.7-style "latest wins" tiebreak between two conflicting
+    /// modifiers that both apply to the same player — hand size isn't a CR
+    /// 613 layer at all, so there's no dependency (613.8) analysis to do,
+    /// only this same timestamp-order convention every other flat-override
+    /// continuous effect in this engine already uses.
+    pub timestamp: SequenceNo,
+}
+
+/// CR 402.2: `player`'s current maximum hand size, given whatever
+/// `HandSizeModifier`s currently apply — `None` means "no maximum hand
+/// size." Multiple applicable modifiers don't stack; the one with the
+/// latest `timestamp` wins outright (see `HandSizeModifier::timestamp`'s own
+/// doc comment). `base` is normally 7 (CR 402.2) — the caller's problem, not
+/// this function's, same "base value supplied by the caller" split
+/// `cost::apply_cost_modifiers` already uses for `ManaCost`.
+pub fn effective_max_hand_size(modifiers: &[HandSizeModifier], player: PlayerId, base: u32) -> Option<u32> {
+    let winner = modifiers
+        .iter()
+        .filter(|m| match m.affected {
+            FilterController::You => player == m.controller,
+            FilterController::Opponent => player != m.controller,
+            FilterController::Any => true,
+        })
+        .max_by_key(|m| m.timestamp.0);
+    match winner {
+        Some(m) => match m.effect {
+            HandSizeEffect::NoMaximum => None,
+            HandSizeEffect::SetTo(n) => Some(n),
+        },
+        None => Some(base),
     }
 }

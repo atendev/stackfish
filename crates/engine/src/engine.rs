@@ -25,7 +25,7 @@ use crate::types::game::{GameState, RngState};
 use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::mana::{ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
-use crate::types::player::PlayerState;
+use crate::types::player::{effective_max_hand_size, PlayerState};
 use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::target::{TargetFilter, TargetSpec};
 use crate::types::turn::{Phase, Step};
@@ -1839,6 +1839,7 @@ impl Engine {
             continuous_effects: Vec::new(),
             replacement_effects: Vec::new(),
             cost_modifiers: Vec::new(),
+            hand_size_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState { seed: config.rng_seed, draws_consumed: 0 },
@@ -3575,14 +3576,19 @@ impl Engine {
             ProcessState::AwaitingDiscard { player, excess } => {
                 // Nothing to do until submit_discard answers - put the
                 // exact same state back and tell the caller who needs to be
-                // prompted, mirroring AwaitingPayment's pattern.
+                // prompted, mirroring AwaitingPayment's pattern. CR 402.2:
+                // recomputed the same way begin_cleanup_step derived it -
+                // this arm only re-displays it, `excess` (fixed when this
+                // pause first started) is what submit_discard actually
+                // validates against.
                 let hand_size = self
                     .state
                     .zone(ZoneKind::Hand, Some(player))
                     .map(|z| z.contents.len())
                     .unwrap_or(0);
-                let status =
-                    StepStatus::AwaitingDiscard { player, hand_size, max_hand_size: 7 };
+                let max_hand_size = effective_max_hand_size(&self.state.hand_size_modifiers, player, 7)
+                    .unwrap_or(u32::MAX) as usize;
+                let status = StepStatus::AwaitingDiscard { player, hand_size, max_hand_size };
                 self.process_state = ProcessState::AwaitingDiscard { player, excess };
                 status
             }
@@ -4064,16 +4070,18 @@ impl Engine {
             .zone(ZoneKind::Hand, Some(active))
             .map(|z| z.contents.len())
             .unwrap_or(0);
-        // TODO(CR 402.2): hardcoded to 7 - doesn't consult
-        // state.continuous_effects for effects that modify max hand size
-        // (e.g. "you have no maximum hand size"). Revisit once a continuous
-        // effect that modifies this exists and has a query API.
-        const MAX_HAND_SIZE: usize = 7;
+        // CR 402.2: `None` means "no maximum hand size" - skip the discard
+        // check entirely, same as if hand_size could never exceed it.
+        let Some(max_hand_size) = effective_max_hand_size(&self.state.hand_size_modifiers, active, 7) else {
+            self.process_state = ProcessState::CleanupSbaCheck;
+            return StepStatus::Progressed;
+        };
+        let max_hand_size = max_hand_size as usize;
 
-        if hand_size > MAX_HAND_SIZE {
-            let excess = hand_size - MAX_HAND_SIZE;
+        if hand_size > max_hand_size {
+            let excess = hand_size - max_hand_size;
             self.process_state = ProcessState::AwaitingDiscard { player: active, excess };
-            return StepStatus::AwaitingDiscard { player: active, hand_size, max_hand_size: MAX_HAND_SIZE };
+            return StepStatus::AwaitingDiscard { player: active, hand_size, max_hand_size };
         }
 
         // No discard needed - proceed to the SBA check.
@@ -4331,6 +4339,7 @@ mod tests {
             continuous_effects: Vec::new(),
             replacement_effects: Vec::new(),
             cost_modifiers: Vec::new(),
+            hand_size_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: crate::types::game::RngState { seed: 1, draws_consumed: 0 },
