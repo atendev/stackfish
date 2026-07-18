@@ -2449,12 +2449,15 @@ verbatim once enough time has passed for the underlying code to have moved.
   either discard source (cost payment or the cleanup hand-size discard). `draw_step`'s library-side LKI
   stash is likewise real but practically unreachable (no card has a library-card ability that cares
   about itself leaving the library) - not fixed here, same standing note.
-- **Script-error swallowing (cross-cutting, not tracked anywhere else)**: a Lua runtime error mid-
-  resolution is silently treated as "no effect"/"condition false" rather than surfaced as a real
-  engine-level error, in several separate spots - `engine.rs` (script-backed operation/condition/
-  intervening-if resolution, several call sites) and `triggers.rs` (condition/intervening-if
-  evaluation during `collect_triggers`). Each site's own comment flags it individually; nothing ties
-  them together as one systemic gap until now.
+- **Script-error swallowing (cross-cutting)**: closed for every site with `&mut Engine`/a real
+  mutation pipeline to log through, `phase5/script-error-surfacing` (docs/implementation.md, below) -
+  `GameEventKind::ScriptError { message }`, logged from `engine.rs`'s `ResolveStackTop` intervening-if
+  recheck and `triggers.rs`'s `collect_triggers` (now returns `(Vec<PendingTrigger>, Vec<String>)`,
+  logged by its one caller). `layers.rs`'s own script call sites
+  (`applicable_effects_in_layer`/`resolve_primitive`) are a deliberate, named exception - pure
+  `&GameState`-only characteristic-query functions called from `effective_characteristics`'s many
+  call sites; logging from there would mean threading error-reporting through that entire call graph,
+  out of scope for this slice.
 - **`Destroy`/`Sacrifice`/`Exile` script ops' CR 616.1 ordering choice**: closed, `phase5/destroy-
   ordering-choice` (docs/implementation.md, below) - all three now pause via a real
   `AwaitingReplacementChoice` instead of silently no-oping. Exile's own arm is fixed by the same
@@ -7922,3 +7925,84 @@ tests unaffected.
 **UNRESOLVED:** CR 701.19b's static-ability-sourced (repeatable) shield creation path remains unbuilt,
 same as `StaticAbilityBuilder`'s standing "no Lua/TOML duration path" gap generally. No "divide as you
 choose" concern here (Regenerate has no amount to divide).
+
+## Phase 5: phase5/script-error-surfacing slice (script-error swallowing, cross-cutting)
+
+Branch `phase5/script-error-surfacing`, off master. Picked from the "Known unresolved gaps" list's
+cross-cutting bullet — a Lua runtime error mid-resolution silently became "condition false"/"didn't
+match" at every one of several call sites, with nothing recording that it happened at all. A real
+script bug and "the card's ability legitimately didn't apply" were indistinguishable from the ledger
+alone.
+
+**Scoping finding, locked in before writing code:** a full sweep (`.unwrap_or(false)`/`.ok().flatten()`
+across `engine.rs`/`triggers.rs`/`layers.rs`) found six real script-invocation sites, not the whole grep
+hit list — several matches were unrelated `Option` chains, not script calls at all. Of the six real
+ones, three live in `layers.rs`'s pure characteristic-query call graph
+(`applicable_effects_in_layer`'s intervening-if/affected-filter checks, `resolve_primitive`'s CDA
+resolution) - `&GameState`-only functions with no mutation pipeline to log through, called from
+`effective_characteristics`'s many callers throughout the engine. Fixing those would mean threading
+error-reporting through that entire call graph - a much larger, architecturally different change than
+this slice's scope. Named as a deliberate exception rather than silently left unfixed alongside the
+three sites this slice actually closes (`engine.rs`'s `ResolveStackTop` intervening-if recheck,
+`triggers.rs::collect_triggers`'s three script call sites, all reachable from `Engine`'s own mutation
+pipeline).
+
+**What got implemented:**
+- `types/event.rs`: `GameEventKind::ScriptError { message: String }` — same free-text-diagnostic shape
+  `StateBasedActionApplied` already established (itself still unconstructed anywhere, same "ships with
+  no matching case yet" precedent this now rides too). Never itself replacement-checked or a trigger
+  condition target.
+- `engine.rs`: `ResolveStackTop`'s Script intervening-if arm now matches on the real `Result` — on
+  `Err`, logs a `ScriptError` via the existing `log_events` helper before falling back to the same
+  conservative "doesn't hold" default as before.
+- `triggers.rs`: `collect_triggers`'s signature changed from `Vec<PendingTrigger>` to
+  `(Vec<PendingTrigger>, Vec<String>)` — it only has `&GameState`, not `&mut Engine`, so it can't log a
+  real event itself; it collects error messages instead, and its one caller
+  (`engine.rs`'s `ProcessState::CollectTriggers`) turns them into real `ScriptError` events once the
+  loop holding an immutable borrow of `state.ledger` releases it. All three of its own script call
+  sites (the live-source condition check, the live-source intervening-if check, the departed-loop
+  intervening-if check) now report their errors this way instead of silently defaulting.
+- `layers.rs`: no code change, both real script call sites got a doc-comment addition naming this
+  slice's own deliberate exception explicitly, cross-referencing each other.
+- 18 existing test call sites of `collect_triggers` across 3 test files updated for the new tuple
+  return (`let pending = collect_triggers(...)` → `let (pending, _) = collect_triggers(...)`) - a
+  mechanical, compiler-caught ripple, not a design change.
+- Fixed two unrelated stale doc comments discovered while touching this code: `triggers.rs`'s own
+  "Only Dies/LeavesBattlefield" note hadn't been updated when `phase5/discarded-trigger` added
+  `Discarded` to the same departed-loop match arms.
+
+**TODOs marked, not silently narrowed:** the `layers.rs` exception above is the one deliberately
+unfixed piece of this gap — named, not silently dropped.
+
+**Tests added** (`crates/engine/tests/phase5_script_error_surfacing.rs`, 4 new tests): three unit-level
+tests calling `collect_triggers` directly against a real `ScriptRuntime` loaded with an always-erroring
+script — a Script condition error, a live-source Script intervening-if error, and a departed-loop
+(`Dies`-shaped) Script intervening-if error each fall back to "didn't match"/"doesn't hold" and report
+exactly one error message naming which check failed; one full-`Engine` test (mirroring
+`phase5_intervening_if.rs`'s own "response spell invalidates the condition between trigger and
+resolution" shape) where a script errors only once life drops below a threshold - the trigger queues
+cleanly (no error yet, life still high), a response spell drops life below the threshold, and the
+resolution-time recheck hits the erroring branch, fizzling the trigger (a real `Fizzled` event, `GainLife`
+never applied) with at least one real `ScriptError` event logged alongside it. That last test's
+assertion is `>= 1` errors, not an exact count — `collect_triggers` evaluates every ability's
+intervening-if against every event regardless of whether that event's own condition matched (a
+pre-existing, unrelated characteristic, not something this slice changes), so once life drops, every
+subsequent event re-triggers the same erroring branch; discovered by the test actually failing on an
+exact-count assertion during development, not by inspection.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none new).
+`cargo test --workspace` — all test binaries green, 0 failures, including the 4 new tests; all prior
+tests (after the 18 mechanical call-site updates) unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** `triggers::collect_triggers`'s return type changed from `Vec<PendingTrigger>`
+to `(Vec<PendingTrigger>, Vec<String>)` — anticipated in the scoping finding, but its 18-call-site test
+ripple wasn't sized until the compiler enumerated them.
+
+**SCOPE DEVIATIONS:** two stale doc-comment fixes (`triggers.rs`, noted above) — found while touching
+adjacent code, not part of the original scoping report, fixed rather than left for a future slice to
+trip over.
+
+**UNRESOLVED:** the `layers.rs` exception (see above) — the one deliberately unfixed piece of the
+original gap, named rather than silently dropped.

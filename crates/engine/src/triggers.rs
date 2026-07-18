@@ -31,6 +31,14 @@ pub struct PendingTrigger {
 /// Finds every triggered ability that matches `event` and is currently
 /// legal to trigger (timing, once-per-turn, range, etc — CR 603.2-603.3).
 /// Order in the returned `Vec` is not yet APNAP order; see `group_apnap`.
+/// The second return value is every Script condition/intervening-if call
+/// that errored during this pass, as plain messages — this function only
+/// has `&GameState`, not `&mut Engine`, so it can't log a real
+/// `GameEventKind::ScriptError` itself; the caller (`Engine`'s
+/// `CollectTriggers` stage) does that once the loop over `state.ledger`
+/// finishes (`phase5/script-error-surfacing`). A script error still falls
+/// back to the same conservative "didn't match"/"doesn't hold" default as
+/// before this slice — only the *visibility* changed.
 ///
 /// `runtime` invokes each ability's `condition` callback (`None` means "no
 /// filter, always matches" per `RegisteredAbility::condition`'s doc).
@@ -57,8 +65,9 @@ pub struct PendingTrigger {
 /// 603.10 fallback for exactly that case: `Engine`'s stash of `Triggered`
 /// abilities captured (by `commands::retire_object`, via `sba::
 /// commit_death`) off objects that died during this pipeline run, *before*
-/// they were purged from `state.abilities`. Only `Dies`/`LeavesBattlefield`
-/// conditions are evaluated against it (see the second loop below) - a
+/// they were purged from `state.abilities`. Only `Dies`/`LeavesBattlefield`/
+/// `Discarded` conditions are evaluated against it (see the second loop
+/// below) - a
 /// filtered condition ("whenever a creature you control dies") isn't
 /// representable yet, and every other condition shape assumes a source that
 /// still resolves live, which a departed object's never will again.
@@ -84,7 +93,7 @@ pub fn collect_triggers(
     event: &GameEvent,
     runtime: &ScriptRuntime,
     departed: &[RegisteredAbility],
-) -> Vec<PendingTrigger> {
+) -> (Vec<PendingTrigger>, Vec<String>) {
     if !state.abilities.iter().any(|a| a.kind == AbilityKind::Triggered) && departed.is_empty() {
         // Genuinely nothing to match against - safe to no-op rather than
         // hit the invocation logic below, which only matters once a
@@ -92,10 +101,17 @@ pub fn collect_triggers(
         // abilities (e.g. CR 605 mana abilities) don't fire off events at
         // all, so their presence alone shouldn't force this function past
         // its no-op path.
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
     let mut pending = Vec::new();
+    // Collected rather than logged directly - this function only has
+    // `&GameState`, not `&mut Engine`, so the caller (`Engine`'s
+    // `CollectTriggers` stage) is the one that actually turns these into
+    // real `GameEventKind::ScriptError` events (`phase5/script-error-
+    // surfacing`). A script error still falls back to the same
+    // conservative "didn't match"/"doesn't hold" default as before.
+    let mut errors: Vec<String> = Vec::new();
     // `ability_index` (PendingTrigger's field) is "the nth ability
     // registered to this source, any kind, in registration order" - same
     // convention `commands::find_ability` uses for ActivateAbility. Tracked
@@ -149,11 +165,17 @@ pub fn collect_triggers(
                     event: Some(event),
                     chosen_targets: Vec::new(),
                 };
-                // TODO: a script error here silently becomes "didn't
-                // match" rather than being surfaced to the caller - no
-                // error-reporting path exists from CollectTriggers back to
-                // a StepStatus yet.
-                (runtime.invoke_condition(*handle, &ctx).unwrap_or(false), false)
+                let matched = match runtime.invoke_condition(*handle, &ctx) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        errors.push(format!(
+                            "condition script error on source {:?}: {e:?}",
+                            ability.source
+                        ));
+                        false
+                    }
+                };
+                (matched, false)
             }
         };
         // CR 603.4: the intervening-if clause is checked at trigger time too
@@ -163,15 +185,20 @@ pub fn collect_triggers(
         // `InterveningIfSpec`'s own doc comment. Rechecked again at
         // resolution by `Engine`'s `ResolveStackTop` (CR 608.2a), against
         // whatever `PutTriggersApnap` bakes onto the `StackObject`.
-        // TODO: a Script intervening-if error here silently becomes "doesn't
-        // hold" - same pre-existing "no error-surfacing path from
-        // CollectTriggers back to a StepStatus" stance the Script condition
-        // arm above already takes.
         let intervening_if_holds = match &ability.intervening_if {
             None => true,
             Some(InterveningIfSpec::Primitive(p)) => p.holds(state, controller),
             Some(InterveningIfSpec::Script(handle)) => {
-                runtime.invoke_intervening_if(*handle, state, ability.source, controller).unwrap_or(false)
+                match runtime.invoke_intervening_if(*handle, state, ability.source, controller) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        errors.push(format!(
+                            "intervening-if script error on source {:?}: {e:?}",
+                            ability.source
+                        ));
+                        false
+                    }
+                }
             }
         };
         if matched && intervening_if_holds {
@@ -231,9 +258,18 @@ pub fn collect_triggers(
         let intervening_if_holds = match &ability.intervening_if {
             None => true,
             Some(InterveningIfSpec::Primitive(p)) => p.holds(state, lki.controller),
-            Some(InterveningIfSpec::Script(handle)) => runtime
-                .invoke_intervening_if(*handle, state, ability.source, lki.controller)
-                .unwrap_or(false),
+            Some(InterveningIfSpec::Script(handle)) => {
+                match runtime.invoke_intervening_if(*handle, state, ability.source, lki.controller) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        errors.push(format!(
+                            "intervening-if script error on departed source {:?}: {e:?}",
+                            ability.source
+                        ));
+                        false
+                    }
+                }
+            }
         };
         if intervening_if_holds && primitive.matches(ability.source, lki.controller, state.active_player, &event.kind) {
             pending.push(PendingTrigger {
@@ -245,7 +281,7 @@ pub fn collect_triggers(
         }
     }
 
-    pending
+    (pending, errors)
 }
 
 /// Groups `triggers` by controller in APNAP order (CR 603.3b): the active

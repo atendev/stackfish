@@ -87,6 +87,21 @@ pub enum GameEventKind {
     TriggerQueued { source: ObjectId, controller: PlayerId },
     ReplacementApplied { source: ObjectId, original_event: EventId },
     StateBasedActionApplied { description: String },
+    /// A Lua script call failed mid-resolution and the engine fell back to
+    /// its default (no-effect/"condition false") behavior rather than
+    /// guessing at what the script would have returned - same shape as
+    /// `StateBasedActionApplied` (a free-text diagnostic, not itself a
+    /// gameplay-mutating fact). Logged only from sites that already have
+    /// `&mut Engine`/a real mutation pipeline to log through - the pure
+    /// characteristic-query call graph (`layers.rs`'s `applicable_effects_
+    /// in_layer`/`resolve_primitive`) has no such path without threading
+    /// error-reporting through every one of `effective_characteristics`'s
+    /// many callers, so those sites are a deliberate, named exception, not
+    /// silently unfixed (`phase5/script-error-surfacing`, docs/
+    /// implementation.md). No matching `ConditionPrimitive` exists to
+    /// trigger off this - same "ships with no matching case yet" precedent
+    /// `StateBasedActionApplied` itself already set before this slice.
+    ScriptError { message: String },
     TurnStarted { player: PlayerId, turn_number: u32 },
     PhaseStarted { phase: crate::turn::Phase },
     StepStarted { step: crate::turn::Step },

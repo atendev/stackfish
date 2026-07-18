@@ -250,6 +250,17 @@ fn applicable_effects_in_layer<'a>(
             // trigger whose source no longer resolves (CR 603.10 gap,
             // flagged there too).
             let Some(source_obj) = state.object(e.source) else { return false };
+            // A script error here still falls back to the same
+            // conservative "doesn't hold"/"doesn't apply" default as
+            // engine.rs/triggers.rs's own script call sites - but unlike
+            // those, it's never logged as a real ScriptError event
+            // (`phase5/script-error-surfacing`'s own deliberate, named
+            // exception): this function only has `&GameState`, called from
+            // the hot-path characteristic-query graph
+            // (`effective_characteristics`'s many callers, several times
+            // per engine step) - no `&mut Engine` to log through without
+            // threading error-reporting through that entire call graph, a
+            // much larger change than this slice's own scope.
             let condition_holds = match &e.condition {
                 None => true,
                 Some(InterveningIfSpec::Primitive(p)) => p.holds(state, source_obj.controller),
@@ -344,6 +355,10 @@ fn depends_on(effect: &ContinuousEffect, other: &ContinuousEffect) -> bool {
 /// not here — see this slice's own UNRESOLVED note in
 /// docs/implementation.md), resolves to `None`, same "skip rather than
 /// guess" stance every other unresolvable value in this query already takes.
+/// The error itself is never logged - same deliberate, named exception
+/// `applicable_effects_in_layer`'s own script call sites already document
+/// (`phase5/script-error-surfacing`): this is the same hot-path, `&mut
+/// Engine`-less characteristic-query call graph.
 fn resolve_primitive(
     effect: &ContinuousEffect,
     state: &GameState,

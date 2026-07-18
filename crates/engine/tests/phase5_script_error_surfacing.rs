@@ -1,0 +1,404 @@
+//! Phase 5 vertical slice: script-error surfacing (the "Known unresolved
+//! gaps" cross-cutting bullet). Before this slice, a Lua runtime error mid-
+//! resolution silently became "condition false"/"doesn't hold" at every one
+//! of these call sites, with nothing recording that it happened - a real
+//! script bug and "the card's ability legitimately didn't apply" were
+//! indistinguishable from the ledger alone. Each site keeps the exact same
+//! conservative fallback behavior (never guesses what the script *would*
+//! have returned) - only the *visibility* changed: a real
+//! `GameEventKind::ScriptError` is now logged wherever the call site has
+//! `&mut Engine`/a real mutation pipeline to log through.
+//!
+//! `layers.rs`'s own script call sites (`applicable_effects_in_layer`/
+//! `resolve_primitive`) are a deliberate, named exception, not covered here
+//! - they're pure `&GameState`-only characteristic-query functions, called
+//! from `effective_characteristics`'s many call sites throughout the
+//! engine; logging from there would mean threading error-reporting through
+//! that entire call graph, a much larger change than this slice's scope
+//! (see each site's own doc comment).
+
+use std::collections::{HashMap, VecDeque};
+
+use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::script::ScriptRuntime;
+use stackfish_engine::triggers::collect_triggers;
+use stackfish_engine::*;
+
+/// Errors unconditionally regardless of call shape (works for both
+/// `invoke_condition`'s `(source, controller, event, state)` and
+/// `invoke_intervening_if`'s `(source, controller, state)` via `...`).
+const ALWAYS_ERRORS: &str = "function(...) error('boom') end";
+
+/// Errors only once `controller`'s life drops to 10 or below - lets a test
+/// keep the trigger-time check error-free (so it actually queues) and force
+/// the error specifically at the resolution-time recheck, the same "flips
+/// between trigger and resolution" shape `phase5_intervening_if.rs`'s own
+/// response-spell test already uses for a `Primitive` intervening-if.
+const ERRORS_BELOW_TEN_LIFE: &str = r#"
+function(source, controller, state)
+    if state.life[controller] <= 10 then
+        error("boom")
+    end
+    return true
+end
+"#;
+
+fn creature_definition(name: &str) -> CardDefinition {
+    CardDefinition {
+        definition_id: 1,
+        name: name.to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::CREATURE,
+        subtypes: Vec::new(),
+        oracle_text: String::new(),
+        power: Some(PTValue::Fixed(2)),
+        toughness: Some(PTValue::Fixed(2)),
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::ByKey("bear".to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: None,
+        modes: Vec::new(),
+    }
+}
+
+/// "Test Drain: you lose 15 life." - the response spell used to drive the
+/// resolution-time recheck below the error threshold.
+fn drain_spell_definition() -> CardDefinition {
+    CardDefinition {
+        definition_id: 2,
+        name: "Test Drain".to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::INSTANT,
+        subtypes: Vec::new(),
+        oracle_text: "You lose 15 life.".to_string(),
+        power: None,
+        toughness: None,
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::ByKey("test_drain".to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: Some(AbilityEffect::GainLife(-15)),
+        modes: Vec::new(),
+    }
+}
+
+fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
+    GameObject {
+        object_id: id,
+        copiable_override: None,
+        lineage: ObjectLineage { previous: None },
+        definition,
+        owner,
+        controller: owner,
+        zone,
+        tapped: false,
+        flipped: false,
+        face_down: false,
+        phased_out: false,
+        damage_marked: 0,
+        deathtouched: false,
+        counters: CounterSet::new(),
+        attachments: Vec::new(),
+        attached_to: None,
+        timestamp: SequenceNo(0),
+        controlled_since_turn: 0,
+        is_token: false,
+        is_commander: false,
+        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+    }
+}
+
+fn player_state(id: PlayerId, life: i32) -> PlayerState {
+    PlayerState {
+        player_id: id,
+        life,
+        mana_pool: ManaPool::default(),
+        counters: CounterSet::new(),
+        emblems: Vec::new(),
+        commander_damage_taken: Vec::new(),
+        eliminated: false,
+        drew_from_empty_library: false,
+        mulligans_taken: 0,
+        hand_kept: false,
+        commander_casts: std::collections::HashMap::new(),
+    }
+}
+
+/// Two-player state starting at `Phase::PreGame`/`Step::Untap`, p0 active -
+/// mirrors `phase5_intervening_if.rs::two_player_state`.
+fn two_player_state(p0_life: i32) -> GameState {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    GameState {
+        players: vec![player_state(p0, p0_life), player_state(p1, 20)],
+        turn_order: vec![p0, p1],
+        active_player: p0,
+        turn_number: 1,
+        phase: Phase::PreGame,
+        step: Step::Untap,
+        priority_player: p0,
+        consecutive_passes: 0,
+        lands_played_this_turn: HashMap::new(),
+        combat: None,
+        last_active_turn_number: HashMap::new(),
+        objects: HashMap::new(),
+        zones: vec![
+            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
+        ],
+        stack: Vec::new(),
+        continuous_effects: Vec::new(),
+        replacement_effects: Vec::new(),
+        cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
+        abilities: Vec::new(),
+        ledger: Vec::new(),
+        rng: RngState { seed: 1, draws_consumed: 0 },
+        next_event_id: 0,
+        next_sequence_no: 0,
+        next_object_id: 1000,
+        pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
+    }
+}
+
+fn drain(engine: &mut Engine) -> StepStatus {
+    loop {
+        match engine.step().status {
+            StepStatus::Progressed => continue,
+            other => return other,
+        }
+    }
+}
+
+fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(engine);
+    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(engine)
+}
+
+fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
+        })
+        .expect("player holds priority, spell is in hand");
+}
+
+fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
+    let status = drain(engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
+    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    drain(engine)
+}
+
+fn script_error_events(engine: &Engine) -> Vec<String> {
+    engine
+        .state()
+        .ledger
+        .iter()
+        .filter_map(|e| match &e.kind {
+            GameEventKind::ScriptError { message } => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------
+// Unit-level: collect_triggers's own three script call sites.
+// ---------------------------------------------------------------------
+
+#[test]
+fn collect_triggers_condition_script_error_falls_back_to_no_match_and_is_reported() {
+    let mut runtime = ScriptRuntime::new();
+    let handle = runtime.load_function(ALWAYS_ERRORS).expect("script loads");
+    let source = ObjectId(0);
+    let mut state = two_player_state(20);
+    state.objects.insert(source, card_object(source, creature_definition("Bear"), PlayerId(0), ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
+    state.abilities.push(RegisteredAbility {
+        source,
+        kind: AbilityKind::Triggered,
+        condition: Some(ConditionSpec::Script(handle)),
+        cost: None,
+        target: None,
+        operation: ScriptHandle(0),
+        effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: None,
+    });
+    let event = GameEvent {
+        event_id: EventId(0),
+        sequence_no: SequenceNo(0),
+        kind: GameEventKind::ZoneChange { object: source, from: ZoneKind::Hand, to: ZoneKind::Battlefield, last_known_info: None },
+        caused_by_command: None,
+        parent_event: None,
+    };
+
+    let (pending, errors) = collect_triggers(&state, &event, &runtime, &[]);
+
+    assert!(pending.is_empty(), "a script error must fall back to 'didn't match', not guess true");
+    assert_eq!(errors.len(), 1, "the error is reported, not silently dropped");
+    assert!(errors[0].contains("condition"), "error message: {}", errors[0]);
+}
+
+#[test]
+fn collect_triggers_intervening_if_script_error_falls_back_to_not_holding() {
+    let mut runtime = ScriptRuntime::new();
+    let handle = runtime.load_function(ALWAYS_ERRORS).expect("script loads");
+    let source = ObjectId(0);
+    let mut state = two_player_state(20);
+    state.objects.insert(source, card_object(source, creature_definition("Bear"), PlayerId(0), ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
+    state.abilities.push(RegisteredAbility {
+        source,
+        kind: AbilityKind::Triggered,
+        condition: None,
+        cost: None,
+        target: None,
+        operation: ScriptHandle(0),
+        effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: Some(InterveningIfSpec::Script(handle)),
+    });
+    let event = GameEvent {
+        event_id: EventId(0),
+        sequence_no: SequenceNo(0),
+        kind: GameEventKind::ZoneChange { object: source, from: ZoneKind::Hand, to: ZoneKind::Battlefield, last_known_info: None },
+        caused_by_command: None,
+        parent_event: None,
+    };
+
+    let (pending, errors) = collect_triggers(&state, &event, &runtime, &[]);
+
+    assert!(pending.is_empty(), "condition matched (None), but the erroring intervening-if must still suppress it");
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("intervening-if"), "error message: {}", errors[0]);
+}
+
+#[test]
+fn collect_triggers_departed_loop_intervening_if_script_error_falls_back() {
+    let mut runtime = ScriptRuntime::new();
+    let handle = runtime.load_function(ALWAYS_ERRORS).expect("script loads");
+    let source = ObjectId(0);
+    let state = two_player_state(20);
+    let departed = vec![RegisteredAbility {
+        source,
+        kind: AbilityKind::Triggered,
+        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
+        cost: None,
+        target: None,
+        operation: ScriptHandle(0),
+        effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: Some(InterveningIfSpec::Script(handle)),
+    }];
+    let mut lki = card_object(source, creature_definition("Bear"), PlayerId(0), ZoneKind::Battlefield);
+    lki.object_id = source;
+    let event = GameEvent {
+        event_id: EventId(0),
+        sequence_no: SequenceNo(0),
+        kind: GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(lki),
+        },
+        caused_by_command: None,
+        parent_event: None,
+    };
+
+    let (pending, errors) = collect_triggers(&state, &event, &runtime, &departed);
+
+    assert!(pending.is_empty(), "the Dies match must not fire past an erroring intervening-if");
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("departed"), "error message: {}", errors[0]);
+}
+
+// ---------------------------------------------------------------------
+// Full Engine: ResolveStackTop's own resolution-time recheck (CR 608.2a).
+// ---------------------------------------------------------------------
+
+#[test]
+fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let permanent = ObjectId(0);
+    // Life 20 - well above the error threshold (10), so the trigger-time
+    // check succeeds cleanly and the trigger actually queues.
+    let mut state = two_player_state(20);
+    state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p0, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
+    let drain_spell = ObjectId(1);
+    state.objects.insert(drain_spell, card_object(drain_spell, drain_spell_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(drain_spell);
+
+    // ScriptHandle values are registry keys local to one ScriptRuntime -
+    // must be minted from the engine's own runtime (Engine::load_script),
+    // not a throwaway one, or the handle won't resolve to anything when the
+    // engine actually invokes it.
+    let mut engine = Engine::new(state);
+    let handle = engine.load_script(ERRORS_BELOW_TEN_LIFE).expect("script loads");
+    engine.state_mut().abilities.push(RegisteredAbility {
+        source: permanent,
+        kind: AbilityKind::Triggered,
+        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
+        cost: None,
+        target: None,
+        operation: ScriptHandle(0),
+        effect: Some(AbilityEffect::GainLife(1)),
+        intervening_if: Some(InterveningIfSpec::Script(handle)),
+    });
+
+    let status = pass_both(&mut engine, p0, p1);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+    assert_eq!(engine.state().stack.len(), 1, "intervening-if held (no error) at trigger time - collected and pushed");
+    assert!(script_error_events(&engine).is_empty(), "no error yet - the trigger-time check never ran the erroring branch");
+
+    // p0 responds with Test Drain, dropping life to 5 - below the error
+    // threshold - before the upkeep trigger underneath it ever resolves.
+    cast_spell(&mut engine, p0, drain_spell);
+    pay_free_and_drain(&mut engine);
+    assert_eq!(engine.state().stack.len(), 2);
+
+    let status = pass_both(&mut engine, p0, p1);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+    assert_eq!(engine.state().player(p0).unwrap().life, 5, "Test Drain resolved first");
+    assert_eq!(engine.state().stack.len(), 1, "only the upkeep trigger remains");
+
+    // Now the upkeep trigger resolves - CR 608.2a's recheck hits the
+    // erroring branch (life 5 <= 10), falls back to "doesn't hold", and
+    // fizzles - same observable outcome as a real false Primitive, but now
+    // with a real ScriptError event logged alongside it.
+    let status = pass_both(&mut engine, p0, p1);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+    assert!(engine.state().stack.is_empty());
+    assert_eq!(engine.state().player(p0).unwrap().life, 5, "GainLife(1) did NOT apply - the erroring recheck fizzled it");
+    assert!(
+        engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
+        "a Fizzled event was logged for the errored-out trigger"
+    );
+    // collect_triggers computes every ability's intervening-if against
+    // every event regardless of whether that event's own condition
+    // matched (a pre-existing, unrelated characteristic of the function,
+    // not something this slice changes) - once life is at 5, every event
+    // from here on re-triggers the same erroring branch, so more than one
+    // ScriptError is expected. The point being proven is that at least one
+    // real error got logged, not an exact count driven by incidental event
+    // traffic.
+    let errors = script_error_events(&engine);
+    assert!(!errors.is_empty(), "at least one ScriptError event was logged");
+    assert!(errors.iter().all(|m| m.contains("intervening-if")), "error messages: {errors:?}");
+}

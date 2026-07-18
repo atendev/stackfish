@@ -193,7 +193,7 @@ fn collect_triggers_matches_a_real_condition_script() {
     });
 
     let event = zone_change_event(bear, ZoneKind::Hand, ZoneKind::Battlefield);
-    let pending = collect_triggers(&state, &event, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].source, bear);
     assert_eq!(pending[0].controller, p0);
@@ -225,7 +225,7 @@ fn collect_triggers_condition_false_on_a_different_object() {
     // A different object entering the battlefield - the condition checks
     // `event.object == source`, so this shouldn't match.
     let event = zone_change_event(someone_else, ZoneKind::Hand, ZoneKind::Battlefield);
-    let pending = collect_triggers(&state, &event, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert!(pending.is_empty(), "the bear's ETB condition shouldn't fire for a different object");
 }
 
@@ -253,7 +253,7 @@ fn collect_triggers_condition_false_on_wrong_destination_zone() {
     // The bear moving to the graveyard (not the battlefield) shouldn't
     // match an ETB condition.
     let event = zone_change_event(bear, ZoneKind::Battlefield, ZoneKind::Graveyard);
-    let pending = collect_triggers(&state, &event, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert!(pending.is_empty());
 }
 
@@ -288,7 +288,7 @@ fn collect_triggers_none_condition_matches_any_event() {
         caused_by_command: None,
         parent_event: None,
     };
-    let pending = collect_triggers(&state, &event, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert_eq!(pending.len(), 1, "no condition means no filter - any event matches");
 }
 
