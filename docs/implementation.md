@@ -2430,14 +2430,15 @@ verbatim once enough time has passed for the underlying code to have moved.
   target-resolution`; "up to N" counts closed separately too, `phase5/targeting-up-to-n` (both
   docs/implementation.md, below).
 - **Static abilities**: `StaticAbilityBuilder` still always sets `duration: Permanent` (no Lua/TOML
-  path to `UntilEndOfTurn` etc. on a static ability). "As long as ..." conditional gating closed
-  separately, `phase5/conditional-continuous-effects` (CR 611.2c, docs/implementation.md, below) —
-  `ContinuousEffect.condition`/`Game.InterveningIf.ControlsAtLeast`/`:SetCondition`, one concrete
-  shape (`ControllerControlsAtLeast`). `EffectDuration`'s broader inert-duration gap is now closed for
-  `UntilYourNextTurn`/`UntilEndOfCombat`, `phase5/effect-duration-expiration` (docs/implementation.md,
-  below) — no Lua/Rust path creates an effect with either duration yet, so this closed the drain
-  mechanism only, exercised via directly-constructed `ContinuousEffect`s in tests, same as this note's
-  own precedent for `StaticAbilityBuilder`.
+  path to `UntilEndOfTurn` etc. on a *static* ability specifically). "As long as ..." conditional
+  gating closed separately, `phase5/conditional-continuous-effects` (CR 611.2c, docs/implementation.md,
+  below) — `ContinuousEffect.condition`/`Game.InterveningIf.ControlsAtLeast`/`:SetCondition`, one
+  concrete shape (`ControllerControlsAtLeast`). `EffectDuration`'s broader inert-duration gap is now
+  closed for `UntilYourNextTurn`/`UntilEndOfCombat` (the drain mechanism, `phase5/effect-duration-
+  expiration`) and a real creation path now exists for a *resolution-time* temporary effect
+  (`AbilityEffect::Pump`/`Game.Ops.Pump`, `phase5/pump-effect`, docs/implementation.md, below) — just
+  not for a *static* ability's own duration, which is what this bullet's first sentence is still
+  about.
 - **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
   not a stable id - fragile if a card's own ability list ever needs to change shape.
 - **Replacement effects**: `EventFilter` only has two shapes (`DamageDealt`, `WouldDie`); no
@@ -7639,3 +7640,82 @@ tests unaffected.
 **UNRESOLVED:** see the TODOs above — no creation path for temporary continuous effects yet, the
 unresolvable-source-leaves-it-inert limitation, and CR 724.2d's early-combat-end interaction being
 unexercisable since that mechanic doesn't exist in this engine.
+
+## Phase 5: phase5/pump-effect slice (CR 611.2a, `AbilityEffect::Pump`)
+
+Branch `phase5/pump-effect`, off master. Picked as the direct follow-up to `phase5/effect-duration-
+expiration`'s own UNRESOLVED note: that slice built real drain paths for `EffectDuration::
+UntilYourNextTurn`/`UntilEndOfCombat`, but confirmed nothing could actually create an effect with
+either duration — `StaticAbilityBuilder` is setup-time/permanent-only, and `script_api::
+add_continuous_effect` is an unrelated, unbound `todo!()` stub. This slice closes the single most
+common real-card shape that needs one: "target creature gets +X/+Y until <duration>" (CR 611.2a).
+
+**Scoping finding, locked in before writing code:** a fully generic "create any temporary continuous
+effect from a resolving spell" builder was rejected as over-scoped — every existing `AbilityEffect`
+primitive (`Damage`, `Destroy`, `Counters`, ...) is its own narrow, concrete shape resolved by
+`ResolveStackTop`, not a generic "apply any effect" mechanism, so `Pump` follows that same precedent
+rather than introducing a new one.
+
+The harder design question was targeting: `EffectFilter.self_only` was defined (by
+`phase5/layer-engine-*`) as "the affected object is `ContinuousEffect.source`" — modeling an aura's own
+attachment target, since `source` up to now always meant *the permanent whose own ability generated the
+effect*. For Pump, the affected object is the spell's *chosen target*, not the spell itself. Rather than
+add a new filter shape, this slice reuses the exact same mechanism: the pushed `ContinuousEffect`'s
+`source` field is set to the *target's* `ObjectId` with `self_only: true`. Bonus, not a coincidence:
+since every zone change mints a fresh `ObjectId` (the standing precedent this whole area leans on), a
+Pump effect automatically can't outlive whatever zone its target occupied when the effect was created —
+free correctness, no extra bookkeeping, for the same reason `WhileSourceOnBattlefield`/
+`UntilSourceLeaves` already work for free elsewhere.
+
+**What got implemented:**
+- `types/ability.rs`: new `AbilityEffect::Pump { power: i32, toughness: i32, duration:
+  EffectDuration }`.
+- `types/effect.rs`: `EffectDuration` gained `#[derive(Clone, Debug)]` — needed once a value of that
+  type had to live inside `AbilityEffect`, which already derives both.
+- `engine.rs` (`ResolveStackTop`'s effect match): a new arm mirroring `Counters`'s "loop over every
+  legal `Target::Object`, mutate state immediately" shape (no `GameEventKind` exists for "a continuous
+  effect was added" — static-ability registration isn't ledger-logged either, same convention). One
+  `SequenceNo` is allocated per resolution and shared across every target's own pushed effect (CR
+  613.7a: simultaneous effects from the same resolution).
+- `script.rs`: `Game.Ops.Pump(power, toughness, duration)` and a new `Game.Durations.*` tag table
+  (`UntilEndOfTurn`/`UntilYourNextTurn`/`UntilEndOfCombat`/`Permanent` only — see `DurationTag`'s own
+  doc comment for why `WhileSourceOnBattlefield`/`UntilSourceLeaves`/`WhileConditionHolds`/`Custom`
+  aren't exposed here). Not exercised by this slice's own tests, same "wired for future real cards, but
+  the actual test coverage goes through `CardDefinition.effect`'s Rust-native fast path" precedent
+  every other `AbilityEffect` primitive's own test file already follows (see `phase5_script_ops_
+  damage.rs`).
+- `commands.rs`: added the new variant to `ActivateAbility`'s existing non-mana-effect match arm (same
+  path `Damage`/`Counters`/etc. already take).
+
+**TODOs marked, not silently narrowed:**
+- No "divide as you choose" (Pump could theoretically apply a different amount per target, real oracle
+  text almost never does) — same CR 601.2d stance `Damage`/`Counters` already take, not re-litigated
+  here.
+- The general "add any temporary continuous effect" builder (arbitrary layer/effect/filter, not just
+  P/T) is still unbuilt — deliberately deferred per this slice's own scoping finding above, not an
+  oversight.
+
+**Tests added** (`crates/engine/tests/phase5_pump_effect.rs`, 4 new tests, harness copied from
+`phase5_script_ops_damage.rs`): a cast Pump spell boosts its target's effective P/T immediately on
+resolution; the boost is pinned to the actual target, not any other permanent on the battlefield; an
+`UntilEndOfTurn` Pump expires by the start of the next turn (proving this slice's creation path and the
+prior slice's drain path connect end to end); a `Permanent`-duration Pump survives the same turn
+transition.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none new).
+`cargo test --workspace` — all test binaries green, 0 failures, including the 4 new tests; all prior
+tests unaffected.
+
+**STRUCT DEVIATIONS:** `EffectDuration` needed `#[derive(Clone, Debug)]` added — not named in advance
+(this slice wasn't run through phases 1-4 separately), but a mechanical consequence of embedding it in
+`AbilityEffect`, not a design change.
+
+**INTERFACE DEVIATIONS:** none beyond the new variant/bindings themselves — no existing function
+signature changed shape, only `commands.rs`'s already-open-ended non-mana-effect match arm gained one
+more pattern.
+
+**SCOPE DEVIATIONS:** none — every edit landed exactly where the scoping finding above said it would
+(one `AbilityEffect` variant, one `ResolveStackTop` arm, one Lua binding pair, one match-arm addition).
+
+**UNRESOLVED:** see the TODOs above — no generic temporary-effect builder, and per-target division of
+the pump amount isn't modeled (same standing gap `Damage`/`Counters` already carry).

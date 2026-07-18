@@ -17,7 +17,9 @@ use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec, PaymentPlan};
 use crate::types::counter::CounterSet;
-use crate::types::effect::EffectDuration;
+use crate::types::effect::{
+    AffectedFilter, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload, EffectPrimitive, Layer,
+};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
 use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo, Target};
@@ -2769,6 +2771,43 @@ impl Engine {
                                         object: *id,
                                         kind: kind.clone(),
                                         amount: *amount,
+                                    });
+                                }
+                            }
+                            // CR 611.2a's own "duration stated by the spell
+                            // or ability creating it": every legal target
+                            // independently gets its own ContinuousEffect
+                            // pushed straight into state.continuous_effects
+                            // (mutates immediately - no event kind exists
+                            // for "a continuous effect was added", same as
+                            // static-ability registration). `source` is set
+                            // to the *target's* own id with `self_only:
+                            // true`, reusing EffectFilter's existing
+                            // "self_only pins to ContinuousEffect.source"
+                            // mechanism to target a spell's chosen object
+                            // instead of an aura's attachment (see this
+                            // variant's own doc comment in ability.rs).
+                            // Object targets only, same "silent no-op"
+                            // stance as Damage/Counters above.
+                            Some(AbilityEffect::Pump { power, toughness, duration }) => {
+                                let timestamp = self.state.allocate_sequence_no();
+                                for target in &legal_targets {
+                                    let Target::Object(id) = target else { continue };
+                                    self.state.continuous_effects.push(ContinuousEffect {
+                                        source: *id,
+                                        layer: Layer::PowerToughnessModifying,
+                                        affected: AffectedFilter::Primitive(EffectFilter {
+                                            controller: None,
+                                            card_types: None,
+                                            self_only: true,
+                                        }),
+                                        effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+                                            power: *power,
+                                            toughness: *toughness,
+                                        }),
+                                        timestamp,
+                                        duration: duration.clone(),
+                                        condition: None,
                                     });
                                 }
                             }
