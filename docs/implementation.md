@@ -2451,9 +2451,13 @@ verbatim once enough time has passed for the underlying code to have moved.
   intervening-if resolution, several call sites) and `triggers.rs` (condition/intervening-if
   evaluation during `collect_triggers`). Each site's own comment flags it individually; nothing ties
   them together as one systemic gap until now.
-- **`Destroy` script op**: CR 616.1's ordering choice (2+ replacement effects matching the same
-  scripted destroy) isn't supported - silently no-ops rather than pausing for a choice, unlike the
-  real `NeedsOrderingChoice` path every other SBA-driven death uses.
+- **`Destroy`/`Sacrifice`/`Exile` script ops' CR 616.1 ordering choice**: closed, `phase5/destroy-
+  ordering-choice` (docs/implementation.md, below) - all three now pause via a real
+  `AwaitingReplacementChoice` instead of silently no-oping. Exile's own arm is fixed by the same
+  refactor but has no end-to-end test - `EventFilter` only has two shapes and `WouldDie` only ever
+  matches `to: Graveyard`, so no fixture can construct 2 effects that both match a scripted Exile's
+  own `to: Exile` proposal (same standing "two `EventFilter` shapes only" gap named elsewhere in this
+  list).
 - **Combat keywords beyond first/second strike/trample**: banding and the rest of CR 702's combat
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
@@ -7391,3 +7395,96 @@ choice gap, and no regeneration trigger condition. Also: `ConsumptionPolicy::Lim
 exercised by this slice's own tests (only `OneShot`/`Repeatable`) — real Magic has no "regenerate N
 times" card text, so this wasn't a gap worth manufacturing a test for, just noting the combination is
 untested rather than implying it's broken.
+
+## Phase 5: phase5/destroy-ordering-choice slice (CR 616.1)
+
+Branch `phase5/destroy-ordering-choice`, off master. Picked from the "Known unresolved gaps" list
+rather than a numbered backlog item — the numbered backlog (1-17) closed with the previous slice,
+leaving only item 16 (planeswalkers/battles/DFCs/split/sagas, an explicit non-goal) unstarted.
+
+**Pre-slice scoping finding:** the scripted `Destroy`/`Sacrifice`/`Exile` ops (`engine.rs`'s
+`ResolveStackTop`) each loop over their legal targets independently, proposing+replacement-checking+
+inline-committing each target's own `ZoneChange` (a `ZoneChange` always describes an already-happened
+move — the same "already happened" convention every scripted zone-move op uses, unlike `Damage`/
+`Counters`' "push an unapplied event" shape). Before this slice, a target whose proposed event matched
+2+ `ReplacementEffect`s hit `ReplacementOutcome::NeedsOrderingChoice` and the arm's own `{ .. }` catch
+silently did nothing — the target simply never moved, no pause, no player choice raised at all, unlike
+every SBA-driven death (already correctly paused via `ReplacementResumeTarget::SbaDeath`, wired up back
+in `phase5/replacement-prevention-effects`). Confirmed via the actual `regeneration.rs`/`sba.rs` code
+before branching, not assumed from the doc note alone.
+
+**What got implemented:**
+- `engine.rs`: new `ScriptedZoneMoveKind` enum (`Destroy`/`Sacrifice`/`Exile`) and a new
+  `ReplacementResumeTarget::ScriptedZoneMove { kind, remaining: VecDeque<ObjectId>, stack_id }` variant,
+  the same shape role `SbaDeath`'s own `pending_deaths` queue plays for SBA-driven death.
+- Two new `Engine` methods replace the three inline per-target loops: `continue_scripted_zone_move`
+  drains the target queue one at a time (propose → `apply_replacements` → commit), returning a real
+  `ProcessState::AwaitingReplacementChoice` the instant any target needs one rather than silently
+  skipping it; `commit_scripted_zone_move` holds the per-kind commit logic (`commit_death_or_
+  regeneration` for Destroy, `commit_death` for Sacrifice, the inline shared-Exile-zone move for Exile)
+  shared between the fresh-resolution path and the post-choice resume path, unchanged behavior from
+  before this slice, just extracted so both paths call the same code.
+- `submit_replacement_choice` gained a `ScriptedZoneMove` resume arm: applies the chosen effect,
+  commits the resolved event via `commit_scripted_zone_move`, then calls back into
+  `continue_scripted_zone_move` to keep draining the rest of that op's own queue — re-pausing again if
+  the *next* independent target also needs an ordering choice.
+- The three `ResolveStackTop` match arms (`Sacrifice`/`Destroy`/`Exile`) now just collect legal targets
+  into a `VecDeque<ObjectId>` and hand off to `continue_scripted_zone_move`, returning
+  `StepStatus::Progressed` — all the indestructibility/battlefield-presence/is_destroy logic that used
+  to live inline in each arm moved into the shared helper, one copy instead of three.
+
+**CR requirements:** 616.1 (2+ replacement/prevention effects matching one event → affected player
+chooses application order) — now honored for all three scripted zone-move ops, not just SBA-driven
+death.
+
+**A dead end, not a fix:** while writing this slice's own multi-target test, a fixture with a broad
+`controller: None` "exile it instead" effect on one target incidentally intercepted a *different*,
+unrelated creature's own independent death in the same op — a test-fixture bug (the effect needed
+`controller: Some(FilterController::You)` to only protect its own controller's creatures), not an
+engine bug. Chasing that symptom down a different path also surfaced what looked like a real bug in
+`sba::commit_death` (its `zone_mut(to, Some(owner))` call looks like it can't ever resolve a
+replacement-redirected `to: Exile`, since Exile is meant to be a shared zone) — attempting that fix
+broke an existing, previously-passing `phase5_dies_triggers.rs` test, revealing `commit_death`'s
+`Some(owner)` lookup is this codebase's *actual*, if debatable, established convention for Exile
+(distinct from the dedicated scripted-`Exile`-op commit path's own `owner: None` lookup for the same
+zone kind — two different conventions for the same zone, pre-existing and orthogonal to this slice's
+own scope). Reverted the `sba.rs` change and fixed the test fixture instead, once the fixture bug (not
+an engine bug) was isolated as the actual root cause.
+
+**TODOs marked, not silently narrowed:**
+- Exile's own ordering-choice arm is fixed by the same refactor but isn't exercised end-to-end by any
+  test: `EventFilter` only has two shapes today (`DamageDealt`, `WouldDie`), and `WouldDie` only ever
+  matches a proposed `ZoneChange { from: Battlefield, to: Graveyard, .. }` — a scripted Exile's own
+  proposed `to: Exile` can never match either shape, so no fixture can currently construct 2
+  replacement effects that both match an Exile op's proposed event. Not a gap this slice introduces or
+  needs to close (same standing "no Lua builder for replacement effects, only two `EventFilter` shapes"
+  gap already named in this doc's "Known unresolved gaps" list) — noted in the test file's own module
+  doc so the missing Exile-specific test isn't mistaken for an oversight.
+- The Exile-zone-ownership inconsistency surfaced above (`commit_death`'s `Some(owner)` vs. the
+  dedicated Exile-op commit's `owner: None`, for what should be the same shared zone) is real and
+  worth a future look, but reconciling it would ripple through zone setup in test fixtures/scenario
+  loading well beyond this slice's own scope — left as-is, not fixed here.
+
+**Tests added** (`crates/engine/tests/phase5_destroy_ordering_choice.rs`, 5 new tests): a scripted
+`Destroy` with 2 matching replacement effects (a regeneration shield + an "exile instead" effect) now
+pauses instead of silently no-oping (the exact bug this slice fixes); choosing the regeneration shield
+saves the creature; choosing the other effect first lets *it* win instead (proves the order genuinely
+determines the outcome, not just that resolution completes); a 2-target `Destroy` pauses on one target
+and still destroys the second, independent target afterward (the core of the fix — the remaining queue
+keeps draining past a pause, it doesn't stop at the first one); and the same pause/resume/consumption
+proof for the scripted `Sacrifice` op (which can never intercept via regeneration — `is_destroy: false`
+always — so its own test uses two distinct "exile instead" effects instead, distinguished by which one
+gets consumed).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none new).
+`cargo test --workspace` — all test binaries green, 0 failures, including the 5 new tests; all prior
+tests (678 before this slice) unaffected.
+
+**STRUCT DEVIATIONS:** `ScriptedZoneMoveKind` (new, `pub`) and `ReplacementResumeTarget::
+ScriptedZoneMove` (new variant) — both anticipated going in, matching the pre-slice scoping report.
+
+**SCOPE DEVIATIONS:** none beyond the dead-end investigation noted above (which left no trace in the
+final diff — `sba.rs` is unchanged from before this slice).
+
+**UNRESOLVED:** see the TODOs above — Exile's own untested ordering-choice arm, and the pre-existing
+Exile-zone-ownership inconsistency between `commit_death` and the dedicated Exile-op commit path.
