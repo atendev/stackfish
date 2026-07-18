@@ -465,6 +465,22 @@ pub enum ConditionPrimitive {
     /// of `DiscardsCard` (e.g. Waste Not/Megrim-style effects), same
     /// relationship `EachDrawsCard` has to `DrawsCard`.
     EachDiscardsCard,
+    /// "When this card is discarded" — the self-referential sibling
+    /// `DiscardsCard`/`EachDiscardsCard` don't cover (those are
+    /// player-relative: "whenever you/a player discards *a* card", not
+    /// "whenever *this* card is discarded"). Same CR 603.10 look-back-in-time
+    /// shape `Dies`/`LeavesBattlefield` already use for a battlefield
+    /// departure, extended by symmetry to a hand departure — CR 603.10a's own
+    /// enumerated list doesn't explicitly name "leaves the hand" among its
+    /// categories, but the mechanism (match by `last_known_info.object_id`
+    /// against a source that's already been purged from `state.abilities` by
+    /// the time this is checked) is identical, so this reuses it rather than
+    /// inventing a second one. Reachable via both discard sources today - a
+    /// cost-payment `Discard` (`commands::move_to_graveyard_for_cost`) and
+    /// the cleanup hand-size discard (`Engine::submit_discard`) already stash
+    /// their departed `Triggered` abilities for the `collect_triggers` LKI
+    /// fallback to see (closed by the same fix that added `DiscardsCard`).
+    Discarded,
     /// "At the beginning of combat on your turn" (CR 507) — matches
     /// `GameEventKind::StepStarted{step: Step::BeginningOfCombat}` only when
     /// the ability's controller is also the active player. Same reachability
@@ -609,6 +625,11 @@ impl ConditionPrimitive {
             ConditionPrimitive::EachDiscardsCard => matches!(
                 event,
                 GameEventKind::ZoneChange { from: ZoneKind::Hand, to: ZoneKind::Graveyard, .. }
+            ),
+            ConditionPrimitive::Discarded => matches!(
+                event,
+                GameEventKind::ZoneChange { from: ZoneKind::Hand, to: ZoneKind::Graveyard, last_known_info: Some(lki), .. }
+                    if lki.object_id == source
             ),
             ConditionPrimitive::BeginningOfYourCombat => {
                 controller == active_player
@@ -1214,6 +1235,45 @@ mod tests {
             last_known_info: None,
         };
         assert!(!ConditionPrimitive::EachDiscardsCard.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn discarded_matches_hand_to_graveyard_by_last_known_object_id() {
+        let source = ObjectId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999), // the new id minted for the graveyard-side object
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(dummy_last_known_info(source)),
+        };
+        assert!(ConditionPrimitive::Discarded.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn discarded_does_not_match_a_different_cards_discard() {
+        let source = ObjectId(0);
+        let other = ObjectId(1);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Hand,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(dummy_last_known_info(other)),
+        };
+        assert!(!ConditionPrimitive::Discarded.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
+    }
+
+    #[test]
+    fn discarded_does_not_match_a_battlefield_death() {
+        // Battlefield -> Graveyard is a Dies, not a Discarded - same card
+        // identity, different departure zone.
+        let source = ObjectId(0);
+        let event = GameEventKind::ZoneChange {
+            object: ObjectId(999),
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(dummy_last_known_info(source)),
+        };
+        assert!(!ConditionPrimitive::Discarded.matches(source, CONTROLLER, ACTIVE_PLAYER, &event));
     }
 
     #[test]
