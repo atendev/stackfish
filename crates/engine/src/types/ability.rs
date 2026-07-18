@@ -116,6 +116,27 @@ pub enum AbilityEffect {
     /// non-Object legal target is skipped, same "silent no-op" stance every
     /// other object-targeted primitive here takes.
     Pump { power: i32, toughness: i32, duration: crate::types::effect::EffectDuration },
+    /// The `Game.Ops.Regenerate()` primitive — CR 701.19a: "Regenerate
+    /// target creature." Every legal target independently gets its own
+    /// one-shot regeneration shield (`ReplacementEffect`, `EventFilter::
+    /// WouldDie` paired with `ReplacementPayload::Regenerate`, pinned via
+    /// `self_only: true` exactly like `Pump` pins its own `ContinuousEffect`)
+    /// pushed straight into `state.replacement_effects` — same "mutates
+    /// state immediately, no event kind for this" convention `Pump` already
+    /// established, since static-ability-sourced shields (CR 701.19b)
+    /// aren't logged either.
+    ///
+    /// CR 701.19c: a target with `KeywordSet::CANT_BE_REGENERATED` gets no
+    /// shield at all - checked at the moment the shield would be created,
+    /// not as a property of the `ReplacementEffect` itself. The ability/
+    /// spell that resolved this primitive still fully resolved (its cost was
+    /// already paid, same as any other primitive here) - only the shield
+    /// silently fails to come into being, matching 701.19c's own wording
+    /// ("doesn't preclude such abilities from being activated... rather,
+    /// causes shields to not be applied"). A non-Object legal target is
+    /// skipped, same "silent no-op" stance every other object-targeted
+    /// primitive here takes.
+    Regenerate,
     /// The `Game.Ops.DrawCards(n)` primitive — the resolving `StackObject`'s
     /// controller draws exactly `n` cards (CR 120.3/121), no target (same
     /// "always the controller" shape `GainLife` already uses, not `Damage`/
