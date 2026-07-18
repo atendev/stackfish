@@ -2462,9 +2462,9 @@ verbatim once enough time has passed for the underlying code to have moved.
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
   Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
-- **CR 111.7 (token cessation)**: a token that leaves the battlefield doesn't actually cease to exist,
-  it just retires like any other object - blocked on a zone-watch SBA hook that doesn't exist yet
-  (`engine.rs`'s `CreateToken` resolution TODO).
+- **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
+  below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
+  the battlefield can't move zones again) is a related but separate rule, not covered.
 - **CR 402.2 (max hand size)**: hardcoded to a literal `7` in Cleanup's discard check - doesn't consult
   `state.continuous_effects` for "you have no maximum hand size"-style effects, since no query API for
   that exists yet (`engine.rs`).
@@ -7488,3 +7488,78 @@ final diff — `sba.rs` is unchanged from before this slice).
 
 **UNRESOLVED:** see the TODOs above — Exile's own untested ordering-choice arm, and the pre-existing
 Exile-zone-ownership inconsistency between `commit_death` and the dedicated Exile-op commit path.
+
+## Phase 5: phase5/token-cessation slice (CR 111.7/704.5d)
+
+Branch `phase5/token-cessation`, off master. Picked from the "Known unresolved gaps" list — the
+numbered backlog (1-17) closed several slices ago, leaving only item 16 (planeswalkers/battles/DFCs/
+split/sagas, an explicit non-goal) unstarted.
+
+**Pre-slice scoping finding:** confirmed via `engine.rs`'s `CreateToken` resolution TODO and a read of
+`commands::retire_object` — a departing object's *old* id is purged (`state.objects.remove`), but every
+death-commit path (`commit_death`/`commit_death_or_regeneration`/the Exile-op inline move) immediately
+re-inserts a *new* id for the post-move object in its destination zone, cloned from `last_known_info`
+(which carries `is_token` forward). Nothing ever noticed that new object was a token sitting somewhere
+other than the battlefield — it just stayed there forever, indistinguishable from a real card.
+
+**What got implemented:**
+- `types/event.rs`: `GameEventKind::TokenCeased { object }` — no new `ObjectId` minted (nothing to move
+  to; the object just stops existing), unlike every real death this engine already models.
+- `sba.rs`: new `collect_ceasing_tokens` (scans every zone except Battlefield for `GameObject.is_token`)
+  and `commit_token_cessation` (removes it from its zone's contents, purges it via
+  `commands::retire_object`, produces the ledger event) — wired into the very top of
+  `check_state_based_actions`, before that same pass's own `collect_dying_creatures`/`resolve_deaths`
+  run. Deterministic (no player choice), so its events/departed-abilities fold directly into the same
+  accumulators the rest of the function already threads through.
+- Timing (the actual point of this slice): CR 704.3's "simultaneous, based on the state as of this
+  check" means a token dying via *this* pass's own SBA collection isn't "in a zone other than the
+  battlefield" until *after* this pass ends — running the scan first, against zones as they stand at
+  the top of the call, defers cessation to the *next* pass for free, satisfying CR 111.7's own
+  parenthetical ("applicable triggered abilities will trigger before the token ceases to exist") without
+  any special-casing. Verified directly: a token with lethal damage marked dies on pass 1 and is still a
+  live object after that same call returns; only a second `check_state_based_actions` call (the next
+  pass) ceases it.
+
+**CR requirements:** 704.5d (token cessation, primary), satisfying 111.7's own timing note. CR 111.8 (a
+token that already left the battlefield can't move zones again — "remains in its current zone instead")
+is a related but separate rule, not covered.
+
+**TODOs marked, not silently narrowed:**
+- CR 111.8 — no mechanism stops an already-off-battlefield token from being targeted by a return-to-
+  hand/battlefield effect; would need a check at every zone-change command site, out of scope here.
+- CR 704.5e (copies of spells/cards in the wrong zone ceasing) — a separate, related SBA; tokens ⊄
+  spell/card copies, not touched by this slice.
+- No trigger condition keys off `TokenCeased` itself (same "ships with no matching `ConditionPrimitive`
+  yet" precedent `GameEventKind::Regenerated` set) — real but rare oracle text.
+- A pre-existing, unrelated gap surfaced along the way (not fixed, not this slice's to fix):
+  `resolve_deaths`'s own `NeedsOrderingChoice` arm already drops any `departed_triggered` accumulated
+  before it pauses (documented at that call site before this slice). This slice's own token-cessation
+  departed-abilities ride the same accumulator, so they're vulnerable to the exact same pre-existing
+  drop in the same rare interleaving (a token ceasing in the same pass some *other* death needs a CR
+  616.1 ordering choice, and that token happens to have a real "when this leaves play" ability). Not hit
+  by this slice's own tests; flagged at the call site, not fixed, same precedent that gap's own comment
+  already set.
+
+**Tests added** (`crates/engine/tests/phase5_token_cessation.rs`, 5 new tests): a token with lethal
+damage dies on one SBA pass and only ceases on the next (not the same one); a non-token creature with
+the same fate never ceases, even run out to the fixed point; a token already sitting in Exile (never
+touched the battlefield this pass) ceases on the very first check — proving the rule isn't graveyard-
+specific; a token's own "Dies" trigger still fires and resolves through the full `Engine` pipeline
+despite the token ceasing a pass later (proving trigger-matching's ledger/LKI-based design, not a live
+`state.objects` lookup, is unaffected); a non-token creature stays in the graveyard through the same
+full pipeline (regression).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none new).
+`cargo test --workspace` — all test binaries green, 0 failures, including the 5 new tests; all prior
+tests unaffected.
+
+**STRUCT DEVIATIONS:** none — `GameEventKind::TokenCeased` matches the pre-slice scoping exactly.
+
+**INTERFACE DEVIATIONS:** none — `collect_ceasing_tokens`/`commit_token_cessation` are both new,
+private, and match the scoping report's shape.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** see the TODOs above — CR 111.8, CR 704.5e, no `TokenCeased` trigger condition, and the
+pre-existing `NeedsOrderingChoice`-drops-departed-abilities gap this slice's own token cessation now
+also rides (not worsened, not fixed).
