@@ -90,6 +90,32 @@ pub enum AbilityEffect {
     /// either (no `EventFilter::CounterAdded` shape exists) — same gap
     /// `GainLife` already has, not fixed here.
     Counters { kind: CounterKind, amount: i32 },
+    /// The `Game.Ops.Pump(power, toughness, duration)` primitive — "target
+    /// creature gets +X/+Y until <duration>" (e.g. CR 702's fight/pump
+    /// effects). Every legal target independently gets its own
+    /// `ContinuousEffect` (layer 7c, `EffectPrimitive::ModifyPT`) pushed
+    /// straight into `state.continuous_effects` — mutates state immediately,
+    /// same "already happened, no `CommitEvents` needed" convention
+    /// `DrawCards`/`Shuffle` already use, since there's no
+    /// event kind for "a continuous effect was added" (static-ability
+    /// registration isn't ledger-logged either). Each pushed effect's
+    /// `ContinuousEffect.source` is set to the *target's* `ObjectId`, not
+    /// the spell/ability's own source, paired with `EffectFilter::
+    /// self_only: true` — reusing exactly the "self_only pins to
+    /// `ContinuousEffect.source`" mechanism `EffectFilter`'s own doc comment
+    /// already names as its stance for "the affected object is the effect's
+    /// own attachment target," just applied to a spell's chosen target
+    /// instead of an aura's. Free side effect: if the target later leaves
+    /// whatever zone it occupied when this effect was created, its
+    /// `ObjectId` stops resolving (every zone change mints a fresh one) and
+    /// `layers::applicable_effects_in_layer` already treats an unresolvable
+    /// source as inapplicable — the effect can't outlive its own target.
+    /// `duration` is `EffectDuration`'s real drain paths
+    /// (`UntilEndOfTurn`/`UntilYourNextTurn`/`UntilEndOfCombat`/
+    /// `Permanent` — see `phase5/effect-duration-expiration`); a
+    /// non-Object legal target is skipped, same "silent no-op" stance every
+    /// other object-targeted primitive here takes.
+    Pump { power: i32, toughness: i32, duration: crate::types::effect::EffectDuration },
     /// The `Game.Ops.DrawCards(n)` primitive — the resolving `StackObject`'s
     /// controller draws exactly `n` cards (CR 120.3/121), no target (same
     /// "always the controller" shape `GainLife` already uses, not `Damage`/

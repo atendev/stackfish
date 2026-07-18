@@ -107,6 +107,20 @@ impl UserData for LayerTag {}
 struct EffectPrimitiveTag(EffectPrimitive);
 impl UserData for EffectPrimitiveTag {}
 
+/// Same idea, for `Game.Durations.*` — e.g. `Game.Durations.UntilEndOfTurn`
+/// is a plain tagged value, the third argument to `Game.Ops.Pump`. Only the
+/// four durations with a real drain path (`Engine::advance_turn_step`'s
+/// Cleanup/EndOfCombat arms, `phase5/effect-duration-expiration`) are ever
+/// bound here - `WhileSourceOnBattlefield`/`UntilSourceLeaves` would be pure
+/// sugar for `Pump` specifically (the target's own id already stops
+/// resolving the moment it leaves any zone, regardless of `duration` - see
+/// `AbilityEffect::Pump`'s own doc comment), and `WhileConditionHolds`/
+/// `Custom` have no meaning for a one-shot resolution effect with no
+/// `ContinuousEffect.condition` to attach.
+#[derive(Clone)]
+struct DurationTag(EffectDuration);
+impl UserData for DurationTag {}
+
 #[derive(Debug)]
 pub enum ScriptError {
     LoadError(String),
@@ -1698,6 +1712,14 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
     })?;
     ops.set("Counters", counters)?;
+    // `Game.Ops.Pump(power, toughness, duration)` - `duration` is a
+    // `Game.Durations.*` tag (see `DurationTag`'s own doc comment for which
+    // ones exist and why).
+    let pump = lua.create_function(|_, (power, toughness, duration): (i32, i32, mlua::AnyUserData)| {
+        let duration = duration.borrow::<DurationTag>()?.0.clone();
+        Ok(OperationTag(AbilityEffect::Pump { power, toughness, duration }))
+    })?;
+    ops.set("Pump", pump)?;
     let draw_cards = lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::DrawCards(amount))))?;
     ops.set("DrawCards", draw_cards)?;
     let create_token = lua.create_function(|_, (spec_ud, count): (mlua::AnyUserData, Option<u32>)| {
@@ -1798,6 +1820,14 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
             Ok(CostTag(CostComponent::Mana(mana)))
         })?,
     )?;
+
+    // Only the 4 durations with a real drain path are exposed - see
+    // `DurationTag`'s own doc comment for why the rest aren't.
+    let durations = lua.create_table()?;
+    durations.set("UntilEndOfTurn", DurationTag(EffectDuration::UntilEndOfTurn))?;
+    durations.set("UntilYourNextTurn", DurationTag(EffectDuration::UntilYourNextTurn))?;
+    durations.set("UntilEndOfCombat", DurationTag(EffectDuration::UntilEndOfCombat))?;
+    durations.set("Permanent", DurationTag(EffectDuration::Permanent))?;
 
     // Only the 7 layers with a real query path (layers::effective_characteristics)
     // are exposed - a static ability can't request layer 1/2/7d at all (see
@@ -1964,6 +1994,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     game.set("Ops", ops)?;
     game.set("Costs", costs)?;
     game.set("Layers", layers)?;
+    game.set("Durations", durations)?;
     game.set("Effects", effects)?;
     game.set("Tokens", tokens)?;
     game.set("CreateTriggeredAbility", create_triggered_ability)?;

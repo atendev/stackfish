@@ -238,6 +238,7 @@ pub enum AffectedFilter {
 /// long as you control a Forest" — re-evaluated continuously, not a fixed
 /// end point), and `Custom` as a catch-all for unusual oracle wording that
 /// doesn't fit a structured case yet.
+#[derive(Clone, Debug)]
 pub enum EffectDuration {
     UntilEndOfTurn,
     UntilYourNextTurn,
