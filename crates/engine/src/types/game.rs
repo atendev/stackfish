@@ -7,7 +7,7 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::ids::{EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
-use crate::types::player::PlayerState;
+use crate::types::player::{HandSizeModifier, PlayerState};
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
@@ -77,6 +77,11 @@ pub struct GameState {
     /// own doc comment (cost.rs) for why this is a distinct mechanism from
     /// the CR 613 layer system those two lists feed.
     pub cost_modifiers: Vec<CostModifier>,
+    /// CR 402.2 max-hand-size effects ("you have no maximum hand size", ...)
+    /// — same "distinct mechanism from the CR 613 layer system" reasoning
+    /// `cost_modifiers` above already established; see `HandSizeModifier`'s
+    /// own doc comment (types/player.rs).
+    pub hand_size_modifiers: Vec<HandSizeModifier>,
     /// Every card's registered triggered/activated/static abilities, flat —
     /// same reasoning as `continuous_effects`/`replacement_effects` above.
     pub abilities: Vec<RegisteredAbility>,
@@ -225,6 +230,7 @@ mod tests {
             continuous_effects: Vec::new(),
             replacement_effects: Vec::new(),
             cost_modifiers: Vec::new(),
+            hand_size_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState { seed: 1, draws_consumed: 0 },

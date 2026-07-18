@@ -116,6 +116,7 @@ fn two_player_state(pool: ManaPool, cost_modifiers: Vec<CostModifier>) -> GameSt
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
         cost_modifiers,
+        hand_size_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState { seed: 1, draws_consumed: 0 },

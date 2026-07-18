@@ -2469,9 +2469,11 @@ verbatim once enough time has passed for the underlying code to have moved.
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
   the battlefield can't move zones again) is a related but separate rule, not covered.
-- **CR 402.2 (max hand size)**: hardcoded to a literal `7` in Cleanup's discard check - doesn't consult
-  `state.continuous_effects` for "you have no maximum hand size"-style effects, since no query API for
-  that exists yet (`engine.rs`).
+- **CR 402.2 (max hand size)**: closed, `phase5/max-hand-size` (docs/implementation.md, below) -
+  `HandSizeModifier`/`effective_max_hand_size` (`types/player.rs`), a dedicated mechanism deliberately
+  parallel to (not folded into) `state.continuous_effects`, same reasoning `cost_modifiers` already
+  established. No `Game.CreateHandSizeModifier` Lua builder yet - direct-literal fixtures only, same
+  bootstrap stance `CostModifier` itself took.
 - **Regeneration (CR 614.8/701.19)**: closed, `phase5/regeneration` (docs/implementation.md, below) -
   `ReplacementPayload::Regenerate`, gated to genuine destruction only (CR 704.5g lethal damage/
   deathtouch, and the scripted `Destroy` op) via a per-call `is_destroy` flag, not CR 704.5f (zero
@@ -7779,3 +7781,64 @@ report named.
 
 **UNRESOLVED:** none new. `draw_step`'s library-side LKI stash remains the one still-dormant sibling
 (practically unreachable, no card needs it) — unaffected by this slice, same standing note.
+
+## Phase 5: phase5/max-hand-size slice (CR 402.2, `HandSizeModifier`)
+
+Branch `phase5/max-hand-size`, off master. Picked from the "Known unresolved gaps" list's CR 402.2
+bullet — `Engine::begin_cleanup_step` had a bare hardcoded `MAX_HAND_SIZE: usize = 7`, consulting
+nothing, so no "you have no maximum hand size"/"your maximum hand size is N" effect could change
+cleanup behavior.
+
+**Scope discovery, flagged before writing code:** every one of this project's ~85 test fixture files
+constructs `GameState` as a full struct literal (no `Default`/spread). The clean design — a dedicated
+`HandSizeModifier` list mirroring `cost.rs`'s already-established `CostModifier` precedent, rather than
+squeezing a player-level rule into the CR-613-only `Layer` enum or `state.continuous_effects` (which
+would break `Layer`'s own "exactly the CR 613.1 layer list, nothing else" invariant) — meant adding a
+field to `GameState`, so every one of those ~85 literals needed it added. Done mechanically via a
+scripted insertion right after each file's own `cost_modifiers: Vec::new(),` line, then the compiler
+caught the one file the script's pattern didn't cover (`crates/scenario/src/lib.rs`, a different
+initializer shape) as a hard `E0063` missing-field error - exactly the "self-correcting" safety net that
+made this large-footprint mechanical change low-risk despite its size.
+
+**What got implemented:**
+- `types/player.rs`: `HandSizeEffect { NoMaximum, SetTo(u32) }` + `HandSizeModifier { source,
+  controller, affected: FilterController, effect, timestamp }` — `controller`/`affected` mirror
+  `CostModifier`'s own `controller`/`filter.controller` split exactly (whose "you"/"opponent"
+  perspective, and who's actually affected). `effective_max_hand_size(modifiers, player, base) ->
+  Option<u32>` — `None` means "no maximum." Multiple applicable modifiers don't stack; the one with the
+  latest `timestamp` wins outright, the same CR 613.7-style "latest wins" convention this engine's flat-
+  override layer effects (e.g. `SetPT`) already use for a conflict, even though hand size isn't a CR 613
+  layer at all (no dependency/613.8 analysis needed for the same reason those flat overrides don't need
+  it either).
+- `types/game.rs`: new `pub hand_size_modifiers: Vec<HandSizeModifier>` field.
+- `engine.rs`: `begin_cleanup_step` calls `effective_max_hand_size` instead of the hardcoded literal; a
+  `None` result skips the discard check entirely (CR 402.2's "no maximum" case) rather than computing
+  against some sentinel number. The `ProcessState::AwaitingDiscard` resume arm (re-displays the pause
+  after a step that made no progress) recomputes the same way, rather than re-hardcoding its own `7` -
+  it was a second, independent hardcoded site the scoping investigation surfaced.
+
+**TODOs marked, not silently narrowed:** no `Game.CreateHandSizeModifier` Lua builder this slice — same
+"direct Rust struct-literal fixtures only" bootstrap stance `CostModifier` itself took before any script
+builder existed for it.
+
+**Tests added** (`crates/engine/tests/phase5_max_hand_size.rs`, 4 new tests): a `NoMaximum` modifier
+suppresses the cleanup discard pause entirely even with a 20-card hand; a `SetTo(10)` modifier changes
+the `AwaitingDiscard` threshold from the default 7; two conflicting modifiers (`SetTo(10)` then
+`NoMaximum`, later timestamp) resolve to the later one; an `Opponent`-scoped modifier doesn't affect its
+own controller's cleanup (still discards to the default 7).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none new).
+`cargo test --workspace` — all test binaries green, 0 failures, including the 4 new tests; all ~85
+mechanically-updated fixture files and every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none beyond the new field/types themselves, which the scoping report already
+named up front as the size-defining consequence of this slice's design choice.
+
+**INTERFACE DEVIATIONS:** none — `effective_max_hand_size` is new, not a signature change to anything
+existing.
+
+**SCOPE DEVIATIONS:** one file outside `crates/engine` (`crates/scenario/src/lib.rs`) needed the same
+field addition — not named in the scoping report (which only anticipated `crates/engine`'s own
+fixtures), caught immediately by the compiler rather than discovered later.
+
+**UNRESOLVED:** none new.

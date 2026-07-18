@@ -150,6 +150,7 @@ fn control_changed_combat_state(p0_last_active_turn: u32, creature_controlled_si
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: RngState { seed: 1, draws_consumed: 0 },
@@ -321,6 +322,7 @@ fn control_changed_activation_state() -> (GameState, PlayerId, PlayerId, ObjectI
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
         abilities: vec![RegisteredAbility {
             source,
             kind: AbilityKind::Activated,
@@ -438,6 +440,7 @@ fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
         continuous_effects: Vec::new(),
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
         abilities: vec![RegisteredAbility {
             source,
             kind: AbilityKind::Activated,
