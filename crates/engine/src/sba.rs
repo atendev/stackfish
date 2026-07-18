@@ -41,7 +41,13 @@ pub enum SbaOutcome {
         pending_event: GameEventKind,
         candidates: Vec<ObjectId>,
         excluded: Vec<ObjectId>,
-        pending_deaths: VecDeque<ObjectId>,
+        /// Whether `pending_event` itself is genuine destruction (CR 614.8)
+        /// — see `DyingCandidate`'s own doc comment. Carried alongside
+        /// `pending_deaths` (each of *those* candidates has its own
+        /// separately-tagged `is_destroy`) because `pending_event` has
+        /// already been popped off that queue by the time this pause fires.
+        is_destroy: bool,
+        pending_deaths: VecDeque<DyingCandidate>,
         resolved_so_far: Vec<GameEvent>,
     },
     /// CR 704.5j (legend rule): `player` controls 2+ legendary permanents
@@ -144,12 +150,14 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
             pending_event,
             candidates,
             excluded,
+            is_destroy,
             pending_deaths,
         } => SbaOutcome::NeedsOrderingChoice {
             affected_player,
             pending_event,
             candidates,
             excluded,
+            is_destroy,
             pending_deaths,
             resolved_so_far: events,
         },
@@ -168,8 +176,13 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     //     layers::effective_characteristics - see collect_dying_creatures's own
     //     doc comment. Combat-damage power and blocking-legality keyword
     //     checks (commands.rs) are NOT wired to the layer engine yet.
-    //   - regeneration (CR 701.16): would replace 704.5g's destroy, not
-    //     modeled, lethal damage always destroys outright here.
+    //   - regeneration (CR 614.8/701.19): done, via the phase5/regeneration
+    //     slice (docs/implementation.md) - CR 704.5g destruction only
+    //     (deathtouch included), gated by DyingCandidate::is_destroy so a
+    //     704.5f zero-toughness or 704.5k world-rule death (neither is
+    //     "destroy") can't be saved by a shield. The scripted `Destroy`
+    //     script op still doesn't check for one - named follow-up, that
+    //     slice's own UNRESOLVED list.
     //   - planeswalker loyalty 0 (704.5i - not v1 scope per DESIGN.md), and
     //     the rest of 704.5 - no prerequisite subsystem exists yet.
 }
@@ -288,6 +301,20 @@ fn remove_players_objects(state: &mut GameState, player: PlayerId) {
     }
 }
 
+/// One `resolve_deaths` candidate: `id` is moving from the battlefield to
+/// the graveyard, and `is_destroy` says whether that move is genuine
+/// destruction (CR 614.8) — the only kind of death a regeneration shield
+/// (`ReplacementPayload::Regenerate`) can intercept. CR 704.5g (lethal
+/// damage/deathtouch) is destruction; CR 704.5f (zero-or-less toughness) and
+/// CR 704.5k (world rule) are both battlefield -> graveyard moves per CR
+/// 700.4's "dies," but neither is "destroy" - conflating them would let a
+/// shield incorrectly save a 0-toughness creature, a real rules bug this
+/// type exists specifically to prevent.
+pub struct DyingCandidate {
+    pub id: ObjectId,
+    pub is_destroy: bool,
+}
+
 /// CR 704.5f/704.5g: which battlefield creatures have non-positive
 /// toughness, or marked damage at or above their toughness — the candidate
 /// set `resolve_deaths` actually moves. Toughness, Indestructible, and
@@ -299,13 +326,17 @@ fn remove_players_objects(state: &mut GameState, player: PlayerId) {
 /// land, `AddCardType(CREATURE)` plus a `SetPT` for its 3/3), or a scripted
 /// characteristic-defining toughness (layer 7a) now actually changes whether
 /// this check applies at all.
-fn collect_dying_creatures(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
+///
+/// `DyingCandidate::is_destroy` distinguishes the two SBAs this function
+/// covers — `false` for 704.5f (zero toughness), `true` for 704.5g (lethal
+/// damage/deathtouch) — see that type's own doc comment for why.
+fn collect_dying_creatures(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
     let candidates: Vec<ObjectId> =
         state.objects.values().filter(|o| o.zone == ZoneKind::Battlefield).map(|o| o.object_id).collect();
 
     candidates
         .into_iter()
-        .filter(|&id| {
+        .filter_map(|id| {
             let effective = crate::layers::effective_characteristics(state, script_runtime, id);
             // CR 613 layer 4: a land animated into a creature by
             // AddCardType(CREATURE) is subject to this SBA; a plain land
@@ -313,24 +344,27 @@ fn collect_dying_creatures(state: &GameState, script_runtime: &ScriptRuntime) ->
             // the effective type, not CardDefinition.card_types, so a
             // granted type actually counts.
             if !effective.card_types.contains(CardTypeSet::CREATURE) {
-                return false;
+                return None;
             }
             // CDA toughness (PTValue::CharacteristicDefining) can't be
             // resolved without the script bridge - skip rather than guess,
             // same stance `PTValue::as_fixed`/`layers.rs` already take.
-            let Some(toughness) = effective.toughness else { return false };
+            let toughness = effective.toughness?;
             let object = state.object(id).expect("candidate id came from state.objects itself");
             // CR 704.5f: 0-or-less toughness applies unconditionally, even
-            // to an indestructible creature (702.12b only exempts 704.5g).
+            // to an indestructible creature (702.12b only exempts 704.5g) -
+            // and isn't destruction, so a regeneration shield can't save it.
             if toughness <= 0 {
-                return true;
+                return Some(DyingCandidate { id, is_destroy: false });
             }
             if effective.keywords.contains(KeywordSet::INDESTRUCTIBLE) {
-                return false;
+                return None;
             }
             // CR 704.5g + 702.2b/c: lethal marked damage, or any nonzero
-            // damage at all from a Deathtouch source.
-            object.damage_marked >= toughness as u32 || (object.deathtouched && object.damage_marked > 0)
+            // damage at all from a Deathtouch source - this one IS
+            // destruction.
+            let lethal = object.damage_marked >= toughness as u32 || (object.deathtouched && object.damage_marked > 0);
+            lethal.then_some(DyingCandidate { id, is_destroy: true })
         })
         .collect()
 }
@@ -414,7 +448,7 @@ fn find_commander_return_candidate(state: &GameState) -> Option<(PlayerId, Objec
 /// dying-creature list instead of getting their own pause type. Name/
 /// supertypes read via `layers::effective_characteristics`, same convention
 /// `find_legend_rule_group` above uses.
-fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
+fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
     let world_objects: Vec<(ObjectId, crate::types::ids::SequenceNo)> = state
         .objects
         .values()
@@ -429,11 +463,17 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
     }
     let max_timestamp = world_objects.iter().map(|(_, ts)| *ts).max().expect("checked len >= 2 above");
     let survivor_count = world_objects.iter().filter(|(_, ts)| *ts == max_timestamp).count();
+    // CR 704.5k is "put into its owner's graveyard," not "destroy" - never
+    // interceptable by a regeneration shield, same as 704.5f above.
     if survivor_count == 1 {
-        world_objects.into_iter().filter(|(_, ts)| *ts != max_timestamp).map(|(id, _)| id).collect()
+        world_objects
+            .into_iter()
+            .filter(|(_, ts)| *ts != max_timestamp)
+            .map(|(id, _)| DyingCandidate { id, is_destroy: false })
+            .collect()
     } else {
         // Tie for shortest time - no unique survivor, all die.
-        world_objects.into_iter().map(|(id, _)| id).collect()
+        world_objects.into_iter().map(|(id, _)| DyingCandidate { id, is_destroy: false }).collect()
     }
 }
 
@@ -458,7 +498,11 @@ pub(crate) enum DeathResolution {
         pending_event: GameEventKind,
         candidates: Vec<ObjectId>,
         excluded: Vec<ObjectId>,
-        pending_deaths: VecDeque<ObjectId>,
+        /// Whether `pending_event` is genuine destruction - see
+        /// `DyingCandidate`'s own doc comment. `pending_deaths`' own
+        /// remaining entries each carry their own `is_destroy` already.
+        is_destroy: bool,
+        pending_deaths: VecDeque<DyingCandidate>,
     },
 }
 
@@ -479,11 +523,11 @@ pub(crate) enum DeathResolution {
 pub(crate) fn resolve_deaths(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
-    mut pending_deaths: VecDeque<ObjectId>,
+    mut pending_deaths: VecDeque<DyingCandidate>,
 ) -> DeathResolution {
     let mut resolved = Vec::new();
     let mut departed_triggered = Vec::new();
-    while let Some(object_id) = pending_deaths.pop_front() {
+    while let Some(DyingCandidate { id: object_id, is_destroy }) = pending_deaths.pop_front() {
         let Some(object) = state.object(object_id) else {
             // Already moved by an earlier iteration of this same pass
             // (shouldn't happen - object_id is from this pass's own
@@ -497,13 +541,13 @@ pub(crate) fn resolve_deaths(
             to: ZoneKind::Graveyard,
             last_known_info: Some(last_known_info),
         };
-        match replacement::apply_replacements(state, script_runtime, proposed) {
+        match replacement::apply_replacements(state, script_runtime, proposed, is_destroy) {
             ReplacementOutcome::Resolved(final_event) => {
-                let (event, mut abilities) = commit_death(state, final_event);
+                let (event, mut abilities) = commit_death_or_regeneration(state, final_event);
                 resolved.push(event);
                 departed_triggered.append(&mut abilities);
             }
-            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
+            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                 // Pre-existing gap, not introduced by this slice: `resolved`
                 // (and now `departed_triggered`) from any earlier iteration
                 // of this same while loop are dropped here rather than
@@ -520,6 +564,7 @@ pub(crate) fn resolve_deaths(
                     pending_event: event,
                     candidates,
                     excluded,
+                    is_destroy,
                     pending_deaths,
                 };
             }
@@ -546,9 +591,9 @@ pub(crate) fn resolve_deaths(
 /// dies"/"when this leaves the battlefield" ability to still fire.
 pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (GameEvent, Vec<RegisteredAbility>) {
     let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = event else {
-        // resolve_deaths only ever feeds this a ZoneChange it just proposed
-        // itself - apply_replacements either hands that back unchanged or
-        // with `to` rewritten, never a different GameEventKind entirely.
+        // Every caller routes through commit_death_or_regeneration below,
+        // which only ever forwards a real ZoneChange here - a Regenerated
+        // event goes to commit_regeneration instead.
         unreachable!("commit_death is only ever called with a ZoneChange event");
     };
     let last_known_info = last_known_info.expect("resolve_deaths always sets last_known_info");
@@ -590,6 +635,57 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (Game
         parent_event: None,
     };
     (event, departed_triggered)
+}
+
+/// CR 614.8/701.19: performs regeneration's actual side effects, once
+/// `replacement::ReplacementEffect::apply` has already rewritten the
+/// proposed destroy into a `GameEventKind::Regenerated` - remove all marked
+/// damage (and the Deathtouch taint alongside it, same pairing Cleanup's own
+/// CR 514.2 damage-removal already keeps), tap the permanent, and remove it
+/// from combat (CR 506.4's own attacker/blocker lists - `EndOfCombat`
+/// already clears the whole `CombatState` at the end of the phase; this is
+/// the same idea for just this one permanent, mid-combat). Unlike
+/// `commit_death`, `object`'s `ObjectId` is unchanged - the permanent never
+/// leaves the battlefield, so CR 400.7's "destruction mints a new object"
+/// rule doesn't apply, and there's nothing for `commands::retire_object` to
+/// purge (no departed `Triggered`-kind abilities either, hence the always-
+/// empty second element).
+pub(crate) fn commit_regeneration(state: &mut GameState, object: ObjectId) -> (GameEvent, Vec<RegisteredAbility>) {
+    if let Some(obj) = state.object_mut(object) {
+        obj.damage_marked = 0;
+        obj.deathtouched = false;
+        obj.tapped = true;
+    }
+    if let Some(combat) = state.combat.as_mut() {
+        combat.attackers.retain(|(id, _)| *id != object);
+        combat.blocks.retain(|(blocker, attacker)| *blocker != object && *attacker != object);
+    }
+    let event_id = state.allocate_event_id();
+    let sequence_no = state.allocate_sequence_no();
+    let event = GameEvent {
+        event_id,
+        sequence_no,
+        kind: GameEventKind::Regenerated { object },
+        caused_by_command: None,
+        parent_event: None,
+    };
+    (event, Vec::new())
+}
+
+/// Dispatches a replacement-checked destroy proposal's final resolved event
+/// to the right committer - `commit_death` for an ordinary (possibly zone-
+/// substituted) `ZoneChange`, `commit_regeneration` for a regeneration
+/// shield's `Regenerated`. The one place every real caller (`resolve_deaths`
+/// below, and `Engine::submit_replacement_choice`'s SBA-resume branch) needs
+/// to make this choice, kept here rather than duplicated at each call site.
+pub(crate) fn commit_death_or_regeneration(
+    state: &mut GameState,
+    event: GameEventKind,
+) -> (GameEvent, Vec<RegisteredAbility>) {
+    match event {
+        GameEventKind::Regenerated { object } => commit_regeneration(state, object),
+        other => commit_death(state, other),
+    }
 }
 
 /// CR 903.9a: performs the *accepted* "return commander to the command

@@ -371,7 +371,12 @@ pub enum ReplacementResumeTarget {
     /// rest of this pass's dying-creature list still to check; `then` says
     /// which state originally started this pass, since `SbaLoop`'s and
     /// `CleanupSbaCheck`'s own "nothing more to do" transitions differ.
-    SbaDeath { pending_deaths: VecDeque<ObjectId>, then: SbaResumeThen },
+    /// `is_destroy` is the currently-paused event's own destroy-tag (CR
+    /// 614.8's regeneration only intercepts genuine destruction - see
+    /// `sba::DyingCandidate`'s own doc comment) - already popped off
+    /// `pending_deaths` by the time this pause fires, so it can't be
+    /// re-derived from the queue.
+    SbaDeath { pending_deaths: VecDeque<sba::DyingCandidate>, is_destroy: bool, then: SbaResumeThen },
 }
 
 /// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
@@ -940,7 +945,16 @@ impl Engine {
         // pause can't reapply to the same event after it.
         let rewritten = replacement::apply_one_replacement(&mut self.state, chosen, pending_event);
         excluded.push(chosen);
-        let outcome = replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, excluded);
+        // is_destroy is per-resume-target: a ReplacementCheck-originated
+        // event is never a destroy proposal (see replacement.rs's own doc
+        // comment on why); an SbaDeath resume carries its own paused-event
+        // tag forward (sba::DyingCandidate's own doc comment).
+        let is_destroy = match &resume {
+            ReplacementResumeTarget::ReplacementCheck { .. } => false,
+            ReplacementResumeTarget::SbaDeath { is_destroy, .. } => *is_destroy,
+        };
+        let outcome =
+            replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, is_destroy, excluded);
 
         self.process_state = match resume {
             ReplacementResumeTarget::ReplacementCheck { remaining, mut checked } => match outcome {
@@ -948,7 +962,7 @@ impl Engine {
                     checked.push(event);
                     ProcessState::ReplacementCheck { remaining, checked }
                 }
-                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                     ProcessState::AwaitingReplacementChoice {
                         affected_player,
                         pending_event: event,
@@ -958,18 +972,18 @@ impl Engine {
                     }
                 }
             },
-            ReplacementResumeTarget::SbaDeath { pending_deaths, then } => match outcome {
+            ReplacementResumeTarget::SbaDeath { pending_deaths, then, .. } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
-                    let (committed, departed) = sba::commit_death(&mut self.state, event);
+                    let (committed, departed) = sba::commit_death_or_regeneration(&mut self.state, event);
                     self.resume_sba_death(pending_deaths, vec![committed], departed, then)
                 }
-                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                     ProcessState::AwaitingReplacementChoice {
                         affected_player,
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::SbaDeath { pending_deaths, then },
+                        resume: ReplacementResumeTarget::SbaDeath { pending_deaths, is_destroy, then },
                     }
                 }
             },
@@ -1004,7 +1018,14 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        let losers: VecDeque<ObjectId> = candidates.into_iter().filter(|id| *id != kept).collect();
+        // CR 704.5j is "put into its owner's graveyard," not "destroy" -
+        // never interceptable by a regeneration shield, same as 704.5f/k
+        // (see sba::DyingCandidate's own doc comment).
+        let losers: VecDeque<sba::DyingCandidate> = candidates
+            .into_iter()
+            .filter(|id| *id != kept)
+            .map(|id| sba::DyingCandidate { id, is_destroy: false })
+            .collect();
         self.process_state = self.resume_sba_death(losers, Vec::new(), Vec::new(), then);
         Ok(())
     }
@@ -2625,7 +2646,12 @@ impl Engine {
                                             to: ZoneKind::Graveyard,
                                             last_known_info: Some(last_known_info),
                                         };
-                                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed) {
+                                        // CR 701.20/614.8: sacrifice is never
+                                        // destruction - is_destroy: false, so
+                                        // a regeneration shield can't (and
+                                        // per the real rules, shouldn't)
+                                        // intercept it.
+                                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
                                             ReplacementOutcome::Resolved(final_event) => {
                                                 let (event, departed) =
                                                     sba::commit_death(&mut self.state, final_event);
@@ -2684,10 +2710,19 @@ impl Engine {
                                                 to: ZoneKind::Graveyard,
                                                 last_known_info: Some(last_known_info),
                                             };
-                                            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed) {
+                                            // CR 614.8: Destroy is genuine
+                                            // destruction - is_destroy: true,
+                                            // so a regeneration shield can
+                                            // intercept it (CR 701.19c: only
+                                            // if nothing already said this
+                                            // Destroy "can't be regenerated" -
+                                            // that qualifier isn't modeled,
+                                            // see this slice's own UNRESOLVED
+                                            // notes).
+                                            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, true) {
                                                 ReplacementOutcome::Resolved(final_event) => {
                                                     let (event, departed) =
-                                                        sba::commit_death(&mut self.state, final_event);
+                                                        sba::commit_death_or_regeneration(&mut self.state, final_event);
                                                     self.departed_triggered_abilities.extend(departed);
                                                     self.state.ledger.push(event);
                                                 }
@@ -2702,7 +2737,11 @@ impl Engine {
                                                     // full rules text" precedent
                                                     // every slice takes - silently
                                                     // does nothing rather than
-                                                    // guessing an order.
+                                                    // guessing an order. A
+                                                    // regeneration shield that's
+                                                    // one of 2+ matches here hits
+                                                    // this same pre-existing gap,
+                                                    // not a new one.
                                                 }
                                             }
                                         }
@@ -2750,7 +2789,13 @@ impl Engine {
                                             to: ZoneKind::Exile,
                                             last_known_info: Some(last_known_info.clone()),
                                         };
-                                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed) {
+                                        // CR 614.8: Exile is never
+                                        // destruction (and its own proposed
+                                        // `to: Exile` couldn't match a
+                                        // Regenerate-paired WouldDie filter
+                                        // regardless, which only ever fires
+                                        // on `to: Graveyard`).
+                                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
                                             ReplacementOutcome::Resolved(final_event) => {
                                                 let GameEventKind::ZoneChange { object: old_id, to, .. } = final_event else {
                                                     unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
@@ -3137,12 +3182,18 @@ impl Engine {
                     self.process_state = ProcessState::CommitEvents { checked };
                     return StepStatus::Progressed;
                 };
-                match replacement::apply_replacements(&mut self.state, &self.script_runtime, event) {
+                // Never a destroy proposal - every event reaching this
+                // generic command-pipeline check (damage, sacrifice/discard
+                // cost payments, ...) is unrelated to CR 704.5g/614.8; the
+                // real destroy producers (SBA lethal damage, the scripted
+                // Destroy op) both run their own inline replacement check
+                // instead of this one, same as before this slice.
+                match replacement::apply_replacements(&mut self.state, &self.script_runtime, event, false) {
                     ReplacementOutcome::Resolved(event) => {
                         checked.push(event);
                         self.process_state = ProcessState::ReplacementCheck { remaining, checked };
                     }
-                    ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded } => {
+                    ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                         self.process_state = ProcessState::AwaitingReplacementChoice {
                             affected_player,
                             pending_event: event,
@@ -3315,6 +3366,7 @@ impl Engine {
                         pending_event,
                         candidates,
                         excluded,
+                        is_destroy,
                         pending_deaths,
                         resolved_so_far,
                     } => {
@@ -3328,7 +3380,11 @@ impl Engine {
                             pending_event,
                             candidates,
                             excluded,
-                            resume: ReplacementResumeTarget::SbaDeath { pending_deaths, then: SbaResumeThen::SbaLoop },
+                            resume: ReplacementResumeTarget::SbaDeath {
+                                pending_deaths,
+                                is_destroy,
+                                then: SbaResumeThen::SbaLoop,
+                            },
                         }
                     }
                     SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far } => {
@@ -3600,6 +3656,7 @@ impl Engine {
                         pending_event,
                         candidates,
                         excluded,
+                        is_destroy,
                         pending_deaths,
                         resolved_so_far,
                     } => {
@@ -3611,6 +3668,7 @@ impl Engine {
                             excluded,
                             resume: ReplacementResumeTarget::SbaDeath {
                                 pending_deaths,
+                                is_destroy,
                                 then: SbaResumeThen::CleanupSbaCheck { since_ledger },
                             },
                         }
@@ -3738,7 +3796,7 @@ impl Engine {
     /// a fresh pass reach the exact same "nothing more to do" transition.
     fn resume_sba_death(
         &mut self,
-        pending_deaths: VecDeque<ObjectId>,
+        pending_deaths: VecDeque<sba::DyingCandidate>,
         mut already_resolved: Vec<GameEvent>,
         mut already_departed: Vec<RegisteredAbility>,
         then: SbaResumeThen,
@@ -3759,6 +3817,7 @@ impl Engine {
                 pending_event,
                 candidates,
                 excluded,
+                is_destroy,
                 pending_deaths,
             } => {
                 // already_resolved (this pass's progress so far) commits now
@@ -3769,7 +3828,7 @@ impl Engine {
                     pending_event,
                     candidates,
                     excluded,
-                    resume: ReplacementResumeTarget::SbaDeath { pending_deaths, then },
+                    resume: ReplacementResumeTarget::SbaDeath { pending_deaths, is_destroy, then },
                 }
             }
         }

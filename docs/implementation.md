@@ -2464,10 +2464,12 @@ verbatim once enough time has passed for the underlying code to have moved.
 - **CR 402.2 (max hand size)**: hardcoded to a literal `7` in Cleanup's discard check - doesn't consult
   `state.continuous_effects` for "you have no maximum hand size"-style effects, since no query API for
   that exists yet (`engine.rs`).
-- **Regeneration (CR 701.16)**: not modeled at all - lethal damage always destroys outright, there's no
-  "instead, regenerate" replacement shield mechanic (`sba.rs`'s own dying-creature TODO, which is
-  otherwise stale re: the other items it lists - CDA toughness and layer 7c/6 consumers it names as
-  still-missing were actually closed by the layer-engine sub-slices since it was written).
+- **Regeneration (CR 614.8/701.19)**: closed, `phase5/regeneration` (docs/implementation.md, below) -
+  `ReplacementPayload::Regenerate`, gated to genuine destruction only (CR 704.5g lethal damage/
+  deathtouch, and the scripted `Destroy` op) via a per-call `is_destroy` flag, not CR 704.5f (zero
+  toughness) or CR 704.5k (world rule) - neither of those is "destroy." CR 701.19c ("can't be
+  regenerated") isn't modeled - no mechanism exists to stop a shield from being created at all, only
+  from applying once created.
 - **CR 601.6/733 unwind**: `Engine::unwind_payment` is an honest forward zone-change/removal, not a
   true state rewind - this engine's ledger is append-only with no undo primitive, a permanent
   architectural choice rather than a gap expected to close later.
@@ -7276,3 +7278,116 @@ the two real call-site ripples that caused. `ContinuousEffectSpec` gained two fi
   the scenario format builds `ContinuousEffect` directly as a Rust struct with no script bridge at
   that layer at all (same standing gap `ContinuousEffectSpec`'s own doc comment already named before
   this slice).
+
+## Phase 5: phase5/regeneration slice (CR 614.8/701.19)
+
+Branch `phase5/regeneration`, off master. Picked from the "Known unresolved gaps" list rather than a
+numbered backlog item — the full numbered backlog (items 1-17) closed with the previous slice, leaving
+only item 16 (planeswalkers/battles/DFCs/split/sagas, an explicit non-goal).
+
+**Pre-slice scoping finding, presented to the human before branching:** this engine's death pipeline
+didn't distinguish "destroy" from "any other battlefield → graveyard move." `sba::
+collect_dying_creatures` returned one flat `Vec<ObjectId>` covering both CR 704.5f (zero toughness —
+NOT destruction) and CR 704.5g (lethal damage — IS destruction) with no tag telling them apart, and
+`resolve_deaths` further mixed those with CR 704.5k world-rule losers (also not destruction). Reusing
+`EventFilter::WouldDie` unmodified for a regeneration shield would have let it incorrectly save a
+0-toughness creature — a real rules bug, not a nitpick. Recommended scope (confirmed by the human
+before implementation): wire regeneration into the CR 704.5g SBA path, correctly excluding 704.5f/k,
+and defer the scripted `Destroy` op as a follow-up.
+
+**Deviation from the recommended scope — Destroy-op support turned out cheap, included it anyway:**
+once the `is_destroy` plumbing was in place, adding the scripted `Destroy` op cost one line (`false` →
+`true` at that call site) plus swapping `commit_death` for the new dispatch helper — the pre-existing
+CR 616.1 ordering-choice gap on `Destroy` (2+ matching replacement effects silently no-op, a gap that
+predates this slice) wasn't made any worse by that, since a lone regeneration shield still resolves
+through the ordinary `Resolved` path. Included it rather than leaving free correctness on the table.
+
+**What got implemented:**
+- `types/event.rs`: `GameEventKind::Regenerated { object }` — the proposed destroy `ZoneChange` is
+  *replaced* with this (CR 614.6's own model: a replaced event never happens, a modified one occurs
+  instead), not rewritten into a different zone move — the permanent never leaves the battlefield, so
+  no new `ObjectId` is minted (CR 400.7 doesn't apply).
+- `types/effect.rs`: `ReplacementPayload::Regenerate` — no new `EventFilter` variant; it's paired with
+  the existing `WouldDie` shape. `ReplacementEffect::matches` gained an `is_destroy: bool` parameter
+  (not a field on `GameEventKind::ZoneChange` — that would have rippled through the ~60 unrelated
+  `ZoneChange` construction sites across the codebase for zero benefit, since nothing but the two real
+  destroy producers ever needs to say it) — a `Regenerate`-payload effect only matches when the caller
+  says `is_destroy: true`.
+- `sba.rs`: new `DyingCandidate { id, is_destroy }` replaces the bare `ObjectId` `collect_dying_creatures`/
+  `collect_world_rule_losers`/`resolve_deaths` passed around — `collect_dying_creatures` now tags its
+  704.5f branch `false` and its 704.5g branch `true`; `collect_world_rule_losers` always tags `false`.
+  New `commit_regeneration` (strip `damage_marked`/`deathtouched`, set `tapped`, remove from
+  `state.combat`'s `attackers`/`blocks` — CR 701.19's actual side effects) alongside the existing
+  `commit_death`, and a new `commit_death_or_regeneration` dispatcher both `resolve_deaths` and
+  `Engine::submit_replacement_choice`'s SBA-resume branch call instead of `commit_death` directly.
+- `engine.rs`: `is_destroy` threaded through the *entire* CR 616.1 ordering-choice pause/resume chain —
+  `ReplacementResumeTarget::SbaDeath` gained its own `is_destroy` field (the currently-paused event's
+  tag, since it's already popped off `pending_deaths` by the time the pause fires), `sba::
+  SbaOutcome::NeedsOrderingChoice`/`sba::DeathResolution::NeedsOrderingChoice` both carry it alongside
+  their own `pending_deaths: VecDeque<DyingCandidate>`. `Sacrifice`/`Exile` script ops pass
+  `is_destroy: false` (neither is destruction — confirmed by reading each site, not assumed); `Destroy`
+  passes `true` (see the scope-widening note above); the generic command-events `ReplacementCheck`
+  pipeline and its own resume always pass `false` (nothing routed through it is ever a destroy
+  proposal — the two real destroy producers each run their own inline replacement check instead,
+  unchanged from before this slice).
+- `CR 704.5j` legend-rule losers (`submit_legend_rule_choice`) also tagged `is_destroy: false` — CR
+  704.5j is "put into its owner's graveyard," not "destroy," same as 704.5f/k.
+
+**CR requirements:** 614.8 (regeneration is a destruction-replacement effect), 701.19a (spell/ability-
+sourced shield: one-shot, "the next time... this turn") and 701.19b (static-ability-sourced shield:
+repeatable, reapplies every time) — both map directly onto the pre-existing `ConsumptionPolicy::
+OneShot`/`Repeatable` split, no new machinery needed for that distinction. 701.19c ("can't be
+regenerated" stops a shield from being *created*, not just from applying) is named but not modeled —
+see UNRESOLVED.
+
+**TODOs marked, not silently narrowed:**
+- CR 701.19c ("can't be regenerated") — no mechanism exists to prevent a shield from being created at
+  all; this engine has no equivalent of a keyword/flag for it yet.
+- No `Game.Ops.Regenerate`/Lua builder for creating a shield — same standing "no Lua builder for
+  replacement effects" gap every `ReplacementEffect` already has (`replacement.rs`'s own doc comment).
+  Shields built via Rust struct literal only this slice, matching every existing replacement-effect
+  test.
+- The pre-existing CR 616.1 ordering-choice gap on the scripted `Destroy` op (2+ matches silently
+  no-op rather than pausing) is unaffected by this slice — not made worse, not fixed either.
+- No "whenever this regenerates" trigger condition — real but rare oracle text (e.g. Broodhatch
+  Nantuko); `GameEventKind::Regenerated` ships with no matching `ConditionPrimitive` yet.
+
+**VERIFICATION RESULT:** Pass. `cargo test --workspace` — 678 total, 0 failed, including 9 new tests in
+`crates/engine/tests/phase5_regeneration.rs`: a `OneShot` shield saves a creature with lethal damage
+(damage cleared, tapped, same `ObjectId`); the same shield does NOT save a second lethal hit
+afterward (consumed); a `Repeatable` shield survives multiple lethal hits; a 0-toughness creature is
+NOT saved by a shield (the core rules nuance this slice exists to get right); a regenerating attacker
+is removed from `state.combat`; an unshielded creature is destroyed normally (regression); two
+matching replacement effects (one a regeneration shield, one a plain `WouldDie` exile effect) still
+pause for a real CR 616.1 ordering choice — both at the `sba::check_state_based_actions` unit level and
+through the full `Engine` pause/resume pipeline (`AwaitingReplacementChoice` →
+`submit_replacement_choice`), proving the `is_destroy` threading survives a real pause/resume round
+trip; a scripted `Destroy` spell is intercepted by a regeneration shield the same way SBA-driven
+destruction is. All prior tests (669 before this slice) unaffected.
+
+**STRUCT DEVIATIONS:** `sba::DyingCandidate` (new, `pub` — not anticipated as a *public* type in the
+scoping report, but had to be: `SbaOutcome::NeedsOrderingChoice`/`DeathResolution::NeedsOrderingChoice`
+are both already `pub`/`pub(crate)`-visible to integration tests, so their `pending_deaths` field's
+element type needed the same visibility, caught by the compiler rather than guessed at). `sba::
+DeathResolution::NeedsOrderingChoice`, `sba::SbaOutcome::NeedsOrderingChoice`, and `engine.rs`'s
+`ReplacementResumeTarget::SbaDeath` each gained an `is_destroy: bool` field, exactly as scoped going
+in.
+
+**INTERFACE DEVIATIONS:** `replacement::apply_replacements`/`apply_replacements_from`/`ReplacementEffect::
+matches` all gained an `is_destroy: bool` parameter — anticipated. `sba::resolve_deaths`/`Engine::
+resume_sba_death` changed their queue parameter from `VecDeque<ObjectId>` to `VecDeque<DyingCandidate>`
+— anticipated. `sba::commit_death_or_regeneration` (new) — not named in the pre-slice report, which
+only mentioned `commit_regeneration`; added once it became clear both `resolve_deaths` and the SBA
+ordering-choice resume branch needed the same dispatch logic, to avoid duplicating it.
+
+**SCOPE DEVIATIONS:** the scripted `Destroy` op (`engine.rs`) — see the "turned out cheap" note above.
+Everywhere `apply_replacements` is called needed its own explicit `is_destroy` decision (`Sacrifice`/
+`Exile`/the generic `ReplacementCheck` pipeline all `false`; `Destroy` `true`) — a mechanical but
+real ripple through every one of that function's ~6 real call sites, not just the two that actually
+produce `true`.
+
+**UNRESOLVED:** see the TODOs above — CR 701.19c, no Lua builder, the pre-existing Destroy ordering-
+choice gap, and no regeneration trigger condition. Also: `ConsumptionPolicy::LimitedUses(n)` was never
+exercised by this slice's own tests (only `OneShot`/`Repeatable`) — real Magic has no "regenerate N
+times" card text, so this wasn't a gap worth manufacturing a test for, just noting the combination is
+untested rather than implying it's broken.
