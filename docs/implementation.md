@@ -2429,9 +2429,13 @@ verbatim once enough time has passed for the underlying code to have moved.
   effect resolution and CR 608.2b's actual partial-fizzle text closed separately, `phase5/multi-
   target-resolution`; "up to N" counts closed separately too, `phase5/targeting-up-to-n` (both
   docs/implementation.md, below).
-- **Static abilities**: `EffectDuration` is always `Permanent` for a self-registered static ability -
-  no "as long as ..." conditional gating (`WhileConditionHolds` exists as an enum variant, nothing
-  produces one).
+- **Static abilities**: `StaticAbilityBuilder` still always sets `duration: Permanent` (no Lua/TOML
+  path to `UntilEndOfTurn` etc. on a static ability). "As long as ..." conditional gating closed
+  separately, `phase5/conditional-continuous-effects` (CR 611.2c, docs/implementation.md, below) —
+  `ContinuousEffect.condition`/`Game.InterveningIf.ControlsAtLeast`/`:SetCondition`, one concrete
+  shape (`ControllerControlsAtLeast`). `EffectDuration`'s broader inert-duration gap
+  (`UntilYourNextTurn`/`UntilEndOfCombat` never expire, named in that slice's own TODOs) is still
+  open, orthogonal to conditional gating.
 - **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
   not a stable id - fragile if a card's own ability list ever needs to change shape.
 - **Replacement effects**: `EventFilter` only has two shapes (`DamageDealt`, `WouldDie`); no
