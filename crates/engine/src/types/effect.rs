@@ -385,9 +385,15 @@ pub enum ReplacementPayload {
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this
-/// codebase uses. `Script` stays dead code this slice — no Lua builder
-/// exists yet for a card to construct one (a natural future sibling to
-/// `Game.CreateStaticAbility`, not built here).
+/// codebase uses. `Script` stays dead code — no Lua builder exists yet for a
+/// card to construct one. `Primitive` now has a real Lua construction path,
+/// `Game.CreateReplacementEffect` (`phase5/static-regeneration`, CR 701.19b)
+/// — scoped narrowly to exactly the `WouldDie`/`Regenerate` pairing this
+/// slice needed proof against; the other `EventFilter`/`ReplacementPayload`
+/// pairings (damage prevention/redirection, non-regenerate zone-destination
+/// substitution) still have no Lua entry point, same "prove one real shape,
+/// name the rest" precedent `Game.CreateStaticAbility` itself started with
+/// (layers 6/7b/7c only, before later slices widened it).
 #[derive(Clone, Debug)]
 pub enum ReplacementSpec {
     Primitive { filter: EventFilter, payload: ReplacementPayload },
@@ -443,8 +449,26 @@ impl ReplacementEffect {
                 EventFilter::WouldDie { affected },
                 GameEventKind::ZoneChange { object, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, .. },
             ) => {
-                if matches!(payload, ReplacementPayload::Regenerate) && !is_destroy {
-                    return false;
+                if matches!(payload, ReplacementPayload::Regenerate) {
+                    if !is_destroy {
+                        return false;
+                    }
+                    // CR 701.19c, checked here rather than only at shield
+                    // creation time: a `Repeatable` (CR 701.19b, static-
+                    // ability-sourced) shield is registered once but must
+                    // keep re-gating on every destroy attempt, since the
+                    // target's CANT_BE_REGENERATED status can change after
+                    // the shield already exists - unlike a `OneShot` (CR
+                    // 701.19a) shield, which `engine.rs`'s creation site
+                    // already skips creating for a can't-be-regenerated
+                    // target (that skip remains, as a cheap optimization -
+                    // this check is what's now authoritative for both).
+                    if crate::layers::effective_characteristics(state, script_runtime, *object)
+                        .keywords
+                        .contains(KeywordSet::CANT_BE_REGENERATED)
+                    {
+                        return false;
+                    }
                 }
                 event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source)
             }

@@ -13,8 +13,8 @@ use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReferenc
 use crate::types::counter::CounterKind;
 use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{
-    AffectedFilter, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload, EffectPrimitive,
-    Layer,
+    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
+    EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
@@ -215,6 +215,12 @@ struct ScriptRegistry {
     /// no `&mut GameState` to call `allocate_sequence_no()` from inside a Lua
     /// callback — the drain step stamps the real value.
     pending_static: Vec<ContinuousEffect>,
+    /// Same idea as `pending_static`, for `Game.CreateReplacementEffect`'s
+    /// builder (CR 614/701.19b) — drained into `GameState.replacement_effects`
+    /// by `run_card_script`. Unlike `pending_static`'s `ContinuousEffect`, a
+    /// `ReplacementEffect` has no `timestamp` field to stamp at drain time —
+    /// nothing about CR 613.7 ordering applies to it.
+    pending_replacement: Vec<ReplacementEffect>,
     /// Backlog item 9: a coroutine `Thread` suspended mid-`invoke_operation`
     /// at a `Game.SelectTargets` call, keyed by the same opaque
     /// `ScriptHandle` space `scripts` uses (shares `next_handle`, kept in a
@@ -1041,6 +1047,80 @@ impl UserData for StaticAbilityBuilder {
     }
 }
 
+/// `Game.CreateReplacementEffect(c)`'s return value (CR 614, CR 701.19b) —
+/// the "natural future sibling to `Game.CreateStaticAbility`" `ReplacementSpec`'s
+/// own doc comment named. Deliberately narrower than that sibling: a
+/// `ReplacementEffect` isn't a CR 613 layer effect (it doesn't touch
+/// `layers::effective_characteristics` at all — it rewrites an *event*, a
+/// wholly separate mechanism, `state.replacement_effects`), so there's no
+/// `:SetLayer`/`:SetEffect` pairing to validate the way `StaticAbilityBuilder`
+/// does. This slice scopes the builder to the one payload shape it needed to
+/// prove against something real: `:Register()` always produces a `Repeatable`
+/// `EventFilter::WouldDie`/`ReplacementPayload::Regenerate` shield (CR
+/// 701.19b - "the effect of a static ability regenerates a permanent...
+/// each time that permanent would be destroyed"). `:SetAffected` mirrors
+/// `StaticAbilityBuilder::SetAffected`'s own table shape, but decodes
+/// straight to `EffectFilter` (not `AffectedFilter`) - `EventFilter` has no
+/// `Script`-affected shape yet (see `ReplacementSpec`'s own doc comment), so
+/// a custom-function argument is rejected with a real error rather than
+/// silently discarded.
+///
+/// `consumption: Repeatable` is not settable from Lua - the whole point of
+/// this builder existing (rather than reusing `Game.Ops.Regenerate()`'s
+/// `OneShot` creation path) is CR 701.19b's repeatable shape; a card that
+/// wants a one-shot shield already has that path via a resolving spell/
+/// ability's own `AbilityEffect::Regenerate`.
+struct ReplacementEffectBuilder {
+    source: ObjectId,
+    affected: EffectFilter,
+    registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for ReplacementEffectBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetAffected", |_, this, table: Table| {
+            let controller_name: Option<String> =
+                table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string())).map_err(to_lua_err)?;
+            let controller = controller_name
+                .map(|name| parse_filter_controller_name(&name))
+                .transpose()
+                .map_err(to_lua_err)?;
+
+            let card_types_table: Option<Table> =
+                table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string())).map_err(to_lua_err)?;
+            let card_types = match card_types_table {
+                Some(t) => {
+                    let mut set = CardTypeSet::empty();
+                    for entry in t.sequence_values::<String>() {
+                        let name = entry.map_err(|e| ScriptError::LoadError(e.to_string())).map_err(to_lua_err)?;
+                        set |= parse_card_type_name(&name).map_err(to_lua_err)?;
+                    }
+                    Some(set)
+                }
+                None => None,
+            };
+
+            let self_only: Option<bool> =
+                table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string())).map_err(to_lua_err)?;
+
+            this.affected = EffectFilter { controller, card_types, self_only: self_only.unwrap_or(false) };
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let replacement_effect = ReplacementEffect {
+                source: this.source,
+                spec: ReplacementSpec::Primitive {
+                    filter: EventFilter::WouldDie { affected: this.affected },
+                    payload: ReplacementPayload::Regenerate,
+                },
+                consumption: ConsumptionPolicy::Repeatable,
+            };
+            this.registry.borrow_mut().pending_replacement.push(replacement_effect);
+            Ok(())
+        });
+    }
+}
+
 /// Owns the embedded Lua VM and every loaded card script. One `ScriptRuntime`
 /// per running engine process, not per-game — scripts load once and are
 /// reused across games, per DESIGN.md's "restart to reload, no hot-reload"
@@ -1128,9 +1208,12 @@ impl ScriptRuntime {
     /// call is drained right after — `pending_triggered` into
     /// `state.abilities`, `pending_static` into `state.continuous_effects`
     /// (stamped with a real `timestamp` here, the only place with `&mut
-    /// GameState` to allocate one). Neither `Game.CreateTriggeredAbility`'s
-    /// nor `Game.CreateStaticAbility`'s builder ever touches `state` itself
-    /// — only this drain does.
+    /// GameState` to allocate one), `pending_replacement` into
+    /// `state.replacement_effects` (no timestamp to stamp - see
+    /// `ReplacementEffect`'s own doc comment). None of `Game.
+    /// CreateTriggeredAbility`'s/`Game.CreateStaticAbility`'s/`Game.
+    /// CreateReplacementEffect`'s builders ever touch `state` itself — only
+    /// this drain does.
     ///
     /// Re-parses/re-evaluates the source fresh on every call rather than
     /// caching the compiled chunk per `CardDefinition` — simpler for this
@@ -1181,6 +1264,10 @@ impl ScriptRuntime {
             effect.timestamp = state.allocate_sequence_no();
         }
         state.continuous_effects.append(&mut static_effects);
+
+        let mut replacement_effects: Vec<ReplacementEffect> =
+            self.registry.borrow_mut().pending_replacement.drain(..).collect();
+        state.replacement_effects.append(&mut replacement_effects);
         Ok(())
     }
 
@@ -1917,6 +2004,17 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?
     };
 
+    let create_replacement_effect = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(ReplacementEffectBuilder {
+                source: ObjectId(source),
+                affected: EffectFilter { controller: None, card_types: None, self_only: false },
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
     let create_activated_ability = {
         let registry = Rc::clone(&registry);
         lua.create_function(move |_, source: u64| {
@@ -2004,6 +2102,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     game.set("Tokens", tokens)?;
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
     game.set("CreateStaticAbility", create_static_ability)?;
+    game.set("CreateReplacementEffect", create_replacement_effect)?;
     game.set("CreateActivatedAbility", create_activated_ability)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;

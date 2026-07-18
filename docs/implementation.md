@@ -2441,8 +2441,11 @@ verbatim once enough time has passed for the underlying code to have moved.
   about.
 - **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
   not a stable id - fragile if a card's own ability list ever needs to change shape.
-- **Replacement effects**: `EventFilter` only has two shapes (`DamageDealt`, `WouldDie`); no
-  `Game.CreateReplacementEffect`-style Lua builder exists yet.
+- **Replacement effects**: `EventFilter` still only has two shapes (`DamageDealt`, `WouldDie`).
+  `Game.CreateReplacementEffect` now exists, `phase5/static-regeneration` (docs/implementation.md,
+  below) - deliberately scoped to exactly one payload shape (`WouldDie`/`Regenerate`, CR 701.19b),
+  the one this slice needed to prove against something real. Damage prevention/redirection and
+  non-regenerate zone-destination substitution still have no Lua construction path.
 - **Triggers**: this bullet was stale - both the player-relative shape (`DiscardsCard`/
   `EachDiscardsCard`) and the self-referential shape (`ConditionPrimitive::Discarded`, "when *this*
   card is discarded", `phase5/discarded-trigger`, docs/implementation.md below) are now real, off
@@ -2484,7 +2487,15 @@ verbatim once enough time has passed for the underlying code to have moved.
   regenerated") also closed, `phase5/cant-be-regenerated` (docs/implementation.md, below) -
   `KeywordSet::CANT_BE_REGENERATED`, checked at shield-creation time by the same slice's new
   `AbilityEffect::Regenerate` (the first real creation path for a shield at all - every prior test
-  built one directly via a Rust struct literal).
+  built one directly via a Rust struct literal). CR 701.19b (a *static* ability's own repeatable
+  shield) also closed, `phase5/static-regeneration` (docs/implementation.md, below) -
+  `Game.CreateReplacementEffect` self-registers a `ConsumptionPolicy::Repeatable` shield;
+  `ReplacementEffect::matches` now re-checks CANT_BE_REGENERATED fresh on every application (not
+  just at creation time) since a static shield's target can gain that status well after the shield
+  itself was registered. Found and fixed alongside it: `retire_object`/`purge_granted_abilities`
+  never purged `state.replacement_effects` - harmless before this slice (every prior entry was
+  `OneShot`/`LimitedUses` and self-consumed), a real leak once a `Repeatable` entry could outlive
+  its source.
 - **CR 601.6/733 unwind**: `Engine::unwind_payment` is an honest forward zone-change/removal, not a
   true state rewind - this engine's ledger is append-only with no undo primitive, a permanent
   architectural choice rather than a gap expected to close later.
@@ -8006,3 +8017,115 @@ trip over.
 
 **UNRESOLVED:** the `layers.rs` exception (see above) — the one deliberately unfixed piece of the
 original gap, named rather than silently dropped.
+
+## Phase 5: phase5/static-regeneration slice (CR 701.19b, `Game.CreateReplacementEffect`)
+
+Branch `phase5/static-regeneration`, off master. Picked from the "Known unresolved gaps" list's
+regeneration bullet — CR 701.19b ("if the effect of a static ability regenerates a permanent, it
+replaces destruction with an alternate effect *each time* that permanent would be destroyed") was
+the one real half of regeneration `phase5/cant-be-regenerated` left standing: that slice built the
+CR 701.19a one-shot (`OneShot`) creation path only.
+
+**Scoping finding, before writing code:** `ConsumptionPolicy::Repeatable` and the `EventFilter::
+WouldDie`/`ReplacementPayload::Regenerate` shape already existed and were already fully proven by
+`replacement.rs`'s own unit tests (and, it turned out, by `phase5_regeneration.rs`'s own
+`a_repeatable_shield_survives_multiple_lethal_hits` test) — the only real gap was a creation path.
+Grepping every real (non-test) `ReplacementEffect {` construction site confirmed it: exactly one
+existed anywhere, `engine.rs`'s `AbilityEffect::Regenerate` arm (`OneShot` only). A regeneration
+shield isn't a CR 613 layer effect — it rewrites an event, not a characteristic — so it can't route
+through `Game.CreateStaticAbility`/`state.continuous_effects`; `types/effect.rs`'s own doc comment
+on `ReplacementSpec::Script` already named the fix as "a natural future sibling to `Game.
+CreateStaticAbility`, not built here." This slice is that sibling, deliberately scoped to the one
+payload shape it needed to prove: `Game.CreateReplacementEffect` always produces a `Repeatable`
+`WouldDie`/`Regenerate` shield. Damage prevention/redirection and non-regenerate zone-destination
+substitution stay Lua-inaccessible, named rather than guessed at.
+
+**Correctness finding, made while designing (not discovered by a failing test):** CR 701.19c
+("can't be regenerated" effects cause regeneration shields "to not be applied") has to be checked
+fresh every time a shield is asked to apply, not just once at creation time the way `phase5/cant-
+be-regenerated`'s one-shot path checks it. That worked for a one-shot shield because it's created
+and consumed within the same narrow window. A static shield is registered once (e.g. on ETB) and
+then expected to keep working "each time" per CR 701.19b's own wording — but the target's
+CANT_BE_REGENERATED status can change after that registration. `ReplacementEffect::matches`'s
+`WouldDie`/`Regenerate` arm now checks `layers::effective_characteristics(...).keywords` there
+directly (types/effect.rs already calls `layers::effective_controller` the same way from
+`event_target_matches`, same module boundary, no new dependency direction). The one-shot creation-
+time skip in `engine.rs` stays as a cheap optimization; the match-time check is now the
+authoritative gate for both paths.
+
+**Second correctness finding, caught by two previously-passing tests actually failing, not by
+inspection:** `commands::retire_object`/`purge_granted_abilities` purge `state.abilities`/
+`state.continuous_effects` by source but never touched `state.replacement_effects` — harmless
+before this slice (every real entry was `OneShot`/`LimitedUses` and self-consumed via
+`apply_one_replacement`), a real leak once a `Repeatable` entry could outlive its source. Fixed by
+extending both functions' existing `retain` calls, same pattern already established for the other
+two lists. This *changed* two existing tests' literal expectations
+(`phase5_destroy_ordering_choice.rs`'s `destroy_spell_choosing_the_other_effect_first_lets_it_win_
+instead`, `phase5_regeneration.rs`'s `a_shield_does_not_save_a_zero_toughness_creature`) — both had
+asserted an unconsumed `OneShot` regeneration shield was "still sitting there," pinned to a bear
+`ObjectId` that the very same test had just retired via CR 400.7 (exile-instead / zero-toughness
+death). That assertion was validating a symptom of the leak, not the feature either test actually
+exists to prove (CR 616.1 ordering / CR 704.5f non-destruction) — updated both to expect the now-
+purged, correct count instead of reverting the fix.
+
+**What got implemented:**
+- `types/effect.rs`: `ReplacementEffect::matches`'s `WouldDie`/`Regenerate` arm gained the
+  match-time `CANT_BE_REGENERATED` check described above. `ReplacementSpec`'s own doc comment
+  updated — `Primitive` now has a real (if narrow) Lua construction path.
+- `commands.rs`: `retire_object`/`purge_granted_abilities` both gained a
+  `state.replacement_effects.retain(|r| r.source != id)` line, doc comments updated to match.
+- `script.rs`: `ScriptRegistry.pending_replacement: Vec<ReplacementEffect>` (mirrors
+  `pending_static`, no `timestamp` to stamp — `ReplacementEffect` has none). New
+  `ReplacementEffectBuilder` (mirrors `StaticAbilityBuilder`'s shape, minus `:SetLayer`/`:SetEffect`
+  — there's no layer/effect pairing to validate here): `:SetAffected(table)` decodes straight to
+  `EffectFilter` (not `AffectedFilter` — `EventFilter` has no `Script`-affected shape, so a
+  function argument is a real error, not silently accepted); `:Register()` always builds the
+  `Repeatable`/`WouldDie`/`Regenerate` shape and queues it. `run_card_script`'s drain step gained a
+  third block, `pending_replacement` into `state.replacement_effects`. Bound as
+  `Game.CreateReplacementEffect` alongside the other two builders in `bind_game_globals`.
+- `docs/lua_scripts.md`: new "Self-registering a repeatable regeneration shield" section, same
+  style as the static-ability/activated-ability sections either side of it.
+
+**CR requirements:** 701.19b (static-ability-sourced, repeatable shield creation - the new
+primitive this slice closes); 701.19c re-verified at application time, not just creation time (see
+finding above), for both the static and one-shot paths.
+
+**TODOs marked, not silently narrowed:** `Game.CreateReplacementEffect`'s own doc comment names the
+single-payload-shape scoping (Regenerate only) as deliberate, same convention every prior builder
+slice used for its own first cut.
+
+**Tests added** (`crates/engine/tests/phase5_static_regeneration.rs`, 3 new tests): a card's
+`initial_effect` calling `Game.CreateReplacementEffect(c):SetAffected({self_only=true}):Register()`
+produces exactly the expected `Repeatable`/`WouldDie`/`Regenerate` shield in `state.
+replacement_effects` (proves the Lua wiring, mirroring `phase5_static_ability_self_registration.
+rs`'s own "unit-level" pattern - a directly-constructed shield stands in for the ETB-registered one
+in the two tests below, same convention that file's own SBA test uses for a `ContinuousEffect`); a
+static shield survives being used and saves its target from two separate lethal hits in the same
+turn (the CR 701.19b headline behavior, contrasted directly against `phase5_regenerate_ability.rs`'s
+own one-shot tests); a target that gains `CANT_BE_REGENERATED` *after* the static shield already
+exists still dies for real, proving the match-time gate is what's actually authoritative (there's
+no creation-time moment in this path to have caught it instead). A 4th test,
+`commands.rs::tests::retire_object_purges_only_the_retired_source`, extended (not new) to also
+assert a `ReplacementEffect` sourced from the retired id is purged and one from a different id
+survives — alongside the existing ability/continuous-effect assertions it already made.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace` — all test binaries green, 0 failures, 718 tests total, including the
+3 new tests in `phase5_static_regeneration.rs` and the extended `retire_object` unit test. Two
+pre-existing tests needed their own assertions updated (not reverted) per the second correctness
+finding above; every other prior test unaffected.
+
+**STRUCT DEVIATIONS:** none — `ReplacementEffect`/`ConsumptionPolicy`/`EventFilter`/
+`ReplacementPayload` were all already exactly the shape this slice needed.
+
+**INTERFACE DEVIATIONS:** none beyond the new builder/binding/queue themselves.
+
+**SCOPE DEVIATIONS:** the `retire_object`/`purge_granted_abilities` fix and the match-time CANT_BE_
+REGENERATED check were both found while implementing (see the two findings above), not in the
+original one-line pick from the gaps list — both are necessary for CR 701.19b to actually be
+correct, not independent cleanup, so folded into this slice rather than deferred.
+
+**UNRESOLVED:** `EventFilter`'s two-shapes-only limit, and `Game.CreateReplacementEffect`'s
+single-payload-shape scoping, remain the same standing gap named in `docs/implementation.md`'s own
+gaps list — damage prevention/redirection and non-regenerate zone-destination substitution still
+have no Lua construction path.
