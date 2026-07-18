@@ -302,10 +302,18 @@ fn a_shield_does_not_save_a_zero_toughness_creature() {
     );
     let GameEventKind::ZoneChange { object: new_id, .. } = events[0].kind else { unreachable!() };
     assert_eq!(state.object(new_id).unwrap().zone, ZoneKind::Graveyard);
+    // The shield never matched at all (is_destroy: false for a 704.5f death)
+    // - it was never spent on a death it couldn't actually intercept. But
+    // the bear's own ObjectId still retired via CR 400.7 (the zero-toughness
+    // death is a real zone change, new id and all), and `phase5/static-
+    // regeneration`'s `retire_object` fix purges a self_only shield pinned
+    // to a since-retired source - it can never match anything again, so it's
+    // gone too, not left sitting as a harmless-looking but permanently dead
+    // entry.
     assert_eq!(
         state.replacement_effects.len(),
-        1,
-        "the shield never matched at all (is_destroy: false for a 704.5f death) - still sitting there unconsumed, not silently spent on a death it couldn't actually intercept"
+        0,
+        "the unconsumed shield was purged when its pinned source (bear's old, now-retired ObjectId) left the game"
     );
 }
 

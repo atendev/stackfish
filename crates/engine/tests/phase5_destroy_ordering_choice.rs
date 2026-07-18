@@ -458,13 +458,20 @@ fn destroy_spell_choosing_the_other_effect_first_lets_it_win_instead() {
         !engine.state().zone(ZoneKind::Exile, Some(p0)).unwrap().contents.is_empty(),
         "the exile-instead effect won this time - the bear should be in Exile, not the graveyard"
     );
+    // The exile effect (OneShot) was consumed by applying; the regeneration
+    // shield never got a chance to apply either - once the event's own `to`
+    // became Exile it stopped matching WouldDie's to:Graveyard shape at all,
+    // so it was excluded rather than removed by `apply_one_replacement`. But
+    // `phase5/static-regeneration`'s `retire_object` fix now purges it too:
+    // the shield was pinned (self_only) to the bear's own ObjectId, and that
+    // id just retired via CR 400.7 - an entry that can never match anything
+    // ever again is real garbage, not a harmless pileup, so it's gone.
     assert_eq!(
         engine.state().replacement_effects.len(),
-        1,
-        "the exile effect (OneShot) was consumed; the regeneration shield never got a chance to apply - \
-         once the event's own `to` became Exile it stopped matching WouldDie's to:Graveyard shape at all"
+        0,
+        "both effects are gone - one consumed by applying, the other purged because its pinned source \
+         (bear's old, now-retired ObjectId) left the game"
     );
-    assert_eq!(engine.state().replacement_effects[0].source, bear, "the regeneration shield is the one left unconsumed");
 }
 
 // ---------------------------------------------------------------------

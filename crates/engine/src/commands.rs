@@ -403,18 +403,21 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
     }
 }
 
-/// Removes `old_id` from `state.objects` and purges any `RegisteredAbility`
-/// or `ContinuousEffect` still pointing at it (`state.abilities.retain`/
-/// `state.continuous_effects.retain`). Use at a zone-change site that does
+/// Removes `old_id` from `state.objects` and purges any `RegisteredAbility`,
+/// `ContinuousEffect`, or `ReplacementEffect` still pointing at it
+/// (`state.abilities.retain`/`state.continuous_effects.retain`/
+/// `state.replacement_effects.retain`). Use at a zone-change site that does
 /// **not** also call `remap_abilities` for `old_id` — calling both would be
 /// wrong (retire would delete what remap just carried forward); calling
 /// neither leaves a dead entry sitting in `state.abilities`/
-/// `state.continuous_effects` forever (harmless per `collect_triggers`'s/
-/// `layers::applicable_effects_in_layer`'s existing "skip if source doesn't
-/// resolve" checks, but pure pileup — the same gap this function was
-/// originally built to close for abilities, extended here to continuous
-/// effects now that `Game.CreateStaticAbility` (script.rs) can produce one
-/// that outlives its source). Today that's exactly the sites with no
+/// `state.continuous_effects`/`state.replacement_effects` forever (harmless
+/// per `collect_triggers`'s/`layers::applicable_effects_in_layer`'s existing
+/// "skip if source doesn't resolve" checks, but pure pileup — the same gap
+/// this function was originally built to close for abilities, extended here
+/// to continuous effects now that `Game.CreateStaticAbility` (script.rs) can
+/// produce one that outlives its source, and again to replacement effects
+/// now that `Game.CreateReplacementEffect` can too). Today that's exactly the
+/// sites with no
 /// in-play "same card, new id" continuation to carry forward: discard
 /// (hand→graveyard), `draw_step` (library→hand), and SBA-driven death
 /// (battlefield→graveyard) — the other zone-change sites (`PlayLand`,
@@ -440,9 +443,10 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
 /// exists to consume it — deliberately left, not an oversight (see
 /// docs/implementation.md's backlog item 7).
 
-/// CR 707.2a (layer 1, "becomes a copy of"): removes every `RegisteredAbility`
-/// and `ContinuousEffect` still sourced from `id`, *without* removing `id`
-/// itself from `state.objects` or purging any zone — unlike `retire_object`,
+/// CR 707.2a (layer 1, "becomes a copy of"): removes every `RegisteredAbility`,
+/// `ContinuousEffect`, and `ReplacementEffect` still sourced from `id`,
+/// *without* removing `id` itself from `state.objects` or purging any zone —
+/// unlike `retire_object`,
 /// the object being copied stays exactly where it is (CR 707.4: it remains
 /// on the battlefield, same identity, same `ObjectId`). Callers ordinarily
 /// call `ScriptRuntime::run_card_script` against the copy's new `CardDefinition`
@@ -453,6 +457,7 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
 pub(crate) fn purge_granted_abilities(state: &mut GameState, id: ObjectId) {
     state.abilities.retain(|a| a.source != id);
     state.continuous_effects.retain(|e| e.source != id);
+    state.replacement_effects.retain(|r| r.source != id);
 }
 
 pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<RegisteredAbility> {
@@ -468,6 +473,13 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
         false
     });
     state.continuous_effects.retain(|e| e.source != old_id);
+    // `phase5/static-regeneration`: `Game.CreateReplacementEffect` gave
+    // `state.replacement_effects` its first-ever durable (`Repeatable`)
+    // entry - every prior entry was `OneShot`/`LimitedUses` and
+    // self-consumed via `apply_one_replacement`, so this list never needed
+    // purging here before. Same pileup-avoidance rationale as
+    // `continuous_effects` above (see this function's own doc comment).
+    state.replacement_effects.retain(|r| r.source != old_id);
     departed_triggered
 }
 
@@ -2037,8 +2049,8 @@ mod tests {
     use super::*;
     use crate::types::counter::CounterSet;
     use crate::types::effect::{
-        AffectedFilter, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload, EffectPrimitive,
-        Layer,
+        AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
+        EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
     };
     use crate::types::game::RngState;
     use crate::types::ids::SequenceNo;
@@ -2119,6 +2131,24 @@ mod tests {
         }
     }
 
+    /// `phase5/static-regeneration`: a `Repeatable` `WouldDie`/`Regenerate`
+    /// shield, the shape `Game.CreateReplacementEffect` produces — the first
+    /// durable `state.replacement_effects` entry that ever needed
+    /// `retire_object` to purge it (every prior entry was `OneShot`/
+    /// `LimitedUses` and self-consumed via `apply_one_replacement`).
+    fn dummy_replacement_effect(source: ObjectId) -> ReplacementEffect {
+        ReplacementEffect {
+            source,
+            spec: ReplacementSpec::Primitive {
+                filter: EventFilter::WouldDie {
+                    affected: EffectFilter { controller: None, card_types: None, self_only: true },
+                },
+                payload: ReplacementPayload::Regenerate,
+            },
+            consumption: ConsumptionPolicy::Repeatable,
+        }
+    }
+
     #[test]
     fn retire_object_purges_only_the_retired_source() {
         let mut state = minimal_state();
@@ -2126,6 +2156,8 @@ mod tests {
         state.abilities.push(dummy_ability(ObjectId(2)));
         state.continuous_effects.push(dummy_continuous_effect(ObjectId(1)));
         state.continuous_effects.push(dummy_continuous_effect(ObjectId(2)));
+        state.replacement_effects.push(dummy_replacement_effect(ObjectId(1)));
+        state.replacement_effects.push(dummy_replacement_effect(ObjectId(2)));
 
         let departed = retire_object(&mut state, ObjectId(1));
 
@@ -2142,6 +2174,16 @@ mod tests {
             state.continuous_effects[0].source,
             ObjectId(2),
             "ObjectId(2)'s continuous effect must survive untouched"
+        );
+        assert_eq!(
+            state.replacement_effects.len(),
+            1,
+            "only ObjectId(1)'s replacement effect should be purged"
+        );
+        assert_eq!(
+            state.replacement_effects[0].source,
+            ObjectId(2),
+            "ObjectId(2)'s replacement effect must survive untouched"
         );
     }
 }

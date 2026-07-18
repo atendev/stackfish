@@ -343,6 +343,45 @@ form) and `crates/engine/tests/phase5_continuous_effects_script.rs` (script-back
 Scenario TOML fixtures can use the table/tag form via `CardSpec.script` too — see
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 
+## Self-registering a repeatable regeneration shield
+
+`Game.CreateReplacementEffect(c)` (CR 614, CR 701.19b) is a narrower sibling of
+`Game.CreateStaticAbility` — it doesn't touch layers/`effective_characteristics` at all (a
+regeneration shield rewrites an *event*, a wholly separate mechanism, `GameState.
+replacement_effects`), so there's no `:SetLayer`/`:SetEffect` pairing to pick. `:Register()` always
+produces a `Repeatable` shield (CR 701.19b: "...each time that permanent would be destroyed," not
+just the next time — contrast `Game.Ops.Regenerate()`, a resolving spell/ability's own `OneShot`
+shield, CR 701.19a):
+
+```lua
+-- This creature regenerates.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+
+return s
+```
+
+`:SetAffected` takes the same plain-table shape `Game.CreateStaticAbility`'s own `:SetAffected`
+does (`controller`/`card_types`/`self_only`, every key optional) — but a custom function isn't
+accepted here (unlike the static-ability builder): `EventFilter` has no `Script`-affected shape
+yet, so passing one is a real `:SetAffected()` error rather than something silently discarded.
+
+CR 701.19c ("can't be regenerated" effects) is checked fresh every time the shield is asked to
+apply (`ReplacementEffect::matches`), not just once when it was created — unlike the one-shot
+`Game.Ops.Regenerate()` path (which also skips *creating* a shield for an already-can't-be-
+regenerated target as a cheap optimization), a repeatable shield is registered once but the
+target's CANT_BE_REGENERATED status can change afterward, and CR 701.19c's own wording ("cause
+regeneration shields to not be applied") is about application, not creation.
+
+Same registration timing and `retire_object` purge as static abilities above — `run_card_script`
+also drains `pending_replacement` into `GameState.replacement_effects` in the same pass. Real,
+tested end to end: `crates/engine/tests/phase5_static_regeneration.rs`.
+
 ## Self-registering an activated ability
 
 `Game.CreateActivatedAbility(c)` is the CR 602 sibling of `Game.CreateTriggeredAbility`/
