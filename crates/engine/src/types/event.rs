@@ -127,6 +127,17 @@ pub enum GameEventKind {
     /// see its own doc comment for the CR 701.19a/b side effects (damage
     /// removed, tapped, removed from combat).
     Regenerated { object: ObjectId },
+    /// CR 704.5d: `object` (a token, `GameObject.is_token`) was sitting in a
+    /// zone other than the battlefield and ceased to exist as a state-based
+    /// action. Not a `ZoneChange`: nothing to move to, no new `ObjectId`
+    /// minted — `object` simply stops existing. `sba::collect_ceasing_tokens`/
+    /// `commit_token_cessation` are this event's only producer/committer.
+    /// CR 111.7's own parenthetical ("applicable triggered abilities will
+    /// trigger before the token ceases to exist") is satisfied by *when*
+    /// this check runs, not by anything in the event's own shape — see
+    /// `collect_ceasing_tokens`'s own doc comment for why a token that just
+    /// died this same pass is never included here.
+    TokenCeased { object: ObjectId },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

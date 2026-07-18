@@ -102,8 +102,10 @@ pub enum SbaOutcome {
 /// with lethal damage marked is destroyed, folding in 702.2b/c's
 /// Deathtouch — any nonzero deathtouch damage counts as lethal — and
 /// 702.12b's Indestructible — ignores 704.5g/deathtouch entirely, but NOT
-/// 704.5f). Every other CR 704.5 SBA is still a no-op — see the TODO below
-/// for which and why.
+/// 704.5f), 704.5d (a token in a zone other than the battlefield ceases to
+/// exist — see `collect_ceasing_tokens`'s own doc comment for the timing
+/// that satisfies CR 111.7's parenthetical). Every other CR 704.5 SBA is
+/// still a no-op — see the TODO below for which and why.
 ///
 /// This is a single pass, not the fixed-point loop — CR 704.3 requires
 /// repeating until no SBA applies. The engine loop (`engine.rs`) is
@@ -132,6 +134,22 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
         return SbaOutcome::NeedsCommanderReturnChoice { player, commander, resolved_so_far: events };
     }
 
+    // CR 704.5d: deterministic (no player choice), checked before this same
+    // pass's own new deaths are collected below - CR 704.3's "simultaneous,
+    // based on the state as of this check" means a token that dies via this
+    // pass's own collect_dying_creatures/resolve_deaths isn't itself "in a
+    // zone other than the battlefield" until after this pass ends, so it
+    // can't also cease in the same pass. Running this scan first (against
+    // zones as they stand at the top of this call) reproduces that "next
+    // SBA check, not this one" timing for free - see collect_ceasing_tokens's
+    // own doc comment.
+    let mut departed_triggered = Vec::new();
+    for id in collect_ceasing_tokens(state) {
+        let (event, mut departed) = commit_token_cessation(state, id);
+        events.push(event);
+        departed_triggered.append(&mut departed);
+    }
+
     // CR 704.5k: fully deterministic (no player choice), so its losers just
     // join the same dying-creature list below - resolve_deaths treats every
     // id generically (any permanent type, not creature-specific), and its
@@ -141,8 +159,9 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     dying.extend(collect_world_rule_losers(state, script_runtime));
 
     match resolve_deaths(state, script_runtime, dying.into()) {
-        DeathResolution::Done(death_events, departed_triggered) => {
+        DeathResolution::Done(death_events, mut death_departed) => {
             events.extend(death_events);
+            departed_triggered.append(&mut death_departed);
             SbaOutcome::Progressed(events, departed_triggered)
         }
         DeathResolution::NeedsOrderingChoice {
@@ -152,15 +171,26 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
             excluded,
             is_destroy,
             pending_deaths,
-        } => SbaOutcome::NeedsOrderingChoice {
-            affected_player,
-            pending_event,
-            candidates,
-            excluded,
-            is_destroy,
-            pending_deaths,
-            resolved_so_far: events,
-        },
+        } => {
+            // Pre-existing gap, same shape resolve_deaths's own
+            // NeedsOrderingChoice arm already documents: departed_triggered
+            // (now including any this pass's own token cessations produced)
+            // has no field to ride along on this particular pause - the
+            // ledger events themselves are safe (folded into resolved_so_far
+            // below), only a departed "when this leaves play"-style trigger
+            // ability would be lost, and only when a token ceases in the
+            // exact same pass some other death needs a 616.1 choice. Not hit
+            // by this slice's own tests; flagged, not fixed, same precedent.
+            SbaOutcome::NeedsOrderingChoice {
+                affected_player,
+                pending_event,
+                candidates,
+                excluded,
+                is_destroy,
+                pending_deaths,
+                resolved_so_far: events,
+            }
+        }
     }
 
     // TODO: still unimplemented, no prerequisite machinery exists yet:
@@ -475,6 +505,53 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
         // Tie for shortest time - no unique survivor, all die.
         world_objects.into_iter().map(|(id, _)| DyingCandidate { id, is_destroy: false }).collect()
     }
+}
+
+/// CR 704.5d: every token (`GameObject.is_token`) currently sitting in a
+/// zone other than the battlefield. Called at the very top of
+/// `check_state_based_actions`, before this same pass's own dying-creature
+/// collection runs - see that call site's own doc comment for why checking
+/// zones as they stand at that point (rather than after this pass commits
+/// its own new deaths) is what makes a token that just died wait one full
+/// SBA pass before ceasing, matching CR 111.7's own parenthetical about
+/// triggered abilities getting a chance first. The stack isn't a `Zone`
+/// (no `is_token` concept applies to a `StackObject` - nothing creates a
+/// token mid-resolution on the stack itself in this engine), so it's never
+/// scanned here.
+fn collect_ceasing_tokens(state: &GameState) -> Vec<ObjectId> {
+    state
+        .zones
+        .iter()
+        .filter(|z| z.kind != ZoneKind::Battlefield)
+        .flat_map(|z| z.contents.iter().copied())
+        .filter(|id| state.object(*id).is_some_and(|obj| obj.is_token))
+        .collect()
+}
+
+/// Removes `id` from whichever zone it's actually sitting in and purges it
+/// (`commands::retire_object`) — no new `ObjectId` minted, unlike every real
+/// death in this engine (CR 400.7 only applies to an actual zone move; a
+/// ceasing token has nowhere to move *to*, it just stops existing). Returns
+/// its own `Triggered`-kind abilities alongside the ledger event, same
+/// "capture before `retire_object` purges them" contract `commit_death`
+/// already has, in case a token ever self-registers a "when this leaves
+/// play"-style ability (no real card needs one today, but the shape is
+/// cheap to keep consistent).
+fn commit_token_cessation(state: &mut GameState, id: ObjectId) -> (GameEvent, Vec<RegisteredAbility>) {
+    for zone in &mut state.zones {
+        zone.remove(id);
+    }
+    let departed = commands::retire_object(state, id);
+    let event_id = state.allocate_event_id();
+    let sequence_no = state.allocate_sequence_no();
+    let event = GameEvent {
+        event_id,
+        sequence_no,
+        kind: GameEventKind::TokenCeased { object: id },
+        caused_by_command: None,
+        parent_event: None,
+    };
+    (event, departed)
 }
 
 /// What one `resolve_deaths` call produced.
