@@ -4154,6 +4154,12 @@ impl Engine {
                 // CR 506.4: attacking/blocking status ends with the combat
                 // phase - clear it so it doesn't leak into the next combat.
                 self.state.combat = None;
+                // CR 511.2/500.5a: "until end of combat" effects expire at
+                // the end of the combat phase itself (this transition out of
+                // it), not at the beginning of the End of Combat step.
+                self.state
+                    .continuous_effects
+                    .retain(|e| !matches!(e.duration, EffectDuration::UntilEndOfCombat));
                 false
             }
             (Phase::Main, Step::PostCombatMain) => {
@@ -4181,6 +4187,27 @@ impl Engine {
                 // CR 800.4b: the next turn skips any eliminated player.
                 self.state.active_player =
                     commands::next_active_player(&self.state, self.state.active_player);
+                // CR 723.1-style "until your next turn": the effect lasts
+                // until the beginning of its controller's own next turn, not
+                // just any next turn - drain exactly the effects whose
+                // source's current controller is the player who is about to
+                // become active. An effect whose source no longer resolves
+                // (e.g. a spell that already left the stack) can never match
+                // here and is left inert rather than guessed at - same
+                // stance `applicable_effects_in_layer` already takes for an
+                // unresolvable source (TODO: known limitation, not fixed by
+                // this slice).
+                let new_active_player = self.state.active_player;
+                let objects = &self.state.objects;
+                self.state.continuous_effects.retain(|e| {
+                    if !matches!(e.duration, EffectDuration::UntilYourNextTurn) {
+                        return true;
+                    }
+                    match objects.get(&e.source) {
+                        Some(source_obj) => source_obj.controller != new_active_player,
+                        None => true,
+                    }
+                });
                 self.state.turn_number += 1;
                 self.state.phase = Phase::Beginning;
                 self.state.step = Step::Untap;

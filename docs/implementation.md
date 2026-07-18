@@ -2433,9 +2433,11 @@ verbatim once enough time has passed for the underlying code to have moved.
   path to `UntilEndOfTurn` etc. on a static ability). "As long as ..." conditional gating closed
   separately, `phase5/conditional-continuous-effects` (CR 611.2c, docs/implementation.md, below) —
   `ContinuousEffect.condition`/`Game.InterveningIf.ControlsAtLeast`/`:SetCondition`, one concrete
-  shape (`ControllerControlsAtLeast`). `EffectDuration`'s broader inert-duration gap
-  (`UntilYourNextTurn`/`UntilEndOfCombat` never expire, named in that slice's own TODOs) is still
-  open, orthogonal to conditional gating.
+  shape (`ControllerControlsAtLeast`). `EffectDuration`'s broader inert-duration gap is now closed for
+  `UntilYourNextTurn`/`UntilEndOfCombat`, `phase5/effect-duration-expiration` (docs/implementation.md,
+  below) — no Lua/Rust path creates an effect with either duration yet, so this closed the drain
+  mechanism only, exercised via directly-constructed `ContinuousEffect`s in tests, same as this note's
+  own precedent for `StaticAbilityBuilder`.
 - **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
   not a stable id - fragile if a card's own ability list ever needs to change shape.
 - **Replacement effects**: `EventFilter` only has two shapes (`DamageDealt`, `WouldDie`); no
@@ -7563,3 +7565,77 @@ private, and match the scoping report's shape.
 **UNRESOLVED:** see the TODOs above — CR 111.8, CR 704.5e, no `TokenCeased` trigger condition, and the
 pre-existing `NeedsOrderingChoice`-drops-departed-abilities gap this slice's own token cessation now
 also rides (not worsened, not fixed).
+
+## Phase 5: phase5/effect-duration-expiration slice (CR 511.2/500.5a, CR 723.1-style)
+
+Branch `phase5/effect-duration-expiration`, off master. Picked from the "Known unresolved gaps" list —
+`EffectDuration::UntilYourNextTurn`/`UntilEndOfCombat` existed on the enum but nothing ever drained
+them; only `UntilEndOfTurn` had a real drain point (Cleanup).
+
+**Pre-slice scoping finding:** `WhileSourceOnBattlefield`/`UntilSourceLeaves` turned out not to be part
+of this gap at all — every zone change in this engine mints a fresh `ObjectId` and purges the old one
+(the CR 400.7 fix's own precedent), so `layers::applicable_effects_in_layer`'s existing
+`state.object(e.source)` check already treats "source's original id no longer resolves" as
+inapplicable, which is exactly what those two durations mean. Only `UntilYourNextTurn`/
+`UntilEndOfCombat` genuinely had no drain point.
+
+Also confirmed: no card/script path creates a `ContinuousEffect` with either duration yet
+(`StaticAbilityBuilder::Register` hardcodes `Permanent`; `script_api::add_continuous_effect` is an
+unrelated unbound `todo!()` stub). This slice closes the drain mechanism only, exercised via
+directly-constructed `ContinuousEffect`s pushed straight into test state — same precedent
+`phase5_conditional_continuous_effects.rs` already set.
+
+**What got implemented (`engine.rs`, `advance_turn_step`):**
+- CR 511.2/500.5a: the `(Phase::Combat, Step::EndOfCombat)` match arm (already the exact "combat
+  phase ends" transition, clearing `state.combat`) now also retains-out any `UntilEndOfCombat` effect.
+  Expires at the end of the combat phase itself, not the beginning of the End of Combat step — verified
+  directly: the effect is still present after only the first of two players has passed priority at that
+  step (still mid-step), and gone only once the transition to `PostCombatMain` actually happens.
+- CR 723.1-style "until your next turn": the `(Phase::Ending, Step::Cleanup)` match arm (already where
+  `active_player` rotates to the next player in turn order) now also retains-out any
+  `UntilYourNextTurn` effect whose source's *current* controller equals the *new* active player.
+  Reasoning locked in during scoping: turn order cycles through every player in a fixed sequence, so
+  the first time `active_player` becomes a given player again after the effect was created **is**
+  that player's next turn by definition — no extra "turns since creation" bookkeeping needed. Verified
+  both directions: an effect created on its own controller's turn survives the very next cleanup
+  (active player becomes someone else) and only drains once cleanup rotates back to the controller.
+
+**TODOs marked, not silently narrowed:**
+- No Lua-facing (or Rust-facing) way to actually create a temporary continuous effect exists yet —
+  `StaticAbilityBuilder` is setup-time-only and permanent-duration-only; this slice only makes the
+  *expiration* side of the enum real. A spell-resolution-time "add a temporary continuous effect"
+  builder is still unbuilt.
+- A `UntilYourNextTurn` effect whose `source` no longer resolves (e.g. sourced by a spell that already
+  left the stack for the graveyard — which, per the zone-change-mints-new-id pattern above, is the
+  *normal* case for anything actually cast, not an edge case) can never be matched to a controller and
+  is left inert in `state.continuous_effects` forever rather than drained. Same category as the
+  pre-existing "Layer 2 control" and "script effects don't participate in dependency" notes already in
+  the gaps list — flagged, not fixed. Directly covered by its own test
+  (`until_your_next_turn_effect_with_unresolvable_source_is_left_inert_rather_than_drained`) so the
+  behavior is at least deliberate and pinned, not silently wrong.
+- CR 724.2d (an effect that ends the combat phase early, skipping straight past the End of Combat step)
+  isn't modeled anywhere in this engine, so that path couldn't be exercised — `UntilEndOfCombat` only
+  ever drains via the normal `EndOfCombat -> PostCombatMain` transition today.
+
+**Tests added** (`crates/engine/tests/phase5_effect_duration_expiration.rs`, 6 new tests): an
+`UntilEndOfCombat` effect survives mid-step after only one player has passed and drains exactly when
+the combat phase ends, with `Permanent`/`UntilEndOfTurn` effects unaffected by that same transition; an
+`UntilYourNextTurn` effect survives cleanup into the opponent's turn and drains only once the turn
+cycles back to its controller; the same duration with an unresolvable source is left inert rather than
+drained (regression-pinning the known limitation above); an `UntilYourNextTurn` effect is untouched by
+the unrelated `EndOfCombat` drain.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none new).
+`cargo test --workspace` — all test binaries green, 0 failures, including the 6 new tests; all prior
+tests unaffected.
+
+**STRUCT DEVIATIONS:** none — no fields added to `EffectDuration`/`ContinuousEffect`.
+
+**INTERFACE DEVIATIONS:** none — both drains are inline `retain()` calls in already-existing
+`advance_turn_step` match arms, no new functions.
+
+**SCOPE DEVIATIONS:** none — both edits landed exactly in the two match arms the scoping report named.
+
+**UNRESOLVED:** see the TODOs above — no creation path for temporary continuous effects yet, the
+unresolvable-source-leaves-it-inert limitation, and CR 724.2d's early-combat-end interaction being
+unexercisable since that mechanic doesn't exist in this engine.
