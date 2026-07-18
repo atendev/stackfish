@@ -2478,8 +2478,10 @@ verbatim once enough time has passed for the underlying code to have moved.
   `ReplacementPayload::Regenerate`, gated to genuine destruction only (CR 704.5g lethal damage/
   deathtouch, and the scripted `Destroy` op) via a per-call `is_destroy` flag, not CR 704.5f (zero
   toughness) or CR 704.5k (world rule) - neither of those is "destroy." CR 701.19c ("can't be
-  regenerated") isn't modeled - no mechanism exists to stop a shield from being created at all, only
-  from applying once created.
+  regenerated") also closed, `phase5/cant-be-regenerated` (docs/implementation.md, below) -
+  `KeywordSet::CANT_BE_REGENERATED`, checked at shield-creation time by the same slice's new
+  `AbilityEffect::Regenerate` (the first real creation path for a shield at all - every prior test
+  built one directly via a Rust struct literal).
 - **CR 601.6/733 unwind**: `Engine::unwind_payment` is an honest forward zone-change/removal, not a
   true state rewind - this engine's ledger is append-only with no undo primitive, a permanent
   architectural choice rather than a gap expected to close later.
@@ -7842,3 +7844,81 @@ field addition — not named in the scoping report (which only anticipated `crat
 fixtures), caught immediately by the compiler rather than discovered later.
 
 **UNRESOLVED:** none new.
+
+## Phase 5: phase5/cant-be-regenerated slice (CR 701.19a/c, `AbilityEffect::Regenerate`)
+
+Branch `phase5/cant-be-regenerated`, off master. Picked from the "Known unresolved gaps" list's
+regeneration bullet — CR 701.19c ("effects that say a permanent can't be regenerated... cause
+regeneration shields to not be applied") had no mechanism at all.
+
+**Scoping finding, changed the shape of this slice:** `phase5/regeneration` built the *drain*/
+resolution side of regeneration (`ReplacementPayload::Regenerate`, `commit_regeneration`) but never a
+*creation* path — every one of that slice's own tests constructs a `ReplacementEffect` shield directly
+via a Rust struct literal, the same "no Lua/Rust creation surface yet" gap `phase5/effect-duration-
+expiration` hit before `phase5/pump-effect` built one. CR 701.19c is about stopping shield *creation*,
+so it had nothing to attach to until a creation path existed — same shape those two slices had, so this
+one absorbed both for the same reason `pump-effect` did: the gate is only provable end-to-end with
+something real to gate.
+
+**Design choice:** rather than a new dedicated mechanism, "can't be regenerated" is
+`KeywordSet::CANT_BE_REGENERATED` - the same layer-6 (ability-adding/restricting) machinery every other
+keyword already uses, checked via the existing `commands::effective_keywords` (which already merges a
+printed keyword with anything a `Game.Effects.AddKeyword`-driven continuous effect grants). This means
+"creatures your opponents control can't be regenerated"-style effects work for free the moment a card
+grants the keyword via a static ability - no new query API needed, unlike `HandSizeModifier`'s own
+slice, which genuinely had nowhere existing to live. Direct precedent: `INDESTRUCTIBLE` is checked the
+same way, at the same "before even proposing the event" point, not as a property of the event/effect
+itself.
+
+**What got implemented:**
+- `types/card.rs`: `KeywordSet::CANT_BE_REGENERATED` (bit 15 - the last one that fits in the existing
+  `u16` backing type without widening it). `script.rs`'s `parse_keyword_name` gained the matching
+  `"CantBeRegenerated"` string mapping (`Game.Effects.AddKeyword("CantBeRegenerated")`), for free.
+- `types/ability.rs`: new `AbilityEffect::Regenerate` (CR 701.19a, "Regenerate target creature") -
+  mirrors `Pump`'s exact shape: every legal target independently gets its own one-shot
+  `ReplacementEffect` (`EventFilter::WouldDie` + `ReplacementPayload::Regenerate`) pushed straight into
+  `state.replacement_effects`, pinned via `self_only: true` the same way `Pump` pins its own
+  `ContinuousEffect`. CR 701.19c's actual gate: `effective_keywords(...).contains(CANT_BE_REGENERATED)`
+  checked per-target before pushing - a matching target gets no shield, silently, while every other
+  legal target in the same resolution still gets one independently.
+- `engine.rs`/`commands.rs`: `ResolveStackTop` arm + the `ActivateAbility` non-mana-effect match arm,
+  both mechanical additions mirroring `Pump`'s own.
+- `script.rs`: `Game.Ops.Regenerate()` binding (no arguments, same toggle shape as `Destroy`/
+  `Shuffle`) - not exercised by this slice's own tests, same "wired for future real cards" precedent
+  `Pump`'s own Lua binding already set.
+
+**CR requirements:** 701.19a (spell/ability-sourced shield creation - the new primitive itself);
+701.19c (can't-be-regenerated gates creation, not application - `KeywordSet` check at the moment
+`AbilityEffect::Regenerate` would push a shield). 701.19b (static-ability-sourced, repeatable shields)
+remains out of scope - no static-ability creation path exists for shields either, unaffected by this
+slice, same standing gap `Pump`'s own doc comment already names for `StaticAbilityBuilder`.
+
+**TODOs marked, not silently narrowed:** none new - this slice closed exactly what it set out to,
+riding entirely on machinery (`effective_keywords`, the `Pump`-shaped resolution arm) that already
+existed.
+
+**Tests added** (`crates/engine/tests/phase5_regenerate_ability.rs`, 3 new tests): a cast Regenerate
+spell creates a shield that later saves its target from lethal damage (damage cleared, tapped,
+`GameEventKind::Regenerated` logged) when checked via `sba::check_state_based_actions` directly; the
+same spell against a `CANT_BE_REGENERATED` target creates no shield at all, yet the spell itself still
+fully resolves (stack empties, priority returns normally) - CR 701.19c's core point - and the
+now-shieldless creature actually dies to the same lethal damage; the shield is pinned to its actual
+target, not an untargeted bystander creature on the same battlefield. All three needed damage marked
+*after* casting/resolving, not in the initial state - marking it upfront let the engine's own automatic
+SBA pass either fizzle the not-yet-resolved spell (CR 608.2b, invalid target) or kill the creature
+before the test's own manual `check_state_based_actions` call had anything left to prove; caught by two
+tests actually failing during development, not discovered by inspection.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none new).
+`cargo test --workspace` — all test binaries green, 0 failures, including the 3 new tests; all prior
+tests unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none beyond the new variant/bindings themselves.
+
+**SCOPE DEVIATIONS:** none — every edit landed exactly where the scoping finding said it would.
+
+**UNRESOLVED:** CR 701.19b's static-ability-sourced (repeatable) shield creation path remains unbuilt,
+same as `StaticAbilityBuilder`'s standing "no Lua/TOML duration path" gap generally. No "divide as you
+choose" concern here (Regenerate has no amount to divide).

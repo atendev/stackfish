@@ -172,6 +172,16 @@ bitflags! {
         /// only ever spills excess to a `Target::Player`, never a
         /// planeswalker/battle `Target::Object` (unmodeled per DESIGN.md).
         const TRAMPLE       = 1 << 14;
+        /// CR 701.19c - a regeneration shield can't be *created* for this
+        /// permanent (checked at the moment `AbilityEffect::Regenerate`
+        /// would create one, not a `ReplacementEffect` shape itself - CR
+        /// 701.19c is explicit that the shield-creating spell/ability still
+        /// resolves normally, only the shield itself fails to come into
+        /// being). Deliberately not modeled as "shields can't apply" -
+        /// 701.19c's own wording is about *creation*, and this engine has no
+        /// shields sitting around unused to make "can't apply" meaningfully
+        /// different from "was never created" anyway.
+        const CANT_BE_REGENERATED = 1 << 15;
     }
 }
 

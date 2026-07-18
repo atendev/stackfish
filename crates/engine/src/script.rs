@@ -447,6 +447,7 @@ fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> {
         "FirstStrike" => KeywordSet::FIRST_STRIKE,
         "DoubleStrike" => KeywordSet::DOUBLE_STRIKE,
         "Trample" => KeywordSet::TRAMPLE,
+        "CantBeRegenerated" => KeywordSet::CANT_BE_REGENERATED,
         other => return Err(ScriptError::LoadError(format!("unknown keyword '{other}'"))),
     })
 }
@@ -1721,6 +1722,9 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         Ok(OperationTag(AbilityEffect::Pump { power, toughness, duration }))
     })?;
     ops.set("Pump", pump)?;
+    // `Game.Ops.Regenerate()` (CR 701.19a) - no arguments, same toggle shape
+    // as `Game.Ops.Destroy`/`Sacrifice`/`Exile`/`Shuffle`.
+    ops.set("Regenerate", OperationTag(AbilityEffect::Regenerate))?;
     let draw_cards = lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::DrawCards(amount))))?;
     ops.set("DrawCards", draw_cards)?;
     let create_token = lua.create_function(|_, (spec_ud, count): (mlua::AnyUserData, Option<u32>)| {

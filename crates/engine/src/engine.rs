@@ -18,7 +18,8 @@ use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec, PaymentPlan};
 use crate::types::counter::CounterSet;
 use crate::types::effect::{
-    AffectedFilter, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload, EffectPrimitive, Layer,
+    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
+    EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
@@ -2809,6 +2810,41 @@ impl Engine {
                                         timestamp,
                                         duration: duration.clone(),
                                         condition: None,
+                                    });
+                                }
+                            }
+                            // CR 701.19a: every legal target independently
+                            // gets its own one-shot regeneration shield,
+                            // pinned via self_only: true exactly like Pump
+                            // above pins its own ContinuousEffect. CR
+                            // 701.19c: a target that currently can't be
+                            // regenerated gets no shield at all - checked
+                            // here, at creation time, not as a property of
+                            // the ReplacementEffect itself (see this
+                            // variant's own doc comment in ability.rs).
+                            // Object targets only, same "silent no-op"
+                            // stance as Pump/Damage/Counters above.
+                            Some(AbilityEffect::Regenerate) => {
+                                for target in &legal_targets {
+                                    let Target::Object(id) = target else { continue };
+                                    if commands::effective_keywords(&self.state, &self.script_runtime, *id)
+                                        .contains(KeywordSet::CANT_BE_REGENERATED)
+                                    {
+                                        continue;
+                                    }
+                                    self.state.replacement_effects.push(ReplacementEffect {
+                                        source: *id,
+                                        spec: ReplacementSpec::Primitive {
+                                            filter: EventFilter::WouldDie {
+                                                affected: EffectFilter {
+                                                    controller: None,
+                                                    card_types: None,
+                                                    self_only: true,
+                                                },
+                                            },
+                                            payload: ReplacementPayload::Regenerate,
+                                        },
+                                        consumption: ConsumptionPolicy::OneShot,
                                     });
                                 }
                             }
