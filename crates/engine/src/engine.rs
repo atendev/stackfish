@@ -2508,16 +2508,30 @@ impl Engine {
                 // without "if" text) never fizzles this way.
                 let intervening_if_fizzles = match &top.intervening_if {
                     Some(InterveningIfSpec::Primitive(p)) => !p.holds(&self.state, top.controller),
-                    // TODO: a script error here silently becomes "doesn't
-                    // hold" (unwrap_or(false), same conservative "nothing
-                    // happens" default triggers.rs's own Script
-                    // intervening-if check already takes) - no error-
-                    // surfacing path from ResolveStackTop back to a
-                    // StepStatus exists yet.
-                    Some(InterveningIfSpec::Script(handle)) => !self
-                        .script_runtime
-                        .invoke_intervening_if(*handle, &self.state, top.source, top.controller)
-                        .unwrap_or(false),
+                    // A script error falls back to the same conservative
+                    // "doesn't hold" default as before, but is now logged as
+                    // a real ScriptError event instead of silently
+                    // disappearing (`phase5/script-error-surfacing`).
+                    Some(InterveningIfSpec::Script(handle)) => {
+                        let holds = match self.script_runtime.invoke_intervening_if(
+                            *handle,
+                            &self.state,
+                            top.source,
+                            top.controller,
+                        ) {
+                            Ok(holds) => holds,
+                            Err(e) => {
+                                self.log_events(vec![GameEventKind::ScriptError {
+                                    message: format!(
+                                        "intervening-if script error resolving source {:?}: {e:?}",
+                                        top.source
+                                    ),
+                                }]);
+                                false
+                            }
+                        };
+                        !holds
+                    }
                     None => false,
                 };
                 let fizzles = fizzles || intervening_if_fizzles;
@@ -3386,8 +3400,9 @@ impl Engine {
 
             ProcessState::CollectTriggers { since } => {
                 let mut pending = Vec::new();
+                let mut script_errors = Vec::new();
                 for event in &self.state.ledger[since..] {
-                    let matches = triggers::collect_triggers(
+                    let (matches, errors) = triggers::collect_triggers(
                         &self.state,
                         event,
                         &self.script_runtime,
@@ -3404,6 +3419,16 @@ impl Engine {
                         }
                     }
                     pending.extend(matches);
+                    script_errors.extend(errors);
+                }
+                // Logged once the loop above (which holds an immutable
+                // borrow of self.state.ledger) has fully released it -
+                // log_events needs &mut self (`phase5/script-error-
+                // surfacing`).
+                if !script_errors.is_empty() {
+                    self.log_events(
+                        script_errors.into_iter().map(|message| GameEventKind::ScriptError { message }).collect(),
+                    );
                 }
                 let groups = triggers::group_apnap(&self.state, pending);
                 self.process_state =

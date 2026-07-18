@@ -199,11 +199,11 @@ fn scries_fires_for_the_controllers_own_scry_not_a_different_players() {
     let runtime = ScriptRuntime::new();
 
     let own_scry = cards_scried_event(p0);
-    let pending = collect_triggers(&state, &own_scry, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &own_scry, &runtime, &[]);
     assert_eq!(pending.len(), 1, "Scries fires for the ability controller's own scry");
 
     let other_scry = cards_scried_event(p1);
-    let pending = collect_triggers(&state, &other_scry, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &other_scry, &runtime, &[]);
     assert!(pending.is_empty(), "Scries must not fire for a different player's scry");
 }
 
@@ -217,7 +217,7 @@ fn each_scries_fires_regardless_of_player() {
     state.abilities.push(watcher_ability(watcher, ConditionPrimitive::EachScries));
     let runtime = ScriptRuntime::new();
 
-    let pending = collect_triggers(&state, &cards_scried_event(p1), &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &cards_scried_event(p1), &runtime, &[]);
     assert_eq!(pending.len(), 1, "EachScries fires regardless of who scried");
 }
 
@@ -231,10 +231,10 @@ fn surveils_fires_for_the_controllers_own_surveil_not_a_different_players() {
     state.abilities.push(watcher_ability(watcher, ConditionPrimitive::Surveils));
     let runtime = ScriptRuntime::new();
 
-    let pending = collect_triggers(&state, &cards_surveiled_event(p0), &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &cards_surveiled_event(p0), &runtime, &[]);
     assert_eq!(pending.len(), 1);
 
-    let pending = collect_triggers(&state, &cards_surveiled_event(p1), &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &cards_surveiled_event(p1), &runtime, &[]);
     assert!(pending.is_empty(), "Surveils must not fire for a different player's surveil");
 }
 
@@ -248,7 +248,7 @@ fn each_surveils_fires_regardless_of_player() {
     state.abilities.push(watcher_ability(watcher, ConditionPrimitive::EachSurveils));
     let runtime = ScriptRuntime::new();
 
-    let pending = collect_triggers(&state, &cards_surveiled_event(p1), &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &cards_surveiled_event(p1), &runtime, &[]);
     assert_eq!(pending.len(), 1, "EachSurveils fires regardless of who surveiled");
 }
 
@@ -275,7 +275,7 @@ fn dies_matching_fires_when_a_creature_you_control_dies() {
 
     let dying = card_object(dying_creature, creature_definition("Bear", CardTypeSet::CREATURE), p0, ZoneKind::Battlefield);
     let event = zone_change_event(ObjectId(2), ZoneKind::Battlefield, ZoneKind::Graveyard, Some(dying));
-    let pending = collect_triggers(&state, &event, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert_eq!(pending.len(), 1, "a creature the watcher's controller controls died");
     assert_eq!(pending[0].source, watcher);
 }
@@ -294,7 +294,7 @@ fn dies_matching_does_not_fire_for_a_noncreature_permanent_dying() {
 
     let dying_land = card_object(ObjectId(1), creature_definition("Test Land", CardTypeSet::LAND), p0, ZoneKind::Battlefield);
     let event = zone_change_event(ObjectId(2), ZoneKind::Battlefield, ZoneKind::Graveyard, Some(dying_land));
-    let pending = collect_triggers(&state, &event, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert!(pending.is_empty(), "the filter is CREATURE-only - a dying land shouldn't match");
 }
 
@@ -314,7 +314,7 @@ fn dies_matching_does_not_fire_for_an_opponents_creature_when_filter_is_you_only
     // p1's creature dies - the watcher's controller (p0) doesn't control it.
     let dying = card_object(ObjectId(1), creature_definition("Bear", CardTypeSet::CREATURE), p1, ZoneKind::Battlefield);
     let event = zone_change_event(ObjectId(2), ZoneKind::Battlefield, ZoneKind::Graveyard, Some(dying));
-    let pending = collect_triggers(&state, &event, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert!(pending.is_empty(), "FilterController::You means the watcher's own controller, not the dying creature's");
 }
 
@@ -332,7 +332,7 @@ fn leaves_battlefield_matching_fires_on_exile_not_just_death() {
 
     let exiled = card_object(ObjectId(1), creature_definition("Bear", CardTypeSet::CREATURE), p0, ZoneKind::Battlefield);
     let event = zone_change_event(ObjectId(2), ZoneKind::Battlefield, ZoneKind::Exile, Some(exiled));
-    let pending = collect_triggers(&state, &event, &runtime, &[]);
+    let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert_eq!(pending.len(), 1, "LeavesBattlefieldMatching fires on exile, unlike DiesMatching");
 }
 
