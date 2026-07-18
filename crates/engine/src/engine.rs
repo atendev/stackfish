@@ -356,6 +356,20 @@ pub struct StepResult {
 /// there's nothing to separate it from "waiting for a submit_action" yet.
 /// Revisit if/when legal-action enumeration becomes a real feature.
 ///
+/// Which scripted zone-move op a `ReplacementResumeTarget::ScriptedZoneMove`
+/// pause is resuming — each commits its resolved event differently:
+/// `Destroy`/`Sacrifice` reuse `sba::commit_death_or_regeneration`/
+/// `commit_death` (the same helpers every SBA-driven death already goes
+/// through), `Exile` can't reuse either (its destination is the shared
+/// Exile zone, `owner: None`, not a per-player zone `commit_death`'s
+/// `zone_mut(to, Some(owner))` call assumes) so it's committed inline.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScriptedZoneMoveKind {
+    Destroy,
+    Sacrifice,
+    Exile,
+}
+
 /// Which pipeline a paused `ProcessState::AwaitingReplacementChoice` should
 /// resume into once `Engine::submit_replacement_choice` answers — the pause
 /// itself (event/candidates/excluded) is identical either way; only what
@@ -377,6 +391,16 @@ pub enum ReplacementResumeTarget {
     /// `pending_deaths` by the time this pause fires, so it can't be
     /// re-derived from the queue.
     SbaDeath { pending_deaths: VecDeque<sba::DyingCandidate>, is_destroy: bool, then: SbaResumeThen },
+    /// Reached from the scripted `Destroy`/`Sacrifice`/`Exile` ops inside
+    /// `ResolveStackTop` (`Engine::continue_scripted_zone_move`). Unlike
+    /// `ReplacementCheck`, there's no pre-built batch of proposed events to
+    /// resume into — each target proposes and inline-commits its own
+    /// `ZoneChange` independently (the "already happened" convention every
+    /// scripted zone-move op here uses), so `remaining` is just the rest of
+    /// this same op's own target list, not yet proposed. `stack_id` is
+    /// needed for the final `StackObjectResolved` event once every target's
+    /// been processed.
+    ScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, stack_id: ObjectId },
 }
 
 /// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
@@ -952,6 +976,7 @@ impl Engine {
         let is_destroy = match &resume {
             ReplacementResumeTarget::ReplacementCheck { .. } => false,
             ReplacementResumeTarget::SbaDeath { is_destroy, .. } => *is_destroy,
+            ReplacementResumeTarget::ScriptedZoneMove { kind, .. } => *kind == ScriptedZoneMoveKind::Destroy,
         };
         let outcome =
             replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, is_destroy, excluded);
@@ -984,6 +1009,21 @@ impl Engine {
                         candidates,
                         excluded,
                         resume: ReplacementResumeTarget::SbaDeath { pending_deaths, is_destroy, then },
+                    }
+                }
+            },
+            ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    self.commit_scripted_zone_move(kind, event);
+                    self.continue_scripted_zone_move(kind, remaining, stack_id)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id },
                     }
                 }
             },
@@ -2612,243 +2652,106 @@ impl Engine {
                                     });
                                 }
                             }
-                            // CR 701.17/614.13: sacrifice every legal
-                            // target independently — identical to the
-                            // Destroy arm below except indestructibility is
-                            // never checked (CR 702.12b is Destroy-specific;
-                            // sacrifice bypasses it). commit_death is
-                            // reusable here (unlike Exile) because the
-                            // destination is the owner's per-player
-                            // graveyard (Some(owner)), not the shared Exile
-                            // zone. Dies/LeavesBattlefield triggers fire the
-                            // same way as SBA-driven death. A non-Object
-                            // legal target (a `Target::Player`, if this were
-                            // ever paired with a filter that allowed one) is
-                            // skipped, same "silent no-op" stance as before.
+                            // CR 701.17/614.13: sacrifice every legal target
+                            // independently — identical to the Destroy arm
+                            // below except indestructibility is never checked
+                            // (CR 702.12b is Destroy-specific; sacrifice
+                            // bypasses it) and CR 701.20/614.8: sacrifice is
+                            // never destruction, so a regeneration shield
+                            // can't (and per the real rules, shouldn't)
+                            // intercept it. Dies/LeavesBattlefield triggers
+                            // fire the same way as SBA-driven death. A
+                            // non-Object legal target (a `Target::Player`, if
+                            // this were ever paired with a filter that
+                            // allowed one) is skipped, same "silent no-op"
+                            // stance as before. CR 616.1: 2+ replacement
+                            // effects matching one target's proposed
+                            // `ZoneChange` pauses via
+                            // `continue_scripted_zone_move`/
+                            // `AwaitingReplacementChoice`, same as every other
+                            // SBA-driven death - the remaining independent
+                            // targets in this same op resume afterward.
                             // TODO: "sacrifice a permanent you control"
                             // (player chooses at resolution) needs coroutines
                             // — blocked on backlog item 9.
-                            // TODO(CR 616.1): same deferred ordering-choice
-                            // gap as Destroy.
                             Some(AbilityEffect::Sacrifice) => {
-                                for target in &legal_targets {
-                                    let Target::Object(id) = target else { continue };
-                                    let id = *id;
-                                    let last_known_info = self
-                                        .state
-                                        .object(id)
-                                        .filter(|obj| obj.zone == ZoneKind::Battlefield)
-                                        .cloned();
-                                    if let Some(last_known_info) = last_known_info {
-                                        let proposed = GameEventKind::ZoneChange {
-                                            object: id,
-                                            from: ZoneKind::Battlefield,
-                                            to: ZoneKind::Graveyard,
-                                            last_known_info: Some(last_known_info),
-                                        };
-                                        // CR 701.20/614.8: sacrifice is never
-                                        // destruction - is_destroy: false, so
-                                        // a regeneration shield can't (and
-                                        // per the real rules, shouldn't)
-                                        // intercept it.
-                                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
-                                            ReplacementOutcome::Resolved(final_event) => {
-                                                let (event, departed) =
-                                                    sba::commit_death(&mut self.state, final_event);
-                                                self.departed_triggered_abilities.extend(departed);
-                                                self.state.ledger.push(event);
-                                            }
-                                            ReplacementOutcome::NeedsOrderingChoice { .. } => {
-                                                // TODO(CR 616.1): same deferred gap as Destroy.
-                                            }
-                                        }
-                                    }
-                                }
+                                let targets: VecDeque<ObjectId> = legal_targets
+                                    .iter()
+                                    .filter_map(|t| match t {
+                                        Target::Object(id) => Some(*id),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                self.process_state = self.continue_scripted_zone_move(
+                                    ScriptedZoneMoveKind::Sacrifice,
+                                    targets,
+                                    top.stack_id,
+                                );
+                                return StepStatus::Progressed;
                             }
                             // CR 701.8/614.13/702.12b: unlike Damage, this
                             // can't be modeled as "push an unapplied event
                             // and let CommitEvents retroactively apply it" -
                             // every other ZoneChange in this codebase already
-                            // describes a move that happened. Runs the real
-                            // WouldDie replacement check and sba::commit_death
-                            // inline instead, mirroring resolve_deaths's own
-                            // per-object body (same functions, no new
-                            // plumbing) - the resulting already-replacement-
-                            // checked GameEvent is appended straight to the
-                            // ledger, same "resume exactly where CommitEvents
-                            // would otherwise have gone" convention
-                            // Engine::submit_payment already uses for a
-                            // Sacrifice cost payment.
+                            // describes a move that happened. Every legal
+                            // target, independently - a Target::Player
+                            // (Destroy only ever affects a permanent) is
+                            // skipped, shouldn't be reachable given cast-time
+                            // target validation against a real card's filter.
+                            // CR 614.8: Destroy is genuine destruction, so a
+                            // regeneration shield can intercept it (CR
+                            // 701.19c: only if nothing already said this
+                            // Destroy "can't be regenerated" - that qualifier
+                            // isn't modeled, see the regeneration slice's own
+                            // UNRESOLVED notes). CR 616.1: 2+ replacement
+                            // effects matching one target's proposed
+                            // `ZoneChange` pauses via
+                            // `continue_scripted_zone_move`/
+                            // `AwaitingReplacementChoice`, same as every other
+                            // SBA-driven death - the remaining independent
+                            // targets in this same op resume afterward.
                             Some(AbilityEffect::Destroy) => {
-                                // Every legal target, independently - a
-                                // Target::Player (Destroy only ever affects a
-                                // permanent) is skipped, shouldn't be
-                                // reachable given cast-time target validation
-                                // against a real card's filter.
-                                for target in &legal_targets {
-                                    let Target::Object(id) = target else { continue };
-                                    let id = *id;
-                                    let last_known_info = self
-                                        .state
-                                        .object(id)
-                                        .filter(|obj| obj.zone == ZoneKind::Battlefield)
-                                        .cloned();
-                                    if let Some(last_known_info) = last_known_info {
-                                        // CR 702.12b: an indestructible permanent
-                                        // can't be destroyed at all - not a
-                                        // replacement effect, checked up front.
-                                        let indestructible = commands::effective_keywords(
-                                            &self.state,
-                                            &self.script_runtime,
-                                            id,
-                                        )
-                                        .contains(KeywordSet::INDESTRUCTIBLE);
-                                        if !indestructible {
-                                            let proposed = GameEventKind::ZoneChange {
-                                                object: id,
-                                                from: ZoneKind::Battlefield,
-                                                to: ZoneKind::Graveyard,
-                                                last_known_info: Some(last_known_info),
-                                            };
-                                            // CR 614.8: Destroy is genuine
-                                            // destruction - is_destroy: true,
-                                            // so a regeneration shield can
-                                            // intercept it (CR 701.19c: only
-                                            // if nothing already said this
-                                            // Destroy "can't be regenerated" -
-                                            // that qualifier isn't modeled,
-                                            // see this slice's own UNRESOLVED
-                                            // notes).
-                                            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, true) {
-                                                ReplacementOutcome::Resolved(final_event) => {
-                                                    let (event, departed) =
-                                                        sba::commit_death_or_regeneration(&mut self.state, final_event);
-                                                    self.departed_triggered_abilities.extend(departed);
-                                                    self.state.ledger.push(event);
-                                                }
-                                                ReplacementOutcome::NeedsOrderingChoice { .. } => {
-                                                    // TODO(CR 616.1): 2+ replacement
-                                                    // effects matching the same
-                                                    // scripted Destroy can't pause
-                                                    // for the ordering choice yet -
-                                                    // no resume-target shape threads
-                                                    // back into mid-ResolveStackTop.
-                                                    // Deferred, same "narrower than
-                                                    // full rules text" precedent
-                                                    // every slice takes - silently
-                                                    // does nothing rather than
-                                                    // guessing an order. A
-                                                    // regeneration shield that's
-                                                    // one of 2+ matches here hits
-                                                    // this same pre-existing gap,
-                                                    // not a new one.
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // else: target already left the battlefield
-                                    // (or never resolved) - nothing to destroy,
-                                    // same "skip rather than guess" stance as
-                                    // everywhere else in this file.
-                                }
+                                let targets: VecDeque<ObjectId> = legal_targets
+                                    .iter()
+                                    .filter_map(|t| match t {
+                                        Target::Object(id) => Some(*id),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                self.process_state = self.continue_scripted_zone_move(
+                                    ScriptedZoneMoveKind::Destroy,
+                                    targets,
+                                    top.stack_id,
+                                );
+                                return StepStatus::Progressed;
                             }
-                            // CR 701.18: exile the first chosen target from the
-                            // battlefield. Unlike Destroy, indestructibility is
-                            // irrelevant - exile bypasses it entirely (CR
+                            // CR 701.18: exile the first chosen target from
+                            // the battlefield. Unlike Destroy, indestructibility
+                            // is irrelevant - exile bypasses it entirely (CR
                             // 702.12b is Destroy-specific). Like Destroy, a
                             // ZoneChange always describes an already-happened
-                            // move, so replacement effects are consulted first
-                            // (apply_replacements) and then the zone move is
-                            // inlined. Cannot reuse sba::commit_death because
-                            // it calls state.zone_mut(to, Some(owner)) - the
-                            // Exile zone is shared (owner = None), so that
-                            // lookup would silently return None and the object
-                            // would never land in exile. Battlefield only -
-                            // TODO: exiling from graveyard/hand requires knowing
+                            // move. Every legal target, independently - a
+                            // Target::Player is skipped, same "silent no-op"
+                            // stance as before. Battlefield only - TODO:
+                            // exiling from graveyard/hand requires knowing
                             // which zone to remove from at resolution time;
-                            // deferred as a named follow-up.
-                            // TODO(CR 616.1): 2+ replacement effects matching
-                            // the same scripted Exile can't pause for an
-                            // ordering choice - same deferred gap as Destroy.
+                            // deferred as a named follow-up. CR 616.1: same
+                            // ordering-choice handling as Destroy/Sacrifice
+                            // above.
                             Some(AbilityEffect::Exile) => {
-                                // Every legal target, independently - a
-                                // Target::Player is skipped, same "silent
-                                // no-op" stance as before this slice.
-                                for target in &legal_targets {
-                                    let Target::Object(id) = target else { continue };
-                                    let id = *id;
-                                    let last_known_info = self
-                                        .state
-                                        .object(id)
-                                        .filter(|obj| obj.zone == ZoneKind::Battlefield)
-                                        .cloned();
-                                    if let Some(last_known_info) = last_known_info {
-                                        let proposed = GameEventKind::ZoneChange {
-                                            object: id,
-                                            from: ZoneKind::Battlefield,
-                                            to: ZoneKind::Exile,
-                                            last_known_info: Some(last_known_info.clone()),
-                                        };
-                                        // CR 614.8: Exile is never
-                                        // destruction (and its own proposed
-                                        // `to: Exile` couldn't match a
-                                        // Regenerate-paired WouldDie filter
-                                        // regardless, which only ever fires
-                                        // on `to: Graveyard`).
-                                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
-                                            ReplacementOutcome::Resolved(final_event) => {
-                                                let GameEventKind::ZoneChange { object: old_id, to, .. } = final_event else {
-                                                    unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
-                                                };
-                                                let owner = last_known_info.owner;
-                                                let new_id = self.state.allocate_object_id();
-                                                let mut new_object = last_known_info.clone();
-                                                new_object.object_id = new_id;
-                                                new_object.lineage = ObjectLineage { previous: Some(old_id) };
-                                                new_object.zone = to;
-                                                new_object.timestamp = self.state.allocate_sequence_no();
-
-                                                if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
-                                                    zone.remove(old_id);
-                                                }
-                                                let departed = commands::retire_object(&mut self.state, old_id);
-                                                self.departed_triggered_abilities.extend(departed);
-                                                // Exile is a shared zone (owner = None); per-player
-                                                // graveyard/hand need Some(owner) - this lookup must
-                                                // use None or the object silently disappears.
-                                                let exile_owner = match to {
-                                                    ZoneKind::Exile => None,
-                                                    _ => Some(owner),
-                                                };
-                                                if let Some(zone) = self.state.zone_mut(to, exile_owner) {
-                                                    zone.push_bottom(new_id);
-                                                }
-                                                self.state.objects.insert(new_id, new_object);
-
-                                                let event_id = self.state.allocate_event_id();
-                                                let sequence_no = self.state.allocate_sequence_no();
-                                                let committed = GameEvent {
-                                                    event_id,
-                                                    sequence_no,
-                                                    kind: GameEventKind::ZoneChange {
-                                                        object: new_id,
-                                                        from: ZoneKind::Battlefield,
-                                                        to,
-                                                        last_known_info: Some(last_known_info),
-                                                    },
-                                                    caused_by_command: None,
-                                                    parent_event: None,
-                                                };
-                                                self.state.ledger.push(committed);
-                                            }
-                                            ReplacementOutcome::NeedsOrderingChoice { .. } => {
-                                                // TODO(CR 616.1): same deferred gap as Destroy -
-                                                // silently does nothing rather than guessing an order.
-                                            }
-                                        }
-                                    }
-                                    // else: target already left the battlefield - nothing to exile.
-                                }
+                                let targets: VecDeque<ObjectId> = legal_targets
+                                    .iter()
+                                    .filter_map(|t| match t {
+                                        Target::Object(id) => Some(*id),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                self.process_state = self.continue_scripted_zone_move(
+                                    ScriptedZoneMoveKind::Exile,
+                                    targets,
+                                    top.stack_id,
+                                );
+                                return StepStatus::Progressed;
                             }
                             // CR 122.1a: same "push an unapplied event, let
                             // CommitEvents retroactively apply it" pattern as
@@ -3794,6 +3697,143 @@ impl Engine {
     /// whichever state originally started this pass (`then`), via
     /// `finish_sba_loop`/`finish_cleanup_sba_check`, so a resumed pause and
     /// a fresh pass reach the exact same "nothing more to do" transition.
+    /// Commits one scripted zone-move target's already-replacement-checked
+    /// `final_event` — `Destroy`/`Sacrifice` reuse the same
+    /// `commit_death_or_regeneration`/`commit_death` helpers every SBA-driven
+    /// death already goes through; `Exile` is inlined (unchanged from the
+    /// pre-`ScriptedZoneMove` Exile arm's own body) since its destination is
+    /// the shared Exile zone (`owner: None`), not a per-player zone
+    /// `commit_death`'s `zone_mut(to, Some(owner))` call assumes.
+    fn commit_scripted_zone_move(&mut self, kind: ScriptedZoneMoveKind, final_event: GameEventKind) {
+        match kind {
+            ScriptedZoneMoveKind::Destroy => {
+                let (event, departed) = sba::commit_death_or_regeneration(&mut self.state, final_event);
+                self.departed_triggered_abilities.extend(departed);
+                self.state.ledger.push(event);
+            }
+            ScriptedZoneMoveKind::Sacrifice => {
+                let (event, departed) = sba::commit_death(&mut self.state, final_event);
+                self.departed_triggered_abilities.extend(departed);
+                self.state.ledger.push(event);
+            }
+            ScriptedZoneMoveKind::Exile => {
+                let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = final_event else {
+                    unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
+                };
+                let last_known_info = last_known_info.expect(
+                    "continue_scripted_zone_move always proposes with last_known_info populated",
+                );
+                let owner = last_known_info.owner;
+                let new_id = self.state.allocate_object_id();
+                let mut new_object = last_known_info.clone();
+                new_object.object_id = new_id;
+                new_object.lineage = ObjectLineage { previous: Some(old_id) };
+                new_object.zone = to;
+                new_object.timestamp = self.state.allocate_sequence_no();
+
+                if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
+                    zone.remove(old_id);
+                }
+                let departed = commands::retire_object(&mut self.state, old_id);
+                self.departed_triggered_abilities.extend(departed);
+                // Exile is a shared zone (owner = None); per-player
+                // graveyard/hand need Some(owner) - this lookup must use
+                // None or the object silently disappears.
+                let exile_owner = match to {
+                    ZoneKind::Exile => None,
+                    _ => Some(owner),
+                };
+                if let Some(zone) = self.state.zone_mut(to, exile_owner) {
+                    zone.push_bottom(new_id);
+                }
+                self.state.objects.insert(new_id, new_object);
+
+                let event_id = self.state.allocate_event_id();
+                let sequence_no = self.state.allocate_sequence_no();
+                let committed = GameEvent {
+                    event_id,
+                    sequence_no,
+                    kind: GameEventKind::ZoneChange {
+                        object: new_id,
+                        from: ZoneKind::Battlefield,
+                        to,
+                        last_known_info: Some(last_known_info),
+                    },
+                    caused_by_command: None,
+                    parent_event: None,
+                };
+                self.state.ledger.push(committed);
+            }
+        }
+    }
+
+    /// Drains `remaining` scripted zone-move targets one at a time — CR
+    /// 616.1's ordering-choice pause can be raised by any of them, not just
+    /// the first, since each target independently proposes+replacement-
+    /// checks+commits its own `ZoneChange` (`commit_scripted_zone_move`).
+    /// Returns the same `ReplacementCheck { remaining: [StackObjectResolved] }`
+    /// transition the pre-`ScriptedZoneMove` non-pausing path already used
+    /// once the queue empties, or pauses immediately on
+    /// `AwaitingReplacementChoice` the instant one target needs an ordering
+    /// choice, carrying the rest of the queue in `ReplacementResumeTarget::
+    /// ScriptedZoneMove` for `submit_replacement_choice` to continue later.
+    fn continue_scripted_zone_move(
+        &mut self,
+        kind: ScriptedZoneMoveKind,
+        mut remaining: VecDeque<ObjectId>,
+        stack_id: ObjectId,
+    ) -> ProcessState {
+        while let Some(id) = remaining.pop_front() {
+            let Some(last_known_info) =
+                self.state.object(id).filter(|obj| obj.zone == ZoneKind::Battlefield).cloned()
+            else {
+                // Target already left the battlefield (or never resolved) -
+                // nothing to move, same "skip rather than guess" stance
+                // every other arm here takes.
+                continue;
+            };
+            if kind == ScriptedZoneMoveKind::Destroy {
+                // CR 702.12b: an indestructible permanent can't be destroyed
+                // at all - not a replacement effect, checked up front.
+                let indestructible =
+                    commands::effective_keywords(&self.state, &self.script_runtime, id)
+                        .contains(KeywordSet::INDESTRUCTIBLE);
+                if indestructible {
+                    continue;
+                }
+            }
+            let to = if kind == ScriptedZoneMoveKind::Exile { ZoneKind::Exile } else { ZoneKind::Graveyard };
+            let proposed = GameEventKind::ZoneChange {
+                object: id,
+                from: ZoneKind::Battlefield,
+                to,
+                last_known_info: Some(last_known_info),
+            };
+            // CR 614.8: only Destroy is genuine destruction - a regeneration
+            // shield can intercept it and only it (Sacrifice/Exile are each
+            // their own real zone-change verb, neither is destruction).
+            let is_destroy = kind == ScriptedZoneMoveKind::Destroy;
+            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, is_destroy) {
+                ReplacementOutcome::Resolved(final_event) => {
+                    self.commit_scripted_zone_move(kind, final_event);
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    return ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id },
+                    };
+                }
+            }
+        }
+        ProcessState::ReplacementCheck {
+            remaining: VecDeque::from([GameEventKind::StackObjectResolved { stack_id }]),
+            checked: Vec::new(),
+        }
+    }
+
     fn resume_sba_death(
         &mut self,
         pending_deaths: VecDeque<sba::DyingCandidate>,
