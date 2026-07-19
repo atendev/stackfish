@@ -2484,18 +2484,23 @@ verbatim once enough time has passed for the underlying code to have moved.
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
   Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
-- **Protection (CR 702.16)**: closed for the color (702.16e), card-type, subtype, name (702.16a),
-  and "everything" (702.16j) qualities, `phase5/protection-from-color`/
-  `phase5/protection-from-card-type`/`phase5/protection-from-subtype`/`phase5/protection-from-name`/
-  `phase5/protection-from-everything` (docs/implementation.md, below) -
-  `EffectiveCharacteristics.protection_colors`/`.protection_card_types`/`.protection_subtypes`/
-  `.protection_names`/`.protection_everything`, `EffectPrimitive::AddProtectionColor`/
-  `AddProtectionCardType`/`AddProtectionSubtype`/`AddProtectionName`/`AddProtectionEverything`,
+- **Protection (CR 702.16)**: fully closed for all six real qualities - color (702.16e), card-type,
+  subtype, name (702.16a), "everything" (702.16j), and player (702.16k),
+  `phase5/protection-from-color`/`phase5/protection-from-card-type`/`phase5/protection-from-subtype`/
+  `phase5/protection-from-name`/`phase5/protection-from-everything`/`phase5/protection-from-player`
+  (docs/implementation.md, below) - `EffectiveCharacteristics.protection_colors`/
+  `.protection_card_types`/`.protection_subtypes`/`.protection_names`/`.protection_everything`/
+  `.protection_players`, `EffectPrimitive::AddProtectionColor`/`AddProtectionCardType`/
+  `AddProtectionSubtype`/`AddProtectionName`/`AddProtectionEverything`/`AddProtectionPlayer`,
   `Game.Effects.AddProtectionColor`/`AddProtectionCardType`/`AddProtectionSubtype`/
-  `AddProtectionName`/`AddProtectionEverything`, enforced at damage (702.16a), targeting (702.16c),
-  and blocking (702.16d) as an OR across all five fields. Protection from a specific player - the
-  last remaining CR 702.16 quality - stays unmodeled. Enchant/Equip (702.16b) stays unmodeled too
-  - needs real attach/enchant machinery this engine doesn't have (`GameObject.attached_to`/
+  `AddProtectionName`/`AddProtectionEverything`/`AddProtectionPlayer`, enforced at damage (702.16a),
+  targeting (702.16c), and blocking (702.16d) as an OR across all six fields. The player quality
+  (`protection_players: Vec<FilterController>`) is the odd one out - it compares the source's raw
+  controller against the *protected object's own* controller (`You`/`Opponent`, the same relative
+  vocabulary `EffectFilter.controller` already uses) rather than a characteristic, since this engine
+  has no multiplayer arbitrary-`PlayerId` targeting (backlog item 11) and a card script never
+  receives one at registration time. Enchant/Equip (702.16b) is the only remaining CR 702.16 gap -
+  needs real attach/enchant machinery this engine doesn't have (`GameObject.attached_to`/
   `.attachments` are inert placeholder fields, same gap `phase5/gain-control-effect` already named
   for its own aura-sourced follow-up).
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
@@ -8873,3 +8878,92 @@ clause (and `target_has_protection_from` gained an early-return branch for it).
 
 **UNRESOLVED:** protection from a specific player (CR 702.16k) - the last remaining CR 702.16
 quality, named above, not narrowed further by this slice.
+
+## Phase 5: phase5/protection-from-player slice (CR 702.16k, protection from a player)
+
+Branch `phase5/protection-from-player`, off master. Picked as the natural next (and final) increment
+of `phase5/protection-from-color`/`phase5/protection-from-card-type`/`phase5/protection-from-subtype`/
+`phase5/protection-from-name`/`phase5/protection-from-everything` - CR 702.16k's player quality
+("protection from an opponent"), extending the same three enforcement sites those five slices built.
+This closes CR 702.16's entire quality list; only Enchant/Equip (702.16b) remains unmodeled, for a
+reason unrelated to protection itself (no attach/enchant machinery).
+
+**Scoping finding, before writing code:** CR 702.16k names a *specific* player, but this engine has
+no multiplayer arbitrary-`PlayerId` targeting yet (backlog item 11, still open) and a card script's
+`initial_effect(c)` is never handed a `PlayerId` at registration time - there was no way to let Lua
+name an opponent by raw identity. Rather than invent new Lua->Rust `PlayerId` marshaling for a
+feature multiplayer generalization doesn't support yet anyway, `AddProtectionPlayer` reuses the
+engine's existing relative-player vocabulary, `FilterController` (`You`/`Opponent`/`Any`) - the same
+enum `:SetAffected({controller=...})`/`EffectFilter.controller` already expose to Lua as
+`"you"`/`"opponent"`/`"any"` strings. `Any` is rejected at construction time (a real `ScriptError`,
+not silently accepted) since "protection from any player" isn't a CR 702.16k quality - that's what
+`AddProtectionEverything` (702.16j) already covers. In the 2-player-only combat this engine supports
+today, `Opponent` (`!= this object's own controller`) is exactly CR 702.16k's real-world common case.
+
+**What got implemented:**
+- `types/effect.rs`: `EffectiveCharacteristics.protection_players: Vec<FilterController>` (sibling
+  to `protection_names`, same multi-instance `Vec` reasoning). New `EffectPrimitive::
+  AddProtectionPlayer(FilterController)`. `RemoveAllAbilities`'s doc comment and reset both updated
+  to cover a seventh field. Also fixed a stale "only strips these three layer-engine fields" count in
+  `RemoveAllAbilities`'s own doc comment left behind by an earlier slice.
+- `layers.rs`: layer-6 fold gained an eighth match arm, deduplicating on push same as
+  `protection_subtypes`/`protection_names`; `RemoveAllAbilities`'s reset clears `protection_players`
+  too.
+- `script.rs`: `Game.Effects.AddProtectionPlayer(who)` (reuses `parse_filter_controller_name`, the
+  same parser `:SetAffected` already uses), with the `Any`-rejection check above; pairing-validation
+  entry.
+- `replacement.rs`/`commands.rs`: `apply_protection`/`target_has_protection_from`/`DeclareBlockers`'s
+  protection check all generalized to check `protection_players` as a sixth OR clause - each site
+  now also resolves the *protected object's own controller* (a raw `GameObject.controller` read, not
+  a characteristics query) as the reference point for `You`/`Opponent`, then compares the incoming
+  source's own raw controller against it. `target_has_protection_from` changed shape slightly to
+  capture `source_obj` once (previously just checked existence) so its controller is available
+  without a second lookup.
+- `docs/lua_scripts.md`/`docs/implementation.md`: extended the existing protection section/gaps
+  bullet rather than writing new ones - this is the last protection-quality slice, so both now read
+  as "closed" lists rather than "closed so far."
+
+**CR requirements:** CR 702.16a/c/d again (damage/targeting/blocking), now also covering CR 702.16k
+("protection from a specific player has protection from each object that player controls..."). This
+engine's model reduces CR 702.16k's two-clause text (controls / owns-and-uncontested) to a single
+controller comparison - see the scoping finding above for why the second clause is redundant given
+this engine's single-controller-per-object model (an object owned by P but controlled by someone
+else is excluded by the second clause's own "not controlled by another player" qualifier, so it
+never actually adds coverage beyond the first clause). CR 702.16k's own Aura/Equipment-targeting
+half stays out of scope, same as every earlier protection slice - no attach machinery.
+
+**TODOs marked, not silently narrowed:** none remaining in CR 702.16's quality list - only
+Enchant/Equip (702.16b) stays open, and that's a pre-existing, differently-scoped gap (attach
+machinery), not part of this slice's own scope.
+
+**Tests added** (`crates/engine/tests/phase5_protection_from_player.rs`, 9 new tests): Lua
+self-registration; a bad `"any"` argument produces a real script error rather than being silently
+accepted; combat damage from an opponent-controlled source prevented, damage from a source the
+protected creature's own controller controls still lands; targeting by an opponent-controlled spell
+rejected, targeting by the protected creature's own controller still works; fizzle when protection
+is gained mid-stack (CR 608.2b, the same pre-existing generic mechanism); blocking by an
+opponent-controlled creature rejected; and one proving `RemoveAllAbilities` strips a granted
+protection player too (the same consistency check every earlier protection slice already has for
+its own quality).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+9 new tests; every prior test unaffected. One test (`casting_a_spell_the_protected_controller_
+controls_at_a_protected_target_still_works`) initially failed on first write - it cast from p1 while
+`base_state()` defaults priority/active player to p0 (`NotYourTurn`); fixed by having the protected
+creature and caster both be p0 instead, which still exercises the same "same-controller, not an
+opponent" case the test is named for.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none beyond `target_has_protection_from`'s internal restructuring (still
+the same signature) to capture `source_obj` once instead of just checking `is_none()`.
+
+**SCOPE DEVIATIONS:** one small unplanned fix - a stale field-count in `EffectPrimitive::
+RemoveAllAbilities`'s own doc comment (left over from an earlier protection slice, "only strips
+these three layer-engine fields" when it had already grown past three) - corrected alongside this
+slice's own edit to the same comment rather than left stale.
+
+**UNRESOLVED:** Enchant/Equip (CR 702.16b) - the sole remaining CR 702.16 gap, unrelated to this
+slice's own scope (needs attach/enchant machinery this engine doesn't have at all, not a protection-
+specific gap). CR 702.16's quality list itself is now fully closed.

@@ -219,18 +219,35 @@ pub enum EffectPrimitive {
     /// same single bit, which is correct (CR 702.16m: "multiple instances
     /// of protection from the same quality... are redundant").
     AddProtectionEverything,
+    /// Layer 6 (CR 613.1/702.16k, player quality): grants protection from a
+    /// specific player's own controlled/owned-and-uncontested objects — e.g.
+    /// "protection from an opponent." Carries a `FilterController`
+    /// (`You`/`Opponent`), the same relative-player vocabulary `:SetAffected
+    /// ({controller=...})`/`EffectFilter.controller` already expose to Lua,
+    /// rather than a raw `PlayerId` — this engine has no multiplayer
+    /// arbitrary-player-targeting yet (backlog item 11), and a card script's
+    /// `initial_effect(c)` is never handed a `PlayerId` at registration time
+    /// to name one with anyway. Resolved relative to the *protected
+    /// object's own* controller at each enforcement site (not the
+    /// continuous effect's source — the two coincide for every `self_only`
+    /// grant this engine can build, same as `EffectFilter`'s own "You"
+    /// resolution). `FilterController::Any` is rejected at construction
+    /// time (`script.rs`'s `Game.Effects.AddProtectionPlayer`) — "protection
+    /// from any player" isn't a CR 702.16k quality, that's what
+    /// `AddProtectionEverything` (702.16j) already covers.
+    AddProtectionPlayer(FilterController),
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
     /// abilities"): resets the running `keywords`, `protection_colors`,
     /// `protection_card_types`, `protection_subtypes`, `protection_names`,
-    /// *and* `protection_everything` accumulators to empty/false at this
-    /// effect's position in `effective_characteristics`'s layer-6 fold —
-    /// protection is an ability too, regardless of which quality it names
-    /// (CR 613.1f names "ability-adding... and ability-removing effects"
-    /// together, no carve-out for protection specifically). Not a flat
-    /// override the way `SetName`/`SetPT`/`GainControl` are — a
-    /// later-timestamp `AddKeyword`/`AddProtectionColor`/
+    /// `protection_everything`, *and* `protection_players` accumulators to
+    /// empty/false at this effect's position in `effective_characteristics`'s
+    /// layer-6 fold — protection is an ability too, regardless of which
+    /// quality it names (CR 613.1f names "ability-adding... and
+    /// ability-removing effects" together, no carve-out for protection
+    /// specifically). Not a flat override the way `SetName`/`SetPT`/
+    /// `GainControl` are — a later-timestamp `AddKeyword`/`AddProtectionColor`/
     /// `AddProtectionCardType`/`AddProtectionSubtype`/`AddProtectionName`/
-    /// `AddProtectionEverything` still
+    /// `AddProtectionEverything`/`AddProtectionPlayer` still
     /// applies on top afterward (CR 613.7's plain timestamp fold already
     /// produces this for free, no special dependency case needed: a
     /// strip-all and an add-keyword/add-protection never depend on each
@@ -239,7 +256,7 @@ pub enum EffectPrimitive {
     /// clears everything accumulated so far, there's no narrower "loses
     /// these specific keywords" shape here.
     ///
-    /// Deliberately narrow: only strips these three layer-engine fields,
+    /// Deliberately narrow: only strips these layer-engine fields,
     /// not the full picture of "abilities." A permanent's own custom
     /// triggered/activated `RegisteredAbility` entries are never filtered
     /// by continuous effects at all in this engine (`collect_triggers`/
@@ -735,6 +752,18 @@ pub struct EffectiveCharacteristics {
     /// even looking up the source's own characteristics (no source lookup
     /// is needed to know the answer once this is `true`).
     pub protection_everything: bool,
+    /// CR 702.16k's player quality: relative player(s) (`FilterController::
+    /// You`/`Opponent`) this object has protection from, from every
+    /// applicable layer 6 `EffectPrimitive::AddProtectionPlayer`. `Vec`
+    /// rather than a single `Option`, same "CR 702.16g composability"
+    /// reasoning the other quality fields already document. Unlike the
+    /// other four `protection_*` fields, matching this one needs a
+    /// reference point — this object's own controller, not a
+    /// characteristic — resolved at each of the three enforcement call
+    /// sites (not here) against the incoming source's raw `GameObject.
+    /// controller` field, same "You"/"Opponent" resolution `EffectFilter`
+    /// already does.
+    pub protection_players: Vec<FilterController>,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,
