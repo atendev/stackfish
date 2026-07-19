@@ -303,13 +303,31 @@ of permanent — e.g. "artifacts you control gain flying until end of turn":
 e:SetDuration(Game.Durations.UntilEndOfTurn)
 ```
 
-Same 4 tags `Game.Ops.Pump`'s own duration argument already exposes (`UntilEndOfTurn`/
-`UntilYourNextTurn`/`UntilEndOfCombat`/`Permanent` — see `DurationTag`'s own doc comment in
-script.rs for why the rest of `EffectDuration` aren't offered). Omitting `:SetDuration()`
-defaults to `Permanent`, this builder's original (and still most common) behavior. The drain
-itself is the same cleanup/end-of-combat/next-turn mechanism every other `EffectDuration`-tagged
-`ContinuousEffect` already uses (`phase5/effect-duration-expiration`) — this builder only gained a
-way to opt into it.
+Same 4 tags `Game.Ops.Pump`/`Game.Ops.GainControl`'s own duration arguments already expose
+(`UntilEndOfTurn`/`UntilYourNextTurn`/`UntilEndOfCombat`/`Permanent` — see `DurationTag`'s own doc
+comment in script.rs for why the rest of `EffectDuration` aren't offered). Omitting
+`:SetDuration()` defaults to `Permanent`, this builder's original (and still most common)
+behavior. The drain itself is the same cleanup/end-of-combat/next-turn mechanism every other
+`EffectDuration`-tagged `ContinuousEffect` already uses (`phase5/effect-duration-expiration`) —
+this builder only gained a way to opt into it.
+
+`Game.Ops.GainControl(duration)` (CR 108.4/613.1 layer 2) is a resolving spell/ability's own
+primitive, same `return Game.Ops.X(...)` shape `Game.Ops.GainLife(n)` uses — e.g. "Gain control of
+target creature until end of turn" (Threaten-style) as a spell's own operation:
+
+```lua
+return Game.Ops.GainControl(Game.Durations.UntilEndOfTurn)
+```
+
+Every legal target gets its own `ContinuousEffect` (layer 2, `EffectPrimitive::GainControl`),
+pinned `self_only: true` to that target exactly like `Pump` pins its own `ModifyPT` effect — the
+new controller is always the resolving spell/ability's own controller, no separate player argument
+from Lua. Only this resolving-effect creation path exists — a static ability's own "you control
+enchanted creature" (Control Magic-style aura) needs real attach/enchant machinery this engine
+doesn't have yet, a separate, larger gap. `phase5_gain_control_effect.rs` proves the primitive
+itself end to end (via direct `CardDefinition.effect` construction, same convention every other
+`AbilityEffect` primitive's own test file follows — not by invoking the Lua binding, which just
+decodes to the identical value), including reverting control once the duration expires.
 
 **Script-backed `:SetAffected`/`:SetEffect`** — both also accept a custom function instead of a
 table/tag, same two-shapes pattern `:SetCondition`/`:SetOperation` already use:
