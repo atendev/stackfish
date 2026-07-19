@@ -2429,16 +2429,16 @@ verbatim once enough time has passed for the underlying code to have moved.
   effect resolution and CR 608.2b's actual partial-fizzle text closed separately, `phase5/multi-
   target-resolution`; "up to N" counts closed separately too, `phase5/targeting-up-to-n` (both
   docs/implementation.md, below).
-- **Static abilities**: `StaticAbilityBuilder` still always sets `duration: Permanent` (no Lua/TOML
-  path to `UntilEndOfTurn` etc. on a *static* ability specifically). "As long as ..." conditional
-  gating closed separately, `phase5/conditional-continuous-effects` (CR 611.2c, docs/implementation.md,
-  below) — `ContinuousEffect.condition`/`Game.InterveningIf.ControlsAtLeast`/`:SetCondition`, one
-  concrete shape (`ControllerControlsAtLeast`). `EffectDuration`'s broader inert-duration gap is now
-  closed for `UntilYourNextTurn`/`UntilEndOfCombat` (the drain mechanism, `phase5/effect-duration-
-  expiration`) and a real creation path now exists for a *resolution-time* temporary effect
-  (`AbilityEffect::Pump`/`Game.Ops.Pump`, `phase5/pump-effect`, docs/implementation.md, below) — just
-  not for a *static* ability's own duration, which is what this bullet's first sentence is still
-  about.
+- **Static abilities**: `StaticAbilityBuilder`'s own duration gap is closed, `phase5/static-ability-
+  duration` (docs/implementation.md, below) — `:SetDuration(Game.Durations.*)`, same 4-tag
+  `DurationTag` decode `Game.Ops.Pump` already used, defaulting to `Permanent` when unset. "As long
+  as ..." conditional gating closed separately, `phase5/conditional-continuous-effects` (CR 611.2c,
+  docs/implementation.md, below) — `ContinuousEffect.condition`/`Game.InterveningIf.
+  ControlsAtLeast`/`:SetCondition`, one concrete shape (`ControllerControlsAtLeast`).
+  `EffectDuration`'s broader inert-duration gap is closed for `UntilYourNextTurn`/`UntilEndOfCombat`
+  (the drain mechanism, `phase5/effect-duration-expiration`) and a real creation path exists for a
+  *resolution-time* temporary effect (`AbilityEffect::Pump`/`Game.Ops.Pump`, `phase5/pump-effect`,
+  docs/implementation.md, below) as well as now a *static* ability's own duration (this bullet).
 - **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
   not a stable id - fragile if a card's own ability list ever needs to change shape.
 - **Replacement effects**: `EventFilter` still only has two shapes (`DamageDealt`, `WouldDie`).
@@ -8129,3 +8129,69 @@ correct, not independent cleanup, so folded into this slice rather than deferred
 single-payload-shape scoping, remain the same standing gap named in `docs/implementation.md`'s own
 gaps list — damage prevention/redirection and non-regenerate zone-destination substitution still
 have no Lua construction path.
+
+## Phase 5: phase5/static-ability-duration slice (CR 611.2a-style, `StaticAbilityBuilder::SetDuration`)
+
+Branch `phase5/static-ability-duration`, off master. Picked from the "Known unresolved gaps" list's
+Static abilities bullet — `StaticAbilityBuilder::Register()` always hardcoded `duration: EffectDuration
+::Permanent`, no Lua path to a temporary static-shaped `ContinuousEffect` (e.g. "artifacts you control
+gain flying until end of turn").
+
+**Scoping finding, before writing code:** the drain mechanism for every `EffectDuration` variant
+already existed and was already fully proven by `phase5_effect_duration_expiration.rs`'s own tests,
+generic over any `ContinuousEffect.duration` regardless of construction path. `Game.Durations.*`
+(the 4-tag `DurationTag` table) was already bound and already consumed by `Game.Ops.Pump`'s own
+duration argument. The only real gap was `StaticAbilityBuilder` itself never reading a duration from
+Lua at all — a pure wiring gap, not a new mechanism.
+
+**What got implemented:**
+- `script.rs`: `StaticAbilityBuilder` gained a `duration: EffectDuration` field (defaults to
+  `Permanent` at the one real construction site, same value this builder always produced before).
+  New `:SetDuration(Game.Durations.*)` method — identical `AnyUserData`/`DurationTag` decode
+  `Game.Ops.Pump`'s duration argument already uses. `Register()` now reads `this.duration.clone()`
+  instead of the hardcoded `EffectDuration::Permanent`.
+- `docs/lua_scripts.md`: static-ability section gained a `:SetDuration` paragraph + example, same
+  style as the existing `:SetCondition` callout, cross-referencing `Game.Ops.Pump`'s own duration
+  argument and `phase5/effect-duration-expiration`'s drain mechanism.
+- `docs/implementation.md`: "Known unresolved gaps" list's Static abilities bullet updated to
+  reflect closure.
+
+**CR requirements:** CR 611.2a-style limited-duration static effects — no single CR citation covers
+"a static ability's own continuous effect can be temporary" as its own numbered rule (CR 611.2 is
+about spell/ability resolution effects generally); this closes the builder-side gap so a card script
+can express that shape at all, reusing rules already covered elsewhere (CR 514.2 cleanup, CR
+511.2/500.5a end of combat, CR 723.1-style until-your-next-turn) for the actual expiration.
+
+**TODOs marked, not silently narrowed:** `WhileConditionHolds`/`Custom` durations stay unexposed to
+`Game.Durations` (same "only 4 with a real drain path" stance the table's own doc comment already
+states) — untouched by this slice, named rather than silently expanded. A static ability's duration
+being itself conditional/script-decided (rather than a fixed tag) is out of scope, same fixed-tag-only
+stance `Game.Ops.Pump` already took.
+
+**Tests added** (`crates/engine/tests/phase5_static_ability_duration.rs`, 6 new tests): five
+unit-level tests calling `run_card_script` directly, one per `Game.Durations.*` tag
+(`UntilEndOfTurn`/`UntilYourNextTurn`/`UntilEndOfCombat`/explicit `Permanent`) confirming each
+decodes into the matching `ContinuousEffect.duration`, plus one confirming omitting `:SetDuration()`
+still defaults to `Permanent` (regression guard against the default flip breaking every existing
+static-ability test). One end-to-end test: a Lua-registered `UntilEndOfTurn` static ability (via
+`run_card_script`, same mechanism `PlayLand`/`CastSpell` resolution already drives — that path
+itself proven separately by `phase5_static_ability_self_registration.rs`) seeded onto a real `Engine`
+sitting at the Ending/End step, driven through both players passing into cleanup — the effect is
+gone by the time the engine pauses again in the next turn's Upkeep (CR 502.4: no priority during
+Untap, so the engine runs straight through it), proving the Lua wiring and the pre-existing drain
+mechanism actually connect end to end.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace` — all test binaries green, 0 failures, including the 6 new tests; every
+prior test unaffected (no existing `StaticAbilityBuilder` construction site needed updating beyond
+the one real one in `script.rs` itself).
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none beyond the new `:SetDuration` method itself — additive, no existing
+method signature changed.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** none new — `WhileConditionHolds`/`Custom` durations remain the same standing
+`Game.Durations` scoping gap named elsewhere in this doc.
