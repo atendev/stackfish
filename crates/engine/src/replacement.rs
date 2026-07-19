@@ -101,20 +101,21 @@ pub(crate) fn apply_one_replacement(
 }
 
 /// CR 702.16a: protection prevents all damage from a source matching the
-/// protected quality (quality) — color (702.16e), card type (702.16), or
-/// subtype (702.16), checked as an OR of all three, since any one alone is
-/// sufficient to trigger protection. Unlike a `ReplacementEffect` a card
-/// registers, this is a static, always-on characteristic of the object
-/// itself (`layers::effective_characteristics()`'s `protection_colors`/
-/// `protection_card_types`/`protection_subtypes`), so it's a hardcoded
-/// check here rather than an entry in `state.replacement_effects` — same
-/// "checked up front, not modeled as a registered replacement" stance CR
-/// 702.12b indestructible already takes ahead of `Destroy`. Idempotent
-/// (zeroing an already-zero amount is a no-op), so calling it fresh on
-/// every `apply_replacements_from` loop iteration is safe and correctly
-/// re-evaluates against a possibly-`RedirectDamage`-changed target, not
-/// just the original proposal. A `Target::Player`/unresolvable source or
-/// target never has protection to check — returned unchanged.
+/// protected quality (quality) — color (702.16e), card type (702.16),
+/// subtype (702.16), or name (702.16a), checked as an OR of all four, since
+/// any one alone is sufficient to trigger protection. Unlike a
+/// `ReplacementEffect` a card registers, this is a static, always-on
+/// characteristic of the object itself (`layers::effective_characteristics()`'s
+/// `protection_colors`/`protection_card_types`/`protection_subtypes`/
+/// `protection_names`), so it's a hardcoded check here rather than an entry
+/// in `state.replacement_effects` — same "checked up front, not modeled as
+/// a registered replacement" stance CR 702.12b indestructible already takes
+/// ahead of `Destroy`. Idempotent (zeroing an already-zero amount is a
+/// no-op), so calling it fresh on every `apply_replacements_from` loop
+/// iteration is safe and correctly re-evaluates against a
+/// possibly-`RedirectDamage`-changed target, not just the original
+/// proposal. A `Target::Player`/unresolvable source or target never has
+/// protection to check — returned unchanged.
 fn apply_protection(state: &GameState, script_runtime: &ScriptRuntime, event: GameEventKind) -> GameEventKind {
     let GameEventKind::DamageDealt { source, target, amount, is_combat_damage } = event else {
         return event;
@@ -132,7 +133,8 @@ fn apply_protection(state: &GameState, script_runtime: &ScriptRuntime, event: Ga
         || target_characteristics
             .protection_subtypes
             .iter()
-            .any(|s| source_characteristics.subtypes.contains(s));
+            .any(|s| source_characteristics.subtypes.contains(s))
+        || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name);
     let amount = if protected { 0 } else { amount };
     GameEventKind::DamageDealt { source, target, amount, is_combat_damage }
 }
