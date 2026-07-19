@@ -258,15 +258,15 @@ fn lethal_damage_needed(
 /// that doesn't pin a zone would need the original zone threaded through
 /// separately to catch that case.
 /// CR 702.16c: `target_id` can't be the target of a spell/ability matching
-/// a quality it has protection from — color (702.16e) or card type
-/// (702.16), checked as an OR of both. `source` is the spell/ability's own
-/// object id (the card being cast, or the source of an activated ability)
-/// — its color/card types, not the caster's, is what protection cares
-/// about (CR 702.16's "of the stated quality" always describes the source,
-/// never the controller). An unresolvable source has no qualities to check
-/// against and can't illegally target anything on this basis — same "skip
-/// rather than guess" stance every other unresolvable-source case in this
-/// codebase already takes.
+/// a quality it has protection from — color (702.16e), card type (702.16),
+/// or subtype (702.16), checked as an OR across all three. `source` is the
+/// spell/ability's own object id (the card being cast, or the source of an
+/// activated ability) — its color/card types/subtypes, not the caster's, is
+/// what protection cares about (CR 702.16's "of the stated quality" always
+/// describes the source, never the controller). An unresolvable source has
+/// no qualities to check against and can't illegally target anything on
+/// this basis — same "skip rather than guess" stance every other
+/// unresolvable-source case in this codebase already takes.
 fn target_has_protection_from(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -277,12 +277,19 @@ fn target_has_protection_from(
         return false;
     }
     let target_characteristics = crate::layers::effective_characteristics(state, script_runtime, target_id);
-    if target_characteristics.protection_colors.is_empty() && target_characteristics.protection_card_types.is_empty() {
+    if target_characteristics.protection_colors.is_empty()
+        && target_characteristics.protection_card_types.is_empty()
+        && target_characteristics.protection_subtypes.is_empty()
+    {
         return false;
     }
     let source_characteristics = crate::layers::effective_characteristics(state, script_runtime, source);
     target_characteristics.protection_colors.intersects(source_characteristics.colors)
         || target_characteristics.protection_card_types.intersects(source_characteristics.card_types)
+        || target_characteristics
+            .protection_subtypes
+            .iter()
+            .any(|s| source_characteristics.subtypes.contains(s))
 }
 
 pub(crate) fn target_is_legal(
@@ -1704,12 +1711,12 @@ pub fn execute_command(
                 }
 
                 // CR 702.16d: an attacker with protection from a quality
-                // (color, 702.16e, or card type, 702.16) can't be blocked
-                // by a creature matching that quality. Same
+                // (color, 702.16e, card type, or subtype, 702.16) can't be
+                // blocked by a creature matching that quality. Same
                 // effective_characteristics treatment as Flying/Reach
-                // above - a granted color/type or a granted protection both
-                // change blocking legality for real, not just the printed
-                // values.
+                // above - a granted color/type/subtype or a granted
+                // protection all change blocking legality for real, not
+                // just the printed values.
                 let attacker_characteristics =
                     crate::layers::effective_characteristics(state, script_runtime, attacker_object.object_id);
                 let blocker_characteristics =
@@ -1718,6 +1725,10 @@ pub fn execute_command(
                     || attacker_characteristics
                         .protection_card_types
                         .intersects(blocker_characteristics.card_types)
+                    || attacker_characteristics
+                        .protection_subtypes
+                        .iter()
+                        .any(|s| blocker_characteristics.subtypes.contains(s))
                 {
                     return Err(CommandError::IllegalAction(
                         "an attacker with protection from a quality can't be blocked by a \

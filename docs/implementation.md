@@ -2484,13 +2484,14 @@ verbatim once enough time has passed for the underlying code to have moved.
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
   Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
-- **Protection (CR 702.16)**: closed for the color (702.16e) and card-type qualities, `phase5/
-  protection-from-color`/`phase5/protection-from-card-type` (docs/implementation.md, below) -
-  `EffectiveCharacteristics.protection_colors`/`.protection_card_types`, `EffectPrimitive::
-  AddProtectionColor`/`AddProtectionCardType`, `Game.Effects.AddProtectionColor`/
-  `AddProtectionCardType`, enforced at damage (702.16a), targeting (702.16c), and blocking
-  (702.16d) as an OR across both fields. Protection from a creature subtype/a specific player/"from
-  everything" stays unmodeled. Enchant/Equip (702.16b) stays unmodeled too - needs real
+- **Protection (CR 702.16)**: closed for the color (702.16e), card-type, and subtype qualities,
+  `phase5/protection-from-color`/`phase5/protection-from-card-type`/`phase5/protection-from-subtype`
+  (docs/implementation.md, below) - `EffectiveCharacteristics.protection_colors`/
+  `.protection_card_types`/`.protection_subtypes`, `EffectPrimitive::AddProtectionColor`/
+  `AddProtectionCardType`/`AddProtectionSubtype`, `Game.Effects.AddProtectionColor`/
+  `AddProtectionCardType`/`AddProtectionSubtype`, enforced at damage (702.16a), targeting (702.16c),
+  and blocking (702.16d) as an OR across all three fields. Protection from a specific player or
+  "from everything" stays unmodeled. Enchant/Equip (702.16b) stays unmodeled too - needs real
   attach/enchant machinery this engine doesn't have (`GameObject.attached_to`/`.attachments` are
   inert placeholder fields, same gap `phase5/gain-control-effect` already named for its own
   aura-sourced follow-up).
@@ -8678,3 +8679,67 @@ than one quality.
 **UNRESOLVED:** protection from creature subtype/player/everything, and Enchant/Equip - both named
 above, the same standing gaps `phase5/protection-from-color` already left open, not narrowed
 further by this slice.
+
+## Phase 5: phase5/protection-from-subtype slice (CR 702.16, protection from subtype)
+
+Branch `phase5/protection-from-subtype`, off master. Picked as the natural next increment of
+`phase5/protection-from-color`/`phase5/protection-from-card-type` - CR 702.16's subtype quality
+("protection from Zombies," "protection from Arcane"), extending the same three enforcement sites
+those two slices built rather than inventing new ones.
+
+**What got implemented:**
+- `types/effect.rs`: `EffectiveCharacteristics.protection_subtypes: Vec<Subtype>` (sibling to
+  `protection_colors`/`protection_card_types`, but a plain `Vec` rather than a bitflag `Set` -
+  `Subtype` is an open-ended string, same reason `CardDefinition.subtypes` itself is a `Vec` and not
+  a fixed enum). New `EffectPrimitive::AddProtectionSubtype(Subtype)`, one subtype per primitive
+  (CR 702.16g's "and" shorthand is already modeled as two separate registered static abilities,
+  same convention the color/card-type qualities use). `RemoveAllAbilities`'s doc comment and reset
+  both updated to cover a fourth field.
+- `layers.rs`: layer-6 fold gained a fifth match arm, deduplicating on push (`if !protection_subtypes.
+  contains(&added)`) since `Vec` has no free union the way `ColorSet`/`CardTypeSet`'s bitwise-or
+  gets; `RemoveAllAbilities`'s reset clears `protection_subtypes` too.
+- `script.rs`: `Game.Effects.AddProtectionSubtype(name)` (constructs `Subtype(name)` directly, no
+  parser needed - unlike `parse_card_type_name`/`parse_color_letter`, any string is a legal
+  subtype), pairing-validation entry.
+- `replacement.rs`: `apply_protection` generalized to check all three quality fields as an OR -
+  protected if `protection_colors`/`protection_card_types` intersects the source's own colors/card
+  types, or `protection_subtypes` contains any of the source's own subtypes.
+- `commands.rs`: `target_has_protection_from` and `DeclareBlockers`'s protection check both
+  generalized the same way, matching subtypes via `Vec::contains` against the source/blocker's own
+  `subtypes` list (mirrors `cost.rs`'s existing `FilterSpec` subtype-filter check, the only other
+  place in this codebase that already does a `Vec<Subtype>` membership test).
+- `docs/lua_scripts.md`/`docs/implementation.md`: extended the existing protection section/gaps
+  bullet rather than writing new ones.
+
+**CR requirements:** CR 702.16a/c/d again, now covering the subtype quality alongside color/card
+type - no new rule text, a third instance of the same mechanism CR 702.16 already treats uniformly.
+
+**TODOs marked, not silently narrowed:** protection from a specific player, or "from everything" -
+still not modeled, the same two qualities left open after the card-type slice.
+
+**Tests added** (`crates/engine/tests/phase5_protection_from_subtype.rs`, 9 new tests): mirrors
+`phase5_protection_from_card_type.rs` almost 1:1 with subtype instead of card type - Lua
+self-registration; combat damage from a matching-subtype source prevented, non-matching still
+lands; targeting by a matching-subtype spell rejected (an Arcane-subtyped instant, CR 205.4g's real
+instant/sorcery subtype vocabulary, so the targeting tests have a legitimate spell-side subtype to
+check against), non-matching still works; fizzle when protection is gained mid-stack (CR 608.2b,
+the same pre-existing generic mechanism); blocking by a matching-subtype creature rejected,
+non-matching still legal; and one proving `RemoveAllAbilities` strips a granted protection subtype
+too (the same consistency check the other two protection slices already have for their own
+quality).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+9 new tests; every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none - `apply_protection`/`target_has_protection_from`/`DeclareBlockers`'s
+protection check all kept their existing signatures, only their internal OR conditions grew a third
+clause.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** protection from a specific player and "from everything" - both named above, the
+same standing gaps the two earlier protection slices already left open, not narrowed further by
+this slice.
