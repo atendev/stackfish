@@ -274,22 +274,22 @@ why each is unbuilt).
 
 `Game.Effects` mirrors `Game.Ops`'s one-factory-per-shape convention: `SetPT(power, toughness)`,
 `ModifyPT(power, toughness)`, `AddKeyword(name)`, `AddCardType(name)`, `AddColor(letter)`,
-`AddProtectionColor(letter)` — each call returns a tagged value for `:SetEffect`. Two shapes take
-no arguments at all and are bare values instead of functions to call — `Game.Effects.SwitchPT`
-(layer 7e) and `Game.Effects.RemoveAllAbilities` (layer 6, CR 613.1f's ability-removing effects —
-"~ loses all abilities"; strips every keyword *and* protection color accumulated so far in the
-layer-6 fold, though a later-timestamp `AddKeyword`/`AddProtectionColor` still applies on top — see
-`EffectPrimitive::RemoveAllAbilities`'s own doc comment for why no special CR 613.8 dependency case
-is needed for that). `:Register()` rejects a layer/effect pairing that doesn't match (e.g.
-`SetLayer(TypeChanging)` with `SetEffect(ModifyPT(...))`) with a real error, rather than silently
-building a `ContinuousEffect` the layer engine could never actually apply — this check only runs
-for a `Game.Effects.*` tag, see the script-backed form below for why.
+`AddProtectionColor(letter)`, `AddProtectionCardType(name)` — each call returns a tagged value for
+`:SetEffect`. Two shapes take no arguments at all and are bare values instead of functions to call
+— `Game.Effects.SwitchPT` (layer 7e) and `Game.Effects.RemoveAllAbilities` (layer 6, CR 613.1f's
+ability-removing effects — "~ loses all abilities"; strips every keyword *and* both protection
+fields accumulated so far in the layer-6 fold, though a later-timestamp add-shape still applies on
+top — see `EffectPrimitive::RemoveAllAbilities`'s own doc comment for why no special CR 613.8
+dependency case is needed for that). `:Register()` rejects a layer/effect pairing that doesn't
+match (e.g. `SetLayer(TypeChanging)` with `SetEffect(ModifyPT(...))`) with a real error, rather than
+silently building a `ContinuousEffect` the layer engine could never actually apply — this check
+only runs for a `Game.Effects.*` tag, see the script-backed form below for why.
 
-`AddProtectionColor` (CR 702.16, narrowed to 702.16e's "protection from color" shape) pairs with
-`Game.Layers.AbilityAdding`, same layer `AddKeyword` uses — protection isn't its own `KeywordSet`
-bit (it has to carry *which* color, which a flat bitflag can't), so it's a separate field,
-`EffectiveCharacteristics.protection_colors`, folded in alongside `keywords` in the same layer-6
-pass:
+`AddProtectionColor`/`AddProtectionCardType` (CR 702.16, narrowed to the color, 702.16e, and
+card-type qualities) both pair with `Game.Layers.AbilityAdding`, same layer `AddKeyword` uses —
+protection isn't its own `KeywordSet` bit (it has to carry *which* color/type, which a flat bitflag
+can't), so each quality is its own field, `EffectiveCharacteristics.protection_colors`/
+`.protection_card_types`, folded in alongside `keywords` in the same layer-6 pass:
 
 ```lua
 -- This creature has protection from red.
@@ -306,18 +306,34 @@ end
 return s
 ```
 
+```lua
+-- This creature has protection from artifacts.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.AbilityAdding)
+    e:SetEffect(Game.Effects.AddProtectionCardType("Artifact"))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+
+return s
+```
+
 Enforced at three real call sites, none of them a `state.replacement_effects` entry (protection is
 a static, always-on characteristic, not something a card "registers" — same "checked up front, not
-a registered replacement" stance CR 702.12b indestructible already takes ahead of `Destroy`):
-damage (`replacement::apply_protection_from_color`, CR 702.16a — the matched source's damage is
-prevented entirely, re-checked fresh every replacement-resolution pass so a mid-resolution
-`RedirectDamage` retarget is caught too), targeting (`commands::target_is_legal`, CR 702.16c — a
-spell/ability of the protected color can't target it, including the CR 608.2b recheck at
-resolution time if protection is gained after the spell was already cast), and blocking
-(`DeclareBlockers`, CR 702.16d — a creature of the protected color can't block it, same call site
-Flying/Reach/Menace already gate). Enchant/Equip (702.16b) stays unmodeled — no attach/enchant
-machinery exists in this engine yet. Protection from card type/subtype/a specific player/"from
-everything" — only color, this slice.
+a registered replacement" stance CR 702.12b indestructible already takes ahead of `Destroy`), each
+checking both quality fields as an OR (protected if *either* the color or the card-type quality
+matches the source): damage (`replacement::apply_protection`, CR 702.16a — the matched source's
+damage is prevented entirely, re-checked fresh every replacement-resolution pass so a
+mid-resolution `RedirectDamage` retarget is caught too), targeting (`commands::target_is_legal`, CR
+702.16c — a spell/ability matching a protected quality can't target it, including the CR 608.2b
+recheck at resolution time if protection is gained after the spell was already cast), and blocking
+(`DeclareBlockers`, CR 702.16d — a creature matching a protected quality can't block it, same call
+site Flying/Reach/Menace already gate). Enchant/Equip (702.16b) stays unmodeled — no attach/enchant
+machinery exists in this engine yet. Protection from a creature subtype/a specific player/"from
+everything" — only color and card type, so far.
 
 `:SetAffected` takes a plain table, not its own family of tag factories — every key optional,
 same shape `EffectFilter` (`types/effect.rs`) already has:
@@ -415,9 +431,10 @@ sites needed; `run_card_script` drains both `pending_triggered` and `pending_sta
 Real, tested end to end: `crates/engine/tests/phase5_static_ability_self_registration.rs` (table/tag
 form), `crates/engine/tests/phase5_continuous_effects_script.rs` (script-backed form),
 `crates/engine/tests/phase5_static_ability_duration.rs` (`:SetDuration`),
-`crates/engine/tests/phase5_lose_all_abilities.rs` (`RemoveAllAbilities`, both forms), and
+`crates/engine/tests/phase5_lose_all_abilities.rs` (`RemoveAllAbilities`, both forms),
 `crates/engine/tests/phase5_protection_from_color.rs` (`AddProtectionColor`, all three enforcement
-sites).
+sites), and `crates/engine/tests/phase5_protection_from_card_type.rs`
+(`AddProtectionCardType`, same three sites plus the `RemoveAllAbilities` interaction).
 Scenario TOML fixtures can use the table/tag form via `CardSpec.script` too — see
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 

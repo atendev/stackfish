@@ -100,23 +100,22 @@ pub(crate) fn apply_one_replacement(
     rewritten
 }
 
-/// CR 702.16a: protection prevents all damage from a source of the
-/// protected color(s) — unlike a `ReplacementEffect` a card registers, this
-/// is a static, always-on characteristic of the object itself (`layers::
-/// effective_characteristics().protection_colors`), so it's a hardcoded
-/// check here rather than an entry in `state.replacement_effects` — same
-/// "checked up front, not modeled as a registered replacement" stance CR
-/// 702.12b indestructible already takes ahead of `Destroy`. Idempotent
-/// (zeroing an already-zero amount is a no-op), so calling it fresh on
-/// every `apply_replacements_from` loop iteration is safe and correctly
-/// re-evaluates against a possibly-`RedirectDamage`-changed target, not
-/// just the original proposal. A `Target::Player`/unresolvable source or
-/// target never has protection to check — returned unchanged.
-fn apply_protection_from_color(
-    state: &GameState,
-    script_runtime: &ScriptRuntime,
-    event: GameEventKind,
-) -> GameEventKind {
+/// CR 702.16a: protection prevents all damage from a source matching the
+/// protected quality (quality) — color (702.16e) or card type (702.16,
+/// checked as an OR of both, since either alone is sufficient to trigger
+/// protection). Unlike a `ReplacementEffect` a card registers, this is a
+/// static, always-on characteristic of the object itself (`layers::
+/// effective_characteristics()`'s `protection_colors`/
+/// `protection_card_types`), so it's a hardcoded check here rather than an
+/// entry in `state.replacement_effects` — same "checked up front, not
+/// modeled as a registered replacement" stance CR 702.12b indestructible
+/// already takes ahead of `Destroy`. Idempotent (zeroing an already-zero
+/// amount is a no-op), so calling it fresh on every `apply_replacements_from`
+/// loop iteration is safe and correctly re-evaluates against a
+/// possibly-`RedirectDamage`-changed target, not just the original
+/// proposal. A `Target::Player`/unresolvable source or target never has
+/// protection to check — returned unchanged.
+fn apply_protection(state: &GameState, script_runtime: &ScriptRuntime, event: GameEventKind) -> GameEventKind {
     let GameEventKind::DamageDealt { source, target, amount, is_combat_damage } = event else {
         return event;
     };
@@ -126,10 +125,11 @@ fn apply_protection_from_color(
     if state.object(source).is_none() || state.object(target_id).is_none() {
         return GameEventKind::DamageDealt { source, target, amount, is_combat_damage };
     }
-    let target_protection =
-        crate::layers::effective_characteristics(state, script_runtime, target_id).protection_colors;
-    let source_colors = crate::layers::effective_characteristics(state, script_runtime, source).colors;
-    let amount = if target_protection.intersects(source_colors) { 0 } else { amount };
+    let target_characteristics = crate::layers::effective_characteristics(state, script_runtime, target_id);
+    let source_characteristics = crate::layers::effective_characteristics(state, script_runtime, source);
+    let protected = target_characteristics.protection_colors.intersects(source_characteristics.colors)
+        || target_characteristics.protection_card_types.intersects(source_characteristics.card_types);
+    let amount = if protected { 0 } else { amount };
     GameEventKind::DamageDealt { source, target, amount, is_combat_damage }
 }
 
@@ -173,10 +173,10 @@ pub(crate) fn apply_replacements_from(
     let mut event = proposed;
     loop {
         // CR 702.16a: checked fresh every iteration, ahead of the
-        // registered-effects match below - see apply_protection_from_color's
-        // own doc comment for why this is hardcoded rather than a
-        // ReplacementEffect entry.
-        event = apply_protection_from_color(state, script_runtime, event);
+        // registered-effects match below - see apply_protection's own doc
+        // comment for why this is hardcoded rather than a ReplacementEffect
+        // entry.
+        event = apply_protection(state, script_runtime, event);
 
         if state.replacement_effects.is_empty() {
             // Genuinely nothing registered to match against - safe to
