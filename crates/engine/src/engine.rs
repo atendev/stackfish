@@ -2827,6 +2827,36 @@ impl Engine {
                                     });
                                 }
                             }
+                            // CR 108.4/613.1 layer 2: same per-target
+                            // ContinuousEffect construction as Pump above,
+                            // just layer 2/GainControl instead of layer 7c/
+                            // ModifyPT. The new controller is always
+                            // top.controller (the resolving spell/ability's
+                            // own controller) - see AbilityEffect::
+                            // GainControl's own doc comment for why no
+                            // separate player argument exists. Object
+                            // targets only, same "silent no-op" stance as
+                            // Pump/Damage/Counters above.
+                            Some(AbilityEffect::GainControl(duration)) => {
+                                let timestamp = self.state.allocate_sequence_no();
+                                let new_controller = top.controller;
+                                for target in &legal_targets {
+                                    let Target::Object(id) = target else { continue };
+                                    self.state.continuous_effects.push(ContinuousEffect {
+                                        source: *id,
+                                        layer: Layer::ControlChangingEffects,
+                                        affected: AffectedFilter::Primitive(EffectFilter {
+                                            controller: None,
+                                            card_types: None,
+                                            self_only: true,
+                                        }),
+                                        effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
+                                        timestamp,
+                                        duration: duration.clone(),
+                                        condition: None,
+                                    });
+                                }
+                            }
                             // CR 701.19a: every legal target independently
                             // gets its own one-shot regeneration shield,
                             // pinned via self_only: true exactly like Pump

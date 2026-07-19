@@ -116,6 +116,33 @@ pub enum AbilityEffect {
     /// non-Object legal target is skipped, same "silent no-op" stance every
     /// other object-targeted primitive here takes.
     Pump { power: i32, toughness: i32, duration: crate::types::effect::EffectDuration },
+    /// The `Game.Ops.GainControl(duration)` primitive — CR 108.4/613.1
+    /// layer 2, e.g. "Gain control of target creature until end of turn"
+    /// (Threaten-style). Same per-target `ContinuousEffect` construction
+    /// `Pump` above uses (`self_only: true` pinned to the *target's* own
+    /// `ObjectId`, mutates `state.continuous_effects` immediately, no
+    /// `CommitEvents` involved), just `Layer::ControlChangingEffects`/
+    /// `EffectPrimitive::GainControl` instead of layer 7c/`ModifyPT`. The
+    /// new controller is always the resolving spell/ability's own
+    /// controller (`StackObject::controller` at resolution time) - no
+    /// separate player argument from Lua, since every real "gain control"
+    /// card gives control to its own caster. A non-Object legal target is
+    /// skipped, same "silent no-op" stance every other object-targeted
+    /// primitive here takes.
+    ///
+    /// Deliberately narrow: only this resolving-spell/ability creation path
+    /// exists. A *static* ability's own "you control enchanted creature"
+    /// (Control Magic-style, CR 303.4h auras) needs real attach/enchant
+    /// machinery this engine doesn't have yet (`GameObject.attached_to`/
+    /// `.attachments` are inert placeholder fields, never written to
+    /// anywhere) - a separate, larger gap, not attempted here. Also,
+    /// `GameObject.controlled_since_turn` isn't updated by this effect
+    /// (CR 302.6 summoning sickness technically restarts for the new
+    /// controller) - deliberately left alone rather than half-fixed, since
+    /// naively stamping it here would leave a stale value behind once the
+    /// effect's duration expires and control reverts via the layer engine,
+    /// a new bug rather than a fix. Named, not guessed at.
+    GainControl(crate::types::effect::EffectDuration),
     /// The `Game.Ops.Regenerate()` primitive — CR 701.19a: "Regenerate
     /// target creature." Every legal target independently gets its own
     /// one-shot regeneration shield (`ReplacementEffect`, `EventFilter::

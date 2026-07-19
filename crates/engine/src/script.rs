@@ -1937,6 +1937,15 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         Ok(OperationTag(AbilityEffect::Pump { power, toughness, duration }))
     })?;
     ops.set("Pump", pump)?;
+    // `Game.Ops.GainControl(duration)` - same `Game.Durations.*` tag decode
+    // as Pump's own duration argument. No player argument - the new
+    // controller is always the resolving spell/ability's own controller
+    // (see AbilityEffect::GainControl's own doc comment for why).
+    let gain_control = lua.create_function(|_, duration: mlua::AnyUserData| {
+        let duration = duration.borrow::<DurationTag>()?.0.clone();
+        Ok(OperationTag(AbilityEffect::GainControl(duration)))
+    })?;
+    ops.set("GainControl", gain_control)?;
     // `Game.Ops.Regenerate()` (CR 701.19a) - no arguments, same toggle shape
     // as `Game.Ops.Destroy`/`Sacrifice`/`Exile`/`Shuffle`.
     ops.set("Regenerate", OperationTag(AbilityEffect::Regenerate))?;

@@ -6939,11 +6939,14 @@ of migrated.
 
 **UNRESOLVED (named during this slice, not silently narrowed):**
 - No command/`AbilityEffect`/script binding produces a `GainControl` effect yet - test fixtures build
-  it via struct literal, same bootstrap convention every layer-engine sub-slice used. `controlled_
-  since_turn` still isn't bumped by anything resembling a real "gain control" mutation event either
-  (the query-only slice's own UNRESOLVED note, still true) - this slice's summoning-sickness test
-  demonstrates the *query* is now correct by directly constructing a `controlled_since_turn` value,
-  not by proving a real gameplay action updates it.
+  it via struct literal, same bootstrap convention every layer-engine sub-slice used. Closed for the
+  resolving-spell/ability creation path, `phase5/gain-control-effect` (docs/implementation.md, below)
+  - a static ability's own aura-sourced control change is still open, see that slice's own notes.
+  `controlled_since_turn` still isn't bumped by anything resembling a real "gain control" mutation
+  event either (the query-only slice's own UNRESOLVED note, still true) - this slice's summoning-
+  sickness test demonstrates the *query* is now correct by directly constructing a `controlled_
+  since_turn` value, not by proving a real gameplay action updates it. `phase5/gain-control-effect`
+  deliberately left this alone too, rather than half-fixing it.
 - 11b's `StackObject.controller`-as-owner-stand-in gap (`sba.rs`'s `remove_players_objects`) is still
   open - unrelated to this migration, `StackObject` has no owner field at all to migrate.
 - `layers.rs`'s own internal filtering stays on the raw field for every layer (not just layer 2), a
@@ -8339,3 +8342,80 @@ rather than deferred.
 
 **UNRESOLVED:** `ReplacementPayload::RedirectDamage(Target)` and `EventFilter`'s two-shapes-only
 limit remain the same standing gaps named in `docs/implementation.md`'s own gaps list.
+
+## Phase 5: phase5/gain-control-effect slice (CR 108.4/613.1, `AbilityEffect::GainControl`)
+
+Branch `phase5/gain-control-effect`, off master. Picked from `phase5/layer-engine-control-
+consumers`'s own UNRESOLVED note — every real consumer of `layers::effective_controller` (combat,
+targeting, cost filters, `has_summoning_sickness`, `FilterSpec::matches`) already reads the *live*
+controller correctly, but nothing could create a `GainControl` effect at all; every existing test
+built one via a bare `ContinuousEffect` struct literal.
+
+**Scoping finding, before writing code:** two possible creation paths exist for a real "gain
+control" card - a resolving spell/ability (Threaten-style, "gain control of target creature until
+end of turn") or a static ability on an attached permanent (Control Magic-style aura, "you control
+enchanted creature"). The aura path needs real attach/enchant machinery (`GameObject.attached_to`/
+`.attachments` are inert placeholder fields — confirmed by grep, nothing ever writes to them) — a
+separate, larger gap. Scoped to the resolving-spell path only, mirroring `AbilityEffect::Pump`'s
+exact shape (same per-target `ContinuousEffect` construction, `self_only: true` pinned to the
+target, no script call needed) since the only real difference is which layer/primitive pair gets
+built. The new controller is always the resolving effect's own controller (`StackObject::
+controller`) — no player argument needed from Lua, since every real "gain control" card in Magic
+targets a creature and gives control to its own caster.
+
+**What got implemented:**
+- `types/ability.rs`: `AbilityEffect::GainControl(EffectDuration)` — new variant, same shape as
+  `Pump` minus the power/toughness fields.
+- `script.rs`: `Game.Ops.GainControl(duration)` binding, same `AnyUserData`/`DurationTag` decode
+  `Game.Ops.Pump`'s duration argument already uses.
+- `engine.rs`: new `ResolveStackTop` match arm, textually adjacent to `Pump`'s own — same per-target
+  loop and `ContinuousEffect` construction, `layer: ControlChangingEffects`/`effect: GainControl
+  (top.controller)` instead of `PowerToughnessModifying`/`ModifyPT`.
+- `commands.rs`: `ActivateAbility`'s non-mana-effect catch-all pattern gained `Some(AbilityEffect::
+  GainControl(_))` — a mechanical, compiler-caught addition (this primitive uses the stack like
+  every other non-mana ability effect).
+- `docs/lua_scripts.md`: `Game.Ops.GainControl` documented alongside the `:SetDuration` /
+  `Game.Ops.Pump` cross-reference (this codebase has no dedicated section for `AbilityEffect`
+  resolution-effect primitives as a group — `Damage`/`Destroy`/`Counters`/`Pump`/`Regenerate` aren't
+  documented as a table either, a pre-existing gap wider than this slice, not attempted here beyond
+  giving the new primitive itself a real mention).
+- `docs/implementation.md`: `phase5/layer-engine-control-consumers`'s UNRESOLVED note updated to
+  reflect the resolving-spell path's closure.
+
+**CR requirements:** CR 108.4/613.1 layer 2 (control-changing effects), CR 611.2a's "duration
+stated by the spell or ability creating it" (same convention `Pump` already established).
+
+**TODOs marked, not silently narrowed:**
+- Aura/static-ability-sourced control change (Control Magic-style) stays unbuilt — needs real
+  attach/enchant machinery first, named in `AbilityEffect::GainControl`'s own doc comment and this
+  write-up.
+- `GameObject.controlled_since_turn` still isn't bumped by a live control-change event — left alone
+  deliberately, not half-fixed: naively stamping it at gain-control time would introduce a *new*
+  bug (the stale bumped value would persist on the object after the effect's duration expires and
+  control reverts via the layer engine, making the original controller incorrectly read as having
+  only just reacquired it). Correctly modeling "since when has each controller controlled this"
+  needs more than one scalar field on `GameObject` — named, not guessed at.
+
+**Tests added** (`crates/engine/tests/phase5_gain_control_effect.rs`, 4 new tests): a Threaten-style
+sorcery resolving against an opponent's creature makes the caster the real `effective_controller`,
+proven both by the query directly and by a concrete combat-legality check (the new controller can
+declare the creature as an attacker — same shape `phase5_control_change_consumers.rs`'s own
+end-to-end test uses, but through the real Lua/`AbilityEffect` creation path this time instead of a
+hand-built `ContinuousEffect`); the effect is pinned to its target, not the spell's own source
+(mirrors `phase5_pump_effect.rs`'s own pinning test); an `UntilEndOfTurn` gain-control effect drains
+at cleanup and control reverts to the original owner; a `Permanent`-duration gain-control effect
+survives into the next turn.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` — every test binary green, 0 failures, including the
+4 new tests; every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none beyond the new `AbilityEffect` variant itself — additive, no
+existing variant or function signature changed.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** the aura/static-ability control-change path and `controlled_since_turn` (see the
+two TODOs above) — both named, not silently dropped.
