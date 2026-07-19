@@ -2420,7 +2420,12 @@ verbatim once enough time has passed for the underlying code to have moved.
 - **Layer 3 (text-changing)**: general CR 612.2 "correct usage" word/symbol substitution and the
   single-card rules (612.5 Exchange of Words, 612.6 Volrath's Shapeshifter, 612.7 Spy Kit, 612.9 name
   stickers, 612.10 splice) stay unmodeled - only CR 612.8 name-setting is real. "Loses all abilities"
-  (a text-removal shape) isn't modeled either.
+  (CR 613.1f, mechanically layer 6 despite being flagged here) is closed for the `KeywordSet` half,
+  `phase5/lose-all-abilities` (docs/implementation.md, below) - `EffectPrimitive::
+  RemoveAllAbilities`/`Game.Effects.RemoveAllAbilities`. A permanent's own `RegisteredAbility`
+  entries (custom triggered/activated abilities) stay unaffected - `collect_triggers`/activation-
+  legality never consult continuous effects at all, same shape the layer-2-control-consumers gap
+  below already names for a different layer.
 - **CR 613.6-8 dependency**: `EffectPayload::Script` effects never participate in dependency ordering
   (always treated as independent); cross-layer/cross-sublayer dependency isn't modeled (this one is by
   rule - CR 613.8 is explicitly same-layer/sublayer only - not a real gap).
@@ -8214,6 +8219,87 @@ method signature changed.
 **UNRESOLVED:** none new — `WhileConditionHolds`/`Custom` durations remain the same standing
 `Game.Durations` scoping gap named elsewhere in this doc.
 
+## Phase 5: phase5/lose-all-abilities slice (CR 613.1f, `EffectPrimitive::RemoveAllAbilities`)
+
+Branch `phase5/lose-all-abilities`, off master. Picked from the "Known unresolved gaps" list's
+Layer 3 bullet — layer 6 (`AbilityAdding`) only had the additive `AddKeyword` shape; a card saying
+"loses all abilities" (Ovinize, Turn to Frog) had no construction path. Flagged under the Layer 3
+bullet in this doc even though CR 613.1f places ability-removing effects in layer 6 - the doc
+cross-reference was deliberate ("tracked here rather than under layer 6's AddKeyword TODO"), the
+mechanics below follow the CR, not the doc placement.
+
+**Scoping finding, before writing code:** every real consumer of layer 6's output
+(`effective_keywords`, read by combat's flying/reach/menace/trample/deathtouch/lifelink/infect/
+wither/first-strike checks throughout `commands.rs`) already routes through `layers::
+effective_characteristics`, not the raw printed `KeywordSet` - so a layer-6 primitive that clears
+the accumulator needed zero changes anywhere outside `layers.rs`'s own fold loop to be observed
+by real gameplay. The harder question was scope: real "loses all abilities" text also silences a
+permanent's custom triggered/activated abilities, not just keywords - but `state.abilities`
+(`RegisteredAbility` entries) is never filtered by continuous effects anywhere in this engine
+(`collect_triggers`/activation-legality read it directly). Extending this primitive to cover that
+too would mean threading a layer-6 lookup through that entire call graph - the same shape the
+layer-2-control-consumers slice already declined for a different layer. Scoped to the `KeywordSet`
+half only, named rather than silently narrowed.
+
+**What got implemented:**
+- `types/effect.rs`: `EffectPrimitive::RemoveAllAbilities` (unit variant, layer 6). `AddKeyword`'s
+  own doc comment and `Layer::TextChanging`'s TODO both updated to point here instead of flagging
+  the gap.
+- `layers.rs`: `effective_characteristics`'s layer-6 loop now matches on both `AddKeyword` (union,
+  as before) and `RemoveAllAbilities` (resets the running `keywords` accumulator to empty at that
+  effect's position in the CR 613.7 timestamp-ordered fold) - no new CR 613.8 dependency case
+  needed, same reasoning `SetPT`/`GainControl` already documented for why a flat
+  clear-or-override never depends on anything else in its own layer.
+- `script.rs`: `validate_layer_effect_pairing` gained the `(AbilityAdding, RemoveAllAbilities)`
+  pair. `Game.Effects.RemoveAllAbilities` bound as a bare tag (no arguments), same pattern
+  `SwitchPT` already used. Script-backed `:SetEffect(function...)` table decode gained a 7th
+  recognized key, `remove_all_abilities = true`, alongside the existing six.
+- `docs/lua_scripts.md`: static-ability section's `Game.Effects.*` paragraph now calls out both
+  no-argument bare-tag shapes (`SwitchPT`, `RemoveAllAbilities`) - `SwitchPT` had never actually
+  been documented there before this slice touched the same paragraph, a pre-existing one-line gap
+  fixed alongside it rather than left for a future slice to trip over. The script-backed six-key
+  list/table both updated to seven.
+- `docs/implementation.md`: Layer 3 gaps-list bullet updated to reflect closure of the keyword half.
+
+**CR requirements:** CR 613.1f (layer 6, "ability-adding effects... and ability-removing effects...
+are applied").
+
+**TODOs marked, not silently narrowed:** a permanent's own `RegisteredAbility` entries (custom
+triggered/activated abilities) stay unaffected by this primitive - see the scoping finding above,
+named in both `EffectPrimitive::RemoveAllAbilities`'s own doc comment and the gaps-list bullet.
+
+**Tests added** (`crates/engine/tests/phase5_lose_all_abilities.rs`, 7 new tests): three unit-level
+tests against `effective_characteristics` directly (struct-literal `ContinuousEffect`s, same
+pattern `phase5_layer_engine_basics.rs`/`phase5_layer_engine_consumers.rs` already use) - a printed
+keyword stripped outright, a later-timestamp `AddKeyword` still applying after an earlier strip,
+and an earlier-timestamp granted keyword getting stripped by a later `RemoveAllAbilities` too (not
+just the printed set). Two combat-integration tests mirroring `phase5_layer_engine_consumers.rs`'s
+own granted-Flying test in reverse, through a real `Engine`'s `DeclareBlockers` pipeline: a printed-
+Flying attacker whose ability is stripped becomes legally blockable by a ground creature, and the
+same fixture without the strip still enforces Flying's blocking restriction (regression guard).
+One Lua self-registration test (`Game.CreateStaticAbility` + `Game.Effects.RemoveAllAbilities`,
+mirroring `phase5_static_ability_self_registration.rs`'s own pattern) confirming both the queued
+`ContinuousEffect`'s shape and its real effect on `effective_characteristics`. One script-backed
+decode test (`ScriptRuntime::invoke_continuous_effect` given `{remove_all_abilities = true}`,
+mirroring `phase5_continuous_effects_script.rs`'s own `effect_decodes_*` tests).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace` — all test binaries green, 0 failures, including the 7 new tests;
+every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none beyond the new `EffectPrimitive` variant itself — additive, no
+existing variant or function signature changed.
+
+**SCOPE DEVIATIONS:** the `SwitchPT` documentation gap in `docs/lua_scripts.md` (found while
+editing the same paragraph for `RemoveAllAbilities`) — fixed alongside it, not part of the original
+scoping.
+
+**UNRESOLVED:** the `RegisteredAbility`/custom-ability half of "loses all abilities" (see scoping
+finding above) — named, not silently dropped, same standing shape the layer-2-control-consumers
+gap already established for a different layer.
+
 ## Fix: layer 5 read `color_indicator` alone instead of `CardDefinition::colors()` (CR 105.2a/202.2)
 
 Found while answering "how far from a real card database" — not picked from the gaps list, a stale
@@ -8516,8 +8602,23 @@ deviation.
 **SCOPE DEVIATIONS:** none.
 
 **UNRESOLVED:** protection from card type/subtype/player/name/everything, and Enchant/Equip - both
-named above, not silently dropped. `phase5/lose-all-abilities` (a separate, still-unmerged branch)
-introduces `EffectPrimitive::RemoveAllAbilities`, which resets `keywords` in the same layer-6 fold
-this slice touched - when that branch merges, its reset will need extending to also clear
-`protection_colors`, or "loses all abilities" would leave protection behind. Not fixed here since
-the primitive doesn't exist on this branch yet; flagged so it isn't missed at merge time.
+named above, not silently dropped. `phase5/lose-all-abilities` (a separate branch, unmerged at the
+time this slice was written) introduces `EffectPrimitive::RemoveAllAbilities`, which resets
+`keywords` in the same layer-6 fold this slice touched - flagged then as needing its reset extended
+to also clear `protection_colors` once that branch merged. Done as part of merging the two branches
+together (see the merge commit itself / `phase5/lose-all-abilities`'s own updated write-up above,
+just above this slice's) - `RemoveAllAbilities` now resets both fields.
+
+## Merging phase5/lose-all-abilities and phase5/protection-from-color
+
+The two branches above were developed in parallel off master, each unaware of the other, and both
+touched the same layer-6 fold in `effective_characteristics` (`keywords`/`RemoveAllAbilities` from
+one, `protection_colors`/`AddProtectionColor` from the other). Merging `master` (which had
+`phase5/protection-from-color` already merged in) into `phase5/lose-all-abilities` produced real
+conflicts in `layers.rs`, `types/effect.rs`, and `script.rs` - resolved by keeping both features and
+extending `RemoveAllAbilities`'s reset to clear `protection_colors` too, exactly as both slices'
+own UNRESOLVED notes had already flagged would be needed. `EffectiveCharacteristics.keywords`'s own
+doc comment ("no layer removes a keyword yet") was also stale after `RemoveAllAbilities` existed -
+fixed alongside the merge rather than left. No test or behavior changes beyond that one intentional
+fix - `cargo test --workspace` green after resolving, same test counts as each branch had
+independently plus no regressions.

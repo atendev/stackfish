@@ -274,11 +274,16 @@ why each is unbuilt).
 
 `Game.Effects` mirrors `Game.Ops`'s one-factory-per-shape convention: `SetPT(power, toughness)`,
 `ModifyPT(power, toughness)`, `AddKeyword(name)`, `AddCardType(name)`, `AddColor(letter)`,
-`AddProtectionColor(letter)` — each call returns a tagged value for `:SetEffect`. `:Register()`
-rejects a layer/effect pairing that doesn't match (e.g. `SetLayer(TypeChanging)` with
-`SetEffect(ModifyPT(...))`) with a real error, rather than silently building a `ContinuousEffect`
-the layer engine could never actually apply — this check only runs for a `Game.Effects.*` tag, see
-the script-backed form below for why.
+`AddProtectionColor(letter)` — each call returns a tagged value for `:SetEffect`. Two shapes take
+no arguments at all and are bare values instead of functions to call — `Game.Effects.SwitchPT`
+(layer 7e) and `Game.Effects.RemoveAllAbilities` (layer 6, CR 613.1f's ability-removing effects —
+"~ loses all abilities"; strips every keyword *and* protection color accumulated so far in the
+layer-6 fold, though a later-timestamp `AddKeyword`/`AddProtectionColor` still applies on top — see
+`EffectPrimitive::RemoveAllAbilities`'s own doc comment for why no special CR 613.8 dependency case
+is needed for that). `:Register()` rejects a layer/effect pairing that doesn't match (e.g.
+`SetLayer(TypeChanging)` with `SetEffect(ModifyPT(...))`) with a real error, rather than silently
+building a `ContinuousEffect` the layer engine could never actually apply — this check only runs
+for a `Game.Effects.*` tag, see the script-backed form below for why.
 
 `AddProtectionColor` (CR 702.16, narrowed to 702.16e's "protection from color" shape) pairs with
 `Game.Layers.AbilityAdding`, same layer `AddKeyword` uses — protection isn't its own `KeywordSet`
@@ -376,17 +381,18 @@ end)
 
 -- An effect whose shape is decided by a script instead of a Game.Effects.*
 -- tag - the "Lua asks, Rust decides" table convention Game.Ops.* operations
--- already use, generalized to six recognized keys:
+-- already use, generalized to seven recognized keys:
 e:SetEffect(function(source, controller)
     return { modify_pt = { power = 1, toughness = 1 } }
     -- also recognized: set_pt = {power=,toughness=}, add_keyword = {"Flying",...},
-    -- add_card_type = {"Creature",...}, add_color = "WU", switch_pt = true
+    -- add_card_type = {"Creature",...}, add_color = "WU", switch_pt = true,
+    -- remove_all_abilities = true
 end)
 ```
 
 An affects-predicate is invoked once per candidate object (`ScriptRuntime::invoke_continuous_affects`)
 and must return a plain boolean. An effect-shape script is invoked once per query
-(`ScriptRuntime::invoke_continuous_effect`) and must return a table with exactly one of the six
+(`ScriptRuntime::invoke_continuous_effect`) and must return a table with exactly one of the seven
 recognized keys above — an empty/unrecognized table, or a script that errors, resolves to "no
 effect this call," same "skip rather than guess" stance every other unresolvable script value in
 this engine already takes. Neither call passes `GameState` into Lua (same limitation
@@ -408,7 +414,8 @@ sites needed; `run_card_script` drains both `pending_triggered` and `pending_sta
 
 Real, tested end to end: `crates/engine/tests/phase5_static_ability_self_registration.rs` (table/tag
 form), `crates/engine/tests/phase5_continuous_effects_script.rs` (script-backed form),
-`crates/engine/tests/phase5_static_ability_duration.rs` (`:SetDuration`), and
+`crates/engine/tests/phase5_static_ability_duration.rs` (`:SetDuration`),
+`crates/engine/tests/phase5_lose_all_abilities.rs` (`RemoveAllAbilities`, both forms), and
 `crates/engine/tests/phase5_protection_from_color.rs` (`AddProtectionColor`, all three enforcement
 sites).
 Scenario TOML fixtures can use the table/tag form via `CardSpec.script` too — see

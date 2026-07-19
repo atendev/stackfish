@@ -51,10 +51,13 @@ use crate::script::ScriptRuntime;
 /// The general case (CR 612.2's "changes only correctly-used words" word/
 /// symbol substitution, 612.6/612.7/612.10's single-card rules, 612.9's name
 /// stickers) stays unmodeled; `CardDefinition.oracle_text` is still a plain
-/// immutable `String`, never parsed. "Loses all abilities" is a text-removal
-/// shape too (CR 612.3 says ability-adding effects aren't touched by this,
-/// but a card can still say "loses all abilities" directly) — also
-/// unmodeled, tracked here rather than under layer 6's `AddKeyword` TODO.
+/// immutable `String`, never parsed. "Loses all abilities" (CR 613.1f's
+/// ability-*removing* half, mechanically layer 6 despite being flagged here
+/// alongside layer 3's other text-removal shapes) is closed for the
+/// `KeywordSet` portion — see `EffectPrimitive::RemoveAllAbilities`,
+/// `phase5/lose-all-abilities` (docs/implementation.md). A permanent's own
+/// `RegisteredAbility` entries (custom triggered/activated abilities) are a
+/// separate, still-open gap — see that primitive's own doc comment.
 ///
 /// Layers 4/5 (CR 613.1) don't have CR-defined sublayers the way layer 7
 /// does (CR 613.3 only lettered-sublayers layers 3, 4, 6, and 7 — and layer
@@ -157,9 +160,8 @@ pub enum EffectPrimitive {
     /// what number this effect doubles). See `layers::order_by_dependency`.
     DoublePT { power: bool, toughness: bool },
     /// Layer 6 (CR 613.1): grants the listed keyword(s) in addition to
-    /// whatever the object already has. Union, never removes a keyword —
-    /// "loses all abilities" (also layer 6, but a text-removal shape) isn't
-    /// modeled; see `Layer::TextChanging`'s TODO.
+    /// whatever the object already has. Union, never removes a keyword on
+    /// its own — see `RemoveAllAbilities` below for the strip shape.
     AddKeyword(KeywordSet),
     /// Layer 6 (CR 613.1/702.16e): grants protection from the listed
     /// color(s) in addition to whatever the object already has protection
@@ -167,6 +169,34 @@ pub enum EffectPrimitive {
     /// protection_colors`'s own doc comment for why this is a separate
     /// primitive/field rather than folded into `AddKeyword`/`KeywordSet`.
     AddProtectionColor(ColorSet),
+    /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
+    /// abilities"): resets both the running `keywords` *and*
+    /// `protection_colors` accumulators to empty at this effect's position
+    /// in `effective_characteristics`'s layer-6 fold — protection is an
+    /// ability too (CR 613.1f names "ability-adding... and ability-removing
+    /// effects" together, no carve-out for protection specifically). Not a
+    /// flat override the way `SetName`/`SetPT`/`GainControl` are — a
+    /// later-timestamp `AddKeyword`/`AddProtectionColor` still applies on
+    /// top afterward (CR 613.7's plain timestamp fold already produces this
+    /// for free, no special dependency case needed: a strip-all and an
+    /// add-keyword/add-protection never depend on each other under CR
+    /// 613.8a, same reasoning `SetPT`/`GainControl` already document for
+    /// why *they* don't need one). No payload — it always clears everything
+    /// accumulated so far, there's no narrower "loses these specific
+    /// keywords" shape here.
+    ///
+    /// Deliberately narrow: only strips `KeywordSet`/`protection_colors`,
+    /// the layer-engine half of "abilities." A permanent's own custom
+    /// triggered/activated `RegisteredAbility` entries are never filtered
+    /// by continuous effects at all in this engine (`collect_triggers`/
+    /// activation-legality checks read `state.abilities` directly, no
+    /// layer-6 consultation) — making this primitive also silence those
+    /// would mean threading a layer-6 lookup through that entire call
+    /// graph, the same shape as the already-named layer-2-control-consumers
+    /// gap. Named here rather than silently narrowed — see
+    /// `phase5/lose-all-abilities` (docs/implementation.md) for the scoping
+    /// finding.
+    RemoveAllAbilities,
     /// Layer 4 (CR 613.1, general "gains types" text): grants the listed
     /// card type(s) in addition to whatever the object already has — e.g.
     /// "target land becomes a 3/3 Elemental creature in addition to its
@@ -594,8 +624,9 @@ pub struct EffectiveCharacteristics {
     /// `EffectPrimitive`'s supertypes/subtypes TODO).
     pub subtypes: Vec<Subtype>,
     /// Base (`CardDefinition.keywords`) unioned with every applicable layer
-    /// 6 `EffectPrimitive::AddKeyword`. No layer removes a keyword yet
-    /// (see `Layer::TextChanging`'s TODO).
+    /// 6 `EffectPrimitive::AddKeyword`, reset to empty by an intervening
+    /// `RemoveAllAbilities` (CR 613.1f "loses all abilities") — see that
+    /// primitive's own doc comment.
     pub keywords: KeywordSet,
     /// CR 702.16e: colors this object has protection from, unioned with
     /// every applicable layer 6 `EffectPrimitive::AddProtectionColor`. A
