@@ -2484,17 +2484,18 @@ verbatim once enough time has passed for the underlying code to have moved.
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
   Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
-- **Protection (CR 702.16)**: closed for the color (702.16e), card-type, and subtype qualities,
-  `phase5/protection-from-color`/`phase5/protection-from-card-type`/`phase5/protection-from-subtype`
-  (docs/implementation.md, below) - `EffectiveCharacteristics.protection_colors`/
-  `.protection_card_types`/`.protection_subtypes`, `EffectPrimitive::AddProtectionColor`/
-  `AddProtectionCardType`/`AddProtectionSubtype`, `Game.Effects.AddProtectionColor`/
-  `AddProtectionCardType`/`AddProtectionSubtype`, enforced at damage (702.16a), targeting (702.16c),
-  and blocking (702.16d) as an OR across all three fields. Protection from a specific player or
-  "from everything" stays unmodeled. Enchant/Equip (702.16b) stays unmodeled too - needs real
-  attach/enchant machinery this engine doesn't have (`GameObject.attached_to`/`.attachments` are
-  inert placeholder fields, same gap `phase5/gain-control-effect` already named for its own
-  aura-sourced follow-up).
+- **Protection (CR 702.16)**: closed for the color (702.16e), card-type, subtype, and name (702.16a)
+  qualities, `phase5/protection-from-color`/`phase5/protection-from-card-type`/
+  `phase5/protection-from-subtype`/`phase5/protection-from-name` (docs/implementation.md, below) -
+  `EffectiveCharacteristics.protection_colors`/`.protection_card_types`/`.protection_subtypes`/
+  `.protection_names`, `EffectPrimitive::AddProtectionColor`/`AddProtectionCardType`/
+  `AddProtectionSubtype`/`AddProtectionName`, `Game.Effects.AddProtectionColor`/
+  `AddProtectionCardType`/`AddProtectionSubtype`/`AddProtectionName`, enforced at damage (702.16a),
+  targeting (702.16c), and blocking (702.16d) as an OR across all four fields. Protection from a
+  specific player or "from everything" stays unmodeled. Enchant/Equip (702.16b) stays unmodeled too
+  - needs real attach/enchant machinery this engine doesn't have (`GameObject.attached_to`/
+  `.attachments` are inert placeholder fields, same gap `phase5/gain-control-effect` already named
+  for its own aura-sourced follow-up).
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
   the battlefield can't move zones again) is a related but separate rule, not covered.
@@ -8742,4 +8743,66 @@ clause.
 
 **UNRESOLVED:** protection from a specific player and "from everything" - both named above, the
 same standing gaps the two earlier protection slices already left open, not narrowed further by
+this slice.
+
+## Phase 5: phase5/protection-from-name slice (CR 702.16a, protection from name)
+
+Branch `phase5/protection-from-name`, off master. Picked as the natural next increment of
+`phase5/protection-from-color`/`phase5/protection-from-card-type`/`phase5/protection-from-subtype` -
+CR 702.16a's name quality ("protection from Progenitus"), extending the same three enforcement
+sites those three slices built rather than inventing new ones.
+
+**What got implemented:**
+- `types/effect.rs`: `EffectiveCharacteristics.protection_names: Vec<String>` (sibling to
+  `protection_subtypes`, same "open-ended string, not a bitflag" reasoning). New
+  `EffectPrimitive::AddProtectionName(String)`, one name per primitive, same convention every other
+  quality primitive uses. `RemoveAllAbilities`'s doc comment and reset both updated to cover a
+  fifth field.
+- `layers.rs`: layer-6 fold gained a sixth match arm, deduplicating on push same as
+  `protection_subtypes`; `RemoveAllAbilities`'s reset clears `protection_names` too.
+- `script.rs`: `Game.Effects.AddProtectionName(name)` (no parser needed - any string is a legal
+  name, same reasoning `AddProtectionSubtype` already established), pairing-validation entry.
+- `replacement.rs`: `apply_protection` generalized to check all four quality fields as an OR -
+  added `target_characteristics.protection_names.iter().any(|n| *n ==
+  source_characteristics.name)`, matched against the source's *effective* name (post any CR 612.8
+  `SetName`), not the printed `CardDefinition.name`.
+- `commands.rs`: `target_has_protection_from` and `DeclareBlockers`'s protection check both
+  generalized the same way.
+- `docs/lua_scripts.md`/`docs/implementation.md`: extended the existing protection section/gaps
+  bullet rather than writing new ones.
+
+**CR requirements:** CR 702.16a/c/d again, now covering the name quality alongside color/card
+type/subtype - no new rule text, a fourth instance of the same mechanism CR 702.16 already treats
+uniformly. CR 702.16a's own text ("If the quality happens to be a card name, it is treated as such
+only if the protection ability specifies that the quality is a name") is satisfied structurally -
+`AddProtectionName` and `AddProtectionSubtype` are separate primitives/fields, so there's no
+ambiguity between "this string is a name" and "this string is a subtype" the way there could be if
+they shared one field.
+
+**TODOs marked, not silently narrowed:** protection from a specific player, or "from everything" -
+still not modeled, the same two qualities left open after the subtype slice.
+
+**Tests added** (`crates/engine/tests/phase5_protection_from_name.rs`, 9 new tests): mirrors
+`phase5_protection_from_subtype.rs` almost 1:1 with name instead of subtype - Lua
+self-registration; combat damage from a matching-name source prevented, non-matching still lands;
+targeting by a matching-name spell rejected, non-matching still works; fizzle when protection is
+gained mid-stack (CR 608.2b, the same pre-existing generic mechanism); blocking by a matching-name
+creature rejected, non-matching still legal; and one proving `RemoveAllAbilities` strips a granted
+protection name too (the same consistency check the other three protection slices already have for
+their own quality).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+9 new tests; every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none - `apply_protection`/`target_has_protection_from`/`DeclareBlockers`'s
+protection check all kept their existing signatures, only their internal OR conditions grew a
+fourth clause.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** protection from a specific player and "from everything" - both named above, the
+same standing gaps the three earlier protection slices already left open, not narrowed further by
 this slice.

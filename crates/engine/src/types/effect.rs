@@ -189,16 +189,31 @@ pub enum EffectPrimitive {
     /// bitflag `Set` the way the color/card-type qualities are (`Subtype` is
     /// an open-ended string, not a fixed enum).
     AddProtectionSubtype(Subtype),
+    /// Layer 6 (CR 613.1/702.16a, name quality): grants protection from the
+    /// named card in addition to whatever the object already has protection
+    /// from — e.g. "protection from Progenitus." CR 702.16a: "If the
+    /// quality happens to be a card name, it is treated as such only if the
+    /// protection ability specifies that the quality is a name" — this
+    /// primitive *is* that specification (unlike `AddProtectionSubtype`,
+    /// there's no ambiguity between "this string is a name" vs. "this
+    /// string is a subtype," since each has its own primitive/field). One
+    /// name per primitive, same convention as the other quality primitives.
+    /// Matched against the source's *effective* name (`EffectiveCharacteristics::
+    /// name`, post any CR 612.8 `SetName`), not the printed `CardDefinition.
+    /// name` — protection has to see a renamed source the same way every
+    /// other characteristic-sensitive check in this engine does.
+    AddProtectionName(String),
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
     /// abilities"): resets the running `keywords`, `protection_colors`,
-    /// `protection_card_types`, *and* `protection_subtypes` accumulators to
-    /// empty at this effect's position in `effective_characteristics`'s
-    /// layer-6 fold — protection is an ability too, regardless of which
-    /// quality it names (CR 613.1f names "ability-adding... and
-    /// ability-removing effects" together, no carve-out for protection
-    /// specifically). Not a flat override the way `SetName`/`SetPT`/
-    /// `GainControl` are — a later-timestamp `AddKeyword`/
-    /// `AddProtectionColor`/`AddProtectionCardType`/`AddProtectionSubtype` still
+    /// `protection_card_types`, `protection_subtypes`, *and*
+    /// `protection_names` accumulators to empty at this effect's position in
+    /// `effective_characteristics`'s layer-6 fold — protection is an
+    /// ability too, regardless of which quality it names (CR 613.1f names
+    /// "ability-adding... and ability-removing effects" together, no
+    /// carve-out for protection specifically). Not a flat override the way
+    /// `SetName`/`SetPT`/`GainControl` are — a later-timestamp `AddKeyword`/
+    /// `AddProtectionColor`/`AddProtectionCardType`/`AddProtectionSubtype`/
+    /// `AddProtectionName` still
     /// applies on top afterward (CR 613.7's plain timestamp fold already
     /// produces this for free, no special dependency case needed: a
     /// strip-all and an add-keyword/add-protection never depend on each
@@ -684,6 +699,15 @@ pub struct EffectiveCharacteristics {
     /// checking all three as an OR — protected if color, card type, *or*
     /// subtype matches the source.
     pub protection_subtypes: Vec<Subtype>,
+    /// CR 702.16a's name quality: card name(s) this object has protection
+    /// from, from every applicable layer 6 `EffectPrimitive::
+    /// AddProtectionName`. `Vec<String>` rather than a single `Option` —
+    /// CR 702.16g's "protection from A and from B" already models multiple
+    /// simultaneous qualities as multiple registered abilities, same as the
+    /// other three quality fields. Same three enforcement call sites,
+    /// matched by exact equality against the source's own *effective* name,
+    /// not a bitflag/subtype-list membership test.
+    pub protection_names: Vec<String>,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,
