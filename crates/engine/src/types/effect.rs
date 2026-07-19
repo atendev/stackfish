@@ -163,28 +163,39 @@ pub enum EffectPrimitive {
     /// whatever the object already has. Union, never removes a keyword on
     /// its own — see `RemoveAllAbilities` below for the strip shape.
     AddKeyword(KeywordSet),
+    /// Layer 6 (CR 613.1/702.16e): grants protection from the listed
+    /// color(s) in addition to whatever the object already has protection
+    /// from. Union, same shape as `AddKeyword` above — see `EffectiveCharacteristics::
+    /// protection_colors`'s own doc comment for why this is a separate
+    /// primitive/field rather than folded into `AddKeyword`/`KeywordSet`.
+    AddProtectionColor(ColorSet),
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
-    /// abilities"): resets the running `keywords` accumulator to empty at
-    /// this effect's position in `effective_characteristics`'s layer-6 fold.
-    /// Not a flat override the way `SetName`/`SetPT`/`GainControl` are — a
-    /// later-timestamp `AddKeyword` still applies on top afterward (CR
-    /// 613.7's plain timestamp fold already produces this for free, no
-    /// special dependency case needed: a strip-all and an add-keyword never
-    /// depend on each other under CR 613.8a, same reasoning `SetPT`/
-    /// `GainControl` already document for why *they* don't need one). No
-    /// payload — it always clears everything accumulated so far, there's no
-    /// narrower "loses these specific keywords" shape here.
+    /// abilities"): resets both the running `keywords` *and*
+    /// `protection_colors` accumulators to empty at this effect's position
+    /// in `effective_characteristics`'s layer-6 fold — protection is an
+    /// ability too (CR 613.1f names "ability-adding... and ability-removing
+    /// effects" together, no carve-out for protection specifically). Not a
+    /// flat override the way `SetName`/`SetPT`/`GainControl` are — a
+    /// later-timestamp `AddKeyword`/`AddProtectionColor` still applies on
+    /// top afterward (CR 613.7's plain timestamp fold already produces this
+    /// for free, no special dependency case needed: a strip-all and an
+    /// add-keyword/add-protection never depend on each other under CR
+    /// 613.8a, same reasoning `SetPT`/`GainControl` already document for
+    /// why *they* don't need one). No payload — it always clears everything
+    /// accumulated so far, there's no narrower "loses these specific
+    /// keywords" shape here.
     ///
-    /// Deliberately narrow: only strips `KeywordSet`, the layer-engine half
-    /// of "abilities." A permanent's own custom triggered/activated
-    /// `RegisteredAbility` entries are never filtered by continuous effects
-    /// at all in this engine (`collect_triggers`/activation-legality checks
-    /// read `state.abilities` directly, no layer-6 consultation) — making
-    /// this primitive also silence those would mean threading a layer-6
-    /// lookup through that entire call graph, the same shape as the
-    /// already-named layer-2-control-consumers gap. Named here rather than
-    /// silently narrowed — see `phase5/lose-all-abilities`
-    /// (docs/implementation.md) for the scoping finding.
+    /// Deliberately narrow: only strips `KeywordSet`/`protection_colors`,
+    /// the layer-engine half of "abilities." A permanent's own custom
+    /// triggered/activated `RegisteredAbility` entries are never filtered
+    /// by continuous effects at all in this engine (`collect_triggers`/
+    /// activation-legality checks read `state.abilities` directly, no
+    /// layer-6 consultation) — making this primitive also silence those
+    /// would mean threading a layer-6 lookup through that entire call
+    /// graph, the same shape as the already-named layer-2-control-consumers
+    /// gap. Named here rather than silently narrowed — see
+    /// `phase5/lose-all-abilities` (docs/implementation.md) for the scoping
+    /// finding.
     RemoveAllAbilities,
     /// Layer 4 (CR 613.1, general "gains types" text): grants the listed
     /// card type(s) in addition to whatever the object already has — e.g.
@@ -613,9 +624,25 @@ pub struct EffectiveCharacteristics {
     /// `EffectPrimitive`'s supertypes/subtypes TODO).
     pub subtypes: Vec<Subtype>,
     /// Base (`CardDefinition.keywords`) unioned with every applicable layer
-    /// 6 `EffectPrimitive::AddKeyword`. No layer removes a keyword yet
-    /// (see `Layer::TextChanging`'s TODO).
+    /// 6 `EffectPrimitive::AddKeyword`, reset to empty by an intervening
+    /// `RemoveAllAbilities` (CR 613.1f "loses all abilities") — see that
+    /// primitive's own doc comment.
     pub keywords: KeywordSet,
+    /// CR 702.16e: colors this object has protection from, unioned with
+    /// every applicable layer 6 `EffectPrimitive::AddProtectionColor`. A
+    /// separate field from `keywords` rather than another `KeywordSet` bit
+    /// — protection has to carry *which* color(s), which a flat bitflag
+    /// can't. Empty base (`CardDefinition` has no printed-protection field
+    /// of its own yet — every real protection ability is granted via this
+    /// primitive, same "no printed-keyword-string parsing" stance
+    /// `KeywordSet`'s own construction already takes for every other
+    /// ability). Enforced at three real call sites: damage (`apply_
+    /// replacements`), targeting (`target_is_legal`), and blocking
+    /// (`DeclareBlockers`) — see `phase5/protection-from-color`
+    /// (docs/implementation.md) for why those three and not the full CR
+    /// 702.16 "DEBT" list (Enchant/Equip needs attach machinery this engine
+    /// doesn't have).
+    pub protection_colors: ColorSet,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,

@@ -690,7 +690,19 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (Game
     // PlayLand/CastSpell/ResolveStackTop's "same card, new id" moves) -
     // purge any RegisteredAbility/ContinuousEffect still pointing at it.
     let departed_triggered = commands::retire_object(state, old_id);
-    if let Some(zone) = state.zone_mut(to, Some(owner)) {
+    // Exile is a shared zone (owner: None), same distinction engine.rs's own
+    // stack-resolution zone move already makes - `to` was always Graveyard
+    // (per-player) before ReplacementPayload::ReplaceZoneDestination gained
+    // a real Lua construction path (phase5/replacement-effect-shapes), so
+    // this branch was unreachable until then. Caught by a real test
+    // exiling a creature instead of it dying, not by inspection - without
+    // this, the wrong-owner zone_mut lookup silently found no zone at all
+    // and the object was never re-inserted anywhere.
+    let destination_owner = match to {
+        ZoneKind::Battlefield | ZoneKind::Exile => None,
+        _ => Some(owner),
+    };
+    if let Some(zone) = state.zone_mut(to, destination_owner) {
         zone.push_bottom(new_id);
         state.objects.insert(new_id, new_object);
     }

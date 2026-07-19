@@ -2446,11 +2446,18 @@ verbatim once enough time has passed for the underlying code to have moved.
   docs/implementation.md, below) as well as now a *static* ability's own duration (this bullet).
 - **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
   not a stable id - fragile if a card's own ability list ever needs to change shape.
-- **Replacement effects**: `EventFilter` still only has two shapes (`DamageDealt`, `WouldDie`).
-  `Game.CreateReplacementEffect` now exists, `phase5/static-regeneration` (docs/implementation.md,
-  below) - deliberately scoped to exactly one payload shape (`WouldDie`/`Regenerate`, CR 701.19b),
-  the one this slice needed to prove against something real. Damage prevention/redirection and
-  non-regenerate zone-destination substitution still have no Lua construction path.
+- **Replacement effects**: `EventFilter` still only has two event *shapes* (`DamageDealt`,
+  `WouldDie`) - protection (CR 702.16), ETB-modifier replacements, "would draw a card"
+  substitution, and any other event kind stay unmodeled. Within those two shapes,
+  `Game.CreateReplacementEffect`'s Lua construction path is now general: `phase5/static-
+  regeneration` (docs/implementation.md, below) proved `WouldDie`/`Regenerate` (CR 701.19b);
+  `phase5/replacement-effect-shapes` (docs/implementation.md, below) generalized the same builder
+  to `DamageDealt`/`PreventDamage` (CR 615) and `WouldDie`/`ReplaceZoneDestination` (CR 614.13-style
+  "instead" substitution, non-regenerate), plus a settable `ConsumptionPolicy`
+  (`OneShot`/`Repeatable`/`LimitedUses`) - all payload shapes `ReplacementEffect::matches`/`apply`
+  already handled correctly in Rust, just previously Lua-inaccessible. `RedirectDamage(Target)`
+  remains Lua-inaccessible - a redirect target isn't a static Lua literal, named as its own
+  follow-up rather than guessed at.
 - **Triggers**: this bullet was stale - both the player-relative shape (`DiscardsCard`/
   `EachDiscardsCard`) and the self-referential shape (`ConditionPrimitive::Discarded`, "when *this*
   card is discarded", `phase5/discarded-trigger`, docs/implementation.md below) are now real, off
@@ -2477,6 +2484,14 @@ verbatim once enough time has passed for the underlying code to have moved.
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
   Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
+- **Protection (CR 702.16)**: closed for "protection from color" (702.16e's shape), `phase5/
+  protection-from-color` (docs/implementation.md, below) - `EffectiveCharacteristics.
+  protection_colors`, `EffectPrimitive::AddProtectionColor`/`Game.Effects.AddProtectionColor`,
+  enforced at damage (702.16a), targeting (702.16c), and blocking (702.16d). Protection from card
+  type/subtype/a specific player/"from everything" stays unmodeled - only color. Enchant/Equip
+  (702.16b) stays unmodeled too - needs real attach/enchant machinery this engine doesn't have
+  (`GameObject.attached_to`/`.attachments` are inert placeholder fields, same gap `phase5/gain-
+  control-effect` already named for its own aura-sourced follow-up).
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
   the battlefield can't move zones again) is a related but separate rule, not covered.
@@ -6937,11 +6952,14 @@ of migrated.
 
 **UNRESOLVED (named during this slice, not silently narrowed):**
 - No command/`AbilityEffect`/script binding produces a `GainControl` effect yet - test fixtures build
-  it via struct literal, same bootstrap convention every layer-engine sub-slice used. `controlled_
-  since_turn` still isn't bumped by anything resembling a real "gain control" mutation event either
-  (the query-only slice's own UNRESOLVED note, still true) - this slice's summoning-sickness test
-  demonstrates the *query* is now correct by directly constructing a `controlled_since_turn` value,
-  not by proving a real gameplay action updates it.
+  it via struct literal, same bootstrap convention every layer-engine sub-slice used. Closed for the
+  resolving-spell/ability creation path, `phase5/gain-control-effect` (docs/implementation.md, below)
+  - a static ability's own aura-sourced control change is still open, see that slice's own notes.
+  `controlled_since_turn` still isn't bumped by anything resembling a real "gain control" mutation
+  event either (the query-only slice's own UNRESOLVED note, still true) - this slice's summoning-
+  sickness test demonstrates the *query* is now correct by directly constructing a `controlled_
+  since_turn` value, not by proving a real gameplay action updates it. `phase5/gain-control-effect`
+  deliberately left this alone too, rather than half-fixing it.
 - 11b's `StackObject.controller`-as-owner-stand-in gap (`sba.rs`'s `remove_players_objects`) is still
   open - unrelated to this migration, `StackObject` has no owner field at all to migrate.
 - `layers.rs`'s own internal filtering stays on the raw field for every layer (not just layer 2), a
@@ -8281,3 +8299,326 @@ scoping.
 **UNRESOLVED:** the `RegisteredAbility`/custom-ability half of "loses all abilities" (see scoping
 finding above) — named, not silently dropped, same standing shape the layer-2-control-consumers
 gap already established for a different layer.
+
+## Fix: layer 5 read `color_indicator` alone instead of `CardDefinition::colors()` (CR 105.2a/202.2)
+
+Found while answering "how far from a real card database" — not picked from the gaps list, a stale
+TODO caught by inspection. `layers.rs`'s `effective_characteristics` seeded its layer-5 base value
+as `def.color_indicator.unwrap_or(ColorSet::empty())`, with a comment saying this was a stopgap
+until `CardDefinition::colors()`/`ManaCost::colors()` got filled in. Both had already been filled in
+for real (`types/card.rs::CardDefinition::colors()`, `types/mana.rs::ManaCost::colors()`) by some
+earlier slice's mana-cost work, but nobody circled back to update this one caller — so every real
+colored permanent (almost none of which set `color_indicator`, since that field only exists for the
+rare card that needs an explicit override) was silently resolving as colorless in the layer engine.
+A live, wrong answer today, not a missing feature — worth fixing directly rather than waiting for a
+slice to trip over it.
+
+**What got implemented:** `layers.rs`'s layer-5 seed changed from the raw `color_indicator` read to
+`def.colors()` — CR 105.2a's own "indicator overrides, otherwise derive from the mana cost" split,
+already correctly implemented there. Stale comment replaced with one explaining what changed and
+why. No other call site needed touching — `def.colors()` was already fully correct, just uncalled
+from here.
+
+**Tests added** (`crates/engine/tests/phase5_layer_engine_types_colors.rs`, 2 new tests): a creature
+with a `{W}{U}{1}` mana cost and no `color_indicator` now resolves to White/Blue in
+`effective_characteristics` (the regression this fix closes); a creature with both a mana cost *and*
+an explicit `color_indicator` still resolves to just the indicator's color, not a union of the two
+(CR 105.2a's override, not additive, confirming the fix didn't change that half of the split).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace` — all test binaries green, 0 failures, including the 2 new tests;
+every prior test unaffected (no existing fixture relied on the old colorless-by-default behavior —
+every test that cared about color already set `color_indicator` directly).
+
+**UNRESOLVED:** none new. `SetCardTypes`/`SetColors` (the full "loses all other colors" overwrite
+shape) and supertype/subtype gains remain the same standing gaps named in `types/effect.rs`'s own
+TODOs, untouched by this fix.
+
+## Phase 5: phase5/replacement-effect-shapes slice (CR 615/614.13, `Game.CreateReplacementEffect` generalized)
+
+Branch `phase5/replacement-effect-shapes`, off master. Picked from the "Known unresolved gaps"
+list's Replacement-effects bullet — `Game.CreateReplacementEffect` always hardcoded
+`EventFilter::WouldDie`/`ReplacementPayload::Regenerate`/`ConsumptionPolicy::Repeatable`
+(`phase5/static-regeneration`'s own deliberate CR 701.19b-only scoping), even though
+`ReplacementEffect::matches`/`apply` already handled `DamageDealt`/`PreventDamage` (CR 615) and
+`WouldDie`/`ReplaceZoneDestination` (CR 614.13-style "instead" substitution) correctly in Rust —
+proven by `engine.rs`'s own `prevent_all_damage` unit test and
+`phase5_combat_damage_replacement.rs`. The "no Lua construction path" note had been carried
+forward, unfixed, across five prior slices.
+
+**Scoping finding, before writing code:** since the engine mechanics for the other pairings were
+already proven, this was a pure Lua-wiring gap, not a new mechanism — generalize
+`ReplacementEffectBuilder` the same way `StaticAbilityBuilder::SetDuration` just generalized its
+own builder: new settable fields, each defaulting to the builder's exact original behavior when
+never called, so `phase5_static_regeneration.rs`'s existing tests (which only ever call
+`:SetAffected` before `:Register()`) keep passing unmodified. `ReplacementPayload::
+RedirectDamage(Target)` was scoped out up front — a redirect target isn't a static Lua literal the
+way a zone name or a use-count is, and there was no clean answer for "which object/player" without
+either a narrowing (redirect-to-source) or live target selection that doesn't obviously compose
+with this queued-and-drained-later builder shape.
+
+**Bug found and fixed while writing this slice's own end-to-end exile test, not by inspection:**
+`sba::commit_death`'s zone-move always looked up the destination zone via `state.zone_mut(to,
+Some(owner))` — correct for Graveyard (per-player) but wrong for Exile, which CR 400.10 makes a
+*shared* zone (`owner: None`), same distinction `engine.rs`'s own stack-resolution zone move
+already made correctly. `to` had only ever been `Graveyard` before this slice gave
+`ReplaceZoneDestination` a real Lua path, so the wrong-owner lookup was unreachable code, not a
+live bug, until now: with `to: Exile`, `zone_mut` found no matching zone at all, and the object was
+silently never re-inserted anywhere. Fixed by giving `commit_death` the same
+`Battlefield`/`Exile => None, _ => Some(owner)` branch `engine.rs`'s own zone-move code already
+uses. This exposed a second, wider problem: six existing test fixtures
+(`phase5_destroy_ordering_choice.rs`, `phase5_dies_triggers.rs`, `phase5_legend_world_rule.rs`,
+`phase5_regeneration.rs`, `phase5_sba_death_replacement.rs`, `phase5_script_ops_destroy.rs`) had
+each built their own *per-player* Exile zone (`owner: Some(p0)`, some with a second `Some(p1)`
+entry alongside it) specifically to match `commit_death`'s old bug — one of them even had a comment
+naming this as a known, deliberately-unreconciled inconsistency with the real shared-zone
+convention. All six updated to the correct single shared `owner: None` Exile zone and the matching
+`zone(ZoneKind::Exile, None)` query call sites, rather than left passing against the wrong model.
+
+**What got implemented:**
+- `script.rs`: `ReplacementEffectBuilder` gained `event_kind: EventFilterKind` (new, Lua-side-only
+  enum — `EventFilter` itself has no shape until `affected` is filled in), `payload:
+  ReplacementPayload`, and `consumption: ConsumptionPolicy` fields (defaults `WouldDie`/
+  `Regenerate`/`Repeatable`, this builder's original values). New `:SetFilter`/`:SetPayload`/
+  `:SetConsumption` methods. New `validate_replacement_filter_payload_pairing` (mirrors
+  `validate_layer_effect_pairing`) — `DamageDealt` only pairs with `PreventDamage`; `WouldDie`
+  pairs with `ReplaceZoneDestination`/`Regenerate`. `Game.EventFilters.DamageDealt`/`.WouldDie`
+  (bare tags), `Game.ReplacementPayloads.PreventDamage`/`.Regenerate` (bare tags) and
+  `.ReplaceZoneDestination(zoneName)` (new `parse_zone_kind_name` helper, same match-on-string
+  pattern every other `parse_*_name` helper here uses — no zone-name parser existed in `script.rs`
+  before this, only the separate `scenario` crate had one for TOML), `Game.Consumption.OneShot`/
+  `.Repeatable` (bare tags) and `.LimitedUses(n)` (function).
+- `sba.rs`: `commit_death`'s destination-zone-owner bug fixed (see above).
+- `docs/lua_scripts.md`: "Self-registering a repeatable regeneration shield" retitled "Self-
+  registering a replacement effect", extended with `:SetFilter`/`:SetPayload`/`:SetConsumption`
+  and a Fog-effect worked example; explicit note on why `RedirectDamage` stays unbound.
+- `docs/implementation.md`: Replacement-effects gaps-list bullet updated to reflect the builder's
+  generalization (the remaining gap is `EventFilter`'s two-*shapes*-only limit, not payload/
+  consumption coverage within those two shapes).
+
+**CR requirements:** CR 615 (prevention effects, `PreventDamage`), CR 614.13-style "instead"
+zone-destination substitution (`ReplaceZoneDestination`, non-regenerate case), CR 400.10 (Exile is
+a shared zone — the bug fix above), CR 616 (the `OneShot`/`Repeatable`/`LimitedUses` consumption
+shapes, whose ordering-choice pipeline was already proven by `phase5/destroy-ordering-choice`).
+
+**TODOs marked, not silently narrowed:** `ReplacementPayload::RedirectDamage(Target)` stays
+Lua-inaccessible, named in both `ReplacementEffectBuilder`'s own doc comment and the gaps-list
+bullet. `EventFilter` itself still only covers two event *kinds* — protection (CR 702.16),
+ETB-modifier replacements, and "would draw a card" substitution all remain unmodeled; this slice
+only generalized construction within the two shapes that already existed.
+
+**Tests added** (`crates/engine/tests/phase5_replacement_effect_shapes.rs`, 7 new tests): four
+unit-level tests via `run_card_script` — `DamageDealt`/`PreventDamage`/`OneShot` and
+`WouldDie`/`ReplaceZoneDestination("Exile")` each register the expected struct, a mismatched
+`DamageDealt`/`ReplaceZoneDestination` pairing is a real `Register()`-time error, and omitting
+every new setter still defaults to `WouldDie`/`Regenerate`/`Repeatable` (regression guard). Three
+end-to-end tests through a real `Engine`: a Lua-registered Fog effect (`DamageDealt`/
+`PreventDamage`/`OneShot`) actually zeroes real combat damage and is consumed after use; a
+Lua-registered `ReplaceZoneDestination("Exile")` effect actually exiles a dying creature (the test
+that caught the `commit_death` bug above — first asserting the event, then the *new* object's
+actual zone, not the old retired id); a `LimitedUses(1)` shield stops protecting after its one use.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` — every test binary green, 0 failures, including the
+7 new tests and the 6 existing test files whose Exile-zone fixtures were corrected to match the
+real shared-zone convention (see the bug-fix finding above) rather than reverted.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none beyond the new `:SetFilter`/`:SetPayload`/`:SetConsumption` methods
+themselves — additive, no existing method signature changed.
+
+**SCOPE DEVIATIONS:** the `sba::commit_death` Exile-zone-owner fix and its six-file test-fixture
+ripple were both found while implementing (see the bug-fix finding above), not anticipated in the
+original one-line pick from the gaps list — necessary for `ReplaceZoneDestination` to actually be
+correct for any zone other than Graveyard, not independent cleanup, so folded into this slice
+rather than deferred.
+
+**UNRESOLVED:** `ReplacementPayload::RedirectDamage(Target)` and `EventFilter`'s two-shapes-only
+limit remain the same standing gaps named in `docs/implementation.md`'s own gaps list.
+
+## Phase 5: phase5/gain-control-effect slice (CR 108.4/613.1, `AbilityEffect::GainControl`)
+
+Branch `phase5/gain-control-effect`, off master. Picked from `phase5/layer-engine-control-
+consumers`'s own UNRESOLVED note — every real consumer of `layers::effective_controller` (combat,
+targeting, cost filters, `has_summoning_sickness`, `FilterSpec::matches`) already reads the *live*
+controller correctly, but nothing could create a `GainControl` effect at all; every existing test
+built one via a bare `ContinuousEffect` struct literal.
+
+**Scoping finding, before writing code:** two possible creation paths exist for a real "gain
+control" card - a resolving spell/ability (Threaten-style, "gain control of target creature until
+end of turn") or a static ability on an attached permanent (Control Magic-style aura, "you control
+enchanted creature"). The aura path needs real attach/enchant machinery (`GameObject.attached_to`/
+`.attachments` are inert placeholder fields — confirmed by grep, nothing ever writes to them) — a
+separate, larger gap. Scoped to the resolving-spell path only, mirroring `AbilityEffect::Pump`'s
+exact shape (same per-target `ContinuousEffect` construction, `self_only: true` pinned to the
+target, no script call needed) since the only real difference is which layer/primitive pair gets
+built. The new controller is always the resolving effect's own controller (`StackObject::
+controller`) — no player argument needed from Lua, since every real "gain control" card in Magic
+targets a creature and gives control to its own caster.
+
+**What got implemented:**
+- `types/ability.rs`: `AbilityEffect::GainControl(EffectDuration)` — new variant, same shape as
+  `Pump` minus the power/toughness fields.
+- `script.rs`: `Game.Ops.GainControl(duration)` binding, same `AnyUserData`/`DurationTag` decode
+  `Game.Ops.Pump`'s duration argument already uses.
+- `engine.rs`: new `ResolveStackTop` match arm, textually adjacent to `Pump`'s own — same per-target
+  loop and `ContinuousEffect` construction, `layer: ControlChangingEffects`/`effect: GainControl
+  (top.controller)` instead of `PowerToughnessModifying`/`ModifyPT`.
+- `commands.rs`: `ActivateAbility`'s non-mana-effect catch-all pattern gained `Some(AbilityEffect::
+  GainControl(_))` — a mechanical, compiler-caught addition (this primitive uses the stack like
+  every other non-mana ability effect).
+- `docs/lua_scripts.md`: `Game.Ops.GainControl` documented alongside the `:SetDuration` /
+  `Game.Ops.Pump` cross-reference (this codebase has no dedicated section for `AbilityEffect`
+  resolution-effect primitives as a group — `Damage`/`Destroy`/`Counters`/`Pump`/`Regenerate` aren't
+  documented as a table either, a pre-existing gap wider than this slice, not attempted here beyond
+  giving the new primitive itself a real mention).
+- `docs/implementation.md`: `phase5/layer-engine-control-consumers`'s UNRESOLVED note updated to
+  reflect the resolving-spell path's closure.
+
+**CR requirements:** CR 108.4/613.1 layer 2 (control-changing effects), CR 611.2a's "duration
+stated by the spell or ability creating it" (same convention `Pump` already established).
+
+**TODOs marked, not silently narrowed:**
+- Aura/static-ability-sourced control change (Control Magic-style) stays unbuilt — needs real
+  attach/enchant machinery first, named in `AbilityEffect::GainControl`'s own doc comment and this
+  write-up.
+- `GameObject.controlled_since_turn` still isn't bumped by a live control-change event — left alone
+  deliberately, not half-fixed: naively stamping it at gain-control time would introduce a *new*
+  bug (the stale bumped value would persist on the object after the effect's duration expires and
+  control reverts via the layer engine, making the original controller incorrectly read as having
+  only just reacquired it). Correctly modeling "since when has each controller controlled this"
+  needs more than one scalar field on `GameObject` — named, not guessed at.
+
+**Tests added** (`crates/engine/tests/phase5_gain_control_effect.rs`, 4 new tests): a Threaten-style
+sorcery resolving against an opponent's creature makes the caster the real `effective_controller`,
+proven both by the query directly and by a concrete combat-legality check (the new controller can
+declare the creature as an attacker — same shape `phase5_control_change_consumers.rs`'s own
+end-to-end test uses, but through the real Lua/`AbilityEffect` creation path this time instead of a
+hand-built `ContinuousEffect`); the effect is pinned to its target, not the spell's own source
+(mirrors `phase5_pump_effect.rs`'s own pinning test); an `UntilEndOfTurn` gain-control effect drains
+at cleanup and control reverts to the original owner; a `Permanent`-duration gain-control effect
+survives into the next turn.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` — every test binary green, 0 failures, including the
+4 new tests; every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none beyond the new `AbilityEffect` variant itself — additive, no
+existing variant or function signature changed.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** the aura/static-ability control-change path and `controlled_since_turn` (see the
+two TODOs above) — both named, not silently dropped.
+
+## Phase 5: phase5/protection-from-color slice (CR 702.16, protection from color)
+
+Branch `phase5/protection-from-color`, off master. Picked from the "Known unresolved gaps" list -
+protection had no representation anywhere in this engine, not even a `KeywordSet` bit. Scoped to
+CR 702.16e's "protection from color" shape (by far the most common real form) and three of the four
+"DEBT" restrictions - damage (702.16a), targeting (702.16c), blocking (702.16d). Enchant/Equip
+(702.16b) stays unmodeled, named rather than attempted - no attach/enchant machinery exists in this
+engine yet (confirmed absent, `GameObject.attached_to`/`.attachments` are never written to
+anywhere), same gap `phase5/gain-control-effect` already named for its own aura-sourced follow-up.
+
+**Scoping finding, before writing code:** a shortcut was considered and rejected - treating
+protection's damage half like Lifelink/Deathtouch/Wither/Infect, a post-hoc special case in
+`commands::apply_damage_event`. That doesn't fit: those keywords change what already-committed
+damage *does*; protection has to stop the damage from happening at all, which only the replacement-
+check pipeline (pre-commit) can do. The real design finding: protection isn't a `state.
+replacement_effects` entry a card registers - it's a static, always-on characteristic of the object
+itself (like a keyword), so enforcement is three hardcoded checks at the sites that already gate
+the equivalent real-gameplay action, the same "checked up front, not a registered replacement"
+precedent CR 702.12b indestructible already set ahead of `Destroy` - not three new generic
+mechanisms.
+
+**Why a separate field, not a `KeywordSet` bit:** protection has to carry *which* color(s), which a
+flat bitflag can't express. `EffectiveCharacteristics` gained `protection_colors: ColorSet`, folded
+in in the same layer-6 pass as `keywords` from a sibling `EffectPrimitive::AddProtectionColor`
+(union, same shape `AddKeyword` already uses) - reuses `StaticAbilityBuilder`/`Game.
+CreateStaticAbility` wholesale, no new builder needed, and `:SetDuration` (already generic) covers
+"gains protection until end of turn" for free.
+
+**What got implemented:**
+- `types/effect.rs`: `EffectPrimitive::AddProtectionColor(ColorSet)`. `EffectiveCharacteristics.
+  protection_colors: ColorSet`.
+- `layers.rs`: layer-6 fold in `effective_characteristics` gained a third match arm alongside
+  `AddKeyword`.
+- `script.rs`: `Game.Effects.AddProtectionColor(letter)`, pairing-validation entry for
+  `(AbilityAdding, AddProtectionColor)`.
+- `replacement.rs`: new `apply_protection_from_color` - checked fresh at the top of every
+  `apply_replacements_from` loop iteration (idempotent, so safe to call unconditionally every pass),
+  ahead of the registered-`ReplacementEffect` match. Re-checking every iteration rather than once
+  up front matters for real correctness: it means a mid-resolution `RedirectDamage` retarget is
+  caught against the *new* target, not just the original proposal.
+- `commands.rs`: new `target_has_protection_from`, called from both `TargetFilter::Object` and
+  `TargetFilter::AnyTarget` arms of `target_is_legal`. `target_is_legal`/`validate_targets` both
+  gained a `source: ObjectId` parameter (the spell/ability's own id, not the caster - protection
+  cares about the source's color, same distinction `FilterSpec::matches`'s own `object_controller`
+  parameter already established for a different check) - already in scope at both real call sites
+  (`CastSpell`'s `card`, `ActivateAbility`'s `source`), just not threaded through before. `Declare
+  Blockers`'s existing Flying/Reach/Menace check block gained a sibling protection-from-color check,
+  same `effective_characteristics` read.
+- `engine.rs`: both other `target_is_legal` call sites (`submit_script_choice`'s `Game.
+  SelectTargets` validation, and the CR 608.2b resolution-time recheck) updated for the new
+  parameter - `stack_id`/`top.stack_id` respectively.
+- `docs/lua_scripts.md`: `AddProtectionColor` documented in the static-ability section, with a
+  worked example and a summary of all three enforcement sites.
+- `docs/implementation.md`: new gaps-list bullet.
+
+**CR requirements:** CR 702.16a (damage), 702.16c (targeting), 702.16d (blocking), narrowed to
+702.16e's color-only quality grammar. 702.16b (enchant/equip) and the type/subtype/player/name/
+"everything" quality shapes are named follow-ups, not attempted.
+
+**TODOs marked, not silently narrowed:**
+- Protection from card type/subtype/a specific player/name/"everything" - only color this slice.
+- Enchant/Equip protection (702.16b) - needs attach mechanics, doesn't exist (see scoping finding
+  above).
+
+**Tests added** (`crates/engine/tests/phase5_protection_from_color.rs`, 8 new tests): Lua
+self-registration (`Game.Effects.AddProtectionColor("R")` produces the right primitive and shows up
+in `effective_characteristics.protection_colors`); combat damage from a matching color is prevented,
+from a different color still lands; casting a matching-color spell at a protected target is
+rejected, a colorless spell still works; a spell fizzles (CR 608.2b, the pre-existing generic
+mechanism - not a new one) when its target gains protection after being targeted but before
+resolution; a matching-color creature can't block a protected attacker, a different-color creature
+still can.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+8 new tests; every prior test unaffected (the `target_is_legal`/`validate_targets` signature change
+was mechanical - every existing call site already had the needed `ObjectId` in scope).
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** `target_is_legal`/`validate_targets` both gained a `source: ObjectId`
+parameter - anticipated in the pre-slice report ("target_is_legal... gain the casting spell/
+activated ability's own source id... same signature change FilterSpec::matches took"), not a
+deviation.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** protection from card type/subtype/player/name/everything, and Enchant/Equip - both
+named above, not silently dropped. `phase5/lose-all-abilities` (a separate branch, unmerged at the
+time this slice was written) introduces `EffectPrimitive::RemoveAllAbilities`, which resets
+`keywords` in the same layer-6 fold this slice touched - flagged then as needing its reset extended
+to also clear `protection_colors` once that branch merged. Done as part of merging the two branches
+together (see the merge commit itself / `phase5/lose-all-abilities`'s own updated write-up above,
+just above this slice's) - `RemoveAllAbilities` now resets both fields.
+
+## Merging phase5/lose-all-abilities and phase5/protection-from-color
+
+The two branches above were developed in parallel off master, each unaware of the other, and both
+touched the same layer-6 fold in `effective_characteristics` (`keywords`/`RemoveAllAbilities` from
+one, `protection_colors`/`AddProtectionColor` from the other). Merging `master` (which had
+`phase5/protection-from-color` already merged in) into `phase5/lose-all-abilities` produced real
+conflicts in `layers.rs`, `types/effect.rs`, and `script.rs` - resolved by keeping both features and
+extending `RemoveAllAbilities`'s reset to clear `protection_colors` too, exactly as both slices'
+own UNRESOLVED notes had already flagged would be needed. `EffectiveCharacteristics.keywords`'s own
+doc comment ("no layer removes a keyword yet") was also stale after `RemoveAllAbilities` existed -
+fixed alongside the merge rather than left. No test or behavior changes beyond that one intentional
+fix - `cargo test --workspace` green after resolving, same test counts as each branch had
+independently plus no regressions.

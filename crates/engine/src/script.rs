@@ -121,6 +121,44 @@ impl UserData for EffectPrimitiveTag {}
 struct DurationTag(EffectDuration);
 impl UserData for DurationTag {}
 
+/// Which `EventFilter` shape a `Game.CreateReplacementEffect` builder should
+/// build, before `:SetAffected` fills in the actual `EffectFilter` — plain
+/// data, not `EventFilter` itself, since `EventFilter`'s two real variants
+/// both carry an `affected: EffectFilter` this tag doesn't have yet at
+/// `:SetFilter()` time (see `ReplacementEffectBuilder`'s own doc comment).
+#[derive(Clone, Copy, Debug)]
+enum EventFilterKind {
+    DamageDealt,
+    WouldDie,
+}
+
+/// Same idea, for `Game.EventFilters.*` — e.g. `Game.EventFilters.DamageDealt`
+/// is a plain tagged value, the argument to `ReplacementEffectBuilder::
+/// SetFilter`.
+#[derive(Clone, Copy)]
+struct EventFilterKindTag(EventFilterKind);
+impl UserData for EventFilterKindTag {}
+
+/// Same idea, for `Game.ReplacementPayloads.*` — e.g.
+/// `Game.ReplacementPayloads.PreventDamage` is a plain tagged value, decoded
+/// back out by `ReplacementEffectBuilder::SetPayload`. Wraps the real
+/// `ReplacementPayload` directly (unlike `EventFilterKindTag` above, a
+/// payload needs no deferred data the way `affected` is for a filter) —
+/// `RedirectDamage` is deliberately never bound here, see
+/// `ReplacementEffectBuilder`'s own doc comment for why.
+#[derive(Clone)]
+struct ReplacementPayloadTag(ReplacementPayload);
+impl UserData for ReplacementPayloadTag {}
+
+/// Same idea, for `Game.Consumption.*` — e.g. `Game.Consumption.Repeatable`/
+/// `Game.Consumption.LimitedUses(3)` are plain tagged values, decoded back
+/// out by `ReplacementEffectBuilder::SetConsumption`. Wraps the real
+/// `ConsumptionPolicy` directly, same reasoning `ReplacementPayloadTag` above
+/// documents.
+#[derive(Clone, Copy)]
+struct ConsumptionPolicyTag(ConsumptionPolicy);
+impl UserData for ConsumptionPolicyTag {}
+
 #[derive(Debug)]
 pub enum ScriptError {
     LoadError(String),
@@ -489,6 +527,24 @@ fn parse_color_letter(letter: &str) -> Result<ColorSet, ScriptError> {
     })
 }
 
+/// `ReplacementPayloads.ReplaceZoneDestination(name)`'s argument decoder —
+/// same match-on-string-with-a-real-error pattern every other `parse_*_name`
+/// helper here uses. No such parser existed in `script.rs` before this slice
+/// (the `scenario` crate has its own, separate `parse_zone_kind` for TOML
+/// fixtures - not reused here, different crate, different error type).
+fn parse_zone_kind_name(name: &str) -> Result<ZoneKind, ScriptError> {
+    Ok(match name {
+        "Library" => ZoneKind::Library,
+        "Hand" => ZoneKind::Hand,
+        "Battlefield" => ZoneKind::Battlefield,
+        "Graveyard" => ZoneKind::Graveyard,
+        "Stack" => ZoneKind::Stack,
+        "Exile" => ZoneKind::Exile,
+        "Command" => ZoneKind::Command,
+        other => return Err(ScriptError::LoadError(format!("unknown zone '{other}'"))),
+    })
+}
+
 fn parse_filter_controller_name(name: &str) -> Result<FilterController, ScriptError> {
     match name {
         "you" => Ok(FilterController::You),
@@ -732,6 +788,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::ColorChanging, EffectPrimitive::AddColor(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
             | (Layer::AbilityAdding, EffectPrimitive::RemoveAllAbilities)
+            | (Layer::AbilityAdding, EffectPrimitive::AddProtectionColor(_))
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
             | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
             | (Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)
@@ -742,6 +799,33 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
         Err(ScriptError::LoadError(format!(
             "SetLayer({layer:?}) doesn't pair with SetEffect({effect:?}) - each layer only accepts \
              its own effect primitive shape"
+        )))
+    }
+}
+
+/// `EventFilter`'s per-shape payload pairing (`types/effect.rs`'s own
+/// `ReplacementPayload` doc comment) — same "reject a bad pairing at
+/// `:Register()` time" stance `validate_layer_effect_pairing` above already
+/// takes for `StaticAbilityBuilder`. `RedirectDamage` never appears on
+/// either side of this match - `Game.ReplacementPayloads` has no entry that
+/// produces one (see `ReplacementEffectBuilder`'s own doc comment) - so it's
+/// simply never a valid pairing from Lua yet, not silently accepted.
+fn validate_replacement_filter_payload_pairing(
+    kind: EventFilterKind,
+    payload: &ReplacementPayload,
+) -> Result<(), ScriptError> {
+    let paired = matches!(
+        (kind, payload),
+        (EventFilterKind::DamageDealt, ReplacementPayload::PreventDamage)
+            | (EventFilterKind::WouldDie, ReplacementPayload::ReplaceZoneDestination(_))
+            | (EventFilterKind::WouldDie, ReplacementPayload::Regenerate)
+    );
+    if paired {
+        Ok(())
+    } else {
+        Err(ScriptError::LoadError(format!(
+            "SetFilter({kind:?}) doesn't pair with SetPayload({payload:?}) - each event filter only \
+             accepts its own replacement payload shape(s)"
         )))
     }
 }
@@ -1063,32 +1147,42 @@ impl UserData for StaticAbilityBuilder {
     }
 }
 
-/// `Game.CreateReplacementEffect(c)`'s return value (CR 614, CR 701.19b) —
+/// `Game.CreateReplacementEffect(c)`'s return value (CR 614/615/701.19b) —
 /// the "natural future sibling to `Game.CreateStaticAbility`" `ReplacementSpec`'s
 /// own doc comment named. Deliberately narrower than that sibling: a
 /// `ReplacementEffect` isn't a CR 613 layer effect (it doesn't touch
 /// `layers::effective_characteristics` at all — it rewrites an *event*, a
 /// wholly separate mechanism, `state.replacement_effects`), so there's no
-/// `:SetLayer`/`:SetEffect` pairing to validate the way `StaticAbilityBuilder`
-/// does. This slice scopes the builder to the one payload shape it needed to
-/// prove against something real: `:Register()` always produces a `Repeatable`
-/// `EventFilter::WouldDie`/`ReplacementPayload::Regenerate` shield (CR
-/// 701.19b - "the effect of a static ability regenerates a permanent...
-/// each time that permanent would be destroyed"). `:SetAffected` mirrors
+/// `:SetLayer`/`:SetEffect` pairing to validate; `:SetFilter`/`:SetPayload`
+/// serve the equivalent role, checked by
+/// `validate_replacement_filter_payload_pairing`. `:SetAffected` mirrors
 /// `StaticAbilityBuilder::SetAffected`'s own table shape, but decodes
 /// straight to `EffectFilter` (not `AffectedFilter`) - `EventFilter` has no
 /// `Script`-affected shape yet (see `ReplacementSpec`'s own doc comment), so
 /// a custom-function argument is rejected with a real error rather than
 /// silently discarded.
 ///
-/// `consumption: Repeatable` is not settable from Lua - the whole point of
-/// this builder existing (rather than reusing `Game.Ops.Regenerate()`'s
-/// `OneShot` creation path) is CR 701.19b's repeatable shape; a card that
-/// wants a one-shot shield already has that path via a resolving spell/
-/// ability's own `AbilityEffect::Regenerate`.
+/// Defaults (`WouldDie`/`Regenerate`/`Repeatable`) when `:SetFilter`/
+/// `:SetPayload`/`:SetConsumption` are never called reproduce this builder's
+/// exact original CR 701.19b-only behavior - same backward-compatible-
+/// default convention `StaticAbilityBuilder::SetDuration` already
+/// established, so `phase5_static_regeneration.rs`'s existing tests (which
+/// only ever call `:SetAffected` before `:Register()`) keep working
+/// unmodified.
+///
+/// `ReplacementPayload::RedirectDamage(Target)` is deliberately never bound
+/// on `Game.ReplacementPayloads` - a redirect target isn't a static Lua
+/// literal the way a zone name or a use-count is; it would need either a
+/// "redirect to this effect's own source" narrowing or live target
+/// selection (`Game.SelectTargets`, which doesn't obviously compose with a
+/// builder that's queued and drained later rather than resolved
+/// synchronously). Flagged, not guessed at.
 struct ReplacementEffectBuilder {
     source: ObjectId,
     affected: EffectFilter,
+    event_kind: EventFilterKind,
+    payload: ReplacementPayload,
+    consumption: ConsumptionPolicy,
     registry: Rc<RefCell<ScriptRegistry>>,
 }
 
@@ -1122,14 +1216,34 @@ impl UserData for ReplacementEffectBuilder {
             this.affected = EffectFilter { controller, card_types, self_only: self_only.unwrap_or(false) };
             Ok(())
         });
+        // `Game.EventFilters.*` - which EventFilter shape this effect
+        // watches. See EventFilterKindTag's own doc comment for why this
+        // isn't the real EventFilter yet (affected is still separate).
+        methods.add_method_mut("SetFilter", |_, this, value: mlua::AnyUserData| {
+            this.event_kind = value.borrow::<EventFilterKindTag>()?.0;
+            Ok(())
+        });
+        // `Game.ReplacementPayloads.*` - what this effect rewrites the
+        // matched event into.
+        methods.add_method_mut("SetPayload", |_, this, value: mlua::AnyUserData| {
+            this.payload = value.borrow::<ReplacementPayloadTag>()?.0.clone();
+            Ok(())
+        });
+        // `Game.Consumption.*` - OneShot/Repeatable/LimitedUses(n).
+        methods.add_method_mut("SetConsumption", |_, this, value: mlua::AnyUserData| {
+            this.consumption = value.borrow::<ConsumptionPolicyTag>()?.0;
+            Ok(())
+        });
         methods.add_method_mut("Register", |_, this, ()| {
+            let filter = match this.event_kind {
+                EventFilterKind::DamageDealt => EventFilter::DamageDealt { affected: this.affected },
+                EventFilterKind::WouldDie => EventFilter::WouldDie { affected: this.affected },
+            };
+            validate_replacement_filter_payload_pairing(this.event_kind, &this.payload).map_err(to_lua_err)?;
             let replacement_effect = ReplacementEffect {
                 source: this.source,
-                spec: ReplacementSpec::Primitive {
-                    filter: EventFilter::WouldDie { affected: this.affected },
-                    payload: ReplacementPayload::Regenerate,
-                },
-                consumption: ConsumptionPolicy::Repeatable,
+                spec: ReplacementSpec::Primitive { filter, payload: this.payload.clone() },
+                consumption: this.consumption,
             };
             this.registry.borrow_mut().pending_replacement.push(replacement_effect);
             Ok(())
@@ -1829,6 +1943,15 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         Ok(OperationTag(AbilityEffect::Pump { power, toughness, duration }))
     })?;
     ops.set("Pump", pump)?;
+    // `Game.Ops.GainControl(duration)` - same `Game.Durations.*` tag decode
+    // as Pump's own duration argument. No player argument - the new
+    // controller is always the resolving spell/ability's own controller
+    // (see AbilityEffect::GainControl's own doc comment for why).
+    let gain_control = lua.create_function(|_, duration: mlua::AnyUserData| {
+        let duration = duration.borrow::<DurationTag>()?.0.clone();
+        Ok(OperationTag(AbilityEffect::GainControl(duration)))
+    })?;
+    ops.set("GainControl", gain_control)?;
     // `Game.Ops.Regenerate()` (CR 701.19a) - no arguments, same toggle shape
     // as `Game.Ops.Destroy`/`Sacrifice`/`Exile`/`Shuffle`.
     ops.set("Regenerate", OperationTag(AbilityEffect::Regenerate))?;
@@ -1978,6 +2101,13 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?,
     )?;
     effects.set(
+        "AddProtectionColor",
+        lua.create_function(|_, letter: String| {
+            let set = parse_color_letter(&letter).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionColor(set)))
+        })?,
+    )?;
+    effects.set(
         "AddCardType",
         lua.create_function(|_, name: String| {
             let set = parse_card_type_name(&name).map_err(to_lua_err)?;
@@ -1993,6 +2123,39 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     )?;
     effects.set("SwitchPT", EffectPrimitiveTag(EffectPrimitive::SwitchPT))?;
     effects.set("RemoveAllAbilities", EffectPrimitiveTag(EffectPrimitive::RemoveAllAbilities))?;
+
+    // `Game.EventFilters.*` - which EventFilter shape a ReplacementEffect
+    // watches (ReplacementEffectBuilder::SetFilter). Only the two shapes
+    // with a real query path (ReplacementEffect::matches) are ever bound -
+    // see EventFilter's own doc comment for what's unmodeled.
+    let event_filters = lua.create_table()?;
+    event_filters.set("DamageDealt", EventFilterKindTag(EventFilterKind::DamageDealt))?;
+    event_filters.set("WouldDie", EventFilterKindTag(EventFilterKind::WouldDie))?;
+
+    // `Game.ReplacementPayloads.*` - what a ReplacementEffect rewrites the
+    // matched event into (ReplacementEffectBuilder::SetPayload).
+    // RedirectDamage deliberately isn't bound here - see
+    // ReplacementEffectBuilder's own doc comment for why.
+    let replacement_payloads = lua.create_table()?;
+    replacement_payloads.set("PreventDamage", ReplacementPayloadTag(ReplacementPayload::PreventDamage))?;
+    replacement_payloads.set("Regenerate", ReplacementPayloadTag(ReplacementPayload::Regenerate))?;
+    replacement_payloads.set(
+        "ReplaceZoneDestination",
+        lua.create_function(|_, zone_name: String| {
+            let zone = parse_zone_kind_name(&zone_name).map_err(to_lua_err)?;
+            Ok(ReplacementPayloadTag(ReplacementPayload::ReplaceZoneDestination(zone)))
+        })?,
+    )?;
+
+    // `Game.Consumption.*` - a ReplacementEffect's ConsumptionPolicy
+    // (ReplacementEffectBuilder::SetConsumption).
+    let consumption = lua.create_table()?;
+    consumption.set("OneShot", ConsumptionPolicyTag(ConsumptionPolicy::OneShot))?;
+    consumption.set("Repeatable", ConsumptionPolicyTag(ConsumptionPolicy::Repeatable))?;
+    consumption.set(
+        "LimitedUses",
+        lua.create_function(|_, uses: u32| Ok(ConsumptionPolicyTag(ConsumptionPolicy::LimitedUses(uses))))?,
+    )?;
 
     let create_triggered_ability = {
         let registry = Rc::clone(&registry);
@@ -2032,6 +2195,9 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
             Ok(ReplacementEffectBuilder {
                 source: ObjectId(source),
                 affected: EffectFilter { controller: None, card_types: None, self_only: false },
+                event_kind: EventFilterKind::WouldDie,
+                payload: ReplacementPayload::Regenerate,
+                consumption: ConsumptionPolicy::Repeatable,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -2121,6 +2287,9 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     game.set("Layers", layers)?;
     game.set("Durations", durations)?;
     game.set("Effects", effects)?;
+    game.set("EventFilters", event_filters)?;
+    game.set("ReplacementPayloads", replacement_payloads)?;
+    game.set("Consumption", consumption)?;
     game.set("Tokens", tokens)?;
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
     game.set("CreateStaticAbility", create_static_ability)?;

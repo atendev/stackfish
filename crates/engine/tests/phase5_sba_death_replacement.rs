@@ -127,7 +127,8 @@ fn base_state() -> GameState {
         zones: vec![
             Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: Some(p0), contents: VecDeque::new() },
+            // Exile is a shared zone (CR 400.10, owner: None).
+            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
             Zone { kind: ZoneKind::Command, owner: Some(p0), contents: VecDeque::new() },
         ],
         stack: Vec::new(),
@@ -231,7 +232,7 @@ fn would_die_replacement_exiles_instead_of_dying_to_the_graveyard() {
         state.zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty(),
         "it must never have touched the graveyard at all"
     );
-    assert!(state.zone(ZoneKind::Exile, Some(p0)).unwrap().contents.contains(&new_id));
+    assert!(state.zone(ZoneKind::Exile, None).unwrap().contents.contains(&new_id));
 }
 
 #[test]
@@ -309,7 +310,7 @@ fn engine_pauses_mid_sba_and_resumes_correctly_after_a_replacement_choice() {
     let new_id = *engine.state().zone(ZoneKind::Command, Some(p0)).unwrap().contents.front().unwrap();
     assert_eq!(engine.state().object(new_id).unwrap().zone, ZoneKind::Command);
     assert!(
-        engine.state().zone(ZoneKind::Exile, Some(p0)).unwrap().contents.is_empty(),
+        engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(),
         "the Exile effect must not have also applied - only the chosen one wins"
     );
 

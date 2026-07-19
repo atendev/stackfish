@@ -4,12 +4,15 @@
 //! "loses all abilities" had no construction path (`Layer::TextChanging`'s
 //! own TODO flagged it, even though it's mechanically layer 6).
 //!
-//! Deliberately narrow: only strips `KeywordSet`, the layer-engine half of
-//! "abilities." A permanent's own custom triggered/activated
-//! `RegisteredAbility` entries are never filtered by continuous effects at
-//! all in this engine (`collect_triggers`/activation-legality checks read
-//! `state.abilities` directly) - not covered here, same shape the
-//! layer-2-control-consumers gap already named for a different layer.
+//! Deliberately narrow: only strips `KeywordSet`/`protection_colors` (the
+//! latter added in parallel by `phase5/protection-from-color`, reconciled
+//! when the two branches merged - see this file's own
+//! `remove_all_abilities_also_strips_a_granted_protection_color` test), the
+//! layer-engine half of "abilities." A permanent's own custom triggered/
+//! activated `RegisteredAbility` entries are never filtered by continuous
+//! effects at all in this engine (`collect_triggers`/activation-legality
+//! checks read `state.abilities` directly) - not covered here, same shape
+//! the layer-2-control-consumers gap already named for a different layer.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -208,6 +211,35 @@ fn remove_all_abilities_also_strips_an_earlier_granted_keyword() {
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
 
     assert_eq!(effective.keywords, KeywordSet::empty(), "the earlier-granted Flying should be stripped too");
+}
+
+/// CR 613.1f names "ability-adding... and ability-removing effects"
+/// together, no carve-out for protection specifically - `protection_colors`
+/// is a separate field from `keywords` in the same layer-6 fold (added by
+/// `phase5/protection-from-color`, developed in parallel and merged
+/// together with this slice), so `RemoveAllAbilities` has to reset both or
+/// "loses all abilities" would leave protection behind. Same real
+/// interaction the two slices' own UNRESOLVED notes each flagged before
+/// either saw the other's code.
+#[test]
+fn remove_all_abilities_also_strips_a_granted_protection_color() {
+    let mut state = combat_state();
+    let p0 = PlayerId(0);
+    let bear = ObjectId(0);
+    put_on_battlefield(&mut state, permanent(bear, creature_definition("Bear", 2, 2, KeywordSet::empty()), p0));
+    state.continuous_effects.push(self_only_effect(
+        bear,
+        Layer::AbilityAdding,
+        EffectPrimitive::AddProtectionColor(ColorSet::RED),
+        0,
+    ));
+    state
+        .continuous_effects
+        .push(self_only_effect(bear, Layer::AbilityAdding, EffectPrimitive::RemoveAllAbilities, 1));
+
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
+
+    assert_eq!(effective.protection_colors, ColorSet::empty(), "the earlier-granted protection should be stripped too");
 }
 
 // ---------------------------------------------------------------------

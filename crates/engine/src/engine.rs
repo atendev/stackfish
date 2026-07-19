@@ -1134,13 +1134,17 @@ impl Engine {
     /// (non-yielding) `invoke_operation` call already had — not a new gap
     /// this method introduces.
     pub fn submit_script_choice(&mut self, chosen: Target) -> Result<(), ScriptChoiceError> {
-        let ProcessState::AwaitingScriptChoice { request, controller, .. } = &self.process_state else {
+        let ProcessState::AwaitingScriptChoice { request, controller, stack_id, .. } = &self.process_state else {
             return Err(ScriptChoiceError::NotAwaitingChoice);
         };
         let ScriptChoiceRequest::SelectTarget { filter } = request else {
             return Err(ScriptChoiceError::WrongRequestKind);
         };
-        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller) {
+        // CR 702.16c: the resolving StackObject's own id is the "source"
+        // protection checks against, not the controller - same distinction
+        // validate_targets' own callers already make for a static target
+        // requirement.
+        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller, *stack_id) {
             return Err(ScriptChoiceError::InvalidCandidate);
         }
         let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, mut events_so_far, .. } =
@@ -2475,6 +2479,7 @@ impl Engine {
                                 *t,
                                 &req.filter,
                                 top.controller,
+                                top.stack_id,
                             )
                         })
                         .collect(),
@@ -2821,6 +2826,36 @@ impl Engine {
                                             power: *power,
                                             toughness: *toughness,
                                         }),
+                                        timestamp,
+                                        duration: duration.clone(),
+                                        condition: None,
+                                    });
+                                }
+                            }
+                            // CR 108.4/613.1 layer 2: same per-target
+                            // ContinuousEffect construction as Pump above,
+                            // just layer 2/GainControl instead of layer 7c/
+                            // ModifyPT. The new controller is always
+                            // top.controller (the resolving spell/ability's
+                            // own controller) - see AbilityEffect::
+                            // GainControl's own doc comment for why no
+                            // separate player argument exists. Object
+                            // targets only, same "silent no-op" stance as
+                            // Pump/Damage/Counters above.
+                            Some(AbilityEffect::GainControl(duration)) => {
+                                let timestamp = self.state.allocate_sequence_no();
+                                let new_controller = top.controller;
+                                for target in &legal_targets {
+                                    let Target::Object(id) = target else { continue };
+                                    self.state.continuous_effects.push(ContinuousEffect {
+                                        source: *id,
+                                        layer: Layer::ControlChangingEffects,
+                                        affected: AffectedFilter::Primitive(EffectFilter {
+                                            controller: None,
+                                            card_types: None,
+                                            self_only: true,
+                                        }),
+                                        effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
                                         timestamp,
                                         duration: duration.clone(),
                                         condition: None,

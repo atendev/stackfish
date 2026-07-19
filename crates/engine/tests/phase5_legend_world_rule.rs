@@ -51,7 +51,8 @@ fn base_state() -> GameState {
             Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: Some(p0), contents: VecDeque::new() },
+            // Exile is a shared zone (CR 400.10, owner: None).
+            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
         ],
         stack: Vec::new(),
         continuous_effects: Vec::new(),
@@ -315,7 +316,7 @@ fn would_die_replacement_applies_to_the_losing_legendary() {
         engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty(),
         "the loser must never have touched the graveyard"
     );
-    let exile = engine.state().zone(ZoneKind::Exile, Some(p0)).unwrap();
+    let exile = engine.state().zone(ZoneKind::Exile, None).unwrap();
     assert_eq!(exile.contents.len(), 1, "the loser was exiled instead, per the real replacement effect");
 }
 

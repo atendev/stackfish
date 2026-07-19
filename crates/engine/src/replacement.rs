@@ -100,6 +100,39 @@ pub(crate) fn apply_one_replacement(
     rewritten
 }
 
+/// CR 702.16a: protection prevents all damage from a source of the
+/// protected color(s) — unlike a `ReplacementEffect` a card registers, this
+/// is a static, always-on characteristic of the object itself (`layers::
+/// effective_characteristics().protection_colors`), so it's a hardcoded
+/// check here rather than an entry in `state.replacement_effects` — same
+/// "checked up front, not modeled as a registered replacement" stance CR
+/// 702.12b indestructible already takes ahead of `Destroy`. Idempotent
+/// (zeroing an already-zero amount is a no-op), so calling it fresh on
+/// every `apply_replacements_from` loop iteration is safe and correctly
+/// re-evaluates against a possibly-`RedirectDamage`-changed target, not
+/// just the original proposal. A `Target::Player`/unresolvable source or
+/// target never has protection to check — returned unchanged.
+fn apply_protection_from_color(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    event: GameEventKind,
+) -> GameEventKind {
+    let GameEventKind::DamageDealt { source, target, amount, is_combat_damage } = event else {
+        return event;
+    };
+    let Target::Object(target_id) = target else {
+        return GameEventKind::DamageDealt { source, target, amount, is_combat_damage };
+    };
+    if state.object(source).is_none() || state.object(target_id).is_none() {
+        return GameEventKind::DamageDealt { source, target, amount, is_combat_damage };
+    }
+    let target_protection =
+        crate::layers::effective_characteristics(state, script_runtime, target_id).protection_colors;
+    let source_colors = crate::layers::effective_characteristics(state, script_runtime, source).colors;
+    let amount = if target_protection.intersects(source_colors) { 0 } else { amount };
+    GameEventKind::DamageDealt { source, target, amount, is_combat_damage }
+}
+
 /// Rewrites/prevents `proposed` per CR 614/615/616, applying every matching
 /// `ReplacementEffect` in `state.replacement_effects` before the event is
 /// allowed to commit, re-checking after each rewrite in case the rewritten
@@ -139,6 +172,12 @@ pub(crate) fn apply_replacements_from(
 ) -> ReplacementOutcome {
     let mut event = proposed;
     loop {
+        // CR 702.16a: checked fresh every iteration, ahead of the
+        // registered-effects match below - see apply_protection_from_color's
+        // own doc comment for why this is hardcoded rather than a
+        // ReplacementEffect entry.
+        event = apply_protection_from_color(state, script_runtime, event);
+
         if state.replacement_effects.is_empty() {
             // Genuinely nothing registered to match against - safe to
             // resolve unchanged.

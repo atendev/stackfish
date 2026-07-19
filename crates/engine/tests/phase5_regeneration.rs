@@ -135,7 +135,8 @@ fn base_state() -> GameState {
         zones: vec![
             Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: Some(p0), contents: VecDeque::new() },
+            // Exile is a shared zone (CR 400.10, owner: None).
+            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
         ],
         stack: Vec::new(),
         continuous_effects: Vec::new(),
@@ -421,7 +422,7 @@ fn engine_resumes_correctly_after_choosing_the_regeneration_shield_in_an_orderin
     assert_eq!(survivor.damage_marked, 0);
     assert!(survivor.tapped);
     assert!(
-        engine.state().zone(ZoneKind::Exile, Some(p0)).unwrap().contents.is_empty(),
+        engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(),
         "the Exile effect must not also have applied - only the chosen one wins"
     );
 }
