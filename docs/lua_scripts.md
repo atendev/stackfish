@@ -359,15 +359,16 @@ form), `crates/engine/tests/phase5_continuous_effects_script.rs` (script-backed 
 Scenario TOML fixtures can use the table/tag form via `CardSpec.script` too — see
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 
-## Self-registering a repeatable regeneration shield
+## Self-registering a replacement effect
 
-`Game.CreateReplacementEffect(c)` (CR 614, CR 701.19b) is a narrower sibling of
-`Game.CreateStaticAbility` — it doesn't touch layers/`effective_characteristics` at all (a
-regeneration shield rewrites an *event*, a wholly separate mechanism, `GameState.
-replacement_effects`), so there's no `:SetLayer`/`:SetEffect` pairing to pick. `:Register()` always
-produces a `Repeatable` shield (CR 701.19b: "...each time that permanent would be destroyed," not
-just the next time — contrast `Game.Ops.Regenerate()`, a resolving spell/ability's own `OneShot`
-shield, CR 701.19a):
+`Game.CreateReplacementEffect(c)` (CR 614/615) is a narrower sibling of `Game.CreateStaticAbility`
+— it doesn't touch layers/`effective_characteristics` at all (a replacement effect rewrites an
+*event*, a wholly separate mechanism, `GameState.replacement_effects`), so there's no
+`:SetLayer`/`:SetEffect` pairing to pick; `:SetFilter`/`:SetPayload` serve the equivalent role.
+Omitting every settable field reproduces this builder's original CR 701.19b-only shape — a
+`Repeatable` regeneration shield ("...each time that permanent would be destroyed," not just the
+next time — contrast `Game.Ops.Regenerate()`, a resolving spell/ability's own `OneShot` shield, CR
+701.19a):
 
 ```lua
 -- This creature regenerates.
@@ -382,21 +383,58 @@ end
 return s
 ```
 
+`:SetFilter(Game.EventFilters.*)` picks which event shape this effect watches —
+`DamageDealt`/`WouldDie` are the only two with a real query path (`ReplacementEffect::matches`).
+`:SetPayload(Game.ReplacementPayloads.*)` picks the rewrite: `PreventDamage` (CR 615, pairs only
+with `DamageDealt`), `Regenerate` (CR 701.19b, pairs only with `WouldDie`), or
+`ReplaceZoneDestination(zoneName)` (CR 614.13-style "instead" substitution, pairs only with
+`WouldDie` — `zoneName` is a zone name string, e.g. `"Exile"`). A mismatched pairing is a real
+`:Register()`-time error, same stance `StaticAbilityBuilder`'s `:SetLayer`/`:SetEffect` pairing
+already takes. `:SetConsumption(Game.Consumption.*)` picks `OneShot`, `Repeatable` (the default),
+or `LimitedUses(n)`.
+
+```lua
+-- Fog: prevent all combat damage that would be dealt to you this turn.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.DamageDealt)
+    e:SetPayload(Game.ReplacementPayloads.PreventDamage)
+    e:SetConsumption(Game.Consumption.OneShot)
+    e:SetAffected({ controller = "you" })
+    e:Register()
+end
+
+return s
+```
+
+`ReplacementPayload::RedirectDamage(Target)` is deliberately never bound on
+`Game.ReplacementPayloads` — a redirect target isn't a static Lua literal the way a zone name or a
+use-count is; it would need either a "redirect to this effect's own source" narrowing or live
+target selection (`Game.SelectTargets`, which doesn't obviously compose with a builder that's
+queued and drained later rather than resolved synchronously). Flagged, not guessed at — a card that
+needs it still has to be built directly in Rust (same bootstrap stance every other still-unbound
+shape in this doc takes).
+
 `:SetAffected` takes the same plain-table shape `Game.CreateStaticAbility`'s own `:SetAffected`
 does (`controller`/`card_types`/`self_only`, every key optional) — but a custom function isn't
 accepted here (unlike the static-ability builder): `EventFilter` has no `Script`-affected shape
 yet, so passing one is a real `:SetAffected()` error rather than something silently discarded.
 
-CR 701.19c ("can't be regenerated" effects) is checked fresh every time the shield is asked to
-apply (`ReplacementEffect::matches`), not just once when it was created — unlike the one-shot
-`Game.Ops.Regenerate()` path (which also skips *creating* a shield for an already-can't-be-
-regenerated target as a cheap optimization), a repeatable shield is registered once but the
+CR 701.19c ("can't be regenerated" effects) is checked fresh every time a `Regenerate` shield is
+asked to apply (`ReplacementEffect::matches`), not just once when it was created — unlike the
+one-shot `Game.Ops.Regenerate()` path (which also skips *creating* a shield for an already-can't-
+be-regenerated target as a cheap optimization), a repeatable shield is registered once but the
 target's CANT_BE_REGENERATED status can change afterward, and CR 701.19c's own wording ("cause
 regeneration shields to not be applied") is about application, not creation.
 
 Same registration timing and `retire_object` purge as static abilities above — `run_card_script`
 also drains `pending_replacement` into `GameState.replacement_effects` in the same pass. Real,
-tested end to end: `crates/engine/tests/phase5_static_regeneration.rs`.
+tested end to end: `crates/engine/tests/phase5_static_regeneration.rs` (the original
+`WouldDie`/`Regenerate`-only shape) and `crates/engine/tests/phase5_replacement_effect_shapes.rs`
+(`:SetFilter`/`:SetPayload`/`:SetConsumption`, including a real combat-damage Fog effect and a
+real exile-instead-of-dying effect, both driven through a full `Engine`).
 
 ## Self-registering an activated ability
 

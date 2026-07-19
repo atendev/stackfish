@@ -108,8 +108,9 @@ fn base_state() -> GameState {
             Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: Some(p1), contents: VecDeque::new() },
+            // Exile is a shared zone (CR 400.10, owner: None) - a single
+            // entry, not one per player.
+            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
         ],
         stack: Vec::new(),
         continuous_effects: Vec::new(),
@@ -278,7 +279,7 @@ fn leaves_battlefield_trigger_fires_when_a_replacement_exiles_instead_of_killing
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1));
     assert_eq!(engine.state().stack.len(), 1, "LeavesBattlefield must fire on the exile, not just a death");
     assert!(
-        engine.state().zone(ZoneKind::Exile, Some(p0)).unwrap().contents.len() == 1,
+        engine.state().zone(ZoneKind::Exile, None).unwrap().contents.len() == 1,
         "the bear actually went to exile, not the graveyard"
     );
 

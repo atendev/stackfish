@@ -170,8 +170,9 @@ fn two_player_state() -> GameState {
             Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: Some(p1), contents: VecDeque::new() },
+            // Exile is a shared zone (CR 400.10, owner: None) - a single
+            // entry, not one per player.
+            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
         ],
         stack: Vec::new(),
         continuous_effects: Vec::new(),
@@ -297,7 +298,7 @@ fn would_die_replacement_redirects_a_scripted_destroy_to_exile() {
     pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(engine.state().object(target).is_none(), "the original bear id is retired");
-    assert_eq!(engine.state().zone(ZoneKind::Exile, Some(p1)).unwrap().contents.len(), 1, "redirected to exile instead of the graveyard");
+    assert_eq!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.len(), 1, "redirected to exile instead of the graveyard");
     assert!(engine.state().zone(ZoneKind::Graveyard, Some(p1)).unwrap().contents.is_empty());
 }
 

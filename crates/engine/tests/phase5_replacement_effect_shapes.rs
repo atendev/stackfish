@@ -1,0 +1,452 @@
+//! Phase 5 vertical slice: `Game.CreateReplacementEffect` generalized beyond
+//! its original CR 701.19b-only scope (`phase5/static-regeneration`) to the
+//! other `EventFilter`/`ReplacementPayload` pairings `ReplacementEffect::
+//! matches`/`apply` already handled correctly in Rust - `DamageDealt`/
+//! `PreventDamage` (CR 615) and `WouldDie`/`ReplaceZoneDestination` (CR
+//! 614.13-style "instead" substitution) - proven end to end by
+//! `engine.rs`'s own `prevent_all_damage` unit test and
+//! `phase5_combat_damage_replacement.rs`, but with no Lua construction path
+//! until this slice. `RedirectDamage(Target)` stays unbound - see
+//! `ReplacementEffectBuilder`'s own doc comment (script.rs) for why.
+
+use std::collections::{HashMap, VecDeque};
+
+use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::script::ScriptRuntime;
+use stackfish_engine::*;
+
+const PREVENT_DAMAGE_TO_YOU_ONE_SHOT: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.DamageDealt)
+    e:SetPayload(Game.ReplacementPayloads.PreventDamage)
+    e:SetConsumption(Game.Consumption.OneShot)
+    e:SetAffected({ controller = "you" })
+    e:Register()
+end
+return s
+"#;
+
+const EXILE_INSTEAD_OF_DYING: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldDie)
+    e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+return s
+"#;
+
+const MISMATCHED_FILTER_PAYLOAD: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.DamageDealt)
+    e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
+    e:Register()
+end
+return s
+"#;
+
+const LIMITED_USES_SHIELD: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.DamageDealt)
+    e:SetPayload(Game.ReplacementPayloads.PreventDamage)
+    e:SetConsumption(Game.Consumption.LimitedUses(1))
+    e:SetAffected({ controller = "you" })
+    e:Register()
+end
+return s
+"#;
+
+const REGENERATE_DEFAULTS_UNCHANGED: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+return s
+"#;
+
+fn creature_definition(name: &str, power: i32, toughness: i32, script: &str) -> CardDefinition {
+    CardDefinition {
+        definition_id: 1,
+        name: name.to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::CREATURE,
+        subtypes: Vec::new(),
+        oracle_text: "Replacement-effect-shapes test fixture.".to_string(),
+        power: Some(PTValue::Fixed(power)),
+        toughness: Some(PTValue::Fixed(toughness)),
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::Inline(script.to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: None,
+        modes: Vec::new(),
+    }
+}
+
+/// A plain, unscripted creature - `run_card_script` never runs on it (this
+/// test file places objects directly onto the battlefield rather than
+/// driving them through `PlayLand`/`CastSpell`, so no ETB script hook fires
+/// for anyone regardless of `script_ref`), same `ByKey` convention
+/// `phase5_combat_damage_replacement.rs` already uses for its own attacker.
+fn vanilla_creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
+    CardDefinition { script_ref: ScriptReference::ByKey(name.to_string()), ..creature_definition(name, power, toughness, "") }
+}
+
+fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
+    GameObject {
+        object_id: id,
+        copiable_override: None,
+        lineage: ObjectLineage { previous: None },
+        definition,
+        owner,
+        controller: owner,
+        zone: ZoneKind::Battlefield,
+        tapped: false,
+        flipped: false,
+        face_down: false,
+        phased_out: false,
+        damage_marked: 0,
+        deathtouched: false,
+        counters: CounterSet::new(),
+        attachments: Vec::new(),
+        attached_to: None,
+        timestamp: SequenceNo(0),
+        controlled_since_turn: 0,
+        is_token: false,
+        is_commander: false,
+        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+    }
+}
+
+fn put_on_battlefield(state: &mut GameState, object: GameObject) {
+    let id = object.object_id;
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
+    state.objects.insert(id, object);
+}
+
+fn player_state(id: PlayerId) -> PlayerState {
+    PlayerState {
+        player_id: id,
+        life: 20,
+        mana_pool: ManaPool::default(),
+        counters: CounterSet::new(),
+        emblems: Vec::new(),
+        commander_damage_taken: Vec::new(),
+        eliminated: false,
+        drew_from_empty_library: false,
+        mulligans_taken: 0,
+        hand_kept: false,
+        commander_casts: std::collections::HashMap::new(),
+    }
+}
+
+fn combat_damage_state(combat: CombatState) -> GameState {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    GameState {
+        players: vec![player_state(p0), player_state(p1)],
+        turn_order: vec![p0, p1],
+        active_player: p0,
+        turn_number: 1,
+        phase: Phase::Combat,
+        step: Step::CombatDamage,
+        priority_player: p0,
+        consecutive_passes: 0,
+        lands_played_this_turn: HashMap::new(),
+        combat: Some(combat),
+        last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
+        objects: HashMap::new(),
+        zones: vec![Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() }],
+        stack: Vec::new(),
+        continuous_effects: Vec::new(),
+        replacement_effects: Vec::new(),
+        cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
+        abilities: Vec::new(),
+        ledger: Vec::new(),
+        rng: RngState { seed: 1, draws_consumed: 0 },
+        next_event_id: 0,
+        next_sequence_no: 0,
+        next_object_id: 1000,
+        pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
+    }
+}
+
+fn base_state() -> GameState {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    GameState {
+        players: vec![player_state(p0), player_state(p1)],
+        turn_order: vec![p0, p1],
+        active_player: p0,
+        turn_number: 1,
+        phase: Phase::Main,
+        step: Step::PreCombatMain,
+        priority_player: p0,
+        consecutive_passes: 0,
+        lands_played_this_turn: HashMap::new(),
+        combat: None,
+        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
+        objects: HashMap::new(),
+        zones: vec![
+            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
+        ],
+        stack: Vec::new(),
+        continuous_effects: Vec::new(),
+        replacement_effects: Vec::new(),
+        cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
+        abilities: Vec::new(),
+        ledger: Vec::new(),
+        rng: RngState { seed: 1, draws_consumed: 0 },
+        next_event_id: 0,
+        next_sequence_no: 0,
+        next_object_id: 1000,
+        pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
+    }
+}
+
+// ---------------------------------------------------------------------
+// Unit-level: run_card_script's self-registration mechanics.
+// ---------------------------------------------------------------------
+
+#[test]
+fn set_filter_damage_dealt_and_prevent_damage_registers_correctly() {
+    let mut state = base_state();
+    let source = ObjectId(0);
+    let definition = creature_definition("Ward", 0, 1, PREVENT_DAMAGE_TO_YOU_ONE_SHOT);
+    state.objects.insert(source, permanent(source, definition.clone(), PlayerId(0)));
+
+    let mut runtime = ScriptRuntime::new();
+    runtime.run_card_script(&mut state, &definition, source).expect("script self-registers cleanly");
+
+    assert_eq!(state.replacement_effects.len(), 1);
+    let effect = &state.replacement_effects[0];
+    assert_eq!(effect.consumption, ConsumptionPolicy::OneShot);
+    match &effect.spec {
+        ReplacementSpec::Primitive {
+            filter: EventFilter::DamageDealt { affected },
+            payload: ReplacementPayload::PreventDamage,
+        } => {
+            assert_eq!(affected.controller, Some(FilterController::You));
+        }
+        other => panic!("expected a DamageDealt/PreventDamage primitive spec, got {other:?}"),
+    }
+}
+
+#[test]
+fn set_filter_would_die_and_replace_zone_destination_registers_correctly() {
+    let mut state = base_state();
+    let source = ObjectId(0);
+    let definition = creature_definition("Vanishes", 2, 2, EXILE_INSTEAD_OF_DYING);
+    state.objects.insert(source, permanent(source, definition.clone(), PlayerId(0)));
+
+    let mut runtime = ScriptRuntime::new();
+    runtime.run_card_script(&mut state, &definition, source).expect("script self-registers cleanly");
+
+    assert_eq!(state.replacement_effects.len(), 1);
+    match &state.replacement_effects[0].spec {
+        ReplacementSpec::Primitive {
+            filter: EventFilter::WouldDie { affected },
+            payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
+        } => {
+            assert!(affected.self_only);
+        }
+        other => panic!("expected a WouldDie/ReplaceZoneDestination(Exile) primitive spec, got {other:?}"),
+    }
+}
+
+#[test]
+fn mismatched_filter_and_payload_is_a_real_register_time_error() {
+    let mut state = base_state();
+    let source = ObjectId(0);
+    let definition = creature_definition("Broken", 2, 2, MISMATCHED_FILTER_PAYLOAD);
+    state.objects.insert(source, permanent(source, definition.clone(), PlayerId(0)));
+
+    let mut runtime = ScriptRuntime::new();
+    let result = runtime.run_card_script(&mut state, &definition, source);
+
+    assert!(result.is_err(), "DamageDealt + ReplaceZoneDestination is a real mismatch, must be rejected");
+    assert!(state.replacement_effects.is_empty(), "no partial effect should have been committed");
+}
+
+#[test]
+fn omitting_every_new_setter_still_defaults_to_would_die_regenerate_repeatable() {
+    let mut state = base_state();
+    let source = ObjectId(0);
+    let definition = creature_definition("Bear", 2, 2, REGENERATE_DEFAULTS_UNCHANGED);
+    state.objects.insert(source, permanent(source, definition.clone(), PlayerId(0)));
+
+    let mut runtime = ScriptRuntime::new();
+    runtime.run_card_script(&mut state, &definition, source).expect("script self-registers cleanly");
+
+    assert_eq!(state.replacement_effects.len(), 1);
+    let effect = &state.replacement_effects[0];
+    assert_eq!(effect.consumption, ConsumptionPolicy::Repeatable);
+    assert!(matches!(
+        &effect.spec,
+        ReplacementSpec::Primitive { filter: EventFilter::WouldDie { .. }, payload: ReplacementPayload::Regenerate }
+    ));
+}
+
+// ---------------------------------------------------------------------
+// End-to-end: a Lua-registered effect actually changes real Engine
+// behavior, not just the queued struct's shape.
+// ---------------------------------------------------------------------
+
+fn drain(engine: &mut Engine) -> StepStatus {
+    loop {
+        match engine.step().status {
+            StepStatus::Progressed => continue,
+            other => return other,
+        }
+    }
+}
+
+fn assign_combat_damage(
+    engine: &mut Engine,
+    player: PlayerId,
+    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+) -> StepStatus {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        .expect("turn-based action, no priority required");
+    drain(engine)
+}
+
+#[test]
+fn lua_registered_prevent_damage_stops_real_combat_damage_from_landing() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let shield_source = ObjectId(1);
+    let mut state = combat_damage_state(CombatState {
+        attackers: vec![(attacker, Target::Player(p1))],
+        blocks: Vec::new(),
+        declared_defenders: vec![p1],
+    });
+    put_on_battlefield(&mut state, permanent(attacker, vanilla_creature_definition("Bear", 3, 3), p0));
+    let shield_definition = creature_definition("Ward", 0, 1, PREVENT_DAMAGE_TO_YOU_ONE_SHOT);
+    put_on_battlefield(&mut state, permanent(shield_source, shield_definition.clone(), p1));
+
+    // Self-registration (run_card_script) happens the same way PlayLand/
+    // CastSpell resolution already drives it for real - proven separately,
+    // see phase5_static_ability_self_registration.rs. A throwaway
+    // ScriptRuntime is enough here since ReplacementSpec::Primitive carries
+    // no runtime-bound handle - Engine::new below builds its own runtime for
+    // real gameplay afterward.
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &shield_definition, shield_source)
+        .expect("script self-registers cleanly");
+    assert_eq!(state.replacement_effects.len(), 1);
+
+    let mut engine = Engine::new(state);
+    assign_combat_damage(&mut engine, p0, Vec::new());
+
+    assert_eq!(
+        engine.state().player(p1).unwrap().life,
+        20,
+        "the Lua-registered PreventDamage effect must have stopped the damage from landing"
+    );
+    assert!(
+        engine.state().replacement_effects.is_empty(),
+        "a OneShot shield is consumed after use"
+    );
+}
+
+#[test]
+fn lua_registered_replace_zone_destination_exiles_instead_of_dying() {
+    let p0 = PlayerId(0);
+    let bear = ObjectId(0);
+    let mut state = base_state();
+    let definition = creature_definition("Vanishes", 2, 2, EXILE_INSTEAD_OF_DYING);
+    put_on_battlefield(&mut state, permanent(bear, definition.clone(), p0));
+
+    ScriptRuntime::new().run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+    assert_eq!(state.replacement_effects.len(), 1);
+    state.object_mut(bear).unwrap().damage_marked = 2;
+
+    let script_runtime = ScriptRuntime::new();
+    let outcome = stackfish_engine::sba::check_state_based_actions(&mut state, &script_runtime);
+    let events = match outcome {
+        stackfish_engine::sba::SbaOutcome::Progressed(events, _) => events,
+        stackfish_engine::sba::SbaOutcome::NeedsOrderingChoice { .. } => {
+            panic!("fixture didn't expect a replacement ordering-choice pause")
+        }
+        stackfish_engine::sba::SbaOutcome::NeedsLegendRuleChoice { .. } => {
+            panic!("fixture didn't expect a legend-rule choice pause")
+        }
+        stackfish_engine::sba::SbaOutcome::NeedsCommanderReturnChoice { .. } => {
+            panic!("fixture didn't expect a commander-return choice pause")
+        }
+    };
+
+    // CR 400.7: a death mints a fresh ObjectId - old_id (bear) never
+    // remaps, same convention every other zone-changing move in this
+    // engine already uses (PlayLand/CastSpell/ResolveStackTop).
+    let new_id = events
+        .iter()
+        .find_map(|e| match e.kind {
+            GameEventKind::ZoneChange { object, from: ZoneKind::Battlefield, to: ZoneKind::Exile, .. } => Some(object),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected the lethal-damage SBA to exile the creature instead of sending it to the graveyard, got {events:?}"));
+
+    assert!(state.object(bear).is_none(), "the old id shouldn't resolve anymore");
+    assert_eq!(
+        state.object(new_id).map(|o| o.zone),
+        Some(ZoneKind::Exile),
+        "the creature should actually be in exile now, not just logged as such"
+    );
+}
+
+#[test]
+fn lua_registered_limited_uses_one_shield_stops_protecting_after_first_use() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let shield_source = ObjectId(1);
+    let mut state = combat_damage_state(CombatState {
+        attackers: vec![(attacker, Target::Player(p1))],
+        blocks: Vec::new(),
+        declared_defenders: vec![p1],
+    });
+    put_on_battlefield(&mut state, permanent(attacker, vanilla_creature_definition("Bear", 3, 3), p0));
+    let shield_definition = creature_definition("Ward", 0, 1, LIMITED_USES_SHIELD);
+    put_on_battlefield(&mut state, permanent(shield_source, shield_definition.clone(), p1));
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &shield_definition, shield_source)
+        .expect("script self-registers cleanly");
+
+    let mut engine = Engine::new(state);
+    assign_combat_damage(&mut engine, p0, Vec::new());
+
+    assert_eq!(engine.state().player(p1).unwrap().life, 20, "the first hit should be prevented");
+    assert!(
+        engine.state().replacement_effects.is_empty(),
+        "LimitedUses(1) should be fully consumed after its one use, same as OneShot"
+    );
+}

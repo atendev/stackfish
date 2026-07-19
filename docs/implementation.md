@@ -2441,11 +2441,18 @@ verbatim once enough time has passed for the underlying code to have moved.
   docs/implementation.md, below) as well as now a *static* ability's own duration (this bullet).
 - **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
   not a stable id - fragile if a card's own ability list ever needs to change shape.
-- **Replacement effects**: `EventFilter` still only has two shapes (`DamageDealt`, `WouldDie`).
-  `Game.CreateReplacementEffect` now exists, `phase5/static-regeneration` (docs/implementation.md,
-  below) - deliberately scoped to exactly one payload shape (`WouldDie`/`Regenerate`, CR 701.19b),
-  the one this slice needed to prove against something real. Damage prevention/redirection and
-  non-regenerate zone-destination substitution still have no Lua construction path.
+- **Replacement effects**: `EventFilter` still only has two event *shapes* (`DamageDealt`,
+  `WouldDie`) - protection (CR 702.16), ETB-modifier replacements, "would draw a card"
+  substitution, and any other event kind stay unmodeled. Within those two shapes,
+  `Game.CreateReplacementEffect`'s Lua construction path is now general: `phase5/static-
+  regeneration` (docs/implementation.md, below) proved `WouldDie`/`Regenerate` (CR 701.19b);
+  `phase5/replacement-effect-shapes` (docs/implementation.md, below) generalized the same builder
+  to `DamageDealt`/`PreventDamage` (CR 615) and `WouldDie`/`ReplaceZoneDestination` (CR 614.13-style
+  "instead" substitution, non-regenerate), plus a settable `ConsumptionPolicy`
+  (`OneShot`/`Repeatable`/`LimitedUses`) - all payload shapes `ReplacementEffect::matches`/`apply`
+  already handled correctly in Rust, just previously Lua-inaccessible. `RedirectDamage(Target)`
+  remains Lua-inaccessible - a redirect target isn't a static Lua literal, named as its own
+  follow-up rather than guessed at.
 - **Triggers**: this bullet was stale - both the player-relative shape (`DiscardsCard`/
   `EachDiscardsCard`) and the self-referential shape (`ConditionPrimitive::Discarded`, "when *this*
   card is discarded", `phase5/discarded-trigger`, docs/implementation.md below) are now real, off
@@ -8229,3 +8236,106 @@ every test that cared about color already set `color_indicator` directly).
 **UNRESOLVED:** none new. `SetCardTypes`/`SetColors` (the full "loses all other colors" overwrite
 shape) and supertype/subtype gains remain the same standing gaps named in `types/effect.rs`'s own
 TODOs, untouched by this fix.
+
+## Phase 5: phase5/replacement-effect-shapes slice (CR 615/614.13, `Game.CreateReplacementEffect` generalized)
+
+Branch `phase5/replacement-effect-shapes`, off master. Picked from the "Known unresolved gaps"
+list's Replacement-effects bullet — `Game.CreateReplacementEffect` always hardcoded
+`EventFilter::WouldDie`/`ReplacementPayload::Regenerate`/`ConsumptionPolicy::Repeatable`
+(`phase5/static-regeneration`'s own deliberate CR 701.19b-only scoping), even though
+`ReplacementEffect::matches`/`apply` already handled `DamageDealt`/`PreventDamage` (CR 615) and
+`WouldDie`/`ReplaceZoneDestination` (CR 614.13-style "instead" substitution) correctly in Rust —
+proven by `engine.rs`'s own `prevent_all_damage` unit test and
+`phase5_combat_damage_replacement.rs`. The "no Lua construction path" note had been carried
+forward, unfixed, across five prior slices.
+
+**Scoping finding, before writing code:** since the engine mechanics for the other pairings were
+already proven, this was a pure Lua-wiring gap, not a new mechanism — generalize
+`ReplacementEffectBuilder` the same way `StaticAbilityBuilder::SetDuration` just generalized its
+own builder: new settable fields, each defaulting to the builder's exact original behavior when
+never called, so `phase5_static_regeneration.rs`'s existing tests (which only ever call
+`:SetAffected` before `:Register()`) keep passing unmodified. `ReplacementPayload::
+RedirectDamage(Target)` was scoped out up front — a redirect target isn't a static Lua literal the
+way a zone name or a use-count is, and there was no clean answer for "which object/player" without
+either a narrowing (redirect-to-source) or live target selection that doesn't obviously compose
+with this queued-and-drained-later builder shape.
+
+**Bug found and fixed while writing this slice's own end-to-end exile test, not by inspection:**
+`sba::commit_death`'s zone-move always looked up the destination zone via `state.zone_mut(to,
+Some(owner))` — correct for Graveyard (per-player) but wrong for Exile, which CR 400.10 makes a
+*shared* zone (`owner: None`), same distinction `engine.rs`'s own stack-resolution zone move
+already made correctly. `to` had only ever been `Graveyard` before this slice gave
+`ReplaceZoneDestination` a real Lua path, so the wrong-owner lookup was unreachable code, not a
+live bug, until now: with `to: Exile`, `zone_mut` found no matching zone at all, and the object was
+silently never re-inserted anywhere. Fixed by giving `commit_death` the same
+`Battlefield`/`Exile => None, _ => Some(owner)` branch `engine.rs`'s own zone-move code already
+uses. This exposed a second, wider problem: six existing test fixtures
+(`phase5_destroy_ordering_choice.rs`, `phase5_dies_triggers.rs`, `phase5_legend_world_rule.rs`,
+`phase5_regeneration.rs`, `phase5_sba_death_replacement.rs`, `phase5_script_ops_destroy.rs`) had
+each built their own *per-player* Exile zone (`owner: Some(p0)`, some with a second `Some(p1)`
+entry alongside it) specifically to match `commit_death`'s old bug — one of them even had a comment
+naming this as a known, deliberately-unreconciled inconsistency with the real shared-zone
+convention. All six updated to the correct single shared `owner: None` Exile zone and the matching
+`zone(ZoneKind::Exile, None)` query call sites, rather than left passing against the wrong model.
+
+**What got implemented:**
+- `script.rs`: `ReplacementEffectBuilder` gained `event_kind: EventFilterKind` (new, Lua-side-only
+  enum — `EventFilter` itself has no shape until `affected` is filled in), `payload:
+  ReplacementPayload`, and `consumption: ConsumptionPolicy` fields (defaults `WouldDie`/
+  `Regenerate`/`Repeatable`, this builder's original values). New `:SetFilter`/`:SetPayload`/
+  `:SetConsumption` methods. New `validate_replacement_filter_payload_pairing` (mirrors
+  `validate_layer_effect_pairing`) — `DamageDealt` only pairs with `PreventDamage`; `WouldDie`
+  pairs with `ReplaceZoneDestination`/`Regenerate`. `Game.EventFilters.DamageDealt`/`.WouldDie`
+  (bare tags), `Game.ReplacementPayloads.PreventDamage`/`.Regenerate` (bare tags) and
+  `.ReplaceZoneDestination(zoneName)` (new `parse_zone_kind_name` helper, same match-on-string
+  pattern every other `parse_*_name` helper here uses — no zone-name parser existed in `script.rs`
+  before this, only the separate `scenario` crate had one for TOML), `Game.Consumption.OneShot`/
+  `.Repeatable` (bare tags) and `.LimitedUses(n)` (function).
+- `sba.rs`: `commit_death`'s destination-zone-owner bug fixed (see above).
+- `docs/lua_scripts.md`: "Self-registering a repeatable regeneration shield" retitled "Self-
+  registering a replacement effect", extended with `:SetFilter`/`:SetPayload`/`:SetConsumption`
+  and a Fog-effect worked example; explicit note on why `RedirectDamage` stays unbound.
+- `docs/implementation.md`: Replacement-effects gaps-list bullet updated to reflect the builder's
+  generalization (the remaining gap is `EventFilter`'s two-*shapes*-only limit, not payload/
+  consumption coverage within those two shapes).
+
+**CR requirements:** CR 615 (prevention effects, `PreventDamage`), CR 614.13-style "instead"
+zone-destination substitution (`ReplaceZoneDestination`, non-regenerate case), CR 400.10 (Exile is
+a shared zone — the bug fix above), CR 616 (the `OneShot`/`Repeatable`/`LimitedUses` consumption
+shapes, whose ordering-choice pipeline was already proven by `phase5/destroy-ordering-choice`).
+
+**TODOs marked, not silently narrowed:** `ReplacementPayload::RedirectDamage(Target)` stays
+Lua-inaccessible, named in both `ReplacementEffectBuilder`'s own doc comment and the gaps-list
+bullet. `EventFilter` itself still only covers two event *kinds* — protection (CR 702.16),
+ETB-modifier replacements, and "would draw a card" substitution all remain unmodeled; this slice
+only generalized construction within the two shapes that already existed.
+
+**Tests added** (`crates/engine/tests/phase5_replacement_effect_shapes.rs`, 7 new tests): four
+unit-level tests via `run_card_script` — `DamageDealt`/`PreventDamage`/`OneShot` and
+`WouldDie`/`ReplaceZoneDestination("Exile")` each register the expected struct, a mismatched
+`DamageDealt`/`ReplaceZoneDestination` pairing is a real `Register()`-time error, and omitting
+every new setter still defaults to `WouldDie`/`Regenerate`/`Repeatable` (regression guard). Three
+end-to-end tests through a real `Engine`: a Lua-registered Fog effect (`DamageDealt`/
+`PreventDamage`/`OneShot`) actually zeroes real combat damage and is consumed after use; a
+Lua-registered `ReplaceZoneDestination("Exile")` effect actually exiles a dying creature (the test
+that caught the `commit_death` bug above — first asserting the event, then the *new* object's
+actual zone, not the old retired id); a `LimitedUses(1)` shield stops protecting after its one use.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` — every test binary green, 0 failures, including the
+7 new tests and the 6 existing test files whose Exile-zone fixtures were corrected to match the
+real shared-zone convention (see the bug-fix finding above) rather than reverted.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none beyond the new `:SetFilter`/`:SetPayload`/`:SetConsumption` methods
+themselves — additive, no existing method signature changed.
+
+**SCOPE DEVIATIONS:** the `sba::commit_death` Exile-zone-owner fix and its six-file test-fixture
+ripple were both found while implementing (see the bug-fix finding above), not anticipated in the
+original one-line pick from the gaps list — necessary for `ReplaceZoneDestination` to actually be
+correct for any zone other than Graveyard, not independent cleanup, so folded into this slice
+rather than deferred.
+
+**UNRESOLVED:** `ReplacementPayload::RedirectDamage(Target)` and `EventFilter`'s two-shapes-only
+limit remain the same standing gaps named in `docs/implementation.md`'s own gaps list.
