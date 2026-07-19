@@ -2479,6 +2479,14 @@ verbatim once enough time has passed for the underlying code to have moved.
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
   Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
+- **Protection (CR 702.16)**: closed for "protection from color" (702.16e's shape), `phase5/
+  protection-from-color` (docs/implementation.md, below) - `EffectiveCharacteristics.
+  protection_colors`, `EffectPrimitive::AddProtectionColor`/`Game.Effects.AddProtectionColor`,
+  enforced at damage (702.16a), targeting (702.16c), and blocking (702.16d). Protection from card
+  type/subtype/a specific player/"from everything" stays unmodeled - only color. Enchant/Equip
+  (702.16b) stays unmodeled too - needs real attach/enchant machinery this engine doesn't have
+  (`GameObject.attached_to`/`.attachments` are inert placeholder fields, same gap `phase5/gain-
+  control-effect` already named for its own aura-sourced follow-up).
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
   the battlefield can't move zones again) is a related but separate rule, not covered.
@@ -8419,3 +8427,97 @@ existing variant or function signature changed.
 
 **UNRESOLVED:** the aura/static-ability control-change path and `controlled_since_turn` (see the
 two TODOs above) — both named, not silently dropped.
+
+## Phase 5: phase5/protection-from-color slice (CR 702.16, protection from color)
+
+Branch `phase5/protection-from-color`, off master. Picked from the "Known unresolved gaps" list -
+protection had no representation anywhere in this engine, not even a `KeywordSet` bit. Scoped to
+CR 702.16e's "protection from color" shape (by far the most common real form) and three of the four
+"DEBT" restrictions - damage (702.16a), targeting (702.16c), blocking (702.16d). Enchant/Equip
+(702.16b) stays unmodeled, named rather than attempted - no attach/enchant machinery exists in this
+engine yet (confirmed absent, `GameObject.attached_to`/`.attachments` are never written to
+anywhere), same gap `phase5/gain-control-effect` already named for its own aura-sourced follow-up.
+
+**Scoping finding, before writing code:** a shortcut was considered and rejected - treating
+protection's damage half like Lifelink/Deathtouch/Wither/Infect, a post-hoc special case in
+`commands::apply_damage_event`. That doesn't fit: those keywords change what already-committed
+damage *does*; protection has to stop the damage from happening at all, which only the replacement-
+check pipeline (pre-commit) can do. The real design finding: protection isn't a `state.
+replacement_effects` entry a card registers - it's a static, always-on characteristic of the object
+itself (like a keyword), so enforcement is three hardcoded checks at the sites that already gate
+the equivalent real-gameplay action, the same "checked up front, not a registered replacement"
+precedent CR 702.12b indestructible already set ahead of `Destroy` - not three new generic
+mechanisms.
+
+**Why a separate field, not a `KeywordSet` bit:** protection has to carry *which* color(s), which a
+flat bitflag can't express. `EffectiveCharacteristics` gained `protection_colors: ColorSet`, folded
+in in the same layer-6 pass as `keywords` from a sibling `EffectPrimitive::AddProtectionColor`
+(union, same shape `AddKeyword` already uses) - reuses `StaticAbilityBuilder`/`Game.
+CreateStaticAbility` wholesale, no new builder needed, and `:SetDuration` (already generic) covers
+"gains protection until end of turn" for free.
+
+**What got implemented:**
+- `types/effect.rs`: `EffectPrimitive::AddProtectionColor(ColorSet)`. `EffectiveCharacteristics.
+  protection_colors: ColorSet`.
+- `layers.rs`: layer-6 fold in `effective_characteristics` gained a third match arm alongside
+  `AddKeyword`.
+- `script.rs`: `Game.Effects.AddProtectionColor(letter)`, pairing-validation entry for
+  `(AbilityAdding, AddProtectionColor)`.
+- `replacement.rs`: new `apply_protection_from_color` - checked fresh at the top of every
+  `apply_replacements_from` loop iteration (idempotent, so safe to call unconditionally every pass),
+  ahead of the registered-`ReplacementEffect` match. Re-checking every iteration rather than once
+  up front matters for real correctness: it means a mid-resolution `RedirectDamage` retarget is
+  caught against the *new* target, not just the original proposal.
+- `commands.rs`: new `target_has_protection_from`, called from both `TargetFilter::Object` and
+  `TargetFilter::AnyTarget` arms of `target_is_legal`. `target_is_legal`/`validate_targets` both
+  gained a `source: ObjectId` parameter (the spell/ability's own id, not the caster - protection
+  cares about the source's color, same distinction `FilterSpec::matches`'s own `object_controller`
+  parameter already established for a different check) - already in scope at both real call sites
+  (`CastSpell`'s `card`, `ActivateAbility`'s `source`), just not threaded through before. `Declare
+  Blockers`'s existing Flying/Reach/Menace check block gained a sibling protection-from-color check,
+  same `effective_characteristics` read.
+- `engine.rs`: both other `target_is_legal` call sites (`submit_script_choice`'s `Game.
+  SelectTargets` validation, and the CR 608.2b resolution-time recheck) updated for the new
+  parameter - `stack_id`/`top.stack_id` respectively.
+- `docs/lua_scripts.md`: `AddProtectionColor` documented in the static-ability section, with a
+  worked example and a summary of all three enforcement sites.
+- `docs/implementation.md`: new gaps-list bullet.
+
+**CR requirements:** CR 702.16a (damage), 702.16c (targeting), 702.16d (blocking), narrowed to
+702.16e's color-only quality grammar. 702.16b (enchant/equip) and the type/subtype/player/name/
+"everything" quality shapes are named follow-ups, not attempted.
+
+**TODOs marked, not silently narrowed:**
+- Protection from card type/subtype/a specific player/name/"everything" - only color this slice.
+- Enchant/Equip protection (702.16b) - needs attach mechanics, doesn't exist (see scoping finding
+  above).
+
+**Tests added** (`crates/engine/tests/phase5_protection_from_color.rs`, 8 new tests): Lua
+self-registration (`Game.Effects.AddProtectionColor("R")` produces the right primitive and shows up
+in `effective_characteristics.protection_colors`); combat damage from a matching color is prevented,
+from a different color still lands; casting a matching-color spell at a protected target is
+rejected, a colorless spell still works; a spell fizzles (CR 608.2b, the pre-existing generic
+mechanism - not a new one) when its target gains protection after being targeted but before
+resolution; a matching-color creature can't block a protected attacker, a different-color creature
+still can.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+8 new tests; every prior test unaffected (the `target_is_legal`/`validate_targets` signature change
+was mechanical - every existing call site already had the needed `ObjectId` in scope).
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** `target_is_legal`/`validate_targets` both gained a `source: ObjectId`
+parameter - anticipated in the pre-slice report ("target_is_legal... gain the casting spell/
+activated ability's own source id... same signature change FilterSpec::matches took"), not a
+deviation.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** protection from card type/subtype/player/name/everything, and Enchant/Equip - both
+named above, not silently dropped. `phase5/lose-all-abilities` (a separate, still-unmerged branch)
+introduces `EffectPrimitive::RemoveAllAbilities`, which resets `keywords` in the same layer-6 fold
+this slice touched - when that branch merges, its reset will need extending to also clear
+`protection_colors`, or "loses all abilities" would leave protection behind. Not fixed here since
+the primitive doesn't exist on this branch yet; flagged so it isn't missed at merge time.

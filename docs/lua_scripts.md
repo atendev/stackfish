@@ -273,11 +273,46 @@ Layers 1/2/3/7d/7e aren't offered at all (see `Layer`'s own doc comment in `type
 why each is unbuilt).
 
 `Game.Effects` mirrors `Game.Ops`'s one-factory-per-shape convention: `SetPT(power, toughness)`,
-`ModifyPT(power, toughness)`, `AddKeyword(name)`, `AddCardType(name)`, `AddColor(letter)` — each
-call returns a tagged value for `:SetEffect`. `:Register()` rejects a layer/effect pairing that
-doesn't match (e.g. `SetLayer(TypeChanging)` with `SetEffect(ModifyPT(...))`) with a real error,
-rather than silently building a `ContinuousEffect` the layer engine could never actually apply —
-this check only runs for a `Game.Effects.*` tag, see the script-backed form below for why.
+`ModifyPT(power, toughness)`, `AddKeyword(name)`, `AddCardType(name)`, `AddColor(letter)`,
+`AddProtectionColor(letter)` — each call returns a tagged value for `:SetEffect`. `:Register()`
+rejects a layer/effect pairing that doesn't match (e.g. `SetLayer(TypeChanging)` with
+`SetEffect(ModifyPT(...))`) with a real error, rather than silently building a `ContinuousEffect`
+the layer engine could never actually apply — this check only runs for a `Game.Effects.*` tag, see
+the script-backed form below for why.
+
+`AddProtectionColor` (CR 702.16, narrowed to 702.16e's "protection from color" shape) pairs with
+`Game.Layers.AbilityAdding`, same layer `AddKeyword` uses — protection isn't its own `KeywordSet`
+bit (it has to carry *which* color, which a flat bitflag can't), so it's a separate field,
+`EffectiveCharacteristics.protection_colors`, folded in alongside `keywords` in the same layer-6
+pass:
+
+```lua
+-- This creature has protection from red.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.AbilityAdding)
+    e:SetEffect(Game.Effects.AddProtectionColor("R"))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+
+return s
+```
+
+Enforced at three real call sites, none of them a `state.replacement_effects` entry (protection is
+a static, always-on characteristic, not something a card "registers" — same "checked up front, not
+a registered replacement" stance CR 702.12b indestructible already takes ahead of `Destroy`):
+damage (`replacement::apply_protection_from_color`, CR 702.16a — the matched source's damage is
+prevented entirely, re-checked fresh every replacement-resolution pass so a mid-resolution
+`RedirectDamage` retarget is caught too), targeting (`commands::target_is_legal`, CR 702.16c — a
+spell/ability of the protected color can't target it, including the CR 608.2b recheck at
+resolution time if protection is gained after the spell was already cast), and blocking
+(`DeclareBlockers`, CR 702.16d — a creature of the protected color can't block it, same call site
+Flying/Reach/Menace already gate). Enchant/Equip (702.16b) stays unmodeled — no attach/enchant
+machinery exists in this engine yet. Protection from card type/subtype/a specific player/"from
+everything" — only color, this slice.
 
 `:SetAffected` takes a plain table, not its own family of tag factories — every key optional,
 same shape `EffectFilter` (`types/effect.rs`) already has:
@@ -372,8 +407,10 @@ Same registration timing and `retire_object` purge as triggered abilities above 
 sites needed; `run_card_script` drains both `pending_triggered` and `pending_static` in one pass.
 
 Real, tested end to end: `crates/engine/tests/phase5_static_ability_self_registration.rs` (table/tag
-form), `crates/engine/tests/phase5_continuous_effects_script.rs` (script-backed form), and
-`crates/engine/tests/phase5_static_ability_duration.rs` (`:SetDuration`).
+form), `crates/engine/tests/phase5_continuous_effects_script.rs` (script-backed form),
+`crates/engine/tests/phase5_static_ability_duration.rs` (`:SetDuration`), and
+`crates/engine/tests/phase5_protection_from_color.rs` (`AddProtectionColor`, all three enforcement
+sites).
 Scenario TOML fixtures can use the table/tag form via `CardSpec.script` too — see
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 

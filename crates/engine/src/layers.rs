@@ -112,9 +112,12 @@ pub fn effective_characteristics(
         }
     }
 
+    let mut protection_colors = crate::ColorSet::empty();
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
-        if let Some(EffectPrimitive::AddKeyword(added)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
-            keywords |= added;
+        match resolve_primitive(effect, state, script_runtime, obj.controller) {
+            Some(EffectPrimitive::AddKeyword(added)) => keywords |= added,
+            Some(EffectPrimitive::AddProtectionColor(added)) => protection_colors |= added,
+            _ => {}
         }
     }
 
@@ -175,6 +178,7 @@ pub fn effective_characteristics(
         supertypes: def.supertypes,
         subtypes: def.subtypes.clone(),
         keywords,
+        protection_colors,
         power,
         toughness,
         loyalty: def.loyalty.as_ref().and_then(|l| l.as_fixed()),

@@ -257,12 +257,39 @@ fn lethal_damage_needed(
 /// changed zones already fails the zone check below), but a future filter
 /// that doesn't pin a zone would need the original zone threaded through
 /// separately to catch that case.
+/// CR 702.16c: `target_id` can't be the target of a spell/ability of a
+/// color it has protection from. `source` is the spell/ability's own
+/// object id (the card being cast, or the source of an activated ability)
+/// — its color, not the caster's, is what protection cares about (CR
+/// 702.16's "of the stated quality" always describes the source, never the
+/// controller). An unresolvable source has no color to check against and
+/// can't illegally target anything on this basis — same "skip rather than
+/// guess" stance every other unresolvable-source case in this codebase
+/// already takes.
+fn target_has_protection_from(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    target_id: ObjectId,
+    source: ObjectId,
+) -> bool {
+    if state.object(source).is_none() {
+        return false;
+    }
+    let protection = crate::layers::effective_characteristics(state, script_runtime, target_id).protection_colors;
+    if protection.is_empty() {
+        return false;
+    }
+    let source_colors = crate::layers::effective_characteristics(state, script_runtime, source).colors;
+    protection.intersects(source_colors)
+}
+
 pub(crate) fn target_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,
     target: Target,
     filter: &TargetFilter,
     caster: PlayerId,
+    source: ObjectId,
 ) -> bool {
     match filter {
         TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
@@ -294,6 +321,9 @@ pub(crate) fn target_is_legal(
                     return false;
                 }
             }
+            if target_has_protection_from(state, script_runtime, id, source) {
+                return false;
+            }
             true
         }
         // CR 115.4: creature, player, planeswalker, or battle only - no
@@ -306,9 +336,12 @@ pub(crate) fn target_is_legal(
                     return false;
                 }
                 let effective = crate::layers::effective_characteristics(state, script_runtime, id);
-                effective.card_types.intersects(
+                if !effective.card_types.intersects(
                     CardTypeSet::CREATURE | CardTypeSet::PLANESWALKER | CardTypeSet::BATTLE,
-                )
+                ) {
+                    return false;
+                }
+                !target_has_protection_from(state, script_runtime, id, source)
             }
         },
     }
@@ -337,6 +370,7 @@ fn validate_targets(
     requirement: Option<&TargetSpec>,
     targets: &[Target],
     caster: PlayerId,
+    source: ObjectId,
 ) -> Result<(), CommandError> {
     match requirement {
         None => {
@@ -370,7 +404,7 @@ fn validate_targets(
                 }
             }
             for t in targets {
-                if !target_is_legal(state, script_runtime, *t, &req.filter, caster) {
+                if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source) {
                     return Err(CommandError::InvalidTarget);
                 }
             }
@@ -1020,6 +1054,7 @@ pub fn execute_command(
                 target_requirement.as_ref(),
                 &targets,
                 command.actor,
+                card,
             )?;
 
             // CR 601.2f: total cost = the card's printed mana_cost, unless
@@ -1356,6 +1391,7 @@ pub fn execute_command(
                         target_requirement.as_ref(),
                         &targets,
                         command.actor,
+                        source,
                     )?;
 
                     // `None` means "no cost at all" - same empty-CostSpec
@@ -1661,6 +1697,25 @@ pub fn execute_command(
                     return Err(CommandError::IllegalAction(
                         "an attacker with flying can only be blocked by a creature with \
                          flying or reach"
+                            .to_string(),
+                    ));
+                }
+
+                // CR 702.16d: an attacker with protection from a color
+                // can't be blocked by a creature of that color. Same
+                // effective_characteristics treatment as Flying/Reach
+                // above - a granted color or a granted protection both
+                // change blocking legality for real, not just the printed
+                // values.
+                let attacker_protection =
+                    crate::layers::effective_characteristics(state, script_runtime, attacker_object.object_id)
+                        .protection_colors;
+                let blocker_colors =
+                    crate::layers::effective_characteristics(state, script_runtime, blocker_object.object_id).colors;
+                if attacker_protection.intersects(blocker_colors) {
+                    return Err(CommandError::IllegalAction(
+                        "an attacker with protection from a color can't be blocked by a \
+                         creature of that color"
                             .to_string(),
                     ));
                 }
