@@ -232,6 +232,53 @@ fn base_case_no_continuous_effects_mirrors_card_definition() {
 }
 
 #[test]
+fn printed_mana_cost_symbols_derive_base_color_per_cr_202_2() {
+    // Regression: effective_characteristics used to read color_indicator
+    // alone and ignore the mana cost entirely - a real colored card (which
+    // almost never sets color_indicator) would resolve as colorless. Fixed
+    // by routing through CardDefinition::colors(), which was already CR
+    // 105.2a-correct but had no real caller wiring it into the layer engine.
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    let bear = ObjectId(0);
+    let mut definition = creature_definition(2, 2, KeywordSet::empty());
+    definition.mana_cost = ManaCost {
+        symbols: vec![
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Blue)),
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+        ],
+    };
+    let mut object = creature(bear, p0, 2, 2);
+    object.definition = definition;
+    put_on_battlefield(&mut state, object);
+
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
+
+    assert_eq!(effective.colors, ColorSet::WHITE | ColorSet::BLUE);
+}
+
+#[test]
+fn color_indicator_still_overrides_mana_cost_derived_color() {
+    // CR 105.2a: an explicit color_indicator wins outright, it doesn't union
+    // with the mana cost's own colors.
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    let bear = ObjectId(0);
+    let mut definition = creature_definition(2, 2, KeywordSet::empty());
+    definition.mana_cost =
+        ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White))] };
+    definition.color_indicator = Some(ColorSet::BLACK);
+    let mut object = creature(bear, p0, 2, 2);
+    object.definition = definition;
+    put_on_battlefield(&mut state, object);
+
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
+
+    assert_eq!(effective.colors, ColorSet::BLACK);
+}
+
+#[test]
 fn add_card_type_unions_a_type_in_without_removing_existing_types() {
     let mut state = base_state();
     let p0 = PlayerId(0);

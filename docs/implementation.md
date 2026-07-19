@@ -8195,3 +8195,37 @@ method signature changed.
 
 **UNRESOLVED:** none new — `WhileConditionHolds`/`Custom` durations remain the same standing
 `Game.Durations` scoping gap named elsewhere in this doc.
+
+## Fix: layer 5 read `color_indicator` alone instead of `CardDefinition::colors()` (CR 105.2a/202.2)
+
+Found while answering "how far from a real card database" — not picked from the gaps list, a stale
+TODO caught by inspection. `layers.rs`'s `effective_characteristics` seeded its layer-5 base value
+as `def.color_indicator.unwrap_or(ColorSet::empty())`, with a comment saying this was a stopgap
+until `CardDefinition::colors()`/`ManaCost::colors()` got filled in. Both had already been filled in
+for real (`types/card.rs::CardDefinition::colors()`, `types/mana.rs::ManaCost::colors()`) by some
+earlier slice's mana-cost work, but nobody circled back to update this one caller — so every real
+colored permanent (almost none of which set `color_indicator`, since that field only exists for the
+rare card that needs an explicit override) was silently resolving as colorless in the layer engine.
+A live, wrong answer today, not a missing feature — worth fixing directly rather than waiting for a
+slice to trip over it.
+
+**What got implemented:** `layers.rs`'s layer-5 seed changed from the raw `color_indicator` read to
+`def.colors()` — CR 105.2a's own "indicator overrides, otherwise derive from the mana cost" split,
+already correctly implemented there. Stale comment replaced with one explaining what changed and
+why. No other call site needed touching — `def.colors()` was already fully correct, just uncalled
+from here.
+
+**Tests added** (`crates/engine/tests/phase5_layer_engine_types_colors.rs`, 2 new tests): a creature
+with a `{W}{U}{1}` mana cost and no `color_indicator` now resolves to White/Blue in
+`effective_characteristics` (the regression this fix closes); a creature with both a mana cost *and*
+an explicit `color_indicator` still resolves to just the indicator's color, not a union of the two
+(CR 105.2a's override, not additive, confirming the fix didn't change that half of the split).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace` — all test binaries green, 0 failures, including the 2 new tests;
+every prior test unaffected (no existing fixture relied on the old colorless-by-default behavior —
+every test that cared about color already set `color_indicator` directly).
+
+**UNRESOLVED:** none new. `SetCardTypes`/`SetColors` (the full "loses all other colors" overwrite
+shape) and supertype/subtype gains remain the same standing gaps named in `types/effect.rs`'s own
+TODOs, untouched by this fix.

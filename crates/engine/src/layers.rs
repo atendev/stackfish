@@ -78,13 +78,13 @@ pub fn effective_characteristics(
         resolve_base_pt(def.toughness.as_ref(), &obj.counters, state, script_runtime, object, obj.controller);
     let mut keywords = def.keywords;
     let mut card_types = def.card_types;
-    // TODO: CardDefinition::colors()/ManaCost::colors() are both still
-    // todo!() (see mana.rs) - once filled, derive this from def.colors()
-    // instead of reading color_indicator directly (which ignores colors
-    // contributed by mana_cost symbols per CR 202.2). Carried forward from
-    // the layer-engine-basics slice; this slice's layer 5 union applies on
-    // top of whatever this stopgap produces, not blocked on fixing it.
-    let mut colors = def.color_indicator.unwrap_or(crate::ColorSet::empty());
+    // CR 105.2a/202.2: color comes from color_indicator if set, otherwise
+    // the mana cost's own colored symbols - CardDefinition::colors() already
+    // implements exactly that split. Previously this read color_indicator
+    // alone (a stopgap from when CardDefinition::colors()/ManaCost::colors()
+    // were still todo!() stubs) - real color, printed mana cost symbols
+    // included, now derived correctly.
+    let mut colors = def.colors();
 
     // Layer 3 (CR 612.8): override-wins-outright, same shape as layer 2's
     // GainControl/layer 7b's SetPT - a later-timestamp SetName replaces an
