@@ -792,6 +792,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionCardType(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionSubtype(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionName(_))
+            | (Layer::AbilityAdding, EffectPrimitive::AddProtectionEverything)
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
             | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
             | (Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)
@@ -2141,6 +2142,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     )?;
     effects.set("SwitchPT", EffectPrimitiveTag(EffectPrimitive::SwitchPT))?;
     effects.set("RemoveAllAbilities", EffectPrimitiveTag(EffectPrimitive::RemoveAllAbilities))?;
+    effects.set("AddProtectionEverything", EffectPrimitiveTag(EffectPrimitive::AddProtectionEverything))?;
 
     // `Game.EventFilters.*` - which EventFilter shape a ReplacementEffect
     // watches (ReplacementEffectBuilder::SetFilter). Only the two shapes

@@ -203,17 +203,34 @@ pub enum EffectPrimitive {
     /// name` — protection has to see a renamed source the same way every
     /// other characteristic-sensitive check in this engine does.
     AddProtectionName(String),
+    /// Layer 6 (CR 613.1/702.16j, "protection from everything"): grants
+    /// protection unconditionally, regardless of the source's own
+    /// characteristics — "A permanent or player with protection from
+    /// everything has protection from each object regardless of that
+    /// object's characteristic values." No payload, same bare-value shape
+    /// as `RemoveAllAbilities`/`SwitchPT` below — there's no quality to
+    /// carry, just an on/off flag (`EffectiveCharacteristics::
+    /// protection_everything: bool`), unlike the other four
+    /// `AddProtection*` primitives which each carry *which* color/type/
+    /// subtype/name. A `true` union (once granted by any applicable effect,
+    /// stays granted for the rest of this layer-6 fold, same as every other
+    /// additive shape here) rather than a `Vec`/`Set` — redundant
+    /// `AddProtectionEverything`s from multiple sources collapse to the
+    /// same single bit, which is correct (CR 702.16m: "multiple instances
+    /// of protection from the same quality... are redundant").
+    AddProtectionEverything,
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
     /// abilities"): resets the running `keywords`, `protection_colors`,
-    /// `protection_card_types`, `protection_subtypes`, *and*
-    /// `protection_names` accumulators to empty at this effect's position in
-    /// `effective_characteristics`'s layer-6 fold — protection is an
-    /// ability too, regardless of which quality it names (CR 613.1f names
-    /// "ability-adding... and ability-removing effects" together, no
-    /// carve-out for protection specifically). Not a flat override the way
-    /// `SetName`/`SetPT`/`GainControl` are — a later-timestamp `AddKeyword`/
-    /// `AddProtectionColor`/`AddProtectionCardType`/`AddProtectionSubtype`/
-    /// `AddProtectionName` still
+    /// `protection_card_types`, `protection_subtypes`, `protection_names`,
+    /// *and* `protection_everything` accumulators to empty/false at this
+    /// effect's position in `effective_characteristics`'s layer-6 fold —
+    /// protection is an ability too, regardless of which quality it names
+    /// (CR 613.1f names "ability-adding... and ability-removing effects"
+    /// together, no carve-out for protection specifically). Not a flat
+    /// override the way `SetName`/`SetPT`/`GainControl` are — a
+    /// later-timestamp `AddKeyword`/`AddProtectionColor`/
+    /// `AddProtectionCardType`/`AddProtectionSubtype`/`AddProtectionName`/
+    /// `AddProtectionEverything` still
     /// applies on top afterward (CR 613.7's plain timestamp fold already
     /// produces this for free, no special dependency case needed: a
     /// strip-all and an add-keyword/add-protection never depend on each
@@ -708,6 +725,16 @@ pub struct EffectiveCharacteristics {
     /// matched by exact equality against the source's own *effective* name,
     /// not a bitflag/subtype-list membership test.
     pub protection_names: Vec<String>,
+    /// CR 702.16j: "protection from everything" — `true` if any applicable
+    /// layer 6 `EffectPrimitive::AddProtectionEverything` granted it, `false`
+    /// otherwise (the base/default). Unlike the other four `protection_*`
+    /// fields, this is an unconditional flag, not a set/list to intersect
+    /// against the source's own characteristics — CR 702.16j is explicit
+    /// that it applies "regardless of that object's characteristic values,"
+    /// so the three enforcement call sites check this field *first*, before
+    /// even looking up the source's own characteristics (no source lookup
+    /// is needed to know the answer once this is `true`).
+    pub protection_everything: bool,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,
