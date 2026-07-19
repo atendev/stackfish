@@ -296,6 +296,21 @@ real error, same stance `TriggeredAbilityBuilder`'s `Register()` takes for a mis
 `:SetOperation()`. A card can call `Game.CreateStaticAbility(c)` more than once per
 `initial_effect` — each `:Register()` independently queues, same as multiple triggered abilities.
 
+`:SetDuration(Game.Durations.*)` (CR 611.2a-style) makes the registered effect temporary instead
+of permanent — e.g. "artifacts you control gain flying until end of turn":
+
+```lua
+e:SetDuration(Game.Durations.UntilEndOfTurn)
+```
+
+Same 4 tags `Game.Ops.Pump`'s own duration argument already exposes (`UntilEndOfTurn`/
+`UntilYourNextTurn`/`UntilEndOfCombat`/`Permanent` — see `DurationTag`'s own doc comment in
+script.rs for why the rest of `EffectDuration` aren't offered). Omitting `:SetDuration()`
+defaults to `Permanent`, this builder's original (and still most common) behavior. The drain
+itself is the same cleanup/end-of-combat/next-turn mechanism every other `EffectDuration`-tagged
+`ContinuousEffect` already uses (`phase5/effect-duration-expiration`) — this builder only gained a
+way to opt into it.
+
 **Script-backed `:SetAffected`/`:SetEffect`** — both also accept a custom function instead of a
 table/tag, same two-shapes pattern `:SetCondition`/`:SetOperation` already use:
 
@@ -339,7 +354,8 @@ Same registration timing and `retire_object` purge as triggered abilities above 
 sites needed; `run_card_script` drains both `pending_triggered` and `pending_static` in one pass.
 
 Real, tested end to end: `crates/engine/tests/phase5_static_ability_self_registration.rs` (table/tag
-form) and `crates/engine/tests/phase5_continuous_effects_script.rs` (script-backed form).
+form), `crates/engine/tests/phase5_continuous_effects_script.rs` (script-backed form), and
+`crates/engine/tests/phase5_static_ability_duration.rs` (`:SetDuration`).
 Scenario TOML fixtures can use the table/tag form via `CardSpec.script` too — see
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 

@@ -968,6 +968,13 @@ struct StaticAbilityBuilder {
     /// `:SetCondition(Game.InterveningIf.*)`, same decode shape
     /// `TriggeredAbilityBuilder::SetInterveningIf` already uses.
     condition: Option<InterveningIfSpec>,
+    /// CR 611.2a-style limited-duration static effect (e.g. "artifacts you
+    /// control gain flying until end of turn") — set via
+    /// `:SetDuration(Game.Durations.*)`, same `DurationTag` decode
+    /// `Game.Ops.Pump`'s duration argument already uses. Defaults to
+    /// `Permanent` (this builder's original, only behavior before this
+    /// field existed) when never called.
+    duration: EffectDuration,
     registry: Rc<RefCell<ScriptRegistry>>,
 }
 
@@ -1016,6 +1023,14 @@ impl UserData for StaticAbilityBuilder {
             this.condition = Some(spec);
             Ok(())
         });
+        // `Game.Ops.Pump`'s own duration argument decode (script.rs, `Game.Ops`
+        // table setup) - same `AnyUserData`/`DurationTag` shape, exposed here as
+        // a settable method instead of a constructor argument since every other
+        // `StaticAbilityBuilder` field follows the `:SetX` convention.
+        methods.add_method_mut("SetDuration", |_, this, value: mlua::AnyUserData| {
+            this.duration = value.borrow::<DurationTag>()?.0.clone();
+            Ok(())
+        });
         methods.add_method_mut("Register", |_, this, ()| {
             let layer = this.layer.ok_or_else(|| {
                 mlua::Error::RuntimeError(
@@ -1038,7 +1053,7 @@ impl UserData for StaticAbilityBuilder {
                 // Placeholder - run_card_script's drain step stamps the real
                 // value (see this struct's own doc comment).
                 timestamp: SequenceNo(0),
-                duration: EffectDuration::Permanent,
+                duration: this.duration.clone(),
                 condition: this.condition.clone(),
             };
             this.registry.borrow_mut().pending_static.push(continuous_effect);
@@ -1999,6 +2014,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
                     self_only: false,
                 }),
                 condition: None,
+                duration: EffectDuration::Permanent,
                 registry: Rc::clone(&registry),
             })
         })?
