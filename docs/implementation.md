@@ -2484,15 +2484,17 @@ verbatim once enough time has passed for the underlying code to have moved.
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
   Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
-- **Protection (CR 702.16)**: closed for the color (702.16e), card-type, subtype, and name (702.16a)
-  qualities, `phase5/protection-from-color`/`phase5/protection-from-card-type`/
-  `phase5/protection-from-subtype`/`phase5/protection-from-name` (docs/implementation.md, below) -
+- **Protection (CR 702.16)**: closed for the color (702.16e), card-type, subtype, name (702.16a),
+  and "everything" (702.16j) qualities, `phase5/protection-from-color`/
+  `phase5/protection-from-card-type`/`phase5/protection-from-subtype`/`phase5/protection-from-name`/
+  `phase5/protection-from-everything` (docs/implementation.md, below) -
   `EffectiveCharacteristics.protection_colors`/`.protection_card_types`/`.protection_subtypes`/
-  `.protection_names`, `EffectPrimitive::AddProtectionColor`/`AddProtectionCardType`/
-  `AddProtectionSubtype`/`AddProtectionName`, `Game.Effects.AddProtectionColor`/
-  `AddProtectionCardType`/`AddProtectionSubtype`/`AddProtectionName`, enforced at damage (702.16a),
-  targeting (702.16c), and blocking (702.16d) as an OR across all four fields. Protection from a
-  specific player or "from everything" stays unmodeled. Enchant/Equip (702.16b) stays unmodeled too
+  `.protection_names`/`.protection_everything`, `EffectPrimitive::AddProtectionColor`/
+  `AddProtectionCardType`/`AddProtectionSubtype`/`AddProtectionName`/`AddProtectionEverything`,
+  `Game.Effects.AddProtectionColor`/`AddProtectionCardType`/`AddProtectionSubtype`/
+  `AddProtectionName`/`AddProtectionEverything`, enforced at damage (702.16a), targeting (702.16c),
+  and blocking (702.16d) as an OR across all five fields. Protection from a specific player - the
+  last remaining CR 702.16 quality - stays unmodeled. Enchant/Equip (702.16b) stays unmodeled too
   - needs real attach/enchant machinery this engine doesn't have (`GameObject.attached_to`/
   `.attachments` are inert placeholder fields, same gap `phase5/gain-control-effect` already named
   for its own aura-sourced follow-up).
@@ -8806,3 +8808,68 @@ fourth clause.
 **UNRESOLVED:** protection from a specific player and "from everything" - both named above, the
 same standing gaps the three earlier protection slices already left open, not narrowed further by
 this slice.
+
+## Phase 5: phase5/protection-from-everything slice (CR 702.16j, protection from everything)
+
+Branch `phase5/protection-from-everything`, off master. Picked as the natural next increment of
+`phase5/protection-from-color`/`phase5/protection-from-card-type`/`phase5/protection-from-subtype`/
+`phase5/protection-from-name` - CR 702.16j's "protection from everything," extending the same three
+enforcement sites those four slices built rather than inventing new ones. Unlike the other four,
+this quality has no payload at all - it protects "regardless of that object's characteristic
+values" - so it's the simplest remaining increment, a bare flag rather than a set/list to intersect
+against a source.
+
+**What got implemented:**
+- `types/effect.rs`: `EffectiveCharacteristics.protection_everything: bool` (base `false`). New
+  `EffectPrimitive::AddProtectionEverything`, no payload - same bare-value shape as
+  `RemoveAllAbilities`/`SwitchPT`, since there's no quality to carry. A `true` union across the
+  layer-6 fold (once granted, stays granted), correctly modeling CR 702.16m's "multiple instances...
+  are redundant" as a no-op re-grant. `RemoveAllAbilities`'s doc comment and reset both updated to
+  cover a sixth field.
+- `layers.rs`: layer-6 fold gained a seventh match arm (`protection_everything = true`);
+  `RemoveAllAbilities`'s reset clears it back to `false` too.
+- `script.rs`: `Game.Effects.AddProtectionEverything` (bare value, not a function - no parser
+  needed), pairing-validation entry.
+- `replacement.rs`: `apply_protection` generalized to check all five quality fields as an OR -
+  `target_characteristics.protection_everything` is the first disjunct, so a fully-protected
+  target's damage is prevented without needing the other four checks to even run.
+- `commands.rs`: `target_has_protection_from` now returns `true` immediately after computing the
+  target's own characteristics if `protection_everything` is set, skipping the source lookup
+  entirely (CR 702.16j needs no source characteristics at all, unlike the other four qualities -
+  the only quality where the "unresolvable source" early-return doesn't apply). `DeclareBlockers`'s
+  protection check gained a matching first disjunct.
+- `docs/lua_scripts.md`/`docs/implementation.md`: extended the existing protection section/gaps
+  bullet rather than writing new ones.
+
+**CR requirements:** CR 702.16a/c/d again (damage/targeting/blocking), now also covering CR 702.16j
+("protection from everything... All damage that would be dealt to such a permanent or player is
+prevented... can't be targeted by spells or abilities... can't be blocked by creatures"). Enchant/
+Equip and the Aura-specific half of 702.16j stay out of scope, same reasoning as every earlier
+protection slice - no attach/enchant machinery.
+
+**TODOs marked, not silently narrowed:** protection from a specific player (CR 702.16k) - the last
+remaining CR 702.16 quality, still not modeled.
+
+**Tests added** (`crates/engine/tests/phase5_protection_from_everything.rs`, 6 new tests): Lua
+self-registration; combat damage from any source prevented (no "non-matching" control test needed -
+there's no such thing under "everything"); targeting by any spell rejected; fizzle when protection
+is gained mid-stack (CR 608.2b, the same pre-existing generic mechanism); blocking by any creature
+rejected; and one proving `RemoveAllAbilities` strips a granted `protection_everything` too (the
+same consistency check the other four protection slices already have for their own quality). Fewer
+tests than the other slices (6 vs. 8-9) because there's no "non-matching quality still works"
+control case to write - every source matches by definition.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+6 new tests; every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** none - `apply_protection`/`target_has_protection_from`/`DeclareBlockers`'s
+protection check all kept their existing signatures, only their internal OR conditions grew a fifth
+clause (and `target_has_protection_from` gained an early-return branch for it).
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** protection from a specific player (CR 702.16k) - the last remaining CR 702.16
+quality, named above, not narrowed further by this slice.

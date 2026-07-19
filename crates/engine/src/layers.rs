@@ -113,18 +113,19 @@ pub fn effective_characteristics(
     }
 
     // Layer 6 (CR 613.1f): additive (AddKeyword/AddProtectionColor/
-    // AddProtectionCardType/AddProtectionSubtype/AddProtectionName) and
-    // removing (RemoveAllAbilities) effects fold in the same CR 613.7
-    // timestamp order `applicable_effects_in_layer` already returns - a
-    // RemoveAllAbilities clears whatever's accumulated so far in all five
-    // fields (protection is an ability too, CR 613.1f), but a
-    // later-timestamp add-shape still applies on top of that, same as a
-    // real strip-then-regrant interaction (see RemoveAllAbilities's own doc
-    // comment).
+    // AddProtectionCardType/AddProtectionSubtype/AddProtectionName/
+    // AddProtectionEverything) and removing (RemoveAllAbilities) effects
+    // fold in the same CR 613.7 timestamp order `applicable_effects_in_layer`
+    // already returns - a RemoveAllAbilities clears whatever's accumulated
+    // so far in all six fields (protection is an ability too, CR 613.1f),
+    // but a later-timestamp add-shape still applies on top of that, same as
+    // a real strip-then-regrant interaction (see RemoveAllAbilities's own
+    // doc comment).
     let mut protection_colors = crate::ColorSet::empty();
     let mut protection_card_types = CardTypeSet::empty();
     let mut protection_subtypes: Vec<crate::Subtype> = Vec::new();
     let mut protection_names: Vec<String> = Vec::new();
+    let mut protection_everything = false;
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
             Some(EffectPrimitive::AddKeyword(added)) => keywords |= added,
@@ -140,12 +141,14 @@ pub fn effective_characteristics(
                     protection_names.push(added);
                 }
             }
+            Some(EffectPrimitive::AddProtectionEverything) => protection_everything = true,
             Some(EffectPrimitive::RemoveAllAbilities) => {
                 keywords = KeywordSet::empty();
                 protection_colors = crate::ColorSet::empty();
                 protection_card_types = CardTypeSet::empty();
                 protection_subtypes = Vec::new();
                 protection_names = Vec::new();
+                protection_everything = false;
             }
             _ => {}
         }
@@ -212,6 +215,7 @@ pub fn effective_characteristics(
         protection_card_types,
         protection_subtypes,
         protection_names,
+        protection_everything,
         power,
         toughness,
         loyalty: def.loyalty.as_ref().and_then(|l| l.as_fixed()),
