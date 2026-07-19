@@ -259,30 +259,47 @@ fn lethal_damage_needed(
 /// separately to catch that case.
 /// CR 702.16c: `target_id` can't be the target of a spell/ability matching
 /// a quality it has protection from — color (702.16e), card type (702.16),
-/// subtype (702.16), name (702.16a), or "everything" (702.16j), checked as
-/// an OR across all five. `source` is the spell/ability's own object id
-/// (the card being cast, or the source of an activated ability) — its
-/// color/card types/subtypes/name, not the caster's, is what protection
-/// cares about (CR 702.16's "of the stated quality" always describes the
-/// source, never the controller) — except `protection_everything`, which
-/// CR 702.16j is explicit applies "regardless of that object's
-/// characteristic values," so it's checked before the source's own
-/// characteristics are even looked up. An unresolvable source has no
-/// qualities to check against and can't illegally target anything on this
-/// basis — same "skip rather than guess" stance every other
-/// unresolvable-source case in this codebase already takes.
+/// subtype (702.16), name (702.16a), "everything" (702.16j), or a specific
+/// player (702.16k), checked as an OR across all six. `source` is the
+/// spell/ability's own object id (the card being cast, or the source of an
+/// activated ability) — its color/card types/subtypes/name, not the
+/// caster's, is what protection cares about (CR 702.16's "of the stated
+/// quality" always describes the source, never the controller) — except
+/// `protection_everything`, which CR 702.16j is explicit applies
+/// "regardless of that object's characteristic values," so it's checked
+/// before the source's own characteristics are even looked up. The player
+/// quality is the one exception to "source, not caster": CR 702.16k cares
+/// about the source's *controller* (raw `GameObject.controller`, resolved
+/// relative to `target_id`'s own controller, same "You"/"Opponent"
+/// resolution `EffectFilter` already does), not any characteristic. An
+/// unresolvable source has no qualities to check against and can't
+/// illegally target anything on this basis — same "skip rather than guess"
+/// stance every other unresolvable-source case in this codebase already
+/// takes.
 fn target_has_protection_from(
     state: &GameState,
     script_runtime: &ScriptRuntime,
     target_id: ObjectId,
     source: ObjectId,
 ) -> bool {
-    if state.object(source).is_none() {
+    let Some(source_obj) = state.object(source) else {
         return false;
-    }
+    };
     let target_characteristics = crate::layers::effective_characteristics(state, script_runtime, target_id);
     if target_characteristics.protection_everything {
         return true;
+    }
+    if !target_characteristics.protection_players.is_empty() {
+        let target_controller = state.object(target_id).map(|o| o.controller);
+        if target_controller.is_some_and(|target_controller| {
+            target_characteristics.protection_players.iter().any(|who| match who {
+                FilterController::You => source_obj.controller == target_controller,
+                FilterController::Opponent => source_obj.controller != target_controller,
+                FilterController::Any => false,
+            })
+        }) {
+            return true;
+        }
     }
     if target_characteristics.protection_colors.is_empty()
         && target_characteristics.protection_card_types.is_empty()
@@ -1720,13 +1737,18 @@ pub fn execute_command(
                 }
 
                 // CR 702.16d: an attacker with protection from a quality
-                // (color, 702.16e, card type, subtype, name, 702.16a, or
-                // "everything," 702.16j) can't be blocked by a creature
-                // matching that quality. Same effective_characteristics
-                // treatment as Flying/Reach above - a granted
-                // color/type/subtype/name or a granted protection all
-                // change blocking legality for real, not just the printed
-                // values.
+                // (color, 702.16e, card type, subtype, name, 702.16a,
+                // "everything," 702.16j, or a specific player, 702.16k)
+                // can't be blocked by a creature matching that quality.
+                // Same effective_characteristics treatment as Flying/Reach
+                // above - a granted color/type/subtype/name or a granted
+                // protection all change blocking legality for real, not
+                // just the printed values. The player quality compares raw
+                // GameObject.controller fields (attacker_object/
+                // blocker_object, already in scope), resolved relative to
+                // the attacker's own controller - same "You"/"Opponent"
+                // resolution target_has_protection_from's own player check
+                // uses.
                 let attacker_characteristics =
                     crate::layers::effective_characteristics(state, script_runtime, attacker_object.object_id);
                 let blocker_characteristics =
@@ -1744,6 +1766,11 @@ pub fn execute_command(
                         .protection_names
                         .iter()
                         .any(|n| *n == blocker_characteristics.name)
+                    || attacker_characteristics.protection_players.iter().any(|who| match who {
+                        FilterController::You => blocker_object.controller == attacker_object.controller,
+                        FilterController::Opponent => blocker_object.controller != attacker_object.controller,
+                        FilterController::Any => false,
+                    })
                 {
                     return Err(CommandError::IllegalAction(
                         "an attacker with protection from a quality can't be blocked by a \

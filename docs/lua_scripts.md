@@ -275,28 +275,29 @@ why each is unbuilt).
 `Game.Effects` mirrors `Game.Ops`'s one-factory-per-shape convention: `SetPT(power, toughness)`,
 `ModifyPT(power, toughness)`, `AddKeyword(name)`, `AddCardType(name)`, `AddColor(letter)`,
 `AddProtectionColor(letter)`, `AddProtectionCardType(name)`, `AddProtectionSubtype(name)`,
-`AddProtectionName(name)` — each call returns a tagged value for `:SetEffect`. Three shapes take no
-arguments at all and are bare values instead of functions to call — `Game.Effects.SwitchPT` (layer
-7e), `Game.Effects.RemoveAllAbilities` (layer 6, CR 613.1f's ability-removing effects — "~ loses
-all abilities"; strips every keyword *and* all five protection fields accumulated so far in the
-layer-6 fold, though a later-timestamp add-shape still applies on top — see `EffectPrimitive::
-RemoveAllAbilities`'s own doc comment for why no special CR 613.8 dependency case is needed for
-that), and `Game.Effects.AddProtectionEverything` (CR 702.16j, see below). `:Register()` rejects a
-layer/effect pairing that doesn't match (e.g. `SetLayer(TypeChanging)` with
-`SetEffect(ModifyPT(...))`) with a real error, rather than silently building a `ContinuousEffect`
-the layer engine could never actually apply — this check only runs for a `Game.Effects.*` tag, see
-the script-backed form below for why.
+`AddProtectionName(name)`, `AddProtectionPlayer(who)` — each call returns a tagged value for
+`:SetEffect`. Three shapes take no arguments at all and are bare values instead of functions to
+call — `Game.Effects.SwitchPT` (layer 7e), `Game.Effects.RemoveAllAbilities` (layer 6, CR 613.1f's
+ability-removing effects — "~ loses all abilities"; strips every keyword *and* all six protection
+fields accumulated so far in the layer-6 fold, though a later-timestamp add-shape still applies on
+top — see `EffectPrimitive::RemoveAllAbilities`'s own doc comment for why no special CR 613.8
+dependency case is needed for that), and `Game.Effects.AddProtectionEverything` (CR 702.16j, see
+below). `:Register()` rejects a layer/effect pairing that doesn't match (e.g.
+`SetLayer(TypeChanging)` with `SetEffect(ModifyPT(...))`) with a real error, rather than silently
+building a `ContinuousEffect` the layer engine could never actually apply — this check only runs
+for a `Game.Effects.*` tag, see the script-backed form below for why.
 
 `AddProtectionColor`/`AddProtectionCardType`/`AddProtectionSubtype`/`AddProtectionName`/
-`AddProtectionEverything` (CR 702.16, the color (702.16e), card-type, subtype, name (702.16a), and
-"everything" (702.16j) qualities) all pair with `Game.Layers.AbilityAdding`, same layer
+`AddProtectionEverything`/`AddProtectionPlayer` (CR 702.16, the color (702.16e), card-type,
+subtype, name (702.16a), "everything" (702.16j), and player (702.16k) qualities — the complete CR
+702.16 quality list this engine models) all pair with `Game.Layers.AbilityAdding`, same layer
 `AddKeyword` uses — protection isn't its own `KeywordSet` bit (it has to carry *which*
-color/type/subtype/name, which a flat bitflag can't), so each quality is its own field,
+color/type/subtype/name/player, which a flat bitflag can't), so each quality is its own field,
 `EffectiveCharacteristics.protection_colors`/`.protection_card_types`/`.protection_subtypes`/
-`.protection_names`/`.protection_everything`, folded in alongside `keywords` in the same layer-6
-pass. Unlike the first two, `protection_subtypes`/`protection_names` are plain `Vec`s, not a
-bitflag `Set` — both are open-ended strings (new creature types are added over time; card names
-aren't enumerable at all), same reason `CardDefinition.subtypes` itself is a `Vec`.
+`.protection_names`/`.protection_everything`/`.protection_players`, folded in alongside `keywords`
+in the same layer-6 pass. Unlike the first two, `protection_subtypes`/`protection_names` are plain
+`Vec`s, not a bitflag `Set` — both are open-ended strings (new creature types are added over time;
+card names aren't enumerable at all), same reason `CardDefinition.subtypes` itself is a `Vec`.
 `protection_everything` is a bare `bool` — CR 702.16j has no quality payload at all, it protects
 "regardless of that object's characteristic values," so `AddProtectionEverything` (like
 `RemoveAllAbilities`/`SwitchPT`) is a bare value rather than a function taking an argument.
@@ -304,7 +305,18 @@ aren't enumerable at all), same reason `CardDefinition.subtypes` itself is a `Ve
 from A and from B" is already modeled as two separate registered static abilities, same convention
 every quality uses). `AddProtectionName` matches against the source's *effective* name
 (`EffectiveCharacteristics.name`, post any CR 612.8 `SetName`), not the printed
-`CardDefinition.name`:
+`CardDefinition.name`.
+
+`AddProtectionPlayer(who)` is the odd one out: `who` is `"you"` or `"opponent"`, not a raw
+`PlayerId` — this engine has no multiplayer arbitrary-player-targeting yet (backlog item 11), and a
+card script's `initial_effect(c)` is never handed a `PlayerId` at registration time to name a
+specific player with anyway. It reuses `Game.EffectFilters`'/`:SetAffected({controller=...})`'s
+same relative vocabulary (`parse_filter_controller_name`), resolved at each of the three
+enforcement sites against the *protected object's own* controller — `"you"` means protection from
+that object's own controller (unusual but valid — e.g. an aura that grants an opponent's creature
+protection from you), `"opponent"` means protection from anyone else, the common real case.
+`"any"` is rejected with a real error — "protection from any player" isn't a CR 702.16k quality,
+that's what `AddProtectionEverything` (CR 702.16j) already covers:
 
 ```lua
 -- This creature has protection from red.
@@ -381,21 +393,38 @@ end
 return s
 ```
 
+```lua
+-- This creature has protection from an opponent.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.AbilityAdding)
+    e:SetEffect(Game.Effects.AddProtectionPlayer("opponent"))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+
+return s
+```
+
 Enforced at three real call sites, none of them a `state.replacement_effects` entry (protection is
 a static, always-on characteristic, not something a card "registers" — same "checked up front, not
 a registered replacement" stance CR 702.12b indestructible already takes ahead of `Destroy`), each
-checking all five quality fields as an OR (protected if the color, card-type, subtype, name, *or*
-"everything" quality matches the source — `protection_everything` short-circuits before even
-looking up the source's own characteristics, since CR 702.16j needs none): damage
-(`replacement::apply_protection`, CR 702.16a — the matched source's damage is prevented entirely,
-re-checked fresh every replacement-resolution pass so a mid-resolution `RedirectDamage` retarget is
-caught too), targeting (`commands::target_is_legal`, CR 702.16c — a spell/ability matching a
-protected quality can't target it, including the CR 608.2b recheck at resolution time if protection
-is gained after the spell was already cast), and blocking (`DeclareBlockers`, CR 702.16d — a
-creature matching a protected quality can't block it, same call site Flying/Reach/Menace already
-gate). Enchant/Equip (702.16b) stays unmodeled — no attach/enchant
-machinery exists in this engine yet. Protection from a specific player — the last remaining CR
-702.16 quality — still unmodeled.
+checking all six quality fields as an OR (protected if the color, card-type, subtype, name,
+"everything," *or* player quality matches the source — `protection_everything` short-circuits
+before even looking up the source's own characteristics, since CR 702.16j needs none; the player
+quality compares the source's raw `GameObject.controller` field, not a characteristic, resolved
+against the protected object's own controller): damage (`replacement::apply_protection`, CR
+702.16a — the matched source's damage is prevented entirely, re-checked fresh every
+replacement-resolution pass so a mid-resolution `RedirectDamage` retarget is caught too), targeting
+(`commands::target_is_legal`, CR 702.16c — a spell/ability matching a protected quality can't
+target it, including the CR 608.2b recheck at resolution time if protection is gained after the
+spell was already cast), and blocking (`DeclareBlockers`, CR 702.16d — a creature matching a
+protected quality can't block it, same call site Flying/Reach/Menace already gate). Enchant/Equip
+(702.16b) stays unmodeled — no attach/enchant machinery exists in this engine yet. That's the
+complete CR 702.16 quality list otherwise — color, card type, subtype, name, everything, and player
+are all real.
 
 `:SetAffected` takes a plain table, not its own family of tag factories — every key optional,
 same shape `EffectFilter` (`types/effect.rs`) already has:
@@ -499,9 +528,10 @@ sites), `crates/engine/tests/phase5_protection_from_card_type.rs`
 (`AddProtectionCardType`, same three sites plus the `RemoveAllAbilities` interaction),
 `crates/engine/tests/phase5_protection_from_subtype.rs` (`AddProtectionSubtype`, same three sites
 plus `RemoveAllAbilities`), `crates/engine/tests/phase5_protection_from_name.rs`
-(`AddProtectionName`, same three sites plus `RemoveAllAbilities`), and
+(`AddProtectionName`, same three sites plus `RemoveAllAbilities`),
 `crates/engine/tests/phase5_protection_from_everything.rs` (`AddProtectionEverything`, same three
-sites plus `RemoveAllAbilities`).
+sites plus `RemoveAllAbilities`), and `crates/engine/tests/phase5_protection_from_player.rs`
+(`AddProtectionPlayer`, same three sites plus `RemoveAllAbilities` and the `"any"` rejection).
 Scenario TOML fixtures can use the table/tag form via `CardSpec.script` too — see
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml`.
 

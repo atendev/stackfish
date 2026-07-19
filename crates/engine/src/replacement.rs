@@ -1,4 +1,5 @@
 use crate::script::ScriptRuntime;
+use crate::types::cost::FilterController;
 use crate::types::effect::ConsumptionPolicy;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -102,21 +103,21 @@ pub(crate) fn apply_one_replacement(
 
 /// CR 702.16a: protection prevents all damage from a source matching the
 /// protected quality (quality) — color (702.16e), card type (702.16),
-/// subtype (702.16), name (702.16a), or "everything" (702.16j), checked as
-/// an OR of all five, since any one alone is sufficient to trigger
-/// protection. Unlike a `ReplacementEffect` a card registers, this is a
-/// static, always-on characteristic of the object itself (`layers::
-/// effective_characteristics()`'s `protection_colors`/`protection_card_types`/
-/// `protection_subtypes`/`protection_names`/`protection_everything`), so
-/// it's a hardcoded check here rather than an entry in `state.
-/// replacement_effects` — same "checked up front, not modeled as a
-/// registered replacement" stance CR 702.12b indestructible already takes
-/// ahead of `Destroy`. Idempotent (zeroing an already-zero amount is a
-/// no-op), so calling it fresh on every `apply_replacements_from` loop
-/// iteration is safe and correctly re-evaluates against a
-/// possibly-`RedirectDamage`-changed target, not just the original
-/// proposal. A `Target::Player`/unresolvable source or target never has
-/// protection to check — returned unchanged.
+/// subtype (702.16), name (702.16a), "everything" (702.16j), or a specific
+/// player (702.16k), checked as an OR of all six, since any one alone is
+/// sufficient to trigger protection. Unlike a `ReplacementEffect` a card
+/// registers, this is a static, always-on characteristic of the object
+/// itself (`layers::effective_characteristics()`'s `protection_colors`/
+/// `protection_card_types`/`protection_subtypes`/`protection_names`/
+/// `protection_everything`/`protection_players`), so it's a hardcoded check
+/// here rather than an entry in `state.replacement_effects` — same "checked
+/// up front, not modeled as a registered replacement" stance CR 702.12b
+/// indestructible already takes ahead of `Destroy`. Idempotent (zeroing an
+/// already-zero amount is a no-op), so calling it fresh on every
+/// `apply_replacements_from` loop iteration is safe and correctly
+/// re-evaluates against a possibly-`RedirectDamage`-changed target, not
+/// just the original proposal. A `Target::Player`/unresolvable source or
+/// target never has protection to check — returned unchanged.
 fn apply_protection(state: &GameState, script_runtime: &ScriptRuntime, event: GameEventKind) -> GameEventKind {
     let GameEventKind::DamageDealt { source, target, amount, is_combat_damage } = event else {
         return event;
@@ -124,9 +125,11 @@ fn apply_protection(state: &GameState, script_runtime: &ScriptRuntime, event: Ga
     let Target::Object(target_id) = target else {
         return GameEventKind::DamageDealt { source, target, amount, is_combat_damage };
     };
-    if state.object(source).is_none() || state.object(target_id).is_none() {
+    let (Some(source_obj), Some(target_obj)) = (state.object(source), state.object(target_id)) else {
         return GameEventKind::DamageDealt { source, target, amount, is_combat_damage };
-    }
+    };
+    let source_controller = source_obj.controller;
+    let target_controller = target_obj.controller;
     let target_characteristics = crate::layers::effective_characteristics(state, script_runtime, target_id);
     let source_characteristics = crate::layers::effective_characteristics(state, script_runtime, source);
     let protected = target_characteristics.protection_everything
@@ -136,7 +139,12 @@ fn apply_protection(state: &GameState, script_runtime: &ScriptRuntime, event: Ga
             .protection_subtypes
             .iter()
             .any(|s| source_characteristics.subtypes.contains(s))
-        || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name);
+        || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name)
+        || target_characteristics.protection_players.iter().any(|who| match who {
+            FilterController::You => source_controller == target_controller,
+            FilterController::Opponent => source_controller != target_controller,
+            FilterController::Any => false,
+        });
     let amount = if protected { 0 } else { amount };
     GameEventKind::DamageDealt { source, target, amount, is_combat_damage }
 }
