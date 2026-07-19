@@ -731,6 +731,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::TypeChanging, EffectPrimitive::AddCardType(_))
             | (Layer::ColorChanging, EffectPrimitive::AddColor(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
+            | (Layer::AbilityAdding, EffectPrimitive::RemoveAllAbilities)
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
             | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
             | (Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)
@@ -1400,6 +1401,7 @@ impl ScriptRuntime {
     /// - `add_card_type = {"Creature", ...}` -> `AddCardType`
     /// - `add_color = "WU"` -> `AddColor`
     /// - `switch_pt = true` -> `SwitchPT`
+    /// - `remove_all_abilities = true` -> `RemoveAllAbilities`
     ///
     /// An empty/unrecognized table, or a script that errors, resolves to
     /// `None` — same "skip rather than guess" stance every other
@@ -1456,6 +1458,9 @@ impl ScriptRuntime {
         }
         if let Some(true) = result.get::<_, Option<bool>>("switch_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
             return Ok(Some(EffectPrimitive::SwitchPT));
+        }
+        if let Some(true) = result.get::<_, Option<bool>>("remove_all_abilities").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            return Ok(Some(EffectPrimitive::RemoveAllAbilities));
         }
         Ok(None)
     }
@@ -1987,6 +1992,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?,
     )?;
     effects.set("SwitchPT", EffectPrimitiveTag(EffectPrimitive::SwitchPT))?;
+    effects.set("RemoveAllAbilities", EffectPrimitiveTag(EffectPrimitive::RemoveAllAbilities))?;
 
     let create_triggered_ability = {
         let registry = Rc::clone(&registry);

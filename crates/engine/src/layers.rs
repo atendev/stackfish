@@ -1,6 +1,6 @@
 use crate::script::ScriptRuntime;
 use crate::types::ability::InterveningIfSpec;
-use crate::types::card::{net_counters, PTValue, ScriptReference};
+use crate::types::card::{net_counters, KeywordSet, PTValue, ScriptReference};
 use crate::types::counter::CounterSet;
 use crate::types::effect::{
     AffectedFilter, ContinuousEffect, EffectPayload, EffectPrimitive, EffectiveCharacteristics, Layer,
@@ -112,9 +112,17 @@ pub fn effective_characteristics(
         }
     }
 
+    // Layer 6 (CR 613.1f): additive (AddKeyword) and removing
+    // (RemoveAllAbilities) effects fold in the same CR 613.7 timestamp order
+    // `applicable_effects_in_layer` already returns - a RemoveAllAbilities
+    // clears whatever's accumulated so far, but a later-timestamp AddKeyword
+    // still applies on top of that, same as a real strip-then-regrant
+    // interaction (see RemoveAllAbilities's own doc comment).
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
-        if let Some(EffectPrimitive::AddKeyword(added)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
-            keywords |= added;
+        match resolve_primitive(effect, state, script_runtime, obj.controller) {
+            Some(EffectPrimitive::AddKeyword(added)) => keywords |= added,
+            Some(EffectPrimitive::RemoveAllAbilities) => keywords = KeywordSet::empty(),
+            _ => {}
         }
     }
 
