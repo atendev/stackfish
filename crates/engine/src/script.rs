@@ -787,6 +787,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::TypeChanging, EffectPrimitive::AddCardType(_))
             | (Layer::ColorChanging, EffectPrimitive::AddColor(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
+            | (Layer::AbilityAdding, EffectPrimitive::AddProtectionColor(_))
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
             | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
             | (Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)
@@ -2092,6 +2093,13 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         lua.create_function(|_, name: String| {
             let set = parse_keyword_name(&name).map_err(to_lua_err)?;
             Ok(EffectPrimitiveTag(EffectPrimitive::AddKeyword(set)))
+        })?,
+    )?;
+    effects.set(
+        "AddProtectionColor",
+        lua.create_function(|_, letter: String| {
+            let set = parse_color_letter(&letter).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddProtectionColor(set)))
         })?,
     )?;
     effects.set(

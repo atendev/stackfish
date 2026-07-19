@@ -161,6 +161,12 @@ pub enum EffectPrimitive {
     /// "loses all abilities" (also layer 6, but a text-removal shape) isn't
     /// modeled; see `Layer::TextChanging`'s TODO.
     AddKeyword(KeywordSet),
+    /// Layer 6 (CR 613.1/702.16e): grants protection from the listed
+    /// color(s) in addition to whatever the object already has protection
+    /// from. Union, same shape as `AddKeyword` above — see `EffectiveCharacteristics::
+    /// protection_colors`'s own doc comment for why this is a separate
+    /// primitive/field rather than folded into `AddKeyword`/`KeywordSet`.
+    AddProtectionColor(ColorSet),
     /// Layer 4 (CR 613.1, general "gains types" text): grants the listed
     /// card type(s) in addition to whatever the object already has — e.g.
     /// "target land becomes a 3/3 Elemental creature in addition to its
@@ -591,6 +597,21 @@ pub struct EffectiveCharacteristics {
     /// 6 `EffectPrimitive::AddKeyword`. No layer removes a keyword yet
     /// (see `Layer::TextChanging`'s TODO).
     pub keywords: KeywordSet,
+    /// CR 702.16e: colors this object has protection from, unioned with
+    /// every applicable layer 6 `EffectPrimitive::AddProtectionColor`. A
+    /// separate field from `keywords` rather than another `KeywordSet` bit
+    /// — protection has to carry *which* color(s), which a flat bitflag
+    /// can't. Empty base (`CardDefinition` has no printed-protection field
+    /// of its own yet — every real protection ability is granted via this
+    /// primitive, same "no printed-keyword-string parsing" stance
+    /// `KeywordSet`'s own construction already takes for every other
+    /// ability). Enforced at three real call sites: damage (`apply_
+    /// replacements`), targeting (`target_is_legal`), and blocking
+    /// (`DeclareBlockers`) — see `phase5/protection-from-color`
+    /// (docs/implementation.md) for why those three and not the full CR
+    /// 702.16 "DEBT" list (Enchant/Equip needs attach machinery this engine
+    /// doesn't have).
+    pub protection_colors: ColorSet,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,
