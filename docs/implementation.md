@@ -2484,14 +2484,16 @@ verbatim once enough time has passed for the underlying code to have moved.
   keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
   trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
   Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
-- **Protection (CR 702.16)**: closed for "protection from color" (702.16e's shape), `phase5/
-  protection-from-color` (docs/implementation.md, below) - `EffectiveCharacteristics.
-  protection_colors`, `EffectPrimitive::AddProtectionColor`/`Game.Effects.AddProtectionColor`,
-  enforced at damage (702.16a), targeting (702.16c), and blocking (702.16d). Protection from card
-  type/subtype/a specific player/"from everything" stays unmodeled - only color. Enchant/Equip
-  (702.16b) stays unmodeled too - needs real attach/enchant machinery this engine doesn't have
-  (`GameObject.attached_to`/`.attachments` are inert placeholder fields, same gap `phase5/gain-
-  control-effect` already named for its own aura-sourced follow-up).
+- **Protection (CR 702.16)**: closed for the color (702.16e) and card-type qualities, `phase5/
+  protection-from-color`/`phase5/protection-from-card-type` (docs/implementation.md, below) -
+  `EffectiveCharacteristics.protection_colors`/`.protection_card_types`, `EffectPrimitive::
+  AddProtectionColor`/`AddProtectionCardType`, `Game.Effects.AddProtectionColor`/
+  `AddProtectionCardType`, enforced at damage (702.16a), targeting (702.16c), and blocking
+  (702.16d) as an OR across both fields. Protection from a creature subtype/a specific player/"from
+  everything" stays unmodeled. Enchant/Equip (702.16b) stays unmodeled too - needs real
+  attach/enchant machinery this engine doesn't have (`GameObject.attached_to`/`.attachments` are
+  inert placeholder fields, same gap `phase5/gain-control-effect` already named for its own
+  aura-sourced follow-up).
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
   the battlefield can't move zones again) is a related but separate rule, not covered.
@@ -8622,3 +8624,57 @@ doc comment ("no layer removes a keyword yet") was also stale after `RemoveAllAb
 fixed alongside the merge rather than left. No test or behavior changes beyond that one intentional
 fix - `cargo test --workspace` green after resolving, same test counts as each branch had
 independently plus no regressions.
+
+## Phase 5: phase5/protection-from-card-type slice (CR 702.16, protection from card type)
+
+Branch `phase5/protection-from-card-type`, off master. Picked as the natural next increment of
+`phase5/protection-from-color` - CR 702.16's card-type quality ("protection from artifacts"),
+extending the same three enforcement sites that slice built rather than inventing new ones.
+
+**What got implemented:**
+- `types/effect.rs`: `EffectiveCharacteristics.protection_card_types: CardTypeSet` (sibling to
+  `protection_colors`, same reasoning). New `EffectPrimitive::AddProtectionCardType(CardTypeSet)`.
+  `RemoveAllAbilities`'s doc comment and reset both updated to cover a third field.
+- `layers.rs`: layer-6 fold gained a fourth match arm; `RemoveAllAbilities`'s reset clears
+  `protection_card_types` too.
+- `script.rs`: `Game.Effects.AddProtectionCardType(name)` (reuses `parse_card_type_name`, the same
+  parser `AddCardType` already uses), pairing-validation entry.
+- `replacement.rs`: `apply_protection_from_color` renamed `apply_protection` and generalized to
+  check both quality fields as an OR - protected if *either* `protection_colors` intersects the
+  source's colors *or* `protection_card_types` intersects the source's card types.
+- `commands.rs`: `target_has_protection_from` and `DeclareBlockers`'s protection check both
+  generalized the same way.
+- `docs/lua_scripts.md`/`docs/implementation.md`: extended the existing protection section/gaps
+  bullet rather than writing new ones.
+
+**CR requirements:** CR 702.16a/c/d again, now covering the card-type quality alongside color - no
+new rule text, a second instance of the same mechanism CR 702.16 already treats uniformly.
+
+**TODOs marked, not silently narrowed:** protection from a creature subtype ("protection from
+Dragons"), a specific player, or "from everything" - still not modeled. Enchant/Equip stays out of
+scope (no attach machinery), unchanged from the color slice.
+
+**Tests added** (`crates/engine/tests/phase5_protection_from_card_type.rs`, 9 new tests): mirrors
+`phase5_protection_from_color.rs` almost 1:1 with card type instead of color - Lua self-
+registration; combat damage from a matching-type source prevented, non-matching still lands;
+targeting by a matching-type spell rejected, non-matching still works; fizzle when protection is
+gained mid-stack (CR 608.2b, the same pre-existing generic mechanism); blocking by a matching-type
+creature rejected, non-matching still legal; and one proving `RemoveAllAbilities` strips a granted
+protection card type too (the same consistency check `phase5_lose_all_abilities.rs` already has for
+the color half).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+9 new tests; every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none.
+
+**INTERFACE DEVIATIONS:** `apply_protection_from_color` renamed to `apply_protection` (its own
+internal, non-pub function - not a public interface change) to reflect that it now checks more
+than one quality.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** protection from creature subtype/player/everything, and Enchant/Equip - both named
+above, the same standing gaps `phase5/protection-from-color` already left open, not narrowed
+further by this slice.

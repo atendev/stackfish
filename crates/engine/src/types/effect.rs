@@ -169,24 +169,34 @@ pub enum EffectPrimitive {
     /// protection_colors`'s own doc comment for why this is a separate
     /// primitive/field rather than folded into `AddKeyword`/`KeywordSet`.
     AddProtectionColor(ColorSet),
+    /// Layer 6 (CR 613.1/702.16, card-type quality): grants protection from
+    /// the listed card type(s) in addition to whatever the object already
+    /// has protection from — e.g. "protection from artifacts." Union, same
+    /// shape as `AddProtectionColor` above and the same reasoning for why
+    /// it's a separate field (`EffectiveCharacteristics::
+    /// protection_card_types`) rather than reusing `AddCardType`/
+    /// `CardTypeSet` (protection and "has this type" are unrelated
+    /// characteristics that happen to share a `CardTypeSet` vocabulary).
+    AddProtectionCardType(CardTypeSet),
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
-    /// abilities"): resets both the running `keywords` *and*
-    /// `protection_colors` accumulators to empty at this effect's position
-    /// in `effective_characteristics`'s layer-6 fold — protection is an
-    /// ability too (CR 613.1f names "ability-adding... and ability-removing
-    /// effects" together, no carve-out for protection specifically). Not a
-    /// flat override the way `SetName`/`SetPT`/`GainControl` are — a
-    /// later-timestamp `AddKeyword`/`AddProtectionColor` still applies on
-    /// top afterward (CR 613.7's plain timestamp fold already produces this
-    /// for free, no special dependency case needed: a strip-all and an
-    /// add-keyword/add-protection never depend on each other under CR
-    /// 613.8a, same reasoning `SetPT`/`GainControl` already document for
-    /// why *they* don't need one). No payload — it always clears everything
-    /// accumulated so far, there's no narrower "loses these specific
-    /// keywords" shape here.
+    /// abilities"): resets the running `keywords`, `protection_colors`,
+    /// *and* `protection_card_types` accumulators to empty at this effect's
+    /// position in `effective_characteristics`'s layer-6 fold — protection
+    /// is an ability too, regardless of which quality it names (CR 613.1f
+    /// names "ability-adding... and ability-removing effects" together, no
+    /// carve-out for protection specifically). Not a flat override the way
+    /// `SetName`/`SetPT`/`GainControl` are — a later-timestamp
+    /// `AddKeyword`/`AddProtectionColor`/`AddProtectionCardType` still
+    /// applies on top afterward (CR 613.7's plain timestamp fold already
+    /// produces this for free, no special dependency case needed: a
+    /// strip-all and an add-keyword/add-protection never depend on each
+    /// other under CR 613.8a, same reasoning `SetPT`/`GainControl` already
+    /// document for why *they* don't need one). No payload — it always
+    /// clears everything accumulated so far, there's no narrower "loses
+    /// these specific keywords" shape here.
     ///
-    /// Deliberately narrow: only strips `KeywordSet`/`protection_colors`,
-    /// the layer-engine half of "abilities." A permanent's own custom
+    /// Deliberately narrow: only strips these three layer-engine fields,
+    /// not the full picture of "abilities." A permanent's own custom
     /// triggered/activated `RegisteredAbility` entries are never filtered
     /// by continuous effects at all in this engine (`collect_triggers`/
     /// activation-legality checks read `state.abilities` directly, no
@@ -643,6 +653,15 @@ pub struct EffectiveCharacteristics {
     /// 702.16 "DEBT" list (Enchant/Equip needs attach machinery this engine
     /// doesn't have).
     pub protection_colors: ColorSet,
+    /// CR 702.16's card-type quality: card type(s) this object has
+    /// protection from, unioned with every applicable layer 6
+    /// `EffectPrimitive::AddProtectionCardType`. Same reasoning
+    /// `protection_colors` documents for why this is its own field rather
+    /// than reusing `card_types`/`CardTypeSet` on `AddCardType` — same
+    /// three enforcement call sites too, each now checking both quality
+    /// fields (protected if *either* intersects the source's own colors or
+    /// card types).
+    pub protection_card_types: CardTypeSet,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,
