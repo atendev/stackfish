@@ -275,18 +275,16 @@ fn base_state() -> GameState {
             Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
             Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-            // owner: Some(p0) - every test here reaches Exile via a
-            // `ReplaceZoneDestination(Exile)` replacement effect on a
-            // Destroy/Sacrifice target, which commits through
-            // `sba::commit_death` (owner: Some(owner) lookup), the same
-            // per-player-zone convention `phase5_dies_triggers.rs`'s/
-            // `phase5_regeneration.rs`'s own fixtures already use for
-            // Exile - not the separate `owner: None` shared-zone lookup
-            // `commit_scripted_zone_move`'s own dedicated Exile-kind branch
-            // uses for a real `AbilityEffect::Exile` op (untouched by this
-            // slice, a pre-existing inconsistency between the two paths
-            // that's out of this slice's own scope to reconcile).
-            Zone { kind: ZoneKind::Exile, owner: Some(p0), contents: VecDeque::new() },
+            // owner: None - Exile is a shared zone (CR 400.10), same
+            // convention `commit_scripted_zone_move`'s own Exile-kind branch
+            // always used. `sba::commit_death`'s own Battlefield->Exile
+            // lookup previously (incorrectly) used owner: Some(owner)
+            // instead, which this fixture used to match - fixed by
+            // `phase5/replacement-effect-shapes` (docs/implementation.md),
+            // caught by that slice's own end-to-end exile test actually
+            // failing, not by inspection. This fixture updated to match the
+            // real, now-consistent convention rather than the bug.
+            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
         ],
         stack: Vec::new(),
         continuous_effects: Vec::new(),
@@ -419,7 +417,7 @@ fn destroy_spell_choosing_the_regeneration_shield_saves_the_creature() {
     assert_eq!(survivor.damage_marked, 0);
     assert!(survivor.tapped, "CR 701.19: the controller taps a regenerated permanent");
     assert!(
-        engine.state().zone(ZoneKind::Exile, Some(p0)).unwrap().contents.is_empty(),
+        engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(),
         "the exile-instead effect must not also have applied - only the chosen one wins"
     );
     assert_eq!(engine.state().replacement_effects.len(), 1, "the OneShot shield was consumed, the loser was never even evaluated");
@@ -455,7 +453,7 @@ fn destroy_spell_choosing_the_other_effect_first_lets_it_win_instead() {
 
     assert!(engine.state().object(bear).is_none(), "the bear's original ObjectId retired - it left the battlefield via CR 400.7");
     assert!(
-        !engine.state().zone(ZoneKind::Exile, Some(p0)).unwrap().contents.is_empty(),
+        !engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(),
         "the exile-instead effect won this time - the bear should be in Exile, not the graveyard"
     );
     // The exile effect (OneShot) was consumed by applying; the regeneration
@@ -562,7 +560,7 @@ fn sacrifice_spell_with_two_matching_effects_pauses_and_only_the_chosen_one_is_c
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     assert!(engine.state().object(bear).is_none(), "the bear's original ObjectId retired");
-    assert!(!engine.state().zone(ZoneKind::Exile, Some(p0)).unwrap().contents.is_empty(), "sacrificed and exiled instead of hitting the graveyard");
+    assert!(!engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(), "sacrificed and exiled instead of hitting the graveyard");
     assert_eq!(
         engine.state().replacement_effects.len(),
         1,
