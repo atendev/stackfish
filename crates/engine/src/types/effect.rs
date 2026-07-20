@@ -476,8 +476,16 @@ pub enum ReplacementPayload {
     /// fires (so anything downstream that cares "damage was dealt, amount
     /// 0" sees a real event), just with its amount zeroed.
     PreventDamage,
-    /// CR 614.13-style redirection — the matched damage is dealt to this
-    /// target instead of its original one.
+    /// CR 614.9 redirection — the matched damage is dealt to this target
+    /// instead of its original one. `ReplacementEffect::matches`'s
+    /// `DamageDealt` arm re-checks this target is still a valid
+    /// destination (still on the battlefield, still a
+    /// creature/planeswalker/battle, or still a player in the game) on
+    /// every application — CR 614.9's own text: if it isn't, "the effect
+    /// does nothing" (fizzles silently, original damage goes through
+    /// unprevented), same "recheck fresh, don't trust construction-time
+    /// state" stance `Regenerate`'s CANT_BE_REGENERATED check already
+    /// takes.
     RedirectDamage(Target),
     /// CR 614.13-style "instead" zone-change substitution (e.g. "exile it
     /// instead of putting it into its owner's graveyard") — the matched
@@ -550,6 +558,16 @@ impl ReplacementEffect {
         let ReplacementSpec::Primitive { filter, payload } = &self.spec else { return false };
         match (filter, event) {
             (EventFilter::DamageDealt { affected }, GameEventKind::DamageDealt { target, .. }) => {
+                if let ReplacementPayload::RedirectDamage(new_target) = payload {
+                    // CR 614.9: a redirection effect whose destination has
+                    // already left the battlefield (or stopped being a
+                    // creature/planeswalker/battle) or is a player who's
+                    // left the game does nothing — not "prevent," just
+                    // never matches, so the original damage proceeds.
+                    if !redirect_target_still_valid(*new_target, state, script_runtime) {
+                        return false;
+                    }
+                }
                 event_target_matches(affected, *target, state, script_runtime, self.source)
             }
             (
@@ -605,6 +623,38 @@ impl ReplacementEffect {
                 GameEventKind::Regenerated { object }
             }
             (_, other) => other,
+        }
+    }
+}
+
+/// CR 614.9's own destination-validity clause, checked fresh by
+/// `ReplacementEffect::matches` on every `RedirectDamage` application (not
+/// just once at construction) — same "the world can change between when a
+/// replacement effect is created and when it's asked to apply" stance
+/// `Regenerate`'s CANT_BE_REGENERATED recheck already takes. Mirrors
+/// `commands::target_is_legal`'s `TargetFilter::AnyTarget` arm (CR 115.4's
+/// own creature/planeswalker/battle/player list) — deliberately not calling
+/// that function directly, since it also checks protection (irrelevant here:
+/// CR 614.9 fizzles on a *missing* destination, not a protected one) and
+/// lives in `commands.rs`, a layer above `types/effect.rs`.
+fn redirect_target_still_valid(target: Target, state: &GameState, script_runtime: &ScriptRuntime) -> bool {
+    match target {
+        // `state.player()` doesn't filter by `eliminated` - a player who's
+        // left the game stays in `state.players` forever, just flagged (see
+        // `sba::check_state_based_actions`'s own CR 104.3 elimination path)
+        // - so CR 614.9's "left the game" clause needs the flag checked
+        // directly, unlike `commands::target_is_legal`'s `TargetFilter::
+        // AnyTarget` arm (a pre-existing, separate gap in CR 115.4 targeting
+        // legality, not touched here).
+        Target::Player(pid) => state.player(pid).is_some_and(|p| !p.eliminated),
+        Target::Object(id) => {
+            let Some(object) = state.object(id) else { return false };
+            if object.zone != ZoneKind::Battlefield {
+                return false;
+            }
+            crate::layers::effective_characteristics(state, script_runtime, id)
+                .card_types
+                .intersects(CardTypeSet::CREATURE | CardTypeSet::PLANESWALKER | CardTypeSet::BATTLE)
         }
     }
 }
@@ -1028,6 +1078,86 @@ mod tests {
             rewritten,
             GameEventKind::DamageDealt { source: s, target, amount: 5, .. } if s == source && target == new_target
         ));
+    }
+
+    #[test]
+    fn redirect_damage_matches_when_destination_still_a_live_creature() {
+        let p0 = PlayerId(0);
+        let effect_source = ObjectId(0);
+        let redirect_dest = ObjectId(1);
+        let state = state_with(vec![
+            object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield),
+            object(redirect_dest, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield),
+        ]);
+        let effect = replacement(
+            effect_source,
+            EventFilter::DamageDealt { affected: EffectFilter { card_types: None, controller: None, self_only: false } },
+            ReplacementPayload::RedirectDamage(Target::Object(redirect_dest)),
+        );
+        let event =
+            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        assert!(effect.matches(&event, false, &state, &ScriptRuntime::new()));
+    }
+
+    #[test]
+    fn redirect_damage_fizzles_cr_614_9_when_destination_object_left_the_battlefield() {
+        let p0 = PlayerId(0);
+        let effect_source = ObjectId(0);
+        let gone = ObjectId(99); // never inserted into state.objects - CR 400.7 retired id
+        let state = state_with(vec![object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield)]);
+        let effect = replacement(
+            effect_source,
+            EventFilter::DamageDealt { affected: EffectFilter { card_types: None, controller: None, self_only: false } },
+            ReplacementPayload::RedirectDamage(Target::Object(gone)),
+        );
+        let event =
+            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        assert!(
+            !effect.matches(&event, false, &state, &ScriptRuntime::new()),
+            "CR 614.9: a redirection effect whose destination is no longer on the battlefield does nothing"
+        );
+    }
+
+    #[test]
+    fn redirect_damage_fizzles_cr_614_9_when_destination_stopped_being_a_valid_type() {
+        let p0 = PlayerId(0);
+        let effect_source = ObjectId(0);
+        let land = ObjectId(1);
+        let state = state_with(vec![
+            object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield),
+            object(land, p0, CardTypeSet::LAND, ZoneKind::Battlefield),
+        ]);
+        let effect = replacement(
+            effect_source,
+            EventFilter::DamageDealt { affected: EffectFilter { card_types: None, controller: None, self_only: false } },
+            ReplacementPayload::RedirectDamage(Target::Object(land)),
+        );
+        let event =
+            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        assert!(
+            !effect.matches(&event, false, &state, &ScriptRuntime::new()),
+            "CR 614.9: a land is never a valid redirection destination (not a creature/planeswalker/battle)"
+        );
+    }
+
+    #[test]
+    fn redirect_damage_fizzles_cr_614_9_when_destination_player_has_left_the_game() {
+        let p0 = PlayerId(0);
+        let p1 = PlayerId(1);
+        let effect_source = ObjectId(0);
+        let mut state = state_with(vec![object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield)]);
+        state.player_mut(p1).unwrap().eliminated = true;
+        let effect = replacement(
+            effect_source,
+            EventFilter::DamageDealt { affected: EffectFilter { card_types: None, controller: None, self_only: false } },
+            ReplacementPayload::RedirectDamage(Target::Player(p1)),
+        );
+        let event =
+            GameEventKind::DamageDealt { source: effect_source, target: Target::Player(p0), amount: 3, is_combat_damage: false };
+        assert!(
+            !effect.matches(&event, false, &state, &ScriptRuntime::new()),
+            "CR 614.9: redirecting to a player who has left the game does nothing"
+        );
     }
 
     #[test]
