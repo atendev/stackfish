@@ -2430,10 +2430,17 @@ verbatim once enough time has passed for the underlying code to have moved.
   (always treated as independent); cross-layer/cross-sublayer dependency isn't modeled (this one is by
   rule - CR 613.8 is explicitly same-layer/sublayer only - not a real gap).
 - **Targeting**: no spell with more than one distinct "target" word, `TargetSpec::Script`/
-  `ScriptRuntime::invoke_target` still `todo!()`, "N or more" counts unmodeled. Real multi-target
-  effect resolution and CR 608.2b's actual partial-fizzle text closed separately, `phase5/multi-
-  target-resolution`; "up to N" counts closed separately too, `phase5/targeting-up-to-n` (both
-  docs/implementation.md, below).
+  `ScriptRuntime::invoke_target` still `todo!()`, "N or more" counts unmodeled, no "another target"
+  restriction, no negative filters. Real multi-target effect resolution and CR 608.2b's actual
+  partial-fizzle text closed separately, `phase5/multi-target-resolution`; "up to N" counts closed
+  separately too, `phase5/targeting-up-to-n`; CR 205.4b subtype restrictions ("target Human," CR
+  702.6c's "Equip [quality] creature") closed too, `phase5/targeting-subtype-filter` -
+  `TargetFilter::Object` gained a `subtypes: Option<Vec<Subtype>>` field, same shape `cost.rs`'s
+  `FilterSpec::subtypes` already had, wired into both `commands::target_is_legal` and the shared
+  `Game.SelectTargets`/`ActivatedAbilityBuilder::SetTarget` Lua table decoder. No supertype
+  restriction on `TargetFilter` yet ("target legendary creature") - `FilterSpec` has one,
+  `TargetFilter` still doesn't, narrower gap than before but still open (all docs/implementation.md,
+  below).
 - **Static abilities**: `StaticAbilityBuilder`'s own duration gap is closed, `phase5/static-ability-
   duration` (docs/implementation.md, below) — `:SetDuration(Game.Durations.*)`, same 4-tag
   `DurationTag` decode `Game.Ops.Pump` already used, defaulting to `Permanent` when unset. "As long
@@ -9191,3 +9198,70 @@ anticipated in the pre-slice scoping discussion; `ActivatedAbilityBuilder.target
 
 **UNRESOLVED:** everything named under "TODOs marked" above - CR 702.6c/d/e, Fortifications, and
 phasing.
+
+## Phase 5: phase5/targeting-subtype-filter slice (CR 205.4b, subtype target restrictions)
+
+Branch `phase5/targeting-subtype-filter`, off master. Picked over two smaller items (a
+`RedirectDamage` Lua binding, a CR 111.8 token zone-move guard) by explicit user choice - closes a
+gap `target.rs`'s own TODO list had named since the targeting-basics slice, and both
+`phase5/aura-attach` ("Enchant Human"-style Aura restrictions) and `phase5/equip-ability` (CR
+702.6c "Equip [quality] creature") deferred it as a named follow-up rather than guessing at it.
+
+**What got implemented:**
+- `types/target.rs`: `TargetFilter::Object` gained `subtypes: Option<Vec<Subtype>>`, same shape and
+  "or across the list" semantics `cost.rs`'s `FilterSpec::subtypes` already documents. Mechanical
+  consequence: `TargetFilter`/`TargetRequirement`/`TargetSpec` all lost their `Copy` derive
+  (`Vec<Subtype>` isn't `Copy`) - a real, if small, deviation from a bare additive field.
+- `commands.rs`: `target_is_legal`'s `TargetFilter::Object` arm gained a subtype check, matched
+  against `layers::effective_characteristics` (not the raw `CardDefinition`), same treatment
+  `card_types` already gets - a granted subtype (if one is ever built) would count too, not just
+  the printed one.
+- `script.rs`: `decode_target_filter_table` (shared by `Game.SelectTargets` and
+  `ActivatedAbilityBuilder::SetTarget`) gained a `subtypes` table key, same list-of-strings shape
+  `card_types` already uses, no parser needed (`Subtype` is a bare string newtype).
+- `crates/scenario/src/lib.rs`: `TargetRequirementSpec` gained a `subtypes: Vec<String>` TOML field,
+  threaded into `build_target_requirement` the same way `card_types` already is.
+- Fixed the four call sites the `Copy` removal broke (`commands.rs` x3, `engine.rs` x1) - each was
+  copying `Option<TargetSpec>` out of a shared reference (`ability.target`, `object.definition.
+  target_requirement`, `chosen.target_requirement`); each now `.clone()`s instead. Confirmed via a
+  full-workspace grep before touching anything that these were the *only* four - every other
+  `TargetFilter`/`TargetRequirement`/`TargetSpec` consumer already matched by reference.
+- `docs/lua_scripts.md`/`docs/scenario_format.md`/`docs/implementation.md`: extended the existing
+  `Game.SelectTargets` filter-shape docs, the `target_requirement` TOML table docs, and the
+  Targeting gaps bullet, rather than writing new sections.
+
+**CR requirements:** CR 205.4b (subtype restrictions on a target), exercised through 601.2c/602.2b's
+existing targeting pipeline (no new mechanism beyond the field itself) and CR 702.6c ("Equip
+[quality] creature," the worked example both new Lua-facing tests use).
+
+**TODOs marked, not attempted:** supertype restrictions on `TargetFilter` ("target legendary
+creature") - `FilterSpec` (cost.rs) already has one, `TargetFilter` still doesn't; "another target"
+(CR 115.3, must differ from a specific other object, not just dedup within one requirement);
+negative filters ("target creature you don't control that isn't a Wall").
+
+**Tests added** (`crates/engine/tests/phase5_targeting_subtype_filter.rs`, 6 new tests): casting a
+"target Human" spell at a Human is accepted, at a Zombie is rejected; the spell fizzles when its
+target leaves the battlefield before resolution (CR 608.2b, mirroring the existing pattern - there's
+no continuous effect that removes a subtype yet to test the "target changes subtype mid-stack"
+variant directly, so this exercises the same recheck via the target disappearing instead); the
+shared Lua decoder produces a real `subtypes` filter for an "Equip Dragons"-style ability; equipping
+a non-Dragon is rejected, equipping a Dragon attaches it.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+6 new tests. Adding the required field meant updating every pre-existing `TargetFilter::Object`
+construction/match across 21 test files (`subtypes: None,`/`..` added to each) - all mechanical,
+none behavior-changing, confirmed by the same 0-failure full-suite run.
+
+**STRUCT DEVIATIONS:** `TargetFilter`/`TargetRequirement`/`TargetSpec` losing `Copy` was anticipated
+in the pre-slice scoping discussion (a `Vec` field can't be `Copy`), but the exact size of the
+mechanical fallout (21 test files) was confirmed only by grepping before writing code, not assumed.
+
+**INTERFACE DEVIATIONS:** none - every touched function kept its existing signature; the four
+`Copy`-reliant call sites changed their own local variable binding (`.clone()`), not any function's
+signature.
+
+**SCOPE DEVIATIONS:** none beyond the anticipated mechanical test-fixture updates above.
+
+**UNRESOLVED:** supertype restrictions on `TargetFilter`, "another target," negative filters - all
+named above, not attempted.

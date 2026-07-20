@@ -328,16 +328,30 @@ pub(crate) fn target_is_legal(
 ) -> bool {
     match filter {
         TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
-        TargetFilter::Object { card_types, controller, zone } => {
+        TargetFilter::Object { card_types, subtypes, controller, zone } => {
             let Target::Object(id) = target else { return false };
             let Some(obj) = state.object(id) else { return false };
             if obj.zone != zone.unwrap_or(ZoneKind::Battlefield) {
                 return false;
             }
-            if let Some(types) = card_types {
+            if card_types.is_some() || subtypes.is_some() {
                 let effective = crate::layers::effective_characteristics(state, script_runtime, id);
-                if !effective.card_types.intersects(*types) {
-                    return false;
+                if let Some(types) = card_types {
+                    if !effective.card_types.intersects(*types) {
+                        return false;
+                    }
+                }
+                // CR 205.4b: "target Human"/"Equip Dragons" - matches if the
+                // target has *any* subtype in the list, same "or, not and"
+                // convention cost.rs's FilterSpec::subtypes already
+                // documents. Checked against effective_characteristics
+                // (post layer-4 AddCardType-adjacent subtype grants, if any
+                // ever exist), same treatment card_types just above already
+                // gets - not the raw CardDefinition.
+                if let Some(subtypes) = subtypes {
+                    if !subtypes.iter().any(|s| effective.subtypes.contains(s)) {
+                        return false;
+                    }
                 }
             }
             if let Some(fc) = controller {
@@ -1132,7 +1146,7 @@ pub fn execute_command(
                             "this card isn't modal - no modes to choose".to_string(),
                         ));
                     }
-                    (object.definition.target_requirement, None)
+                    (object.definition.target_requirement.clone(), None)
                 } else {
                     if modes.len() != 1 {
                         return Err(CommandError::IllegalAction(
@@ -1146,7 +1160,7 @@ pub fn execute_command(
                         .ok_or_else(|| {
                             CommandError::IllegalAction("no such mode on this card".to_string())
                         })?;
-                    (chosen.target_requirement, chosen.effect.clone())
+                    (chosen.target_requirement.clone(), chosen.effect.clone())
                 };
 
             // CR 601.2c/601.2e: target count/filter/dedup validated below via
@@ -1380,7 +1394,7 @@ pub fn execute_command(
             let effect = ability.effect.clone();
             let cost = ability.cost.clone();
             let operation = ability.operation;
-            let target_requirement = ability.target;
+            let target_requirement = ability.target.clone();
 
             // CR 702.6a: "Activate only as a sorcery" - Equip's own timing
             // restriction, enforced here by matching on the effect shape

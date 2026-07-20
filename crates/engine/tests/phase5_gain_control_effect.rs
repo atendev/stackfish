@@ -70,7 +70,7 @@ fn threaten_definition(duration: EffectDuration) -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_threaten".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
+            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, controller: None, zone: None },
             count: 1,
             up_to: false,
         })),

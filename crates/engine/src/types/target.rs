@@ -1,4 +1,4 @@
-use crate::types::card::CardTypeSet;
+use crate::types::card::{CardTypeSet, Subtype};
 use crate::types::cost::FilterController;
 use crate::types::ids::ScriptHandle;
 use crate::types::zone::ZoneKind;
@@ -9,20 +9,29 @@ use crate::types::zone::ZoneKind;
 /// 115.2's battlefield-by-default rule) and the two non-object target
 /// shapes (CR 115.4's "any target", plain "target player").
 ///
-/// TODO: no supertype/subtype restriction ("target Human"), no "another
-/// target" (must differ from one specific other object, not just dedup
-/// within this one requirement per CR 115.3), no negative filters ("target
-/// creature you don't control that isn't a Wall") — only what a first real
-/// spell needs.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// TODO: no "another target" (must differ from one specific other object,
+/// not just dedup within this one requirement per CR 115.3), no negative
+/// filters ("target creature you don't control that isn't a Wall") — only
+/// what a first real spell needs.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TargetFilter {
     /// "target creature" / "target permanent you control" / etc. `zone:
     /// None` defaults to `Battlefield` (CR 115.2: only permanents are legal
     /// targets unless a spell/ability says otherwise) — `Some(zone)` is for
     /// the rarer case of targeting a card in another zone (e.g. a spell on
     /// the stack, CR 115.2b), not exercised by any card built this slice.
+    ///
+    /// `subtypes` (CR 205.4b, "target Human," "Equip Dragons") matches if
+    /// the target has *any* subtype in the list (an "or," not an "and") —
+    /// same convention `cost.rs`'s `FilterSpec::subtypes` already
+    /// documents for the identical reason (no real card asks for two
+    /// subtypes at once). No supertype restriction yet ("target legendary
+    /// creature") — narrower than `FilterSpec`, which does have one; no
+    /// card built against `TargetFilter` has needed it yet, named rather
+    /// than guessed at.
     Object {
         card_types: Option<CardTypeSet>,
+        subtypes: Option<Vec<Subtype>>,
         controller: Option<FilterController>,
         zone: Option<ZoneKind>,
     },
@@ -55,7 +64,7 @@ pub enum TargetFilter {
 /// "target creature and target player") needs more than one
 /// `TargetRequirement`, plural — not modeled; this is exactly one
 /// requirement per spell/ability.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TargetRequirement {
     pub filter: TargetFilter,
     pub count: u32,
@@ -69,7 +78,7 @@ pub struct TargetRequirement {
 /// script-backed target-legality predicate needs its own "Lua asks, Rust
 /// decides" convention, not designed yet (same shape of gap as backlog item
 /// 3a's continuous-effect `Script` arm).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum TargetSpec {
     Primitive(TargetRequirement),
     Script(ScriptHandle),

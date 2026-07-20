@@ -59,7 +59,7 @@ fn destroy_spell_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_destroy".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
+            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, controller: None, zone: None },
             count: 1,
             up_to: false,
         })),
@@ -319,7 +319,7 @@ fn destroy_ability_works_the_same_as_a_destroy_spell() {
         condition: None,
         cost: Some(CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() }),
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
+            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, controller: None, zone: None },
             count: 1,
             up_to: false,
         })),

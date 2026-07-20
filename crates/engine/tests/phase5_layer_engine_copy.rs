@@ -168,7 +168,7 @@ fn become_copy_ability(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), controller: None, zone: None },
+            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, controller: None, zone: None },
             count: 1,
             up_to: false,
         })),

@@ -286,16 +286,21 @@ pub struct ContinuousEffectSpec {
 
 /// `CardSpec.target_requirement`'s shape — `filter` picks which
 /// `TargetFilter` variant this is: `"object"` (uses `card_types`/
-/// `controller`/`zone`, CR 115.2's battlefield default applies when `zone`
-/// is unset), `"player"` (any player), or `"any"` (CR 115.4's "any target" —
-/// creature/player/planeswalker/battle). `count` is the maximum — exact
-/// unless `up_to` is set (CR 601.2c/115.6, "up to N"; "N or more" still
-/// isn't modeled, see `TargetRequirement`'s own doc).
+/// `subtypes`/`controller`/`zone`, CR 115.2's battlefield default applies
+/// when `zone` is unset), `"player"` (any player), or `"any"` (CR 115.4's
+/// "any target" — creature/player/planeswalker/battle). `count` is the
+/// maximum — exact unless `up_to` is set (CR 601.2c/115.6, "up to N"; "N or
+/// more" still isn't modeled, see `TargetRequirement`'s own doc).
 #[derive(Deserialize)]
 pub struct TargetRequirementSpec {
     pub filter: String,
     #[serde(default)]
     pub card_types: Vec<String>,
+    /// CR 205.4b — e.g. `["Human"]` for "target Human". Matches as an "or"
+    /// across the list, same convention `TargetFilter::Object::subtypes`
+    /// itself documents.
+    #[serde(default)]
+    pub subtypes: Vec<String>,
     #[serde(default)]
     pub controller: Option<String>,
     #[serde(default)]
@@ -919,6 +924,8 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
     let filter = match spec.filter.as_str() {
         "object" => TargetFilter::Object {
             card_types: (!spec.card_types.is_empty()).then(|| parse_card_types(&spec.card_types)),
+            subtypes: (!spec.subtypes.is_empty())
+                .then(|| spec.subtypes.iter().cloned().map(Subtype).collect()),
             controller: spec.controller.as_deref().map(parse_filter_controller),
             zone: spec.zone.as_deref().map(parse_zone_kind),
         },

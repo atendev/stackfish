@@ -108,6 +108,7 @@ fn equip_ability(source: ObjectId) -> RegisteredAbility {
         target: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object {
                 card_types: Some(CardTypeSet::CREATURE),
+                subtypes: None,
                 controller: Some(FilterController::You),
                 zone: None,
             },
@@ -285,7 +286,7 @@ fn game_ops_attach_self_registers_a_real_equip_ability() {
         &ability.target,
         Some(TargetSpec::Primitive(req)) if matches!(
             req.filter,
-            TargetFilter::Object { card_types: Some(t), controller: Some(FilterController::You), zone: None }
+            TargetFilter::Object { card_types: Some(t), controller: Some(FilterController::You), zone: None, .. }
                 if t == CardTypeSet::CREATURE
         )
     ));

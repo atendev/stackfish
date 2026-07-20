@@ -1829,7 +1829,26 @@ fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError>
                 None => None,
             };
 
-            Ok(TargetFilter::Object { card_types, controller, zone: None })
+            // CR 205.4b: "target Human"/"Equip Dragons" - a plain list of
+            // subtype name strings, same shape card_types just above uses,
+            // matched as an "or" (TargetFilter::Object::subtypes's own doc
+            // comment). No parser needed - Subtype is a bare string newtype,
+            // same "any string is legal" stance AddProtectionSubtype/
+            // AddProtectionName already took.
+            let subtypes_table: Option<Table> =
+                table.get("subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let subtypes = match subtypes_table {
+                Some(t) => {
+                    let mut list = Vec::new();
+                    for entry in t.sequence_values::<String>() {
+                        list.push(Subtype(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?));
+                    }
+                    Some(list)
+                }
+                None => None,
+            };
+
+            Ok(TargetFilter::Object { card_types, subtypes, controller, zone: None })
         }
         other => Err(ScriptError::LoadError(format!(
             "unknown Game.SelectTargets filter type '{other}' - expected object/player/any"
