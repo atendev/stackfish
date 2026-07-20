@@ -30,7 +30,8 @@ Commits should be straight and to the point, but in readable and understandable 
 ## Notes
 Look in the docs folder for the following information:
 - [DESIGN.md](/docs/DESIGN.md) | Bigger design document that should be updated as new things are created.
-- [implementation.md](/docs/implementation.md) | Notes from your previous sessions about where we are and things yet to be done, mistakes, changes, etc. This is something you should always be checking.
+- [index.md](/docs/implementation/index.md) | Notes from your previous sessions about where we are and things yet to be done, mistakes, changes, etc. This is something you should always be checking.
+- [backlog.md](/docs/implementation/99-backlog.md) | The backlog of what items we are currently working on or are listed in TODOs.
 - [workflow.md](/docs/workflow.md) | The main workflow of how we are going to be talking back and forth. Current phase is listed in implementation.
 - [ygo_pro_reference.md](/docs/ygo_pro_reference.md) | A reference guide for how the ygo-pro engine works.
 - [mtg_adaptation_reference.md](/docs/mtg_adaptation_reference.md) | Reference guide for how some of the ygo-pro engine mechanics can translate over to mtg.
