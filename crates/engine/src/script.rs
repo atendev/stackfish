@@ -144,11 +144,31 @@ impl UserData for EventFilterKindTag {}
 /// back out by `ReplacementEffectBuilder::SetPayload`. Wraps the real
 /// `ReplacementPayload` directly (unlike `EventFilterKindTag` above, a
 /// payload needs no deferred data the way `affected` is for a filter) —
-/// `RedirectDamage` is deliberately never bound here, see
-/// `ReplacementEffectBuilder`'s own doc comment for why.
+/// `RedirectDamage(Target)` itself is never wrapped here (see
+/// `RedirectDamageToSourceTag`, its narrow bound sibling, and
+/// `ReplacementEffectBuilder::SetPayload` for why).
 #[derive(Clone)]
 struct ReplacementPayloadTag(ReplacementPayload);
 impl UserData for ReplacementPayloadTag {}
+
+/// `Game.ReplacementPayloads.RedirectDamageToSource` — a sentinel, not a
+/// `ReplacementPayloadTag`, because `RedirectDamage(Target)` needs a real
+/// `ObjectId` that doesn't exist yet when `Game.ReplacementPayloads` itself
+/// is built (a plain global table, constructed once at `ScriptRuntime::new`,
+/// long before any card's `Game.CreateReplacementEffect(c)` call). CR 614.9
+/// redirection to an arbitrary chosen target stays unbound — a redirect
+/// target isn't a static Lua literal and live target selection doesn't
+/// obviously compose with a builder that's queued and drained later rather
+/// than resolved synchronously (same gap `ReplacementEffectBuilder`'s own
+/// doc comment already named). This binds exactly one real shape: redirect
+/// to the replacement effect's own source, e.g. "damage that would be dealt
+/// to you is dealt to [this permanent] instead" (Pariah/Pariah's Shield-
+/// style, composes with `phase5/aura-attach`/`phase5/equip-ability`'s
+/// attach machinery once a card wants "enchanted/equipped creature" instead
+/// of literally itself — that's a different, still-unbound target shape).
+#[derive(Clone, Copy)]
+struct RedirectDamageToSourceTag;
+impl UserData for RedirectDamageToSourceTag {}
 
 /// Same idea, for `Game.Consumption.*` — e.g. `Game.Consumption.Repeatable`/
 /// `Game.Consumption.LimitedUses(3)` are plain tagged values, decoded back
@@ -811,10 +831,9 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
 /// `EventFilter`'s per-shape payload pairing (`types/effect.rs`'s own
 /// `ReplacementPayload` doc comment) — same "reject a bad pairing at
 /// `:Register()` time" stance `validate_layer_effect_pairing` above already
-/// takes for `StaticAbilityBuilder`. `RedirectDamage` never appears on
-/// either side of this match - `Game.ReplacementPayloads` has no entry that
-/// produces one (see `ReplacementEffectBuilder`'s own doc comment) - so it's
-/// simply never a valid pairing from Lua yet, not silently accepted.
+/// takes for `StaticAbilityBuilder`. `RedirectDamage` pairs only with
+/// `DamageDealt`, same as `PreventDamage` — CR 614.9 redirection is a
+/// damage-event rewrite, not a zone-change one.
 fn validate_replacement_filter_payload_pairing(
     kind: EventFilterKind,
     payload: &ReplacementPayload,
@@ -822,6 +841,7 @@ fn validate_replacement_filter_payload_pairing(
     let paired = matches!(
         (kind, payload),
         (EventFilterKind::DamageDealt, ReplacementPayload::PreventDamage)
+            | (EventFilterKind::DamageDealt, ReplacementPayload::RedirectDamage(_))
             | (EventFilterKind::WouldDie, ReplacementPayload::ReplaceZoneDestination(_))
             | (EventFilterKind::WouldDie, ReplacementPayload::Regenerate)
     );
@@ -1187,13 +1207,15 @@ impl UserData for StaticAbilityBuilder {
 /// only ever call `:SetAffected` before `:Register()`) keep working
 /// unmodified.
 ///
-/// `ReplacementPayload::RedirectDamage(Target)` is deliberately never bound
-/// on `Game.ReplacementPayloads` - a redirect target isn't a static Lua
-/// literal the way a zone name or a use-count is; it would need either a
-/// "redirect to this effect's own source" narrowing or live target
-/// selection (`Game.SelectTargets`, which doesn't obviously compose with a
-/// builder that's queued and drained later rather than resolved
-/// synchronously). Flagged, not guessed at.
+/// `ReplacementPayload::RedirectDamage(Target)` is bound narrowly:
+/// `Game.ReplacementPayloads.RedirectDamageToSource` (CR 614.9, "redirect to
+/// this effect's own source") is a real, real-card-shaped case (Pariah/
+/// Pariah's Shield: "damage that would be dealt to you is dealt to
+/// [this permanent] instead"). Redirecting to an arbitrary *chosen* target
+/// stays unbound — that would need live target selection
+/// (`Game.SelectTargets`), which doesn't obviously compose with a builder
+/// that's queued and drained later rather than resolved synchronously. See
+/// `RedirectDamageToSourceTag`'s own doc comment.
 struct ReplacementEffectBuilder {
     source: ObjectId,
     affected: EffectFilter,
@@ -1241,8 +1263,14 @@ impl UserData for ReplacementEffectBuilder {
             Ok(())
         });
         // `Game.ReplacementPayloads.*` - what this effect rewrites the
-        // matched event into.
+        // matched event into. `RedirectDamageToSourceTag` is handled here
+        // rather than at decode time - it needs `this.source`, only known
+        // once the builder already exists (see that tag's own doc comment).
         methods.add_method_mut("SetPayload", |_, this, value: mlua::AnyUserData| {
+            if value.is::<RedirectDamageToSourceTag>() {
+                this.payload = ReplacementPayload::RedirectDamage(Target::Object(this.source));
+                return Ok(());
+            }
             this.payload = value.borrow::<ReplacementPayloadTag>()?.0.clone();
             Ok(())
         });
@@ -2205,11 +2233,12 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
 
     // `Game.ReplacementPayloads.*` - what a ReplacementEffect rewrites the
     // matched event into (ReplacementEffectBuilder::SetPayload).
-    // RedirectDamage deliberately isn't bound here - see
-    // ReplacementEffectBuilder's own doc comment for why.
+    // `RedirectDamageToSource` is a sentinel, not a ReplacementPayloadTag -
+    // see RedirectDamageToSourceTag's own doc comment for why.
     let replacement_payloads = lua.create_table()?;
     replacement_payloads.set("PreventDamage", ReplacementPayloadTag(ReplacementPayload::PreventDamage))?;
     replacement_payloads.set("Regenerate", ReplacementPayloadTag(ReplacementPayload::Regenerate))?;
+    replacement_payloads.set("RedirectDamageToSource", RedirectDamageToSourceTag)?;
     replacement_payloads.set(
         "ReplaceZoneDestination",
         lua.create_function(|_, zone_name: String| {

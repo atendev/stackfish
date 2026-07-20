@@ -562,12 +562,12 @@ return s
 `:SetFilter(Game.EventFilters.*)` picks which event shape this effect watches —
 `DamageDealt`/`WouldDie` are the only two with a real query path (`ReplacementEffect::matches`).
 `:SetPayload(Game.ReplacementPayloads.*)` picks the rewrite: `PreventDamage` (CR 615, pairs only
-with `DamageDealt`), `Regenerate` (CR 701.19b, pairs only with `WouldDie`), or
-`ReplaceZoneDestination(zoneName)` (CR 614.13-style "instead" substitution, pairs only with
-`WouldDie` — `zoneName` is a zone name string, e.g. `"Exile"`). A mismatched pairing is a real
-`:Register()`-time error, same stance `StaticAbilityBuilder`'s `:SetLayer`/`:SetEffect` pairing
-already takes. `:SetConsumption(Game.Consumption.*)` picks `OneShot`, `Repeatable` (the default),
-or `LimitedUses(n)`.
+with `DamageDealt`), `RedirectDamageToSource` (CR 614.9, pairs only with `DamageDealt` — see below),
+`Regenerate` (CR 701.19b, pairs only with `WouldDie`), or `ReplaceZoneDestination(zoneName)` (CR
+614.13-style "instead" substitution, pairs only with `WouldDie` — `zoneName` is a zone name string,
+e.g. `"Exile"`). A mismatched pairing is a real `:Register()`-time error, same stance
+`StaticAbilityBuilder`'s `:SetLayer`/`:SetEffect` pairing already takes. `:SetConsumption(Game.
+Consumption.*)` picks `OneShot`, `Repeatable` (the default), or `LimitedUses(n)`.
 
 ```lua
 -- Fog: prevent all combat damage that would be dealt to you this turn.
@@ -585,13 +585,39 @@ end
 return s
 ```
 
-`ReplacementPayload::RedirectDamage(Target)` is deliberately never bound on
-`Game.ReplacementPayloads` — a redirect target isn't a static Lua literal the way a zone name or a
-use-count is; it would need either a "redirect to this effect's own source" narrowing or live
-target selection (`Game.SelectTargets`, which doesn't obviously compose with a builder that's
-queued and drained later rather than resolved synchronously). Flagged, not guessed at — a card that
-needs it still has to be built directly in Rust (same bootstrap stance every other still-unbound
-shape in this doc takes).
+`Game.ReplacementPayloads.RedirectDamageToSource` (CR 614.9) redirects the matched damage to this
+effect's own registering permanent instead — the Pariah/Pariah's Shield shape ("damage that would
+be dealt to you is dealt to [this permanent] instead"), the only redirect target that's a static
+Lua literal (it's just `c`, already known when the builder was created):
+
+```lua
+-- Pariah: all damage that would be dealt to you is dealt to this creature instead.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.DamageDealt)
+    e:SetPayload(Game.ReplacementPayloads.RedirectDamageToSource)
+    e:SetAffected({ controller = "you" })
+    e:Register()
+end
+
+return s
+```
+
+Redirecting to an arbitrary *chosen* target (e.g. "to that source's controller," or "to target
+creature") stays unbound — that would need live target selection (`Game.SelectTargets`, which
+doesn't obviously compose with a builder that's queued and drained later rather than resolved
+synchronously) or a computed-from-the-event target neither `EventFilter` nor this builder currently
+expose. Flagged, not guessed at — a card that needs one still has to be built directly in Rust.
+
+CR 614.9's own destination-validity clause ("if [the destination] is no longer on the battlefield,
+or is no longer a creature/planeswalker/battle... the effect does nothing," "if damage would be
+redirected to or from a player who has left the game, the effect does nothing") is rechecked fresh
+by `ReplacementEffect::matches` on every application, not just once at construction — same "recheck
+fresh" stance CR 701.19c's `CANT_BE_REGENERATED` check already takes for `Regenerate`. A redirect
+whose destination has become invalid simply doesn't match; it doesn't prevent the damage, so the
+original, unredirected damage proceeds normally.
 
 `:SetAffected` takes the same plain-table shape `Game.CreateStaticAbility`'s own `:SetAffected`
 does (`controller`/`card_types`/`self_only`, every key optional) — but a custom function isn't

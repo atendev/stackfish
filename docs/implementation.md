@@ -2463,8 +2463,17 @@ verbatim once enough time has passed for the underlying code to have moved.
   "instead" substitution, non-regenerate), plus a settable `ConsumptionPolicy`
   (`OneShot`/`Repeatable`/`LimitedUses`) - all payload shapes `ReplacementEffect::matches`/`apply`
   already handled correctly in Rust, just previously Lua-inaccessible. `RedirectDamage(Target)`
-  remains Lua-inaccessible - a redirect target isn't a static Lua literal, named as its own
-  follow-up rather than guessed at.
+  (CR 614.9, not 614.13 - the code's own prior comments mislabeled the CR cite, fixed alongside
+  this) is now bound narrowly too, `phase5/redirect-damage` (docs/implementation.md, below) -
+  `Game.ReplacementPayloads.RedirectDamageToSource` resolves to the registering permanent's own
+  `ObjectId` (Pariah/Pariah's Shield shape), the only redirect destination that's a static Lua
+  literal; an arbitrary chosen redirect target is still unbound (would need live target selection
+  composing with a queued-and-drained-later builder), named rather than guessed at. Same slice also
+  closed a real correctness gap in the Rust mechanism itself, reachable regardless of which Lua
+  shape is bound: CR 614.9's own "if the destination is no longer on the battlefield / no longer a
+  creature-planeswalker-battle / a player who's left the game, the effect does nothing" clause is
+  now rechecked fresh by `ReplacementEffect::matches` on every application (a new
+  `redirect_target_still_valid` helper), not just assumed valid forever from construction time.
 - **Triggers**: this bullet was stale - both the player-relative shape (`DiscardsCard`/
   `EachDiscardsCard`) and the self-referential shape (`ConditionPrimitive::Discarded`, "when *this*
   card is discarded", `phase5/discarded-trigger`, docs/implementation.md below) are now real, off
@@ -9265,3 +9274,97 @@ signature.
 
 **UNRESOLVED:** supertype restrictions on `TargetFilter`, "another target," negative filters - all
 named above, not attempted.
+
+## Phase 5: phase5/redirect-damage slice (CR 614.9, redirection effects)
+
+Branch `phase5/redirect-damage`, off master. Picked over two smaller items (a supertype target
+filter, a CR 111.8 token zone-move guard) by explicit user choice - closes the last named gap in
+`ReplacementEffectBuilder`'s own doc comment (script.rs), which had flagged `RedirectDamage(Target)`
+as "deliberately never bound" since `phase5/replacement-effect-shapes`.
+
+**What got implemented:**
+- `script.rs`: a new sentinel `RedirectDamageToSourceTag` (unit struct, `UserData`), bound as
+  `Game.ReplacementPayloads.RedirectDamageToSource`. Unlike every other `Game.ReplacementPayloads.*`
+  entry, it isn't a pre-built `ReplacementPayloadTag` - `RedirectDamage(Target)` needs a real
+  `ObjectId` that doesn't exist yet when the `Game.ReplacementPayloads` table itself is built (once,
+  at `ScriptRuntime::new`, long before any card's `Game.CreateReplacementEffect(c)` call). Recognized
+  specially inside `ReplacementEffectBuilder::SetPayload` instead, which substitutes `this.source`
+  (already known at builder-construction time) to produce `ReplacementPayload::
+  RedirectDamage(Target::Object(this.source))`.
+- `script.rs`: `validate_replacement_filter_payload_pairing` gained `(DamageDealt, RedirectDamage(_))`
+  as a valid pairing (CR 614.9 rewrites a damage event, same shape `PreventDamage` already pairs
+  with).
+- `types/effect.rs`: `ReplacementEffect::matches`'s `DamageDealt` arm gained a real CR 614.9 recheck
+  for `RedirectDamage` payloads - a new `redirect_target_still_valid` helper, checked fresh on every
+  application (not just trusted from construction time), mirroring `Regenerate`'s own CANT_BE_
+  REGENERATED-recheck stance. Mirrors `commands::target_is_legal`'s `TargetFilter::AnyTarget` arm
+  (CR 115.4's creature/planeswalker/battle/player list) for the object case, but deliberately doesn't
+  call that function directly (it also checks protection, irrelevant to CR 614.9's own "destination
+  missing" clause, and lives a layer above `types/effect.rs`). For the player case, found and fixed
+  a real gap while writing this: `state.player(pid).is_some()` (what `AnyTarget`'s own arm uses)
+  never actually catches "left the game" - `state.player()` doesn't filter by `eliminated`, an
+  eliminated player stays in `state.players` forever, just flagged. `redirect_target_still_valid`
+  checks `!p.eliminated` directly instead; `AnyTarget`'s own pre-existing shallow check is untouched
+  (a separate, real CR 115.4 gap, not in this slice's scope).
+- Doc-comment fix, not a behavior change: `ReplacementPayload::RedirectDamage`'s own doc comment
+  (and every place it was echoed) cited "CR 614.13-style redirection" - actually wrong. CR 614.13 is
+  about ETB-replacement effects modifying other objects' zone changes (mill effects); the real cite
+  for damage redirection is CR 614.9 (glossary: "Redirection Effect"). Fixed everywhere this slice
+  touched that comment; left `ReplaceZoneDestination`'s own "CR 614.13-style" cite alone (a different
+  mechanism, not touched here, and its own citation wasn't checked).
+- `docs/lua_scripts.md`: replaced the "deliberately never bound" paragraph in the "Self-registering a
+  replacement effect" section with a real `RedirectDamageToSource` example and the CR 614.9
+  destination-validity note.
+
+**CR requirements:** CR 614.9 (redirection effects) - a damage-event rewrite naming a new
+destination. Narrowed to exactly one destination shape: the replacement effect's own registering
+permanent (Pariah/Pariah's Shield: "damage that would be dealt to you is dealt to [this permanent]
+instead") - the only destination that's a static Lua literal at `Game.ReplacementPayloads`
+construction time, matching `ReplacementEffectBuilder`'s own pre-existing doc comment's plan exactly.
+
+**TODOs marked, not attempted:** redirecting to an arbitrary *chosen* target (needs live target
+selection via `Game.SelectTargets`, which doesn't obviously compose with a builder that's queued and
+drained later rather than resolved synchronously) or a computed-from-the-event target (e.g. "that
+source's controller," Reflect Damage's own shape) - neither `EventFilter` nor this builder exposes
+enough at match time to build either yet. Composing `RedirectDamageToSource` with the Attach
+machinery (`phase5/aura-attach`/`phase5/equip-ability`) to redirect to "enchanted/equipped creature"
+instead of literally the effect's own source is also unattempted - a real, different destination
+shape, named rather than guessed at.
+
+**Tests added:**
+- `crates/engine/tests/phase5_redirect_damage.rs` (3 tests): `Game.CreateReplacementEffect` +
+  `RedirectDamageToSource` self-registers with the registering permanent's own id as the redirect
+  target; a mismatched `WouldDie` + `RedirectDamageToSource` pairing is a real `:Register()`-time
+  error; end to end through the real combat-damage pipeline, a Lua-registered redirect keeps combat
+  damage off the defending player entirely and lands it on the shield creature instead (`Repeatable`
+  by default, not consumed by one redirect).
+- `crates/engine/src/types/effect.rs`'s own test module (4 new tests, alongside the existing
+  `apply_redirect_damage_changes_target_only`): `matches()` accepts a still-valid live-creature
+  redirect destination; fizzles (CR 614.9) when the destination object has left the battlefield
+  entirely, when it's on the battlefield but isn't a creature/planeswalker/battle (a land), and when
+  the destination is a player who's been eliminated. The player-elimination case specifically needed
+  a direct-Rust `Target::Player` construction - the narrow Lua-bound shape only ever produces
+  `Target::Object(source)`, so it can't reach that branch itself.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including all 7
+new tests (3 integration + 4 unit).
+
+**STRUCT DEVIATIONS:** none - no field added to any existing struct; `RedirectDamageToSourceTag` is
+a wholly new unit type, not a modification of `ReplacementPayloadTag`.
+
+**INTERFACE DEVIATIONS:** `ReplacementEffect::matches`'s own signature is unchanged (`redirect_target_
+still_valid` is a private helper it calls internally, not a new parameter) - anticipated in the
+pre-slice research, since `matches` already receives `state`/`script_runtime`.
+
+**SCOPE DEVIATIONS:** the `state.player()`/`eliminated` gap (found while implementing the player-
+destination branch, not anticipated in the pre-slice requirements report) - a real correctness fix,
+not scope creep, since CR 614.9's own text explicitly names "a player who has left the game" and the
+obvious naive implementation (matching `AnyTarget`'s own existing check) would have silently gotten
+it wrong.
+
+**UNRESOLVED:** arbitrary chosen redirect targets, computed-from-the-event targets (e.g. "that
+source's controller"), and Attach-machinery-composed destinations ("enchanted/equipped creature") -
+all named above, not attempted. `commands::target_is_legal`'s `TargetFilter::AnyTarget` arm still has
+its own pre-existing "doesn't check `eliminated`" gap for CR 115.4 targeting generally - not fixed
+here, out of this slice's scope (different call site, different rule).
