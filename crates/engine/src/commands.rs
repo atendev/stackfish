@@ -112,8 +112,8 @@ pub struct PendingPaymentRequest {
 /// (CR 305.3), it's a main phase of that turn (CR 305.1), and the stack is
 /// empty (CR 307.1/305.1). Pulled out as a standalone predicate rather than
 /// inlined into `PlayLand` alone, since `CastSpell`'s sorcery-timing branch
-/// and (most) `ActivateAbility` checks will need the exact same condition
-/// once they're real.
+/// and `ActivateAbility`'s own CR 702.6a check (Equip's "activate only as a
+/// sorcery," `phase5/equip-ability`) both need the exact same condition.
 ///
 /// TODO: doesn't account for effects that grant timing permission beyond
 /// the base rule (e.g. "you may play an additional land," "you may cast
@@ -543,17 +543,42 @@ pub(crate) fn is_aura(definition: &CardDefinition) -> bool {
         && definition.subtypes.iter().any(|s| s.0 == "Aura")
 }
 
-/// CR 303.4b/301.5a: attaches `attaching_id` (an Aura or, once Equipment's
-/// own `Equip` ability exists, an Equipment) to `target_id` - sets the
-/// attaching object's own `attached_to` and pushes into the target's
-/// `attachments`, kept in sync in both directions. The only writer of
-/// either field anywhere in this engine - see `GameObject`'s own doc
-/// comment for why they were inert placeholder fields before this slice.
-/// Silently no-ops if either id doesn't resolve to a live object (shouldn't
-/// happen - callers only ever pass ids they just confirmed exist), same
-/// "skip rather than guess" stance every other unresolvable-id case in this
-/// codebase already takes.
+/// CR 301.5: `definition` is an Equipment - an artifact (card type) with
+/// the "Equipment" subtype. Same ad hoc string-comparison shape `is_aura`
+/// already established, for the same reason (`Subtype` has no parsed
+/// vocabulary).
+pub(crate) fn is_equipment(definition: &CardDefinition) -> bool {
+    definition.card_types.contains(CardTypeSet::ARTIFACT)
+        && definition.subtypes.iter().any(|s| s.0 == "Equipment")
+}
+
+/// CR 303.4b/301.5a: attaches `attaching_id` (an Aura or an Equipment) to
+/// `target_id` - sets the attaching object's own `attached_to` and pushes
+/// into the target's `attachments`, kept in sync in both directions. The
+/// only writer of either field anywhere in this engine - see `GameObject`'s
+/// own doc comment for why they were inert placeholder fields before
+/// `phase5/aura-attach`. Silently no-ops if either id doesn't resolve to a
+/// live object (shouldn't happen - callers only ever pass ids they just
+/// confirmed exist), same "skip rather than guess" stance every other
+/// unresolvable-id case in this codebase already takes.
+///
+/// CR 301.5c/702.6a: unlike an Aura (which is never re-targeted after it
+/// attaches), an Equip activation can retarget an already-attached
+/// Equipment to a different creature - if `attaching_id` is already
+/// attached elsewhere, it's detached from the *old* target's own
+/// `attachments` list first, so re-equipping doesn't leave a stale entry
+/// behind (the same bidirectional-consistency concern `retire_object`'s own
+/// cleanup step already takes seriously, just on the "still alive, just
+/// moved" path instead of "departed").
 pub(crate) fn attach_permanent(state: &mut GameState, attaching_id: ObjectId, target_id: ObjectId) {
+    let previous_target = state.object(attaching_id).and_then(|o| o.attached_to);
+    if let Some(old_target_id) = previous_target {
+        if old_target_id != target_id {
+            if let Some(old_target) = state.object_mut(old_target_id) {
+                old_target.attachments.retain(|&id| id != attaching_id);
+            }
+        }
+    }
     if let Some(attaching) = state.object_mut(attaching_id) {
         attaching.attached_to = Some(target_id);
     }
@@ -1357,6 +1382,21 @@ pub fn execute_command(
             let operation = ability.operation;
             let target_requirement = ability.target;
 
+            // CR 702.6a: "Activate only as a sorcery" - Equip's own timing
+            // restriction, enforced here by matching on the effect shape
+            // rather than a new RegisteredAbility field (see AbilityEffect::
+            // Attach's own doc comment for why - a generic per-ability
+            // timing-restriction field isn't worth the ~94-call-site
+            // blast radius for a restriction only this one effect needs
+            // today). `is_sorcery_speed` was written anticipating exactly
+            // this call site (see its own doc comment) but had no real
+            // caller until now.
+            if matches!(effect, Some(AbilityEffect::Attach)) && !is_sorcery_speed(state, command.actor) {
+                return Err(CommandError::IllegalAction(
+                    "this ability can only be activated as a sorcery".to_string(),
+                ));
+            }
+
             // CR 602.2b: `chosen_colors` is only meaningful alongside
             // `AddManaChoice` - reject rather than silently ignore it
             // against any other ability (a plain `AddMana`'s units are
@@ -1445,13 +1485,16 @@ pub fn execute_command(
                 // Some(Damage)/Some(Destroy)/Some(Counters)/Some(Pump)/
                 // Some(GainControl)/Some(Regenerate)/Some(DrawCards)/
                 // Some(Shuffle)/Some(Scry)/Some(Surveil)/Some(Search)/
-                // Some(BecomeCopy) (a non-mana ActivateAbility whose effect
-                // happens to be a recognized primitive) all take the same
-                // path: unlike CR 605's mana abilities, a non-mana activated
-                // ability uses the stack (CR 602.2) rather than resolving
-                // immediately. Targets are validated below (CR 602.2b/
-                // 601.2c-e) via the same validate_targets CastSpell uses,
-                // before any state mutation (stack push) happens.
+                // Some(BecomeCopy)/Some(Attach) (a non-mana ActivateAbility
+                // whose effect happens to be a recognized primitive) all
+                // take the same path: unlike CR 605's mana abilities, a
+                // non-mana activated ability uses the stack (CR 602.2)
+                // rather than resolving immediately. Targets are validated
+                // below (CR 602.2b/601.2c-e) via the same validate_targets
+                // CastSpell uses, before any state mutation (stack push)
+                // happens - for Attach (Equip), this is where CR 702.6a's
+                // "target creature you control" is enforced, same as any
+                // other targeted ability.
                 non_mana_effect @ (None
                 | Some(AbilityEffect::GainLife(_))
                 | Some(AbilityEffect::Damage(_))
@@ -1468,7 +1511,8 @@ pub fn execute_command(
                 | Some(AbilityEffect::Scry(_))
                 | Some(AbilityEffect::Surveil(_))
                 | Some(AbilityEffect::Search { .. })
-                | Some(AbilityEffect::BecomeCopy)) => {
+                | Some(AbilityEffect::BecomeCopy)
+                | Some(AbilityEffect::Attach)) => {
                     validate_targets(
                         state,
                         script_runtime,
