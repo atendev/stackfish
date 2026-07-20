@@ -5,6 +5,7 @@ use crate::{
 use crate::types::ability::InterveningIfSpec;
 use crate::types::card::KeywordSet;
 use crate::types::cost::FilterController;
+use crate::types::counter::CounterKind;
 use crate::script::ScriptRuntime;
 
 /// CR 613.1 layers, with sublayers for layer 7 (power/toughness).
@@ -496,7 +497,7 @@ pub enum EventFilter {
 /// check already takes — though no Lua builder exists for replacement
 /// effects yet, see this file's own backlog note) — `ReplacementEffect::apply`
 /// falls back to returning the event unchanged rather than guessing.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum ReplacementPayload {
     /// CR 615: the matched damage doesn't happen at all — the event still
     /// fires (so anything downstream that cares "damage was dealt, amount
@@ -523,6 +524,28 @@ pub enum ReplacementPayload {
     /// this can't be expressed as a `ReplaceZoneDestination` (the permanent
     /// doesn't change zones at all, so there's no destination to substitute).
     Regenerate,
+    /// CR 603.6d/113.6h: the matched `WouldMoveZone(_, Battlefield)` event's
+    /// resulting permanent enters tapped. Unlike every payload above, this
+    /// has nothing on `GameEventKind::ZoneChange` to rewrite (no `tapped`
+    /// field exists there) — `ReplacementEffect::apply`'s fallback arm
+    /// returns the event unchanged for this payload, same as it would for
+    /// any other mismatched pairing. The real effect happens in
+    /// `replacement::apply_enters_battlefield_modifiers`, a narrow sibling
+    /// driver (not `apply_replacements_from`) that mutates the already-
+    /// constructed `GameObject` directly rather than routing through the
+    /// event-rewrite loop — see that function's own doc comment for why
+    /// entering-the-battlefield modifiers don't fit the "propose, rewrite,
+    /// commit" shape every other payload above uses.
+    EntersTapped,
+    /// CR 614.1c/122.6: the matched `WouldMoveZone(_, Battlefield)` event's
+    /// resulting permanent enters with `amount` counters of `kind` on it
+    /// (e.g. Fading N, Modular N, Graft N — fixed printed numbers only;
+    /// game-state-dependent amounts like Bloodthirst/Sunburst/Devour aren't
+    /// representable by this `Primitive` shape, see `ReplacementSpec::Script`'s
+    /// own doc comment). Same "nothing to rewrite on the event itself" stance
+    /// as `EntersTapped` above — applied by
+    /// `replacement::apply_enters_battlefield_modifiers`, not `apply()`.
+    EntersWithCounters { kind: CounterKind, amount: i32 },
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this

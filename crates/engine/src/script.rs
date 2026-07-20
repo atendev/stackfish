@@ -843,7 +843,16 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
 /// `:Register()` time" stance `validate_layer_effect_pairing` above already
 /// takes for `StaticAbilityBuilder`. `RedirectDamage` pairs only with
 /// `DamageDealt`, same as `PreventDamage` — CR 614.9 redirection is a
-/// damage-event rewrite, not a zone-change one.
+/// damage-event rewrite, not a zone-change one. `EntersTapped`/
+/// `EntersWithCounters` (CR 603.6d/614.1c) additionally require `to` to
+/// name `Battlefield` specifically (not just any `WouldMoveZone` shape) —
+/// "how a permanent enters" only means something for a move landing on the
+/// battlefield; `replacement::apply_enters_battlefield_modifiers` (the
+/// function that actually reads these two payloads back out) only ever
+/// checks a candidate event shaped exactly that way, so a registered effect
+/// with a different `to` would silently never match anything - rejected
+/// here instead, at `:Register()` time, same "real error over a silently
+/// inert effect" stance every other pairing check in this function takes.
 fn validate_replacement_filter_payload_pairing(
     kind: EventFilterKind,
     payload: &ReplacementPayload,
@@ -855,6 +864,12 @@ fn validate_replacement_filter_payload_pairing(
             | (EventFilterKind::WouldDie, ReplacementPayload::ReplaceZoneDestination(_))
             | (EventFilterKind::WouldDie, ReplacementPayload::Regenerate)
             | (EventFilterKind::WouldMoveZone { .. }, ReplacementPayload::ReplaceZoneDestination(_))
+    ) || matches!(
+        (kind, payload),
+        (
+            EventFilterKind::WouldMoveZone { to: Some(ZoneKind::Battlefield), .. },
+            ReplacementPayload::EntersTapped | ReplacementPayload::EntersWithCounters { .. }
+        )
     );
     if paired {
         Ok(())
@@ -2287,6 +2302,23 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         lua.create_function(|_, zone_name: String| {
             let zone = parse_zone_kind_name(&zone_name).map_err(to_lua_err)?;
             Ok(ReplacementPayloadTag(ReplacementPayload::ReplaceZoneDestination(zone)))
+        })?,
+    )?;
+    // CR 603.6d: pairs only with `Game.EventFilters.WouldMoveZone(_, "Battlefield")`
+    // - see `validate_replacement_filter_payload_pairing`. Applied by
+    // `replacement::apply_enters_battlefield_modifiers`, not `ReplacementEffect::apply`
+    // (see `ReplacementPayload::EntersTapped`'s own doc comment).
+    replacement_payloads.set("EntersTapped", ReplacementPayloadTag(ReplacementPayload::EntersTapped))?;
+    // CR 614.1c/122.6: `Game.ReplacementPayloads.EntersWithCounters(kindName, amount)`
+    // - fixed printed amounts only, same `parse_counter_kind_name` table
+    // `Game.Ops.Counters` already uses. Game-state-dependent amounts
+    // (Bloodthirst/Sunburst/Devour) aren't representable this way - see
+    // `ReplacementPayload::EntersWithCounters`'s own doc comment.
+    replacement_payloads.set(
+        "EntersWithCounters",
+        lua.create_function(|_, (kind_name, amount): (String, i32)| {
+            let kind = parse_counter_kind_name(&kind_name);
+            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCounters { kind, amount }))
         })?,
     )?;
 

@@ -75,7 +75,9 @@
   - `Game.EventFilters.WouldMoveZone(fromName, toName)` function; nil = wildcard.
   - `validate_replacement_filter_payload_pairing` allows `(WouldMoveZone, ReplaceZoneDestination)`.
 - Unresolved:
-  - ETB-modifier replacements need new event payload.
+  - ETB-modifier replacements need new event payload (fixed later, see `etb-replacement-modifiers`
+    — though that slice ended up bypassing this event-rewrite mechanism entirely rather than
+    adding a payload that fit it, see that slice's own notes for why).
   - Draw/discard/cost-payment producers still mutate directly (fixed next).
 
 ## Slice: replaceable-cost-zone-moves (merged)
@@ -118,3 +120,58 @@
   - `Engine::draw_step` deleted.
 - Unresolved:
   - `Game.Ops.DrawCards(n)` scripted multi-draw still direct mutation.
+
+## Slice: etb-replacement-modifiers (merged)
+
+- Branch `phase5/etb-replacement-modifiers`.
+- Scope: CR 603.6d/614.1c "how a permanent enters the battlefield" replacement effects —
+  `ReplacementPayload::{EntersTapped, EntersWithCounters}`, both self-intrinsic (a card's own
+  "enters tapped"/"enters with N counters" text) and externally granted (Blood Moon-style).
+- Verify: 9 new tests (Lua registration mechanics, `PlayLand`/`CastSpell`-resolution end-to-end,
+  consumption-policy bookkeeping), 0 failed, full workspace suite (114 binaries) green.
+- Key finding that reshaped the plan: the obvious approach (a new `CardDefinition` field) would
+  have rippled all ~403 raw `CardDefinition { .. }` struct-literal sites in this codebase (no
+  `Default` impl) — an order of magnitude past any prior slice's ripple. Dropped in favor of
+  reusing the already-real `Game.CreateReplacementEffect` self-registration builder plus two new
+  payload tags, which needed zero `CardDefinition`/`GameEventKind::ZoneChange` field changes.
+- Key changes:
+  - `ReplacementPayload::{EntersTapped, EntersWithCounters { kind: CounterKind, amount: i32 }}` —
+    pair only with `EventFilter::WouldMoveZone { to: Some(Battlefield), .. }`
+    (`validate_replacement_filter_payload_pairing` enforces the `to` restriction, unlike every
+    other `WouldMoveZone` pairing so far).
+  - `ReplacementPayload` lost `Copy` (`CounterKind::Custom(String)` isn't `Copy`) — `Clone` only
+    now, same as `ReplacementEffect`'s other non-`Copy` fields already implied elsewhere.
+  - `replacement::apply_enters_battlefield_modifiers(state, script_runtime, object, from) ->
+    Vec<GameEventKind>` — a narrow sibling of `apply_replacements`, not routed through
+    `apply_replacements_from`'s event-rewrite loop (neither payload has anything on
+    `GameEventKind::ZoneChange` to rewrite). `EntersTapped` mutates the `GameObject` directly;
+    `EntersWithCounters` only proposes a `CounterAdded` event for the caller to route through
+    `CommitEvents` — mutating both ways double-applies (caught by the `cast_creature_resolution_
+    self_registered_enters_with_counters` test initially failing 4 counters instead of 2, see
+    "Mistakes caught" in `99-backlog.md`).
+  - Deliberately skips CR 616.1's ordering-choice pause even for multiple matches: `EntersTapped`
+    is idempotent, `EntersWithCounters` is additive, so unlike `ReplaceZoneDestination` no
+    application order ever changes the result.
+  - `Game.ReplacementPayloads.{EntersTapped, EntersWithCounters(kindName, amount)}` — reuses
+    `parse_counter_kind_name` (PascalCase, e.g. `"PlusOnePlusOne"` — distinct from the scenario
+    crate's own snake_case `parse_counter_kind`).
+  - Wired into all three real battlefield-entry producers, each already running `run_card_script`
+    before this point in the same call: `PlayLand` (via `advance()`'s `battlefield_entries` loop),
+    `move_resolving_spell`'s `ResolveStackTop` caller, `submit_search_choice`'s
+    `SearchDestination::Battlefield` arm.
+- Registration-timing note (why no chicken-and-egg problem): `run_card_script` already runs after
+  an object is inserted into `state.objects` but before the resulting `ZoneChange` event is
+  checked/committed at all three producers — a self-registered effect is already in
+  `state.replacement_effects` by the time `apply_enters_battlefield_modifiers` runs right after.
+- Unresolved:
+  - Dynamic/choice-based amounts (Bloodthirst, Sunburst, Devour, Amplify) — needs a `Script`
+    payload variant, only fixed printed `amount` is real.
+  - CR 614.12a/b (choices required by an ETB modifier, payability ordering across simultaneous
+    entries) — unmodeled.
+  - Token creation (`Game.Ops.CreateToken`) — a 4th real to-Battlefield producer, not wired.
+  - General CR 616 propose/replace/commit for battlefield entry still doesn't exist beyond this
+    narrow carve-out — `docs/lua_scripts.md`'s existing reachability note (battlefield-entry absent
+    from the real-`WouldMoveZone`-producer list) stays true; a `ReplaceZoneDestination`-style
+    "can't enter, goes to the graveyard instead" effect is still unreachable.
+  - CR 122.6a (which player places ETB counters) always defaults to the object's controller — no
+    multiplayer override.

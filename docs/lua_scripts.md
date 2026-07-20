@@ -732,6 +732,92 @@ tested end to end: `crates/engine/tests/phase5_static_regeneration.rs` (the orig
 (`:SetFilter`/`:SetPayload`/`:SetConsumption`, including a real combat-damage Fog effect and a
 real exile-instead-of-dying effect, both driven through a full `Engine`).
 
+### "How this permanent enters the battlefield" (CR 603.6d/614.1c)
+
+`Game.ReplacementPayloads.EntersTapped` and `Game.ReplacementPayloads.EntersWithCounters(kindName,
+amount)` pair only with `Game.EventFilters.WouldMoveZone(_, "Battlefield")` (any `from`, `to`
+literally `"Battlefield"` — a different `to` is a real `:Register()` error). Covers both a card's
+own printed "enters tapped"/"enters with N counters" text and an externally granted version (e.g.
+"lands your opponents control enter tapped"):
+
+```lua
+-- This creature enters tapped.
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
+    e:SetPayload(Game.ReplacementPayloads.EntersTapped)
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+return s
+```
+
+```lua
+-- This creature enters with two +1/+1 counters on it (e.g. Modular 2).
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
+    e:SetPayload(Game.ReplacementPayloads.EntersWithCounters("PlusOnePlusOne", 2))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+return s
+```
+
+`EntersWithCounters`'s `kindName` uses the same `CounterKind` name table `parse_counter_kind_name`
+already defines for this file's other `Game.*` bindings (`"PlusOnePlusOne"`, `"MinusOneMinusOne"`,
+`"Loyalty"`, `"Poison"`, `"Energy"`, `"Experience"`, `"Charge"`, any other string falls back to
+`Custom`) — note this is PascalCase, unlike `docs/scenario_format.md`'s TOML-facing
+`assert_object_counters`/`assert_player_counters`, which use snake_case (`"plus_one_plus_one"`) via
+a *different* parser (`crates/scenario/src/lib.rs`'s own `parse_counter_kind`); the two aren't
+interchangeable.
+
+CR 113.6h is what makes the self case work at all: an ability that modifies how its own object
+enters the battlefield "functions as that object is entering," before it's a real battlefield
+permanent in the trigger-collection sense. This engine's self-registration (`run_card_script`)
+still only ever runs *after* an object is already inserted into `state.objects` — same timing as
+every other self-registered ability — but critically, that's still *before* the resulting
+`ZoneChange` event is checked/committed at every one of the three real battlefield-entry producers
+(`PlayLand`, `CastSpell` resolution, `submit_search_choice`'s `SearchDestination::Battlefield`
+arm). So a self-registered `EntersTapped`/`EntersWithCounters` effect is already sitting in
+`state.replacement_effects` by the time each producer calls `replacement::
+apply_enters_battlefield_modifiers` right after running the script — no chicken-and-egg problem,
+and no propose-before-the-object-exists split the way a true CR 616 zone-move commit would need.
+
+Applied differently from every other `ReplacementPayload`, and deliberately outside
+`apply_replacements`/`apply_replacements_from`: neither payload has anything on
+`GameEventKind::ZoneChange` to rewrite (no `tapped`/`counters` field exists there). `EntersTapped`
+mutates the just-created `GameObject` directly; `EntersWithCounters` only proposes a
+`GameEventKind::CounterAdded` (same "Lua/Rust-internal proposer describes intent, `CommitEvents`
+applies it" split `Game.Ops.Counters` already uses) — the caller must route that event through its
+own `CommitEvents` pass, not apply it twice.
+
+CR 616.1's ordering choice (multiple matching replacement effects, affected player chooses which
+applies first) is deliberately not invoked for these two payloads even when several match the same
+entry: `EntersTapped` is idempotent and `EntersWithCounters` is additive, so unlike a
+`ReplaceZoneDestination`-style rewrite, no ordering of multiple matches changes the final result.
+
+Not modeled this slice (real, named gaps, not silently guessed at):
+
+- **Dynamic/choice-based amounts** — Bloodthirst, Sunburst, Devour, Amplify: the counter count
+  depends on game state or a player choice made as the permanent enters (CR 614.12a). Only a fixed
+  printed `amount` is representable via this `Primitive` shape; a `Script`-backed payload is the
+  natural follow-up.
+- **Token creation** (`Game.Ops.CreateToken`) — a real to-Battlefield producer, not wired to this
+  mechanism yet. Same shape as the other three, just not done this slice.
+- **General CR 616 propose/replace/commit for battlefield entry** — `PlayLand`/`CastSpell`
+  resolution/search-to-battlefield still mutate eagerly rather than going through a real
+  propose-then-replace-then-commit split; a `ReplaceZoneDestination`-style "this can't enter, goes
+  to the graveyard instead" effect (Torpor Orb-adjacent) stays unreachable. This carve-out only
+  covers `EntersTapped`/`EntersWithCounters` specifically.
+
+Real, tested end to end: `crates/engine/tests/phase5_etb_replacement_modifiers.rs` (self and
+externally granted `EntersTapped` via `PlayLand`, self-registered `EntersWithCounters` via
+`CastSpell` resolution, `LimitedUses`/`Repeatable` consumption bookkeeping, and the
+`WouldMoveZone(_, "Battlefield")`-only pairing rejection).
+
 ## Self-registering an activated ability
 
 `Game.CreateActivatedAbility(c)` is the CR 602 sibling of `Game.CreateTriggeredAbility`/
