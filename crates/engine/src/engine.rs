@@ -373,14 +373,16 @@ pub enum ScriptedZoneMoveKind {
     Exile,
 }
 
-/// One `Sacrifice`/`Discard` `CostPayment` still to propose+replacement-
-/// check+commit — `Engine::continue_cost_zone_moves`'s own queue entry, built
-/// by `commands::collect_cost_zone_moves` from an already-validated
-/// `PaymentPlan`. `from` is the zone the payment claims to move `id` out of
-/// (`Battlefield` for `Sacrifice`, `Hand` for `Discard`) — `PaymentPlan::
-/// validate` already confirmed `id` is really there.
+/// One card still to propose+replacement-check+commit into a graveyard —
+/// shared queue entry for `Engine::continue_cost_zone_moves` (a `Sacrifice`/
+/// `Discard` `CostPayment`, built by `commands::collect_cost_zone_moves` from
+/// an already-validated `PaymentPlan`) and `Engine::continue_discard_moves`
+/// (CR 514.1's cleanup hand-size discard, `phase5/replaceable-cleanup-
+/// discard`). `from` is the zone the card is claimed to move out of
+/// (`Battlefield` for `Sacrifice`, `Hand` for `Discard`/cleanup discard) —
+/// the caller already confirmed `id` is really there before queuing it.
 #[derive(Clone, Copy, Debug)]
-pub struct PendingCostZoneMove {
+pub struct PendingZoneMove {
     pub id: ObjectId,
     pub from: ZoneKind,
 }
@@ -420,11 +422,21 @@ pub enum ReplacementResumeTarget {
     /// submit_payment`'s own `Sacrifice`/`Discard` handling). Same "each
     /// target proposes+commits independently" shape `ScriptedZoneMove`
     /// already has - `remaining` is the rest of this payment's own
-    /// `PendingCostZoneMove` queue. `payer` is needed for the final
+    /// `PendingZoneMove` queue. `payer` is needed for the final
     /// `CostPaid` event once every zone-moving payment's been processed
     /// (`stack_id`'s `costs_paid` was already set before this pause could
     /// first fire, so it doesn't need to be threaded through here too).
-    CostZoneMove { remaining: VecDeque<PendingCostZoneMove>, payer: PlayerId, stack_id: ObjectId },
+    CostZoneMove { remaining: VecDeque<PendingZoneMove>, payer: PlayerId, stack_id: ObjectId },
+    /// Reached from `Engine::continue_discard_moves` (`Engine::
+    /// submit_discard`'s own CR 514.1 cleanup hand-size discard). Same
+    /// shape `CostZoneMove` has - `remaining` is the rest of this
+    /// discard's own `PendingZoneMove` queue. `since_ledger` is the ledger
+    /// length from *before* the first card in this discard committed -
+    /// carried through the pause so the eventual `ProcessState::
+    /// CollectTriggers { since }` transition (once the queue empties) still
+    /// sees this discard's own earlier-committed `ZoneChange`s, not just
+    /// whatever comes after the choice.
+    CleanupDiscard { remaining: VecDeque<PendingZoneMove>, since_ledger: usize },
 }
 
 /// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
@@ -1005,6 +1017,8 @@ impl Engine {
             // destruction (Sacrifice/Discard are each their own zone-change
             // verb) - a regeneration shield never intercepts one.
             ReplacementResumeTarget::CostZoneMove { .. } => false,
+            // CR 614.8: cleanup discard isn't destruction either.
+            ReplacementResumeTarget::CleanupDiscard { .. } => false,
         };
         let outcome =
             replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, is_destroy, excluded);
@@ -1057,7 +1071,7 @@ impl Engine {
             },
             ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
-                    let (committed, departed) = commands::commit_cost_zone_move(&mut self.state, event);
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
                     self.state.ledger.push(committed);
                     self.continue_cost_zone_moves(remaining, payer, stack_id)
@@ -1069,6 +1083,23 @@ impl Engine {
                         candidates,
                         excluded,
                         resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id },
+                    }
+                }
+            },
+            ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                    self.continue_discard_moves(remaining, since_ledger)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger },
                     }
                 }
             },
@@ -1552,11 +1583,11 @@ impl Engine {
         // validate's check rather than re-deriving anything. Sacrifice/
         // Discard are collected separately, *not* committed yet - CR
         // 601.2h/616.1 makes each one its own replaceable zone-change
-        // proposal (see commands::propose_cost_zone_move's doc comment),
+        // proposal (see commands::propose_zone_move's doc comment),
         // driven below by continue_cost_zone_moves.
-        let pending_zone_moves: VecDeque<PendingCostZoneMove> = commands::collect_cost_zone_moves(&plan.payments)
+        let pending_zone_moves: VecDeque<PendingZoneMove> = commands::collect_cost_zone_moves(&plan.payments)
             .into_iter()
-            .map(|(id, from)| PendingCostZoneMove { id, from })
+            .map(|(id, from)| PendingZoneMove { id, from })
             .collect();
         let immediate_events = commands::commit_payment(&mut self.state, payer, &plan.payments);
         if let Some(stack_object) = self.state.stack.iter_mut().find(|s| s.stack_id == stack_id) {
@@ -1588,8 +1619,8 @@ impl Engine {
     /// Drains `remaining` `Sacrifice`/`Discard` cost-payment targets one at a
     /// time - CR 616.1's ordering-choice pause can be raised by any of them,
     /// not just the first, since each independently proposes+replacement-
-    /// checks+commits its own `ZoneChange` (`commands::propose_cost_zone_move`/
-    /// `commit_cost_zone_move`). Same shape `continue_scripted_zone_move`
+    /// checks+commits its own `ZoneChange` (`commands::propose_zone_move`/
+    /// `commit_zone_move`). Same shape `continue_scripted_zone_move`
     /// already established for the scripted Destroy/Sacrifice/Exile ops -
     /// `departed_triggered_abilities`/`state.ledger` are updated inline as
     /// each target commits, rather than accumulated and flushed at the end
@@ -1603,12 +1634,12 @@ impl Engine {
     /// unconditionally before this split existed.
     fn continue_cost_zone_moves(
         &mut self,
-        mut remaining: VecDeque<PendingCostZoneMove>,
+        mut remaining: VecDeque<PendingZoneMove>,
         payer: PlayerId,
         stack_id: ObjectId,
     ) -> ProcessState {
         while let Some(pending) = remaining.pop_front() {
-            let Some(proposed) = commands::propose_cost_zone_move(&self.state, pending.id, pending.from) else {
+            let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from) else {
                 // Already gone somehow (shouldn't happen - PaymentPlan::
                 // validate confirmed it) - skip rather than guess, same
                 // stance continue_scripted_zone_move's own analogous check
@@ -1619,7 +1650,7 @@ impl Engine {
             // - a regeneration shield never intercepts either.
             match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
                 ReplacementOutcome::Resolved(event) => {
-                    let (committed, departed) = commands::commit_cost_zone_move(&mut self.state, event);
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
                     self.state.ledger.push(committed);
                 }
@@ -1708,19 +1739,18 @@ impl Engine {
 
     /// Answers a pending CR 514.1 discard-to-hand-size choice raised by
     /// `StepStatus::AwaitingDiscard` — `cards` must be exactly the right
-    /// number of cards from the active player's hand. Moves each hand →
-    /// graveyard via the same CR 400.7 new-`ObjectId` convention every other
-    /// zone move uses, then routes the resulting `ZoneChange` events through
-    /// `ProcessState::CollectTriggers` (`PipelineExit::CleanupSbaCheck`
+    /// number of cards from the active player's hand. Each card is now a
+    /// real replaceable zone-change proposal (CR 616.1's "if a card would be
+    /// discarded, exile it instead" pattern - e.g. Leyline of the Void) -
+    /// `continue_discard_moves` drives the queue, same propose/replacement-
+    /// check/commit split `Engine::continue_cost_zone_moves` established for
+    /// Sacrifice/Discard cost payments (`phase5/replaceable-cleanup-
+    /// discard`). Once every card's committed, `ProcessState::
+    /// CollectTriggers` still runs (`PipelineExit::CleanupSbaCheck`
     /// unconditionally continues on to `ProcessState::CleanupSbaCheck` once
     /// any `DiscardsCard`/`EachDiscardsCard` trigger has had a chance to be
     /// placed) so the next `step()` decides whether CR 514.3's priority
-    /// exception applies.
-    ///
-    /// TODO: discard can be replaced (e.g. Leyline of the Void redirects
-    /// discarded cards to exile) but replacement effects aren't implemented
-    /// yet — events committed directly to the ledger here, same shortcut
-    /// `submit_payment` uses.
+    /// exception applies - unchanged from before this split.
     pub fn submit_discard(&mut self, cards: Vec<ObjectId>) -> Result<(), DiscardError> {
         let ProcessState::AwaitingDiscard { player, excess } = self.process_state else {
             return Err(DiscardError::NotAwaitingDiscard);
@@ -1747,71 +1777,55 @@ impl Engine {
             }
         }
 
-        // Move each card hand → graveyard (CR 400.7: new ObjectId per move).
-        let mut events: Vec<GameEventKind> = Vec::with_capacity(cards.len());
-        let mut departed_all: Vec<RegisteredAbility> = Vec::new();
-        for card in cards {
-            let last_known_info =
-                self.state.object(card).expect("validated above").clone();
-            let owner = last_known_info.owner;
+        let since_ledger = self.state.ledger.len();
+        let pending: VecDeque<PendingZoneMove> =
+            cards.into_iter().map(|id| PendingZoneMove { id, from: ZoneKind::Hand }).collect();
+        self.process_state = self.continue_discard_moves(pending, since_ledger);
+        Ok(())
+    }
 
-            let new_id = self.state.allocate_object_id();
-            let mut new_object = last_known_info.clone();
-            new_object.object_id = new_id;
-            new_object.lineage = ObjectLineage { previous: Some(card) };
-            new_object.zone = ZoneKind::Graveyard;
-            new_object.timestamp = self.state.allocate_sequence_no();
-
-            self.state
-                .zone_mut(ZoneKind::Hand, Some(player))
-                .expect("hand zone must exist")
-                .remove(card);
-            // CR 400.7: discarded, no remap follows - purge any
-            // RegisteredAbility still pointing at the hand-zone id. Departed
-            // Triggered abilities stashed below (CR 603.10 LKI) - now that
-            // ConditionPrimitive::DiscardsCard/EachDiscardsCard exist, this
-            // is reachable in practice, unlike before this fix.
-            departed_all.extend(commands::retire_object(&mut self.state, card));
-            self.state
-                .zone_mut(ZoneKind::Graveyard, Some(owner))
-                .expect("graveyard zone must exist")
-                .push_bottom(new_id);
-            self.state.objects.insert(new_id, new_object);
-
-            events.push(GameEventKind::ZoneChange {
-                object: new_id,
-                from: ZoneKind::Hand,
-                to: ZoneKind::Graveyard,
-                last_known_info: Some(last_known_info),
-            });
+    /// Drains `remaining` cleanup-discard targets one at a time - same
+    /// propose/replacement-check/commit loop shape `continue_cost_zone_moves`
+    /// already established for Sacrifice/Discard cost payments, reused here
+    /// for `Engine::submit_discard`'s own CR 514.1 targets. `since_ledger`
+    /// (captured before the first card in this discard committed) is what
+    /// the eventual `ProcessState::CollectTriggers { since }` transition
+    /// needs once the queue empties - carried through any CR 616.1 pause via
+    /// `ReplacementResumeTarget::CleanupDiscard` so it isn't lost.
+    fn continue_discard_moves(&mut self, mut remaining: VecDeque<PendingZoneMove>, since_ledger: usize) -> ProcessState {
+        while let Some(pending) = remaining.pop_front() {
+            let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from) else {
+                continue;
+            };
+            // CR 614.8: a cleanup discard is never genuine destruction - a
+            // regeneration shield never intercepts one.
+            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    return ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger },
+                    };
+                }
+            }
         }
-
-        // Route through CollectTriggers/PutTriggersApnap instead of
-        // committing directly then jumping straight to CleanupSbaCheck -
-        // this discard's own ZoneChange events (and any DiscardsCard/
-        // EachDiscardsCard trigger they raise) used to bypass trigger
-        // collection entirely, the same AdvanceTurnStep-shaped pipeline gap
-        // this backlog item's Untap fix closed elsewhere.
+        // Route through CollectTriggers/PutTriggersApnap instead of ending
+        // the pipeline here - this discard's own ZoneChange events (and any
+        // DiscardsCard/EachDiscardsCard trigger they raise) need real
+        // trigger collection, same as every other real zone move.
         // PipelineExit::CleanupSbaCheck (unconditional, unlike
         // PipelineExit::CleanupCheck) is what still gets to the SBA check
         // afterward regardless of whether anything triggered, matching
         // begin_cleanup_step's own discard-then-SBA-check sequencing.
-        let since_ledger = self.state.ledger.len();
-        for kind in events {
-            let event_id = self.state.allocate_event_id();
-            let sequence_no = self.state.allocate_sequence_no();
-            self.state.ledger.push(GameEvent {
-                event_id,
-                sequence_no,
-                kind,
-                caused_by_command: None,
-                parent_event: None,
-            });
-        }
-        self.departed_triggered_abilities.extend(departed_all);
         self.pipeline_exit = PipelineExit::CleanupSbaCheck;
-        self.process_state = ProcessState::CollectTriggers { since: since_ledger };
-        Ok(())
+        ProcessState::CollectTriggers { since: since_ledger }
     }
 
     /// Builds a fresh `Engine` from a `GameConfig`: creates zones and

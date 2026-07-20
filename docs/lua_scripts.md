@@ -596,12 +596,15 @@ them separately from the immediate payments (mana/tap/life) and drives each one 
 continue_cost_zone_moves`, the same propose/replacement-check/commit split `sba::resolve_deaths`
 already uses (`phase5/replaceable-cost-zone-moves`) — so `Game.EventFilters.WouldMoveZone("Hand",
 "Graveyard")` genuinely intercepts a Discard-as-cost now, a `from` shape `WouldDie` could never
-express. `Engine::draw_one_card` and `Engine::submit_discard` (the cleanup-step hand-size discard,
-CR 514.3 — a different code path from a cost payment) still mutate state directly and never call
-`apply_replacements` at all — a "would draw a card, instead..." or "if a card would be discarded to
-the graveyard at cleanup, exile it instead" effect stays inert against those two specifically, same
-"proven correct, ready for a future producer" stance the CR 111.8 token zone-lock check already
-takes for the shapes it can't reach yet either.
+express. CR 514.1's cleanup hand-size discard is real too now (`phase5/replaceable-cleanup-discard`)
+— `Engine::submit_discard` drives its own queue through `Engine::continue_discard_moves`, the same
+propose/replacement-check/commit loop `continue_cost_zone_moves` uses, just with a different tail
+(routes into real trigger collection afterward instead of logging a `CostPaid` event). `Engine::
+draw_one_card` is the one holdout — it lives inside `AdvanceTurnStep`'s single shared `step()` match
+arm rather than a self-contained method, so making it replaceable needs a new pause/resume shape
+threaded through that whole function, real separate follow-up work. A "would draw a card, instead..."
+effect stays inert until then, same "proven correct, ready for a future producer" stance the CR 111.8
+token zone-lock check already takes for the shapes it can't reach yet either.
 
 ```lua
 -- If a creature you control would be sacrificed, exile it instead.
@@ -612,6 +615,26 @@ function s.initial_effect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
     e:SetAffected({ controller = "you", card_types = { "Creature" } })
+    e:Register()
+end
+
+return s
+```
+
+This intercepts a `Sacrifice`/`Discard` cost payment, a cleanup-step discard, or (once a real producer
+exists) a draw — the same registered effect matches all of them, since they all propose the identical
+`ZoneChange` shape. `Game.EventFilters.WouldMoveZone("Hand", "Graveyard")` alone (no `"Battlefield"`
+counterpart) catches only a discard, whichever way the card got discarded:
+
+```lua
+-- If a card would be discarded, exile it instead.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone("Hand", "Graveyard"))
+    e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
+    e:SetAffected({ card_types = { "Creature" } })
     e:Register()
 end
 
