@@ -869,14 +869,21 @@ No `:SetCost` — every `:AddCost` call appends to the ability's `CostSpec.addit
 components on an activated ability's own cost stay out of scope — no Lua-facing mana-cost-string
 parser exists anywhere yet (same boundary `CastSpell`'s own cost has).
 
-`:SetTarget(table)` (`phase5/equip-ability`) gives a script-registered activated ability a real
-target — reuses `decode_target_filter_table`, the same table-shape decoder `Game.SelectTargets`
-already uses (`{type="object"|"player"|"any", card_types={...}, subtypes={...}, supertypes={...},
-controller="you"|"opponent"|"any"}`, `type` defaults to `"object"`). Always single-target (`count:
-1, up_to: false`) — no "up to N" or multi-target shape, same narrowing precedent `Game.SelectTargets`'s
-own doc comment already set. Omitting `:SetTarget` entirely keeps the ability targetless (`target:
-None`), the prior behavior. CR 702.6a's Equip is the worked example — "`[Cost]`: Attach this
-permanent to target creature you control. Activate only as a sorcery":
+`:SetTarget(table | function)` (table shape `phase5/equip-ability`; function shape
+`phase5/scripted-target-filter`) gives a script-registered activated ability a real target — goes
+through `decode_target_filter_value`. A table reuses `decode_target_filter_table`, the same
+table-shape decoder `Game.SelectTargets` already uses (`{type="object"|"player"|"any",
+card_types={...}, subtypes={...}, supertypes={...}, controller="you"|"opponent"|"any"}`, `type`
+defaults to `"object"`). A bare function — `function(object, source, controller, state) -> bool` —
+becomes a scripted `TargetFilter::Script` legality predicate instead, for a shape the flat
+option-bag table can't express (e.g. "target creature with power 4 or greater"); see this file's
+own `invoke_target_legal`/`TargetFilter::Script` note further below (in the `Game.SelectTargets`
+section, where it's contrasted with that unrelated coroutine-based mechanism) for the full call
+shape and scoping notes. Always single-target (`count: 1, up_to: false`) either way — no "up
+to N" or multi-target shape, same narrowing precedent `Game.SelectTargets`'s own doc comment
+already set. Omitting `:SetTarget` entirely keeps the ability targetless (`target: None`), the
+prior behavior. CR 702.6a's Equip is the worked example — "`[Cost]`: Attach this permanent to
+target creature you control. Activate only as a sorcery":
 
 ```lua
 -- Equip {1}
@@ -959,8 +966,17 @@ checks `target.kind` to tell an object answer from a player one. Exactly one tar
 illegal answer to `submit_script_choice` is rejected and the pause stays open, same "invalid
 candidate, no state change" contract every other choice-submit method in this engine already has.
 
-`invoke_target`/`TargetSpec::Script` (a *static* target-requirement predicate, checked once at
-cast/activation time before the stack) is a different, unrelated concept and stays unimplemented.
+`invoke_target_legal`/`TargetFilter::Script` (a *static* per-candidate legality predicate, checked
+once at cast/activation time before the stack, from `commands::target_is_legal`) is a different,
+unrelated concept from the above — no coroutine involved, same synchronous per-candidate shape
+`invoke_continuous_affects` already uses for `AffectedFilter::Script`. Real as of
+`phase5/scripted-target-filter`: `ActivatedAbilityBuilder::SetTarget(function)` (previously table-
+only) registers `function(object, source, controller, state) -> bool`, nested inside a real
+`TargetRequirement` so `count`/`up_to` still apply — replacing the old top-level `TargetSpec::Script`
+variant, which had no count field of its own and was never constructed by anything across 5+ prior
+targeting slices (removed by this slice). Candidate is `Target::Object` only (a player-target script
+predicate is unmodeled) and still has to clear CR 702.16e protection first, same as every other
+`TargetFilter` arm. See `crates/engine/tests/phase5_scripted_target_filter.rs`.
 
 Real, tested end to end: `crates/engine/tests/phase5_coroutine_spike.rs` (the raw coroutine
 mechanism, standalone) and `crates/engine/tests/phase5_script_target_selection.rs` (the full
@@ -1029,15 +1045,15 @@ Don't spend time trying these — they're signatures only, or explicitly unbound
   `ByKey` is a real error. Real integration is expected to always hand this engine an
   already-resolved `Inline` source (the database crate resolves the key upstream), so this may
   never need solving here.
-- **Script-backed costs/targets** — `ScriptRuntime::invoke_cost`/`invoke_target` are both
-  `todo!()`. `Game.Costs.*` covers every structured `AdditionalCost` shape without needing either
-  one. Neither builder binds a bare `:SetCost` (both use `:AddCost`, appending to `CostSpec.
-  additional`, since a single activation can need more than one component). `TriggeredAbilityBuilder`
-  still doesn't bind `:SetTarget` at all (`invoke_target`'s own gap, nothing built yet to consume
-  one); `ActivatedAbilityBuilder`'s own `:SetTarget` (`phase5/equip-ability`) only accepts the
-  structured table shape `decode_target_filter_table` already handles (`{type=..., card_types=...,
-  controller=...}`) - a custom-Lua-function target predicate still isn't possible for either
-  builder, only the recognized primitive shapes.
+- **Script-backed costs** — `ScriptRuntime::invoke_cost` is still `todo!()`. `Game.Costs.*` covers
+  every structured `AdditionalCost` shape without needing it. Neither ability builder binds a bare
+  `:SetCost` (both use `:AddCost`, appending to `CostSpec.additional`, since a single activation
+  can need more than one component).
+- **Script-backed targets, resolved as of `phase5/scripted-target-filter`** —
+  `ScriptRuntime::invoke_target_legal` is real; `ActivatedAbilityBuilder::SetTarget` accepts a bare
+  function (`TargetFilter::Script`) alongside the structured table shape. `TriggeredAbilityBuilder`
+  still doesn't bind `:SetTarget` at all — nothing built yet consumes a target on a triggered
+  ability, a separate gap from the legality-predicate mechanism itself.
 - **{X} costs, alternative costs (flashback-style), hybrid/Phyrexian/snow mana payment** —
   pre-existing `CostSpec`/`PaymentPlan` gaps, not specific to the script bridge.
 - **Any event kind other than `ZoneChange`** — `event_to_lua` (`script.rs`) only bridges zone
