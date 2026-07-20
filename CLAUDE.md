@@ -25,7 +25,7 @@ Commits should be straight and to the point, but in readable and understandable 
 - make sure to stop and commit at appropritate times, but always check for permission before committing.
 - When done with implementation, give a detailed report in the chat as indicated in the workflow document.
 - Don't delete the branch, as I will manually inspect the code after for changes.
-- If all is good, I will instruct to merge the branch.
+- If all is good, I will instruct to commit, merge, and push.
 
 ## Notes
 Look in the docs folder for the following information:
