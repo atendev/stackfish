@@ -437,6 +437,21 @@ pub enum ReplacementResumeTarget {
     /// sees this discard's own earlier-committed `ZoneChange`s, not just
     /// whatever comes after the choice.
     CleanupDiscard { remaining: VecDeque<PendingZoneMove>, since_ledger: usize },
+    /// Reached from `ProcessState::AdvanceTurnStep`'s own `Step::Draw`
+    /// handling (CR 504.1's turn-based draw, `phase5/replaceable-draw`) -
+    /// a single proposal, not a queue (`draw_step` is always exactly one
+    /// card), so there's nothing left to loop over once this resolves -
+    /// resuming just means committing and continuing on to
+    /// `Engine::enter_priority_via_replacement_check`. `tail_events` is
+    /// this same `step()` call's own `TurnStarted`/`PhaseStarted`/
+    /// `StepStarted` markers, still unlogged - carried through so they
+    /// still reach the real pipeline (and, downstream, trigger collection)
+    /// once the choice is answered. `since_ledger` was captured *before*
+    /// the draw's own proposal, so the eventual trigger-collection window
+    /// covers both the draw and these markers regardless of which commits
+    /// (or logs) first - same reasoning `CleanupDiscard`'s own
+    /// `since_ledger` field documents.
+    Draw { tail_events: Vec<GameEventKind>, since_ledger: usize },
 }
 
 /// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
@@ -1019,6 +1034,8 @@ impl Engine {
             ReplacementResumeTarget::CostZoneMove { .. } => false,
             // CR 614.8: cleanup discard isn't destruction either.
             ReplacementResumeTarget::CleanupDiscard { .. } => false,
+            // CR 614.8: drawing a card isn't destruction either.
+            ReplacementResumeTarget::Draw { .. } => false,
         };
         let outcome =
             replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, is_destroy, excluded);
@@ -1100,6 +1117,23 @@ impl Engine {
                         candidates,
                         excluded,
                         resume: ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger },
+                    }
+                }
+            },
+            ReplacementResumeTarget::Draw { tail_events, since_ledger } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                    self.enter_priority_via_replacement_check(tail_events, since_ledger)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::Draw { tail_events, since_ledger },
                     }
                 }
             },
@@ -1826,6 +1860,24 @@ impl Engine {
         // begin_cleanup_step's own discard-then-SBA-check sequencing.
         self.pipeline_exit = PipelineExit::CleanupSbaCheck;
         ProcessState::CollectTriggers { since: since_ledger }
+    }
+
+    /// The shared tail every `ProcessState::AdvanceTurnStep` step reaches
+    /// once its own turn-based action (if any) is done and it's ready to
+    /// open a priority window (CR 603.3/117.3b: replacement check -> SBA ->
+    /// trigger collection first, same "settle everything before priority"
+    /// contract `PendingAction`/`ResolveStackTop` already follow). Factored
+    /// out (`phase5/replaceable-draw`) so `Step::Draw`'s own handling can
+    /// reach it both on the normal path and after a CR 616.1 pause resumes
+    /// (`ReplacementResumeTarget::Draw`) - `since_ledger` is a parameter
+    /// rather than captured fresh here specifically so `Step::Draw` can
+    /// supply one taken *before* its own draw committed (see that call
+    /// site's own comment for why the ordering matters).
+    fn enter_priority_via_replacement_check(&mut self, events: Vec<GameEventKind>, since_ledger: usize) -> ProcessState {
+        self.state.priority_player = self.state.active_player;
+        self.pipeline_context = Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
+        self.pipeline_exit = PipelineExit::BackToPriority;
+        ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() }
     }
 
     /// Builds a fresh `Engine` from a `GameConfig`: creates zones and
@@ -3045,14 +3097,19 @@ impl Engine {
                             }
                             // CR 120.3/121: no target, always top.controller
                             // (same "controller only" shape GainLife uses).
-                            // Cheaper than Counters - a ZoneChange always
-                            // describes a move that already happened (see
-                            // Destroy's own doc comment above), so this
-                            // mutates state immediately via the shared
-                            // draw_one_card helper (draw_step's own body,
-                            // extracted) and just logs the resulting real
-                            // event - no CommitEvents special-case needed,
-                            // same convention draw_step already established.
+                            // TODO(phase5/replaceable-draw): still mutates
+                            // directly via draw_one_card rather than the
+                            // propose/apply_replacements/commit split
+                            // draw_step's own AdvanceTurnStep handling now
+                            // uses - a "would draw a card, instead..." effect
+                            // is inert against a scripted "Draw N cards"
+                            // ability. Not folded into that slice: this sits
+                            // inside ResolveStackTop's own giant effect match
+                            // (a different pause/resume shape than
+                            // AdvanceTurnStep's), and N draws needs a real
+                            // queue (a count, not a list of ids - each draw
+                            // re-peeks whatever's now on top) rather than
+                            // Draw's own single-proposal resume target.
                             // Stops rather than looping past an empty
                             // library (CR 704.5b's empty-library-loss SBA
                             // isn't modeled - TODO, same gap draw_step
@@ -3795,14 +3852,43 @@ impl Engine {
                         self.process_state = ProcessState::AdvanceTurnStep;
                         return StepStatus::Progressed;
                     }
-                    // CR 504.1: draw is a turn-based action that happens
-                    // before priority opens (504.2 still opens it normally
-                    // below, unlike untap) - its ZoneChange joins the same
-                    // batch routed through the real pipeline below, so a
-                    // future "whenever you draw a card" condition would be
-                    // collected before that priority window too.
-                    let draw_events = self.draw_step();
-                    events.extend(draw_events);
+                    // CR 504.1/616.1: drawing is a real replaceable zone-
+                    // change proposal now (phase5/replaceable-draw) - same
+                    // propose/apply_replacements/commit split every other
+                    // zone-move producer in this engine uses. since_ledger
+                    // is captured *before* the draw's own event is logged
+                    // (directly, via commit_zone_move + a plain
+                    // state.ledger.push - bypassing the generic
+                    // ReplacementCheck pipeline below entirely, so the
+                    // already-resolved event never gets re-checked a second
+                    // time against a fresh, empty `excluded` set) so the
+                    // eventual trigger-collection window still covers both
+                    // the draw and this call's own TurnStarted/PhaseStarted/
+                    // StepStarted markers (`events`, still unlogged at this
+                    // point) - same property `DrawsCard`/`EachDrawsCard`
+                    // already depend on.
+                    let since_ledger = self.state.ledger.len();
+                    if let Some(proposed) = commands::propose_draw(&mut self.state, active) {
+                        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+                            ReplacementOutcome::Resolved(event) => {
+                                let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                                self.departed_triggered_abilities.extend(departed);
+                                self.state.ledger.push(committed);
+                            }
+                            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                                self.process_state = ProcessState::AwaitingReplacementChoice {
+                                    affected_player,
+                                    pending_event: event,
+                                    candidates,
+                                    excluded,
+                                    resume: ReplacementResumeTarget::Draw { tail_events: events, since_ledger },
+                                };
+                                return StepStatus::Progressed;
+                            }
+                        }
+                    }
+                    self.process_state = self.enter_priority_via_replacement_check(events, since_ledger);
+                    return StepStatus::Progressed;
                 }
                 if self.state.step == Step::Cleanup {
                     // CR 514.3: normally no priority during cleanup - run
@@ -3821,20 +3907,15 @@ impl Engine {
                 // CR 603.3/117.3b: route through the real pipeline
                 // (replacement check -> SBA -> trigger collection) before
                 // opening the priority window that follows every step/phase
-                // transition except Untap/Cleanup above - same "settle
+                // transition except Untap/Draw/Cleanup above - same "settle
                 // everything before priority" contract PendingAction/
                 // ResolveStackTop already follow. This is the fix for the
                 // gap ConditionPrimitive::BeginningOfYourUpkeep's own doc
                 // comment (ability.rs) names: AdvanceTurnStep used to push
                 // these events via log_events, which never ran
                 // collect_triggers at all.
-                self.state.priority_player = self.state.active_player;
                 let since_ledger = self.state.ledger.len();
-                self.pipeline_context =
-                    Some(PipelineContext { since_ledger, caused_by_command: None, parent_event: None });
-                self.pipeline_exit = PipelineExit::BackToPriority;
-                self.process_state =
-                    ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
+                self.process_state = self.enter_priority_via_replacement_check(events, since_ledger);
                 StepStatus::Progressed
             }
 
@@ -4235,32 +4316,22 @@ impl Engine {
         events
     }
 
-    /// CR 504.1: the active player draws one card as the draw step's
-    /// turn-based action, following the same CR 400.7 new-`ObjectId` zone
-    /// move `PlayLand`/`CastSpell`/SBA death already use. CR 103.8a: in a
-    /// two-player game, the starting player skips the draw on their first
-    /// turn - `turn_number == 1` always belongs to the starting player
-    /// since `active_player` only rotates at Cleanup, so that check alone
-    /// scopes this correctly without tracking who started separately.
-    /// Drawing from an empty library sets `PlayerState.drew_from_empty_library`
-    /// (see `draw_one_card`) rather than losing outright here - `sba::apply_player_loss`
-    /// is what actually eliminates the player, on the next SBA pass (CR 704.5b).
-    fn draw_step(&mut self) -> Vec<GameEventKind> {
-        let active = self.state.active_player;
-        self.draw_one_card(active).into_iter().collect()
-    }
-
-    /// Shared body behind `draw_step` (always `active_player`, exactly one
-    /// card) and `Game.Ops.DrawCards(n)`'s `ResolveStackTop` arm (any
-    /// `player`, looped `n` times) - CR 120.3/121's actual draw mechanic:
-    /// move the library's top card to hand under a new CR 400.7 object id,
-    /// same "new id, no remap" convention `PlayLand`/`CastSpell`/SBA death
-    /// already use. Returns `None` on an empty library (or no library zone
-    /// at all) - CR 704.5b: this sets `PlayerState.drew_from_empty_library`,
-    /// which `sba::apply_player_loss` checks on the next SBA pass. The loss
-    /// isn't immediate here - CR 704.5b is a state-based action, not a
-    /// consequence of the draw attempt itself, same "the SBA loop is what
-    /// actually eliminates" split 704.5a's own life-loss check already has.
+    /// `Game.Ops.DrawCards(n)`'s `ResolveStackTop` arm (any `player`, looped
+    /// `n` times) - CR 120.3/121's actual draw mechanic: move the library's
+    /// top card to hand under a new CR 400.7 object id, same "new id, no
+    /// remap" convention `PlayLand`/`CastSpell`/SBA death already use.
+    /// Returns `None` on an empty library (or no library zone at all) - CR
+    /// 704.5b: this sets `PlayerState.drew_from_empty_library`, which
+    /// `sba::apply_player_loss` checks on the next SBA pass. The loss isn't
+    /// immediate here - CR 704.5b is a state-based action, not a consequence
+    /// of the draw attempt itself, same "the SBA loop is what actually
+    /// eliminates" split 704.5a's own life-loss check already has.
+    ///
+    /// No longer `Step::Draw`'s own producer - `phase5/replaceable-draw`
+    /// replaced that call site with `commands::propose_draw`/`commit_zone_move`
+    /// (a real replacement-checked proposal); this direct-mutation function
+    /// is now `Game.Ops.DrawCards(n)`'s only caller, and stays that way until
+    /// that op gets the same treatment (see its own TODO comment).
     fn draw_one_card(&mut self, player: PlayerId) -> Option<GameEventKind> {
         let card = self
             .state

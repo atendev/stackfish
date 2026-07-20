@@ -599,12 +599,34 @@ already uses (`phase5/replaceable-cost-zone-moves`) — so `Game.EventFilters.Wo
 express. CR 514.1's cleanup hand-size discard is real too now (`phase5/replaceable-cleanup-discard`)
 — `Engine::submit_discard` drives its own queue through `Engine::continue_discard_moves`, the same
 propose/replacement-check/commit loop `continue_cost_zone_moves` uses, just with a different tail
-(routes into real trigger collection afterward instead of logging a `CostPaid` event). `Engine::
-draw_one_card` is the one holdout — it lives inside `AdvanceTurnStep`'s single shared `step()` match
-arm rather than a self-contained method, so making it replaceable needs a new pause/resume shape
-threaded through that whole function, real separate follow-up work. A "would draw a card, instead..."
-effect stays inert until then, same "proven correct, ready for a future producer" stance the CR 111.8
-token zone-lock check already takes for the shapes it can't reach yet either.
+(routes into real trigger collection afterward instead of logging a `CostPaid` event).
+
+CR 504.1's turn-based draw is real too, closing this reachability gap's last piece
+(`phase5/replaceable-draw`) — `Game.EventFilters.WouldMoveZone("Library", "Hand")` now genuinely
+intercepts it (a "you draw instead" Notion Thief-style effect, or the simpler "if you would draw a
+card, exile it instead" shape below):
+
+```lua
+-- If you would draw a card, exile it instead.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone("Library", "Hand"))
+    e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
+    e:SetAffected({ controller = "you" })
+    e:Register()
+end
+
+return s
+```
+
+The one remaining holdout is `Game.Ops.DrawCards(n)` (a scripted "draw N cards" ability) — it lives
+inside `ResolveStackTop`'s own giant effect match, a different pause/resume shape than
+`AdvanceTurnStep`'s (and needs a count-based queue, not a list of ids, since each draw re-peeks
+whatever's now on top of the library), so it wasn't folded into the same slice. A scripted multi-draw
+ability stays inert against a `WouldMoveZone` effect until that follow-up lands - the turn's own
+regular draw (CR 504.1, the overwhelmingly common real-card case) is unaffected.
 
 ```lua
 -- If a creature you control would be sacrificed, exile it instead.
