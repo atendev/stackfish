@@ -60,7 +60,7 @@ fn doom_blast_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_doom_blast".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 2,
             up_to: false,
         })),
@@ -88,7 +88,7 @@ fn slay_two_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_slay_two".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 2,
             up_to: false,
         })),

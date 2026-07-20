@@ -1,4 +1,4 @@
-use crate::types::card::{CardTypeSet, Subtype};
+use crate::types::card::{CardTypeSet, Subtype, SupertypeSet};
 use crate::types::cost::FilterController;
 use crate::types::ids::ScriptHandle;
 use crate::types::zone::ZoneKind;
@@ -25,13 +25,17 @@ pub enum TargetFilter {
     /// the target has *any* subtype in the list (an "or," not an "and") —
     /// same convention `cost.rs`'s `FilterSpec::subtypes` already
     /// documents for the identical reason (no real card asks for two
-    /// subtypes at once). No supertype restriction yet ("target legendary
-    /// creature") — narrower than `FilterSpec`, which does have one; no
-    /// card built against `TargetFilter` has needed it yet, named rather
-    /// than guessed at.
+    /// subtypes at once).
+    ///
+    /// `supertypes` (CR 205.4a, "target legendary creature") is an
+    /// intersection test against `SupertypeSet` (a bitflag, unlike
+    /// `subtypes`' bare-string `Vec`) — same shape and "or across the set's
+    /// bits" semantics `cost.rs`'s `FilterSpec::supertypes` already has, now
+    /// mirrored here.
     Object {
         card_types: Option<CardTypeSet>,
         subtypes: Option<Vec<Subtype>>,
+        supertypes: Option<SupertypeSet>,
         controller: Option<FilterController>,
         zone: Option<ZoneKind>,
     },

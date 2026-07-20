@@ -301,6 +301,9 @@ pub struct TargetRequirementSpec {
     /// itself documents.
     #[serde(default)]
     pub subtypes: Vec<String>,
+    /// CR 205.4a — e.g. `["Legendary"]` for "target legendary creature".
+    #[serde(default)]
+    pub supertypes: Vec<String>,
     #[serde(default)]
     pub controller: Option<String>,
     #[serde(default)]
@@ -745,6 +748,25 @@ fn parse_card_types(names: &[String]) -> CardTypeSet {
     set
 }
 
+/// `TargetRequirementSpec.supertypes` (CR 205.4a, "target legendary
+/// creature") - same names/panic-on-unknown convention `parse_card_types`
+/// just above uses; mirrors `script.rs`'s own `parse_supertype_name`,
+/// duplicated rather than shared per that function's own doc comment (no
+/// common string-parsing utility between the two crates today).
+fn parse_supertypes(names: &[String]) -> SupertypeSet {
+    let mut set = SupertypeSet::empty();
+    for name in names {
+        set |= match name.as_str() {
+            "Basic" => SupertypeSet::BASIC,
+            "Legendary" => SupertypeSet::LEGENDARY,
+            "Snow" => SupertypeSet::SNOW,
+            "World" => SupertypeSet::WORLD,
+            other => panic!("unknown supertype in scenario file: {other}"),
+        };
+    }
+    set
+}
+
 /// `CardSpec.power`/`.power_script` (or the `toughness` pair) -> a
 /// `PTValue` — a script, if present, wins over a plain fixed value (see
 /// `CardSpec.power_script`'s doc comment on why that overlap isn't
@@ -926,6 +948,7 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
             card_types: (!spec.card_types.is_empty()).then(|| parse_card_types(&spec.card_types)),
             subtypes: (!spec.subtypes.is_empty())
                 .then(|| spec.subtypes.iter().cloned().map(Subtype).collect()),
+            supertypes: (!spec.supertypes.is_empty()).then(|| parse_supertypes(&spec.supertypes)),
             controller: spec.controller.as_deref().map(parse_filter_controller),
             zone: spec.zone.as_deref().map(parse_zone_kind),
         },

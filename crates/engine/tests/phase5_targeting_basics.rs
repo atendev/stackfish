@@ -108,6 +108,7 @@ fn pump_definition() -> CardDefinition {
             filter: TargetFilter::Object {
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
+                supertypes: None,
                 controller: Some(FilterController::You),
                 zone: None,
             },

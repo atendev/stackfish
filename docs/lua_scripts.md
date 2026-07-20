@@ -685,12 +685,12 @@ parser exists anywhere yet (same boundary `CastSpell`'s own cost has).
 
 `:SetTarget(table)` (`phase5/equip-ability`) gives a script-registered activated ability a real
 target — reuses `decode_target_filter_table`, the same table-shape decoder `Game.SelectTargets`
-already uses (`{type="object"|"player"|"any", card_types={...}, controller="you"|"opponent"|"any"}`,
-`type` defaults to `"object"`). Always single-target (`count: 1, up_to: false`) — no "up to N" or
-multi-target shape, same narrowing precedent `Game.SelectTargets`'s own doc comment already set.
-Omitting `:SetTarget` entirely keeps the ability targetless (`target: None`), the prior behavior.
-CR 702.6a's Equip is the worked example — "`[Cost]`: Attach this permanent to target creature you
-control. Activate only as a sorcery":
+already uses (`{type="object"|"player"|"any", card_types={...}, subtypes={...}, supertypes={...},
+controller="you"|"opponent"|"any"}`, `type` defaults to `"object"`). Always single-target (`count:
+1, up_to: false`) — no "up to N" or multi-target shape, same narrowing precedent `Game.SelectTargets`'s
+own doc comment already set. Omitting `:SetTarget` entirely keeps the ability targetless (`target:
+None`), the prior behavior. CR 702.6a's Equip is the worked example — "`[Cost]`: Attach this
+permanent to target creature you control. Activate only as a sorcery":
 
 ```lua
 -- Equip {1}
@@ -759,11 +759,15 @@ synchronously. A script that never calls `Game.SelectTargets` behaves identicall
 existed — nothing about existing operations changes.
 
 `filter` is the same flat option-bag shape `:SetAffected`/cost filters already use, plus a `type`
-discriminator: `{ type = "object"|"player"|"any", card_types = {...}, subtypes = {...}, controller =
-"you"|"opponent"|"any" }`, every key optional (`type` defaults to `"object"`). `subtypes`
-(`phase5/targeting-subtype-filter`, CR 205.4b — "target Human," "Equip Dragons") is a plain list of
-subtype name strings, matched as an "or" (no parser — `Subtype` is a bare string newtype, any value
-is legal). `target` resumes as a tagged table, `{ kind = "object"|"player", id = n }` — a script
+discriminator: `{ type = "object"|"player"|"any", card_types = {...}, subtypes = {...}, supertypes =
+{...}, controller = "you"|"opponent"|"any" }`, every key optional (`type` defaults to `"object"`).
+`subtypes` (`phase5/targeting-subtype-filter`, CR 205.4b — "target Human," "Equip Dragons") is a
+plain list of subtype name strings, matched as an "or" (no parser — `Subtype` is a bare string
+newtype, any value is legal). `supertypes` (`phase5/targeting-supertype-filter`, CR 205.4a —
+"target legendary creature") is a list of supertype names (`"Basic"`/`"Legendary"`/`"Snow"`/
+`"World"`, same `parse_supertype_name` table `:SetAffected`'s own `supertypes` key already uses),
+matched as an intersection against `SupertypeSet`. `target` resumes as a tagged table, `{ kind =
+"object"|"player", id = n }` — a script
 checks `target.kind` to tell an object answer from a player one. Exactly one target per call (no
 "up to N," no zone override). An
 illegal answer to `submit_script_choice` is rejected and the pause stays open, same "invalid
