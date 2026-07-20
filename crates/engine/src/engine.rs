@@ -3566,7 +3566,7 @@ impl Engine {
                         };
                         let operation = ability.operation;
                         let effect = ability.effect.clone();
-                        let target_requirement = ability.target;
+                        let target_requirement = ability.target.clone();
                         let intervening_if = ability.intervening_if.clone();
                         let stack_id = self.state.allocate_object_id();
                         // TODO(CR 603.3c): triggered abilities that require

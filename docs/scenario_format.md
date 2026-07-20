@@ -335,6 +335,8 @@ its effect. `count` is always exact — no "up to N"/variable counts yet (see
 filter = "any"          # "object" | "player" | "any" (CR 115.4's any target: creature/player/
                          # planeswalker/battle)
 card_types = ["Creature"] # "object" filter only, default [] (no card-type restriction)
+subtypes = ["Human"]     # "object" filter only, default [] (no subtype restriction) - CR 205.4b,
+                         # matches as an "or" across the list
 controller = "you"       # "object" filter only, optional: "you" | "opponent" | "any"
 zone = "battlefield"     # "object" filter only, optional, default: battlefield (CR 115.2)
 count = 1                # u32, required - exact target count

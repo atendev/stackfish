@@ -733,10 +733,13 @@ synchronously. A script that never calls `Game.SelectTargets` behaves identicall
 existed — nothing about existing operations changes.
 
 `filter` is the same flat option-bag shape `:SetAffected`/cost filters already use, plus a `type`
-discriminator: `{ type = "object"|"player"|"any", card_types = {...}, controller = "you"|
-"opponent"|"any" }`, every key optional (`type` defaults to `"object"`). `target` resumes as a
-tagged table, `{ kind = "object"|"player", id = n }` — a script checks `target.kind` to tell an
-object answer from a player one. Exactly one target per call (no "up to N," no zone override). An
+discriminator: `{ type = "object"|"player"|"any", card_types = {...}, subtypes = {...}, controller =
+"you"|"opponent"|"any" }`, every key optional (`type` defaults to `"object"`). `subtypes`
+(`phase5/targeting-subtype-filter`, CR 205.4b — "target Human," "Equip Dragons") is a plain list of
+subtype name strings, matched as an "or" (no parser — `Subtype` is a bare string newtype, any value
+is legal). `target` resumes as a tagged table, `{ kind = "object"|"player", id = n }` — a script
+checks `target.kind` to tell an object answer from a player one. Exactly one target per call (no
+"up to N," no zone override). An
 illegal answer to `submit_script_choice` is rejected and the pause stays open, same "invalid
 candidate, no state change" contract every other choice-submit method in this engine already has.
 
