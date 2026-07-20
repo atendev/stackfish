@@ -157,11 +157,23 @@ impl CostSpec {
 /// needed, `viewer` is just `self.controller` (whose "You"/"Opponent"
 /// perspective the modifier's own text is written from).
 ///
-/// TODO(CR 613.7-style ordering): when two modifiers could apply at the same
-/// timestamp, the affected player chooses application order; this engine
-/// has no timestamp/ordering-choice concept for cost modifiers yet —
-/// `apply_cost_modifiers` below applies matches in `state.cost_modifiers`'s
-/// registration order instead, un-chosen.
+/// CR 601.2f: "the total cost is the mana cost... plus all... cost
+/// increases, and minus all cost reductions... If multiple cost reductions
+/// apply, the player may apply them in any order." Read as a single
+/// arithmetic formula (sum every increase/reduction, floor once at {0}) —
+/// not "apply each one at a time, flooring after every step" — `phase5/
+/// cost-modifier-order` found the two aren't equivalent whenever an
+/// increase and a reduction both match the same spell (e.g. base `{1}`,
+/// modifiers `-2` then `+1`: stepwise gives `{1}`; the same two modifiers
+/// in the opposite order give `{0}` — registration order silently changed
+/// the resolved cost). `apply_cost_modifiers` below sums first, floors
+/// once, so registration order in `state.cost_modifiers` no longer matters
+/// — no CR 616-style ordering-choice pause needed to fix this, since a
+/// single sum-then-floor is provably order-independent for the flat
+/// generic-only deltas this engine models (real Magic's own "order can
+/// matter among multiple reductions" carve-out is specifically about CR
+/// 118.7's colored-vs-generic-pip interactions, which `CostModifier`
+/// explicitly doesn't model — see its own scope note above).
 /// TODO: no `Game.CreateCostModifier` script builder yet — same "Rust
 /// struct-literal fixtures only" bootstrap stance replacement effects and
 /// static abilities each took before their own builder slice landed. Only
@@ -182,22 +194,35 @@ pub struct CostModifier {
 }
 
 /// Applies every `CostModifier` in `modifiers` whose `filter` matches
-/// `spell` (evaluated from that modifier's own `controller`'s perspective),
-/// one at a time in list order, each via `ManaCost::apply_cost_delta` — see
-/// that method's own doc comment for why this isn't "sum every delta, then
-/// clamp once."
+/// `spell` (evaluated from that modifier's own `controller`'s perspective)
+/// as a single net delta — sums every matching modifier's `amount` first,
+/// then calls `ManaCost::apply_cost_delta` exactly once, rather than once
+/// per modifier. See this struct's own doc comment (above, `CostModifier`)
+/// for why summing first is what CR 601.2f actually asks for, and why
+/// registration order in `modifiers` mattering at all (the pre-`phase5/
+/// cost-modifier-order` behavior) was the bug, not a missing player choice.
 pub fn apply_cost_modifiers(base: &ManaCost, modifiers: &[CostModifier], spell: &GameObject) -> ManaCost {
-    let mut cost = base.clone();
-    for modifier in modifiers {
+    let net_delta: i32 = modifiers
+        .iter()
         // `spell`'s own `.controller` is used directly here, not a resolved
         // effective_controller - it's a spell on the stack, not a
         // battlefield permanent, and no GainControl effect (CR 108.4) can
         // target something in that zone.
-        if modifier.filter.matches(spell, spell.controller, modifier.controller) {
-            cost = cost.apply_cost_delta(modifier.amount);
-        }
-    }
-    cost
+        .filter(|modifier| modifier.filter.matches(spell, spell.controller, modifier.controller))
+        .map(|modifier| modifier.amount)
+        .sum();
+    // A net-zero delta (no matching modifiers, or matching modifiers that
+    // cancel out) must be a true no-op - `ManaCost::apply_cost_delta(0)`
+    // isn't one: it always drops an *explicit* `Generic(0)` symbol (e.g. an
+    // {X} cost resolved with X=0, `ManaCost::resolve_x`'s own output),
+    // since a bare `0` never clears its own "adjusted > 0" push condition.
+    // Skipping the call entirely when there's nothing to add preserves
+    // that explicit zero marker - same "don't touch what isn't changing"
+    // bug `phase5/cost-modifier-order` caught via `phase5_x_costs.rs`'s
+    // own `x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry`
+    // regressing once this function started calling `apply_cost_delta`
+    // unconditionally.
+    if net_delta == 0 { base.clone() } else { base.apply_cost_delta(net_delta) }
 }
 
 /// `Color` enum order used to index a fixed-size `[u32; 5]` colored-mana

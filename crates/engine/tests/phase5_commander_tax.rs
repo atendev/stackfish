@@ -204,6 +204,55 @@ fn manually_return_to_command_zone(state: &mut GameState, card: ObjectId) -> Obj
     new_id
 }
 
+/// `phase5/cost-modifier-order` found this while fixing a related bug:
+/// `ManaCost::apply_cost_delta(0)` isn't a true no-op, it drops an explicit
+/// `Generic(0)` symbol (e.g. an {X} cost resolved with X=0) - the commander
+/// tax path used to call it unconditionally even on a first cast
+/// (`prior_casts == 0`, delta `2 * 0 == 0`), so an {X} commander cast for
+/// the very first time from the command zone would have silently lost its
+/// explicit `{0}`, requiring `PaymentPlan::validate` to accept a payment
+/// with *no* mana entry at all instead of the explicit-empty one CR 601.2b
+/// actually requires. Now the tax path skips `apply_cost_delta` entirely
+/// when `prior_casts == 0`, same guard `cost::apply_cost_modifiers` uses.
+#[test]
+fn x_cost_commander_first_cast_still_needs_an_explicit_empty_mana_entry() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let commander = ObjectId(0);
+    put_in_zone(
+        &mut state,
+        card_object(
+            commander,
+            creature_definition("General", ManaCost { symbols: vec![ManaSymbol::X] }),
+            p0,
+            ZoneKind::Command,
+            true,
+        ),
+        Some(p0),
+    );
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::CastSpell {
+                card: commander,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: Some(0),
+                alternative_cost: None,
+            },
+        })
+        .expect("X=0 is a legal announced value, first cast, no tax yet");
+    drain(&mut engine);
+
+    engine
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units: Vec::new(), phyrexian_life: 0 }] })
+        .expect("X resolved to {0}, no tax on the first cast - still needs the explicit empty Mana entry");
+    let status = drain(&mut engine);
+    assert!(matches!(status, engine::StepStatus::AwaitingAction { player } if player == p0));
+}
+
 #[test]
 fn first_cast_from_the_command_zone_has_no_tax() {
     let mut state = two_player_state();

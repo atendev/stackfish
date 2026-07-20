@@ -1313,7 +1313,19 @@ pub fn execute_command(
                             .and_then(|p| p.commander_casts.get(&object.definition.name))
                             .copied()
                             .unwrap_or(0);
-                        resolved_mana_cost.apply_cost_delta(2 * prior_casts as i32)
+                        // A first cast (prior_casts == 0, delta == 0) must
+                        // be a true no-op - apply_cost_delta(0) isn't one,
+                        // it always drops an explicit Generic(0) symbol
+                        // (see cost::apply_cost_modifiers's own doc comment
+                        // for the same bug shape, caught by phase5/cost-
+                        // modifier-order). An {X} commander with X == 0,
+                        // cast from the command zone for the first time,
+                        // would otherwise lose that explicit zero marker.
+                        if prior_casts == 0 {
+                            resolved_mana_cost
+                        } else {
+                            resolved_mana_cost.apply_cost_delta(2 * prior_casts as i32)
+                        }
                     } else {
                         resolved_mana_cost
                     };

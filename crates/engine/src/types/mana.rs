@@ -178,13 +178,19 @@ impl ManaCost {
     /// Thalia taxing an otherwise-`{R}`-only spell) — a non-positive delta
     /// with nothing to reduce is simply a no-op.
     ///
-    /// `cost.rs`'s `apply_cost_modifiers` calls this once per matching
-    /// `CostModifier`, in registration order, rather than summing every
-    /// delta first and clamping once — CR 613.7-style "affected player
-    /// picks the order among same-timestamp effects" isn't modeled (see
-    /// `CostModifier`'s own doc comment), but applying one at a time still
-    /// gets the common case (at most one reduction and one increase
-    /// interacting) right, since clamping is idempotent past zero.
+    /// `cost.rs`'s `apply_cost_modifiers` calls this exactly once per spell,
+    /// with the *sum* of every matching `CostModifier`'s `amount` — not
+    /// once per modifier. An earlier version of this codebase called it
+    /// once per modifier in registration order instead, on the claim that
+    /// "applying one at a time still gets the common case (at most one
+    /// reduction and one increase interacting) right, since clamping is
+    /// idempotent past zero" — that claim was wrong (`phase5/cost-modifier-
+    /// order`): base `{1}` with deltas `-2` then `+1` clamps to `{1}`,
+    /// while the same two deltas in the opposite order clamp to `{0}` —
+    /// registration order silently changed the result. Summing first and
+    /// clamping once (what this function still does, unchanged — only its
+    /// caller changed) is order-independent by construction, since addition
+    /// commutes and there's only one floor applied at the very end.
     pub fn apply_cost_delta(&self, delta: i32) -> ManaCost {
         let current: i32 = self
             .symbols
