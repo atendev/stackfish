@@ -34,7 +34,7 @@ pub struct PlayerState {
     /// source. 21+ from a single source means this player loses (CR 903.10a).
     pub commander_damage_taken: Vec<(ObjectId, u32)>,
     pub eliminated: bool,
-    /// CR 704.5b/120.3: set by `Engine::draw_one_card` when a draw is
+    /// CR 704.5b/120.3: set by `commands::propose_draw` when a draw is
     /// attempted against an empty (or missing) library zone. Once `true`,
     /// `sba::apply_player_loss` eliminates this player on the next SBA pass
     /// - sticky, never cleared once set (same permanence 704.5a's

@@ -243,7 +243,7 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
 /// The four "a player loses the game" state-based actions this engine
 /// checks: CR 704.5a (0 or less life), CR 704.5b (drew from an empty
 /// library — `PlayerState.drew_from_empty_library`, set by
-/// `Engine::draw_one_card`), CR 704.5c (10+ poison counters), and CR
+/// `commands::propose_draw`), CR 704.5c (10+ poison counters), and CR
 /// 903.10a (21+ combat damage from a single commander source). One
 /// `GameEventKind::PlayerEliminated` per player regardless of which cause
 /// applied — the event doesn't distinguish cause, same as before this

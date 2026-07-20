@@ -473,16 +473,16 @@ pub enum EventFilter {
     /// shape (see `ReplacementEffect::matches`'s own `is_destroy` doc
     /// comment), not something a wildcard-from/to filter should reinterpret.
     ///
-    /// Reachability note: most zone-change producers in this engine
-    /// (`Engine::draw_one_card`, `Engine::submit_discard`,
-    /// `commands::commit_payment`'s Sacrifice/Discard cost payments) mutate
-    /// state directly and never call `replacement::apply_replacements` at
-    /// all - only SBA-driven deaths and the scripted Destroy/Sacrifice/Exile
-    /// ops do, and all three are always Battlefield-sourced. A
-    /// `WouldMoveZone` matching a non-Battlefield `from` is real and correct
-    /// but currently unreachable via actual gameplay, same "proven via
-    /// direct construction, ready the moment a real producer exists" stance
-    /// `phase5/token-zone-lock`'s own CR 111.8 check already took.
+    /// Reachability note: as of this writing every real zone-change producer
+    /// routes through `replacement::apply_replacements` except token zone-lock
+    /// (which is hardcoded ahead of it). `WouldMoveZone(Library, Hand)` is now
+    /// reachable via `Game.Ops.DrawCards(n)`/`Engine::continue_draw_cards`, and
+    /// `WouldMoveZone(Hand, Graveyard)` is reachable via `Engine::submit_discard`
+    /// (CR 514.1 cleanup discard) and Sacrifice/Discard cost payments. A
+    /// `WouldMoveZone` matching other non-Battlefield `from`/`to` pairs is
+    /// real and correct but may still be unreachable via actual gameplay,
+    /// same "proven via direct construction, ready the moment a real producer
+    /// exists" stance `phase5/token-zone-lock`'s own CR 111.8 check already took.
     WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind>, affected: EffectFilter },
 }
 
