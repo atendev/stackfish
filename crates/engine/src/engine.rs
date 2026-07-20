@@ -452,6 +452,23 @@ pub enum ReplacementResumeTarget {
     /// (or logs) first - same reasoning `CleanupDiscard`'s own
     /// `since_ledger` field documents.
     Draw { tail_events: Vec<GameEventKind>, since_ledger: usize },
+    /// Reached from `ResolveStackTop`'s `AbilityEffect::DrawCards(n)` arm
+    /// (CR 120.3/121, `Game.Ops.DrawCards`). Unlike `Draw` above, this is
+    /// a count-based queue inside a resolving spell/ability - each draw
+    /// re-peeks the library's current top, and a CR 616.1 pause can fire
+    /// on any individual card. `remaining` is the number of cards still to
+    /// draw *after* the currently paused one; `events_so_far` carries the
+    /// spell's own Stack->Graveyard `ZoneChange` (if any) so it reaches the
+    /// normal `ReplacementCheck`/`CommitEvents` pipeline once the draws are
+    /// done. The draw events themselves are committed inline (like every
+    /// other replacement-checked zone move) so they are not re-checked a
+    /// second time against an empty `excluded` set.
+    ScriptedDraw {
+        remaining: u32,
+        player: PlayerId,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+    },
 }
 
 /// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
@@ -1036,6 +1053,9 @@ impl Engine {
             ReplacementResumeTarget::CleanupDiscard { .. } => false,
             // CR 614.8: drawing a card isn't destruction either.
             ReplacementResumeTarget::Draw { .. } => false,
+            // CR 614.8: a scripted DrawCards(n) ability is also just a draw,
+            // not destruction.
+            ReplacementResumeTarget::ScriptedDraw { .. } => false,
         };
         let outcome =
             replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, is_destroy, excluded);
@@ -1137,6 +1157,30 @@ impl Engine {
                     }
                 }
             },
+            ReplacementResumeTarget::ScriptedDraw { remaining, player, stack_id, events_so_far } => {
+                match outcome {
+                    ReplacementOutcome::Resolved(event) => {
+                        let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                        self.departed_triggered_abilities.extend(departed);
+                        self.state.ledger.push(committed);
+                        self.continue_draw_cards(remaining, player, stack_id, events_so_far)
+                    }
+                    ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                        ProcessState::AwaitingReplacementChoice {
+                            affected_player,
+                            pending_event: event,
+                            candidates,
+                            excluded,
+                            resume: ReplacementResumeTarget::ScriptedDraw {
+                                remaining,
+                                player,
+                                stack_id,
+                                events_so_far,
+                            },
+                        }
+                    }
+                }
+            }
         };
         Ok(())
     }
@@ -3095,32 +3139,26 @@ impl Engine {
                                     });
                                 }
                             }
-                            // CR 120.3/121: no target, always top.controller
-                            // (same "controller only" shape GainLife uses).
-                            // TODO(phase5/replaceable-draw): still mutates
-                            // directly via draw_one_card rather than the
-                            // propose/apply_replacements/commit split
-                            // draw_step's own AdvanceTurnStep handling now
-                            // uses - a "would draw a card, instead..." effect
-                            // is inert against a scripted "Draw N cards"
-                            // ability. Not folded into that slice: this sits
-                            // inside ResolveStackTop's own giant effect match
-                            // (a different pause/resume shape than
-                            // AdvanceTurnStep's), and N draws needs a real
-                            // queue (a count, not a list of ids - each draw
-                            // re-peeks whatever's now on top) rather than
-                            // Draw's own single-proposal resume target.
-                            // Stops rather than looping past an empty
+                            // CR 120.3/121/616.1: no target, always
+                            // top.controller (same "controller only" shape
+                            // GainLife uses). Routed through the real
+                            // propose/apply_replacements/commit pipeline so
+                            // "would draw a card, instead..." effects intercept
+                            // each individual draw. N draws is a count-based
+                            // queue (`ReplacementResumeTarget::ScriptedDraw`)
+                            // because each draw re-peeks the library's current
+                            // top. Stops rather than looping past an empty
                             // library (CR 704.5b's empty-library-loss SBA
                             // isn't modeled - TODO, same gap draw_step
                             // itself already carries).
                             Some(AbilityEffect::DrawCards(amount)) => {
-                                for _ in 0..*amount {
-                                    match self.draw_one_card(top.controller) {
-                                        Some(event) => events.push(event),
-                                        None => break,
-                                    }
-                                }
+                                self.process_state = self.continue_draw_cards(
+                                    *amount,
+                                    top.controller,
+                                    top.stack_id,
+                                    events,
+                                );
+                                return StepStatus::Progressed;
                             }
                             // CR 701.19b: no target, always top.controller
                             // (same "controller only" shape DrawCards/
@@ -4225,6 +4263,69 @@ impl Engine {
         }
     }
 
+    /// CR 120.3/121/616.1: drains `remaining` scripted draws one at a time,
+    /// each proposed via `commands::propose_draw`, replacement-checked, and
+    /// committed inline. A CR 616.1 ordering choice pauses on any individual
+    /// draw, carrying the rest of the count in `ReplacementResumeTarget::
+    /// ScriptedDraw` so `submit_replacement_choice` can resume. The draw
+    /// events themselves are pushed directly to the ledger (not queued in
+    /// `events_so_far`) so they are never re-checked a second time against a
+    /// fresh, empty `excluded` set; `events_so_far` carries only the rest of
+    /// this resolution's already-produced events (e.g. an instant/sorcery
+    /// spell's Stack->Graveyard move) so they still reach the normal
+    /// `ReplacementCheck`->`CommitEvents` pipeline once the draws finish.
+    fn continue_draw_cards(
+        &mut self,
+        mut remaining: u32,
+        player: PlayerId,
+        stack_id: ObjectId,
+        mut events_so_far: Vec<GameEventKind>,
+    ) -> ProcessState {
+        while remaining > 0 {
+            remaining -= 1;
+            let Some(proposed) = commands::propose_draw(&mut self.state, player) else {
+                break;
+            };
+            match replacement::apply_replacements(
+                &mut self.state,
+                &self.script_runtime,
+                proposed,
+                false,
+            ) {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                }
+                ReplacementOutcome::NeedsOrderingChoice {
+                    affected_player,
+                    event,
+                    candidates,
+                    excluded,
+                    ..
+                } => {
+                    return ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::ScriptedDraw {
+                            remaining,
+                            player,
+                            stack_id,
+                            events_so_far,
+                        },
+                    };
+                }
+            }
+        }
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        ProcessState::ReplacementCheck {
+            remaining: events_so_far.into(),
+            checked: Vec::new(),
+        }
+    }
+
     fn resume_sba_death(
         &mut self,
         pending_deaths: VecDeque<sba::DyingCandidate>,
@@ -4314,73 +4415,6 @@ impl Engine {
             events.push(GameEventKind::Untapped { object: id });
         }
         events
-    }
-
-    /// `Game.Ops.DrawCards(n)`'s `ResolveStackTop` arm (any `player`, looped
-    /// `n` times) - CR 120.3/121's actual draw mechanic: move the library's
-    /// top card to hand under a new CR 400.7 object id, same "new id, no
-    /// remap" convention `PlayLand`/`CastSpell`/SBA death already use.
-    /// Returns `None` on an empty library (or no library zone at all) - CR
-    /// 704.5b: this sets `PlayerState.drew_from_empty_library`, which
-    /// `sba::apply_player_loss` checks on the next SBA pass. The loss isn't
-    /// immediate here - CR 704.5b is a state-based action, not a consequence
-    /// of the draw attempt itself, same "the SBA loop is what actually
-    /// eliminates" split 704.5a's own life-loss check already has.
-    ///
-    /// No longer `Step::Draw`'s own producer - `phase5/replaceable-draw`
-    /// replaced that call site with `commands::propose_draw`/`commit_zone_move`
-    /// (a real replacement-checked proposal); this direct-mutation function
-    /// is now `Game.Ops.DrawCards(n)`'s only caller, and stays that way until
-    /// that op gets the same treatment (see its own TODO comment).
-    fn draw_one_card(&mut self, player: PlayerId) -> Option<GameEventKind> {
-        let card = self
-            .state
-            .zone(ZoneKind::Library, Some(player))
-            .and_then(|library| library.contents.front().copied());
-        let Some(card) = card else {
-            if let Some(p) = self.state.player_mut(player) {
-                p.drew_from_empty_library = true;
-            }
-            return None;
-        };
-
-        // Snapshot before the move - CR 603.10's last_known_info (see
-        // GameEventKind::ZoneChange's doc comment), same ordering PlayLand
-        // uses.
-        let last_known_info =
-            self.state.object(card).expect("card id came from the library zone's own contents").clone();
-
-        let new_id = self.state.allocate_object_id();
-        let mut new_object = last_known_info.clone();
-        new_object.object_id = new_id;
-        new_object.lineage = ObjectLineage { previous: Some(card) };
-        new_object.zone = ZoneKind::Hand;
-        new_object.timestamp = self.state.allocate_sequence_no();
-
-        self.state
-            .zone_mut(ZoneKind::Library, Some(player))
-            .expect("checked above")
-            .remove(card);
-        // CR 400.7: drawn, no remap follows - purge any RegisteredAbility
-        // still pointing at the library-zone id. Departed Triggered
-        // abilities stashed for consistency with every other retire_object
-        // call site, though still practically unreachable - no
-        // ConditionPrimitive matches a Library-departure LKI (a card sitting
-        // in the library wouldn't have a live triggered ability caring about
-        // itself leaving it anyway).
-        self.departed_triggered_abilities.extend(commands::retire_object(&mut self.state, card));
-        self.state
-            .zone_mut(ZoneKind::Hand, Some(player))
-            .expect("player has no hand zone")
-            .push_bottom(new_id);
-        self.state.objects.insert(new_id, new_object);
-
-        Some(GameEventKind::ZoneChange {
-            object: new_id,
-            from: ZoneKind::Library,
-            to: ZoneKind::Hand,
-            last_known_info: Some(last_known_info),
-        })
     }
 
     /// CR 514.1/514.2/514.3: entry point for the cleanup step's turn-based

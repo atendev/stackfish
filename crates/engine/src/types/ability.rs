@@ -168,18 +168,17 @@ pub enum AbilityEffect {
     /// controller draws exactly `n` cards (CR 120.3/121), no target (same
     /// "always the controller" shape `GainLife` already uses, not `Damage`/
     /// `Destroy`/`Counters`'s object-target shape — "Draw a card"/"you draw
-    /// two cards" vastly outnumbers "target player draws"). Cheaper than
-    /// even `Counters`: a `ZoneChange` always describes a move that already
-    /// happened (see `Destroy`'s own doc comment), so `ResolveStackTop`
-    /// mutates state immediately via the shared `Engine::draw_one_card`
-    /// helper (extracted from `draw_step`'s own body) and just logs the
-    /// resulting real event — no `CommitEvents` special-case needed, same
-    /// convention `draw_step` already established. Drawing from an empty
-    /// library silently stops rather than looping past it - CR 704.5b's
-    /// empty-library-loss SBA isn't modeled (same TODO `draw_step` already
-    /// carries). No `Target::Player` "target player draws" variant, no
-    /// replacement/prevention modeling for draws (no `EventFilter::
-    /// DrawsCard`/"would draw" shape exists).
+    /// two cards" vastly outnumbers "target player draws"). Like every
+    /// other real zone move in this engine, each draw is proposed via
+    /// `commands::propose_draw`, replacement-checked via `apply_replacements`
+    /// (CR 614/616), and committed via `commands::commit_zone_move` — see
+    /// `Engine::continue_draw_cards`. Drawing from an empty library silently
+    /// stops rather than looping past it - CR 704.5b's empty-library-loss SBA
+    /// isn't modeled (same TODO `draw_step` already carries). No `Target::
+    /// Player` "target player draws" variant; replacement effects that
+    /// change *which player* draws (e.g. Notion Thief) are not representable
+    /// because `ReplacementPayload::ReplaceZoneDestination` only rewrites `to`,
+    /// not the destination hand's owner.
     DrawCards(u32),
     /// The `Game.Ops.Sacrifice()` primitive — sacrifices the resolving
     /// `StackObject`'s first chosen target from the battlefield (CR 701.17).
@@ -231,9 +230,9 @@ pub enum AbilityEffect {
     /// Resolved by calling the existing `Engine::shuffle_library` helper
     /// (previously pregame-setup-only) directly, which already mutates state
     /// and logs the real `LibraryShuffled`/`RngDrawn` events itself — no
-    /// `CommitEvents` special-case needed, same convention `DrawCards`
-    /// established for `draw_one_card`. No fields — a toggle, not a value,
-    /// same shape as `Destroy`/`Sacrifice`/`Exile`.
+    /// `CommitEvents` special-case needed, same "commit inline" convention
+    /// `DrawCards` uses. No fields — a toggle, not a value, same shape as
+    /// `Destroy`/`Sacrifice`/`Exile`.
     ///
     /// TODO: `Target::Player` "target player shuffles their library" is rare
     /// but real — deferred as a named follow-up, same precedent `DrawCards`

@@ -708,13 +708,12 @@ pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind)
 /// zone besides Battlefield/Exile.
 ///
 /// CR 704.5b: an empty library still sets `PlayerState.drew_from_empty_library`
-/// here (not itself a zone-change) - ported exactly from this function's
-/// predecessor (`Engine::draw_one_card`, still real and unchanged - `Game.
-/// Ops.DrawCards(n)`'s `ResolveStackTop` arm is its only remaining caller;
-/// see this function's own reachability note in docs/implementation.md for
-/// why that call site wasn't folded into this slice). Takes `&mut GameState`
-/// rather than `propose_zone_move`'s `&GameState` for exactly this one side
-/// effect - nothing else about this function mutates state.
+/// here (not itself a zone-change) - the same flag the old direct-mutation
+/// `Engine::draw_one_card` used to set. `Game.Ops.DrawCards(n)`'s
+/// `ResolveStackTop` arm now routes through this function + `commit_zone_move`
+/// (see `Engine::continue_draw_cards`). Takes `&mut GameState` rather than
+/// `propose_zone_move`'s `&GameState` for exactly this one side effect -
+/// nothing else about this function mutates state.
 pub(crate) fn propose_draw(state: &mut GameState, player: PlayerId) -> Option<GameEventKind> {
     let card = state.zone(ZoneKind::Library, Some(player)).and_then(|library| library.contents.front().copied());
     let Some(card) = card else {
