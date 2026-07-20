@@ -175,3 +175,59 @@
     "can't enter, goes to the graveyard instead" effect is still unreachable.
   - CR 122.6a (which player places ETB counters) always defaults to the object's controller — no
     multiplayer override.
+
+## Slice: protection-as-replacement (merged)
+
+- Branch `phase5/protection-as-replacement`.
+- Scope: CR 702.16e/615.1/616.1 — protection's damage-prevention aspect now genuinely participates
+  in the CR 616 ordering-choice decision instead of applying unconditionally ahead of the loop.
+- Verify: 5 new tests (ordering-choice pause offered, both resolution orders' divergent outcomes,
+  the common-case regression, the documented sentinel-collision limitation), 0 failed, full
+  workspace suite (115 binaries) green — every existing `phase5_protection_from_*.rs` test passed
+  unchanged, confirming the common case (protection alone) is behavior-preserving.
+- Research finding before implementing: the gap was real (CR 616.1e gives the affected player a
+  genuine choice here) but completely unexercised — no existing test combined protection with a
+  competing registered replacement effect on the same event. Indestructible, despite `apply_
+  protection`'s own old doc comment drawing the "same stance" comparison, turned out to be a
+  structurally different shape (no event is ever proposed for an indestructible creature's lethal
+  damage, so there's nothing for a second effect to compete over) — explicitly *not* touched by
+  this slice.
+- Key changes:
+  - `apply_protection` (old: unconditional mutate-and-return, called first every loop iteration)
+    replaced by `protection_prevents(state, script_runtime, event: &GameEventKind) -> Option<ObjectId>`
+    — a pure predicate returning the protected object's own id if protection would zero the event's
+    damage, folded into `apply_replacements_from`'s own `matching` candidate list alongside real
+    `ReplacementEffect::source`s instead of being applied ahead of it.
+  - `apply_one_replacement_or_protection(state, chosen, event)` — new dispatch (`pub(crate)`,
+    exported), shared by the loop's own single-match branch and `Engine::submit_replacement_choice`'s
+    resume path (previously called `apply_one_replacement` directly): if `chosen` names a real
+    registered effect, applies it as before; otherwise treats it as the protection sentinel and
+    zeroes the damage.
+  - `matching` dedups the protection sentinel against an already-present entry with the same id
+    before pushing — without this, a permanent with *both* innate protection and its own registered
+    replacement effect on itself would get a spurious duplicate-id 2-candidate pause instead of
+    correctly collapsing to the one real match (caught by a failing test, see below).
+  - `ReplacementOutcome::NeedsOrderingChoice`'s own doc comment updated: `candidates` can now name
+    either a real effect source or the protection sentinel.
+- Known, accepted limitation (documented in code, not silently papered over): the protected
+  object's own id doubles as the protection sentinel. If that same object also has its own
+  registered replacement effect (source == itself) matching the same event, the two collide — the
+  registered effect always wins the dispatch, so protection can never independently be "the one
+  chosen" for that specific id in that specific case. Locked in by its own test rather than left
+  unverified. A real `ReplacementCandidate` enum (registered-vs-protection) would close this for
+  real; not built this slice, matching this codebase's preference for narrow real fixes over new
+  general machinery (`is_destroy`'s own call-parameter precedent).
+- Bug caught mid-slice (see `99-backlog.md`'s "Mistakes caught"): the first version of the dedup
+  fix was missing — a permanent with both protection and a self-registered effect produced a bogus
+  `matching = [id, id]` (two candidates that were actually the same object), triggering a spurious
+  ordering pause instead of the intended single-match collapse. Caught by `a_permanent_with_both_
+  protection_and_its_own_registered_effect_only_ever_resolves_the_registered_one` failing before the
+  fix.
+- Unresolved:
+  - The sentinel-collision limitation above.
+  - `apply_token_zone_lock` (CR 111.8) has the identical hardcoded-ahead-of-the-loop shape and the
+    same theoretical CR 616.1 exposure, but stays untouched — already flagged elsewhere as
+    unreachable via real gameplay, so the same fix isn't worth it there yet.
+  - Targeting/blocking enforcement (`commands::target_is_legal`, `DeclareBlockers`) are correctly
+    *not* touched — CR 702.16c/d are hard restrictions, not replacement effects, so CR 616.1 never
+    applied to them in the first place.

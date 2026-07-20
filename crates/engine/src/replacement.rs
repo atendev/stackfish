@@ -18,17 +18,22 @@ pub enum ReplacementOutcome {
     /// rewrite/re-match passes CR 616's stabilization requirement needed) —
     /// this is the event's final form, ready for `CommitEvents`.
     Resolved(GameEventKind),
-    /// More than one `ReplacementEffect` matches `event` and `affected_player`
-    /// must choose which applies first (CR 616.1) before resolution can
-    /// continue. `candidates` identifies the matching effects by their
-    /// `ReplacementEffect::source` `ObjectId` (no dedicated id type exists
-    /// yet). The engine must surface this as an actual pause — see
-    /// `engine::ProcessState::AwaitingReplacementChoice` — not fold it back
-    /// into a synchronous transform. `excluded` carries forward every
-    /// effect already applied to this same event earlier in this same
-    /// resolution (see `apply_replacements`'s own doc comment for why) — the
-    /// caller must thread it back into whatever continues this resolution
-    /// after the choice is made, not start a fresh empty exclusion set.
+    /// More than one replacement/prevention effect matches `event` and
+    /// `affected_player` must choose which applies first (CR 616.1) before
+    /// resolution can continue. `candidates` identifies the matches by
+    /// `ObjectId` (no dedicated id type exists yet) — almost always a real
+    /// `ReplacementEffect::source`, but CR 702.16e protection's damage
+    /// prevention (`protection_prevents`) can also appear here, identified
+    /// by the *protected object's own id* rather than a registered effect's
+    /// source (see that function's own doc comment, and `apply_one_
+    /// replacement_or_protection`'s dispatch). The engine must surface this
+    /// as an actual pause — see `engine::ProcessState::
+    /// AwaitingReplacementChoice` — not fold it back into a synchronous
+    /// transform. `excluded` carries forward every effect already applied to
+    /// this same event earlier in this same resolution (see `apply_
+    /// replacements`'s own doc comment for why) — the caller must thread it
+    /// back into whatever continues this resolution after the choice is
+    /// made, not start a fresh empty exclusion set.
     NeedsOrderingChoice {
         affected_player: PlayerId,
         event: GameEventKind,
@@ -102,29 +107,122 @@ pub(crate) fn apply_one_replacement(
     rewritten
 }
 
-/// CR 702.16a: protection prevents all damage from a source matching the
-/// protected quality (quality) — color (702.16e), card type (702.16),
-/// subtype (702.16), name (702.16a), "everything" (702.16j), or a specific
-/// player (702.16k), checked as an OR of all six, since any one alone is
-/// sufficient to trigger protection. Unlike a `ReplacementEffect` a card
-/// registers, this is a static, always-on characteristic of the object
-/// itself (`layers::effective_characteristics()`'s `protection_colors`/
+/// Dispatch for a chosen `ObjectId` out of `apply_replacements_from`'s
+/// `matching` list (either the loop's own single-match branch, or a resumed
+/// `NeedsOrderingChoice` pause via `Engine::submit_replacement_choice`) —
+/// almost always a real registered `ReplacementEffect::source`, in which
+/// case this is exactly `apply_one_replacement`. The one exception: CR
+/// 702.16e protection's damage prevention (`protection_prevents`) has no
+/// `state.replacement_effects` entry of its own to look up (it's a live
+/// characteristics query, not a registered effect — see that function's own
+/// doc comment for why), so when `chosen` doesn't name any registered
+/// effect, it must be the protection sentinel `protection_prevents` added to
+/// `matching` — the protected object's own id — and the damage is zeroed
+/// directly. Not rechecked against `protection_prevents` again here: exactly
+/// like `apply_one_replacement`'s own "trusts `matches` already confirmed
+/// this" contract, whoever built `matching` already established eligibility,
+/// and `Engine::submit_replacement_choice` independently validates `chosen`
+/// against `candidates` before this is ever called — a stale/invalid id
+/// can't reach this function at all.
+///
+/// Known limitation, not silently accepted: if the protected object also
+/// happens to have its *own* registered replacement effect with itself as
+/// `source` matching this same event (e.g. a self-registered regeneration
+/// shield on the same permanent), that effect's source collides with the
+/// protection sentinel — this dispatch always resolves the collision toward
+/// the registered effect, so protection can never be the one chosen for that
+/// specific id in that specific case. Narrow (needs both innate protection
+/// *and* a self-registered damage-replacement effect on the exact same
+/// permanent, matching the exact same event) and not fixed this slice —
+/// would need a real `ReplacementCandidate` enum (registered-vs-protection)
+/// instead of reusing `ObjectId` as a dual-purpose id to close for real.
+pub(crate) fn apply_one_replacement_or_protection(
+    state: &mut GameState,
+    chosen: ObjectId,
+    event: GameEventKind,
+) -> GameEventKind {
+    if state.replacement_effects.iter().any(|r| r.source == chosen) {
+        apply_one_replacement(state, chosen, event)
+    } else {
+        match event {
+            GameEventKind::DamageDealt { source, target, is_combat_damage, .. } => {
+                GameEventKind::DamageDealt { source, target, amount: 0, is_combat_damage }
+            }
+            other => other,
+        }
+    }
+}
+
+/// CR 702.16a/615.1/616.1: whether protection prevents `event`'s damage —
+/// checked as an OR of all six protected qualities (color, card type,
+/// subtype, name, "everything," or a specific player), same as before. A
+/// *predicate*, not a mutation, unlike every other payload in this file:
+/// protection isn't a `state.replacement_effects` entry a card registers
+/// (`layers::effective_characteristics()`'s `protection_colors`/
 /// `protection_card_types`/`protection_subtypes`/`protection_names`/
-/// `protection_everything`/`protection_players`), so it's a hardcoded check
-/// here rather than an entry in `state.replacement_effects` — same "checked
-/// up front, not modeled as a registered replacement" stance CR 702.12b
-/// indestructible already takes ahead of `Destroy`. Idempotent (zeroing an
-/// already-zero amount is a no-op), so calling it fresh on every
-/// `apply_replacements_from` loop iteration is safe and correctly
-/// re-evaluates against a possibly-`RedirectDamage`-changed target, not
-/// just the original proposal. A `Target::Player`/unresolvable source or
-/// target never has protection to check — returned unchanged.
+/// `protection_everything`/`protection_players` are a live characteristics
+/// query, re-derived every call, not a registered struct with a `source`
+/// field to look up) — so it can't sit in `state.replacement_effects`
+/// itself the way a real `ReplacementEffect` does. It still has to
+/// participate in the *same* CR 616.1 ordering-choice decision a registered
+/// effect does, though: `apply_replacements_from` folds this predicate's
+/// result into its own `matching` candidate list (identified by the
+/// protected object's own id, not a registered effect's source — see
+/// `apply_one_replacement_or_protection`'s own doc comment for how that's
+/// dispatched) rather than applying it unconditionally ahead of the loop
+/// the way this engine used to (CR 616.1e: protection's prevention has no
+/// fixed priority against another applicable replacement/prevention effect
+/// touching the same event — the affected player's choice is real and can
+/// produce a different outcome depending on order, e.g. a competing
+/// `RedirectDamage` moving the damage to an unprotected object *before*
+/// protection ever gets a chance to zero it).
+///
+/// Returns the protected object's `ObjectId` if protection would zero
+/// `event`'s damage, `None` otherwise (non-`DamageDealt` event, a
+/// `Target::Player`, or an unresolvable source/target — none of these have
+/// protection to check). Re-evaluated fresh every loop iteration by the
+/// caller (not memoized), same "recheck against a possibly-`RedirectDamage`-
+/// changed target" reasoning the old unconditional `apply_protection` this
+/// replaces already had.
+fn protection_prevents(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    event: &GameEventKind,
+) -> Option<ObjectId> {
+    let GameEventKind::DamageDealt { source, target, .. } = event else { return None };
+    let Target::Object(target_id) = target else { return None };
+    let (Some(source_obj), Some(target_obj)) = (state.object(*source), state.object(*target_id)) else {
+        return None;
+    };
+    let source_controller = source_obj.controller;
+    let target_controller = target_obj.controller;
+    let target_characteristics = crate::layers::effective_characteristics(state, script_runtime, *target_id);
+    let source_characteristics = crate::layers::effective_characteristics(state, script_runtime, *source);
+    let protected = target_characteristics.protection_everything
+        || target_characteristics.protection_colors.intersects(source_characteristics.colors)
+        || target_characteristics.protection_card_types.intersects(source_characteristics.card_types)
+        || target_characteristics
+            .protection_subtypes
+            .iter()
+            .any(|s| source_characteristics.subtypes.contains(s))
+        || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name)
+        || target_characteristics.protection_players.iter().any(|who| match who {
+            FilterController::You => source_controller == target_controller,
+            FilterController::Opponent => source_controller != target_controller,
+            FilterController::Any => false,
+        });
+    protected.then_some(*target_id)
+}
+
 /// CR 111.8: a token that has already left the battlefield can't move to
 /// another zone (or back onto the battlefield) — "if such a token would
 /// change zones, it remains in its current zone instead." Hardcoded ahead
-/// of the registered-effects match, same stance `apply_protection` already
-/// takes for CR 702.16a — this applies to every token unconditionally, not
-/// something a card grants. Checked against `state.object(object)`'s own
+/// of the registered-effects match (unlike protection above, this one still
+/// takes that stance — see its own "unreachable via real gameplay" note
+/// below for why the CR 616.1 ordering-choice exposure this pattern risks
+/// stays purely theoretical for this one, not worth the same fix yet) —
+/// this applies to every token unconditionally, not something a card
+/// grants. Checked against `state.object(object)`'s own
 /// *live* zone (not the proposal's own `from` field, though the two should
 /// always agree) — the token's identity/zone don't change until this event
 /// actually commits, so this is always the token's true current location.
@@ -158,37 +256,6 @@ fn apply_token_zone_lock(state: &GameState, event: GameEventKind) -> GameEventKi
         return GameEventKind::ZoneChange { object, from, to: from, last_known_info };
     }
     GameEventKind::ZoneChange { object, from, to, last_known_info }
-}
-
-fn apply_protection(state: &GameState, script_runtime: &ScriptRuntime, event: GameEventKind) -> GameEventKind {
-    let GameEventKind::DamageDealt { source, target, amount, is_combat_damage } = event else {
-        return event;
-    };
-    let Target::Object(target_id) = target else {
-        return GameEventKind::DamageDealt { source, target, amount, is_combat_damage };
-    };
-    let (Some(source_obj), Some(target_obj)) = (state.object(source), state.object(target_id)) else {
-        return GameEventKind::DamageDealt { source, target, amount, is_combat_damage };
-    };
-    let source_controller = source_obj.controller;
-    let target_controller = target_obj.controller;
-    let target_characteristics = crate::layers::effective_characteristics(state, script_runtime, target_id);
-    let source_characteristics = crate::layers::effective_characteristics(state, script_runtime, source);
-    let protected = target_characteristics.protection_everything
-        || target_characteristics.protection_colors.intersects(source_characteristics.colors)
-        || target_characteristics.protection_card_types.intersects(source_characteristics.card_types)
-        || target_characteristics
-            .protection_subtypes
-            .iter()
-            .any(|s| source_characteristics.subtypes.contains(s))
-        || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name)
-        || target_characteristics.protection_players.iter().any(|who| match who {
-            FilterController::You => source_controller == target_controller,
-            FilterController::Opponent => source_controller != target_controller,
-            FilterController::Any => false,
-        });
-    let amount = if protected { 0 } else { amount };
-    GameEventKind::DamageDealt { source, target, amount, is_combat_damage }
 }
 
 /// Rewrites/prevents `proposed` per CR 614/615/616, applying every matching
@@ -230,26 +297,41 @@ pub(crate) fn apply_replacements_from(
 ) -> ReplacementOutcome {
     let mut event = proposed;
     loop {
-        // CR 702.16a: checked fresh every iteration, ahead of the
-        // registered-effects match below - see apply_protection's own doc
-        // comment for why this is hardcoded rather than a ReplacementEffect
-        // entry.
-        event = apply_protection(state, script_runtime, event);
-        // CR 111.8: same hardcoded-ahead-of-registered-effects stance, for
-        // an already-off-battlefield token's own zone lock.
+        // CR 111.8: still hardcoded ahead of the match below - see
+        // apply_token_zone_lock's own doc comment for why this one keeps
+        // that stance while protection (below) no longer does.
         event = apply_token_zone_lock(state, event);
 
-        if state.replacement_effects.is_empty() {
-            // Genuinely nothing registered to match against - safe to
-            // resolve unchanged.
+        // CR 702.16a/616.1: protection's damage prevention now folds into
+        // `matching` as a real candidate (identified by the protected
+        // object's own id) rather than applying unconditionally ahead of
+        // the loop - see `protection_prevents`'s own doc comment for why.
+        let protection_candidate =
+            protection_prevents(state, script_runtime, &event).filter(|id| !excluded.contains(id));
+
+        if state.replacement_effects.is_empty() && protection_candidate.is_none() {
+            // Genuinely nothing to match against - safe to resolve unchanged.
             return ReplacementOutcome::Resolved(event);
         }
-        let matching: Vec<ObjectId> = state
+        let mut matching: Vec<ObjectId> = state
             .replacement_effects
             .iter()
             .filter(|r| !excluded.contains(&r.source) && r.matches(&event, is_destroy, state, script_runtime))
             .map(|r| r.source)
             .collect();
+        if let Some(protected_id) = protection_candidate {
+            // Sentinel collision (the protected object also has its own
+            // registered effect with itself as source, matching this same
+            // event - apply_one_replacement_or_protection's own doc comment
+            // names this limitation): don't push a second, duplicate entry
+            // for the same id - that would offer the player a bogus 2-way
+            // "choice" between two candidates that are actually the same
+            // object, rather than genuinely collapsing to the single real
+            // match the dispatch already resolves this case to.
+            if !matching.contains(&protected_id) {
+                matching.push(protected_id);
+            }
+        }
 
         match matching.as_slice() {
             [] => return ReplacementOutcome::Resolved(event),
@@ -258,7 +340,7 @@ pub(crate) fn apply_replacements_from(
                 // against this same event, and re-check the rewritten form
                 // (CR 616's stabilization requirement) by looping rather
                 // than returning immediately.
-                event = apply_one_replacement(state, *only, event);
+                event = apply_one_replacement_or_protection(state, *only, event);
                 excluded.push(*only);
             }
             _ => {

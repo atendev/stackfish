@@ -409,22 +409,27 @@ return s
 ```
 
 Enforced at three real call sites, none of them a `state.replacement_effects` entry (protection is
-a static, always-on characteristic, not something a card "registers" — same "checked up front, not
-a registered replacement" stance CR 702.12b indestructible already takes ahead of `Destroy`), each
-checking all six quality fields as an OR (protected if the color, card-type, subtype, name,
-"everything," *or* player quality matches the source — `protection_everything` short-circuits
-before even looking up the source's own characteristics, since CR 702.16j needs none; the player
-quality compares the source's raw `GameObject.controller` field, not a characteristic, resolved
-against the protected object's own controller): damage (`replacement::apply_protection`, CR
-702.16a — the matched source's damage is prevented entirely, re-checked fresh every
-replacement-resolution pass so a mid-resolution `RedirectDamage` retarget is caught too), targeting
-(`commands::target_is_legal`, CR 702.16c — a spell/ability matching a protected quality can't
-target it, including the CR 608.2b recheck at resolution time if protection is gained after the
-spell was already cast), and blocking (`DeclareBlockers`, CR 702.16d — a creature matching a
-protected quality can't block it, same call site Flying/Reach/Menace already gate). Enchant/Equip
-(702.16b) stays unmodeled — no attach/enchant machinery exists in this engine yet. That's the
-complete CR 702.16 quality list otherwise — color, card type, subtype, name, everything, and player
-are all real.
+a static, always-on characteristic, not something a card "registers" — it can't sit in
+`state.replacement_effects` the way a real `ReplacementEffect` struct does), each checking all six
+quality fields as an OR (protected if the color, card-type, subtype, name, "everything," *or*
+player quality matches the source — `protection_everything` short-circuits before even looking up
+the source's own characteristics, since CR 702.16j needs none; the player quality compares the
+source's raw `GameObject.controller` field, not a characteristic, resolved against the protected
+object's own controller): damage (`replacement::protection_prevents`, CR 702.16a/615.1/616.1 — the
+matched source's damage is prevented, but *not* applied unconditionally ahead of the CR 616 loop
+the way this engine used to (`phase5/protection-as-replacement`) — it's folded into
+`apply_replacements_from`'s own `matching` candidate list (identified by the protected object's own
+id) so it genuinely participates in CR 616.1's ordering choice when another registered replacement/
+prevention effect also matches the same event, dispatched by `apply_one_replacement_or_protection`;
+re-checked fresh every loop iteration either way, so a mid-resolution `RedirectDamage` retarget is
+still caught), targeting (`commands::target_is_legal`, CR 702.16c — a spell/ability matching a
+protected quality can't target it, including the CR 608.2b recheck at resolution time if protection
+is gained after the spell was already cast — this one's still a hard restriction, not a replacement
+effect, so CR 616.1 doesn't apply to it), and blocking (`DeclareBlockers`, CR 702.16d — a creature
+matching a protected quality can't block it, same call site Flying/Reach/Menace already gate, also
+a hard restriction). Enchant/Equip (702.16b) stays unmodeled — no attach/enchant machinery exists in
+this engine yet. That's the complete CR 702.16 quality list otherwise — color, card type, subtype,
+name, everything, and player are all real.
 
 `:SetAffected` takes a plain table, not its own family of tag factories — every key optional,
 same shape `EffectFilter` (`types/effect.rs`) already has:
@@ -621,12 +626,13 @@ end
 return s
 ```
 
-The one remaining holdout is `Game.Ops.DrawCards(n)` (a scripted "draw N cards" ability) — it lives
-inside `ResolveStackTop`'s own giant effect match, a different pause/resume shape than
-`AdvanceTurnStep`'s (and needs a count-based queue, not a list of ids, since each draw re-peeks
-whatever's now on top of the library), so it wasn't folded into the same slice. A scripted multi-draw
-ability stays inert against a `WouldMoveZone` effect until that follow-up lands - the turn's own
-regular draw (CR 504.1, the overwhelmingly common real-card case) is unaffected.
+`Game.Ops.DrawCards(n)` (a scripted "draw N cards" ability) is real too now
+(`phase5/replaceable-scripted-draw`) — `Engine::continue_draw_cards` loops `propose_draw`/
+`apply_replacements`/`commit_zone_move` per card (a count-based queue, not a list of ids, since
+each draw re-peeks whatever's now on top of the library after the previous one), pausing on
+`ReplacementResumeTarget::ScriptedDraw` for a CR 616.1 ordering choice same as every other
+replacement-checked producer. `Game.EventFilters.WouldMoveZone("Library", "Hand")` genuinely
+intercepts a scripted multi-draw now, not just the turn's own regular draw.
 
 ```lua
 -- If a creature you control would be sacrificed, exile it instead.

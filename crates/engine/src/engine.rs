@@ -1034,8 +1034,12 @@ impl Engine {
         // another effect, including needing a further ordering choice of
         // its own) - carrying `excluded` forward rather than starting a
         // fresh exclusion set, so an effect already applied before this
-        // pause can't reapply to the same event after it.
-        let rewritten = replacement::apply_one_replacement(&mut self.state, chosen, pending_event);
+        // pause can't reapply to the same event after it. `chosen` may name
+        // a real registered effect or the CR 702.16e protection sentinel
+        // (the protected object's own id) - apply_one_replacement_or_
+        // protection dispatches either way, same as apply_replacements_
+        // from's own single-match branch.
+        let rewritten = replacement::apply_one_replacement_or_protection(&mut self.state, chosen, pending_event);
         excluded.push(chosen);
         // is_destroy is per-resume-target: a ReplacementCheck-originated
         // event is never a destroy proposal (see replacement.rs's own doc
