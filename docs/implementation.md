@@ -2499,10 +2499,34 @@ verbatim once enough time has passed for the underlying code to have moved.
   controller against the *protected object's own* controller (`You`/`Opponent`, the same relative
   vocabulary `EffectFilter.controller` already uses) rather than a characteristic, since this engine
   has no multiplayer arbitrary-`PlayerId` targeting (backlog item 11) and a card script never
-  receives one at registration time. Enchant/Equip (702.16b) is the only remaining CR 702.16 gap -
-  needs real attach/enchant machinery this engine doesn't have (`GameObject.attached_to`/
-  `.attachments` are inert placeholder fields, same gap `phase5/gain-control-effect` already named
-  for its own aura-sourced follow-up).
+  receives one at registration time. Enchant/Equip (702.16b) was the only remaining CR 702.16 gap -
+  the Enchant (Aura) half is now closed too, `phase5/aura-attach` (docs/implementation.md, below):
+  an already-attached Aura whose target gains protection from it is caught by that slice's own CR
+  704.5m SBA check (which reuses `commands::target_is_legal`, protection included) and dies. Equip
+  stays open - Equipment's own attach ability (CR 701.5/702.6) is a separate, not-yet-built slice
+  (see `phase5/aura-attach`'s own UNRESOLVED list).
+- **Attach machinery (CR 303.4 Auras / CR 301.5-702.6 Equipment)**: `GameObject.attached_to`/
+  `.attachments` were inert placeholder fields, never written to anywhere, for the entire life of
+  this engine until `phase5/aura-attach` (docs/implementation.md, below) - repeatedly named as a
+  blocker by `phase5/protection-from-color`'s own Enchant/Equip note and `AbilityEffect::
+  GainControl`'s own Control-Magic-style-aura note, among others. Closed for Auras only:
+  `commands::attach_permanent` (the sole writer of either field, called from `engine.rs`'s
+  `ResolveStackTop` right after an Aura resolves onto its already-legality-checked target, CR
+  303.4a/b) and `sba::collect_illegally_attached_auras` (CR 704.5m/303.4c - an unattached or
+  now-illegally-attached Aura dies via the same `resolve_deaths` pipeline every other SBA death
+  uses). `commands::retire_object` also gained a bidirectional cleanup step - a departing object's
+  own id is now purged from whatever it was attached to's `attachments` list. Not attempted: CR
+  303.4d (an Aura can't enchant itself/an Aura-creature can't enchant anything), CR 303.4f/h/i/k/m
+  (non-spell attachment entry, "enchanted X" ability reference - no effect in this engine puts an
+  Aura onto the battlefield except by resolving as a spell, so unreachable today), enchant-subtype
+  restrictions ("Enchant Human," `target.rs`'s pre-existing subtype-filter gap), and all of
+  Equipment (CR 301.5/702.6's `Equip` activated ability needs a new `AbilityEffect::Attach`-style
+  primitive, an activate-only-as-sorcery restriction, and CR 704.5n's different in-place-unattach
+  SBA shape - an illegally-equipped Equipment becomes unattached and stays on the battlefield, not
+  a zone move like 704.5m, so it can't reuse `resolve_deaths`). A Control-Magic-style aura
+  (`AbilityEffect::GainControl` from a *static* ability rather than a resolving spell) is now
+  theoretically buildable on top of this machinery but wasn't attempted this slice - named, not
+  silently narrowed.
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
   the battlefield can't move zones again) is a related but separate rule, not covered.
@@ -8967,3 +8991,104 @@ slice's own edit to the same comment rather than left stale.
 **UNRESOLVED:** Enchant/Equip (CR 702.16b) - the sole remaining CR 702.16 gap, unrelated to this
 slice's own scope (needs attach/enchant machinery this engine doesn't have at all, not a protection-
 specific gap). CR 702.16's quality list itself is now fully closed.
+
+## Phase 5: phase5/aura-attach slice (CR 303.4, Aura attach machinery)
+
+Branch `phase5/aura-attach`, off master. Picked from the "Known unresolved gaps" list - `GameObject.
+attached_to`/`.attachments` had been named as inert placeholder fields, blocking real work, since as
+far back as the protection-from-color slice's own Enchant/Equip note and `AbilityEffect::
+GainControl`'s Control-Magic-style-aura note. Scoped to Auras only, on the user's own explicit
+choice between this and two smaller items (a `RedirectDamage` Lua binding, a CR 111.8 token
+zone-move guard) - Equipment's own `Equip` activated ability is a large enough second system (a new
+`AbilityEffect::Attach` primitive, an activate-only-as-sorcery restriction, and a structurally
+different CR 704.5n in-place-unattach SBA shape) to be its own follow-up slice, not bundled in.
+
+**Scoping finding, before writing code:** a research pass (file:line citations, full CR 303/301.5/
+702.5/702.6/704.5 text) confirmed the target-legality half of CR 303.4a ("an Aura spell requires a
+target") was already free - `TargetFilter::Object { card_types: Some(CREATURE), .. }` plus the
+existing `commands::target_is_legal`/CR 608.2b fizzle pipeline already reject an illegal Aura target
+and fizzle exactly like CR 303.4g's stack-case wants, with zero new mechanism. The two real gaps
+were (1) nothing ever *attached* an Aura once it resolved, and (2) no SBA ever cleaned one up per CR
+704.5m. `engine.rs`'s `ResolveStackTop` (CR 608.2m's single permanent-entry branch point,
+`move_resolving_spell`) was the one extension point for (1); `sba.rs`'s existing `DyingCandidate`/
+`resolve_deaths` pipeline (already generic over "any permanent type, not creature-specific," per
+`collect_world_rule_losers`'s own precedent) was the one extension point for (2) - no new zone-move
+mechanism needed, just a new collector feeding the same list.
+
+**What got implemented:**
+- `types/event.rs`: `GameEventKind::Attached { object, attached_to }` - a pure-mutation event, no
+  new `ObjectId` minted, same shape `Regenerated` already established for "something changed in
+  place, not a `ZoneChange`."
+- `commands.rs`: `is_aura(definition: &CardDefinition) -> bool` (card type `Enchantment` + a literal
+  `"Aura"` subtype string - `Subtype` has no parsed vocabulary, same ad hoc string-compare shape
+  `cost.rs`'s `FilterSpec` subtype filter already uses). `attach_permanent(state, attaching_id,
+  target_id)` - the sole writer of `GameObject.attached_to`/`.attachments`, sets both sides
+  (bidirectional). `retire_object` gained a new cleanup step: if the departing object was itself
+  attached to something, its id is purged from that target's own `attachments` list (best-effort;
+  an object *attached to* the departing one is deliberately left with a stale `attached_to` - CR
+  704.5m/704.5n's own SBA checks notice that lazily next pass, same timing a real game has, not
+  something to preempt).
+- `engine.rs`: `ResolveStackTop`'s permanent-entry branch, right after `move_resolving_spell`
+  returns a `Battlefield`-bound `ZoneChange`, checks `commands::is_aura` on the newly-entered object
+  and, if so, attaches it to the first (only, per CR 303.4a) entry in `legal_targets` - already
+  recomputed fresh by the pre-existing CR 608.2b check earlier in the same function, so no new
+  legality logic, just consuming what already existed. Logs the `ZoneChange` first, then `Attached`.
+- `sba.rs`: `collect_illegally_attached_auras` - every battlefield Aura with no `attached_to`, or
+  whose target no longer passes its own `CardDefinition.target_requirement` filter (re-checked via
+  `commands::target_is_legal`, the same function CR 608.2b's own resolution-time recheck uses),
+  feeds `DyingCandidate { is_destroy: false }` (CR 700.4/704.5m is "put into," not "destroy," so a
+  regeneration shield can never save one - same reasoning `collect_dying_creatures`/
+  `collect_world_rule_losers` already document for 704.5f/704.5k) into the same `dying` vector
+  `collect_world_rule_losers` already joins, reusing `resolve_deaths` verbatim. Because
+  `target_is_legal` already includes the protection check, an Aura's target gaining protection *from
+  that Aura* after it's already attached is caught too - closing the one piece of CR 702.16's Enchant
+  "DEBT" restriction the six protection slices' own doc comments had named but couldn't reach
+  without this machinery.
+- `docs/implementation.md`: extended the existing Protection gaps bullet and added a new "Attach
+  machinery" bullet. No `docs/lua_scripts.md` change - this slice has zero Lua surface (no new
+  `Game.*` binding; attach is driven entirely by `CardDefinition.card_types`/`.subtypes`/
+  `.target_requirement`, decided in Rust, not scripted).
+
+**CR requirements:** CR 303.4a (free, pre-existing), 303.4b (attach on resolution), 303.4c/704.5m
+(illegal-attachment cleanup). Not attempted, named rather than silently narrowed: CR 303.4d (an
+Aura can't enchant itself / an Aura-creature can't enchant anything), 303.4f/h/i/k/m (non-spell
+attachment entry, "enchanted X" ability reference - no effect in this engine puts an Aura onto the
+battlefield except by resolving as a spell, so these have no reachable trigger yet), enchant-subtype
+restrictions ("Enchant Human" - `target.rs`'s pre-existing subtype-filter gap), and all of Equipment
+(CR 301.5/702.6).
+
+**TODOs marked, not silently narrowed:** see CR requirements above, plus a Control-Magic-style aura
+(`AbilityEffect::GainControl` from a static ability) is now theoretically buildable on top of this
+machinery but wasn't attempted here.
+
+**Tests added** (`crates/engine/tests/phase5_aura_attach.rs`, 7 new tests): casting an Aura at a
+legal creature attaches it on resolution (both directions checked - `attached_to` and the target's
+own `attachments`, plus the `Attached` ledger event); casting at a target that becomes illegal
+before resolution fizzles and never attaches (reuses the same CR 608.2b mid-stack-protection
+mechanism the protection slices' own fizzle tests already exercise); an unattached Aura dies via SBA
+immediately; an Aura's target dying makes it fall off on the *next* SBA pass, not the same one (CR
+704.3 "based on the state as of the check" timing, mirrored directly off `phase5/token-cessation`'s
+own two-pass test shape); a healthy, legally-attached Aura is left alone; a plain (non-Aura)
+enchantment is never touched by the new check; and the bonus case - an Aura's target gaining
+protection from it after attaching makes the Aura fall off, and `retire_object`'s new cleanup step
+correctly purges the dead Aura's id from the target's own `attachments` list.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+7 new tests; every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none - `GameObject.attached_to`/`.attachments` already existed exactly as
+needed; this slice only added writers/readers.
+
+**INTERFACE DEVIATIONS:** `commands::retire_object`'s signature is unchanged, but its body now does
+one extra `HashMap` lookup on every call (the bidirectional-cleanup step) - not flagged in the
+pre-slice scoping discussion, found while implementing rather than anticipated up front.
+
+**SCOPE DEVIATIONS:** the `retire_object` cleanup step above touches a shared function used by every
+object-departure path in the engine (deaths, token cessation, player elimination), not just Aura
+removal - a deliberate, minimal, additive change (best-effort list cleanup, never observed by any
+correctness-relevant check), not a narrowly-scoped Aura-only edit, but not fixing it there would
+have left a real stale-data landmine the next feature to read `attachments` would hit.
+
+**UNRESOLVED:** everything named under "TODOs marked" above - CR 303.4d/f/h/i/k/m, enchant-subtype
+restrictions, and all of Equipment (a natural next slice).

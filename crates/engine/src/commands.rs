@@ -4,7 +4,7 @@ use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
 use crate::types::ability::RegisteredAbility;
-use crate::types::card::{CardTypeSet, KeywordSet};
+use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet};
 use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::cost::{self, AdditionalCost, AlternativeCost, CostPayment, CostSpec, FilterController};
@@ -529,8 +529,57 @@ pub(crate) fn purge_granted_abilities(state: &mut GameState, id: ObjectId) {
     state.replacement_effects.retain(|r| r.source != id);
 }
 
+/// CR 303.4: `definition` is an Aura - an enchantment (card type) with the
+/// "Aura" subtype. No `Subtype`-vocabulary parser exists (`Subtype` is a
+/// bare string newtype, `types/card.rs`) - checked by direct string
+/// comparison, same as every other ad hoc subtype check in this codebase
+/// (`cost.rs`'s `FilterSpec::matches` subtype filter does the identical
+/// `object.definition.subtypes.contains(s)` shape). Card-type-gated rather
+/// than subtype-alone, matching CR 303.4's own "some enchantments have the
+/// subtype Aura" framing - a non-enchantment permanent could theoretically
+/// carry a stray "Aura" subtype string without this treating it as one.
+pub(crate) fn is_aura(definition: &CardDefinition) -> bool {
+    definition.card_types.contains(CardTypeSet::ENCHANTMENT)
+        && definition.subtypes.iter().any(|s| s.0 == "Aura")
+}
+
+/// CR 303.4b/301.5a: attaches `attaching_id` (an Aura or, once Equipment's
+/// own `Equip` ability exists, an Equipment) to `target_id` - sets the
+/// attaching object's own `attached_to` and pushes into the target's
+/// `attachments`, kept in sync in both directions. The only writer of
+/// either field anywhere in this engine - see `GameObject`'s own doc
+/// comment for why they were inert placeholder fields before this slice.
+/// Silently no-ops if either id doesn't resolve to a live object (shouldn't
+/// happen - callers only ever pass ids they just confirmed exist), same
+/// "skip rather than guess" stance every other unresolvable-id case in this
+/// codebase already takes.
+pub(crate) fn attach_permanent(state: &mut GameState, attaching_id: ObjectId, target_id: ObjectId) {
+    if let Some(attaching) = state.object_mut(attaching_id) {
+        attaching.attached_to = Some(target_id);
+    }
+    if let Some(target) = state.object_mut(target_id) {
+        if !target.attachments.contains(&attaching_id) {
+            target.attachments.push(attaching_id);
+        }
+    }
+}
+
 pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<RegisteredAbility> {
-    state.objects.remove(&old_id);
+    let removed = state.objects.remove(&old_id);
+    // CR 303.4b/301.5a: if old_id was itself attached to something (an Aura/
+    // Equipment that just left play), drop it from that object's own
+    // `attachments` list too - best-effort bidirectional cleanup, not
+    // load-bearing for correctness. An object *attached to* old_id, if any,
+    // is deliberately left with a stale `attached_to` here - CR 704.5m/
+    // 704.5n's own SBA checks are what notice that lazily on the next pass,
+    // same timing a real game has (an Aura doesn't fall off the instant its
+    // enchanted creature dies, only once state-based actions are next
+    // checked), not something to preempt.
+    if let Some(target_id) = removed.and_then(|o| o.attached_to) {
+        if let Some(target) = state.object_mut(target_id) {
+            target.attachments.retain(|&id| id != old_id);
+        }
+    }
     let mut departed_triggered = Vec::new();
     state.abilities.retain(|a| {
         if a.source != old_id {

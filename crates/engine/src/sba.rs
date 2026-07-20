@@ -104,8 +104,11 @@ pub enum SbaOutcome {
 /// 702.12b's Indestructible — ignores 704.5g/deathtouch entirely, but NOT
 /// 704.5f), 704.5d (a token in a zone other than the battlefield ceases to
 /// exist — see `collect_ceasing_tokens`'s own doc comment for the timing
-/// that satisfies CR 111.7's parenthetical). Every other CR 704.5 SBA is
-/// still a no-op — see the TODO below for which and why.
+/// that satisfies CR 111.7's parenthetical), 704.5m (an Aura attached to an
+/// illegal object, or not attached to anything, is put into its owner's
+/// graveyard — see `collect_illegally_attached_auras`'s own doc comment).
+/// Every other CR 704.5 SBA is still a no-op — see the TODO below for which
+/// and why.
 ///
 /// This is a single pass, not the fixed-point loop — CR 704.3 requires
 /// repeating until no SBA applies. The engine loop (`engine.rs`) is
@@ -157,6 +160,11 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     // creature also independently dying to lethal damage) harmless.
     let mut dying = collect_dying_creatures(state, script_runtime);
     dying.extend(collect_world_rule_losers(state, script_runtime));
+    // CR 704.5m: same "fully deterministic, join the same list" shape as
+    // 704.5k above - an illegally-attached Aura isn't destruction (CR
+    // 700.4/704.5m's "put into," not "destroy"), so it can't be saved by a
+    // regeneration shield, same reasoning 704.5f/704.5k already document.
+    dying.extend(collect_illegally_attached_auras(state, script_runtime));
 
     match resolve_deaths(state, script_runtime, dying.into()) {
         DeathResolution::Done(death_events, mut death_departed) => {
@@ -505,6 +513,61 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
         // Tie for shortest time - no unique survivor, all die.
         world_objects.into_iter().map(|(id, _)| DyingCandidate { id, is_destroy: false }).collect()
     }
+}
+
+/// CR 704.5m/303.4c: every battlefield Aura (`commands::is_aura`) that's
+/// either not attached to anything, or whose `attached_to` no longer names
+/// a legal target - `CardDefinition.target_requirement`'s own filter
+/// re-checked fresh via `commands::target_is_legal`, the same function CR
+/// 608.2b's own resolution-time recheck already uses, so a target that
+/// left the battlefield, changed characteristics, *or gained protection
+/// from this very Aura since it attached* (closing the one piece of CR
+/// 702.16's Enchant "DEBT" restriction the protection slices couldn't -
+/// see `EffectiveCharacteristics::protection_colors`'s own doc comment)
+/// all correctly make the Aura fall off. `caster`/`source` are threaded
+/// through as the Aura's own current controller/object id, same meaning
+/// those parameters had at cast time - `target_is_legal`'s protection check
+/// reads the *Aura's* characteristics as the "source" whose quality
+/// matters (CR 702.16's "of the stated quality" always describes the
+/// source, not the caster), exactly what CR 702.16's Enchant restriction
+/// needs.
+///
+/// An Aura with no `target_requirement` at all (shouldn't happen for a
+/// real Aura - CR 303.4a requires one - but no fixture is stopped from
+/// building one without) falls back to a bare existence check on
+/// `attached_to`'s target, same "don't crash on a malformed fixture, just
+/// don't over-claim legality" stance every other missing-filter case in
+/// this codebase takes.
+///
+/// CR 304.3's "based on the state as of the check" timing falls out for
+/// free from running this *before* `resolve_deaths` mutates anything this
+/// same pass, same precedent `collect_ceasing_tokens`'s own doc comment
+/// already establishes for tokens - a creature dying this same pass still
+/// resolves as a legal target here, so its attached Auras wait one more
+/// SBA pass to fall off, matching real-game timing.
+fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
+    state
+        .objects
+        .values()
+        .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_aura(&o.definition))
+        .filter_map(|o| {
+            let illegal = match o.attached_to {
+                None => true,
+                Some(target_id) => match &o.definition.target_requirement {
+                    Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::target_is_legal(
+                        state,
+                        script_runtime,
+                        crate::types::ids::Target::Object(target_id),
+                        &req.filter,
+                        o.controller,
+                        o.object_id,
+                    ),
+                    _ => state.object(target_id).is_none(),
+                },
+            };
+            illegal.then_some(DyingCandidate { id: o.object_id, is_destroy: false })
+        })
+        .collect()
 }
 
 /// CR 704.5d: every token (`GameObject.is_token`) currently sitting in a
