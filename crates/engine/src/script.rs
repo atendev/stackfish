@@ -123,13 +123,19 @@ impl UserData for DurationTag {}
 
 /// Which `EventFilter` shape a `Game.CreateReplacementEffect` builder should
 /// build, before `:SetAffected` fills in the actual `EffectFilter` — plain
-/// data, not `EventFilter` itself, since `EventFilter`'s two real variants
-/// both carry an `affected: EffectFilter` this tag doesn't have yet at
+/// data, not `EventFilter` itself, since `EventFilter`'s real variants all
+/// carry an `affected: EffectFilter` this tag doesn't have yet at
 /// `:SetFilter()` time (see `ReplacementEffectBuilder`'s own doc comment).
+/// `WouldMoveZone`'s `from`/`to` are carried here (unlike `WouldDie`, which
+/// hardcodes Battlefield/Graveyard) since they're chosen at `:SetFilter()`
+/// call time via `Game.EventFilters.WouldMoveZone(fromName, toName)`, a
+/// function rather than a bare tagged value - either argument may be `nil`
+/// for "any zone" (`EventFilter::WouldMoveZone`'s own wildcard meaning).
 #[derive(Clone, Copy, Debug)]
 enum EventFilterKind {
     DamageDealt,
     WouldDie,
+    WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind> },
 }
 
 /// Same idea, for `Game.EventFilters.*` — e.g. `Game.EventFilters.DamageDealt`
@@ -848,6 +854,7 @@ fn validate_replacement_filter_payload_pairing(
             | (EventFilterKind::DamageDealt, ReplacementPayload::RedirectDamage(_))
             | (EventFilterKind::WouldDie, ReplacementPayload::ReplaceZoneDestination(_))
             | (EventFilterKind::WouldDie, ReplacementPayload::Regenerate)
+            | (EventFilterKind::WouldMoveZone { .. }, ReplacementPayload::ReplaceZoneDestination(_))
     );
     if paired {
         Ok(())
@@ -1287,6 +1294,9 @@ impl UserData for ReplacementEffectBuilder {
             let filter = match this.event_kind {
                 EventFilterKind::DamageDealt => EventFilter::DamageDealt { affected: this.affected },
                 EventFilterKind::WouldDie => EventFilter::WouldDie { affected: this.affected },
+                EventFilterKind::WouldMoveZone { from, to } => {
+                    EventFilter::WouldMoveZone { from, to, affected: this.affected }
+                }
             };
             validate_replacement_filter_payload_pairing(this.event_kind, &this.payload).map_err(to_lua_err)?;
             let replacement_effect = ReplacementEffect {
@@ -2244,12 +2254,25 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     )?;
 
     // `Game.EventFilters.*` - which EventFilter shape a ReplacementEffect
-    // watches (ReplacementEffectBuilder::SetFilter). Only the two shapes
-    // with a real query path (ReplacementEffect::matches) are ever bound -
-    // see EventFilter's own doc comment for what's unmodeled.
+    // watches (ReplacementEffectBuilder::SetFilter). Only the shapes with a
+    // real query path (ReplacementEffect::matches) are ever bound - see
+    // EventFilter's own doc comment for what's unmodeled.
     let event_filters = lua.create_table()?;
     event_filters.set("DamageDealt", EventFilterKindTag(EventFilterKind::DamageDealt))?;
     event_filters.set("WouldDie", EventFilterKindTag(EventFilterKind::WouldDie))?;
+    // `Game.EventFilters.WouldMoveZone(fromName, toName)` - either argument
+    // may be nil for "any zone" (EventFilter::WouldMoveZone's own wildcard
+    // meaning), e.g. `Game.EventFilters.WouldMoveZone("Battlefield", nil)`
+    // matches any move off the battlefield, `Game.EventFilters.
+    // WouldMoveZone(nil, "Exile")` matches any move into exile.
+    event_filters.set(
+        "WouldMoveZone",
+        lua.create_function(|_, (from_name, to_name): (Option<String>, Option<String>)| {
+            let from = from_name.as_deref().map(parse_zone_kind_name).transpose().map_err(to_lua_err)?;
+            let to = to_name.as_deref().map(parse_zone_kind_name).transpose().map_err(to_lua_err)?;
+            Ok(EventFilterKindTag(EventFilterKind::WouldMoveZone { from, to }))
+        })?,
+    )?;
 
     // `Game.ReplacementPayloads.*` - what a ReplacementEffect rewrites the
     // matched event into (ReplacementEffectBuilder::SetPayload).
