@@ -2540,16 +2540,20 @@ verbatim once enough time has passed for the underlying code to have moved.
   a sorcery" is enforced by matching on `effect == Some(AbilityEffect::Attach)` in `ActivateAbility`
   directly rather than a new `RegisteredAbility` field (see that variant's own doc comment).
   `commands::attach_permanent` also gained a reattach-safety fix (Equip retargets repeatedly; Auras
-  never did) alongside `retire_object`'s own bidirectional cleanup step from the Aura slice. Not
-  attempted: CR 303.4d (an Aura can't enchant itself/an Aura-creature can't enchant anything), CR
+  never did) alongside `retire_object`'s own bidirectional cleanup step from the Aura slice.
+  Enchant/Equip subtype-quality restrictions ("Enchant Human"/"Equip Dragons") closed too,
+  `phase5/targeting-subtype-filter` (docs/implementation.md, below) - `target.rs`'s own subtype-
+  filter gap this bullet used to name. CR 702.6d (multiple equip abilities per card) turned out to
+  already work with zero production changes - `commands::find_ability` already looks up
+  `state.abilities` filtered by source and indexed by registration order, nothing Attach-specific
+  about it - `phase5/multi-equip-ability` (docs/implementation.md, below) is pure proof, not a fix.
+  Not attempted: CR 303.4d (an Aura can't enchant itself/an Aura-creature can't enchant anything), CR
   303.4f/h/i/k/m (non-spell attachment entry, "enchanted X" ability reference - no effect in this
-  engine puts an Aura onto the battlefield except by resolving as a spell, so unreachable today),
-  enchant-subtype restrictions ("Enchant Human"/"Equip [quality]," `target.rs`'s pre-existing
-  subtype-filter gap, CR 702.6c), CR 702.6d (multiple equip abilities per card aren't distinguished
-  from each other), CR 702.6e (Equip planeswalker - backlog item 16's non-goal), and Fortifications.
-  A Control-Magic-style aura (`AbilityEffect::GainControl` from a *static* ability rather than a
-  resolving spell) is now theoretically buildable on top of this machinery but wasn't attempted -
-  named, not silently narrowed.
+  engine puts an Aura onto the battlefield except by resolving as a spell, so unreachable today), CR
+  702.6e (Equip planeswalker - backlog item 16's non-goal), and Fortifications. A Control-Magic-style
+  aura (`AbilityEffect::GainControl` from a *static* ability rather than a resolving spell) is now
+  theoretically buildable on top of this machinery but wasn't attempted - named, not silently
+  narrowed.
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
   the battlefield can't move zones again, or come back onto it) is closed too, `phase5/token-zone-
@@ -9509,3 +9513,49 @@ tokens aren't cards, so a token can never be the object of that move. CR 111.7's
 also means a token generally doesn't survive long in a non-battlefield zone regardless. If a future
 slice ever adds a real "move this token out of the graveyard" producer (some hypothetical effect),
 `apply_token_zone_lock` is already correct and ready to intercept it - nothing further to build.
+
+## Phase 5: phase5/multi-equip-ability slice (CR 702.6d, multiple equip abilities per card)
+
+Branch `phase5/multi-equip-ability`, off master. Last of the small-items list picked this batch
+(alongside CR 111.8 and the supertype target filter) before moving to bigger backlog work.
+
+**What got implemented:** nothing in production code. Research before writing any test confirmed
+`commands::find_ability` (used by both `ActivateAbility`'s `ability_index` field and
+`triggers::collect_triggers`'s `PendingTrigger::ability_index`) already filters `state.abilities` by
+`source` and indexes into that filtered list by registration order, generically over `AbilityKind` -
+nothing Attach-specific or equip-specific about it. Two `RegisteredAbility` entries sharing a
+`source`, each with its own `target`/`cost`, already resolve completely independently by index. CR
+702.6d ("any of its equip abilities may be activated") was already true the moment
+`phase5/equip-ability` landed `AbilityEffect::Attach` - that slice's own "not attempted" list named
+it defensively, without having actually tried it against the pre-existing indexing mechanism. Same
+shape correction `phase5/layer-engine-consumers` made once before for a different gap ("the TODO
+over-pattern-matched against a different, real wall").
+
+**CR requirements:** CR 702.6d, plus CR 702.6c (each equip ability's own further restriction, e.g.
+"Equip Dragon") to make the proof meaningful - two abilities with the *same* restriction wouldn't
+demonstrate they're genuinely separate from each other.
+
+**TODOs marked, not attempted:** none new.
+
+**Tests added** (`crates/engine/tests/phase5_multi_equip_ability.rs`, 2 new tests): a Rust-level test
+builds one Equipment with two hand-registered equip abilities (index 0: "Equip {0}," any creature
+you control; index 1: "Equip Dragon {0}," Dragon creatures only) and activates each by its own index
+- index 0 accepts a non-Dragon bear, index 1 then retargets the same Equipment to a Dragon (proving
+it's a real, separate ability, not index 0 reused), and index 1 rejects the bear (proving its own
+restriction is real, not silently shared with index 0's laxer one). A second test proves the Lua
+side: a card script calling `Game.CreateActivatedAbility(c):Register()` twice produces two distinct
+`state.abilities` entries with their own separately-decoded target filters.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (no production code touched at all,
+so no new warnings possible). `cargo test --workspace --no-fail-fast` - every test binary green, 0
+failures, including the 2 new tests.
+
+**STRUCT DEVIATIONS:** none - no production code changed.
+
+**INTERFACE DEVIATIONS:** none.
+
+**SCOPE DEVIATIONS:** none - this slice's entire scope was "write the test that proves or disproves
+the gap," decided before writing any code, and it proved there was no gap to fix.
+
+**UNRESOLVED:** none new. CR 702.6e (Equip planeswalker) remains backlog item 16's own explicit
+non-goal, unrelated to what this slice closed.
