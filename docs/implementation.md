@@ -2437,10 +2437,12 @@ verbatim once enough time has passed for the underlying code to have moved.
   702.6c's "Equip [quality] creature") closed too, `phase5/targeting-subtype-filter` -
   `TargetFilter::Object` gained a `subtypes: Option<Vec<Subtype>>` field, same shape `cost.rs`'s
   `FilterSpec::subtypes` already had, wired into both `commands::target_is_legal` and the shared
-  `Game.SelectTargets`/`ActivatedAbilityBuilder::SetTarget` Lua table decoder. No supertype
-  restriction on `TargetFilter` yet ("target legendary creature") - `FilterSpec` has one,
-  `TargetFilter` still doesn't, narrower gap than before but still open (all docs/implementation.md,
-  below).
+  `Game.SelectTargets`/`ActivatedAbilityBuilder::SetTarget` Lua table decoder. Supertype
+  restrictions ("target legendary creature") closed too, `phase5/targeting-supertype-filter`
+  (docs/implementation.md, below) - `TargetFilter::Object` gained `supertypes:
+  Option<SupertypeSet>`, same shape `cost.rs`'s `FilterSpec::supertypes` already had, wired into
+  the same two consumers subtypes just above uses. Unlike `subtypes`, `SupertypeSet` is `Copy`, so
+  this field addition needed no further `Copy`-derive fallout (all docs/implementation.md, below).
 - **Static abilities**: `StaticAbilityBuilder`'s own duration gap is closed, `phase5/static-ability-
   duration` (docs/implementation.md, below) — `:SetDuration(Game.Durations.*)`, same 4-tag
   `DurationTag` decode `Game.Ops.Pump` already used, defaulting to `Permanent` when unset. "As long
@@ -9368,3 +9370,76 @@ source's controller"), and Attach-machinery-composed destinations ("enchanted/eq
 all named above, not attempted. `commands::target_is_legal`'s `TargetFilter::AnyTarget` arm still has
 its own pre-existing "doesn't check `eliminated`" gap for CR 115.4 targeting generally - not fixed
 here, out of this slice's scope (different call site, different rule).
+
+## Phase 5: phase5/targeting-supertype-filter slice (CR 205.4a, supertype target restrictions)
+
+Branch `phase5/targeting-supertype-filter`, off master. Picked over two smaller items (a CR 111.8
+token zone-move guard, CR 702.6d's multi-equip-ability distinction) by explicit user choice - closes
+the gap `target.rs`'s own doc comment named since `phase5/targeting-subtype-filter`: `FilterSpec`
+(cost.rs) already had a `supertypes` field, `TargetFilter` still didn't.
+
+**What got implemented:**
+- `types/target.rs`: `TargetFilter::Object` gained `supertypes: Option<SupertypeSet>`, same
+  intersection-test shape and semantics `cost.rs`'s `FilterSpec::supertypes` already documents.
+  Unlike the sibling `subtypes` field (a `Vec<Subtype>`), `SupertypeSet` is a `Copy` bitflag - this
+  addition needed no `Copy`-derive removal or downstream `.clone()` fixes, purely additive.
+- `commands.rs`: `target_is_legal`'s `TargetFilter::Object` arm gained a supertype check, matched
+  against `layers::effective_characteristics` (not the raw `CardDefinition`), same treatment
+  `card_types`/`subtypes` already get.
+- `script.rs`: `decode_target_filter_table` (shared by `Game.SelectTargets` and
+  `ActivatedAbilityBuilder::SetTarget`) gained a `supertypes` table key, reusing the existing
+  `parse_supertype_name` function `decode_filter_table` (cost-filter tables) already calls - no new
+  parser needed, same "Basic"/"Legendary"/"Snow"/"World" set.
+- `crates/scenario/src/lib.rs`: `TargetRequirementSpec` gained a `supertypes: Vec<String>` TOML
+  field, threaded into `build_target_requirement` the same way `subtypes` already is. Needed a new
+  `parse_supertypes` helper (mirroring `script.rs`'s `parse_supertype_name`, duplicated per that
+  function's own doc comment - no shared string-parsing utility exists between the two crates) since
+  this crate had no supertype-name parser at all before this slice (`CardSpec` itself still can't
+  mark a card definition Legendary/Basic/Snow/World from TOML - out of scope, a separate gap).
+- `docs/lua_scripts.md`/`docs/scenario_format.md`/`docs/implementation.md`: extended the existing
+  `Game.SelectTargets`/`:SetTarget` filter-shape docs and the `target_requirement` TOML table docs,
+  rather than writing new sections.
+
+**CR requirements:** CR 205.4a (supertype restrictions on a target), exercised through the same
+601.2c/602.2b targeting pipeline `phase5/targeting-subtype-filter` already proved (no new mechanism
+beyond the field itself) and CR 702.6c ("Equip legendary creature," the worked example both new
+Lua-facing tests use, mirroring that slice's own "Equip Dragons" example).
+
+**TODOs marked, not attempted:** none new - this closes the exact gap named since the subtype-filter
+slice. Remaining, pre-existing targeting gaps (unchanged by this slice): "another target" (CR
+115.3), negative filters ("target creature you don't control that isn't a Wall"), "N or more"
+counts, more than one distinct "target" word per spell/ability.
+
+**Tests added** (`crates/engine/tests/phase5_targeting_supertype_filter.rs`, 6 new tests): casting a
+"target legendary creature" spell at a legendary creature is accepted, at a non-legendary creature
+is rejected; the spell fizzles when its target leaves the battlefield before resolution (CR 608.2b,
+same pattern the subtype-filter slice's own version of this test uses); the shared Lua decoder
+produces a real `supertypes` filter for an "Equip legendary creature"-style ability; equipping a
+non-legendary creature is rejected, equipping a legendary creature attaches it.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the 6
+new tests. Adding the field broke 1 production site (`sba.rs`'s synthetic Equipment-recheck filter)
+and 28 pre-existing `TargetFilter::Object` construction sites across 21 test files (29 `supertypes:
+None,` insertions total, one file needed two) - all mechanical, none behavior-changing, confirmed by
+a fresh `cargo build --workspace --tests` showing 0 remaining `E0063` errors before running the full
+suite. The one pre-existing *match* site (`phase5_targeting_subtype_filter.rs`'s own decoder-shape
+assertion) already used `..` and needed no change.
+
+**STRUCT DEVIATIONS:** none beyond the field itself - `SupertypeSet` being `Copy` meant no
+`Copy`-derive fallout, a smaller mechanical footprint than the sibling subtype-filter slice
+anticipated and confirmed before writing any code (checked `SupertypeSet`'s own `#[derive(...)]` in
+`types/card.rs` first).
+
+**INTERFACE DEVIATIONS:** none - every touched function kept its existing signature.
+
+**SCOPE DEVIATIONS:** the scenario crate needed a new `parse_supertypes` helper that didn't exist
+before this slice (unlike `subtypes`, which only needed `Subtype(String)` wrapping, no parsing) -
+anticipated once `TargetRequirementSpec.supertypes` was added, not a surprise, but worth naming since
+it's new code in a crate this slice didn't otherwise need to touch much.
+
+**UNRESOLVED:** "another target," negative filters, "N or more" counts, multi-target-word
+spells/abilities - all pre-existing, named above, not attempted. `CardSpec` (scenario crate) still
+can't mark a card definition itself Legendary/Basic/Snow/World from TOML - a real, separate gap from
+this slice's own `TargetRequirementSpec.supertypes` (which restricts *targets*, not card
+definitions) - not fixed here.

@@ -64,6 +64,7 @@ fn sacrifice_spell_definition() -> CardDefinition {
             filter: TargetFilter::Object {
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
+                supertypes: None,
                 controller: Some(FilterController::You),
                 zone: None,
             },
@@ -292,7 +293,7 @@ fn sacrifice_activated_ability_also_works() {
         condition: None,
         cost: Some(CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() }),
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, controller: Some(FilterController::You), zone: None },
+            filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: Some(FilterController::You), zone: None },
             count: 1,
             up_to: false,
         })),

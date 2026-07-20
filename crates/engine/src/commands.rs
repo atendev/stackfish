@@ -328,13 +328,13 @@ pub(crate) fn target_is_legal(
 ) -> bool {
     match filter {
         TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
-        TargetFilter::Object { card_types, subtypes, controller, zone } => {
+        TargetFilter::Object { card_types, subtypes, supertypes, controller, zone } => {
             let Target::Object(id) = target else { return false };
             let Some(obj) = state.object(id) else { return false };
             if obj.zone != zone.unwrap_or(ZoneKind::Battlefield) {
                 return false;
             }
-            if card_types.is_some() || subtypes.is_some() {
+            if card_types.is_some() || subtypes.is_some() || supertypes.is_some() {
                 let effective = crate::layers::effective_characteristics(state, script_runtime, id);
                 if let Some(types) = card_types {
                     if !effective.card_types.intersects(*types) {
@@ -350,6 +350,14 @@ pub(crate) fn target_is_legal(
                 // gets - not the raw CardDefinition.
                 if let Some(subtypes) = subtypes {
                     if !subtypes.iter().any(|s| effective.subtypes.contains(s)) {
+                        return false;
+                    }
+                }
+                // CR 205.4a: "target legendary creature" - same
+                // intersection-against-effective-characteristics treatment
+                // card_types gets, mirroring cost.rs's FilterSpec::matches.
+                if let Some(types) = supertypes {
+                    if !effective.supertypes.intersects(*types) {
                         return false;
                     }
                 }

@@ -109,6 +109,7 @@ fn equip_ability(source: ObjectId) -> RegisteredAbility {
             filter: TargetFilter::Object {
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
+                supertypes: None,
                 controller: Some(FilterController::You),
                 zone: None,
             },

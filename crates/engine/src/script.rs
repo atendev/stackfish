@@ -1876,7 +1876,23 @@ fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError>
                 None => None,
             };
 
-            Ok(TargetFilter::Object { card_types, subtypes, controller, zone: None })
+            // CR 205.4a: "target legendary creature" - same shape/table key
+            // decode_filter_table's own supertypes decode already uses.
+            let supertypes_table: Option<Table> =
+                table.get("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let supertypes = match supertypes_table {
+                Some(t) => {
+                    let mut set = SupertypeSet::empty();
+                    for entry in t.sequence_values::<String>() {
+                        let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                        set |= parse_supertype_name(&name)?;
+                    }
+                    Some(set)
+                }
+                None => None,
+            };
+
+            Ok(TargetFilter::Object { card_types, subtypes, supertypes, controller, zone: None })
         }
         other => Err(ScriptError::LoadError(format!(
             "unknown Game.SelectTargets filter type '{other}' - expected object/player/any"

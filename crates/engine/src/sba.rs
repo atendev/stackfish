@@ -607,6 +607,7 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
     let creature_filter = crate::types::target::TargetFilter::Object {
         card_types: Some(CardTypeSet::CREATURE),
         subtypes: None,
+        supertypes: None,
         controller: None,
         zone: None,
     };
