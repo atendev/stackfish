@@ -2608,7 +2608,36 @@ impl Engine {
                             if let Some(event) =
                                 self.move_resolving_spell(top.stack_id, destination, run_script)
                             {
+                                // CR 303.4b: an Aura entering the battlefield
+                                // this way attaches to its (already
+                                // legality-checked, CR 608.2b, above)
+                                // sole target instead of entering bare -
+                                // the only permanent-entry path this engine
+                                // builds attach for; CR 303.4f/h's other
+                                // entry shapes need an effect that puts a
+                                // permanent onto the battlefield already
+                                // attached, which doesn't exist here yet.
+                                let new_battlefield_aura = match &event {
+                                    GameEventKind::ZoneChange { object, to: ZoneKind::Battlefield, .. }
+                                        if self
+                                            .state
+                                            .object(*object)
+                                            .is_some_and(|o| commands::is_aura(&o.definition)) =>
+                                    {
+                                        Some(*object)
+                                    }
+                                    _ => None,
+                                };
                                 events.push(event);
+                                if let Some(aura_id) = new_battlefield_aura {
+                                    if let Some(Target::Object(target_id)) = legal_targets.first().copied() {
+                                        commands::attach_permanent(&mut self.state, aura_id, target_id);
+                                        events.push(GameEventKind::Attached {
+                                            object: aura_id,
+                                            attached_to: target_id,
+                                        });
+                                    }
+                                }
                             }
                         }
                         // else: defensive - the spell's GameObject should
