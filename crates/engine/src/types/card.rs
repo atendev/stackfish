@@ -124,7 +124,7 @@ bitflags! {
     /// just say `Game.GrantKeyword(card, "Flying")` instead of every card's
     /// script constructing a `KeywordSet` by hand.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub struct KeywordSet: u16 {
+    pub struct KeywordSet: u32 {
         /// CR 702.9 - evasion: blockable only by Flying/Reach.
         const FLYING        = 1 << 0;
         /// CR 702.17 - can block Flying (no evasion of its own).
@@ -182,6 +182,19 @@ bitflags! {
         /// shields sitting around unused to make "can't apply" meaningfully
         /// different from "was never created" anyway.
         const CANT_BE_REGENERATED = 1 << 15;
+        /// CR 702.36 - evasion: can't be blocked except by artifact and/or
+        /// black creatures.
+        const FEAR          = 1 << 16;
+        /// CR 702.13 - evasion: can't be blocked except by artifact
+        /// creatures and/or creatures that share a color with it.
+        const INTIMIDATE    = 1 << 17;
+        /// CR 702.28 - evasion: can only block/be blocked by other shadow
+        /// creatures (symmetric - a non-shadow creature can't block a
+        /// shadow one either).
+        const SHADOW        = 1 << 18;
+        /// CR 702.31 - evasion: can't be blocked by creatures without
+        /// horsemanship (a horsemanship creature may itself block anything).
+        const HORSEMANSHIP  = 1 << 19;
     }
 }
 

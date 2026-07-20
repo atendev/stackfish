@@ -512,6 +512,10 @@ fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> {
         "DoubleStrike" => KeywordSet::DOUBLE_STRIKE,
         "Trample" => KeywordSet::TRAMPLE,
         "CantBeRegenerated" => KeywordSet::CANT_BE_REGENERATED,
+        "Fear" => KeywordSet::FEAR,
+        "Intimidate" => KeywordSet::INTIMIDATE,
+        "Shadow" => KeywordSet::SHADOW,
+        "Horsemanship" => KeywordSet::HORSEMANSHIP,
         other => return Err(ScriptError::LoadError(format!("unknown keyword '{other}'"))),
     })
 }
