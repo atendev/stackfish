@@ -680,21 +680,24 @@ pub(crate) fn non_eliminated_players(state: &GameState) -> Vec<PlayerId> {
         .collect()
 }
 
-/// CR 601.2h/616.1: `Sacrifice`/`Discard` cost payments are themselves
-/// replaceable zone-change proposals ("if a permanent you control would be
-/// sacrificed, exile it instead" is a real, if unusual, card pattern) - this
-/// builds the *proposed* event only, mirroring `sba::resolve_deaths`'/
-/// `Engine::continue_scripted_zone_move`'s own "propose, then replacement-
-/// check, then commit" split rather than mutating directly the way this
-/// function's predecessor (`move_to_graveyard_for_cost`, folded into
-/// `commit_payment` itself) used to. `Engine::continue_cost_zone_moves` is
-/// the only caller - see its own doc comment for the full pipeline.
-pub(crate) fn propose_cost_zone_move(state: &GameState, id: ObjectId, from: ZoneKind) -> Option<GameEventKind> {
+/// CR 601.2h/616.1/514.1: a card moving to a graveyard - whether via a
+/// `Sacrifice`/`Discard` cost payment or CR 514.1's cleanup hand-size
+/// discard - is itself a replaceable zone-change proposal ("if a permanent
+/// you control would be sacrificed, exile it instead" is a real, if
+/// unusual, card pattern). This builds the *proposed* event only, mirroring
+/// `sba::resolve_deaths`'/`Engine::continue_scripted_zone_move`'s own
+/// "propose, then replacement-check, then commit" split rather than
+/// mutating directly the way this function's predecessor
+/// (`move_to_graveyard_for_cost`, folded into `commit_payment` itself) used
+/// to. Two callers: `Engine::continue_cost_zone_moves` (cost payments) and
+/// `Engine::continue_discard_moves` (cleanup discard, `phase5/replaceable-
+/// cleanup-discard`) - see either's own doc comment for its full pipeline.
+pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind) -> Option<GameEventKind> {
     let last_known_info = state.object(id)?.clone();
     Some(GameEventKind::ZoneChange { object: id, from, to: ZoneKind::Graveyard, last_known_info: Some(last_known_info) })
 }
 
-/// Commits `event` (a `propose_cost_zone_move` proposal, already
+/// Commits `event` (a `propose_zone_move` proposal, already
 /// replacement-checked by the caller — `to` may have been rewritten by a
 /// `ReplaceZoneDestination` payload) — CR 400.7 fresh `ObjectId`, same
 /// convention every other zone move in this codebase uses, and purges any
@@ -716,11 +719,11 @@ pub(crate) fn propose_cost_zone_move(state: &GameState, id: ObjectId, from: Zone
 /// the departed abilities let `DiscardsCard`/`EachDiscardsCard`
 /// (player-relative) and `Discarded` (self-referential,
 /// `phase5/discarded-trigger`) fire the same way.
-pub(crate) fn commit_cost_zone_move(state: &mut GameState, event: GameEventKind) -> (GameEvent, Vec<RegisteredAbility>) {
+pub(crate) fn commit_zone_move(state: &mut GameState, event: GameEventKind) -> (GameEvent, Vec<RegisteredAbility>) {
     let GameEventKind::ZoneChange { object: old_id, from, to, last_known_info } = event else {
-        unreachable!("propose_cost_zone_move only ever proposes a ZoneChange");
+        unreachable!("propose_zone_move only ever proposes a ZoneChange");
     };
-    let last_known_info = last_known_info.expect("propose_cost_zone_move always sets last_known_info");
+    let last_known_info = last_known_info.expect("propose_zone_move always sets last_known_info");
     let owner = last_known_info.owner;
 
     let new_id = state.allocate_object_id();
@@ -765,7 +768,7 @@ pub(crate) fn commit_cost_zone_move(state: &mut GameState, event: GameEventKind)
 /// contract `cost::spend` documents for mana). `Sacrifice`/`Discard` are
 /// deliberately not handled here — unlike mana/tap/life, they're zone-change
 /// proposals, themselves subject to CR 601.2h/616.1 replacement checking
-/// (see `propose_cost_zone_move`'s own doc comment) — `Engine::submit_payment`
+/// (see `propose_zone_move`'s own doc comment) — `Engine::submit_payment`
 /// collects them separately and drives them through `Engine::
 /// continue_cost_zone_moves` instead of this function.
 ///
@@ -817,9 +820,9 @@ pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &
     events
 }
 
-/// `PendingCostZoneMove` (`Engine::continue_cost_zone_moves`'s own queue
+/// `PendingZoneMove` (`Engine::continue_cost_zone_moves`'s own queue
 /// entry) - collects every `Sacrifice`/`Discard` payment in `payments` into
-/// a `(id, source zone)` pair, ready for `propose_cost_zone_move`. Kept as a
+/// a `(id, source zone)` pair, ready for `propose_zone_move`. Kept as a
 /// standalone pass (not folded into `commit_payment` above) since it must
 /// run *before* any replacement-checked commit happens - `PaymentPlan::
 /// validate` has already confirmed every id here really is in the zone it

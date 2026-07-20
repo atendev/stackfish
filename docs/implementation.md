@@ -2473,11 +2473,17 @@ verbatim once enough time has passed for the underlying code to have moved.
   (docs/implementation.md, below) - `Engine::submit_payment` collects them separately from mana/tap/
   life and drives each through `Engine::continue_cost_zone_moves`, the same propose/replacement-
   check/commit split `sba::resolve_deaths` already established, complete with its own CR 616.1
-  ordering-choice pause (`ReplacementResumeTarget::CostZoneMove`). `Engine::draw_one_card` and
-  `Engine::submit_discard` (the cleanup-step hand-size discard, a different code path from a cost
-  payment) still mutate directly - "would draw a card, instead..." and "if a card would be discarded
-  at cleanup, exile it instead" stay inert, named rather than silently implied fixed. Within the
-  shapes that do exist,
+  ordering-choice pause (`ReplacementResumeTarget::CostZoneMove`). CR 514.1's cleanup hand-size
+  discard closed too, `phase5/replaceable-cleanup-discard` (docs/implementation.md, below) -
+  `Engine::submit_discard` now drives `Engine::continue_discard_moves`, reusing the exact same
+  `commands::propose_zone_move`/`commit_zone_move` pair cost payments use (renamed from
+  `propose_cost_zone_move`/`commit_cost_zone_move` to drop the now-inaccurate "cost" prefix once a
+  second, non-cost caller existed), with its own `ReplacementResumeTarget::CleanupDiscard` pause.
+  `Engine::draw_one_card` is the one holdout - it lives inside `AdvanceTurnStep`'s single shared
+  `step()` match arm rather than a self-contained method, so making it replaceable needs a new
+  pause/resume shape threaded through that whole function, real, separate, still-unscoped follow-up.
+  "Would draw a card, instead..." stays inert until then, named rather than silently implied fixed.
+  Within the shapes that do exist,
   `Game.CreateReplacementEffect`'s Lua construction path is now general: `phase5/static-
   regeneration` (docs/implementation.md, below) proved `WouldDie`/`Regenerate` (CR 701.19b);
   `phase5/replacement-effect-shapes` (docs/implementation.md, below) generalized the same builder
@@ -9833,3 +9839,79 @@ explicitly out of scope from the start, not discovered as unreachable mid-slice.
 **UNRESOLVED:** `Engine::draw_one_card`, `Engine::submit_discard` - named above, real follow-up work,
 each its own slice-sized change (a different call shape from `submit_payment`, so this slice's own
 `continue_cost_zone_moves` doesn't generalize to either for free).
+
+## Phase 5: phase5/replaceable-cleanup-discard slice (CR 514.1 cleanup discard, CR 616.1)
+
+Branch `phase5/replaceable-cleanup-discard`, off master. The other half of `phase5/eventfilter-would-
+move-zone`'s own reachability gap - `phase5/replaceable-cost-zone-moves` closed Sacrifice/Discard cost
+payments; this closes CR 514.1's cleanup hand-size discard, `Engine::submit_discard`'s own doc comment
+had carried a literal `TODO: discard can be replaced (e.g. Leyline of the Void redirects discarded
+cards to exile) but replacement effects aren't implemented yet` since before replacement effects
+existed at all.
+
+Pre-slice research changed scope from what was originally offered alongside this item:
+`Engine::draw_one_card` turned out to live inside `AdvanceTurnStep`'s single giant shared `step()`
+match arm (not a self-contained public method the way `submit_payment`/`submit_discard` are) - making
+it replaceable would mean threading a brand new pause/resume shape through that whole function, real
+risk to core turn-structure code for one slice. Scoped down to `submit_discard` only; `draw_one_card`
+named as its own, harder, still-open follow-up.
+
+**What got implemented:**
+- `commands.rs`: `propose_cost_zone_move`/`commit_cost_zone_move` renamed to `propose_zone_move`/
+  `commit_zone_move` (mechanical, compiler-checked rename across both call sites) - both are shared
+  now between cost payments and cleanup discard, so the "cost" prefix was no longer accurate.
+  `commit_zone_move`'s zone-owner derivation (Battlefield/Exile shared, everything else per-player)
+  already generalized correctly to Library/Hand without any change - confirmed by inspection before
+  writing any new code, not assumed.
+- `engine.rs`: `PendingZoneMove` (renamed from `PendingCostZoneMove`, same reasoning) is now a shared
+  queue-entry type. A new `ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger }` -
+  `since_ledger` (captured once, before the first card in a given discard commits) is threaded through
+  any CR 616.1 pause so the eventual `ProcessState::CollectTriggers { since }` transition still sees
+  the whole batch, not just whatever committed after the choice. A new `Engine::continue_discard_moves`
+  drains the queue with the identical propose/`apply_replacements`/commit loop `continue_cost_zone_moves`
+  already established, but with the previous code's own tail (`PipelineExit::CleanupSbaCheck` +
+  `ProcessState::CollectTriggers`) instead of `continue_cost_zone_moves`'s `CostPaid` + `SbaLoop` tail.
+  `Engine::submit_discard` itself shrank to validation + queuing + a single call into
+  `continue_discard_moves` - the ~40-line direct-mutation loop it used to contain is gone entirely.
+  `submit_replacement_choice` gained a fourth resume arm (alongside `ReplacementCheck`/`SbaDeath`/
+  `ScriptedZoneMove`/`CostZoneMove`) and its `is_destroy` derivation gained a fifth case
+  (`CleanupDiscard` is always `false`, same CR 614.8 reasoning `CostZoneMove` already established).
+
+**CR requirements:** CR 514.1 (cleanup hand-size discard) and CR 616.1 (an ordering choice when more
+than one replacement effect matches) - applied to a code path that had explicitly, in its own doc
+comment, deferred replacement checking since before the mechanism existed to check against.
+
+**TODOs marked, not attempted:** `Engine::draw_one_card` - named above, real, harder follow-up (needs
+a new pause/resume shape inside `AdvanceTurnStep` itself, not just a new `ReplacementResumeTarget`
+variant like every zone-move producer closed so far has needed).
+
+**Tests added** (`crates/engine/tests/phase5_replaceable_cleanup_discard.rs`, 3 new tests): a cleanup
+discard is genuinely redirected by a registered `WouldMoveZone(Hand, Graveyard)` +
+`ReplaceZoneDestination(Exile)` effect (graveyard ends up empty, exile gets the card); a non-matching
+replacement effect leaves a cleanup discard landing in the graveyard normally; two independently-
+matching replacement effects produce a real `StepStatus::AwaitingReplacementChoice` pause with both
+candidates, and `submit_replacement_choice` correctly resumes cleanup-discard resolution afterward -
+proving `ReplacementResumeTarget::CleanupDiscard`'s own pause/resume path, previously unreachable.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including all 3
+new tests and every pre-existing test exercising cleanup discard (`phase5_discard_triggers.rs`,
+`phase5_discarded_trigger.rs`, `phase5_max_hand_size.rs`, `phase5_ending_phase.rs`) - all passed
+unmodified after the restructuring, no fixture changes needed, same clean result
+`phase5/replaceable-cost-zone-moves` got for its own core-pipeline restructuring.
+
+**STRUCT DEVIATIONS:** none beyond the anticipated rename (`PendingZoneMove`/`propose_zone_move`/
+`commit_zone_move`) - flagged in the pre-slice requirements report before writing any code, not
+discovered as a naming problem mid-slice.
+
+**INTERFACE DEVIATIONS:** none - `submit_discard`'s own public signature (`Vec<ObjectId> ->
+Result<(), DiscardError>`) is unchanged; the rename touched only `pub(crate)` internals with exactly
+two call sites each, both updated in the same commit.
+
+**SCOPE DEVIATIONS:** none against the requirements report's own scope (route `submit_discard`
+through real replacement checking, leave `draw_one_card` for later) - the report itself was already
+a scope-down from what was originally offered, decided before writing any code after reading
+`draw_one_card`'s own call site and recognizing the `AdvanceTurnStep` entanglement.
+
+**UNRESOLVED:** `Engine::draw_one_card` - the harder half of the original reachability gap, still
+open, named above with the specific architectural reason it wasn't attempted here.
