@@ -3176,6 +3176,29 @@ impl Engine {
                                     });
                                 }
                             }
+                            // CR 702.6a: Equip's own resolution - attaches
+                            // top.source (the Equipment) to its first (only,
+                            // per CR 702.6a's singular "target creature")
+                            // already legality-checked (CR 608.2b, above)
+                            // target. Same commands::attach_permanent +
+                            // GameEventKind::Attached convention the Aura
+                            // ETB-attach path (Spell branch, above) already
+                            // established - attach_permanent's own
+                            // reattach-safety fix (phase5/equip-ability)
+                            // means retargeting an already-equipped
+                            // Equipment cleans up the old target's
+                            // attachments list for free. Object targets
+                            // only, same "silent no-op" stance every other
+                            // arm here takes for an unreachable target shape.
+                            Some(AbilityEffect::Attach) => {
+                                if let Some(Target::Object(target_id)) = legal_targets.first().copied() {
+                                    commands::attach_permanent(&mut self.state, top.source, target_id);
+                                    events.push(GameEventKind::Attached {
+                                        object: top.source,
+                                        attached_to: target_id,
+                                    });
+                                }
+                            }
                             // AddMana/AddManaChoice are only ever set on a mana
                             // ability, which resolves immediately and never
                             // reaches the stack (CR 605.1a/605.3b) - no

@@ -2507,26 +2507,31 @@ verbatim once enough time has passed for the underlying code to have moved.
   (see `phase5/aura-attach`'s own UNRESOLVED list).
 - **Attach machinery (CR 303.4 Auras / CR 301.5-702.6 Equipment)**: `GameObject.attached_to`/
   `.attachments` were inert placeholder fields, never written to anywhere, for the entire life of
-  this engine until `phase5/aura-attach` (docs/implementation.md, below) - repeatedly named as a
-  blocker by `phase5/protection-from-color`'s own Enchant/Equip note and `AbilityEffect::
-  GainControl`'s own Control-Magic-style-aura note, among others. Closed for Auras only:
-  `commands::attach_permanent` (the sole writer of either field, called from `engine.rs`'s
-  `ResolveStackTop` right after an Aura resolves onto its already-legality-checked target, CR
-  303.4a/b) and `sba::collect_illegally_attached_auras` (CR 704.5m/303.4c - an unattached or
-  now-illegally-attached Aura dies via the same `resolve_deaths` pipeline every other SBA death
-  uses). `commands::retire_object` also gained a bidirectional cleanup step - a departing object's
-  own id is now purged from whatever it was attached to's `attachments` list. Not attempted: CR
-  303.4d (an Aura can't enchant itself/an Aura-creature can't enchant anything), CR 303.4f/h/i/k/m
-  (non-spell attachment entry, "enchanted X" ability reference - no effect in this engine puts an
-  Aura onto the battlefield except by resolving as a spell, so unreachable today), enchant-subtype
-  restrictions ("Enchant Human," `target.rs`'s pre-existing subtype-filter gap), and all of
-  Equipment (CR 301.5/702.6's `Equip` activated ability needs a new `AbilityEffect::Attach`-style
-  primitive, an activate-only-as-sorcery restriction, and CR 704.5n's different in-place-unattach
-  SBA shape - an illegally-equipped Equipment becomes unattached and stays on the battlefield, not
-  a zone move like 704.5m, so it can't reuse `resolve_deaths`). A Control-Magic-style aura
-  (`AbilityEffect::GainControl` from a *static* ability rather than a resolving spell) is now
-  theoretically buildable on top of this machinery but wasn't attempted this slice - named, not
-  silently narrowed.
+  this engine until `phase5/aura-attach`/`phase5/equip-ability` (docs/implementation.md, below) -
+  repeatedly named as a blocker by `phase5/protection-from-color`'s own Enchant/Equip note and
+  `AbilityEffect::GainControl`'s own Control-Magic-style-aura note, among others. Now closed for
+  both Auras and Equipment: `commands::attach_permanent` (the sole writer of either field - called
+  from `engine.rs`'s `ResolveStackTop` both right after an Aura resolves onto its
+  already-legality-checked target, CR 303.4a/b, and after an `AbilityEffect::Attach`/Equip
+  activation resolves, CR 702.6a) and two structurally different SBA cleanup shapes:
+  `sba::collect_illegally_attached_auras` (CR 704.5m/303.4c - an unattached or illegally-attached
+  Aura dies via the same `resolve_deaths` pipeline every other SBA death uses) and
+  `sba::collect_illegally_attached_equipment`/`commit_unattach` (CR 704.5n/301.5 - an
+  illegally-attached Equipment becomes unattached *in place* and stays on the battlefield, no zone
+  move, `commit_regeneration`'s shape rather than `resolve_deaths`'s). CR 702.6a's "activate only as
+  a sorcery" is enforced by matching on `effect == Some(AbilityEffect::Attach)` in `ActivateAbility`
+  directly rather than a new `RegisteredAbility` field (see that variant's own doc comment).
+  `commands::attach_permanent` also gained a reattach-safety fix (Equip retargets repeatedly; Auras
+  never did) alongside `retire_object`'s own bidirectional cleanup step from the Aura slice. Not
+  attempted: CR 303.4d (an Aura can't enchant itself/an Aura-creature can't enchant anything), CR
+  303.4f/h/i/k/m (non-spell attachment entry, "enchanted X" ability reference - no effect in this
+  engine puts an Aura onto the battlefield except by resolving as a spell, so unreachable today),
+  enchant-subtype restrictions ("Enchant Human"/"Equip [quality]," `target.rs`'s pre-existing
+  subtype-filter gap, CR 702.6c), CR 702.6d (multiple equip abilities per card aren't distinguished
+  from each other), CR 702.6e (Equip planeswalker - backlog item 16's non-goal), and Fortifications.
+  A Control-Magic-style aura (`AbilityEffect::GainControl` from a *static* ability rather than a
+  resolving spell) is now theoretically buildable on top of this machinery but wasn't attempted -
+  named, not silently narrowed.
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
   the battlefield can't move zones again) is a related but separate rule, not covered.
@@ -9092,3 +9097,97 @@ have left a real stale-data landmine the next feature to read `attachments` woul
 
 **UNRESOLVED:** everything named under "TODOs marked" above - CR 303.4d/f/h/i/k/m, enchant-subtype
 restrictions, and all of Equipment (a natural next slice).
+
+## Phase 5: phase5/equip-ability slice (CR 702.6, Equip)
+
+Branch `phase5/equip-ability`, off master. The natural next slice `phase5/aura-attach`'s own
+UNRESOLVED list named - CR 702.6 "Equip" as a real activated ability, reusing that slice's
+`commands::attach_permanent`/`GameObject.attached_to`/`.attachments` wholesale rather than
+reinventing attach machinery a second time.
+
+**Scoping findings, before writing code:** a research pass (file:line citations, full CR
+301.5/702.6/704.5n text) surfaced two decisions worth locking in before writing code:
+- **No new `RegisteredAbility` field for CR 702.6a's "activate only as a sorcery."** 94 existing
+  `RegisteredAbility {...}` struct literals exist across the codebase (mostly test fixtures, no
+  builder helper) - a new field would touch every one of them for a timing restriction only one
+  effect shape needs today. Instead, `ActivateAbility`'s command handler matches on `effect ==
+  Some(AbilityEffect::Attach)` directly and requires `commands::is_sorcery_speed` - rules-accurate
+  (CR 702.6a's exact text always bundles Attach with the sorcery restriction in every real card),
+  zero blast radius. `is_sorcery_speed` itself was already written years earlier anticipating
+  exactly this call site (its own doc comment said so) but had no real caller until now.
+- **CR 704.5n's own recheck must not reuse the equip ability's "creature you control" filter.** CR
+  702.6c's last sentence: "Additional restrictions for an equip ability don't restrict what the
+  Equipment may be attached to" - once attached, only CR 301.5's base "must be a creature" (plus CR
+  702.16's protection DEBT) keep it legal. A later controller change on the equipped creature must
+  *not* knock the Equipment off. The SBA recheck therefore builds a synthetic `controller: None`
+  filter rather than consulting the registered equip ability's own filter at all - simpler than the
+  original plan (no need to scan `state.abilities` for "which equip ability attached this") and
+  correctly sidesteps CR 702.6d's multi-equip-ability question entirely, since legality no longer
+  depends on which ability attached it.
+
+**What got implemented:**
+- `types/ability.rs`: `AbilityEffect::Attach` - a toggle (no fields), same shape as `Destroy`/
+  `Sacrifice`/`Exile`/`Regenerate`/`BecomeCopy`. Its own doc comment documents the sorcery-speed
+  design decision above so a future reader doesn't have to re-derive it.
+- `types/event.rs`: `GameEventKind::Unattached { object, was_attached_to }` - pure mutation, no new
+  `ObjectId`, same shape `Regenerated`/`Attached` already established. `Attached`'s own doc comment
+  updated to name Equip as its second producer.
+- `commands.rs`: `is_equipment` (mirrors `is_aura`). `attach_permanent` gained a reattach-safety
+  fix - if already attached elsewhere, detaches from the *old* target's `attachments` list first,
+  so repeated re-equipping (routine for Equipment, never needed for Auras) doesn't leave stale
+  entries. New CR 702.6a check in `ActivateAbility`, placed right after the `AbilityKind::Activated`
+  check and before any state mutation. `Attach` added to the existing non-mana-effect union arm
+  (validated via the same `validate_targets` every other targeted ability already uses).
+- `engine.rs`: `ResolveStackTop`'s `ActivatedAbility` match gained an `Attach` arm - attaches
+  `top.source` to its first (only, CR 702.6a) legal target and logs `Attached`, same convention the
+  Aura ETB-attach code (Spell branch) already established.
+- `sba.rs`: `collect_illegally_attached_equipment`/`commit_unattach` (CR 704.5n) - a new, separate
+  loop in `check_state_based_actions` (not folded into the `dying`/`resolve_deaths` list, since
+  nothing dies) that clears `attached_to` in place and cleans the former target's `attachments`,
+  mirroring `commit_regeneration`'s "in-place mutation, no `retire_object`" shape.
+- `script.rs`: `Game.Ops.Attach` (bare tag). `ActivatedAbilityBuilder` gained a real `target:
+  Option<TargetFilter>` field and `:SetTarget(table)` method (reusing `decode_target_filter_table`,
+  the same decoder `Game.SelectTargets` already uses), replacing the previous hardcoded `target:
+  None` in `:Register()`. Single-target only (`count: 1, up_to: false`), same narrowing precedent
+  `Game.SelectTargets` itself already set.
+- `docs/lua_scripts.md`/`docs/implementation.md`: extended the existing activated-ability section
+  and Attach-machinery gaps bullet rather than writing new ones; corrected two stale claims that
+  `ActivatedAbilityBuilder` never binds `:SetTarget`.
+
+**CR requirements:** 702.6a (Equip's full text - attach, sorcery-speed, "creature you control"),
+704.5n (illegal attachment → unattach in place, stay on the battlefield). CR 702.16's Equip DEBT
+half closes for free, same mechanism `phase5/aura-attach` used for the Enchant half.
+
+**TODOs marked, not attempted:** CR 702.6c ("Equip [quality]" further restrictions beyond "creature
+you control" - `target.rs`'s pre-existing subtype-filter gap), CR 702.6d (multiple equip abilities
+per card aren't distinguished - moot given the 704.5n scoping decision above, but activating a
+*specific* one when several exist isn't), CR 702.6e (Equip planeswalker - backlog item 16's
+explicit non-goal), Fortifications, phasing (CR 702.26i).
+
+**Tests added** (`crates/engine/tests/phase5_equip_ability.rs`, 10 new tests): Lua self-registration
+(`:SetTarget` + `Game.Ops.Attach` producing a real `RegisteredAbility`); equipping a creature you
+control attaches it; equipping a creature you don't control is rejected (CR 702.6a's own targeting
+restriction); activating with a nonempty stack is rejected (CR 702.6a's sorcery-speed restriction);
+re-equipping to a different creature moves the attachment and cleans the old target's `attachments`;
+an equipped creature dying makes the Equipment fall off one SBA pass later but *stay on the
+battlefield* (contrasted directly against Aura's own two-pass death test); an equipped creature's
+controller changing does *not* unattach the Equipment (proves the CR 702.6c-vs-704.5n scoping
+decision); a legally-equipped creature is left alone; an unattached Equipment is not itself a
+violation (CR 301.5b, contrasted against Aura's own "must be attached" requirement); and the DEBT
+bonus - an equipped creature gaining protection from the Equipment falls off.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the
+10 new tests; every prior test unaffected.
+
+**STRUCT DEVIATIONS:** none - `AbilityEffect::Attach`/`GameEventKind::Unattached` were both
+anticipated in the pre-slice scoping discussion; `ActivatedAbilityBuilder.target` was named too
+(the pre-slice research pass explicitly flagged the missing `:SetTarget` as a hard blocker).
+
+**INTERFACE DEVIATIONS:** none - every touched function (`attach_permanent`, `ActivateAbility`,
+`ResolveStackTop`, `check_state_based_actions`) kept its existing signature.
+
+**SCOPE DEVIATIONS:** none.
+
+**UNRESOLVED:** everything named under "TODOs marked" above - CR 702.6c/d/e, Fortifications, and
+phasing.

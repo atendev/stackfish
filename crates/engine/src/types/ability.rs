@@ -327,6 +327,42 @@ pub enum AbilityEffect {
     /// battlefield; only relevant once a real ETB-replacement "enters as a
     /// copy" path (Clone itself) exists, a separate follow-up.
     BecomeCopy,
+    /// The `Game.Ops.Attach` primitive (CR 702.6a, Equip: "`[Cost]`: Attach
+    /// this permanent to target creature you control. Activate only as a
+    /// sorcery.") — attaches the resolving `StackObject`'s own source
+    /// (`top.source`, the Equipment) to its first (only, per CR 702.6a)
+    /// legal target via `commands::attach_permanent`, the same function
+    /// `phase5/aura-attach` built for a resolving Aura's own CR 303.4b
+    /// entry-attach. No fields — a toggle, same shape as `Destroy`/
+    /// `Sacrifice`/`Exile`/`Regenerate`/`BecomeCopy`; the target lives on
+    /// the `StackObject`, not here. Never moves anything between zones -
+    /// `attach_permanent` mutates `attached_to`/`attachments` in place, so
+    /// this logs a `GameEventKind::Attached` alongside the mutation, not a
+    /// `ZoneChange`.
+    ///
+    /// CR 702.6a's "Activate only as a sorcery" restriction is enforced in
+    /// `commands::execute_command`'s `ActivateAbility` arm by matching on
+    /// `effect == Some(AbilityEffect::Attach)` directly, rather than a new
+    /// `RegisteredAbility` field - a generic per-ability timing restriction
+    /// would touch every one of this crate's ~94 existing `RegisteredAbility`
+    /// struct literals for a restriction only this one effect shape needs
+    /// today, and CR 702.6a always bundles Attach with the sorcery
+    /// restriction in every real card's reminder text anyway. Deferred to a
+    /// real field if a second ability shape ever needs the same timing
+    /// restriction independently of its effect.
+    ///
+    /// TODO(CR 702.6c): "Equip [quality]"/"Equip [quality] creature" further
+    /// restrictions beyond the base "creature you control" filter aren't
+    /// modeled - same subtype-filter gap `target.rs` already names for
+    /// Auras' own "Enchant Human"-style restriction. TODO(CR 702.6d):
+    /// multiple equip abilities on one permanent aren't distinguished from
+    /// each other - CR 704.5n's own recheck (`sba::
+    /// collect_illegally_attached_equipment`) doesn't consult *which*
+    /// ability attached it anyway, only whether the attachment is still
+    /// legal per CR 301.5/702.16, so this mostly doesn't matter in
+    /// practice. TODO(CR 702.6e): Equip planeswalker isn't modeled -
+    /// planeswalkers are backlog item 16's own explicit non-goal.
+    Attach,
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two

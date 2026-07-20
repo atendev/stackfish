@@ -153,10 +153,11 @@ pub enum GameEventKind {
     /// `collect_ceasing_tokens`'s own doc comment for why a token that just
     /// died this same pass is never included here.
     TokenCeased { object: ObjectId },
-    /// CR 303.4b: `object` (an Aura, `commands::is_aura`) became attached to
-    /// `attached_to` — either as it resolved onto the battlefield
-    /// (`engine.rs`'s `ResolveStackTop`, the only producer today) or, not
-    /// yet built, any future effect that moves an existing Aura. Not a
+    /// CR 303.4b/702.6a: `object` (an Aura, `commands::is_aura`, or an
+    /// Equipment, `commands::is_equipment`) became attached to
+    /// `attached_to` — either as an Aura resolved onto the battlefield or
+    /// an `AbilityEffect::Attach` (Equip) resolved (`engine.rs`'s
+    /// `ResolveStackTop`, the only two producers today). Not a
     /// `ZoneChange`: nothing moves zones, no new `ObjectId` minted, same
     /// "pure mutation, own event" shape `Regenerated` already established.
     /// `commands::attach_permanent` is the sole writer of `GameObject.
@@ -166,6 +167,17 @@ pub enum GameEventKind {
     /// exists to trigger off this yet — same "ships before its own trigger
     /// condition" precedent `BecameCopy`/`Regenerated` already set.
     Attached { object: ObjectId, attached_to: ObjectId },
+    /// CR 704.5n: `object` (an Equipment or Fortification, `commands::
+    /// is_equipment`) was attached to `was_attached_to`, which is now an
+    /// illegal permanent to be equipped by it - it becomes unattached and
+    /// *stays on the battlefield* (unlike CR 704.5m's Aura equivalent,
+    /// which dies - see `sba::collect_illegally_attached_equipment`'s own
+    /// doc comment for why this is a structurally different SBA shape from
+    /// `collect_illegally_attached_auras`). Not a `ZoneChange`: nothing
+    /// moves zones, no new `ObjectId` minted, same "pure mutation, own
+    /// event" shape `Regenerated`/`Attached` already established.
+    /// `sba::commit_unattach` is this event's only producer.
+    Unattached { object: ObjectId, was_attached_to: ObjectId },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

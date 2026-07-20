@@ -106,9 +106,12 @@ pub enum SbaOutcome {
 /// exist — see `collect_ceasing_tokens`'s own doc comment for the timing
 /// that satisfies CR 111.7's parenthetical), 704.5m (an Aura attached to an
 /// illegal object, or not attached to anything, is put into its owner's
-/// graveyard — see `collect_illegally_attached_auras`'s own doc comment).
-/// Every other CR 704.5 SBA is still a no-op — see the TODO below for which
-/// and why.
+/// graveyard — see `collect_illegally_attached_auras`'s own doc comment),
+/// 704.5n (an Equipment attached to an illegal permanent becomes unattached
+/// and stays on the battlefield — see `collect_illegally_attached_equipment`'s
+/// own doc comment for why this is a structurally different shape from
+/// 704.5m, not a zone move). Every other CR 704.5 SBA is still a no-op —
+/// see the TODO below for which and why.
 ///
 /// This is a single pass, not the fixed-point loop — CR 704.3 requires
 /// repeating until no SBA applies. The engine loop (`engine.rs`) is
@@ -151,6 +154,18 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
         let (event, mut departed) = commit_token_cessation(state, id);
         events.push(event);
         departed_triggered.append(&mut departed);
+    }
+
+    // CR 704.5n: structurally different from 704.5m's Aura check just below
+    // - an illegally-attached Equipment/Fortification doesn't die, it just
+    // becomes unattached and stays on the battlefield (no zone move, no new
+    // ObjectId), so it can't join the `dying`/`resolve_deaths` list at all -
+    // see collect_illegally_attached_equipment's own doc comment. Collected
+    // before anything else this pass mutates state, same "based on the
+    // state as of the check" timing collect_ceasing_tokens's own doc
+    // comment already establishes.
+    for id in collect_illegally_attached_equipment(state, script_runtime) {
+        events.push(commit_unattach(state, id));
     }
 
     // CR 704.5k: fully deterministic (no player choice), so its losers just
@@ -568,6 +583,79 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
             illegal.then_some(DyingCandidate { id: o.object_id, is_destroy: false })
         })
         .collect()
+}
+
+/// CR 704.5n/301.5: every battlefield Equipment (`commands::is_equipment`)
+/// currently attached to something that's no longer a legal creature to be
+/// equipped by it - either it's gone (left the battlefield), stopped being
+/// a creature (CR 301.5's own base restriction, "It can't legally be
+/// attached to anything that isn't a creature"), or gained protection from
+/// this very Equipment's own qualities (CR 702.16's Equip "DEBT"
+/// restriction, closed here the same way `collect_illegally_attached_auras`
+/// closed the Enchant half). Deliberately does *not* reuse the equip
+/// ability's own "target creature you control" filter - CR 702.6c's last
+/// sentence is explicit that an equip ability's own further restrictions
+/// "don't restrict what the Equipment may be attached to" once it's
+/// already attached, only who may *choose* to attach it in the first
+/// place. A `controller: None` synthetic filter is built here instead, so
+/// a later change of the equipped creature's controller (a control-swap
+/// effect) does *not* knock the Equipment off, matching real Magic. An
+/// unattached Equipment is *not* itself a violation (CR 301.5b - Equipment
+/// enters, and can sit, unattached indefinitely; only Auras require
+/// attachment at all, CR 704.5m).
+fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
+    let creature_filter = crate::types::target::TargetFilter::Object {
+        card_types: Some(CardTypeSet::CREATURE),
+        controller: None,
+        zone: None,
+    };
+    state
+        .objects
+        .values()
+        .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_equipment(&o.definition))
+        .filter_map(|o| {
+            let target_id = o.attached_to?;
+            let illegal = !commands::target_is_legal(
+                state,
+                script_runtime,
+                crate::types::ids::Target::Object(target_id),
+                &creature_filter,
+                o.controller,
+                o.object_id,
+            );
+            illegal.then_some(o.object_id)
+        })
+        .collect()
+}
+
+/// CR 704.5n's actual commit: clears `id`'s own `attached_to` and removes it
+/// from its former target's `attachments` list - the inverse of
+/// `commands::attach_permanent`, inlined here rather than shared since
+/// `attach_permanent`'s own reattach-safety logic already subsumes a plain
+/// detach and this is the only unattach-without-reattach call site. No zone
+/// change, no new `ObjectId`, no `retire_object` call - `id` never leaves
+/// the battlefield, same "in-place mutation" shape `commit_regeneration`
+/// already established for a different CR 614.8 SBA.
+fn commit_unattach(state: &mut GameState, id: ObjectId) -> GameEvent {
+    let was_attached_to = state.object_mut(id).and_then(|o| o.attached_to.take());
+    if let Some(target_id) = was_attached_to {
+        if let Some(target) = state.object_mut(target_id) {
+            target.attachments.retain(|&a| a != id);
+        }
+    }
+    let event_id = state.allocate_event_id();
+    let sequence_no = state.allocate_sequence_no();
+    GameEvent {
+        event_id,
+        sequence_no,
+        kind: GameEventKind::Unattached {
+            object: id,
+            was_attached_to: was_attached_to
+                .expect("collect_illegally_attached_equipment only ever returns ids with a real attached_to"),
+        },
+        caused_by_command: None,
+        parent_event: None,
+    }
 }
 
 /// CR 704.5d: every token (`GameObject.is_token`) currently sitting in a

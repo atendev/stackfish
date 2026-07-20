@@ -655,17 +655,52 @@ e:AddCost(Game.Costs.Sacrifice({ card_types = { "Creature" } }))
 No `:SetCost` — every `:AddCost` call appends to the ability's `CostSpec.additional`. Omitting
 `:AddCost` entirely means `cost: None` (no cost at all), not an empty `CostSpec`. Mana-cost
 components on an activated ability's own cost stay out of scope — no Lua-facing mana-cost-string
-parser exists anywhere yet (same boundary `CastSpell`'s own cost has). `:SetTarget` isn't bound
-either — a script-registered activated ability is targetless this slice, same "nothing built yet
-to consume it" stance `TriggeredAbilityBuilder`'s own `:SetTarget` omission takes.
+parser exists anywhere yet (same boundary `CastSpell`'s own cost has).
+
+`:SetTarget(table)` (`phase5/equip-ability`) gives a script-registered activated ability a real
+target — reuses `decode_target_filter_table`, the same table-shape decoder `Game.SelectTargets`
+already uses (`{type="object"|"player"|"any", card_types={...}, controller="you"|"opponent"|"any"}`,
+`type` defaults to `"object"`). Always single-target (`count: 1, up_to: false`) — no "up to N" or
+multi-target shape, same narrowing precedent `Game.SelectTargets`'s own doc comment already set.
+Omitting `:SetTarget` entirely keeps the ability targetless (`target: None`), the prior behavior.
+CR 702.6a's Equip is the worked example — "`[Cost]`: Attach this permanent to target creature you
+control. Activate only as a sorcery":
+
+```lua
+-- Equip {1}
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:AddCost(Game.Costs.Mana("{1}"))
+    e:SetTarget({ type = "object", card_types = { "Creature" }, controller = "you" })
+    e:SetOperation(Game.Ops.Attach)
+    e:Register()
+end
+
+return s
+```
+
+`Game.Ops.Attach` is a bare tagged value (no arguments, same toggle shape `Game.Ops.Destroy`/
+`Sacrifice`/`Exile`/`Regenerate`/`BecomeCopy` already use) — attaches the resolving ability's own
+source to whatever `:SetTarget` resolved, via `commands::attach_permanent` (the same function
+`phase5/aura-attach` built for a resolving Aura's own CR 303.4b entry-attach). CR 702.6a's "Activate
+only as a sorcery" is enforced in Rust (`ActivateAbility`'s command handler matches on `effect ==
+Some(AbilityEffect::Attach)` directly, not a new `RegisteredAbility` field or Lua-facing flag — see
+that variant's own doc comment for why), so no `Game.Costs.*`/builder call is needed to opt into it;
+every `Game.Ops.Attach` ability gets the restriction for free. CR 704.5n's own SBA cleanup (an
+illegally-attached Equipment becomes unattached and stays on the battlefield, unlike an Aura which
+dies under CR 704.5m) needs no Lua surface either — it's a pure state-based action, same as every
+other SBA in this engine.
 
 Activating one of these still pauses on `AwaitingPayment` the same way `CastSpell` does, even for a
 bare `Game.Costs.TapSelf` cost — the actual tap (or sacrifice/discard/life deduction) happens once
 `Engine::submit_payment` commits a real `PaymentPlan`, not when the ability is announced.
 
-Real, tested end to end: `crates/engine/tests/phase5_activated_ability_self_registration.rs` and
+Real, tested end to end: `crates/engine/tests/phase5_activated_ability_self_registration.rs`,
 `crates/engine/tests/phase5_activate_ability_costs.rs` (the latter covers hand-built, non-script
-`CostSpec`s exercising every additional-cost shape).
+`CostSpec`s exercising every additional-cost shape), and `crates/engine/tests/phase5_equip_ability.rs`
+(`:SetTarget`, `Game.Ops.Attach`, the sorcery-speed restriction, and CR 704.5n's SBA cleanup).
 
 ## Asking the player for a target mid-resolution
 
@@ -777,9 +812,13 @@ Don't spend time trying these — they're signatures only, or explicitly unbound
   never need solving here.
 - **Script-backed costs/targets** — `ScriptRuntime::invoke_cost`/`invoke_target` are both
   `todo!()`. `Game.Costs.*` covers every structured `AdditionalCost` shape without needing either
-  one, and `TriggeredAbilityBuilder`/`ActivatedAbilityBuilder` don't bind `:SetCost`/`:SetTarget`
-  at all — a script-registered ability can't have a custom-Lua-function cost or target predicate,
-  only the recognized primitive shapes.
+  one. Neither builder binds a bare `:SetCost` (both use `:AddCost`, appending to `CostSpec.
+  additional`, since a single activation can need more than one component). `TriggeredAbilityBuilder`
+  still doesn't bind `:SetTarget` at all (`invoke_target`'s own gap, nothing built yet to consume
+  one); `ActivatedAbilityBuilder`'s own `:SetTarget` (`phase5/equip-ability`) only accepts the
+  structured table shape `decode_target_filter_table` already handles (`{type=..., card_types=...,
+  controller=...}`) - a custom-Lua-function target predicate still isn't possible for either
+  builder, only the recognized primitive shapes.
 - **{X} costs, alternative costs (flashback-style), hybrid/Phyrexian/snow mana payment** —
   pre-existing `CostSpec`/`PaymentPlan` gaps, not specific to the script bridge.
 - **Any event kind other than `ZoneChange`** — `event_to_lua` (`script.rs`) only bridges zone

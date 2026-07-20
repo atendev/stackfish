@@ -21,7 +21,7 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::mana::{Color, ColorSet, ManaCost, ManaUnit};
 use crate::types::object::GameObject;
-use crate::types::target::TargetFilter;
+use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 /// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
@@ -954,16 +954,20 @@ impl UserData for TriggeredAbilityBuilder {
 /// `kind` is implied the same way `TriggeredAbilityBuilder`'s own doc
 /// comment already explains.
 ///
-/// `:SetTarget` is deliberately not bound this slice, same "nothing built
-/// yet to consume it" stance `TriggeredAbilityBuilder`'s own doc comment
-/// takes for its own `:SetTarget` — a script-registered activated ability is
-/// targetless until that's designed. `CardDefinition.mana_cost` (spells) is
-/// untouched by `ManaCost::parse` existing now — it's still sourced as a
-/// structured `ManaCost` from the external card database, never parsed from
-/// a string.
+/// `:SetTarget(table)` (added for `phase5/equip-ability`, CR 702.6a's
+/// "target creature you control") reuses `decode_target_filter_table`, the
+/// same table-shape decoder `Game.SelectTargets` already uses — e.g.
+/// `{type="object", card_types={"Creature"}, controller="you"}`. Always a
+/// single, exact-count target (`count: 1, up_to: false`) — no "up to N" or
+/// multi-target shape, same narrowing precedent `Game.SelectTargets`'s own
+/// doc comment already set for the identical reason (nothing built yet to
+/// consume more than one). `CardDefinition.mana_cost` (spells) is untouched
+/// by `ManaCost::parse` existing now — it's still sourced as a structured
+/// `ManaCost` from the external card database, never parsed from a string.
 struct ActivatedAbilityBuilder {
     source: ObjectId,
     cost: CostSpec,
+    target: Option<TargetFilter>,
     operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
     registry: Rc<RefCell<ScriptRegistry>>,
 }
@@ -993,6 +997,10 @@ impl UserData for ActivatedAbilityBuilder {
             this.operation = Some(decoded);
             Ok(())
         });
+        methods.add_method_mut("SetTarget", |_, this, table: Table| {
+            this.target = Some(decode_target_filter_table(table).map_err(to_lua_err)?);
+            Ok(())
+        });
         methods.add_method_mut("Register", |_, this, ()| {
             let (effect, operation) = this.operation.clone().ok_or_else(|| {
                 mlua::Error::RuntimeError(
@@ -1010,12 +1018,16 @@ impl UserData for ActivatedAbilityBuilder {
             } else {
                 Some(this.cost.clone())
             };
+            let target = this
+                .target
+                .clone()
+                .map(|filter| TargetSpec::Primitive(TargetRequirement { filter, count: 1, up_to: false }));
             let ability = RegisteredAbility {
                 source: this.source,
                 kind: AbilityKind::Activated,
                 condition: None,
                 cost,
-                target: None,
+                target,
                 operation,
                 effect,
                 intervening_if: None,
@@ -2018,6 +2030,11 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     // copy target is whatever the ability's own targeting already resolved,
     // not a value passed here.
     ops.set("BecomeCopy", OperationTag(AbilityEffect::BecomeCopy))?;
+    // `Game.Ops.Attach` (CR 702.6a, Equip) - no arguments, same toggle shape
+    // as `Game.Ops.Destroy`/`Sacrifice`/`Exile`/`Shuffle`/`BecomeCopy`; the
+    // attach target is whatever the activated ability's own `:SetTarget`
+    // resolved, not a value passed here.
+    ops.set("Attach", OperationTag(AbilityEffect::Attach))?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;
@@ -2244,6 +2261,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
             Ok(ActivatedAbilityBuilder {
                 source: ObjectId(source),
                 cost: CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() },
+                target: None,
                 operation: None,
                 registry: Rc::clone(&registry),
             })
