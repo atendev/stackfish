@@ -399,3 +399,42 @@ fn no_modifiers_registered_is_unaffected() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
+
+/// `phase5/cost-modifier-order`: `apply_cost_modifiers` sums every matching
+/// modifier's `amount` before flooring at `{0}`, rather than flooring after
+/// each one - so a reduction and an increase together must resolve to the
+/// same total regardless of which order they're registered in. Base `{1}`,
+/// `-2` then `+1`: the pre-fix stepwise behavior gave `{1}` (the reduction
+/// floors to `{0}` first, then the increase adds back to `{1}`) for this
+/// order and `{0}` for the reverse order - registration order silently
+/// changed the resolved cost. Both orders must now resolve to the same
+/// `{0}` (net delta `-2 + 1 = -1`, `max(1 - 1, 0) = 0`).
+fn resolves_to_a_free_spell(modifiers: Vec<CostModifier>) {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(1))] };
+    let mut state = two_player_state(ManaPool::default(), modifiers);
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    drain(&mut engine);
+
+    engine
+        .submit_payment(PaymentPlan { payments: Vec::new() })
+        .expect("net delta -2 + 1 = -1 against base {1}, floored to {0} - must be free regardless of order");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+}
+
+#[test]
+fn reduction_then_increase_and_increase_then_reduction_resolve_to_the_same_cost() {
+    let reduce =
+        CostModifier { source: ObjectId(98), controller: PlayerId(0), filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None }, amount: -2 };
+    let increase =
+        CostModifier { source: ObjectId(99), controller: PlayerId(0), filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None }, amount: 1 };
+
+    resolves_to_a_free_spell(vec![reduce.clone(), increase.clone()]);
+    resolves_to_a_free_spell(vec![increase, reduce]);
+}

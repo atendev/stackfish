@@ -124,3 +124,47 @@
   - `Game.Effects.RemoveAllAbilities`.
 - Unresolved:
   - Does not strip `RegisteredAbility` entries (custom triggered/activated abilities).
+
+## Slice: cost-modifier-order (merged)
+
+- Branch `phase5/cost-modifier-order`.
+- Scope: CR 601.2f — `cost::apply_cost_modifiers` no longer lets `state.cost_modifiers`'
+  registration order silently change a spell's resolved cost.
+- Verify: 2 new tests (order-independence regression, an adjacent commander-tax edge case caught
+  along the way) + all 7 pre-existing `phase5_cost_modifiers.rs` tests unchanged, full workspace
+  suite (115 binaries) green.
+- Key finding that reshaped the fix: the backlog TODO assumed this needed real CR 616-style
+  player-choice pause machinery. It doesn't — CR 601.2f's own text ("total cost is... plus
+  increases, minus reductions... If multiple cost reductions apply, the player may apply them in
+  any order") is a single arithmetic formula, floored at `{0}` **once**. The old code called
+  `ManaCost::apply_cost_delta` once per matching modifier, flooring after *every* delta — provably
+  not equivalent to summing first: base `{1}` with deltas `-2` then `+1` floors to `{1}`; the same
+  two deltas in the opposite order floor to `{0}`. Real Magic's own "order can matter among
+  multiple reductions" carve-out is about CR 118.7's colored-vs-generic-pip interactions, which
+  `CostModifier` already doesn't model (generic-only, flat amounts) — for what this engine actually
+  implements, sum-then-floor-once is provably order-independent (addition commutes), so no new
+  pause/choice UI was needed at all.
+- Key changes:
+  - `cost::apply_cost_modifiers` sums every matching modifier's `amount` into one net delta, calls
+    `ManaCost::apply_cost_delta` once instead of once per modifier.
+  - Guards against calling `apply_cost_delta` at all when the net delta is `0` (see bug below).
+  - `ManaCost::apply_cost_delta`'s own doc comment corrected — it previously claimed stepwise
+    application "still gets the common case... right, since clamping is idempotent past zero,"
+    which this slice's own counterexample disproves.
+- Bug caught mid-implementation (see `99-backlog.md`'s "Mistakes caught"): `apply_cost_delta(0)`
+  isn't a true no-op — it unconditionally drops an *explicit* `Generic(0)` symbol (e.g. an `{X}`
+  cost resolved with X=0), since a bare `0` never satisfies its own "adjusted > 0, push it back"
+  condition. The old `apply_cost_modifiers` never called it at all when `state.cost_modifiers` was
+  empty, so this never showed up; summing-then-always-calling-once exposed it immediately
+  (`phase5_x_costs.rs`'s `x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry`
+  regressed). Fixed by skipping the call when the net delta is `0`. Found and fixed the identical
+  latent shape at commander tax's own `apply_cost_delta(2 * prior_casts)` call
+  (`commands.rs`, CR 903.8) — a first cast (`prior_casts == 0`) called it unconditionally too; an
+  `{X}` commander cast for the first time with X=0 would have silently lost its explicit `{0}`.
+  Not previously caught by any test (no existing commander test used an `{X}` cost) — new
+  regression test added (`phase5_commander_tax.rs`).
+- Unresolved:
+  - CR 118.7 colored-pip-specific cost reduction — still unmodeled, out of scope (pre-existing
+    `CostModifier` boundary).
+  - `Game.CreateCostModifier` Lua builder — still doesn't exist (pre-existing, separate gap).
+  - Activated-ability costs — `CostModifier` stays spells-only (pre-existing scope boundary).
