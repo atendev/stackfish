@@ -2467,7 +2467,17 @@ verbatim once enough time has passed for the underlying code to have moved.
   graveyard instead" (CR 205.4-style exile-hate protection). ETB-modifier replacements ("enters
   tapped," "enters with counters") and protection-as-a-replacement-effect stay unmodeled - see that
   slice's own TODO notes for why each is a structurally different, bigger problem than a new
-  `EventFilter` shape alone solves. Within the shapes that do exist,
+  `EventFilter` shape alone solves. That slice's own UNRESOLVED note - most zone-change producers
+  never call `apply_replacements` at all - is narrower now: `Sacrifice`/`Discard` cost payments are
+  real replacement-checked proposals as of `phase5/replaceable-cost-zone-moves`
+  (docs/implementation.md, below) - `Engine::submit_payment` collects them separately from mana/tap/
+  life and drives each through `Engine::continue_cost_zone_moves`, the same propose/replacement-
+  check/commit split `sba::resolve_deaths` already established, complete with its own CR 616.1
+  ordering-choice pause (`ReplacementResumeTarget::CostZoneMove`). `Engine::draw_one_card` and
+  `Engine::submit_discard` (the cleanup-step hand-size discard, a different code path from a cost
+  payment) still mutate directly - "would draw a card, instead..." and "if a card would be discarded
+  at cleanup, exile it instead" stay inert, named rather than silently implied fixed. Within the
+  shapes that do exist,
   `Game.CreateReplacementEffect`'s Lua construction path is now general: `phase5/static-
   regeneration` (docs/implementation.md, below) proved `WouldDie`/`Regenerate` (CR 701.19b);
   `phase5/replacement-effect-shapes` (docs/implementation.md, below) generalized the same builder
@@ -9734,3 +9744,92 @@ and at least one (a cost payment matching more than one registered replacement) 
 a genuine `NeedsOrderingChoice`-shaped pause partway through cost payment, a real new pipeline state
 this slice didn't attempt. ETB-modifier replacements and protection-as-replacement-effect are named
 above as their own, structurally different gaps.
+
+## Phase 5: phase5/replaceable-cost-zone-moves slice (Sacrifice/Discard cost payments, CR 601.2h/616.1)
+
+Branch `phase5/replaceable-cost-zone-moves`, off master. The exact follow-up
+`phase5/eventfilter-would-move-zone`'s own UNRESOLVED notes named and scoped out: `commands::
+commit_payment`'s `Sacrifice`/`Discard` arms mutated `GameState` directly, never calling
+`replacement::apply_replacements` at all, so "if a permanent you control would be sacrificed, exile
+it instead" was inert no matter how correctly the replacement effect itself was built.
+
+**What got implemented:**
+- `commands.rs`: `move_to_graveyard_for_cost` (mutated directly, `commit_payment`'s own private
+  helper) replaced with a propose/commit split - `propose_cost_zone_move` (builds the unmutated
+  `ZoneChange` proposal) and `commit_cost_zone_move` (performs the real mutation given an already-
+  replacement-checked event), mirroring `sba::resolve_deaths`/`commit_death`'s own split exactly.
+  `commit_cost_zone_move` derives both the source- and destination-zone owner from the zone kind
+  itself (`Battlefield`/`Exile` are shared, everything else per-player) rather than taking an
+  explicit `from_owner` parameter the way its predecessor did - same convention `Engine::
+  commit_scripted_zone_move`'s own Exile arm already established for the destination side, extended
+  here to the source side too (needed since `ReplaceZoneDestination` can rewrite `to` to something
+  other than Graveyard).
+  `commit_payment` itself now only handles the truly-immediate payments (Mana/Tap/Life) - `Sacrifice`/
+  `Discard` arms became a no-op with a comment pointing at the new pipeline. A new `collect_cost_zone_
+  moves` pulls every `Sacrifice`/`Discard` payment out of a `PaymentPlan` into `(ObjectId, ZoneKind)`
+  pairs for the caller to queue.
+- `engine.rs`: `PendingCostZoneMove { id, from }` (the new queue entry) and `ReplacementResumeTarget::
+  CostZoneMove { remaining, payer, stack_id }` (a fourth resume-target shape, alongside
+  `ReplacementCheck`/`SbaDeath`/`ScriptedZoneMove`). A new `Engine::continue_cost_zone_moves` method
+  drains the queue one target at a time - propose, `apply_replacements`, commit (logging to the
+  ledger and folding departed triggers into `departed_triggered_abilities` inline, as each one
+  resolves, not batched at the end) - pausing on `AwaitingReplacementChoice` the instant any target
+  needs a CR 616.1 ordering choice, exactly mirroring `Engine::continue_scripted_zone_move`'s own
+  shape. `Engine::submit_payment` itself now: commits immediate payments, collects the zone-moving
+  ones into a queue, and hands off to `continue_cost_zone_moves` instead of unconditionally
+  transitioning straight to `SbaLoop` - that transition (and the final `CostPaid` log) now lives
+  inside `continue_cost_zone_moves`'s own "queue empty" exit. `submit_replacement_choice` gained a
+  fourth resume arm alongside its existing three, and its `is_destroy` derivation gained a fourth
+  case (`CostZoneMove` is always `false` - CR 614.8: neither Sacrifice nor Discard is genuine
+  destruction, so a regeneration shield never intercepts either).
+
+**CR requirements:** CR 601.2h/602.2h (paying a cost, including any additional costs, is part of the
+same casting/activation process) and CR 616.1 (more than one applicable replacement effect needs an
+ordering choice) - applied to `Sacrifice`/`Discard` cost payments specifically, which were previously
+the one cost-payment shape excluded from real replacement checking despite being genuine zone-change
+proposals like any other.
+
+**TODOs marked, not attempted:** `Engine::draw_one_card` and `Engine::submit_discard` (the cleanup
+hand-size discard, CR 514.3 - a distinct code path from a cost payment) still mutate directly and
+were out of this slice's own scope from the start (the requirements report flagged this before
+writing any code) - "would draw a card, instead..." and "if a card would be discarded at cleanup,
+exile it instead" stay inert. Each would need the identical propose/replace/commit treatment this
+slice just gave cost payments, but neither shares `submit_payment`'s own call shape, so neither could
+be folded into this slice's own changes for free.
+
+**Tests added** (`crates/engine/tests/phase5_replaceable_cost_zone_moves.rs`, 4 new tests): a
+Sacrifice-as-cost payment is genuinely redirected by a registered `WouldMoveZone(Battlefield,
+Graveyard)` + `ReplaceZoneDestination(Exile)` effect (the graveyard ends up empty, exile gets the
+creature); the Discard equivalent using `WouldMoveZone(Hand, Graveyard)` - a `from` shape `WouldDie`
+itself could never express; a non-matching replacement effect (wrong `affected` filter) leaves a
+Sacrifice payment landing in the graveyard normally, proving the new pipeline doesn't redirect
+indiscriminately; two independently-matching replacement effects on one Sacrifice payment produce a
+real `StepStatus::AwaitingReplacementChoice` pause with both candidates, and `submit_replacement_
+choice` correctly resumes payment resolution afterward - the CR 616.1 pause/resume path this slice's
+own `ReplacementResumeTarget::CostZoneMove` arm added, previously untested since it couldn't be
+reached at all.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including all 4
+new tests and (critically, given this touched a core payment pipeline every `CastSpell`/
+`ActivateAbility` cost goes through) every pre-existing test that exercises `Sacrifice`/`Discard`
+cost payments (`phase5_activate_ability_costs.rs`, `phase5_sacrifice_dies_trigger.rs`) - all passed
+unmodified on the first run after the restructuring, no fixture changes needed.
+
+**STRUCT DEVIATIONS:** `PendingCostZoneMove`/`ReplacementResumeTarget::CostZoneMove` were both
+anticipated in the pre-slice research (the exact shape `ScriptedZoneMove` already established was the
+template, confirmed before writing code by reading `continue_scripted_zone_move` in full).
+
+**INTERFACE DEVIATIONS:** `commands::commit_payment`'s return type narrowed from `(Vec<GameEventKind>,
+Vec<RegisteredAbility>)` to `Vec<GameEventKind>` - the `Vec<RegisteredAbility>` (departed triggered
+abilities) it used to return came entirely from `Sacrifice`/`Discard`, which it no longer handles at
+all; its only caller (`Engine::submit_payment`) was updated in the same commit, so this isn't a
+public-API break in practice.
+
+**SCOPE DEVIATIONS:** none against the requirements report's own scope (routing `Sacrifice`/
+`Discard` cost payments through replacement checking) - `draw_one_card`/`submit_discard` were
+explicitly out of scope from the start, not discovered as unreachable mid-slice.
+
+**UNRESOLVED:** `Engine::draw_one_card`, `Engine::submit_discard` - named above, real follow-up work,
+each its own slice-sized change (a different call shape from `submit_payment`, so this slice's own
+`continue_cost_zone_moves` doesn't generalize to either for free).

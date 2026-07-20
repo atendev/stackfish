@@ -373,6 +373,18 @@ pub enum ScriptedZoneMoveKind {
     Exile,
 }
 
+/// One `Sacrifice`/`Discard` `CostPayment` still to propose+replacement-
+/// check+commit — `Engine::continue_cost_zone_moves`'s own queue entry, built
+/// by `commands::collect_cost_zone_moves` from an already-validated
+/// `PaymentPlan`. `from` is the zone the payment claims to move `id` out of
+/// (`Battlefield` for `Sacrifice`, `Hand` for `Discard`) — `PaymentPlan::
+/// validate` already confirmed `id` is really there.
+#[derive(Clone, Copy, Debug)]
+pub struct PendingCostZoneMove {
+    pub id: ObjectId,
+    pub from: ZoneKind,
+}
+
 /// Which pipeline a paused `ProcessState::AwaitingReplacementChoice` should
 /// resume into once `Engine::submit_replacement_choice` answers — the pause
 /// itself (event/candidates/excluded) is identical either way; only what
@@ -404,6 +416,15 @@ pub enum ReplacementResumeTarget {
     /// needed for the final `StackObjectResolved` event once every target's
     /// been processed.
     ScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, stack_id: ObjectId },
+    /// Reached from `Engine::continue_cost_zone_moves` (`Engine::
+    /// submit_payment`'s own `Sacrifice`/`Discard` handling). Same "each
+    /// target proposes+commits independently" shape `ScriptedZoneMove`
+    /// already has - `remaining` is the rest of this payment's own
+    /// `PendingCostZoneMove` queue. `payer` is needed for the final
+    /// `CostPaid` event once every zone-moving payment's been processed
+    /// (`stack_id`'s `costs_paid` was already set before this pause could
+    /// first fire, so it doesn't need to be threaded through here too).
+    CostZoneMove { remaining: VecDeque<PendingCostZoneMove>, payer: PlayerId, stack_id: ObjectId },
 }
 
 /// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
@@ -980,6 +1001,10 @@ impl Engine {
             ReplacementResumeTarget::ReplacementCheck { .. } => false,
             ReplacementResumeTarget::SbaDeath { is_destroy, .. } => *is_destroy,
             ReplacementResumeTarget::ScriptedZoneMove { kind, .. } => *kind == ScriptedZoneMoveKind::Destroy,
+            // CR 614.8: a Sacrifice/Discard cost payment is never genuine
+            // destruction (Sacrifice/Discard are each their own zone-change
+            // verb) - a regeneration shield never intercepts one.
+            ReplacementResumeTarget::CostZoneMove { .. } => false,
         };
         let outcome =
             replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, is_destroy, excluded);
@@ -1027,6 +1052,23 @@ impl Engine {
                         candidates,
                         excluded,
                         resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id },
+                    }
+                }
+            },
+            ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_cost_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                    self.continue_cost_zone_moves(remaining, payer, stack_id)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id },
                     }
                 }
             },
@@ -1504,25 +1546,23 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        // CR 118.3a/118.13a/602.2f-h: commit exactly what the plan declared
-        // (mana deducted, tap/sacrifice/discard/life side effects applied) -
+        // CR 118.3a/118.13a/602.2f-h: commit exactly what the plan declared.
+        // Mana/tap/life are immediate (never replaceable in this engine) -
         // see commands::commit_payment's doc comment for why this trusts
-        // validate's check rather than re-deriving anything.
-        let (mut events, departed) = commands::commit_payment(&mut self.state, payer, &plan.payments);
-        // CR 603.10: a Sacrifice payment can purge a "when this dies"/
-        // "leaves the battlefield" ability off its source before
-        // CollectTriggers ever runs (same gap `commit_death` closes for
-        // SBA-driven deaths) - fold it into the same transient stash so
-        // collect_triggers/PutTriggersApnap can still find it. Populated
-        // here rather than via finish_sba_loop because this pause resumes
-        // straight at SbaLoop (see below), skipping the accumulation point
-        // finish_sba_loop itself provides.
-        self.departed_triggered_abilities.extend(departed);
+        // validate's check rather than re-deriving anything. Sacrifice/
+        // Discard are collected separately, *not* committed yet - CR
+        // 601.2h/616.1 makes each one its own replaceable zone-change
+        // proposal (see commands::propose_cost_zone_move's doc comment),
+        // driven below by continue_cost_zone_moves.
+        let pending_zone_moves: VecDeque<PendingCostZoneMove> = commands::collect_cost_zone_moves(&plan.payments)
+            .into_iter()
+            .map(|(id, from)| PendingCostZoneMove { id, from })
+            .collect();
+        let immediate_events = commands::commit_payment(&mut self.state, payer, &plan.payments);
         if let Some(stack_object) = self.state.stack.iter_mut().find(|s| s.stack_id == stack_id) {
             stack_object.costs_paid = plan.payments;
         }
-        events.push(GameEventKind::CostPaid { stack_id, payer });
-        for kind in events {
+        for kind in immediate_events {
             let event_id = self.state.allocate_event_id();
             let sequence_no = self.state.allocate_sequence_no();
             self.state.ledger.push(GameEvent {
@@ -1538,9 +1578,72 @@ impl Engine {
         // pending_payment been None (see that arm's doc comment) - the rest
         // of this pipeline run (SBA/triggers/exit) is unaffected by this
         // pause, since pipeline_context/pipeline_exit were already decided
-        // before the pause happened.
-        self.process_state = ProcessState::SbaLoop;
+        // before the pause happened. continue_cost_zone_moves logs CostPaid
+        // itself once every zone-moving payment (if any) has committed, and
+        // returns SbaLoop the same way this used to unconditionally.
+        self.process_state = self.continue_cost_zone_moves(pending_zone_moves, payer, stack_id);
         Ok(())
+    }
+
+    /// Drains `remaining` `Sacrifice`/`Discard` cost-payment targets one at a
+    /// time - CR 616.1's ordering-choice pause can be raised by any of them,
+    /// not just the first, since each independently proposes+replacement-
+    /// checks+commits its own `ZoneChange` (`commands::propose_cost_zone_move`/
+    /// `commit_cost_zone_move`). Same shape `continue_scripted_zone_move`
+    /// already established for the scripted Destroy/Sacrifice/Exile ops -
+    /// `departed_triggered_abilities`/`state.ledger` are updated inline as
+    /// each target commits, rather than accumulated and flushed at the end
+    /// (CR 603.10: a departed "when this dies" ability must be capturable
+    /// before `CollectTriggers` ever runs, same reasoning that function's own
+    /// doc comment already gives).
+    ///
+    /// Once the queue empties (including the trivial case of no zone-moving
+    /// payments at all), logs the final `CostPaid` event and returns
+    /// `ProcessState::SbaLoop` - exactly what `submit_payment` used to do
+    /// unconditionally before this split existed.
+    fn continue_cost_zone_moves(
+        &mut self,
+        mut remaining: VecDeque<PendingCostZoneMove>,
+        payer: PlayerId,
+        stack_id: ObjectId,
+    ) -> ProcessState {
+        while let Some(pending) = remaining.pop_front() {
+            let Some(proposed) = commands::propose_cost_zone_move(&self.state, pending.id, pending.from) else {
+                // Already gone somehow (shouldn't happen - PaymentPlan::
+                // validate confirmed it) - skip rather than guess, same
+                // stance continue_scripted_zone_move's own analogous check
+                // takes.
+                continue;
+            };
+            // CR 614.8: neither Sacrifice nor Discard is genuine destruction
+            // - a regeneration shield never intercepts either.
+            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_cost_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    return ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id },
+                    };
+                }
+            }
+        }
+        let event_id = self.state.allocate_event_id();
+        let sequence_no = self.state.allocate_sequence_no();
+        self.state.ledger.push(GameEvent {
+            event_id,
+            sequence_no,
+            kind: GameEventKind::CostPaid { stack_id, payer },
+            caused_by_command: None,
+            parent_event: None,
+        });
+        ProcessState::SbaLoop
     }
 
     /// Answers a pending CR 601.2f-h payment pause by abandoning the cast/
