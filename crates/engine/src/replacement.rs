@@ -4,6 +4,7 @@ use crate::types::effect::ConsumptionPolicy;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
+use crate::types::zone::ZoneKind;
 
 /// What `apply_replacements` produced for one proposed event. Not just a
 /// `GameEventKind`: CR 616.1 has the *affected player* choose which
@@ -118,6 +119,47 @@ pub(crate) fn apply_one_replacement(
 /// re-evaluates against a possibly-`RedirectDamage`-changed target, not
 /// just the original proposal. A `Target::Player`/unresolvable source or
 /// target never has protection to check — returned unchanged.
+/// CR 111.8: a token that has already left the battlefield can't move to
+/// another zone (or back onto the battlefield) — "if such a token would
+/// change zones, it remains in its current zone instead." Hardcoded ahead
+/// of the registered-effects match, same stance `apply_protection` already
+/// takes for CR 702.16a — this applies to every token unconditionally, not
+/// something a card grants. Checked against `state.object(object)`'s own
+/// *live* zone (not the proposal's own `from` field, though the two should
+/// always agree) — the token's identity/zone don't change until this event
+/// actually commits, so this is always the token's true current location.
+///
+/// Only rewrites `to`, mirroring `ReplacementPayload::ReplaceZoneDestination`'s
+/// own shape — the caller still commits a real (no-op) `ZoneChange`, same as
+/// every other replacement-rewritten proposal. Doesn't touch the token's
+/// own CR 111.7 cessation (`sba::collect_ceasing_tokens`/
+/// `commit_token_cessation`, checked separately by state-based actions) —
+/// that still fires on the next SBA check regardless of whether this
+/// function blocked a second move in the meantime.
+///
+/// Unreachable via real gameplay today, same as several other CR-accurate
+/// but currently-unexercisable checks in this codebase (see e.g. CR
+/// 303.4f/h/i/k/m's own note): nothing in this engine can propose a
+/// `ZoneChange` whose `from` is anything but `Battlefield` for a token — no
+/// "return from graveyard"/"cast from graveyard" path applies to tokens
+/// (they aren't cards, so flashback-style alternative costs can't target
+/// one), and CR 111.7 removes a token from any non-battlefield zone before
+/// most engine code gets a second chance to move it. Proven correct via
+/// direct `apply_replacements` construction instead (see this file's own
+/// test module) rather than an end-to-end scenario.
+fn apply_token_zone_lock(state: &GameState, event: GameEventKind) -> GameEventKind {
+    let GameEventKind::ZoneChange { object, from, to, last_known_info } = event else {
+        return event;
+    };
+    let Some(obj) = state.object(object) else {
+        return GameEventKind::ZoneChange { object, from, to, last_known_info };
+    };
+    if obj.is_token && obj.zone != ZoneKind::Battlefield {
+        return GameEventKind::ZoneChange { object, from, to: from, last_known_info };
+    }
+    GameEventKind::ZoneChange { object, from, to, last_known_info }
+}
+
 fn apply_protection(state: &GameState, script_runtime: &ScriptRuntime, event: GameEventKind) -> GameEventKind {
     let GameEventKind::DamageDealt { source, target, amount, is_combat_damage } = event else {
         return event;
@@ -193,6 +235,9 @@ pub(crate) fn apply_replacements_from(
         // comment for why this is hardcoded rather than a ReplacementEffect
         // entry.
         event = apply_protection(state, script_runtime, event);
+        // CR 111.8: same hardcoded-ahead-of-registered-effects stance, for
+        // an already-off-battlefield token's own zone lock.
+        event = apply_token_zone_lock(state, event);
 
         if state.replacement_effects.is_empty() {
             // Genuinely nothing registered to match against - safe to
@@ -526,6 +571,74 @@ mod tests {
         assert!(
             matches!(resolved, GameEventKind::DamageDealt { target: Target::Player(pid), amount: 0, .. } if pid == p0),
             "redirected to p0 by A, then prevented by B: {resolved:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // CR 111.8: a token that's already left the battlefield can't move
+    // again - no in-game producer can construct this scenario today (see
+    // apply_token_zone_lock's own doc comment), so these call
+    // apply_replacements directly rather than driving a full Engine.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn token_zone_lock_blocks_a_second_move_for_an_already_departed_token() {
+        let id = ObjectId(0);
+        let token = GameObject { zone: ZoneKind::Graveyard, is_token: true, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
+        let mut state = state_with(vec![token]);
+        let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Graveyard, to: ZoneKind::Exile, last_known_info: None };
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+            panic!("no registered effects, no ordering choice possible");
+        };
+        assert!(
+            matches!(resolved, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }),
+            "CR 111.8: the token must stay in its current zone instead of moving to Exile: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn token_zone_lock_blocks_a_departed_token_from_returning_to_the_battlefield() {
+        let id = ObjectId(0);
+        let token = GameObject { zone: ZoneKind::Graveyard, is_token: true, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
+        let mut state = state_with(vec![token]);
+        let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Graveyard, to: ZoneKind::Battlefield, last_known_info: None };
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+            panic!("no registered effects, no ordering choice possible");
+        };
+        assert!(
+            matches!(resolved, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }),
+            "CR 111.8 explicitly covers \"come back onto the battlefield\" too: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn token_zone_lock_allows_the_first_move_off_the_battlefield() {
+        let id = ObjectId(0);
+        let token = GameObject { zone: ZoneKind::Battlefield, is_token: true, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
+        let mut state = state_with(vec![token]);
+        let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+            panic!("no registered effects, no ordering choice possible");
+        };
+        assert!(
+            matches!(resolved, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }),
+            "a token's first move off the battlefield isn't covered by CR 111.8: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn token_zone_lock_ignores_non_token_objects() {
+        let id = ObjectId(0);
+        // Not a token (object()'s own default) - CR 111.8 is token-specific.
+        let card = GameObject { zone: ZoneKind::Graveyard, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
+        let mut state = state_with(vec![card]);
+        let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Graveyard, to: ZoneKind::Exile, last_known_info: None };
+        let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
+            panic!("no registered effects, no ordering choice possible");
+        };
+        assert!(
+            matches!(resolved, GameEventKind::ZoneChange { to: ZoneKind::Exile, .. }),
+            "a non-token card already off the battlefield isn't locked in place: {resolved:?}"
         );
     }
 }

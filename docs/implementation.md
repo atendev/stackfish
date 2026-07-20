@@ -2552,7 +2552,13 @@ verbatim once enough time has passed for the underlying code to have moved.
   named, not silently narrowed.
 - **CR 111.7/704.5d (token cessation)**: closed, `phase5/token-cessation` (docs/implementation.md,
   below) - `sba::collect_ceasing_tokens`/`commit_token_cessation`. CR 111.8 (a token that already left
-  the battlefield can't move zones again) is a related but separate rule, not covered.
+  the battlefield can't move zones again, or come back onto it) is closed too, `phase5/token-zone-
+  lock` (docs/implementation.md, below) - `replacement::apply_token_zone_lock`, hardcoded ahead of
+  the registered-effects match in `apply_replacements_from` (same stance `apply_protection` already
+  takes for CR 702.16a). Correct but currently unreachable via real gameplay - nothing in this engine
+  can propose a `ZoneChange` whose `from` isn't `Battlefield` for a token, proven via direct
+  `apply_replacements` construction instead of an end-to-end scenario (same honest stance CR
+  303.4f/h/i/k/m's own note already takes for a similarly-unreachable Aura rule).
 - **CR 402.2 (max hand size)**: closed, `phase5/max-hand-size` (docs/implementation.md, below) -
   `HandSizeModifier`/`effective_max_hand_size` (`types/player.rs`), a dedicated mechanism deliberately
   parallel to (not folded into) `state.continuous_effects`, same reasoning `cost_modifiers` already
@@ -9443,3 +9449,63 @@ spells/abilities - all pre-existing, named above, not attempted. `CardSpec` (sce
 can't mark a card definition itself Legendary/Basic/Snow/World from TOML - a real, separate gap from
 this slice's own `TargetRequirementSpec.supertypes` (which restricts *targets*, not card
 definitions) - not fixed here.
+
+## Phase 5: phase5/token-zone-lock slice (CR 111.8, token zone lock)
+
+Branch `phase5/token-zone-lock`, off master. Picked from the small-items list (alongside CR 702.6d's
+multi-equip distinction) as the next quick close before moving to bigger backlog work. Sibling rule
+to CR 111.7/704.5d (token cessation, already closed by `phase5/token-cessation`).
+
+**What got implemented:**
+- `replacement.rs`: a new `apply_token_zone_lock(state, event)` function, hardcoded into
+  `apply_replacements_from`'s loop right alongside `apply_protection` (same "checked fresh every
+  iteration, ahead of the registered-effects match, not a `ReplacementEffect` entry" stance that
+  function's own doc comment already established for CR 702.16a). For a `ZoneChange` proposal whose
+  `object` is a token (`GameObject.is_token`) currently in any zone other than `Battlefield`, rewrites
+  `to` back to `from` - the proposed move never happens, matching CR 111.8's own "remains in its
+  current zone instead" text exactly. Covers both halves of the rule in one check (no special-casing
+  `to == Battlefield` needed) - "move to another zone" and "come back onto the battlefield" are both
+  just "some `to` other than the token's current zone."
+- `replacement.rs` gained a new top-level `use crate::types::zone::ZoneKind;` (previously only
+  imported inside the test module) - the only real import change this slice needed.
+
+**CR requirements:** CR 111.8 - "a token that's left the battlefield can't move to another zone or
+come back onto the battlefield." Does not touch CR 111.7 (token cessation, unrelated mechanism,
+already closed) - a locked-in-place token still ceases to exist on the next SBA check regardless of
+whether this function ever blocks a second move for it.
+
+**TODOs marked, not attempted:** none - CR 111.8 is now fully, correctly implemented. What's missing
+isn't implementation, it's *reachability* - see UNRESOLVED below.
+
+**Tests added** (`replacement.rs`'s own test module, 4 new tests, direct `apply_replacements`
+construction rather than a full-`Engine` scenario - see UNRESOLVED): a token already in the graveyard
+proposed to move to exile stays in the graveyard instead; a token already in the graveyard proposed
+to return to the battlefield also stays put (the rule's second clause, tested separately since it's
+a distinct `to` value, not just a parameterization of the first test); a token's *first* move off the
+battlefield (Battlefield -> Graveyard) is unaffected - CR 111.8 only applies once a token has already
+left; a non-token card already in the graveyard is unaffected - the rule is token-specific.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the 4
+new tests.
+
+**STRUCT DEVIATIONS:** none - no field added to any existing struct.
+
+**INTERFACE DEVIATIONS:** none - `apply_replacements`/`apply_replacements_from`'s own signatures are
+unchanged; `apply_token_zone_lock` is a private function called internally, same shape
+`apply_protection` already has.
+
+**SCOPE DEVIATIONS:** none - implementation matched the pre-slice research exactly (found
+`apply_replacements_from` as the single real choke point every zone-change proposal in this engine
+already passes through, confirmed by reading its three real call sites - `sba::resolve_deaths` and
+two `engine.rs` pipeline stages - before writing any code, rather than guessing at a scatter of
+per-site checks).
+
+**UNRESOLVED:** no end-to-end `Engine`-driven test exists, and none could be built honestly this
+slice - confirmed by grepping every `GameEventKind::ZoneChange` construction site in `crates/engine/
+src` for a `from` other than `Battlefield`: none exist. The one apparent candidate (flashback casting
+a card *from* the graveyard, CR 702.34a) doesn't apply here either - flashback requires a *card*, and
+tokens aren't cards, so a token can never be the object of that move. CR 111.7's own cessation SBA
+also means a token generally doesn't survive long in a non-battlefield zone regardless. If a future
+slice ever adds a real "move this token out of the graveyard" producer (some hypothetical effect),
+`apply_token_zone_lock` is already correct and ready to intercept it - nothing further to build.
