@@ -560,14 +560,43 @@ return s
 ```
 
 `:SetFilter(Game.EventFilters.*)` picks which event shape this effect watches —
-`DamageDealt`/`WouldDie` are the only two with a real query path (`ReplacementEffect::matches`).
-`:SetPayload(Game.ReplacementPayloads.*)` picks the rewrite: `PreventDamage` (CR 615, pairs only
-with `DamageDealt`), `RedirectDamageToSource` (CR 614.9, pairs only with `DamageDealt` — see below),
-`Regenerate` (CR 701.19b, pairs only with `WouldDie`), or `ReplaceZoneDestination(zoneName)` (CR
-614.13-style "instead" substitution, pairs only with `WouldDie` — `zoneName` is a zone name string,
-e.g. `"Exile"`). A mismatched pairing is a real `:Register()`-time error, same stance
-`StaticAbilityBuilder`'s `:SetLayer`/`:SetEffect` pairing already takes. `:SetConsumption(Game.
+`DamageDealt`/`WouldDie`/`WouldMoveZone(fromName, toName)` are the ones with a real query path
+(`ReplacementEffect::matches`). `WouldDie` is hardcoded to Battlefield -> Graveyard (CR 700.4
+"dies"); `WouldMoveZone` is the general form — either `fromName`/`toName` may be `nil` for "any
+zone," e.g. `Game.EventFilters.WouldMoveZone("Battlefield", nil)` matches any move off the
+battlefield, `Game.EventFilters.WouldMoveZone(nil, "Exile")` matches any move into exile regardless
+of source. `:SetPayload(Game.ReplacementPayloads.*)` picks the rewrite: `PreventDamage` (CR 615,
+pairs only with `DamageDealt`), `RedirectDamageToSource` (CR 614.9, pairs only with `DamageDealt` —
+see below), `Regenerate` (CR 701.19b, pairs only with `WouldDie` — CR 614.8's "genuine destruction"
+meaning is specifically tied to `WouldDie`'s own Battlefield -> Graveyard shape, not something a
+wildcard `WouldMoveZone` filter should reinterpret), or `ReplaceZoneDestination(zoneName)` (CR
+614.13-style "instead" substitution, pairs with `WouldDie` *or* `WouldMoveZone` — `zoneName` is a
+zone name string, e.g. `"Exile"`). A mismatched pairing is a real `:Register()`-time error, same
+stance `StaticAbilityBuilder`'s `:SetLayer`/`:SetEffect` pairing already takes. `:SetConsumption(Game.
 Consumption.*)` picks `OneShot`, `Repeatable` (the default), or `LimitedUses(n)`.
+
+```lua
+-- If this creature would be exiled, put it into its owner's graveyard instead.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Exile"))
+    e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Graveyard"))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+
+return s
+```
+
+`WouldMoveZone`'s wildcard sides are real and correct but currently unreachable for most zone shapes
+via actual gameplay — most zone-change producers in this engine (`Engine::draw_one_card`,
+`Engine::submit_discard`, `commands::commit_payment`'s Sacrifice/Discard cost payments) mutate state
+directly and never call `apply_replacements` at all. Only SBA-driven deaths and the scripted
+Destroy/Sacrifice/Exile ops do, and all three are always Battlefield-sourced — so a `from` other than
+`"Battlefield"` won't intercept anything real yet, same "proven correct, ready for a future producer"
+stance the CR 111.8 token zone-lock check already takes.
 
 ```lua
 -- Fog: prevent all combat damage that would be dealt to you this turn.

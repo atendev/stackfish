@@ -2455,9 +2455,19 @@ verbatim once enough time has passed for the underlying code to have moved.
   docs/implementation.md, below) as well as now a *static* ability's own duration (this bullet).
 - **Activated abilities**: multi-ability-per-card indexing is still positional by registration order,
   not a stable id - fragile if a card's own ability list ever needs to change shape.
-- **Replacement effects**: `EventFilter` still only has two event *shapes* (`DamageDealt`,
-  `WouldDie`) - protection (CR 702.16), ETB-modifier replacements, "would draw a card"
-  substitution, and any other event kind stay unmodeled. Within those two shapes,
+- **Replacement effects**: `EventFilter` had exactly two event *shapes* (`DamageDealt`, `WouldDie`,
+  the latter hardcoded to Battlefield -> Graveyard) until `phase5/eventfilter-would-move-zone`
+  (docs/implementation.md, below) added a third, general sibling: `WouldMoveZone { from:
+  Option<ZoneKind>, to: Option<ZoneKind>, affected }`, matching any zone-change shape (either side
+  `None` = wildcard) - a pure addition, `WouldDie` untouched, zero fallout across its own ~15
+  pre-existing construction sites. Pairs only with `ReplaceZoneDestination` (not `Regenerate` - CR
+  614.8's "genuine destruction" meaning stays tied to `WouldDie`'s own hardcoded shape). Bound in Lua
+  as `Game.EventFilters.WouldMoveZone(fromName, toName)`, either name nilable. Proven end to end with
+  a real, `WouldDie`-inexpressible capability: "if this would be exiled, put it into its owner's
+  graveyard instead" (CR 205.4-style exile-hate protection). ETB-modifier replacements ("enters
+  tapped," "enters with counters") and protection-as-a-replacement-effect stay unmodeled - see that
+  slice's own TODO notes for why each is a structurally different, bigger problem than a new
+  `EventFilter` shape alone solves. Within the shapes that do exist,
   `Game.CreateReplacementEffect`'s Lua construction path is now general: `phase5/static-
   regeneration` (docs/implementation.md, below) proved `WouldDie`/`Regenerate` (CR 701.19b);
   `phase5/replacement-effect-shapes` (docs/implementation.md, below) generalized the same builder
@@ -9634,3 +9644,93 @@ share them) is invisible from outside `commands.rs`.
 
 **UNRESOLVED:** Landwalk, Banding, Flanking, Rampage - all named above with the specific reason each
 was scoped out, not silently skipped.
+
+## Phase 5: phase5/eventfilter-would-move-zone slice (general zone-change replacement matching)
+
+Branch `phase5/eventfilter-would-move-zone`, off master. Picked over two other big-backlog options
+(Layer 1 copy gaps, the CR 613.6-8 dependency system) by explicit user choice. Pre-slice research
+turned up more than the "add a new `EventFilter` shape" framing suggested - see UNRESOLVED for what
+that surfaced.
+
+**What got implemented:**
+- `types/effect.rs`: `EventFilter::WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind>,
+  affected: EffectFilter }` - a new sibling variant to `WouldDie`, not a generalization/rename of it.
+  `None` on either side means wildcard (matches every zone on that side). `WouldDie` itself is
+  completely untouched - every one of its ~15 pre-existing construction/match sites across
+  `commands.rs`/`engine.rs`/8 test files needed zero changes, unlike the mechanical fallout `Copy`-
+  losing field additions caused in earlier slices this phase.
+- `ReplacementEffect::matches` gained a new match arm for `(WouldMoveZone { from, to, affected },
+  ZoneChange { .. })`: rejects if `from`/`to` are `Some` and don't equal the event's own, otherwise
+  defers to the same `event_target_matches` helper `WouldDie` already uses.
+- `script.rs`: `EventFilterKind::WouldMoveZone { from, to }` (unlike `WouldDie`, a parametrized
+  variant - needs its own `from`/`to` chosen at `:SetFilter()` call time, not fixed at compile time).
+  `Game.EventFilters.WouldMoveZone(fromName, toName)` bound as a function (unlike every other
+  `Game.EventFilters.*` entry, a bare tagged value) - either argument accepts Lua `nil` for wildcard,
+  reusing the existing `parse_zone_kind_name` parser via `Option::map`/`.transpose()`.
+  `validate_replacement_filter_payload_pairing` gained `(WouldMoveZone { .. },
+  ReplaceZoneDestination(_))` as a valid pairing - deliberately not `Regenerate`, which stays
+  `WouldDie`-only (see that payload's own doc comment for why).
+
+**CR requirements:** no single new CR citation - this is infrastructure widening the shapes CR
+614/615/616's existing replacement-effect machinery can express, proven against a real card pattern
+("if this would be exiled, put it into its owner's graveyard instead," CR 614.13's general "instead"
+substitution applied to a zone-change shape `WouldDie` structurally cannot express since it's
+hardcoded to `to: Graveyard`).
+
+**TODOs marked, not attempted:** ETB-modifier replacements (CR 614.12, "enters tapped"/"enters with
+counters") - a structurally different problem from a new `EventFilter` shape: `GameEventKind::
+ZoneChange` carries no payload slot for "the new object should start tapped/with N counters," so
+even a perfectly general filter has nowhere to stash that outcome; would need either a new event
+payload field (rippling through ~19 existing `ZoneChange` construction sites) or a dedicated
+non-`ReplaceZoneDestination` payload shape with its own commit-time handling. Protection modeled as
+a real `ReplacementEffect`/`EventFilter` entry instead of the current hardcoded `apply_protection`
+check - CR 702.16 is a static characteristic (`effective_characteristics`), not something a card
+*registers* as a replacement effect, so this was never really an `EventFilter`-shape gap to begin
+with, despite being named in this same gaps-list bullet historically.
+
+**Tests added:**
+- `crates/engine/src/types/effect.rs`'s own test module (3 new tests, alongside `WouldDie`'s
+  existing ones): both-wildcard matches any zone-change shape (draw-shaped and discard-shaped
+  events, constructed directly since no real producer makes them yet); `from` pinned/`to` wildcard
+  matches any destination off a specific source zone but rejects a different source; both pinned
+  requires an exact `from`/`to` match.
+- `crates/engine/tests/phase5_eventfilter_would_move_zone.rs` (3 tests): `Game.CreateReplacementEffect`
+  + `WouldMoveZone("Battlefield", "Exile")` self-registers with the chosen `from`/`to`; a mismatched
+  `WouldMoveZone` + `PreventDamage` pairing is a real `:Register()`-time error; end to end through
+  the real scripted-Exile-op pipeline, a Lua-registered `WouldMoveZone(Battlefield, Exile)` +
+  `ReplaceZoneDestination(Graveyard)` effect keeps a targeted creature out of exile entirely and
+  lands it in its owner's graveyard instead.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including all 6
+new tests. The end-to-end integration test needed two fixture fixes after the first run (both caught
+immediately, not silently worked around): the spell had to be cast by whichever player already held
+priority (`two_player_state`'s `p0`), not an arbitrary caster; the post-resolution graveyard-contents
+assertion needed to expect 2 objects, not 1 - the redirected creature *and* the Exile instant itself,
+which lands in its own owner's graveyard normally after resolving.
+
+**STRUCT DEVIATIONS:** none beyond the new field itself - `WouldMoveZone`'s `Option<ZoneKind>` pair
+was exactly the shape scoped in the pre-slice research (checked `ZoneKind`'s own `Copy`/`Eq` derives
+before writing any code, confirming no `Copy`-loss ripple the way `Vec<Subtype>` caused earlier this
+phase).
+
+**INTERFACE DEVIATIONS:** none - `ReplacementEffect::matches`'s own signature is unchanged (a new
+match arm, not a new parameter).
+
+**SCOPE DEVIATIONS:** none against the requirements report's own scope decision - the report already
+flagged the draw/discard/cost-payment reachability gap up front, before any code was written, rather
+than discovering it mid-implementation.
+
+**UNRESOLVED:** the reachability gap the requirements report surfaced is real and bigger than this
+slice: `Engine::draw_one_card`, `Engine::submit_discard` (cleanup hand-size discard), and
+`commands::commit_payment`'s Sacrifice/Discard cost payments all mutate `GameState` directly and
+never call `replacement::apply_replacements` - a "would draw a card, instead..." or "if a card would
+be discarded, exile it instead" effect is inert against all three today, not because `EventFilter`
+can't express the match (it now can, via `WouldMoveZone`) but because those producers never propose
+the event through the replacement pipeline at all. Routing them through it is real, separate,
+un-scoped follow-up work - each producer would need restructuring into the same "propose, replace,
+then commit the (possibly rewritten) result" shape `sba::resolve_deaths`/`commit_death` already use,
+and at least one (a cost payment matching more than one registered replacement) would need to surface
+a genuine `NeedsOrderingChoice`-shaped pause partway through cost payment, a real new pipeline state
+this slice didn't attempt. ETB-modifier replacements and protection-as-replacement-effect are named
+above as their own, structurally different gaps.

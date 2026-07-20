@@ -458,6 +458,32 @@ pub enum EventFilter {
     /// comment for why that's a separate `is_destroy` parameter rather than
     /// data carried on the event itself.
     WouldDie { affected: EffectFilter },
+    /// Matches any `GameEventKind::ZoneChange` moving `object` from `from`
+    /// to `to` (either `None` = wildcard, matching every zone on that side)
+    /// where `object` satisfies `affected` — the general form `WouldDie`
+    /// hardcodes to exactly `Some(Battlefield)`/`Some(Graveyard)`. Added so
+    /// a replacement effect can match a zone-change shape `WouldDie` can't
+    /// express at all (e.g. "would be exiled" instead of "would die", or a
+    /// non-battlefield-sourced move like drawing/discarding/milling) — a
+    /// sibling variant rather than a `WouldDie` generalization, so every
+    /// existing `WouldDie` construction site is untouched. Only
+    /// `ReplacementPayload::ReplaceZoneDestination` pairs with this -
+    /// `Regenerate`'s own CR 614.8 "genuine destruction" meaning is
+    /// specifically tied to `WouldDie`'s hardcoded Battlefield -> Graveyard
+    /// shape (see `ReplacementEffect::matches`'s own `is_destroy` doc
+    /// comment), not something a wildcard-from/to filter should reinterpret.
+    ///
+    /// Reachability note: most zone-change producers in this engine
+    /// (`Engine::draw_one_card`, `Engine::submit_discard`,
+    /// `commands::commit_payment`'s Sacrifice/Discard cost payments) mutate
+    /// state directly and never call `replacement::apply_replacements` at
+    /// all - only SBA-driven deaths and the scripted Destroy/Sacrifice/Exile
+    /// ops do, and all three are always Battlefield-sourced. A
+    /// `WouldMoveZone` matching a non-Battlefield `from` is real and correct
+    /// but currently unreachable via actual gameplay, same "proven via
+    /// direct construction, ready the moment a real producer exists" stance
+    /// `phase5/token-zone-lock`'s own CR 111.8 check already took.
+    WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind>, affected: EffectFilter },
 }
 
 /// A `ReplacementEffect`'s actual rewrite (CR 614.1: the event doesn't
@@ -594,6 +620,15 @@ impl ReplacementEffect {
                     {
                         return false;
                     }
+                }
+                event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source)
+            }
+            (
+                EventFilter::WouldMoveZone { from, to, affected },
+                GameEventKind::ZoneChange { object, from: event_from, to: event_to, .. },
+            ) => {
+                if from.is_some_and(|f| f != *event_from) || to.is_some_and(|t| t != *event_to) {
+                    return false;
                 }
                 event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source)
             }
@@ -1040,6 +1075,74 @@ mod tests {
             last_known_info: None,
         };
         assert!(!effect.matches(&non_death, true, &state, &ScriptRuntime::new()), "only Battlefield -> Graveyard counts as \"would die\"");
+    }
+
+    #[test]
+    fn would_move_zone_with_both_sides_wildcard_matches_any_zone_change() {
+        let p0 = PlayerId(0);
+        let this = ObjectId(0);
+        let state = state_with(vec![object(this, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        let effect = replacement(
+            this,
+            EventFilter::WouldMoveZone {
+                from: None,
+                to: None,
+                affected: EffectFilter { card_types: None, controller: None, self_only: true },
+            },
+            ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
+        );
+
+        let library_to_hand = GameEventKind::ZoneChange { object: this, from: ZoneKind::Library, to: ZoneKind::Hand, last_known_info: None };
+        assert!(effect.matches(&library_to_hand, false, &state, &ScriptRuntime::new()), "both-wildcard must match a draw-shaped move");
+
+        let hand_to_graveyard = GameEventKind::ZoneChange { object: this, from: ZoneKind::Hand, to: ZoneKind::Graveyard, last_known_info: None };
+        assert!(effect.matches(&hand_to_graveyard, false, &state, &ScriptRuntime::new()), "both-wildcard must match a discard-shaped move too");
+    }
+
+    #[test]
+    fn would_move_zone_with_from_pinned_ignores_to() {
+        let p0 = PlayerId(0);
+        let this = ObjectId(0);
+        let state = state_with(vec![object(this, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        let effect = replacement(
+            this,
+            EventFilter::WouldMoveZone {
+                from: Some(ZoneKind::Battlefield),
+                to: None,
+                affected: EffectFilter { card_types: None, controller: None, self_only: true },
+            },
+            ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
+        );
+
+        let to_graveyard = GameEventKind::ZoneChange { object: this, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
+        assert!(effect.matches(&to_graveyard, false, &state, &ScriptRuntime::new()));
+        let to_hand = GameEventKind::ZoneChange { object: this, from: ZoneKind::Battlefield, to: ZoneKind::Hand, last_known_info: None };
+        assert!(effect.matches(&to_hand, false, &state, &ScriptRuntime::new()), "to left wildcard - any destination off the battlefield matches");
+
+        let from_hand = GameEventKind::ZoneChange { object: this, from: ZoneKind::Hand, to: ZoneKind::Graveyard, last_known_info: None };
+        assert!(!effect.matches(&from_hand, false, &state, &ScriptRuntime::new()), "from is pinned to Battlefield - a Hand-sourced move must not match");
+    }
+
+    #[test]
+    fn would_move_zone_with_both_sides_pinned_requires_an_exact_match() {
+        let p0 = PlayerId(0);
+        let this = ObjectId(0);
+        let state = state_with(vec![object(this, p0, CardTypeSet::CREATURE, ZoneKind::Battlefield)]);
+        let effect = replacement(
+            this,
+            EventFilter::WouldMoveZone {
+                from: Some(ZoneKind::Battlefield),
+                to: Some(ZoneKind::Exile),
+                affected: EffectFilter { card_types: None, controller: None, self_only: true },
+            },
+            ReplacementPayload::ReplaceZoneDestination(ZoneKind::Graveyard),
+        );
+
+        let exact = GameEventKind::ZoneChange { object: this, from: ZoneKind::Battlefield, to: ZoneKind::Exile, last_known_info: None };
+        assert!(effect.matches(&exact, false, &state, &ScriptRuntime::new()));
+
+        let wrong_to = GameEventKind::ZoneChange { object: this, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
+        assert!(!effect.matches(&wrong_to, false, &state, &ScriptRuntime::new()));
     }
 
     #[test]
