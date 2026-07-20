@@ -2479,11 +2479,17 @@ verbatim once enough time has passed for the underlying code to have moved.
   `commands::propose_zone_move`/`commit_zone_move` pair cost payments use (renamed from
   `propose_cost_zone_move`/`commit_cost_zone_move` to drop the now-inaccurate "cost" prefix once a
   second, non-cost caller existed), with its own `ReplacementResumeTarget::CleanupDiscard` pause.
-  `Engine::draw_one_card` is the one holdout - it lives inside `AdvanceTurnStep`'s single shared
-  `step()` match arm rather than a self-contained method, so making it replaceable needs a new
-  pause/resume shape threaded through that whole function, real, separate, still-unscoped follow-up.
-  "Would draw a card, instead..." stays inert until then, named rather than silently implied fixed.
-  Within the shapes that do exist,
+  CR 504.1's turn-based draw closed the reachability gap's last real piece, `phase5/replaceable-draw`
+  (docs/implementation.md, below) - `AdvanceTurnStep`'s own `Step::Draw` handling now uses `commands::
+  propose_draw` (new) + `commit_zone_move` (already shared), with a new `Engine::
+  enter_priority_via_replacement_check` helper factored out of that match arm's own shared tail so
+  both the normal path and a CR 616.1 pause (`ReplacementResumeTarget::Draw`) reach it identically -
+  `Engine::draw_step` (the old direct-mutation wrapper) is gone entirely, dead once its one call site
+  was replaced. `Game.Ops.DrawCards(n)` (a scripted "draw N cards" ability, `AbilityEffect::DrawCards`
+  inside `ResolveStackTop`'s own giant effect match - a structurally different pause/resume shape,
+  and a count-based queue rather than a list of ids since each draw re-peeks whatever's now on top)
+  is the one remaining holdout, named rather than silently implied fixed. Within the shapes that do
+  exist,
   `Game.CreateReplacementEffect`'s Lua construction path is now general: `phase5/static-
   regeneration` (docs/implementation.md, below) proved `WouldDie`/`Regenerate` (CR 701.19b);
   `phase5/replacement-effect-shapes` (docs/implementation.md, below) generalized the same builder
@@ -9915,3 +9921,96 @@ a scope-down from what was originally offered, decided before writing any code a
 
 **UNRESOLVED:** `Engine::draw_one_card` - the harder half of the original reachability gap, still
 open, named above with the specific architectural reason it wasn't attempted here.
+
+## Phase 5: phase5/replaceable-draw slice (CR 504.1 turn-based draw, CR 616.1)
+
+Branch `phase5/replaceable-draw`, off master. The last, hardest piece of the reachability gap
+`phase5/eventfilter-would-move-zone` originally surfaced - the exact item `phase5/replaceable-
+cleanup-discard`'s own requirements report scoped out after finding `Engine::draw_one_card` entangled
+in `AdvanceTurnStep`'s single shared `step()` match arm rather than a self-contained method.
+
+Pre-slice research confirmed the entanglement was real but tractable: `Step::Draw`'s handling
+already sits inside its own `if` branch within that match arm, and the arm's own "open a priority
+window" tail (replacement check -> SBA -> trigger collection, CR 603.3/117.3b) is shared with every
+step that isn't Untap/Cleanup - factoring that tail into its own method let `Step::Draw` reach it
+both on the normal path and after a CR 616.1 pause resumes, without touching Untap/Cleanup's own
+different tails at all. `Game.Ops.DrawCards(n)` (scripted multi-draw abilities, inside a *different*
+giant match - `ResolveStackTop`'s own effect-application arm) turned out to be a separate, still-
+harder problem (needs a count-based resume, not a target-list one, since each draw re-peeks whatever
+the library's new top card is) and was scoped out from the start, not discovered mid-slice.
+
+**What got implemented:**
+- `commands.rs`: `propose_draw(state: &mut GameState, player) -> Option<GameEventKind>`, mirroring
+  `propose_zone_move`'s "build the proposal, don't mutate" shape but generalized to `to: Hand`
+  (`propose_zone_move` hardcodes `Graveyard`). Takes `&mut GameState` (unlike `propose_zone_move`'s
+  `&GameState`) for exactly one reason: CR 704.5b's `PlayerState.drew_from_empty_library` flag, set
+  here on an empty library exactly as `draw_one_card`'s own predecessor code did - not itself a
+  zone-change, but real state this function's callers still need set. `commit_zone_move` needed no
+  changes at all - its zone-owner derivation already treated Library/Hand as per-player correctly.
+- `engine.rs`: a new `ReplacementResumeTarget::Draw { tail_events, since_ledger }` - unlike every
+  other resume target so far, this isn't a queue (`Step::Draw` is always exactly one card), so
+  resuming just commits and continues on to the shared tail. A new `Engine::
+  enter_priority_via_replacement_check(events, since_ledger)` helper, factored out of
+  `AdvanceTurnStep`'s own bottom tail verbatim (same `priority_player`/`pipeline_context`/
+  `pipeline_exit`/`ReplacementCheck` transition, just parametrized on `since_ledger` instead of
+  capturing it fresh) - both the bottom tail (every non-Untap/Draw/Cleanup step) and `Step::Draw`'s
+  own two exit paths (normal completion, and `ReplacementResumeTarget::Draw`'s own resume) now call
+  it, rather than three copies of the same five lines.
+  `Step::Draw`'s own `if` branch: captures `since_ledger` *before* proposing the draw (not at the
+  usual point, right before the tail) - deliberate, so the draw's own event (logged directly via
+  `commit_zone_move` + a plain `state.ledger.push`, bypassing the generic `ReplacementCheck` pipeline
+  entirely to avoid re-checking an already-resolved event a second time against a fresh, empty
+  `excluded` set) still falls inside the same trigger-collection window as this call's own
+  `TurnStarted`/`PhaseStarted`/`StepStarted` markers - the exact property `ConditionPrimitive::
+  DrawsCard`/`EachDrawsCard` (already real, already tested) depend on.
+  `Engine::draw_step` (the old thin wrapper `draw_one_card` for the turn-based case) is deleted
+  entirely - dead the moment its one call site was replaced, not left as an unused shim.
+  `Game.Ops.DrawCards(n)`'s own comment in `ResolveStackTop` updated to a real `TODO` pointing at this
+  slice and explaining precisely why it wasn't folded in (different pause shape, count vs. list).
+
+**CR requirements:** CR 504.1 (the draw step's turn-based action) and CR 616.1 (an ordering choice
+when more than one replacement effect matches) - the primary, by far most common real-card-relevant
+draw in the game (as opposed to `Game.Ops.DrawCards(n)`'s scripted multi-draw abilities, secondary
+and still unclosed).
+
+**TODOs marked, not attempted:** `Game.Ops.DrawCards(n)` - named above, real, its own follow-up
+(different pause/resume shape, needs a count-based queue).
+
+**Tests added** (`crates/engine/tests/phase5_replaceable_draw.rs`, 4 new tests): a turn-based draw is
+genuinely redirected by a registered `WouldMoveZone(Library, Hand)` + `ReplaceZoneDestination(Exile)`
+effect (hand stays empty, exile gets the card); a non-matching setup (no replacement effect
+registered) lands the card in hand normally; drawing from an empty library still sets
+`drew_from_empty_library` (CR 704.5b, unaffected by any of this slice's own changes, confirmed rather
+than assumed); two independently-matching replacement effects produce a real `StepStatus::
+AwaitingReplacementChoice` pause with both candidates, and `submit_replacement_choice` correctly
+resumes draw-step resolution afterward - `ReplacementResumeTarget::Draw`'s own pause/resume path,
+previously unreachable, all four passing on the first run with no fixture rework needed.
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new - `draw_step`'s removal left no new unused-code warnings, confirmed by grepping for its own name
+before deleting it). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures,
+including all 4 new tests and every pre-existing test that exercises the draw step or `DrawsCard`/
+`EachDrawsCard` triggers (`phase5_draw_combat_end_triggers.rs`, `phase5_beginning_phase.rs`,
+`phase5_pregame.rs`, `phase5_script_ops_drawcards.rs`) - all passed unmodified after restructuring
+one of the largest, most turn-structure-critical functions in the engine, no fixture changes needed.
+
+**STRUCT DEVIATIONS:** `ReplacementResumeTarget::Draw`'s "single proposal, not a queue" shape and
+`enter_priority_via_replacement_check`'s extraction were both anticipated in the pre-slice
+requirements report - confirmed by reading the full `AdvanceTurnStep` match arm before writing any
+code, not discovered as a refactoring need mid-slice.
+
+**INTERFACE DEVIATIONS:** `Engine::draw_step` removed entirely (was already private, zero external
+callers) - the cleanest form of "no interface change" for something that stopped being called at all.
+
+**SCOPE DEVIATIONS:** none against the requirements report's own scope (route the turn-based draw
+through real replacement checking, leave `Game.Ops.DrawCards(n)` for later) - that report was itself
+already the second scope-down in this same reachability-gap thread (`phase5/replaceable-cleanup-
+discard`'s report deferred exactly this item first), and this one's own DrawCards exclusion was
+likewise decided up front.
+
+**UNRESOLVED:** `Game.Ops.DrawCards(n)` - the one remaining producer in the original reachability gap,
+named above with the specific reason (different pause shape inside a different giant match, a
+count-based resume rather than a target-list one) it wasn't attempted here. With this slice, every
+*other* zone-change producer this engine has (SBA deaths, scripted Destroy/Sacrifice/Exile ops,
+Sacrifice/Discard cost payments, cleanup discard, and now the turn-based draw) is real and replacement-
+checked - `DrawCards(n)` is the sole remaining direct-mutation holdout.

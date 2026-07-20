@@ -697,6 +697,36 @@ pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind)
     Some(GameEventKind::ZoneChange { object: id, from, to: ZoneKind::Graveyard, last_known_info: Some(last_known_info) })
 }
 
+/// CR 504.1/616.1: drawing a card is itself a replaceable zone-change
+/// proposal (e.g. Notion Thief-style "you draw instead" effects) - same
+/// "propose, then replacement-check, then commit" split `propose_zone_move`
+/// established, generalized to `to: Hand` (the other real destination a
+/// zone-move proposal in this codebase starts with, alongside
+/// `propose_zone_move`'s own `Graveyard`). `Engine::commit_zone_move`
+/// already handles the commit side correctly with no changes needed - its
+/// zone-owner derivation treats Library/Hand as per-player, same as every
+/// zone besides Battlefield/Exile.
+///
+/// CR 704.5b: an empty library still sets `PlayerState.drew_from_empty_library`
+/// here (not itself a zone-change) - ported exactly from this function's
+/// predecessor (`Engine::draw_one_card`, still real and unchanged - `Game.
+/// Ops.DrawCards(n)`'s `ResolveStackTop` arm is its only remaining caller;
+/// see this function's own reachability note in docs/implementation.md for
+/// why that call site wasn't folded into this slice). Takes `&mut GameState`
+/// rather than `propose_zone_move`'s `&GameState` for exactly this one side
+/// effect - nothing else about this function mutates state.
+pub(crate) fn propose_draw(state: &mut GameState, player: PlayerId) -> Option<GameEventKind> {
+    let card = state.zone(ZoneKind::Library, Some(player)).and_then(|library| library.contents.front().copied());
+    let Some(card) = card else {
+        if let Some(p) = state.player_mut(player) {
+            p.drew_from_empty_library = true;
+        }
+        return None;
+    };
+    let last_known_info = state.object(card).expect("card id came from the library zone's own contents").clone();
+    Some(GameEventKind::ZoneChange { object: card, from: ZoneKind::Library, to: ZoneKind::Hand, last_known_info: Some(last_known_info) })
+}
+
 /// Commits `event` (a `propose_zone_move` proposal, already
 /// replacement-checked by the caller — `to` may have been rewritten by a
 /// `ReplaceZoneDestination` payload) — CR 400.7 fresh `ObjectId`, same
