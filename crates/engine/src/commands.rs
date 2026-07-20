@@ -401,6 +401,25 @@ pub(crate) fn target_is_legal(
                 !target_has_protection_from(state, script_runtime, id, source)
             }
         },
+        // CR 601.2c/602.2b: `invoke_target_legal`'s real body (script.rs)
+        // is the same per-candidate predicate shape `invoke_continuous_affects`
+        // established for `AffectedFilter::Script` — evaluated once per
+        // already-chosen candidate, not a `Game.SelectTargets` coroutine
+        // suspension (that's a different, unrelated concept - see
+        // `TargetFilter::Script`'s own doc comment). Object-only per that
+        // doc comment; a nonexistent object is rejected before the script
+        // ever runs, same "don't invoke Lua on a dead id" guard the other
+        // arms get via `state.object(id)`.
+        TargetFilter::Script(handle) => {
+            let Target::Object(id) = target else { return false };
+            if state.object(id).is_none() {
+                return false;
+            }
+            if target_has_protection_from(state, script_runtime, id, source) {
+                return false;
+            }
+            script_runtime.invoke_target_legal(*handle, state, id, source, caster).unwrap_or(false)
+        }
     }
 }
 
@@ -437,13 +456,6 @@ fn validate_targets(
                 Err(CommandError::InvalidTarget)
             }
         }
-        // TODO: a script-backed target requirement isn't evaluable yet -
-        // same "Script variant stays dead code" stance ConditionSpec/
-        // AffectedFilter already take elsewhere. Nothing constructs this
-        // variant, so this arm can't be exercised for real; accept
-        // unconditionally rather than guessing at a legality rule no card
-        // uses.
-        Some(TargetSpec::Script(_)) => Ok(()),
         Some(TargetSpec::Primitive(req)) => {
             // CR 601.2c/115.6: "up to N" accepts anywhere from 0 to `count`
             // chosen - the common exact-count case still requires exactly

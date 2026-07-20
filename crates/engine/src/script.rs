@@ -1000,16 +1000,21 @@ impl UserData for TriggeredAbilityBuilder {
 /// `kind` is implied the same way `TriggeredAbilityBuilder`'s own doc
 /// comment already explains.
 ///
-/// `:SetTarget(table)` (added for `phase5/equip-ability`, CR 702.6a's
-/// "target creature you control") reuses `decode_target_filter_table`, the
-/// same table-shape decoder `Game.SelectTargets` already uses — e.g.
-/// `{type="object", card_types={"Creature"}, controller="you"}`. Always a
-/// single, exact-count target (`count: 1, up_to: false`) — no "up to N" or
-/// multi-target shape, same narrowing precedent `Game.SelectTargets`'s own
-/// doc comment already set for the identical reason (nothing built yet to
-/// consume more than one). `CardDefinition.mana_cost` (spells) is untouched
-/// by `ManaCost::parse` existing now — it's still sourced as a structured
-/// `ManaCost` from the external card database, never parsed from a string.
+/// `:SetTarget(table | function)` (table shape added for
+/// `phase5/equip-ability`, CR 702.6a's "target creature you control";
+/// function shape added for `phase5/scripted-target-filter`, CR 601.2c/
+/// 602.2b's scripted legality predicate) goes through
+/// `decode_target_filter_value` — a table decodes the same flat option-bag
+/// `Game.SelectTargets` already uses, e.g. `{type="object",
+/// card_types={"Creature"}, controller="you"}`; a bare function becomes
+/// `TargetFilter::Script`, e.g. `function(object, source, controller,
+/// state) return ... end`. Always a single, exact-count target (`count: 1,
+/// up_to: false`) — no "up to N" or multi-target shape, same narrowing
+/// precedent `Game.SelectTargets`'s own doc comment already set for the
+/// identical reason (nothing built yet to consume more than one).
+/// `CardDefinition.mana_cost` (spells) is untouched by `ManaCost::parse`
+/// existing now — it's still sourced as a structured `ManaCost` from the
+/// external card database, never parsed from a string.
 struct ActivatedAbilityBuilder {
     source: ObjectId,
     cost: CostSpec,
@@ -1043,8 +1048,11 @@ impl UserData for ActivatedAbilityBuilder {
             this.operation = Some(decoded);
             Ok(())
         });
-        methods.add_method_mut("SetTarget", |_, this, table: Table| {
-            this.target = Some(decode_target_filter_table(table).map_err(to_lua_err)?);
+        methods.add_method_mut("SetTarget", |lua, this, value: Value| {
+            let mut registry = this.registry.borrow_mut();
+            let decoded = decode_target_filter_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            drop(registry);
+            this.target = Some(decoded);
             Ok(())
         });
         methods.add_method_mut("Register", |_, this, ()| {
@@ -1659,19 +1667,28 @@ impl ScriptRuntime {
         todo!()
     }
 
-    /// Real target selection generally requires suspending mid-script to
-    /// ask the player (same caveat as `script_api::select_targets`) — this
-    /// signature is almost certainly wrong as a synchronous `-> Vec<Target>`
-    /// and will need Lua coroutine support (`Lua::create_thread` plus
-    /// yield/resume spanning `Engine::step()` calls) once that's designed.
-    /// Kept synchronous for this first pass to get the call shape down.
-    pub fn invoke_target(&self, handle: ScriptHandle, ctx: &ScriptContext) -> Result<Vec<Target>, ScriptError> {
-        // TODO: blocked on the coroutine design noted above and in
-        // DESIGN.md's open questions - don't implement synchronously, that
-        // would lock in the wrong shape. Needs Lua coroutine support
-        // designed first.
-        let _ = (handle, ctx);
-        todo!()
+    /// `TargetFilter::Script`'s real body (CR 601.2c/602.2b's target
+    /// legality check, evaluated per already-chosen candidate) — expects
+    /// `function(object, source, controller, state) -> bool`, same call
+    /// shape `invoke_continuous_affects` established for
+    /// `AffectedFilter::Script`. This is a *static* legality predicate
+    /// checked once at cast/activation time, not a `Game.SelectTargets`
+    /// suspension — no coroutine needed, unlike that unrelated mechanism
+    /// (see `ScriptChoiceRequest::SelectTarget`'s own doc comment). Called
+    /// from `commands::target_is_legal`.
+    pub fn invoke_target_legal(
+        &self,
+        handle: ScriptHandle,
+        state: &GameState,
+        object: ObjectId,
+        source: ObjectId,
+        controller: PlayerId,
+    ) -> Result<bool, ScriptError> {
+        let function = self.function(handle)?;
+        let state_value = state_to_lua(&self.lua, state)?;
+        function
+            .call::<_, bool>((object.0, source.0, controller.0, state_value))
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
     /// Real body, narrowed design ("Lua asks, Rust decides"): the loaded
@@ -1925,6 +1942,35 @@ fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError>
         }
         other => Err(ScriptError::LoadError(format!(
             "unknown Game.SelectTargets filter type '{other}' - expected object/player/any"
+        ))),
+    }
+}
+
+/// `ActivatedAbilityBuilder::SetTarget`'s argument decoder — a `Value`
+/// rather than `decode_target_filter_table`'s bare `Table`, same table-or-
+/// function fallback `decode_affected_value` established for `:SetAffected`.
+/// A bare function is registered and returned as `TargetFilter::Script`
+/// (invoked later via `ScriptRuntime::invoke_target_legal`), for a legality
+/// shape the flat option-bag table can't express (e.g. "target creature
+/// with power 4 or greater").
+fn decode_target_filter_value(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    value: Value,
+) -> Result<TargetFilter, ScriptError> {
+    match value {
+        Value::Table(table) => decode_target_filter_table(table),
+        Value::Function(function) => {
+            let key = lua
+                .create_registry_value(function)
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let handle = registry.next_script_handle();
+            registry.scripts.insert(handle, key);
+            Ok(TargetFilter::Script(handle))
+        }
+        other => Err(ScriptError::LoadError(format!(
+            "SetTarget expected a filter table or a function, got {}",
+            other.type_name()
         ))),
     }
 }

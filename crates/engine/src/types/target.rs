@@ -50,6 +50,26 @@ pub enum TargetFilter {
     /// only — nothing else in the engine treats them as real permanents
     /// yet.
     AnyTarget,
+    /// A custom Lua legality predicate (CR 601.2c/602.2b), for a filter
+    /// shape `Object`'s flat option-bag can't express (e.g. "target
+    /// creature with power 4 or greater"). Nested here rather than living
+    /// at the old `TargetSpec::Script` top level (removed by this variant)
+    /// so `count`/`up_to` still apply normally — a bare `ScriptHandle` with
+    /// no count field couldn't express "exactly one" vs "up to three",
+    /// which is why that top-level variant was never actually usable in 5+
+    /// slices since `targeting-basics` first stubbed it.
+    ///
+    /// `ScriptRuntime::invoke_target_legal` is the real body, called once
+    /// per already-chosen candidate from `commands::target_is_legal` — same
+    /// per-candidate-predicate shape `AffectedFilter::Script`/
+    /// `invoke_continuous_affects` already established, not a coroutine
+    /// suspension (that's `Game.SelectTargets`'s unrelated job, see its own
+    /// doc comment). Candidate is restricted to `Target::Object` — a
+    /// player-target script predicate stays unmodeled (rare enough on real
+    /// cards to skip for now). No zone default either (unlike `Object`'s
+    /// `zone: None` defaulting to Battlefield) — the script sees full
+    /// public state and decides zone itself if it cares.
+    Script(ScriptHandle),
 }
 
 /// A number of targets matching `filter`, chosen once for one instance of
@@ -75,15 +95,13 @@ pub struct TargetRequirement {
     pub up_to: bool,
 }
 
-/// Same `Primitive`/`Script` split every other filter-shaped type in this
-/// codebase already uses (`ConditionSpec`, `AffectedFilter`). `Script` is
-/// structurally present but dead code this slice — nothing constructs it,
-/// mirroring `ContinuousEffect::applies_to`'s own `Script` stub. A real
-/// script-backed target-legality predicate needs its own "Lua asks, Rust
-/// decides" convention, not designed yet (same shape of gap as backlog item
-/// 3a's continuous-effect `Script` arm).
+/// `None` means "takes no targets" (`CardDefinition`/`RegisteredAbility`'s
+/// own doc comments); `Some(Primitive(_))` is every real requirement this
+/// engine builds. No top-level `Script` variant here (there used to be one,
+/// never constructed in 5+ slices) — a script-backed legality predicate now
+/// lives at `TargetFilter::Script`, nested inside `TargetRequirement`, so it
+/// still gets a real `count`/`up_to` instead of an ungoverned bare handle.
 #[derive(Clone, Debug)]
 pub enum TargetSpec {
     Primitive(TargetRequirement),
-    Script(ScriptHandle),
 }

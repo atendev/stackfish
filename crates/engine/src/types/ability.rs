@@ -887,10 +887,10 @@ pub struct RegisteredAbility {
     pub cost: Option<CostSpec>,
     /// `None` means "no targets required" — same "cast as though it did
     /// not require those targets" stance `CardDefinition::target_requirement`
-    /// takes. `Some(TargetSpec::Primitive(_))` is what `ActivateAbility`
-    /// validates non-mana-ability targets against this slice;
-    /// `Some(TargetSpec::Script(_))` stays dead code (see `TargetSpec`'s own
-    /// doc comment).
+    /// takes. `Some(TargetSpec::Primitive(req))` is what `ActivateAbility`
+    /// validates non-mana-ability targets against — `req.filter` can itself
+    /// be a `TargetFilter::Script` scripted legality predicate as of
+    /// `phase5/scripted-target-filter`, set via `:SetTarget(function)`.
     pub target: Option<TargetSpec>,
     pub operation: ScriptHandle,
     /// See `AbilityEffect`'s doc comment — `Some` for an effect shape this

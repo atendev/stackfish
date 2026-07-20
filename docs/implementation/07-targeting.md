@@ -67,3 +67,44 @@
   - Scenario `TargetRequirementSpec.supertypes` + `parse_supertypes` helper.
 - Unresolved:
   - "Another target", negative filters, "N or more" counts, multi-target-word spells.
+
+## Slice: scripted-target-filter (merged)
+
+- Branch `phase5/scripted-target-filter`.
+- Scope: CR 601.2c/602.2b — a custom Lua legality predicate for a target requirement, for filter
+  shapes `TargetFilter::Object`'s flat option-bag can't express (e.g. "target creature with power
+  4 or greater").
+- Verify: 6 new tests (`phase5_scripted_target_filter.rs`), full workspace suite green.
+- Key finding that reshaped the fix: the old top-level `TargetSpec::Script(ScriptHandle)` variant
+  (stubbed in `targeting-basics`) was never constructed by anything across 5+ targeting slices
+  since, and had no `count`/`up_to` of its own — a real scripted predicate still needs exactly-1 or
+  up-to-N counting like any other requirement. Deleted it outright rather than implementing it as
+  designed; the real predicate now lives at `TargetFilter::Script(ScriptHandle)`, nested inside
+  `TargetRequirement` alongside `Object`/`Player`/`AnyTarget`, so `count`/`up_to` apply normally.
+  Also stale: `invoke_target`'s old doc comment blamed the gap on "blocked on Lua coroutine
+  support, not designed yet" — that support was already built (for the unrelated
+  `Game.SelectTargets` mid-resolution mechanism) by the time this slice started. The two are
+  genuinely different concepts: `Game.SelectTargets` asks the player mid-resolution (needs
+  suspend/resume); a target *legality check* is a synchronous per-candidate predicate over targets
+  the player already chose, evaluated once at cast/activation time — the exact shape
+  `AffectedFilter::Script`/`invoke_continuous_affects` already solved for continuous effects. No
+  coroutine needed.
+- Key changes:
+  - `TargetFilter::Script(ScriptHandle)` new variant; `TargetSpec::Script` removed.
+  - `ScriptRuntime::invoke_target_legal(handle, state, object, source, controller) -> Result<bool,
+    ScriptError>` — same `function(object, source, controller, state) -> bool` call shape
+    `invoke_continuous_affects` uses. Replaces the old `todo!()` `invoke_target`.
+  - `commands::target_is_legal`'s new `Script` arm: candidate must be `Target::Object` and must
+    exist before the script ever runs, then must still clear CR 702.16e protection
+    (`target_has_protection_from`) same as every other arm, then asks the script.
+  - `decode_target_filter_value` (script.rs) — table-or-function fallback mirroring
+    `decode_affected_value`'s own convention for `:SetAffected`. `ActivatedAbilityBuilder::SetTarget`
+    widened from `Table` to `Value` to accept it.
+- Unresolved:
+  - Candidate restricted to `Target::Object` — a player-target script predicate is unmodeled.
+  - No zone default for `Script` filter (unlike `Object`'s battlefield default) — the script sees
+    full public state and decides zone itself if it cares. Deliberate, not a gap.
+  - Spells (`CardDefinition.target_requirement`) still have no Lua builder path at all — this
+    slice only wires the general `TargetFilter` machinery plus `ActivatedAbilityBuilder::SetTarget`
+    (pre-existing gap, untouched).
+  - "N or more" counts, "another target", negative filters — unchanged, still open.
