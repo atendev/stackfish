@@ -1582,6 +1582,21 @@ impl Engine {
                         to: ZoneKind::Battlefield,
                         last_known_info: Some(last_known_info),
                     });
+                    // CR 603.6d/614.1c: same post-script apply step
+                    // `move_resolving_spell`'s caller and the PlayLand
+                    // battlefield_entries loop both take - `tapped` above is
+                    // this search's own explicit destination flag (CR
+                    // 701.23), unrelated to and independent of a card's own
+                    // "enters tapped" ability, so both can stack (either
+                    // already tapping it is harmless - EntersTapped is
+                    // idempotent).
+                    let counter_events = replacement::apply_enters_battlefield_modifiers(
+                        &mut self.state,
+                        &self.script_runtime,
+                        new_id,
+                        ZoneKind::Library,
+                    );
+                    events_so_far.extend(counter_events);
                 }
             }
         }
@@ -2562,7 +2577,7 @@ impl Engine {
                 let command =
                     EngineCommand { command_id, actor: action.player, action: action.kind };
 
-                let outcome =
+                let mut outcome =
                     match commands::execute_command(&mut self.state, &self.script_runtime, command) {
                         Ok(outcome) => outcome,
                         Err(err) => {
@@ -2585,6 +2600,15 @@ impl Engine {
                 // the side effect" half, same split priority_handoff/broke_pass_chain
                 // already use. TODO: a script error here is silently
                 // dropped, same gap ResolveStackTop's own call flags.
+                //
+                // CR 603.6d/614.1c: `battlefield_entries` is only ever
+                // populated by `PlayLand` (a hand->battlefield move) as of
+                // this writing - once the script above has (possibly)
+                // self-registered an EntersTapped/EntersWithCounters effect
+                // targeting this same object, apply it (and any externally
+                // granted one already sitting in state.replacement_effects)
+                // right here, same call `move_resolving_spell`'s own
+                // ResolveStackTop caller makes.
                 for object_id in &outcome.battlefield_entries {
                     if let Some(definition) =
                         self.state.object(*object_id).map(|o| o.definition.clone())
@@ -2592,6 +2616,13 @@ impl Engine {
                         let _ =
                             self.script_runtime.run_card_script(&mut self.state, &definition, *object_id);
                     }
+                    let counter_events = replacement::apply_enters_battlefield_modifiers(
+                        &mut self.state,
+                        &self.script_runtime,
+                        *object_id,
+                        ZoneKind::Hand,
+                    );
+                    outcome.events.extend(counter_events);
                 }
 
                 self.pipeline_context = Some(PipelineContext {
@@ -2841,7 +2872,27 @@ impl Engine {
                                     }
                                     _ => None,
                                 };
-                                events.push(event);
+                                // CR 603.6d/614.1c: `move_resolving_spell`
+                                // already ran this object's own self-
+                                // registration script (run_script above),
+                                // so any self-registered EntersTapped/
+                                // EntersWithCounters effect is already in
+                                // state.replacement_effects by now - apply
+                                // it (and any externally granted one)
+                                // directly, same as the PlayLand and
+                                // search-to-battlefield call sites below.
+                                if let GameEventKind::ZoneChange { object, to: ZoneKind::Battlefield, .. } = &event {
+                                    let counter_events = replacement::apply_enters_battlefield_modifiers(
+                                        &mut self.state,
+                                        &self.script_runtime,
+                                        *object,
+                                        ZoneKind::Stack,
+                                    );
+                                    events.push(event);
+                                    events.extend(counter_events);
+                                } else {
+                                    events.push(event);
+                                }
                                 if let Some(aura_id) = new_battlefield_aura {
                                     if let Some(Target::Object(target_id)) = legal_targets.first().copied() {
                                         commands::attach_permanent(&mut self.state, aura_id, target_id);

@@ -9,7 +9,7 @@
 - **CR 613.6-8 dependency**: `EffectPayload::Script` effects never participate in dependency ordering.
 - **Targeting**: `TargetSpec::Script`/`invoke_target` still `todo!()`; "N or more" counts, "another target", negative filters unmodeled.
 - **Activated abilities**: positional `ability_index` by registration order, not a stable id.
-- **Replacement effects**: `Game.Ops.DrawCards(n)` bypasses registered replacement checking; ETB-tapped/counter modifiers and protection-as-replacement unmodeled.
+- **Replacement effects**: `Game.Ops.DrawCards(n)` bypasses registered replacement checking; protection-as-replacement unmodeled. ETB-tapped/counter modifiers are real now (`phase5/etb-replacement-modifiers`) but only as a narrow carve-out — dynamic/choice-based amounts (Bloodthirst/Sunburst/Devour/Amplify), CR 614.12a/b choice ordering, token creation as a producer, and general CR 616 propose/replace/commit for battlefield entry (e.g. a `ReplaceZoneDestination`-style "can't enter" effect) all stay unmodeled.
 - **Planeswalkers/Battles/DFCs/Split/Sagas**: explicit DESIGN.md non-goals.
 - **Dead Phase-3 stubs**: `Subtype::new`/`as_str`, `CardDefinition::has_type`/`has_supertype`/`has_subtype`, several `mana.rs` constructors are `todo!()` with zero callers.
 - **Face-down permanents**: `card_summary_to_lua` does not hide real info; no morph-style mechanic exists yet, so currently unreachable.
@@ -23,3 +23,4 @@
 - Hybrid Phyrexian does **not** need a 3-slot container; `Phyrexian(Color)` atom already carries two payment options.
 - PowerShell 5.1 `-replace` with a ScriptBlock is unsupported; use line-by-line array splicing for position-sensitive edits.
 - Replacement stabilization loop needs a per-event `excluded` set, or a `Repeatable`/`LimitedUses` effect can match its own unchanged output forever and hang.
+- A `ReplacementPayload` that both mutates `GameState` directly *and* proposes an event describing the same mutation (e.g. `CounterAdded`) double-applies once that event reaches `CommitEvents`'s own generic handler for it — pick exactly one (`EntersTapped` mutates directly since no event exists for it; `EntersWithCounters` only proposes, since `CommitEvents` already knows how to apply `CounterAdded`). Caught via a failing test asserting 2 counters and getting 4.

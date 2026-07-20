@@ -1,6 +1,6 @@
 use crate::script::ScriptRuntime;
 use crate::types::cost::FilterController;
-use crate::types::effect::ConsumptionPolicy;
+use crate::types::effect::{ConsumptionPolicy, ReplacementPayload, ReplacementSpec};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
@@ -273,6 +273,117 @@ pub(crate) fn apply_replacements_from(
             }
         }
     }
+}
+
+/// CR 603.6d/614.1c/113.6h: applies every registered `EntersTapped`/
+/// `EntersWithCounters` effect matching `object`'s own move from `from` onto
+/// the battlefield — the "how a permanent enters" replacement-effect family,
+/// covering both a card's own self-registered ability (CR 113.6h: functions
+/// as the object is entering, before it's a real battlefield permanent in
+/// the trigger-collection sense) and an externally granted one (e.g. "lands
+/// your opponents control enter tapped"). Deliberately not routed through
+/// `apply_replacements`/`apply_replacements_from`: those rewrite fields on
+/// the proposed `GameEventKind` itself, but neither payload has anything on
+/// `GameEventKind::ZoneChange` to rewrite (see `ReplacementPayload::
+/// EntersTapped`'s own doc comment).
+///
+/// The two payloads apply differently, deliberately: `EntersTapped` mutates
+/// the already-constructed `GameObject` at `object` directly, right here
+/// (mirrors `SearchDestination::Battlefield { tapped }`'s own precedent —
+/// no dedicated event exists for "this became tapped," so there's nothing
+/// to push). `EntersWithCounters` does *not* mutate here — it only proposes
+/// a `GameEventKind::CounterAdded`, same "Rust decides by applying the
+/// event, not the proposer" split `AbilityEffect::Counters` already
+/// established (`ResolveStackTop` proposes, `CommitEvents` is what actually
+/// calls `counters.add`). The caller MUST push the returned events onto a
+/// path that reaches `CommitEvents` - mutating both here *and* relying on
+/// `CommitEvents`'s existing generic `CounterAdded` handler would double
+/// -apply the same counters.
+///
+/// Called only after `object` is already inserted into `state.objects` *and*
+/// its own `run_card_script` pass has run (so a self-registered effect is
+/// already sitting in `state.replacement_effects` by the time this runs —
+/// see `docs/lua_scripts.md`'s "Registration timing" note for why that
+/// ordering already holds at every real call site, without needing a
+/// propose-before-the-object-exists split the way `commit_zone_move`'s own
+/// callers need).
+///
+/// CR 616.1's ordering choice (`ReplacementOutcome::NeedsOrderingChoice`) is
+/// deliberately not invoked here even when multiple effects match the same
+/// entry: `EntersTapped` is idempotent and `EntersWithCounters` is additive,
+/// so unlike a `ReplaceZoneDestination`-style rewrite, no ordering of
+/// multiple matches ever changes the final result — every match just applies.
+/// TODO: if a future payload pairs with this same `WouldMoveZone(_,
+/// Battlefield)` filter and *isn't* order-independent, this function's
+/// "apply every match, no pause" stance stops being correct and needs a real
+/// ordering-choice pause of its own.
+///
+/// Returns the `GameEventKind::CounterAdded` events produced (one per
+/// matching `EntersWithCounters` effect) for the caller to append to its own
+/// event list, same ledger-visibility convention `AbilityEffect::Counters`
+/// already established.
+pub fn apply_enters_battlefield_modifiers(
+    state: &mut GameState,
+    script_runtime: &ScriptRuntime,
+    object: ObjectId,
+    from: ZoneKind,
+) -> Vec<GameEventKind> {
+    // `GameEventKind` isn't `Clone` - rebuilt fresh at each use site below
+    // instead of cloned once, same shape every time (`object`/`from` are
+    // both `Copy`, `last_known_info` is always `None` - this candidate is
+    // never actually committed, only matched against).
+    let candidate = || GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
+    let matching: Vec<ObjectId> = state
+        .replacement_effects
+        .iter()
+        .filter(|r| {
+            matches!(
+                &r.spec,
+                ReplacementSpec::Primitive {
+                    payload: ReplacementPayload::EntersTapped | ReplacementPayload::EntersWithCounters { .. },
+                    ..
+                }
+            )
+        })
+        .filter(|r| r.matches(&candidate(), false, state, script_runtime))
+        .map(|r| r.source)
+        .collect();
+
+    let mut counter_events = Vec::new();
+    for source in matching {
+        let Some(idx) = state.replacement_effects.iter().position(|r| r.source == source) else {
+            continue;
+        };
+        let payload = match &state.replacement_effects[idx].spec {
+            ReplacementSpec::Primitive { payload, .. } => payload.clone(),
+            ReplacementSpec::Script(_) => continue,
+        };
+        match payload {
+            ReplacementPayload::EntersTapped => {
+                if let Some(obj) = state.object_mut(object) {
+                    obj.tapped = true;
+                }
+            }
+            // Unlike `EntersTapped` above, this doesn't mutate `object`
+            // directly - it only proposes the event, same "Rust decides by
+            // applying the event, not the proposer" split `AbilityEffect::
+            // Counters` already established (`ResolveStackTop` pushes
+            // `CounterAdded`; `CommitEvents` is what actually calls
+            // `counters.add`). The caller MUST push this into its own
+            // event list on a path that reaches `CommitEvents` - mutating
+            // here too would double-apply once that generic handler runs.
+            ReplacementPayload::EntersWithCounters { kind, amount } => {
+                counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
+            }
+            _ => continue,
+        }
+        // CR 614.13/701.19b-style consumption bookkeeping (OneShot/
+        // LimitedUses removal, Repeatable untouched) - same helper the
+        // general apply_replacements_from loop uses; the rewritten event it
+        // returns is discarded, since neither payload here ever rewrites one.
+        apply_one_replacement(state, source, candidate());
+    }
+    counter_events
 }
 
 #[cfg(test)]
