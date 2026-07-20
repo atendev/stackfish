@@ -12,7 +12,7 @@ use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
-use crate::types::mana::ManaUnit;
+use crate::types::mana::{ColorSet, ManaUnit};
 use crate::types::object::GameObject;
 use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::target::{TargetFilter, TargetSpec};
@@ -1851,23 +1851,77 @@ pub fn execute_command(
                     ));
                 }
 
+                // CR 702.16d's own protection check below already needs both
+                // objects' full effective_characteristics - computed here
+                // instead, once, so Fear/Intimidate's color/card-type checks
+                // (which need the same live values) can reuse them too.
+                let attacker_characteristics =
+                    crate::layers::effective_characteristics(state, script_runtime, attacker_object.object_id);
+                let blocker_characteristics =
+                    crate::layers::effective_characteristics(state, script_runtime, blocker_object.object_id);
+
+                // CR 702.36b/702.13b: Fear/Intimidate - can't be blocked
+                // except by an artifact creature and/or (Fear: a black
+                // creature; Intimidate: a creature sharing a color with the
+                // attacker).
+                if attacker_keywords.contains(KeywordSet::FEAR)
+                    && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
+                        || blocker_characteristics.colors.contains(ColorSet::BLACK))
+                {
+                    return Err(CommandError::IllegalAction(
+                        "an attacker with fear can only be blocked by an artifact and/or \
+                         black creature"
+                            .to_string(),
+                    ));
+                }
+                if attacker_keywords.contains(KeywordSet::INTIMIDATE)
+                    && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
+                        || blocker_characteristics.colors.intersects(attacker_characteristics.colors))
+                {
+                    return Err(CommandError::IllegalAction(
+                        "an attacker with intimidate can only be blocked by an artifact \
+                         creature and/or a creature sharing a color with it"
+                            .to_string(),
+                    ));
+                }
+
+                // CR 702.28b: Shadow - symmetric, a shadow creature can only
+                // block/be blocked by another shadow creature.
+                if attacker_keywords.contains(KeywordSet::SHADOW) != blocker_keywords.contains(KeywordSet::SHADOW) {
+                    return Err(CommandError::IllegalAction(
+                        "shadow creatures can only block or be blocked by other shadow \
+                         creatures"
+                            .to_string(),
+                    ));
+                }
+
+                // CR 702.31b: Horsemanship - can't be blocked by a creature
+                // without horsemanship (a horsemanship creature may itself
+                // block anything, no restriction on that direction).
+                if attacker_keywords.contains(KeywordSet::HORSEMANSHIP)
+                    && !blocker_keywords.contains(KeywordSet::HORSEMANSHIP)
+                {
+                    return Err(CommandError::IllegalAction(
+                        "an attacker with horsemanship can only be blocked by a creature \
+                         with horsemanship"
+                            .to_string(),
+                    ));
+                }
+
                 // CR 702.16d: an attacker with protection from a quality
                 // (color, 702.16e, card type, subtype, name, 702.16a,
                 // "everything," 702.16j, or a specific player, 702.16k)
                 // can't be blocked by a creature matching that quality.
-                // Same effective_characteristics treatment as Flying/Reach
-                // above - a granted color/type/subtype/name or a granted
-                // protection all change blocking legality for real, not
-                // just the printed values. The player quality compares raw
+                // Reuses attacker_characteristics/blocker_characteristics
+                // computed above (Fear/Intimidate's own doc comment) - a
+                // granted color/type/subtype/name or a granted protection
+                // all change blocking legality for real, not just the
+                // printed values. The player quality compares raw
                 // GameObject.controller fields (attacker_object/
                 // blocker_object, already in scope), resolved relative to
                 // the attacker's own controller - same "You"/"Opponent"
                 // resolution target_has_protection_from's own player check
                 // uses.
-                let attacker_characteristics =
-                    crate::layers::effective_characteristics(state, script_runtime, attacker_object.object_id);
-                let blocker_characteristics =
-                    crate::layers::effective_characteristics(state, script_runtime, blocker_object.object_id);
                 if attacker_characteristics.protection_everything
                     || attacker_characteristics.protection_colors.intersects(blocker_characteristics.colors)
                     || attacker_characteristics

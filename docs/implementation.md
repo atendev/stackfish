@@ -2498,10 +2498,20 @@ verbatim once enough time has passed for the underlying code to have moved.
   matches `to: Graveyard`, so no fixture can construct 2 effects that both match a scripted Exile's
   own `to: Exile` proposal (same standing "two `EventFilter` shapes only" gap named elsewhere in this
   list).
-- **Combat keywords beyond first/second strike/trample**: banding and the rest of CR 702's combat
-  keyword list are still unbuilt - the `first-strike` slice was scoped to exactly CR 702.4/702.7;
-  trample (CR 702.19a/b/d) closed separately, `phase5/trample` (docs/implementation.md, below).
-  Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same as planeswalkers/battles generally.
+- **Combat keywords beyond first/second strike/trample**: the `first-strike` slice was scoped to
+  exactly CR 702.4/702.7; trample (CR 702.19a/b/d) closed separately, `phase5/trample`
+  (docs/implementation.md, below). Trample over planeswalkers (702.19c/e/f/g) stays unmodeled, same
+  as planeswalkers/battles generally. The remaining "who can block me" evasion keywords - Fear
+  (702.36), Intimidate (702.13), Shadow (702.28), Horsemanship (702.31) - closed too,
+  `phase5/combat-evasion-keywords` (docs/implementation.md, below), same `DeclareBlockers`-checked-
+  `KeywordSet`-bit shape Flying/Reach/Menace already established. `KeywordSet` widened from `u16` to
+  `u32` to make room - every bit 0-15 was already spoken for. Landwalk (CR 702.14, checks the
+  *defending player's* battlefield rather than the blocker's own characteristics, parametrized by
+  land type) and Banding (CR 702.22, a rules-heavy legacy mechanic overriding combat-damage
+  assignment order) are both still open, named rather than guessed at - each is closer to its own
+  vertical slice than an extension of this one. Flanking/Rampage are triggered abilities, not
+  blocking restrictions - same script-bridge trigger machinery every other triggered ability already
+  uses, a different (and much smaller) gap, not attempted here.
 - **Protection (CR 702.16)**: fully closed for all six real qualities - color (702.16e), card-type,
   subtype, name (702.16a), "everything" (702.16j), and player (702.16k),
   `phase5/protection-from-color`/`phase5/protection-from-card-type`/`phase5/protection-from-subtype`/
@@ -9559,3 +9569,68 @@ the gap," decided before writing any code, and it proved there was no gap to fix
 
 **UNRESOLVED:** none new. CR 702.6e (Equip planeswalker) remains backlog item 16's own explicit
 non-goal, unrelated to what this slice closed.
+
+## Phase 5: phase5/combat-evasion-keywords slice (CR 702.13/702.28/702.31/702.36, evasion keywords)
+
+Branch `phase5/combat-evasion-keywords`, off master. Picked over three other big-backlog options
+(`EventFilter` new shapes, Layer 1 copy gaps, the CR 613.6-8 dependency system) by explicit user
+choice as the first "bigger" item after the small-list cleanup batch. Scoped down from the full
+"combat keywords" category during the pre-slice requirements report - see TODOs below for what was
+explicitly deferred and why.
+
+**What got implemented:**
+- `types/card.rs`: `KeywordSet` widened from `u16` to `u32` - every bit 0-15 was already in use
+  (`CANT_BE_REGENERATED = 1 << 15` was the last one that fit), a one-line `bitflags` change (no
+  other code depends on the storage width). Four new bits: `FEAR` (702.36), `INTIMIDATE` (702.13),
+  `SHADOW` (702.28), `HORSEMANSHIP` (702.31).
+- `commands.rs`: `DeclareBlockers`'s per-pair legality checks gained four new blocks, same
+  `effective_keywords`/`effective_characteristics`-through-CR-613-layer-6 treatment Flying/Reach/
+  Menace/protection already get (a continuous-effect-granted instance, not just the printed one, is
+  honored). Fear/Intimidate need the blocker's live colors and card types - `attacker_characteristics`/
+  `blocker_characteristics` (previously computed once, only for the protection check further down)
+  moved up and are now shared by both, rather than computed twice.
+- `script.rs`/`crates/scenario/src/lib.rs`: `parse_keyword_name`/`parse_keywords` (the Lua and TOML
+  keyword-name parsers, kept duplicated per their own existing "no shared string-parsing utility
+  between the two crates" precedent) both gained the four new names.
+
+**CR requirements:** CR 702.36 (Fear: blockable only by artifact and/or black creatures), CR 702.13
+(Intimidate: artifact and/or a creature sharing a color with the attacker), CR 702.28 (Shadow:
+symmetric - shadow can only block/be blocked by shadow), CR 702.31 (Horsemanship: blockable only by
+another horsemanship creature; a horsemanship creature itself has no restriction on what it may
+block).
+
+**TODOs marked, not attempted (scoped out during the requirements report, not discovered mid-slice):**
+Landwalk (CR 702.14) - a structurally different shape from every evasion keyword above: it checks
+the *defending player's own battlefield* for a land type/supertype, not the blocker's own
+characteristics, and is parametrized by which land type ("swampwalk" vs. "islandwalk") - closer to
+protection's dynamic per-object field shape (`protection_colors`/`.subtypes`/etc.) than a plain
+`KeywordSet` bit, and would need its own field on `EffectiveCharacteristics`. Banding (CR 702.22) - a
+rules-heavy legacy mechanic that overrides CR 510.1c/d's combat-damage assignment procedure entirely
+and introduces its own attacking-declaration sub-step ("bands") - realistically its own vertical
+slice, not an extension of this one. Flanking/Rampage - both triggered abilities (CR 702.25/702.23),
+not blocking restrictions - a different, much smaller gap already coverable by the existing trigger
+system, not attempted here since it wasn't this slice's own shape.
+
+**Tests added** (`crates/engine/tests/phase5_combat_evasion_keywords.rs`, 12 new tests): three each
+for Fear and Intimidate (reject the "plain" blocker, accept the quality-matching blocker, accept an
+artifact blocker), three for Shadow (attacker rejects non-shadow, non-shadow attacker rejects a
+shadow blocker - the reverse direction, shadow accepts shadow), three for Horsemanship (attacker
+rejects non-horsemanship, accepts horsemanship, and a horsemanship creature may itself block a plain
+attacker with no restriction).
+
+**VERIFICATION RESULT:** Pass. `cargo build --workspace` clean (only pre-existing warnings, none
+new). `cargo test --workspace --no-fail-fast` - every test binary green, 0 failures, including the 12
+new tests, all passing on the first run with no fixture rework needed.
+
+**STRUCT DEVIATIONS:** `KeywordSet`'s `u16` -> `u32` widening was anticipated in the pre-slice
+requirements report (found by inspection before writing any code - all 16 bits of the old width were
+already named) rather than discovered as a build failure.
+
+**INTERFACE DEVIATIONS:** none - no function signature changed; the `DeclareBlockers` handler's
+internal restructuring (hoisting `attacker_characteristics`/`blocker_characteristics` earlier to
+share them) is invisible from outside `commands.rs`.
+
+**SCOPE DEVIATIONS:** none - implementation matched the requirements report's scope decision exactly.
+
+**UNRESOLVED:** Landwalk, Banding, Flanking, Rampage - all named above with the specific reason each
+was scoped out, not silently skipped.
