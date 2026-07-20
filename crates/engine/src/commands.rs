@@ -9,7 +9,7 @@ use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::cost::{self, AdditionalCost, AlternativeCost, CostPayment, CostSpec, FilterController};
 use crate::types::counter::CounterKind;
-use crate::types::event::GameEventKind;
+use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{ColorSet, ManaUnit};
@@ -680,75 +680,100 @@ pub(crate) fn non_eliminated_players(state: &GameState) -> Vec<PlayerId> {
         .collect()
 }
 
-/// CR 400.7: moves `id` from `from`/`from_owner` to the graveyard, minting a
-/// fresh `ObjectId` (same convention every other zone move in this codebase
-/// uses) and purging any ability/continuous-effect the old id left behind
-/// (`retire_object` - no remap follows a sacrifice/discard, same as a
-/// SBA-driven death). Shared by `commit_payment`'s `Sacrifice`/`Discard`
-/// arms, which are identical past "which zone did it start in."
-///
-/// Returns the departed `Triggered`-kind abilities alongside the event (CR
-/// 603.10) — for a `Sacrifice` (Battlefield→Graveyard), this is what lets
-/// `Dies`/`LeavesBattlefield` fire the same way they do off an SBA-driven
-/// death. For a `Discard` (Hand→Graveyard), the departed abilities let
-/// `DiscardsCard`/`EachDiscardsCard` (player-relative) and `Discarded`
-/// (self-referential, `phase5/discarded-trigger`) fire the same way.
-fn move_to_graveyard_for_cost(
-    state: &mut GameState,
-    id: ObjectId,
-    from: ZoneKind,
-    from_owner: Option<PlayerId>,
-) -> Option<(GameEventKind, Vec<RegisteredAbility>)> {
+/// CR 601.2h/616.1: `Sacrifice`/`Discard` cost payments are themselves
+/// replaceable zone-change proposals ("if a permanent you control would be
+/// sacrificed, exile it instead" is a real, if unusual, card pattern) - this
+/// builds the *proposed* event only, mirroring `sba::resolve_deaths`'/
+/// `Engine::continue_scripted_zone_move`'s own "propose, then replacement-
+/// check, then commit" split rather than mutating directly the way this
+/// function's predecessor (`move_to_graveyard_for_cost`, folded into
+/// `commit_payment` itself) used to. `Engine::continue_cost_zone_moves` is
+/// the only caller - see its own doc comment for the full pipeline.
+pub(crate) fn propose_cost_zone_move(state: &GameState, id: ObjectId, from: ZoneKind) -> Option<GameEventKind> {
     let last_known_info = state.object(id)?.clone();
+    Some(GameEventKind::ZoneChange { object: id, from, to: ZoneKind::Graveyard, last_known_info: Some(last_known_info) })
+}
+
+/// Commits `event` (a `propose_cost_zone_move` proposal, already
+/// replacement-checked by the caller — `to` may have been rewritten by a
+/// `ReplaceZoneDestination` payload) — CR 400.7 fresh `ObjectId`, same
+/// convention every other zone move in this codebase uses, and purges any
+/// ability/continuous-effect the old id left behind (`retire_object` - no
+/// remap follows a sacrifice/discard, same as a SBA-driven death).
+///
+/// `from`/`to`'s owner for the `state.zone_mut` lookup is derived from the
+/// zone kind, not carried separately - Battlefield/Exile are shared zones
+/// (owner: `None`), everything else (Hand, Graveyard, ...) is per-player -
+/// same convention `Engine::commit_scripted_zone_move`'s own Exile arm
+/// already established for its destination-side lookup, mirrored here for
+/// both sides since a source zone can be shared too (Battlefield, for a
+/// sacrifice).
+///
+/// Returns the departed `Triggered`-kind abilities alongside the finished
+/// `GameEvent` (CR 603.10) — for a `Sacrifice` (Battlefield→Graveyard, the
+/// common case), this is what lets `Dies`/`LeavesBattlefield` fire the same
+/// way they do off an SBA-driven death. For a `Discard` (Hand→Graveyard),
+/// the departed abilities let `DiscardsCard`/`EachDiscardsCard`
+/// (player-relative) and `Discarded` (self-referential,
+/// `phase5/discarded-trigger`) fire the same way.
+pub(crate) fn commit_cost_zone_move(state: &mut GameState, event: GameEventKind) -> (GameEvent, Vec<RegisteredAbility>) {
+    let GameEventKind::ZoneChange { object: old_id, from, to, last_known_info } = event else {
+        unreachable!("propose_cost_zone_move only ever proposes a ZoneChange");
+    };
+    let last_known_info = last_known_info.expect("propose_cost_zone_move always sets last_known_info");
     let owner = last_known_info.owner;
 
     let new_id = state.allocate_object_id();
     let mut new_object = last_known_info.clone();
     new_object.object_id = new_id;
-    new_object.lineage = ObjectLineage { previous: Some(id) };
-    new_object.zone = ZoneKind::Graveyard;
+    new_object.lineage = ObjectLineage { previous: Some(old_id) };
+    new_object.zone = to;
     new_object.timestamp = state.allocate_sequence_no();
 
+    let from_owner = match from {
+        ZoneKind::Battlefield | ZoneKind::Exile => None,
+        _ => Some(owner),
+    };
     if let Some(zone) = state.zone_mut(from, from_owner) {
-        zone.remove(id);
+        zone.remove(old_id);
     }
-    let departed_triggered = retire_object(state, id);
-    if let Some(zone) = state.zone_mut(ZoneKind::Graveyard, Some(owner)) {
+    let departed_triggered = retire_object(state, old_id);
+    let to_owner = match to {
+        ZoneKind::Battlefield | ZoneKind::Exile => None,
+        _ => Some(owner),
+    };
+    if let Some(zone) = state.zone_mut(to, to_owner) {
         zone.push_bottom(new_id);
     }
     state.objects.insert(new_id, new_object);
 
-    Some((
-        GameEventKind::ZoneChange {
-            object: new_id,
-            from,
-            to: ZoneKind::Graveyard,
-            last_known_info: Some(last_known_info),
-        },
-        departed_triggered,
-    ))
+    let event_id = state.allocate_event_id();
+    let sequence_no = state.allocate_sequence_no();
+    let committed = GameEvent {
+        event_id,
+        sequence_no,
+        kind: GameEventKind::ZoneChange { object: new_id, from, to, last_known_info: Some(last_known_info) },
+        caused_by_command: None,
+        parent_event: None,
+    };
+    (committed, departed_triggered)
 }
 
-/// Performs the real side effect of every `CostPayment` in an already-
-/// validated `PaymentPlan` (`PaymentPlan::validate` must have confirmed the
-/// whole plan first — same "trusts validate, doesn't recheck" contract
-/// `cost::spend` documents for mana). Unlike `PaymentPlan::validate`, this
-/// doesn't need `spec`/positional ordering at all: each `CostPayment`
-/// variant is self-describing (tap this id, sacrifice this id, ...)
-/// regardless of which `AdditionalCost` component it happened to satisfy.
+/// Performs the real side effect of every *immediate* `CostPayment` in an
+/// already-validated `PaymentPlan` (`PaymentPlan::validate` must have
+/// confirmed the whole plan first — same "trusts validate, doesn't recheck"
+/// contract `cost::spend` documents for mana). `Sacrifice`/`Discard` are
+/// deliberately not handled here — unlike mana/tap/life, they're zone-change
+/// proposals, themselves subject to CR 601.2h/616.1 replacement checking
+/// (see `propose_cost_zone_move`'s own doc comment) — `Engine::submit_payment`
+/// collects them separately and drives them through `Engine::
+/// continue_cost_zone_moves` instead of this function.
+///
 /// Returns the `GameEventKind`s for the caller (`Engine::submit_payment`) to
-/// append to the ledger, plus every departed `Triggered`-kind ability a
-/// `Sacrifice`/`Discard` payment purged along the way (CR 603.10 — see
-/// `move_to_graveyard_for_cost`'s doc comment) for the caller to fold into
-/// `Engine::departed_triggered_abilities` — same "commands decide, engine.rs
-/// writes the ledger" split every other command path in this file follows.
-pub(crate) fn commit_payment(
-    state: &mut GameState,
-    payer: PlayerId,
-    payments: &[CostPayment],
-) -> (Vec<GameEventKind>, Vec<RegisteredAbility>) {
+/// append to the ledger — same "commands decide, engine.rs writes the
+/// ledger" split every other command path in this file follows.
+pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &[CostPayment]) -> Vec<GameEventKind> {
     let mut events = Vec::new();
-    let mut departed_triggered = Vec::new();
     for payment in payments {
         match payment {
             CostPayment::Mana { units, phyrexian_life } => {
@@ -771,21 +796,9 @@ pub(crate) fn commit_payment(
                 }
                 events.push(GameEventKind::Tapped { object: *id });
             }
-            CostPayment::Sacrifice(id) => {
-                if let Some((event, departed)) =
-                    move_to_graveyard_for_cost(state, *id, ZoneKind::Battlefield, None)
-                {
-                    events.push(event);
-                    departed_triggered.extend(departed);
-                }
-            }
-            CostPayment::Discard(id) => {
-                if let Some((event, departed)) =
-                    move_to_graveyard_for_cost(state, *id, ZoneKind::Hand, Some(payer))
-                {
-                    events.push(event);
-                    departed_triggered.extend(departed);
-                }
+            CostPayment::Sacrifice(_) | CostPayment::Discard(_) => {
+                // Handled by Engine::continue_cost_zone_moves instead - see
+                // this function's own doc comment.
             }
             CostPayment::Life(amount) => {
                 if let Some(player) = state.player_mut(payer) {
@@ -801,7 +814,25 @@ pub(crate) fn commit_payment(
             }
         }
     }
-    (events, departed_triggered)
+    events
+}
+
+/// `PendingCostZoneMove` (`Engine::continue_cost_zone_moves`'s own queue
+/// entry) - collects every `Sacrifice`/`Discard` payment in `payments` into
+/// a `(id, source zone)` pair, ready for `propose_cost_zone_move`. Kept as a
+/// standalone pass (not folded into `commit_payment` above) since it must
+/// run *before* any replacement-checked commit happens - `PaymentPlan::
+/// validate` has already confirmed every id here really is in the zone it
+/// claims to be.
+pub(crate) fn collect_cost_zone_moves(payments: &[CostPayment]) -> Vec<(ObjectId, ZoneKind)> {
+    payments
+        .iter()
+        .filter_map(|payment| match payment {
+            CostPayment::Sacrifice(id) => Some((*id, ZoneKind::Battlefield)),
+            CostPayment::Discard(id) => Some((*id, ZoneKind::Hand)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Performs the real effect of one already-committed `GameEventKind::

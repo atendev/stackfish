@@ -590,13 +590,33 @@ end
 return s
 ```
 
-`WouldMoveZone`'s wildcard sides are real and correct but currently unreachable for most zone shapes
-via actual gameplay — most zone-change producers in this engine (`Engine::draw_one_card`,
-`Engine::submit_discard`, `commands::commit_payment`'s Sacrifice/Discard cost payments) mutate state
-directly and never call `apply_replacements` at all. Only SBA-driven deaths and the scripted
-Destroy/Sacrifice/Exile ops do, and all three are always Battlefield-sourced — so a `from` other than
-`"Battlefield"` won't intercept anything real yet, same "proven correct, ready for a future producer"
-stance the CR 111.8 token zone-lock check already takes.
+`WouldMoveZone`'s wildcard sides are real and correct but still unreachable for *some* zone shapes via
+actual gameplay. `Sacrifice`/`Discard` cost payments are real now — `Engine::submit_payment` collects
+them separately from the immediate payments (mana/tap/life) and drives each one through `Engine::
+continue_cost_zone_moves`, the same propose/replacement-check/commit split `sba::resolve_deaths`
+already uses (`phase5/replaceable-cost-zone-moves`) — so `Game.EventFilters.WouldMoveZone("Hand",
+"Graveyard")` genuinely intercepts a Discard-as-cost now, a `from` shape `WouldDie` could never
+express. `Engine::draw_one_card` and `Engine::submit_discard` (the cleanup-step hand-size discard,
+CR 514.3 — a different code path from a cost payment) still mutate state directly and never call
+`apply_replacements` at all — a "would draw a card, instead..." or "if a card would be discarded to
+the graveyard at cleanup, exile it instead" effect stays inert against those two specifically, same
+"proven correct, ready for a future producer" stance the CR 111.8 token zone-lock check already
+takes for the shapes it can't reach yet either.
+
+```lua
+-- If a creature you control would be sacrificed, exile it instead.
+local s = {}
+
+function s.initial_effect(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Graveyard"))
+    e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
+    e:SetAffected({ controller = "you", card_types = { "Creature" } })
+    e:Register()
+end
+
+return s
+```
 
 ```lua
 -- Fog: prevent all combat damage that would be dealt to you this turn.
