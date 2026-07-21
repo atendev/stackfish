@@ -115,6 +115,7 @@ fn equip_ability(source: ObjectId) -> RegisteredAbility {
             },
             count: 1,
             up_to: false,
+            exclude_source: false,
         })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Attach),

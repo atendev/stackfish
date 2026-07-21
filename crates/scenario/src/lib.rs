@@ -311,6 +311,10 @@ pub struct TargetRequirementSpec {
     pub count: u32,
     #[serde(default)]
     pub up_to: bool,
+    /// CR 115.4/"another target" - see `TargetRequirement::exclude_source`'s
+    /// own doc comment.
+    #[serde(default)]
+    pub exclude_source: bool,
 }
 
 /// One card instance's triggered ability, collected by `build_initial_state`
@@ -963,7 +967,12 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
              object/player/any"
         ),
     };
-    stackfish_engine::TargetSpec::Primitive(TargetRequirement { filter, count: spec.count, up_to: spec.up_to })
+    stackfish_engine::TargetSpec::Primitive(TargetRequirement {
+        filter,
+        count: spec.count,
+        up_to: spec.up_to,
+        exclude_source: spec.exclude_source,
+    })
 }
 
 /// `assert_object_counters`/`assert_player_counters`'s `kind` field, by CR

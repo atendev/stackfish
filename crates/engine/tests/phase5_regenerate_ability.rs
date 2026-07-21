@@ -66,6 +66,7 @@ fn regenerate_definition() -> CardDefinition {
             filter: TargetFilter::AnyTarget,
             count: 1,
             up_to: false,
+            exclude_source: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Regenerate),

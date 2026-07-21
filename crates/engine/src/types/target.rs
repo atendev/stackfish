@@ -9,10 +9,11 @@ use crate::types::zone::ZoneKind;
 /// 115.2's battlefield-by-default rule) and the two non-object target
 /// shapes (CR 115.4's "any target", plain "target player").
 ///
-/// TODO: no "another target" (must differ from one specific other object,
-/// not just dedup within this one requirement per CR 115.3), no negative
-/// filters ("target creature you don't control that isn't a Wall") — only
-/// what a first real spell needs.
+/// TODO: no negative filters ("target creature you don't control that
+/// isn't a Wall") — only what a first real spell needs. "Another target"
+/// (must differ from the spell/ability's own source, not just dedup within
+/// this one requirement per CR 115.3) is real now — see `TargetRequirement::
+/// exclude_source`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TargetFilter {
     /// "target creature" / "target permanent you control" / etc. `zone:
@@ -93,6 +94,17 @@ pub struct TargetRequirement {
     pub filter: TargetFilter,
     pub count: u32,
     pub up_to: bool,
+    /// CR 115.4/"another target" (e.g. Olivia Voldaren's "deals 1 damage to
+    /// another target creature"): when `true`, the spell/ability's own
+    /// source is never a legal candidate for this requirement, regardless
+    /// of whether it otherwise matches `filter`. Distinct from CR
+    /// 601.2c/115.3's same-instance dedup (enforced unconditionally in
+    /// `commands::validate_targets`, independent of this field) — that
+    /// rejects choosing the *same target twice*; this excludes one
+    /// specific object (the source) from ever being chosen at all, even
+    /// once. `false` (the default/common case) for every requirement that
+    /// doesn't say "another." Checked in `commands::target_is_legal`.
+    pub exclude_source: bool,
 }
 
 /// `None` means "takes no targets" (`CardDefinition`/`RegisteredAbility`'s

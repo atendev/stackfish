@@ -108,3 +108,41 @@
     slice only wires the general `TargetFilter` machinery plus `ActivatedAbilityBuilder::SetTarget`
     (pre-existing gap, untouched).
   - "N or more" counts, "another target", negative filters — unchanged, still open.
+
+## Slice: another-target (implemented, not yet merged)
+
+- Branch `phase5/another-target`.
+- Scope: CR 115.4/601.2c "another target" (e.g. Olivia Voldaren's "deals 1 damage to another target
+  creature") — a spell/ability's own source is excluded from an otherwise-matching filter. A
+  separate mechanism from CR 601.2c/115.3's same-instance dedup (`validate_targets`'s `seen`
+  `HashSet`, already implemented since `targeting-basics`, untouched here) — that rejects choosing
+  the *same target twice*; this excludes one specific object (the source) from ever being a legal
+  candidate at all, even alone.
+- Verify: 3 new tests (`phase5_another_target.rs`), full workspace suite green.
+- Key changes:
+  - `TargetRequirement.exclude_source: bool` — 42 existing struct literals across 30 files needed
+    the field added, mechanical/compiler-guided, not scope creep.
+  - `commands::target_is_legal` gained an `exclude_source: bool` parameter, checked once ahead of
+    every filter variant (`target == Target::Object(source)` -> illegal). Threaded through every
+    real call site: `validate_targets` (cast/activate-time), the CR 608.2b resolution recheck
+    (`engine.rs`), and the Aura SBA recheck (`sba.rs`). The Equipment SBA recheck and `Game.
+    SelectTargets`'s mid-resolution script choice both pass a hardcoded `false` — the former
+    because its filter is a synthetic CR 301.5 "must be a creature" check with no real
+    `TargetRequirement` behind it, the latter because `ScriptChoiceRequest::SelectTarget` carries a
+    bare `TargetFilter` with nowhere to read the flag from (named TODO, not silently narrowed).
+  - Scenario `TargetRequirementSpec.exclude_source: bool` (`#[serde(default)]`), threaded through
+    for symmetry with the other `TargetRequirement` fields the TOML format already exposes.
+  - Found and fixed alongside this feature: the CR 608.2b resolution recheck was passing
+    `top.stack_id` as `target_is_legal`'s `source` parameter instead of `top.source`. Harmless for a
+    spell (the two coincide — see `StackObject`'s own construction sites), but wrong for an
+    activated/triggered ability, where `stack_id` is a bare id never inserted into `state.objects` -
+    `target_has_protection_from`'s `state.object(source)` lookup would silently miss and return
+    `false`, meaning protection-from-source-quality was never actually re-checked at resolution time
+    for any ability, only spells. Every other resolution site already used `top.source` correctly
+    (e.g. the `Damage` effect arm) — only this one recheck call had the mismatch. Fixed at the same
+    call site this slice needed to touch anyway, not filed as a separate slice.
+- Unresolved:
+  - "N or more" counts, negative filters, multi-target-word spells, player-target script
+    predicates, no Lua builder path for a spell's own `target_requirement` — all still open,
+    unchanged by this slice.
+  - `Game.SelectTargets` mid-resolution choices can't express "another target" (see above).

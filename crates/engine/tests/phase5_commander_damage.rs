@@ -254,7 +254,7 @@ fn a_commanders_non_combat_damage_does_not_count() {
         kind: AbilityKind::Activated,
         condition: None,
         cost: Some(CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() }),
-        target: Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 1, up_to: false })),
+        target: Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 1, up_to: false , exclude_source: false })),
         operation: ScriptHandle(0),
         effect: Some(AbilityEffect::Damage(3)),
         intervening_if: None,

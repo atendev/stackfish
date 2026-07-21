@@ -607,6 +607,7 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
                         &req.filter,
                         o.controller,
                         o.object_id,
+                        req.exclude_source,
                     ),
                     _ => state.object(target_id).is_none(),
                 },
@@ -706,6 +707,9 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
                 &creature_filter,
                 o.controller,
                 o.object_id,
+                // A synthetic CR 301.5 filter, not a real TargetRequirement
+                // - "another target" has no meaning here.
+                false,
             );
             illegal.then_some(o.object_id)
         })
