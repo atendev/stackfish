@@ -109,7 +109,7 @@
     (pre-existing gap, untouched).
   - "N or more" counts, "another target", negative filters — unchanged, still open.
 
-## Slice: another-target (implemented, not yet merged)
+## Slice: another-target (merged)
 
 - Branch `phase5/another-target`.
 - Scope: CR 115.4/601.2c "another target" (e.g. Olivia Voldaren's "deals 1 damage to another target
@@ -231,3 +231,49 @@
 - Unresolved:
   - Negated supertypes, multi-target-word spells, no Lua builder path for a spell's own
     `target_requirement` — all still open, unchanged by this slice.
+
+## Slice: spell-target-script (merged)
+
+- Branch `phase5/spell-target-script`.
+- Scope: closes the "no Lua builder path for a spell's own `CardDefinition.target_requirement`"
+  note every prior targeting slice above carried forward — `ActivatedAbilityBuilder::SetTarget`
+  already accepted a script function, spells had no equivalent at all. Traced first (no engine-crate
+  change turned out to be needed): `TargetFilter::Script(ScriptHandle)` already reads generically
+  off any `CardDefinition.target_requirement` via `commands::validate_targets`/`target_is_legal`
+  regardless of whether the source is a spell or an ability, and `Engine::load_script`/
+  `ScriptRuntime::load_function` already existed as exactly the raw-source-to-`ScriptHandle` loader
+  needed — the entire gap was scenario-crate-only wiring.
+- Verify: 1 new TOML fixture (`tests/scenarios/phase5_spell_target_script.toml`, auto-picked up by
+  `scenarios.rs`'s directory scan) exercising a scripted "power 4 or more" spell target requirement
+  against both a legal and an illegal candidate, full workspace suite green.
+- Key changes:
+  - `TargetRequirementSpec.filter = "script"` (scenario TOML) plus a new
+    `TargetRequirementSpec.script: Option<String>` field carrying raw Lua source
+    (`function(object, source, controller, state) -> bool`, same shape
+    `ActivatedAbilityBuilder::SetTarget`'s function form already uses). `build_target_requirement`
+    builds a `TargetFilter::Script(ScriptHandle(0))` placeholder at this point — no
+    `Engine`/`ScriptRuntime` exists yet when `CardDefinition`s are built, same timing problem
+    `trigger_condition`/`trigger_operation` already solved for triggered abilities.
+  - `PendingTargetScript { object, script }` — `build_initial_state`'s collected-for-later list,
+    `PendingTriggerScript`'s exact sibling. Returned alongside it (`build_initial_state`'s return
+    type grew a 4th element); `run()`'s no-`[game]` branch drains it the same way it already drains
+    `trigger_scripts`.
+  - `register_target_script(engine, object, source)` — loads `source` into the real `Engine` once
+    it exists and patches the placeholder handle on that object's own
+    `CardDefinition.target_requirement` in place (`GameObject.definition` is owned per-object, not
+    interned, so this is a direct mutation, not a lookup-and-clone). Panics if the target
+    requirement isn't the placeholder it expects, same "trust the caller wired this up correctly"
+    posture `register_trigger_ability` already takes.
+  - `build_new_game_engine`'s `[game]`-driven path calls `register_target_script` directly inside
+    its existing per-library-card post-`Engine::new_game` loop (the same loop that already calls
+    `register_trigger_ability` for `trigger_operation`) — no separate pending-list threading needed
+    there, since `Engine` already exists by that point in that code path.
+- Unresolved:
+  - Modal spells (`SpellMode.target_requirement`) — TOML has no modal-spell schema at all yet
+    (pre-existing gap, unrelated to this slice).
+  - No caching/dedup of a loaded script across multiple instances of the same scripted-target card —
+    each object gets its own freshly-loaded `ScriptHandle`, consistent with `trigger_operation`'s
+    existing per-instance-load convention, not a new gap.
+  - `build_new_game_engine`'s per-instance loop only wires commander-zone cards' library
+    counterparts (`gp.library`), not `gp.commanders` — pre-existing scope boundary
+    `trigger_operation`/`mana_ability` already have in that function, not touched by this slice.

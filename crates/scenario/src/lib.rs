@@ -330,6 +330,16 @@ pub struct TargetRequirementSpec {
     /// own doc comment.
     #[serde(default)]
     pub exclude_source: bool,
+    /// CR 601.2c/602.2b's scripted legality predicate (`TargetFilter::
+    /// Script`) — only meaningful when `filter = "script"`; raw Lua source,
+    /// `function(object, source, controller, state) -> bool`, same shape
+    /// `ActivatedAbilityBuilder::SetTarget`'s function form already uses.
+    /// Loaded into a real `ScriptHandle` post-construction by
+    /// `register_target_script` — same "no `Engine`/`ScriptRuntime` exists
+    /// yet at `CardDefinition`-build time" timing problem `trigger_condition`/
+    /// `trigger_operation` already solve via `register_trigger_ability`.
+    #[serde(default)]
+    pub script: Option<String>,
 }
 
 /// One card instance's triggered ability, collected by `build_initial_state`
@@ -341,6 +351,17 @@ pub struct PendingTriggerScript {
     pub source: ObjectId,
     pub condition: Option<String>,
     pub operation: String,
+}
+
+/// One card instance's scripted `target_requirement`, collected by
+/// `build_initial_state` for the same reason `PendingTriggerScript` is —
+/// `run()` loads the Lua source afterward and patches the placeholder
+/// `TargetFilter::Script(ScriptHandle(0))` `build_target_requirement` left on
+/// this object's own `CardDefinition.target_requirement` (see
+/// `register_target_script`).
+pub struct PendingTargetScript {
+    pub object: ObjectId,
+    pub script: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -981,9 +1002,13 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
         },
         "player" => TargetFilter::Player,
         "any" => TargetFilter::AnyTarget,
+        // Placeholder handle - no Engine/ScriptRuntime exists yet at this
+        // point (see PendingTargetScript's own doc comment). Patched with
+        // the real loaded handle by register_target_script, once one does.
+        "script" => TargetFilter::Script(ScriptHandle(0)),
         other => panic!(
             "unknown target_requirement filter in scenario file: {other} - expected \
-             object/player/any"
+             object/player/any/script"
         ),
     };
     stackfish_engine::TargetSpec::Primitive(TargetRequirement {
@@ -1064,7 +1089,7 @@ fn zone_owner_for(kind: ZoneKind, player: PlayerId) -> Option<PlayerId> {
 /// assertions can refer to setup cards by their TOML key.
 pub fn build_initial_state(
     file: &ScenarioFile,
-) -> (GameState, HashMap<String, ObjectId>, Vec<PendingTriggerScript>) {
+) -> (GameState, HashMap<String, ObjectId>, Vec<PendingTriggerScript>, Vec<PendingTargetScript>) {
     let mut next_object_id: u64 = 0;
     // Seeds `AbilityId`s for any `mana_ability` built below - draws from a
     // local counter rather than hardcoding a placeholder (unlike
@@ -1079,6 +1104,7 @@ pub fn build_initial_state(
     let mut next_ability_id: u64 = 0;
     let mut card_ids: HashMap<String, ObjectId> = HashMap::new();
     let mut trigger_scripts: Vec<PendingTriggerScript> = Vec::new();
+    let mut target_scripts: Vec<PendingTargetScript> = Vec::new();
 
     let mut players = Vec::new();
     let mut turn_order = Vec::new();
@@ -1222,6 +1248,9 @@ pub fn build_initial_state(
                 operation: operation.clone(),
             });
         }
+        if let Some(script) = spec.target_requirement.as_ref().and_then(|r| r.script.as_ref()) {
+            target_scripts.push(PendingTargetScript { object: object_id, script: script.clone() });
+        }
         if let Some(effect_spec) = &spec.continuous_effect {
             continuous_effects.push(build_continuous_effect(object_id, effect_spec));
         }
@@ -1272,7 +1301,7 @@ pub fn build_initial_state(
         commander_return_offered: std::collections::HashSet::new(),
     };
 
-    (state, card_ids, trigger_scripts)
+    (state, card_ids, trigger_scripts, target_scripts)
 }
 
 /// Loads `condition_src`/`operation_src` into `engine`'s script runtime and
@@ -1306,6 +1335,35 @@ fn register_trigger_ability(
         effect,
         intervening_if: None,
     });
+}
+
+/// Loads `source` into `engine`'s script runtime and patches the placeholder
+/// `TargetFilter::Script(ScriptHandle(0))` `build_target_requirement` left on
+/// `object`'s own `CardDefinition.target_requirement` with the real handle —
+/// same timing fix as `register_trigger_ability`, just patching a field in
+/// place instead of pushing a new `RegisteredAbility`. Panics if `object`'s
+/// `target_requirement` isn't the script placeholder this is meant to patch
+/// (a scenario bug, not a runtime one — same "trust the caller wired this up
+/// via PendingTargetScript" stance `register_trigger_ability` already takes).
+fn register_target_script(engine: &mut Engine, object: ObjectId, source: &str) {
+    let handle = engine
+        .load_script(source)
+        .unwrap_or_else(|e| panic!("target_requirement.script failed to load: {e:?}"));
+    let definition = &mut engine
+        .state_mut()
+        .objects
+        .get_mut(&object)
+        .unwrap_or_else(|| panic!("target script registration: object {object:?} not found"))
+        .definition;
+    match &mut definition.target_requirement {
+        Some(stackfish_engine::TargetSpec::Primitive(req)) => {
+            req.filter = TargetFilter::Script(handle);
+        }
+        other => panic!(
+            "register_target_script called on object {object:?} whose target_requirement isn't \
+             the script placeholder: {other:?}"
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -1750,6 +1808,9 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
             if let Some(effect_spec) = &spec.continuous_effect {
                 engine.state_mut().continuous_effects.push(build_continuous_effect(card_ids[key], effect_spec));
             }
+            if let Some(script) = spec.target_requirement.as_ref().and_then(|r| r.script.as_ref()) {
+                register_target_script(&mut engine, card_ids[key], script);
+            }
         }
     }
     (engine, card_ids)
@@ -2018,7 +2079,7 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
     let (mut engine, mut card_ids) = if let Some(game) = &file.game {
         build_new_game_engine(file, game)
     } else {
-        let (state, card_ids, trigger_scripts) = build_initial_state(file);
+        let (state, card_ids, trigger_scripts, target_scripts) = build_initial_state(file);
         let mut engine = Engine::new(state);
         for pending in trigger_scripts {
             register_trigger_ability(
@@ -2027,6 +2088,9 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
                 pending.condition.as_deref(),
                 &pending.operation,
             );
+        }
+        for pending in target_scripts {
+            register_target_script(&mut engine, pending.object, &pending.script);
         }
         (engine, card_ids)
     };

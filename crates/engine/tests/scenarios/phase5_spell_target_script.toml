@@ -1,0 +1,155 @@
+# Spell-side scripted target requirement (CR 601.2c/602.2b): CardDefinition.
+# target_requirement's filter can now be "script" too (TargetFilter::Script),
+# not just object/player/any - closes the scenario-crate half of the "Lua
+# builder path for spell-side target_requirement" backlog gap
+# (99-backlog.md's Targeting note; ActivatedAbilityBuilder::SetTarget already
+# had this via Game.CreateActivatedAbility, spells had no TOML/scenario path
+# at all). TargetFilter::Script itself was already real engine-side
+# (phase5/scripted-target-filter) - this only proves the TOML -> real
+# ScriptHandle wiring (register_target_script) end to end, for both a legal
+# and an illegal candidate.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "strong"
+name = "Big Creature"
+types = ["Creature"]
+power = 5
+toughness = 5
+
+[[cards]]
+key = "weak"
+name = "Small Creature"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+# Two separate card keys sharing the same script text - each gets its own
+# freshly-loaded ScriptHandle (register_target_script has no cross-instance
+# caching, same as trigger_operation already doesn't), which is exactly what
+# a two-cast fixture like this needs anyway.
+[[cards]]
+key = "bolt_a"
+name = "Test Power-Four Bolt A"
+types = ["Instant"]
+
+[cards.target_requirement]
+filter = "script"
+count = 1
+script = """
+return function(object, source, controller, state)
+    for _, card in ipairs(state.battlefield) do
+        if card.id == object then
+            return card.power ~= nil and card.power >= 4
+        end
+    end
+    return false
+end
+"""
+
+[[cards]]
+key = "bolt_b"
+name = "Test Power-Four Bolt B"
+types = ["Instant"]
+
+[cards.target_requirement]
+filter = "script"
+count = 1
+script = """
+return function(object, source, controller, state)
+    for _, card in ipairs(state.battlefield) do
+        if card.id == object then
+            return card.power ~= nil and card.power >= 4
+        end
+    end
+    return false
+end
+"""
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "strong"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "weak"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bolt_a"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bolt_b"
+
+# This is a solo (1-player) fixture - CR 103.8a's "starting player skips
+# their first draw step" only applies in a two-player game, so p0's turn 1
+# Draw step genuinely runs and needs a real card to draw (CR 704.5b).
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+
+# Legal candidate (power 5 >= 4) - script predicate accepts, spell resolves
+# normally.
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "bolt_a"
+targets = ["strong"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+# bolt_a has no mana_cost - still needs an explicit empty plan (CR 118.5a).
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "bolt_a"
+equals = "graveyard"
+
+# Illegal candidate (power 2 < 4) - script predicate rejects, CastSpell is
+# refused entirely (CommandError::IllegalAction) before anything is mutated,
+# so bolt_b never leaves hand.
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "bolt_b"
+targets = ["weak"]
+
+[[steps]]
+type = "assert_object_zone"
+card = "bolt_b"
+equals = "hand"
+
+[[steps]]
+type = "assert_object_zone"
+card = "weak"
+equals = "battlefield"
