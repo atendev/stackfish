@@ -350,3 +350,105 @@ fn a_non_eliminated_players_objects_are_untouched() {
     assert!(state.object(survivor).is_some(), "p0 wasn't eliminated - their permanent must stay");
     assert!(state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&survivor));
 }
+
+// ---------------------------------------------------------------------
+// CR 800.4a: stack cleanup distinguishes a spell's owner from an
+// ability's controller (StackObject::owner, added alongside the
+// pre-existing controller field)
+// ---------------------------------------------------------------------
+
+#[test]
+fn an_eliminated_players_owned_spell_leaves_the_stack_even_if_controlled_by_someone_else() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let spell_id = ObjectId(0);
+    // A spell is "represented by a card" (CR 800.4a) - it leaves with its
+    // *owner*, regardless of who's currently controlling it (no such
+    // "cast a card you don't own" effect exists in this engine yet, but
+    // the cleanup rule doesn't depend on one existing to be correct).
+    state.stack.push(StackObject::new(
+        spell_id,
+        StackEntryKind::Spell,
+        spell_id,
+        p0,
+        p1,
+        Vec::new(),
+        Vec::new(),
+        None,
+        None,
+        false,
+        ScriptHandle(0),
+        None,
+        None,
+    ));
+    state.player_mut(p0).unwrap().life = 0;
+
+    let _ = check_state_based_actions(&mut state, &ScriptRuntime::new());
+
+    assert!(state.stack.is_empty(), "p0 owns the spell, so it leaves the game with them even though p1 controls it");
+}
+
+#[test]
+fn a_spell_merely_controlled_not_owned_by_an_eliminated_player_stays_on_the_stack() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let spell_id = ObjectId(0);
+    // Owned by the survivor p1, merely controlled by the eliminated p0 -
+    // CR 800.4a's controller-based clause only reaches objects "not
+    // represented by cards" (abilities), not spells. Proves the owner/
+    // controller distinction actually matters, not just that one field
+    // was renamed to the other.
+    state.stack.push(StackObject::new(
+        spell_id,
+        StackEntryKind::Spell,
+        spell_id,
+        p1,
+        p0,
+        Vec::new(),
+        Vec::new(),
+        None,
+        None,
+        false,
+        ScriptHandle(0),
+        None,
+        None,
+    ));
+    state.player_mut(p0).unwrap().life = 0;
+
+    let _ = check_state_based_actions(&mut state, &ScriptRuntime::new());
+
+    assert!(!state.stack.is_empty(), "p1 (still in the game) owns the spell - it must stay regardless of who controls it");
+}
+
+#[test]
+fn an_eliminated_players_controlled_ability_leaves_the_stack_even_if_owned_by_someone_else() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let ability_id = ObjectId(0);
+    let source_id = ObjectId(1);
+    // An ability isn't represented by a card - CR 800.4a removes it by
+    // *controller*, even if a (hypothetical) different owner is set.
+    state.stack.push(StackObject::new(
+        ability_id,
+        StackEntryKind::ActivatedAbility,
+        source_id,
+        p1,
+        p0,
+        Vec::new(),
+        Vec::new(),
+        None,
+        None,
+        false,
+        ScriptHandle(0),
+        None,
+        None,
+    ));
+    state.player_mut(p0).unwrap().life = 0;
+
+    let _ = check_state_based_actions(&mut state, &ScriptRuntime::new());
+
+    assert!(state.stack.is_empty(), "p0 controls the ability, so it ceases to exist with them even though p1 owns its source");
+}

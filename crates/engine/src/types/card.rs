@@ -61,8 +61,8 @@ pub(crate) fn net_counters(base: i32, counters: &CounterSet) -> i32 {
 }
 
 bitflags! {
-    /// Bitmask of `CardType`. A card can be multiple types at once (e.g.
-    /// artifact creature).
+    /// Bitmask of a card's types (CR 300). A card can be multiple types at
+    /// once (e.g. artifact creature).
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct CardTypeSet: u16 {
         const ARTIFACT     = 1 << 0;
@@ -79,22 +79,8 @@ bitflags! {
     }
 }
 
-/// Named card type, per CR 300. Use this for matching/comparison; use
-/// `CardTypeSet` for storage on a card.
-pub enum CardType {
-    Artifact,
-    Creature,
-    Enchantment,
-    Instant,
-    Land,
-    Sorcery,
-    Kindred,
-    Planeswalker,
-    Battle,
-}
-
 bitflags! {
-    /// Bitmask of `Supertype`, per CR 205.4a.
+    /// Bitmask of a card's supertypes (CR 205.4a).
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct SupertypeSet: u8 {
         const BASIC     = 1 << 0;
@@ -102,13 +88,6 @@ bitflags! {
         const SNOW      = 1 << 2;
         const WORLD     = 1 << 3;
     }
-}
-
-pub enum Supertype {
-    Basic,
-    Legendary,
-    Snow,
-    World,
 }
 
 bitflags! {
@@ -237,18 +216,6 @@ pub enum Keyword {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Subtype(pub String);
 
-impl Subtype {
-    pub fn new(name: impl Into<String>) -> Self {
-        // TODO: wrap name.into() in Subtype(_).
-        todo!()
-    }
-
-    pub fn as_str(&self) -> &str {
-        // TODO: return self.0.as_str().
-        todo!()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum ScriptReference {
     /// Lookup key into the external card-database project's script registry.
@@ -350,19 +317,4 @@ impl CardDefinition {
         }
     }
 
-    pub fn has_type(&self, card_type: CardType) -> bool {
-        // TODO: map card_type to its CardTypeSet bit and check
-        // self.card_types.contains(that bit).
-        todo!()
-    }
-
-    pub fn has_supertype(&self, supertype: Supertype) -> bool {
-        // TODO: same pattern as has_type, against self.supertypes.
-        todo!()
-    }
-
-    pub fn has_subtype(&self, subtype: &str) -> bool {
-        // TODO: self.subtypes.iter().any(|s| s.as_str() == subtype).
-        todo!()
-    }
 }
