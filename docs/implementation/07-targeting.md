@@ -198,7 +198,7 @@
   - Negative filters, multi-target-word spells, no Lua builder path for a spell's own
     `target_requirement` — all still open, unchanged by this slice.
 
-## Slice: negative-target-filters (implemented, not yet merged)
+## Slice: negative-target-filters (merged)
 
 - Branch `phase5/negative-target-filters`.
 - Scope: CR 601.2c/115/205.4b negative target filters — `TargetFilter::Object`'s own long-standing
