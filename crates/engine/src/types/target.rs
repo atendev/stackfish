@@ -65,12 +65,25 @@ pub enum TargetFilter {
     /// per-candidate-predicate shape `AffectedFilter::Script`/
     /// `invoke_continuous_affects` already established, not a coroutine
     /// suspension (that's `Game.SelectTargets`'s unrelated job, see its own
-    /// doc comment). Candidate is restricted to `Target::Object` — a
-    /// player-target script predicate stays unmodeled (rare enough on real
-    /// cards to skip for now). No zone default either (unlike `Object`'s
-    /// `zone: None` defaulting to Battlefield) — the script sees full
-    /// public state and decides zone itself if it cares.
+    /// doc comment). Candidate is restricted to `Target::Object` — see
+    /// `PlayerScript` for the player-candidate twin. No zone default either
+    /// (unlike `Object`'s `zone: None` defaulting to Battlefield) — the
+    /// script sees full public state and decides zone itself if it cares.
     Script(ScriptHandle),
+    /// `Script`'s player-candidate twin (CR 601.2c/602.2b), for a player
+    /// legality shape plain `Player` can't express (e.g. "target player
+    /// with 10 or less life"). Kept as a separate variant rather than
+    /// widening `Script` to accept either target kind — `Script`'s Lua
+    /// contract already passes a bare object id number as the first call
+    /// argument, so folding players in would mean either breaking that
+    /// contract for every existing object-script card or tagging every call
+    /// with a kind, neither of which any real card built so far needs.
+    ///
+    /// `ScriptRuntime::invoke_player_target_legal` is the real body, same
+    /// per-candidate shape as `Script`/`invoke_target_legal` with `player`
+    /// in place of `object`. No protection check here, same as plain
+    /// `Player` above — this engine doesn't model player-side protection.
+    PlayerScript(ScriptHandle),
 }
 
 /// A number of targets matching `filter`, chosen once for one instance of

@@ -1,0 +1,261 @@
+//! Phase 5 vertical slice: `TargetFilter::PlayerScript` (CR 601.2c/602.2b) -
+//! `TargetFilter::Script`'s player-candidate twin, for a player legality
+//! shape plain `TargetFilter::Player` can't express (e.g. "target player
+//! with 10 or less life"). Kept as a separate variant rather than widening
+//! `Script` to accept either target kind - `Script`'s Lua contract already
+//! passes a bare object id number as its first call argument, so folding
+//! players in would mean either breaking that contract for every existing
+//! object-script card or tagging every call with a kind, neither of which
+//! any real card built so far needs.
+//!
+//! `ScriptRuntime::invoke_player_target_legal` is the same static
+//! per-candidate predicate shape `invoke_target_legal` established, just
+//! `player` in place of `object`. No protection check - same posture plain
+//! `TargetFilter::Player` already has (this engine doesn't model
+//! player-side protection).
+//!
+//! Lua entry point: `:SetTarget({ type = "player", filter = function(player,
+//! source, controller, state) -> bool end })` - the bare-function shorthand
+//! stays object-only (`scripted-target-filter`'s own shape, unchanged).
+
+use std::collections::{HashMap, VecDeque};
+
+use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::script::ScriptRuntime;
+use stackfish_engine::*;
+
+/// "Tap: Gain 1 life." with a scripted player-target requirement - legal
+/// only against a player at 10 or less life.
+const SCRIPTED_LOW_LIFE_TARGET: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:SetTarget({ type = "player", filter = function(player, source, controller, state)
+        return state.life[player] ~= nil and state.life[player] <= 10
+    end })
+    e:SetOperation(Game.Ops.GainLife(1))
+    e:Register()
+end
+return s
+"#;
+
+fn land_definition(id: u64, script: &str) -> CardDefinition {
+    CardDefinition {
+        definition_id: id,
+        name: "Test Ability Land".to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::LAND,
+        subtypes: Vec::new(),
+        oracle_text: "{T}: Gain 1 life (scripted player target).".to_string(),
+        power: None,
+        toughness: None,
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::Inline(script.to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: None,
+        modes: Vec::new(),
+    }
+}
+
+fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
+    GameObject {
+        object_id: id,
+        copiable_override: None,
+        lineage: ObjectLineage { previous: None },
+        definition,
+        owner,
+        controller: owner,
+        zone: ZoneKind::Battlefield,
+        tapped: false,
+        flipped: false,
+        face_down: false,
+        phased_out: false,
+        damage_marked: 0,
+        deathtouched: false,
+        counters: CounterSet::new(),
+        attachments: Vec::new(),
+        attached_to: None,
+        timestamp: SequenceNo(0),
+        controlled_since_turn: 0,
+        is_token: false,
+        is_commander: false,
+        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+    }
+}
+
+fn put_in_hand(state: &mut GameState, mut obj: GameObject, owner: PlayerId) {
+    obj.zone = ZoneKind::Hand;
+    let id = obj.object_id;
+    state.zone_mut(ZoneKind::Hand, Some(owner)).unwrap().push_bottom(id);
+    state.objects.insert(id, obj);
+}
+
+fn two_player_state(p1_life: i32) -> GameState {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    GameState {
+        players: vec![
+            PlayerState {
+                player_id: p0,
+                life: 20,
+                mana_pool: ManaPool::default(),
+                counters: CounterSet::new(),
+                emblems: Vec::new(),
+                commander_damage_taken: Vec::new(),
+                eliminated: false,
+                drew_from_empty_library: false,
+                mulligans_taken: 0,
+                hand_kept: false,
+                commander_casts: std::collections::HashMap::new(),
+            },
+            PlayerState {
+                player_id: p1,
+                life: p1_life,
+                mana_pool: ManaPool::default(),
+                counters: CounterSet::new(),
+                emblems: Vec::new(),
+                commander_damage_taken: Vec::new(),
+                eliminated: false,
+                drew_from_empty_library: false,
+                mulligans_taken: 0,
+                hand_kept: false,
+                commander_casts: std::collections::HashMap::new(),
+            },
+        ],
+        turn_order: vec![p0, p1],
+        active_player: p0,
+        turn_number: 1,
+        phase: Phase::Main,
+        step: Step::PreCombatMain,
+        priority_player: p0,
+        consecutive_passes: 0,
+        lands_played_this_turn: HashMap::new(),
+        combat: None,
+        last_active_turn_number: { let mut m = HashMap::new(); m.insert(p0, 1); m.insert(p1, 1); m },
+        objects: HashMap::new(),
+        zones: vec![
+            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
+            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
+        ],
+        stack: Vec::new(),
+        continuous_effects: Vec::new(),
+        replacement_effects: Vec::new(),
+        cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
+        abilities: Vec::new(),
+        ledger: Vec::new(),
+        rng: RngState { seed: 1, draws_consumed: 0 },
+        next_event_id: 0,
+        next_sequence_no: 0,
+        next_object_id: 1000,
+        pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
+    }
+}
+
+fn drain(engine: &mut Engine) -> StepStatus {
+    loop {
+        match engine.step().status {
+            StepStatus::Progressed => continue,
+            other => return other,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Unit-level: self-registration wires `:SetTarget({type="player", filter=fn})`
+// into a real `TargetFilter::PlayerScript`.
+// ---------------------------------------------------------------------
+
+#[test]
+fn set_target_with_a_player_table_self_registers_a_player_scripted_target_filter() {
+    let mut state = two_player_state(20);
+    let land = ObjectId(0);
+    let definition = land_definition(1, SCRIPTED_LOW_LIFE_TARGET);
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(land);
+    state.objects.insert(land, permanent(land, definition.clone(), PlayerId(0)));
+
+    let mut runtime = ScriptRuntime::new();
+    runtime.run_card_script(&mut state, &definition, land).expect("script self-registers cleanly");
+
+    assert_eq!(state.abilities.len(), 1);
+    let ability = &state.abilities[0];
+    assert!(matches!(
+        &ability.target,
+        Some(TargetSpec::Primitive(req))
+            if matches!(req.filter, TargetFilter::PlayerScript(_)) && req.count == 1 && !req.up_to
+    ));
+}
+
+// ---------------------------------------------------------------------
+// End-to-end: real Engine pipeline through `ActivateAbility`.
+// ---------------------------------------------------------------------
+
+fn play_land_and_activate(p1_life: i32, target: Target) -> Engine {
+    let p0 = PlayerId(0);
+    let land = ObjectId(0);
+    let mut state = two_player_state(p1_life);
+    put_in_hand(&mut state, permanent(land, land_definition(1, SCRIPTED_LOW_LIFE_TARGET), p0), p0);
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: land } })
+        .expect("p0 holds priority, land is in hand");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected AwaitingAction after PlayLand, got {status:?}");
+    assert_eq!(engine.state().abilities.len(), 1, "the land's activated ability self-registered");
+
+    let new_land_id = engine.state().abilities[0].source;
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::ActivateAbility {
+                source: new_land_id,
+                ability_index: 0,
+                targets: vec![target],
+                chosen_colors: Vec::new(),
+            },
+        })
+        .expect("p0 controls the land and holds priority");
+    engine
+}
+
+#[test]
+fn a_player_at_or_below_the_life_threshold_satisfies_the_script_predicate() {
+    let p1 = PlayerId(1);
+    let mut engine = play_land_and_activate(10, Target::Player(p1));
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "10-life player should satisfy the script predicate, got {status:?}");
+}
+
+#[test]
+fn a_player_above_the_life_threshold_fails_the_script_predicate() {
+    let p1 = PlayerId(1);
+    let mut engine = play_land_and_activate(20, Target::Player(p1));
+    let status = drain(&mut engine);
+    assert!(
+        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
+        "20-life player should fail the script predicate, got {status:?}"
+    );
+}
+
+#[test]
+fn an_object_target_is_rejected_outright_by_a_player_script_filter() {
+    let big = ObjectId(1);
+    let mut engine = play_land_and_activate(10, Target::Object(big));
+    let status = drain(&mut engine);
+    assert!(
+        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
+        "TargetFilter::PlayerScript is player-only by this slice's own narrowing, got {status:?}"
+    );
+}
