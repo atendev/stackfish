@@ -336,16 +336,30 @@ pub(crate) fn target_is_legal(
     }
     match filter {
         TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
-        TargetFilter::Object { card_types, subtypes, supertypes, controller, zone } => {
+        TargetFilter::Object { card_types, excluded_card_types, subtypes, excluded_subtypes, supertypes, controller, zone } => {
             let Target::Object(id) = target else { return false };
             let Some(obj) = state.object(id) else { return false };
             if obj.zone != zone.unwrap_or(ZoneKind::Battlefield) {
                 return false;
             }
-            if card_types.is_some() || subtypes.is_some() || supertypes.is_some() {
+            if card_types.is_some()
+                || excluded_card_types.is_some()
+                || subtypes.is_some()
+                || excluded_subtypes.is_some()
+                || supertypes.is_some()
+            {
                 let effective = crate::layers::effective_characteristics(state, script_runtime, id);
                 if let Some(types) = card_types {
                     if !effective.card_types.intersects(*types) {
+                        return false;
+                    }
+                }
+                // CR 601.2c/115's negated form - "target nonland permanent."
+                // Independent of `card_types` above (a filter can combine a
+                // positive card_types with an excluded_subtypes, e.g.
+                // "target creature that isn't a Wall").
+                if let Some(types) = excluded_card_types {
+                    if effective.card_types.intersects(*types) {
                         return false;
                     }
                 }
@@ -358,6 +372,15 @@ pub(crate) fn target_is_legal(
                 // gets - not the raw CardDefinition.
                 if let Some(subtypes) = subtypes {
                     if !subtypes.iter().any(|s| effective.subtypes.contains(s)) {
+                        return false;
+                    }
+                }
+                // CR 601.2c/115/205.4b's negated form - "target creature
+                // that isn't a Wall." Rejects if the target has *any*
+                // subtype in the list (the negation of subtypes' "or"
+                // match above).
+                if let Some(excluded) = excluded_subtypes {
+                    if excluded.iter().any(|s| effective.subtypes.contains(s)) {
                         return false;
                     }
                 }

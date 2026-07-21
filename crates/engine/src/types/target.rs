@@ -9,11 +9,9 @@ use crate::types::zone::ZoneKind;
 /// 115.2's battlefield-by-default rule) and the two non-object target
 /// shapes (CR 115.4's "any target", plain "target player").
 ///
-/// TODO: no negative filters ("target creature you don't control that
-/// isn't a Wall") — only what a first real spell needs. "Another target"
-/// (must differ from the spell/ability's own source, not just dedup within
-/// this one requirement per CR 115.3) is real now — see `TargetRequirement::
-/// exclude_source`.
+/// "Another target" (must differ from the spell/ability's own source, not
+/// just dedup within this one requirement per CR 115.3) is real now — see
+/// `TargetRequirement::exclude_source`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TargetFilter {
     /// "target creature" / "target permanent you control" / etc. `zone:
@@ -33,9 +31,23 @@ pub enum TargetFilter {
     /// `subtypes`' bare-string `Vec`) — same shape and "or across the set's
     /// bits" semantics `cost.rs`'s `FilterSpec::supertypes` already has, now
     /// mirrored here.
+    ///
+    /// `excluded_card_types`/`excluded_subtypes` (CR 601.2c/115/205.4b's
+    /// negated form — "target nonland permanent," "target creature that
+    /// isn't a Wall") reject a target whose card types intersect
+    /// `excluded_card_types`, or whose subtypes include any of
+    /// `excluded_subtypes` — the negation of the positive `card_types`/
+    /// `subtypes` checks above, checked independently of them (a filter can
+    /// combine a positive `card_types` with an `excluded_subtypes`, e.g.
+    /// "target creature that isn't a Wall"). No `excluded_supertypes` yet —
+    /// no real card built so far needs "nonlegendary," same "only what a
+    /// first real spell needs" scoping this whole enum's fields already
+    /// follow.
     Object {
         card_types: Option<CardTypeSet>,
+        excluded_card_types: Option<CardTypeSet>,
         subtypes: Option<Vec<Subtype>>,
+        excluded_subtypes: Option<Vec<Subtype>>,
         supertypes: Option<SupertypeSet>,
         controller: Option<FilterController>,
         zone: Option<ZoneKind>,

@@ -72,7 +72,7 @@ fn legend_bolt_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_legend_bolt".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
                 supertypes: Some(SupertypeSet::LEGENDARY),
