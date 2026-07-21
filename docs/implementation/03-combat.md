@@ -67,7 +67,7 @@
 - Unresolved:
   - Landwalk, Banding, Flanking/Rampage.
 
-## Slice: landwalk (implemented, not yet merged)
+## Slice: landwalk (merged)
 
 - Branch `phase5/landwalk`.
 - Scope: CR 702.14 Landwalk, narrowed to single-subtype matching (the 5 basic landwalks).
@@ -79,7 +79,7 @@
 - Unresolved:
   - CR 702.14a's card-type/supertype-combination forms ("artifact landwalk," "nonbasic landwalk," "snow swampwalk").
 
-## Slice: banding (implemented, not yet merged)
+## Slice: banding (merged)
 
 - Branch `phase5/banding`.
 - Scope: CR 702.22 Banding, narrowed to the plain form (not "bands with other [quality]").
@@ -92,4 +92,16 @@
 - Unresolved:
   - CR 702.22b/c's "bands with other [quality]" variant (needs a parameter - same shape gap Landwalk's own removal from `KeywordSet` documents).
   - CR 702.22i (a band member blocked "due to an effect" forces the whole band blocked) - no such effect exists in this engine yet.
-  - CR 702.22j (the defending player, not the active player, chooses an attacker's split when it's blocked by a creature with banding) - `AssignCombatDamage`'s actor is hardcoded to the active player for the whole atomic action; a real fix needs that action to accept a split submission from either player depending on which attacker it covers, deferred as a known deviation.
+  - CR 702.22j (the defending player, not the active player, chooses an attacker's split when it's blocked by a creature with banding) is real now too, see `banding-split-actor` below.
+
+## Slice: banding-split-actor (merged)
+
+- Branch `phase5/banding-split-actor`.
+- Scope: CR 702.22j/k - who chooses a combat damage split is no longer hardcoded to the active player.
+- Verify: 3 new tests, full workspace suite green.
+- Key changes:
+  - `AssignCombatDamage`'s actor check moved from a hardcoded `command.actor == state.active_player` at the top of the handler to a per-split-id computation once `requires_assignment` is known: each id's required chooser defaults to the object's own controller (CR 510.1c/d - attacker splits by the attacker's controller, blocker splits by the blocker's controller), flipped to the *other* side's player when a `BANDING` creature is on the other end of that particular block (702.22j: attacker blocked by a banding creature -> defending player; 702.22k: blocker blocking a banding creature -> active player).
+  - 702.22k's pre-existing band-forced-blocker case (`phase5/banding`) was already correct before this slice, but only by accident: every band needs >=1 banding member, so the old blanket-active-player hardcode always happened to match. Now it resolves for the actual documented reason.
+  - No-split-needed damage steps keep the old convention (active player submits an empty batch) - every pre-existing zero-split `AssignCombatDamage` call site across the test suite is unaffected.
+- Unresolved:
+  - A damage step needing splits chosen by two different players *at once* (e.g. a plain multi-block plus a separate banding-blocked attacker, simultaneously) - CR 510.1e implies both players submit their own creatures' splits independently, which would need a real two-phase pause-and-resume protocol (a new `ProcessState`, similar to `AwaitingAttachChoice`). Deliberately narrowed instead: rejected outright with a clear `IllegalAction` rather than silently letting one player choose for both.
