@@ -16,7 +16,8 @@
 - **Stack owner**: `StackObject` has no `owner` field; controller used as proxy in player elimination.
 - **Cost modifier order**: fixed (`phase5/cost-modifier-order`) — `apply_cost_modifiers` sums every matching modifier's delta and floors once, so registration order no longer changes the resolved cost; no real player-choice pause was needed (CR 601.2f's "order matters" carve-out is about colored-pip interactions this engine's generic-only `CostModifier` already doesn't model). CR 118.7 colored-pip-specific reduction itself stays unmodeled.
 - **Enchant/Equip (CR 702.16b)**: attach machinery exists; Enchant side closed, Equip side closed, but some Aura edge rules (303.4d/f/h/i/k/m) not modeled.
-- **Landwalk / Banding**: still open.
+- **Landwalk**: real now (`phase5/landwalk`, `EffectPrimitive::AddLandwalkSubtype`/`EffectiveCharacteristics::landwalk_subtypes`, checked in `commands::DeclareBlockers`) — only single-subtype matching (covers all 5 basic landwalks); CR 702.14a's card-type/supertype-combination forms ("artifact landwalk," "nonbasic landwalk," "snow swampwalk") stay unmodeled.
+- **Banding**: still open.
 
 ## Mistakes caught (don't repeat)
 

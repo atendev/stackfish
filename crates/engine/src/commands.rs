@@ -1995,6 +1995,31 @@ pub fn execute_command(
                     ));
                 }
 
+                // CR 702.14c: landwalk - a creature with landwalk can't be
+                // blocked at all while the defending player controls at
+                // least one land with the specified subtype. Unlike
+                // Fear/Intimidate/Shadow/Horsemanship above, this checks the
+                // *defending player's own battlefield*, not the blocker's
+                // own characteristics - see EffectiveCharacteristics::
+                // landwalk_subtypes' own doc comment for why.
+                if !attacker_characteristics.landwalk_subtypes.is_empty() {
+                    let defender_controls_matching_land = state.objects.values().any(|land| {
+                        land.zone == ZoneKind::Battlefield
+                            && crate::layers::effective_controller(state, script_runtime, land.object_id) == command.actor
+                            && crate::layers::effective_characteristics(state, script_runtime, land.object_id)
+                                .subtypes
+                                .iter()
+                                .any(|s| attacker_characteristics.landwalk_subtypes.contains(s))
+                    });
+                    if defender_controls_matching_land {
+                        return Err(CommandError::IllegalAction(
+                            "an attacker with landwalk can't be blocked while the defending \
+                             player controls a matching land"
+                                .to_string(),
+                        ));
+                    }
+                }
+
                 // CR 702.16d: an attacker with protection from a quality
                 // (color, 702.16e, card type, subtype, name, 702.16a,
                 // "everything," 702.16j, or a specific player, 702.16k)
