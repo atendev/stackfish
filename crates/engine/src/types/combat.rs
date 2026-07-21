@@ -15,4 +15,18 @@ pub struct CombatState {
     pub attackers: Vec<(ObjectId, Target)>,
     pub blocks: Vec<(ObjectId, ObjectId)>,
     pub declared_defenders: Vec<PlayerId>,
+    /// CR 702.22c: attacking "bands" the active player declared alongside
+    /// this combat's attackers - each inner `Vec` is one band's member
+    /// object ids. Populated once, by `PlayerActionKind::DeclareBands`
+    /// (only legal during `Step::DeclareAttackers`, same window as
+    /// `DeclareAttackers` itself), and never mutated afterward - CR 702.22e:
+    /// a band lasts the rest of combat even if banding is later removed
+    /// from a member. CR 702.22f ("a creature removed from combat leaves
+    /// its band") is handled by filtering against `attackers` wherever this
+    /// is consulted, not by pruning this list. Empty for the overwhelming
+    /// majority of combats (no banding creature attacking). Only plain
+    /// banding is representable - CR 702.22b/c's "bands with other
+    /// [quality]" variant isn't modeled (see `KeywordSet::BANDING`'s own
+    /// doc comment).
+    pub bands: Vec<Vec<ObjectId>>,
 }

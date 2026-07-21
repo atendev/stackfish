@@ -152,6 +152,7 @@ fn unblocked_commander_attacker_accumulates_commander_damage() {
         attackers: vec![(commander, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
+        bands: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(commander, creature_definition("General", 5, 5, KeywordSet::empty()), p0, true));
 
@@ -173,6 +174,7 @@ fn two_commanders_attacking_the_same_player_track_independently() {
         attackers: vec![(general, Target::Player(p1)), (admiral, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
+        bands: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(general, creature_definition("General", 4, 4, KeywordSet::empty()), p0, true));
     put_on_battlefield(&mut state, permanent(admiral, creature_definition("Admiral", 6, 6, KeywordSet::empty()), p0, true));
@@ -195,6 +197,7 @@ fn non_commander_creatures_combat_damage_never_counts() {
         attackers: vec![(bear, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
+        bands: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(bear, creature_definition("Bear", 3, 3, KeywordSet::empty()), p0, false));
 
@@ -215,6 +218,7 @@ fn commander_combat_damage_still_accumulates_under_infect() {
         attackers: vec![(commander, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
+        bands: Vec::new(),
     });
     put_on_battlefield(
         &mut state,
@@ -237,7 +241,7 @@ fn commander_combat_damage_still_accumulates_under_infect() {
 fn a_commanders_non_combat_damage_does_not_count() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: vec![p1] });
+    let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new() });
     // No real combat this test - just a commander on the battlefield with
     // an activated damage ability, same shape
     // phase5_script_ops_damage.rs's own lifelink-ability test uses.
@@ -301,6 +305,7 @@ fn commander_damage_reaching_21_ends_the_game() {
         attackers: vec![(commander, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
+        bands: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(commander, creature_definition("General", 21, 21, KeywordSet::empty()), p0, true));
 

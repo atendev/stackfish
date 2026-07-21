@@ -221,6 +221,7 @@ fn protection_vs_redirect_state() -> (GameState, ObjectId, ObjectId, ObjectId) {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(protected, attacker)],
         declared_defenders: vec![p1],
+        bands: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(0, "Bear", 3, 3, Some(ColorSet::RED)), p0));
     let protected_definition = creature_definition(1, "Protected", 0, 4, None, STATIC_PROTECTION_FROM_RED);
@@ -295,6 +296,7 @@ fn protection_alone_still_resolves_synchronously_with_no_pause() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(protected, attacker)],
         declared_defenders: vec![p1],
+        bands: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(0, "Bear", 3, 3, Some(ColorSet::RED)), p0));
     let protected_definition = creature_definition(1, "Protected", 0, 4, None, STATIC_PROTECTION_FROM_RED);
@@ -325,6 +327,7 @@ fn a_permanent_with_both_protection_and_its_own_registered_effect_only_ever_reso
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(protected, attacker)],
         declared_defenders: vec![p1],
+        bands: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(0, "Bear", 3, 3, Some(ColorSet::RED)), p0));
     let protected_definition =

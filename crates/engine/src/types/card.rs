@@ -195,6 +195,18 @@ bitflags! {
         /// CR 702.31 - evasion: can't be blocked by creatures without
         /// horsemanship (a horsemanship creature may itself block anything).
         const HORSEMANSHIP  = 1 << 19;
+        /// CR 702.22 - a static ability modifying combat's blocking and
+        /// damage-assignment rules once grouped into a "band"
+        /// (`CombatState::bands`, declared via `PlayerActionKind::
+        /// DeclareBands`) rather than a per-creature blocking restriction
+        /// like the other bits in this set. Only the plain form is
+        /// representable - CR 702.22b/c's "bands with other [quality]"
+        /// variant needs a parameter (which quality) - same reasoning
+        /// `EffectiveCharacteristics::landwalk_subtypes`'s doc comment gives
+        /// for keeping Landwalk off this bitflag entirely; it would need
+        /// its own field/`EffectPrimitive` rather than a plain bit here,
+        /// and isn't modeled yet.
+        const BANDING       = 1 << 20;
     }
 }
 

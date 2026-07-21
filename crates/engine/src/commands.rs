@@ -1821,6 +1821,7 @@ pub fn execute_command(
                 attackers,
                 blocks: Vec::new(),
                 declared_defenders: Vec::new(),
+                bands: Vec::new(),
             });
 
             return Ok(CommandOutcome {
@@ -1831,7 +1832,89 @@ pub fn execute_command(
                 battlefield_entries: Vec::new(),
             });
         }
-        PlayerActionKind::DeclareBlockers { blocks } => {
+        PlayerActionKind::DeclareBands { bands } => {
+            // CR 508.1e/702.22c: same window as DeclareAttackers itself -
+            // active player, only during the declare attackers step, only
+            // once attackers actually exist to group.
+            if command.actor != state.active_player {
+                return Err(CommandError::IllegalAction(
+                    "only the active player declares bands".to_string(),
+                ));
+            }
+            if state.phase != Phase::Combat || state.step != Step::DeclareAttackers {
+                return Err(CommandError::IllegalAction(
+                    "bands can only be declared during the declare attackers step".to_string(),
+                ));
+            }
+            let combat = state.combat.as_ref().ok_or_else(|| {
+                CommandError::IllegalAction("no attackers have been declared this combat".to_string())
+            })?;
+
+            let mut seen: Vec<ObjectId> = Vec::new();
+            for band in &bands {
+                let mut target: Option<Target> = None;
+                let mut banding_members = 0u32;
+                let mut non_banding_members = 0u32;
+                for member in band {
+                    let (_, member_target) = combat.attackers.iter().find(|(id, _)| id == member).ok_or_else(|| {
+                        CommandError::IllegalAction(
+                            "a band member isn't actually attacking this combat".to_string(),
+                        )
+                    })?;
+                    if seen.contains(member) {
+                        return Err(CommandError::IllegalAction(
+                            "a creature can be in at most one band".to_string(),
+                        ));
+                    }
+                    seen.push(*member);
+
+                    // CR 702.22d/802.3b: every member of a band must attack
+                    // the same player, planeswalker, or battle.
+                    match target {
+                        None => target = Some(*member_target),
+                        Some(t) if t == *member_target => {}
+                        Some(_) => {
+                            return Err(CommandError::IllegalAction(
+                                "every creature in a band must attack the same player, \
+                                 planeswalker, or battle"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+
+                    if effective_keywords(state, script_runtime, *member).contains(KeywordSet::BANDING) {
+                        banding_members += 1;
+                    } else {
+                        non_banding_members += 1;
+                    }
+                }
+                // CR 702.22c: one or more attacking creatures with banding,
+                // plus up to one attacking creature without banding.
+                if banding_members == 0 {
+                    return Err(CommandError::IllegalAction(
+                        "a band needs at least one attacking creature with banding".to_string(),
+                    ));
+                }
+                if non_banding_members > 1 {
+                    return Err(CommandError::IllegalAction(
+                        "a band can include at most one attacking creature without banding"
+                            .to_string(),
+                    ));
+                }
+            }
+
+            let combat = state.combat.as_mut().expect("checked Some above");
+            combat.bands = bands;
+
+            return Ok(CommandOutcome {
+                events: Vec::new(),
+                broke_pass_chain: true,
+                priority_handoff: PriorityHandoff::Unchanged,
+                requires_payment: None,
+                battlefield_entries: Vec::new(),
+            });
+        }
+        PlayerActionKind::DeclareBlockers { mut blocks } => {
             if state.phase != Phase::Combat || state.step != Step::DeclareBlockers {
                 return Err(CommandError::IllegalAction(
                     "blockers can only be declared during the declare blockers step".to_string(),
@@ -2082,6 +2165,38 @@ pub fn execute_command(
                 }
             }
 
+            // CR 702.22h: banding - once a band member has been directly
+            // blocked by a creature in this submission, every other member
+            // of its band becomes blocked by that same creature too,
+            // regardless of that member's own evasion/protection (the
+            // worked example under CR 702.22h blocks a swampwalker this way
+            // even though the defending player controls a Swamp - the
+            // propagated block bypasses every per-pair check this loop just
+            // ran, and the whole-batch Menace check above). Deliberately
+            // scoped to direct blocks from *this* submission only - CR
+            // 702.22d already forces every band member to share one
+            // defending player, so no earlier submission this combat could
+            // contain a same-band pairing. A member still gets a
+            // *propagated* block from every band-mate's own direct block,
+            // even one it's already otherwise blocked by (CR 702.22h has no
+            // "unless already blocked" carve-out) - only an exact duplicate
+            // (blocker, member) pair is skipped.
+            let mut propagated: Vec<(ObjectId, ObjectId)> = Vec::new();
+            for (blocker, attacker) in &blocks {
+                let Some(band) = combat.bands.iter().find(|band| band.contains(attacker)) else { continue };
+                for member in band {
+                    if member == attacker || !combat.attackers.iter().any(|(id, _)| id == member) {
+                        continue;
+                    }
+                    let already =
+                        blocks.iter().chain(propagated.iter()).any(|(b, a)| b == blocker && a == member);
+                    if !already {
+                        propagated.push((*blocker, *member));
+                    }
+                }
+            }
+            blocks.extend(propagated);
+
             let mut events = Vec::with_capacity(blocks.len());
             for (blocker, attacker) in &blocks {
                 events.push(GameEventKind::BlockerDeclared {
@@ -2202,7 +2317,7 @@ pub fn execute_command(
             // either, even if 2+ of its blockers happen to be eligible now.
             let participating_attackers: HashSet<ObjectId> =
                 attackers.iter().map(|(attacker, _)| *attacker).collect();
-            let requires_assignment: HashSet<ObjectId> = blockers_by_attacker
+            let mut requires_assignment: HashSet<ObjectId> = blockers_by_attacker
                 .iter()
                 .filter(|(attacker, blockers)| {
                     participating_attackers.contains(attacker)
@@ -2213,93 +2328,146 @@ pub fn execute_command(
                 })
                 .map(|(attacker, _)| *attacker)
                 .collect();
+            // CR 702.22h/k: banding can force a single blocker onto 2+
+            // attackers (band propagation in DeclareBlockers) - that blocker
+            // then needs the same kind of chosen split `blockers_by_attacker`
+            // above already models for a multi-blocked attacker. Built from
+            // the step-filtered `blocks` (not `alive_blocks`) since only a
+            // blocker that itself deals damage this step can need one.
+            let mut attackers_by_blocker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+            for (blocker, attacker) in &blocks {
+                attackers_by_blocker.entry(*blocker).or_default().push(*attacker);
+            }
+            requires_assignment.extend(
+                attackers_by_blocker.iter().filter(|(_, attackers)| attackers.len() >= 2).map(|(blocker, _)| *blocker),
+            );
 
             // CR 510.1e atomicity: `assignments` must cover exactly the
             // set that needs one - no extra (nothing to split for an
-            // attacker with 0, or 1 non-trampling, blocker), no missing (the
+            // attacker with 0, or 1 non-trampling, blocker; nothing to split
+            // for a blocker blocking only 1 attacker), no missing (the
             // engine can't guess a split).
-            let submitted: HashSet<ObjectId> = assignments.iter().map(|(attacker, _)| *attacker).collect();
+            let submitted: HashSet<ObjectId> = assignments.iter().map(|(id, _)| *id).collect();
             if submitted != requires_assignment {
                 return Err(CommandError::IllegalAction(
-                    "assignments must cover exactly the attackers that need a chosen split \
-                     (two or more blockers, or one blocker with trample)"
+                    "assignments must cover exactly the attackers and blockers that need a \
+                     chosen split (two or more blockers on an attacker, one blocker with \
+                     trample, or a blocker forced onto two or more attackers by banding)"
                         .to_string(),
                 ));
             }
 
-            for (attacker, splits) in &assignments {
-                if state.object(*attacker).is_none() {
+            for (id, splits) in &assignments {
+                if state.object(*id).is_none() {
                     return Err(CommandError::InvalidTarget);
                 }
                 // CR 510.1a: 0-or-less power assigns no damage. Reads through
                 // effective_power (CR 613 layer 7c) so this validation stays
                 // consistent with the actual damage-event amounts computed
                 // below, which use the same helper.
-                let power =
-                    effective_power(state, script_runtime, *attacker).map(|p| p.max(0) as u32).unwrap_or(0);
-                let blockers = &blockers_by_attacker[attacker];
-                let attacker_keywords = effective_keywords(state, script_runtime, *attacker);
-                let has_trample = attacker_keywords.contains(KeywordSet::TRAMPLE);
-                let has_deathtouch = attacker_keywords.contains(KeywordSet::DEATHTOUCH);
+                let power = effective_power(state, script_runtime, *id).map(|p| p.max(0) as u32).unwrap_or(0);
 
-                let mut seen = Vec::with_capacity(splits.len());
-                let mut sum: u32 = 0;
-                for (blocker, amount) in splits {
-                    if !blockers.contains(blocker) {
+                if let Some(blockers) = blockers_by_attacker.get(id) {
+                    let attacker_keywords = effective_keywords(state, script_runtime, *id);
+                    let has_trample = attacker_keywords.contains(KeywordSet::TRAMPLE);
+                    let has_deathtouch = attacker_keywords.contains(KeywordSet::DEATHTOUCH);
+
+                    let mut seen = Vec::with_capacity(splits.len());
+                    let mut sum: u32 = 0;
+                    for (blocker, amount) in splits {
+                        if !blockers.contains(blocker) {
+                            return Err(CommandError::IllegalAction(
+                                "a split entry's blocker isn't actually blocking that attacker"
+                                    .to_string(),
+                            ));
+                        }
+                        if seen.contains(blocker) {
+                            return Err(CommandError::IllegalAction(
+                                "a split can't assign the same blocker twice".to_string(),
+                            ));
+                        }
+                        seen.push(*blocker);
+                        sum += amount;
+                    }
+                    if seen.len() != blockers.len() {
                         return Err(CommandError::IllegalAction(
-                            "a split entry's blocker isn't actually blocking that attacker"
+                            "a split must assign an amount (possibly zero) to every blocker"
                                 .to_string(),
                         ));
                     }
-                    if seen.contains(blocker) {
-                        return Err(CommandError::IllegalAction(
-                            "a split can't assign the same blocker twice".to_string(),
-                        ));
-                    }
-                    seen.push(*blocker);
-                    sum += amount;
-                }
-                if seen.len() != blockers.len() {
-                    return Err(CommandError::IllegalAction(
-                        "a split must assign an amount (possibly zero) to every blocker"
-                            .to_string(),
-                    ));
-                }
-                if !has_trample {
-                    if sum != power {
-                        return Err(CommandError::IllegalAction(
-                            "a split's amounts must sum to exactly the attacker's power".to_string(),
-                        ));
-                    }
-                } else {
-                    // CR 702.19b: a trampler may send the remainder to the
-                    // defending player (handled in the assign-and-deal pass
-                    // below), but only once every blocker in the split has
-                    // been given at least its own lethal amount - short one
-                    // and *nothing* can go to the player, all of `power`
-                    // must stay on blockers instead.
-                    if sum > power {
-                        return Err(CommandError::IllegalAction(
-                            "a split's amounts can't sum to more than the attacker's power".to_string(),
-                        ));
-                    }
-                    if sum < power {
-                        for (blocker, amount) in splits {
-                            let needed = lethal_damage_needed(state, script_runtime, *blocker, has_deathtouch);
-                            if *amount < needed {
-                                return Err(CommandError::IllegalAction(
-                                    "trample can't send excess damage to the defending player until \
-                                     every blocker has been assigned its own lethal amount"
-                                        .to_string(),
-                                ));
+                    if !has_trample {
+                        if sum != power {
+                            return Err(CommandError::IllegalAction(
+                                "a split's amounts must sum to exactly the attacker's power".to_string(),
+                            ));
+                        }
+                    } else {
+                        // CR 702.19b: a trampler may send the remainder to the
+                        // defending player (handled in the assign-and-deal pass
+                        // below), but only once every blocker in the split has
+                        // been given at least its own lethal amount - short one
+                        // and *nothing* can go to the player, all of `power`
+                        // must stay on blockers instead.
+                        if sum > power {
+                            return Err(CommandError::IllegalAction(
+                                "a split's amounts can't sum to more than the attacker's power".to_string(),
+                            ));
+                        }
+                        if sum < power {
+                            for (blocker, amount) in splits {
+                                let needed =
+                                    lethal_damage_needed(state, script_runtime, *blocker, has_deathtouch);
+                                if *amount < needed {
+                                    return Err(CommandError::IllegalAction(
+                                        "trample can't send excess damage to the defending player until \
+                                         every blocker has been assigned its own lethal amount"
+                                            .to_string(),
+                                    ));
+                                }
                             }
                         }
+                    }
+                } else {
+                    // CR 702.22h/k: the blocker-side case - a blocker forced
+                    // onto 2+ attackers by band propagation. No trample-style
+                    // carve-out here: a blocker has no "spill to the
+                    // defending player" outlet, so its split must sum to
+                    // exactly its power every time.
+                    let attackers_for_blocker = &attackers_by_blocker[id];
+                    let mut seen = Vec::with_capacity(splits.len());
+                    let mut sum: u32 = 0;
+                    for (attacker, amount) in splits {
+                        if !attackers_for_blocker.contains(attacker) {
+                            return Err(CommandError::IllegalAction(
+                                "a split entry's attacker isn't actually blocked by that blocker"
+                                    .to_string(),
+                            ));
+                        }
+                        if seen.contains(attacker) {
+                            return Err(CommandError::IllegalAction(
+                                "a split can't assign the same attacker twice".to_string(),
+                            ));
+                        }
+                        seen.push(*attacker);
+                        sum += amount;
+                    }
+                    if seen.len() != attackers_for_blocker.len() {
+                        return Err(CommandError::IllegalAction(
+                            "a split must assign an amount (possibly zero) to every attacker \
+                             it blocks"
+                                .to_string(),
+                        ));
+                    }
+                    if sum != power {
+                        return Err(CommandError::IllegalAction(
+                            "a split's amounts must sum to exactly the blocker's power".to_string(),
+                        ));
                     }
                 }
             }
 
             let assignment_map: HashMap<ObjectId, &Vec<(ObjectId, u32)>> =
-                assignments.iter().map(|(attacker, splits)| (*attacker, splits)).collect();
+                assignments.iter().map(|(id, splits)| (*id, splits)).collect();
 
             // CR 510.1b/c/d + 510.2: assign and deal in the same pass - no
             // priority window between them.
@@ -2385,7 +2553,17 @@ pub fn execute_command(
                     }
                 }
             }
-            for (blocker, attacker) in &blocks {
+            // 510.1d: a blocker deals its damage to the one attacker it
+            // blocks - unambiguous, unless banding forced it onto 2+
+            // attackers (CR 702.22h/k), in which case the validated split
+            // above decides. `handled_blockers` collapses `blocks`'s
+            // possibly-repeated blocker entries (one per attacker it's
+            // forced onto) down to one pass per distinct blocker.
+            let mut handled_blockers: HashSet<ObjectId> = HashSet::new();
+            for (blocker, _) in &blocks {
+                if !handled_blockers.insert(*blocker) {
+                    continue;
+                }
                 let Some(power) = effective_power(state, script_runtime, *blocker) else {
                     continue;
                 };
@@ -2393,15 +2571,26 @@ pub fn execute_command(
                 if power == 0 {
                     continue;
                 }
-                // 510.1d: a blocker deals all its damage to the one
-                // attacker it blocks - never ambiguous under this engine's
-                // one-blocker-one-attacker block model.
-                events.push(GameEventKind::DamageDealt {
-                    source: *blocker,
-                    target: Target::Object(*attacker),
-                    amount: power,
-                    is_combat_damage: true,
-                });
+                let attackers_for_blocker = &attackers_by_blocker[blocker];
+                if let [only_attacker] = attackers_for_blocker[..] {
+                    events.push(GameEventKind::DamageDealt {
+                        source: *blocker,
+                        target: Target::Object(only_attacker),
+                        amount: power,
+                        is_combat_damage: true,
+                    });
+                } else {
+                    for (attacker, amount) in assignment_map[blocker] {
+                        if *amount > 0 {
+                            events.push(GameEventKind::DamageDealt {
+                                source: *blocker,
+                                target: Target::Object(*attacker),
+                                amount: *amount,
+                                is_combat_damage: true,
+                            });
+                        }
+                    }
+                }
             }
 
             // CR 510.2/601.2a: these are proposed events only - engine.rs's
