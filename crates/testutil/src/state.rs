@@ -50,6 +50,42 @@ pub fn two_player_state(zones: Vec<Zone>) -> GameState {
     }
 }
 
+/// A one-player `GameState`, same game-start defaults as `two_player_state` -
+/// for tests that only ever act from a single player's perspective (an
+/// activated ability's cost/payment, say) and would otherwise pay for a
+/// second `PlayerState`/turn-order entry they never touch.
+pub fn single_player_state(player: PlayerId, zones: Vec<Zone>) -> GameState {
+    GameState {
+        players: vec![player_state(player)],
+        turn_order: vec![player],
+        active_player: player,
+        turn_number: 1,
+        phase: Phase::Main,
+        step: Step::PreCombatMain,
+        priority_player: player,
+        consecutive_passes: 0,
+        lands_played_this_turn: HashMap::new(),
+        combat: None,
+        last_active_turn_number: HashMap::from([(player, 1)]),
+        objects: HashMap::new(),
+        zones,
+        stack: Vec::new(),
+        continuous_effects: Vec::new(),
+        replacement_effects: Vec::new(),
+        cost_modifiers: Vec::new(),
+        hand_size_modifiers: Vec::new(),
+        abilities: Vec::new(),
+        ledger: Vec::new(),
+        rng: RngState { seed: 1, draws_consumed: 0 },
+        next_event_id: 0,
+        next_sequence_no: 0,
+        next_object_id: 1000,
+        pending_step_skips: Vec::new(),
+        once_per_turn_triggered: std::collections::HashSet::new(),
+        commander_return_offered: std::collections::HashSet::new(),
+    }
+}
+
 /// The most common zone set: each player's hand plus a shared battlefield —
 /// enough for any test moving a card hand-to-battlefield (land plays,
 /// creature casts) with nowhere else in play.
