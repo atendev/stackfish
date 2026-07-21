@@ -174,10 +174,11 @@ impl CostSpec {
 /// matter among multiple reductions" carve-out is specifically about CR
 /// 118.7's colored-vs-generic-pip interactions, which `CostModifier`
 /// explicitly doesn't model — see its own scope note above).
-/// TODO: no `Game.CreateCostModifier` script builder yet — same "Rust
-/// struct-literal fixtures only" bootstrap stance replacement effects and
-/// static abilities each took before their own builder slice landed. Only
-/// constructible today via a direct `CostModifier` literal.
+/// `Game.CreateCostModifier(c)` (script.rs's `CostModifierBuilder`) is a real
+/// self-registering builder now (`phase5/cost-modifier-builder`), mirroring
+/// `Game.CreateStaticAbility`/`Game.CreateReplacementEffect`'s own
+/// queue-and-drain shape — a direct Rust struct literal still works too
+/// (every existing fixture using one is unaffected).
 #[derive(Clone, Debug)]
 pub struct CostModifier {
     pub source: ObjectId,

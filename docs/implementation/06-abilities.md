@@ -168,5 +168,32 @@
 - Unresolved:
   - CR 118.7 colored-pip-specific cost reduction — still unmodeled, out of scope (pre-existing
     `CostModifier` boundary).
-  - `Game.CreateCostModifier` Lua builder — still doesn't exist (pre-existing, separate gap).
+  - `Game.CreateCostModifier` Lua builder — real now, see `cost-modifier-builder` below.
   - Activated-ability costs — `CostModifier` stays spells-only (pre-existing scope boundary).
+
+## Slice: cost-modifier-builder (merged)
+
+- Branch `phase5/cost-modifier-builder`.
+- Scope: `Game.CreateCostModifier(c)` (CR 601.2f) — the missing Lua construction path
+  `CostModifier`'s own doc comment named as a TODO since `cost-modifier-order` landed. A direct
+  Rust struct literal remained the only way to build one until this slice.
+- Verify: 4 new tests (`phase5_cost_modifier_builder.rs`: unit-level self-registration, two
+  `Register()`-without-required-field error cases, one full `Engine`-driven end-to-end PlayLand →
+  CastSpell test proving the reduced cost is actually honored at payment time), full workspace
+  suite green.
+- Key changes:
+  - `CostModifierBuilder` (script.rs) — mirrors `StaticAbilityBuilder`/`ReplacementEffectBuilder`'s
+    queue-and-drain shape exactly. `:SetFilter(table)` reuses `decode_filter_table` verbatim (same
+    option-bag `Game.Costs.Sacrifice`/`Discard`/`TapPermanents` already decode through — no new
+    filter-table shape). `:SetAmount(n)` sets the flat generic delta.
+  - `ScriptRegistry.pending_cost_modifiers: Vec<CostModifier>` — `:Register()` pushes with a
+    placeholder `controller: PlayerId(0)`; `run_card_script`'s drain step resolves the real value
+    (this effect's source's own live controller) from `state.object(source).controller`, since the
+    builder has no `&GameState` inside a Lua callback to read it from — same "placeholder now,
+    patch at drain" pattern `AbilityId`/`timestamp` already use for `pending_triggered`/
+    `pending_static`, just for a new field kind (a live lookup, not a freshly-minted id).
+  - `Game.CreateCostModifier` registered in `bind_game_globals` alongside the other three
+    `Game.Create*` builders.
+- Unresolved: none new — this closes the builder gap outright at `CostModifier`'s existing scope
+  (spells only, flat generic amount, no CR 118.7 colored-pip modeling — all pre-existing
+  boundaries, untouched by this slice).
