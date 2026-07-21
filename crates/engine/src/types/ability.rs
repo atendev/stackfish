@@ -2,7 +2,7 @@ use crate::types::card::{CardTypeSet, KeywordSet, SupertypeSet};
 use crate::types::cost::{CostSpec, FilterSpec};
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
-use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
+use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{ColorSet, ManaUnit};
 use crate::types::target::TargetSpec;
 use crate::types::turn::Step;
@@ -769,10 +769,11 @@ impl ConditionPrimitive {
 /// tag). Matching itself is identical to `Primitive`'s own — the cap is
 /// enforced separately, in `triggers::collect_triggers`/`Engine`'s
 /// `CollectTriggers` stage, against `GameState::once_per_turn_triggered`
-/// (keyed by `(source, ability_index)`, reset each turn). Not offered for a
-/// `Script` condition this slice - a custom Lua condition function has no
-/// engine-side ability_index-keyed slot to consult without also threading
-/// one through `ScriptContext`, deferred as a named follow-up.
+/// (keyed by the ability's own stable `AbilityId`, reset each turn). Not
+/// offered for a `Script` condition this slice - a custom Lua condition
+/// function has no engine-side `AbilityId`-keyed slot to consult without
+/// also threading one through `ScriptContext`, deferred as a named
+/// follow-up.
 /// `Clone`-only (not `Copy`) — see `ConditionPrimitive`'s own doc comment for
 /// why (its `DiesMatching`/`LeavesBattlefieldMatching` variants own a
 /// `FilterSpec`).
@@ -861,6 +862,12 @@ pub enum InterveningIfSpec {
 /// event/timing window without walking every object first.
 #[derive(Clone)]
 pub struct RegisteredAbility {
+    /// Stable across this ability's lifetime — see `AbilityId`'s own doc
+    /// comment. Minted via `GameState::allocate_ability_id` at registration
+    /// time; a hand-built test fixture that never goes through real
+    /// self-registration picks its own arbitrary (but ideally
+    /// file-unique) value instead.
+    pub id: AbilityId,
     pub source: ObjectId,
     pub kind: AbilityKind,
     /// `None` means "no filter, always matches" — same meaning as

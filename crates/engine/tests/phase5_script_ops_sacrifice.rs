@@ -121,7 +121,7 @@ fn card_object_controlled_by(
 }
 
 fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
@@ -134,7 +134,7 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
 }
 
 fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(1),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::LeavesBattlefield)),
@@ -288,7 +288,7 @@ fn sacrifice_activated_ability_also_works() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
     state.objects.insert(target, card_object(target, creature_definition(2, "Offering", KeywordSet::empty()), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(2),
         source,
         kind: AbilityKind::Activated,
         condition: None,

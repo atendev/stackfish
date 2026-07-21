@@ -135,7 +135,7 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, ObjectId, ObjectId, 
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
-        abilities: vec![RegisteredAbility {
+        abilities: vec![RegisteredAbility { id: AbilityId(0),
             source,
             kind: AbilityKind::Activated,
             condition: None,

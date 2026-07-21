@@ -293,7 +293,7 @@ fn counters_ability_works_the_same_as_a_counters_spell() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
     state.objects.insert(target, card_object(target, creature_definition(2, "Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,

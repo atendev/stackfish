@@ -157,7 +157,7 @@ fn beginning_of_your_upkeep_trigger_fires_and_resolves_for_its_controller() {
     let mut state = two_player_state();
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source: permanent,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
@@ -195,7 +195,7 @@ fn beginning_of_your_upkeep_trigger_does_not_fire_for_a_different_controller() {
     // p0 - BeginningOfYourUpkeep must not fire for p1 here.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(1),
         source: permanent,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
@@ -223,7 +223,7 @@ fn beginning_of_each_upkeep_trigger_fires_regardless_of_whose_turn_it_is() {
     // anyway, unlike BeginningOfYourUpkeep above.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(2),
         source: permanent,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfEachUpkeep)),

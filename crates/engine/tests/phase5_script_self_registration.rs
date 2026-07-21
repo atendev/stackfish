@@ -343,7 +343,7 @@ fn dying_creatures_registered_ability_is_purged_by_sba() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
     // Simulates the ability this creature would have self-registered upon
     // an earlier entrance to the battlefield.
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::EntersBattlefield)),

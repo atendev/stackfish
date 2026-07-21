@@ -60,7 +60,8 @@
 ## Fix: once-per-turn trigger cap (CR 603.2h)
 
 - `ConditionSpec::PrimitiveOncePerTurn(ConditionPrimitive)`.
-- `GameState.once_per_turn_triggered: HashSet<(ObjectId, u32)>`, reset each turn.
+- `GameState.once_per_turn_triggered: HashSet<AbilityId>` (was `HashSet<(ObjectId, u32)>` — rekeyed by
+  `phase5/ability-stable-id`, see that slice's own note below), reset each turn.
 - `PendingTrigger.once_per_turn: bool`; `CollectTriggers` records matches per event before next event in same batch.
 - `Game.Conditions.OncePerTurn(tag)`.
 - 3 tests.
@@ -105,6 +106,46 @@
   - `state_to_lua` snapshot passed as 4th arg to `invoke_condition` and used by `invoke_intervening_if`.
 - Deviations:
   - `ConditionPrimitive`/`ConditionSpec` lost `Copy` due to `FilterSpec` field; `ConditionTag`/`OncePerTurnTag` dropped `Copy`.
+
+## Slice: ability-stable-id (merged)
+
+- Branch `phase5/ability-stable-id`.
+- Scope: `PendingTrigger` used to reference its `RegisteredAbility` by position ("the nth ability
+  registered to this source") — computed once at `collect_triggers` time but consulted later, after
+  an `AwaitTriggerOrderChoice` pause and potentially arbitrary intervening game actions. A position
+  is safe only as long as nothing ever removes/reorders a single ability from a still-live source's
+  list independent of the others — true today (`retire_object` only ever purges a *whole* source's
+  abilities in bulk) but not once CR 613.1f's "loses all abilities" (already flagged, unimplemented —
+  see `06-abilities.md`) actually strips individual `RegisteredAbility` entries.
+- Verify: 2 new unit tests inside `engine.rs`'s own `#[cfg(test)] mod tests`, full workspace suite
+  green (0 failed).
+- Key changes:
+  - `AbilityId(u64)` (types/ids.rs) — minted via `GameState::allocate_ability_id`, which draws from
+    the *same* counter `allocate_sequence_no` already does rather than adding a dedicated
+    `next_ability_id` field to `GameState` (which is built as a full struct literal in 100+ test
+    fixtures — reusing the existing counter avoids that mechanical fallout entirely, same "one
+    counter, more than one purpose" precedent `GameObject.timestamp` already set).
+  - `RegisteredAbility.id: AbilityId` — real ids minted at every production registration site
+    (`script.rs`'s builder-drain in `run_card_script`, `engine.rs`'s Clue/Food token abilities,
+    `scenario/src/lib.rs`'s `mana_ability`/`trigger_operation` construction, the latter seeding a
+    local counter and bumping the final `GameState.next_sequence_no` past it so scenario-seeded ids
+    can never collide with a real one minted later in the same game).
+  - `PendingTrigger.ability_index: u32` → `ability: AbilityId`; `commands::find_ability_by_id` (new,
+    matches by id) replaces the position-based lookup at `PutTriggersApnap`'s stack-push site, for
+    both the live `state.abilities` case and the departed-abilities LKI fallback.
+  - `GameState.once_per_turn_triggered: HashSet<AbilityId>` (was `HashSet<(ObjectId, u32)>`).
+  - `triggers::collect_triggers` simplified as a bonus: the per-source position-counting `HashMap`
+    (both the live loop and the departed-abilities loop) is gone entirely — matching by `ability.id`
+    needs none of that machinery.
+- Scoping note (deliberate, found and confirmed mid-implementation): `PlayerActionKind::
+  ActivateAbility.ability_index` was **not** touched, despite being the same "position into
+  same-source abilities" shape `commands::find_ability` also serves. It's chosen and consumed in the
+  same synchronous engine step (submit → immediate `step()` execution), never spanning a pause the
+  way `PendingTrigger` does — its only consumer (`find_ability`) is never called across a real time
+  gap, so it was never actually at risk. Fixing it too would have touched ~35 additional test files
+  for no correctness gain.
+- Unresolved: none new — this closes the "ability index positional fragility" note `06-abilities.md`
+  carried since `activate-ability-mana`/`activated-ability-costs`.
 
 ## General trigger notes
 

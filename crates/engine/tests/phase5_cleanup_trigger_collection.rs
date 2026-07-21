@@ -70,7 +70,7 @@ fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -
 }
 
 fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),

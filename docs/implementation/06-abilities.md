@@ -16,7 +16,9 @@
 - Unresolved:
   - Summoning sickness for tap-cost abilities (later fixed by combat-declarations slice).
   - Non-mana activated abilities.
-  - Ability index positional fragility.
+  - Ability index positional fragility (the `PendingTrigger` half fixed by `phase5/ability-stable-id`
+    — see `10-triggers.md`; `ActivateAbility`'s own index deliberately kept positional, confirmed
+    never actually at risk).
 
 ## Slice: activated-ability-costs (merged)
 
@@ -36,7 +38,7 @@
   - `PendingPaymentRequest.source: ObjectId` added.
 - Unresolved:
   - TOML shape for non-mana payments.
-  - Multi-ability stable indexing still positional.
+  - Multi-ability stable indexing still positional (see `phase5/ability-stable-id` note above).
   - `{X}`/alternative/hybrid/snow/Phyrexian costs on abilities.
   - `:SetTarget` not bound.
 

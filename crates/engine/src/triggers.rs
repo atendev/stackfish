@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use crate::script::{ScriptContext, ScriptRuntime};
 use crate::types::ability::{
     AbilityKind, ConditionPrimitive, ConditionSpec, InterveningIfSpec, RegisteredAbility,
 };
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, PlayerId};
+use crate::types::ids::{AbilityId, ObjectId, PlayerId};
 
 /// A triggered ability that matched an event and is waiting to be placed on
 /// the stack — not yet a `StackObject` (no chosen targets/modes/costs yet,
@@ -18,13 +16,20 @@ use crate::types::ids::{ObjectId, PlayerId};
 pub struct PendingTrigger {
     pub source: ObjectId,
     pub controller: PlayerId,
-    pub ability_index: u32,
+    /// The triggered `RegisteredAbility`'s own stable `AbilityId` — replaces
+    /// the old positional "the nth ability registered to this source"
+    /// indexing (`phase5/ability-stable-id`). Needed because this value is
+    /// computed here at collection time but consulted later, after an
+    /// `AwaitingTriggerOrderChoice` pause and potentially other intervening
+    /// game actions, by which point a position could have gone stale in a
+    /// way an id can't (see `AbilityId`'s own doc comment).
+    pub ability: AbilityId,
     /// CR 603.2h: whether this match came from a `ConditionSpec::
     /// PrimitiveOncePerTurn` condition — `Engine`'s `CollectTriggers` stage
-    /// reads this to know which `(source, ability_index)` pairs to record
-    /// into `GameState::once_per_turn_triggered` once this trigger is
-    /// actually collected, so a second qualifying event later in the same
-    /// turn (even within the same batch) is correctly excluded.
+    /// reads this to know which `AbilityId`s to record into
+    /// `GameState::once_per_turn_triggered` once this trigger is actually
+    /// collected, so a second qualifying event later in the same turn (even
+    /// within the same batch) is correctly excluded.
     pub once_per_turn: bool,
 }
 
@@ -112,17 +117,7 @@ pub fn collect_triggers(
     // surfacing`). A script error still falls back to the same
     // conservative "didn't match"/"doesn't hold" default as before.
     let mut errors: Vec<String> = Vec::new();
-    // `ability_index` (PendingTrigger's field) is "the nth ability
-    // registered to this source, any kind, in registration order" - same
-    // convention `commands::find_ability` uses for ActivateAbility. Tracked
-    // per-source as we walk state.abilities in order, rather than a global
-    // index, since that's the contract find_ability's lookup relies on.
-    let mut per_source_count: HashMap<ObjectId, u32> = HashMap::new();
     for ability in state.abilities.iter() {
-        let count = per_source_count.entry(ability.source).or_insert(0);
-        let this_index = *count;
-        *count += 1;
-
         if ability.kind != AbilityKind::Triggered {
             continue;
         }
@@ -148,10 +143,10 @@ pub fn collect_triggers(
                 (primitive.matches(ability.source, controller, state.active_player, &event.kind), false)
             }
             // CR 603.2h: same matching as Primitive above, but excluded if
-            // this (source, ability_index) already triggered once this turn
-            // - see GameState::once_per_turn_triggered's own doc comment.
+            // this ability already triggered once this turn - see
+            // GameState::once_per_turn_triggered's own doc comment.
             Some(ConditionSpec::PrimitiveOncePerTurn(primitive)) => {
-                let already = state.once_per_turn_triggered.contains(&(ability.source, this_index));
+                let already = state.once_per_turn_triggered.contains(&ability.id);
                 (
                     !already && primitive.matches(ability.source, controller, state.active_player, &event.kind),
                     true,
@@ -202,7 +197,7 @@ pub fn collect_triggers(
             }
         };
         if matched && intervening_if_holds {
-            pending.push(PendingTrigger { source: ability.source, controller, ability_index: this_index, once_per_turn });
+            pending.push(PendingTrigger { source: ability.source, controller, ability: ability.id, once_per_turn });
         }
     }
 
@@ -210,16 +205,11 @@ pub fn collect_triggers(
     // doc comment above) - `departed` abilities can never appear in the
     // loop above (retire_object already purged them from state.abilities by
     // the time this runs), so this is a genuinely separate source, not a
-    // duplicate scan. `ability_index` here counts "the nth departed ability
-    // for this source in `departed`'s own order" - the same convention
-    // `PutTriggersApnap`'s fallback lookup (engine.rs) walks `departed` with
-    // to resolve a PendingTrigger back into a RegisteredAbility.
-    let mut departed_count: HashMap<ObjectId, u32> = HashMap::new();
+    // duplicate scan. `ability.id` is the same stable id it always had while
+    // still live - `PutTriggersApnap`'s fallback lookup (engine.rs) walks
+    // `departed` matching on that same id to resolve a `PendingTrigger` back
+    // into a `RegisteredAbility`.
     for ability in departed {
-        let count = departed_count.entry(ability.source).or_insert(0);
-        let this_index = *count;
-        *count += 1;
-
         // Only Dies/LeavesBattlefield/Discarded are meaningful for a source
         // that no longer resolves live - every other condition shape (None/
         // Always/DealsDamage/a Script condition/...) either assumes a live
@@ -251,7 +241,7 @@ pub fn collect_triggers(
         if lki.object_id != ability.source {
             continue;
         }
-        if once_per_turn && state.once_per_turn_triggered.contains(&(ability.source, this_index)) {
+        if once_per_turn && state.once_per_turn_triggered.contains(&ability.id) {
             continue;
         }
         // CR 603.4 applies here too - see the main loop's own comment above.
@@ -275,7 +265,7 @@ pub fn collect_triggers(
             pending.push(PendingTrigger {
                 source: ability.source,
                 controller: lki.controller,
-                ability_index: this_index,
+                ability: ability.id,
                 once_per_turn,
             });
         }

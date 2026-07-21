@@ -18,7 +18,7 @@ use crate::types::effect::{
 };
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
+use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::mana::{Color, ColorSet, ManaCost, ManaUnit};
 use crate::types::object::GameObject;
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
@@ -965,6 +965,11 @@ impl UserData for TriggeredAbilityBuilder {
                 )
             })?;
             let ability = RegisteredAbility {
+                // Real id allocated at drain time (run_card_script) - the
+                // builder itself has no &mut GameState to allocate one from
+                // inside a Lua callback, same reason StaticAbilityBuilder's
+                // own timestamp starts as a placeholder too.
+                id: AbilityId(0),
                 source: this.source,
                 kind: AbilityKind::Triggered,
                 condition: this.condition.clone(),
@@ -1078,6 +1083,9 @@ impl UserData for ActivatedAbilityBuilder {
                 .clone()
                 .map(|filter| TargetSpec::Primitive(TargetRequirement { filter, count: 1, up_to: false, at_least: false, exclude_source: false }));
             let ability = RegisteredAbility {
+                // Real id allocated at drain time - see the sibling
+                // TriggeredAbilityBuilder::Register's own comment.
+                id: AbilityId(0),
                 source: this.source,
                 kind: AbilityKind::Activated,
                 condition: None,
@@ -1466,6 +1474,13 @@ impl ScriptRuntime {
 
         let mut registered: Vec<RegisteredAbility> =
             self.registry.borrow_mut().pending_triggered.drain(..).collect();
+        for ability in &mut registered {
+            // Real id (AbilityId's own doc comment) - the builder itself has
+            // no &mut GameState to allocate one from inside a Lua callback,
+            // same reason the static-effect timestamp below is stamped here
+            // too.
+            ability.id = state.allocate_ability_id();
+        }
         state.abilities.append(&mut registered);
 
         let mut static_effects: Vec<ContinuousEffect> =

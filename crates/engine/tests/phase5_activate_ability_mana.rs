@@ -107,7 +107,7 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
-        abilities: vec![RegisteredAbility {
+        abilities: vec![RegisteredAbility { id: AbilityId(0),
             source: ability_owner,
             kind: AbilityKind::Activated,
             condition: None,
@@ -338,7 +338,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
     state.objects.insert(source_b, permanent_object(source_b, land_definition(), p0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source_b);
     // source_a gets a second ability (index 1: adds colorless instead).
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(1),
         source: source_a,
         kind: AbilityKind::Activated,
         condition: None,
@@ -348,7 +348,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
         effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colorless])),
         intervening_if: None,
     });
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(2),
         source: source_b,
         kind: AbilityKind::Activated,
         condition: None,

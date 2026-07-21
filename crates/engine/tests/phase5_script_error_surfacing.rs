@@ -231,7 +231,7 @@ fn collect_triggers_condition_script_error_falls_back_to_no_match_and_is_reporte
     let mut state = two_player_state(20);
     state.objects.insert(source, card_object(source, creature_definition("Bear"), PlayerId(0), ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Script(handle)),
@@ -264,7 +264,7 @@ fn collect_triggers_intervening_if_script_error_falls_back_to_not_holding() {
     let mut state = two_player_state(20);
     state.objects.insert(source, card_object(source, creature_definition("Bear"), PlayerId(0), ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(1),
         source,
         kind: AbilityKind::Triggered,
         condition: None,
@@ -295,7 +295,7 @@ fn collect_triggers_departed_loop_intervening_if_script_error_falls_back() {
     let handle = runtime.load_function(ALWAYS_ERRORS).expect("script loads");
     let source = ObjectId(0);
     let state = two_player_state(20);
-    let departed = vec![RegisteredAbility {
+    let departed = vec![RegisteredAbility { id: AbilityId(2),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
@@ -351,7 +351,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
     // engine actually invokes it.
     let mut engine = Engine::new(state);
     let handle = engine.load_script(ERRORS_BELOW_TEN_LIFE).expect("script loads");
-    engine.state_mut().abilities.push(RegisteredAbility {
+    engine.state_mut().abilities.push(RegisteredAbility { id: AbilityId(3),
         source: permanent,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),

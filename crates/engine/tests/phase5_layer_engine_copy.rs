@@ -162,7 +162,7 @@ fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: 
 }
 
 fn become_copy_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,
@@ -485,7 +485,7 @@ fn become_copy_with_no_object_target_is_a_no_op() {
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
             card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
         ],
-        vec![RegisteredAbility {
+        vec![RegisteredAbility { id: AbilityId(1),
             source: doppel,
             kind: AbilityKind::Activated,
             condition: None,

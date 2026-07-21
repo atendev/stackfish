@@ -524,7 +524,7 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
     let mut aura_obj = permanent(aura, aura_definition(), p0);
     aura_obj.attached_to = Some(bear);
     put_on_battlefield(&mut state, aura_obj);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source: aura,
         kind: AbilityKind::Activated,
         condition: None,

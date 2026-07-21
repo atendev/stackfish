@@ -11,7 +11,7 @@ use crate::types::cost::{self, AdditionalCost, AlternativeCost, CostPayment, Cos
 use crate::types::counter::CounterKind;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
+use crate::types::ids::{AbilityId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{ColorSet, ManaUnit};
 use crate::types::object::GameObject;
 use crate::types::stack::{StackEntryKind, StackObject};
@@ -533,15 +533,26 @@ fn validate_targets(
 
 /// Looks up the `ability_index`th ability registered to `source` — any
 /// kind, in registration order (the order entries were pushed onto
-/// `state.abilities`). Shared by `ActivateAbility` (below) and
-/// `triggers::collect_triggers`'s `PendingTrigger::ability_index`, so both
-/// call sites agree on what "index" means rather than each re-deriving it.
+/// `state.abilities`). Used only by `ActivateAbility` (below) —
+/// `PlayerActionKind::ActivateAbility::ability_index` is chosen and consumed
+/// in the same synchronous step (never spanning a pause), so a position is
+/// still safe here; see `AbilityId`'s own doc comment for why
+/// `triggers::PendingTrigger` needed a real stable id instead of this same
+/// convention (`phase5/ability-stable-id`).
 pub(crate) fn find_ability(
     state: &GameState,
     source: ObjectId,
     ability_index: u32,
 ) -> Option<&RegisteredAbility> {
     state.abilities.iter().filter(|a| a.source == source).nth(ability_index as usize)
+}
+
+/// Looks up a `RegisteredAbility` by its stable `AbilityId` — the
+/// `PendingTrigger`-facing sibling of `find_ability` above. Used by
+/// `PutTriggersApnap` (engine.rs) to resolve a collected trigger back into
+/// its real ability at push-onto-stack time.
+pub(crate) fn find_ability_by_id(state: &GameState, id: AbilityId) -> Option<&RegisteredAbility> {
+    state.abilities.iter().find(|a| a.id == id)
 }
 
 /// CR 400.7: abilities belong to their object and travel with it across zone
@@ -2797,6 +2808,7 @@ mod tests {
 
     fn dummy_ability(source: ObjectId) -> RegisteredAbility {
         RegisteredAbility {
+            id: AbilityId(0),
             source,
             kind: AbilityKind::Triggered,
             condition: None,
