@@ -127,6 +127,7 @@ pub fn effective_characteristics(
     let mut protection_names: Vec<String> = Vec::new();
     let mut protection_everything = false;
     let mut protection_players: Vec<crate::types::cost::FilterController> = Vec::new();
+    let mut landwalk_subtypes: Vec<crate::Subtype> = Vec::new();
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
             Some(EffectPrimitive::AddKeyword(added)) => keywords |= added,
@@ -148,6 +149,11 @@ pub fn effective_characteristics(
                     protection_players.push(added);
                 }
             }
+            Some(EffectPrimitive::AddLandwalkSubtype(added)) => {
+                if !landwalk_subtypes.contains(&added) {
+                    landwalk_subtypes.push(added);
+                }
+            }
             Some(EffectPrimitive::RemoveAllAbilities) => {
                 keywords = KeywordSet::empty();
                 protection_colors = crate::ColorSet::empty();
@@ -156,6 +162,7 @@ pub fn effective_characteristics(
                 protection_names = Vec::new();
                 protection_everything = false;
                 protection_players = Vec::new();
+                landwalk_subtypes = Vec::new();
             }
             _ => {}
         }
@@ -224,6 +231,7 @@ pub fn effective_characteristics(
         protection_names,
         protection_everything,
         protection_players,
+        landwalk_subtypes,
         power,
         toughness,
         loyalty: def.loyalty.as_ref().and_then(|l| l.as_fixed()),

@@ -66,3 +66,15 @@
   - `DeclareBlockers` per-pair checks for each keyword using `effective_keywords`/`effective_characteristics`.
 - Unresolved:
   - Landwalk, Banding, Flanking/Rampage.
+
+## Slice: landwalk (implemented, not yet merged)
+
+- Branch `phase5/landwalk`.
+- Scope: CR 702.14 Landwalk, narrowed to single-subtype matching (the 5 basic landwalks).
+- Verify: 4 new tests, full workspace suite green.
+- Key changes:
+  - Not a `KeywordSet` bit (unlike the other evasion keywords) - parametrized by land subtype, same shape as protection: `EffectPrimitive::AddLandwalkSubtype(Subtype)` (layer 6), `EffectiveCharacteristics::landwalk_subtypes: Vec<Subtype>`, `Game.Effects.AddLandwalkSubtype(name)` Lua binding.
+  - No printed field on `CardDefinition` - always effect-granted, same "no printed-protection field" precedent; a card with printed Islandwalk self-registers an always-on static ability via its script.
+  - `DeclareBlockers` per-pair check (alongside Fear/Intimidate/Shadow/Horsemanship): if the attacker's `landwalk_subtypes` is non-empty and the *defending player* (`command.actor`) controls any battlefield permanent whose effective subtypes intersect it, the block is rejected outright - unlike the other evasion keywords, this checks the defending player's battlefield, not the blocker's own characteristics.
+- Unresolved:
+  - CR 702.14a's card-type/supertype-combination forms ("artifact landwalk," "nonbasic landwalk," "snow swampwalk").

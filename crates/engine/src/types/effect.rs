@@ -237,11 +237,29 @@ pub enum EffectPrimitive {
     /// from any player" isn't a CR 702.16k quality, that's what
     /// `AddProtectionEverything` (702.16j) already covers.
     AddProtectionPlayer(FilterController),
+    /// Layer 6 (CR 613.1/702.14, landwalk): grants unblockability while the
+    /// defending player controls a permanent with the named subtype (e.g.
+    /// "Island" for islandwalk), in addition to whatever the object already
+    /// has. One subtype per primitive, same "CR 702.16g composability via
+    /// multiple registered abilities" convention `AddProtectionSubtype`
+    /// documents — a card with two landwalk keywords registers two static
+    /// abilities. Same "no printed field on `CardDefinition`, always
+    /// effect-granted" shape as every `AddProtection*` primitive: a card
+    /// with printed Islandwalk self-registers an always-on static ability
+    /// via its script, same as printed protection does. Only single-subtype
+    /// matching is modeled — CR 702.14a's card-type/supertype-combination
+    /// forms ("artifact landwalk," "nonbasic landwalk," "snow swampwalk")
+    /// are TODO, unmodeled. See `EffectiveCharacteristics::landwalk_subtypes`
+    /// and `commands::DeclareBlockers`'s enforcement (checks the *defending
+    /// player's* battlefield, not the blocker's own characteristics — the
+    /// one respect this isn't shaped like protection).
+    AddLandwalkSubtype(Subtype),
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
     /// abilities"): resets the running `keywords`, `protection_colors`,
     /// `protection_card_types`, `protection_subtypes`, `protection_names`,
-    /// `protection_everything`, *and* `protection_players` accumulators to
-    /// empty/false at this effect's position in `effective_characteristics`'s
+    /// `protection_everything`, `protection_players`, *and*
+    /// `landwalk_subtypes` accumulators to empty/false at this effect's
+    /// position in `effective_characteristics`'s
     /// layer-6 fold — protection is an ability too, regardless of which
     /// quality it names (CR 613.1f names "ability-adding... and
     /// ability-removing effects" together, no carve-out for protection
@@ -872,6 +890,18 @@ pub struct EffectiveCharacteristics {
     /// controller` field, same "You"/"Opponent" resolution `EffectFilter`
     /// already does.
     pub protection_players: Vec<FilterController>,
+    /// CR 702.14's landwalk: land subtype(s) that make this object
+    /// unblockable while the defending player controls a matching land,
+    /// from every applicable layer 6 `EffectPrimitive::AddLandwalkSubtype`.
+    /// `Vec`, not a bitflag `Set`, same reasoning `protection_subtypes`
+    /// documents (`Subtype` is open-ended). Empty base — no printed field on
+    /// `CardDefinition`, same "always effect-granted" shape as every
+    /// `protection_*` field above. Unlike those, enforcement
+    /// (`commands::DeclareBlockers`) reads this field on the *attacker* but
+    /// checks it against the *defending player's battlefield*, not the
+    /// blocker's own characteristics — CR 702.14c's condition lives outside
+    /// either combatant.
+    pub landwalk_subtypes: Vec<Subtype>,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,
