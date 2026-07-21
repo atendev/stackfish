@@ -43,7 +43,7 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
   CR 303.4m ("the enchanted X" as a script reference - no such reference plumbing exists yet,
   Aura-specific or generic).
 
-## Slice: aura-attach-choice (implemented, not yet merged)
+## Slice: aura-attach-choice (merged)
 
 - Branch `phase5/aura-attach-choice`.
 - Scope: CR 303.4d's third clause - "An Aura can't enchant more than one object or player. If a
