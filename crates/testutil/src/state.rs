@@ -78,3 +78,18 @@ pub fn battlefield_graveyard_exile_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone
         Zone::new(ZoneKind::Exile, None),
     ]
 }
+
+/// One `Zone` per requested kind — a per-player pair for zone kinds that are
+/// per-player (Hand, Library, Graveyard, Command), a single shared entry for
+/// zone kinds that aren't (Battlefield, Exile, Stack). For zone-set shapes
+/// the named presets above don't cover, rather than minting a new named
+/// preset for every combination a test happens to need.
+pub fn zones(p0: PlayerId, p1: PlayerId, kinds: &[ZoneKind]) -> Vec<Zone> {
+    kinds
+        .iter()
+        .flat_map(|&kind| match kind {
+            ZoneKind::Battlefield | ZoneKind::Exile | ZoneKind::Stack => vec![Zone::new(kind, None)],
+            _ => vec![Zone::new(kind, Some(p0)), Zone::new(kind, Some(p1))],
+        })
+        .collect()
+}
