@@ -26,6 +26,20 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
 - `sba::collect_illegally_attached_auras` feeds `resolve_deaths` (non-destroy) when target is gone/illegal/protected.
 - `retire_object` purges the departed object's id from its parent's `attachments`.
 - `GameEventKind::Attached` logs in-place attach changes.
+- CR 303.4d (`phase5/aura-self-enchant`): two further SBA checks alongside the above -
+  `sba::collect_self_enchanted_auras` (an Aura attached to itself dies; only reachable via a
+  directly-constructed fixture today, no attach call site can target an Aura at itself) and
+  `sba::collect_creature_auras` (an Aura whose *effective* card types include Creature - layer 4
+  `AddCardType` - unattaches via `commit_unattach`, shared with Equipment's own 704.5n handling,
+  then dies in the same pass). CR 303.4e (only the Aura's own controller activates its own
+  ability) was already correct by construction - `ActivateAbility`'s actor check reads the
+  ability's registered source's controller, which is the Aura itself for the Aura's own ability -
+  confirmed by a regression test, no code change needed. Still open: CR 303.4d's "can't enchant
+  more than one object" clause (no attach call site can attempt that), CR 303.4f/g/h/i (a
+  permanent entering the battlefield pre-attached by a non-casting, non-equip-activation effect -
+  no such effect exists in this engine yet), CR 303.4k (morph - no face-down mechanic exists), and
+  CR 303.4m ("the enchanted X" as a script reference - no such reference plumbing exists yet,
+  Aura-specific or generic).
 
 ## Equipment / Equip (CR 702.6)
 

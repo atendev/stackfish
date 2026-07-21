@@ -106,7 +106,10 @@ pub enum SbaOutcome {
 /// exist — see `collect_ceasing_tokens`'s own doc comment for the timing
 /// that satisfies CR 111.7's parenthetical), 704.5m (an Aura attached to an
 /// illegal object, or not attached to anything, is put into its owner's
-/// graveyard — see `collect_illegally_attached_auras`'s own doc comment),
+/// graveyard — see `collect_illegally_attached_auras`'s own doc comment;
+/// CR 303.4d's two further Aura-illegality clauses, self-enchant and an
+/// Aura-that's-also-a-creature, are folded in the same way — see
+/// `collect_self_enchanted_auras`/`collect_creature_auras`),
 /// 704.5n (an Equipment attached to an illegal permanent becomes unattached
 /// and stays on the battlefield — see `collect_illegally_attached_equipment`'s
 /// own doc comment for why this is a structurally different shape from
@@ -167,6 +170,14 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     for id in collect_illegally_attached_equipment(state, script_runtime) {
         events.push(commit_unattach(state, id));
     }
+    // CR 303.4d: an Aura that's also a creature unattaches (this loop) and
+    // dies (folded into `dying` below) in the same pass - collected before
+    // either mutation, same "based on the state as of the check" timing as
+    // the Equipment loop just above.
+    let creature_auras = collect_creature_auras(state, script_runtime);
+    for &id in &creature_auras {
+        events.push(commit_unattach(state, id));
+    }
 
     // CR 704.5k: fully deterministic (no player choice), so its losers just
     // join the same dying-creature list below - resolve_deaths treats every
@@ -180,6 +191,10 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     // 700.4/704.5m's "put into," not "destroy"), so it can't be saved by a
     // regeneration shield, same reasoning 704.5f/704.5k already document.
     dying.extend(collect_illegally_attached_auras(state, script_runtime));
+    // CR 303.4d's other two clauses: self-enchant, and (continuing from the
+    // unattach loop above) an Aura-that's-a-creature's own death.
+    dying.extend(collect_self_enchanted_auras(state));
+    dying.extend(creature_auras.into_iter().map(|id| DyingCandidate { id, is_destroy: false }));
 
     match resolve_deaths(state, script_runtime, dying.into()) {
         DeathResolution::Done(death_events, mut death_departed) => {
@@ -585,6 +600,57 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
         .collect()
 }
 
+/// CR 303.4d/704.5m: an Aura attached to itself is illegal regardless of
+/// whether it matches its own enchant filter type-wise -
+/// `collect_illegally_attached_auras` above only catches a target that
+/// fails the Aura's own `target_requirement`, which a self-targeting Aura
+/// could technically still pass (e.g. an "Enchant Aura" targeting itself).
+/// Same "put into," not "destroy" shape as 704.5m generally - not save-able
+/// by regeneration. Currently only reachable via a directly-constructed
+/// `GameObject` (test fixture) rather than real gameplay: the only real
+/// attach call site for an Aura (`attach_permanent`'s Aura-cast-resolution
+/// caller, `engine.rs`) targets an object already on the battlefield at
+/// cast time, before the Aura itself is - it can never legally target
+/// itself through that path. Kept as a real, always-on SBA check anyway
+/// (CR 303.4d states it as one unconditionally) in case a future
+/// reattach-style effect makes it reachable.
+fn collect_self_enchanted_auras(state: &GameState) -> Vec<DyingCandidate> {
+    state
+        .objects
+        .values()
+        .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_aura(&o.definition) && o.attached_to == Some(o.object_id))
+        .map(|o| DyingCandidate { id: o.object_id, is_destroy: false })
+        .collect()
+}
+
+/// CR 303.4d: "An Aura that's also a creature can't enchant anything" - a
+/// battlefield Aura currently attached to something, whose *effective*
+/// characteristics (CR 613 layer 4 `AddCardType`, not just the printed
+/// `CardDefinition`) include the Creature type. Reachable today via any
+/// continuous effect that adds Creature to an already-attached Aura - no
+/// printed card in this engine's catalog does that yet, but the mechanism
+/// (layer 4) is real. Returns just the ids - the caller (`check_state_based_actions`)
+/// unattaches each one (`commit_unattach`, same as 704.5n's Equipment
+/// handling) *and* folds it into the same pass's dying list, since CR
+/// 303.4d's "becomes unattached, then is put into its owner's graveyard"
+/// is two state-based actions performed together, not two separate SBA
+/// checks a pass apart.
+fn collect_creature_auras(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
+    state
+        .objects
+        .values()
+        .filter(|o| {
+            o.zone == ZoneKind::Battlefield
+                && commands::is_aura(&o.definition)
+                && o.attached_to.is_some()
+                && crate::layers::effective_characteristics(state, script_runtime, o.object_id)
+                    .card_types
+                    .contains(CardTypeSet::CREATURE)
+        })
+        .map(|o| o.object_id)
+        .collect()
+}
+
 /// CR 704.5n/301.5: every battlefield Equipment (`commands::is_equipment`)
 /// currently attached to something that's no longer a legal creature to be
 /// equipped by it - either it's gone (left the battlefield), stopped being
@@ -653,7 +719,7 @@ fn commit_unattach(state: &mut GameState, id: ObjectId) -> GameEvent {
         kind: GameEventKind::Unattached {
             object: id,
             was_attached_to: was_attached_to
-                .expect("collect_illegally_attached_equipment only ever returns ids with a real attached_to"),
+                .expect("caller only ever passes ids with a real attached_to"),
         },
         caused_by_command: None,
         parent_event: None,

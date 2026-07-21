@@ -23,8 +23,15 @@
 //!   dies via the same `resolve_deaths` pipeline every other SBA death
 //!   uses.
 //!
-//! Not attempted (named TODOs, not silently narrowed): CR 303.4d (an Aura
-//! can't enchant itself / an Aura-creature can't enchant anything), CR
+//! CR 303.4d (an Aura can't enchant itself / an Aura-creature can't enchant
+//! anything - `sba::collect_self_enchanted_auras`/`collect_creature_auras`)
+//! was added later, in the `phase5/aura-self-enchant` slice - see the tests
+//! under that header below. Self-enchant is real as an SBA check but only
+//! reachable today via a directly-constructed fixture (no attach call site
+//! can target an Aura at itself); the creature-Aura case is reachable via
+//! any layer-4 `AddCardType` continuous effect.
+//!
+//! Still not attempted (named TODOs, not silently narrowed): CR
 //! 303.4f/h/i/k/m (non-spell attachment entry, "enchanted X" ability
 //! reference - no effect in this engine puts an Aura onto the battlefield
 //! except by resolving as a spell, so these have no reachable trigger yet),
@@ -426,5 +433,132 @@ fn an_auras_target_gaining_protection_from_it_after_attaching_makes_it_fall_off(
     assert!(
         !state.object(bear).unwrap().attachments.contains(&aura),
         "retire_object should have cleaned the dead Aura's id out of the target's own attachments list"
+    );
+}
+
+// ---------------------------------------------------------------------
+// CR 303.4d: an Aura that can't legally enchant what it's attached to
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_self_enchanted_aura_dies_via_sba() {
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    let aura = ObjectId(0);
+    let mut aura_obj = permanent(aura, aura_definition(), p0);
+    // Directly constructed - no real attach call site can produce this
+    // (see this file's own header note), but CR 303.4d states the SBA
+    // unconditionally.
+    aura_obj.attached_to = Some(aura);
+    put_on_battlefield(&mut state, aura_obj);
+
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
+    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(events[0].kind, GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. } if object != aura),
+        "a self-enchanted Aura should die (CR 303.4d), got {:?}",
+        events[0].kind
+    );
+}
+
+#[test]
+fn an_aura_that_becomes_a_creature_unattaches_then_dies_in_the_same_pass() {
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    let bear = ObjectId(0);
+    let aura = ObjectId(1);
+    let mut bear_obj = permanent(bear, creature_definition(1, "Bear", 2, 2), p0);
+    bear_obj.attachments.push(aura);
+    put_on_battlefield(&mut state, bear_obj);
+    let mut aura_obj = permanent(aura, aura_definition(), p0);
+    aura_obj.attached_to = Some(bear);
+    put_on_battlefield(&mut state, aura_obj);
+
+    // A continuous effect adds the Creature type to the Aura itself (layer
+    // 4 `AddCardType`) - the mechanism CR 303.4d's "an Aura that's also a
+    // creature" clause needs; no printed card does this yet, but the
+    // primitive is real.
+    state.continuous_effects.push(ContinuousEffect {
+        source: aura,
+        layer: Layer::TypeChanging,
+        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        effect: EffectPayload::Primitive(EffectPrimitive::AddCardType(CardTypeSet::CREATURE)),
+        timestamp: SequenceNo(0),
+        duration: EffectDuration::Permanent,
+        condition: None,
+    });
+
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
+    assert!(
+        events.iter().any(|e| matches!(e.kind, GameEventKind::Unattached { object, was_attached_to } if object == aura && was_attached_to == bear)),
+        "the Aura-creature should become unattached this same pass, got {:?}",
+        events.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
+    assert!(
+        events.iter().any(|e| matches!(e.kind, GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. } if object != aura)),
+        "the Aura-creature should also die this same pass (CR 303.4d: 'becomes unattached, then is put into its owner's graveyard'), got {:?}",
+        events.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
+    assert!(
+        !state.object(bear).unwrap().attachments.contains(&aura),
+        "the target's own attachments list should no longer include the dead Aura"
+    );
+}
+
+// ---------------------------------------------------------------------
+// CR 303.4e: only the Aura's own controller activates the Aura's own
+// abilities, independent of who controls what it enchants
+// ---------------------------------------------------------------------
+
+#[test]
+fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatures_controller() {
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let bear = ObjectId(0);
+    let aura = ObjectId(1);
+    let mut bear_obj = permanent(bear, creature_definition(1, "Bear", 2, 2), p1);
+    bear_obj.attachments.push(aura);
+    put_on_battlefield(&mut state, bear_obj);
+    let mut aura_obj = permanent(aura, aura_definition(), p0);
+    aura_obj.attached_to = Some(bear);
+    put_on_battlefield(&mut state, aura_obj);
+    state.abilities.push(RegisteredAbility {
+        source: aura,
+        kind: AbilityKind::Activated,
+        condition: None,
+        cost: None,
+        target: None,
+        operation: ScriptHandle(0),
+        effect: Some(AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)])),
+        intervening_if: None,
+    });
+
+    // p1 controls the enchanted creature, not the Aura - CR 303.4e says
+    // that's irrelevant to who may activate the Aura's own ability.
+    state.priority_player = p1;
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction {
+            player: p1,
+            kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new() },
+        })
+        .unwrap();
+    assert!(
+        matches!(drain(&mut engine), StepStatus::Error(stackfish_engine::commands::CommandError::IllegalAction(_))),
+        "the enchanted creature's controller shouldn't be able to activate the Aura's own ability"
+    );
+
+    // p0, the Aura's actual controller, can.
+    engine.state_mut().priority_player = p0;
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new() },
+        })
+        .unwrap();
+    assert!(
+        !matches!(drain(&mut engine), StepStatus::Error(_)),
+        "the Aura's own controller should be able to activate its own ability"
     );
 }
