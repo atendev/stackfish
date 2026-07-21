@@ -11,7 +11,7 @@ use crate::types::ability::{
 };
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, Subtype, SupertypeSet};
 use crate::types::counter::CounterKind;
-use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec};
+use crate::types::cost::{AdditionalCost, CostModifier, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
@@ -285,6 +285,14 @@ struct ScriptRegistry {
     /// `ReplacementEffect` has no `timestamp` field to stamp at drain time —
     /// nothing about CR 613.7 ordering applies to it.
     pending_replacement: Vec<ReplacementEffect>,
+    /// Same idea as `pending_static`, for `Game.CreateCostModifier`'s builder
+    /// (CR 601.2f) — drained into `GameState.cost_modifiers` by
+    /// `run_card_script`. `controller` on each queued `CostModifier` is a
+    /// placeholder (`PlayerId(0)`) until drain time — the builder has no
+    /// `&GameState` to read this source's live controller from inside a Lua
+    /// callback, same reason `pending_static`'s `timestamp` is a placeholder
+    /// too. The drain step resolves the real value there instead.
+    pending_cost_modifiers: Vec<CostModifier>,
     /// Backlog item 9: a coroutine `Thread` suspended mid-`invoke_operation`
     /// at a `Game.SelectTargets` call, keyed by the same opaque
     /// `ScriptHandle` space `scripts` uses (shares `next_handle`, kept in a
@@ -1342,6 +1350,68 @@ impl UserData for ReplacementEffectBuilder {
     }
 }
 
+/// `Game.CreateCostModifier(c)`'s return value (CR 601.2f) — mirrors
+/// `StaticAbilityBuilder`/`ReplacementEffectBuilder` for a spell cost
+/// modifier. `:SetFilter(table)` reuses `decode_filter_table` verbatim — the
+/// same flat option-bag (`controller`/`card_types`/`supertypes`/`subtypes`/
+/// `random`) `Game.Costs.Sacrifice`/`Discard`/`TapPermanents` already decode
+/// through, no new filter-table shape to learn. `:SetAmount(n)` sets the flat
+/// generic delta (negative reduces, positive increases — see
+/// `CostModifier::amount`'s own doc comment; still no colored-pip-specific
+/// modeling, pre-existing `CostModifier` scope boundary, untouched here).
+///
+/// `:Register()` queues onto the shared registry's `pending_cost_modifiers`
+/// list with a placeholder `controller` (`PlayerId(0)`) — `run_card_script`'s
+/// drain step resolves the real value (this effect's source's own live
+/// controller, CR 601.2f's "you"/"opponent" perspective the modifier's own
+/// `filter` is relative to) once it does, since it has the `&mut GameState`
+/// the builder itself never gets inside a Lua callback. Same "placeholder
+/// now, patch at drain" pattern `StaticAbilityBuilder`'s `timestamp` and
+/// `TriggeredAbilityBuilder`'s `AbilityId` already use, just for a different
+/// field kind.
+struct CostModifierBuilder {
+    source: ObjectId,
+    filter: Option<FilterSpec>,
+    amount: Option<i32>,
+    registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for CostModifierBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFilter", |_, this, table: Table| {
+            this.filter = Some(decode_filter_table(table).map_err(to_lua_err)?);
+            Ok(())
+        });
+        methods.add_method_mut("SetAmount", |_, this, amount: i32| {
+            this.amount = Some(amount);
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let filter = this.filter.clone().ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetFilter() - a cost modifier needs a filter"
+                        .to_string(),
+                )
+            })?;
+            let amount = this.amount.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetAmount() - a cost modifier needs an amount"
+                        .to_string(),
+                )
+            })?;
+            this.registry.borrow_mut().pending_cost_modifiers.push(CostModifier {
+                source: this.source,
+                // Placeholder - run_card_script's drain step stamps the real
+                // value (see this struct's own doc comment).
+                controller: PlayerId(0),
+                filter,
+                amount,
+            });
+            Ok(())
+        });
+    }
+}
+
 /// Owns the embedded Lua VM and every loaded card script. One `ScriptRuntime`
 /// per running engine process, not per-game — scripts load once and are
 /// reused across games, per DESIGN.md's "restart to reload, no hot-reload"
@@ -1496,6 +1566,19 @@ impl ScriptRuntime {
         let mut replacement_effects: Vec<ReplacementEffect> =
             self.registry.borrow_mut().pending_replacement.drain(..).collect();
         state.replacement_effects.append(&mut replacement_effects);
+
+        let mut cost_modifiers: Vec<CostModifier> =
+            self.registry.borrow_mut().pending_cost_modifiers.drain(..).collect();
+        for modifier in &mut cost_modifiers {
+            // Real controller (CostModifierBuilder's own doc comment) - the
+            // builder itself has no &GameState to read this source's live
+            // controller from inside a Lua callback.
+            modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
+                "CostModifier's source must already exist in GameState by drain time - \
+                 Game.CreateCostModifier was called with a bogus source id",
+            );
+        }
+        state.cost_modifiers.append(&mut cost_modifiers);
         Ok(())
     }
 
@@ -2550,6 +2633,18 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?
     };
 
+    let create_cost_modifier = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(CostModifierBuilder {
+                source: ObjectId(source),
+                filter: None,
+                amount: None,
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
     let tokens = lua.create_table()?;
     tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
     tokens.set("Food", TokenTag(TokenSpec::Named(NamedToken::Food)))?;
@@ -2630,6 +2725,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     game.set("CreateStaticAbility", create_static_ability)?;
     game.set("CreateReplacementEffect", create_replacement_effect)?;
     game.set("CreateActivatedAbility", create_activated_ability)?;
+    game.set("CreateCostModifier", create_cost_modifier)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;
     lua.globals().set("Game", game)
