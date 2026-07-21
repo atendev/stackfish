@@ -689,7 +689,9 @@ fn collect_creature_auras(state: &GameState, script_runtime: &ScriptRuntime) -> 
 fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
     let creature_filter = crate::types::target::TargetFilter::Object {
         card_types: Some(CardTypeSet::CREATURE),
+        excluded_card_types: None,
         subtypes: None,
+        excluded_subtypes: None,
         supertypes: None,
         controller: None,
         zone: None,

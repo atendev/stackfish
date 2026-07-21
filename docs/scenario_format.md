@@ -323,25 +323,36 @@ into a creature that's then actually subject to CR 704.5g's lethal-damage SBA (t
 layer-engine-types-colors slice notes).
 
 **`target_requirement` (CR 115/601.2c-e, targeting system):** if set, casting this card as a
-spell requires exactly `count` targets matching `filter` — `CastSpell` validates count/filter/
-dedup before the spell is allowed onto the stack (CR 601.2e), and `ResolveStackTop` rechecks
-legality against current game state at resolution (CR 608.2b) — if every target is now illegal,
-the spell fizzles (doesn't resolve, removed from the stack, owner's graveyard) instead of running
-its effect. `count` is always exact — no "up to N"/variable counts yet (see
-`TargetRequirement`'s own doc comment).
+spell requires targets matching `filter` — `CastSpell` validates count/filter/dedup before the
+spell is allowed onto the stack (CR 601.2e), and `ResolveStackTop` rechecks legality against
+current game state at resolution (CR 608.2b) — if every target is now illegal, the spell fizzles
+(doesn't resolve, removed from the stack, owner's graveyard) instead of running its effect.
+`count`'s meaning depends on `up_to`/`at_least` (mutually exclusive, see `TargetRequirement`'s own
+doc comment for the full three-way shape): exact by default, 0-to-`count` if `up_to` is set (CR
+601.2c/115.6, "up to N"), `count`-or-more with no upper bound if `at_least` is set ("N or more";
+"any number of target X" is `count = 0, at_least = true`).
 
 ```toml
 [cards.target_requirement]
 filter = "any"          # "object" | "player" | "any" (CR 115.4's any target: creature/player/
                          # planeswalker/battle)
 card_types = ["Creature"] # "object" filter only, default [] (no card-type restriction)
+excluded_card_types = ["Land"] # "object" filter only, default [] - CR 601.2c/115's negated form,
+                         # e.g. "target nonland permanent"; independent of card_types above
 subtypes = ["Human"]     # "object" filter only, default [] (no subtype restriction) - CR 205.4b,
                          # matches as an "or" across the list
+excluded_subtypes = ["Wall"] # "object" filter only, default [] - CR 601.2c/115/205.4b's negated
+                         # form, e.g. "target creature that isn't a Wall"; independent of subtypes
 supertypes = ["Legendary"] # "object" filter only, default [] (no supertype restriction) - CR
                          # 205.4a, matches as an intersection against SupertypeSet
 controller = "you"       # "object" filter only, optional: "you" | "opponent" | "any"
 zone = "battlefield"     # "object" filter only, optional, default: battlefield (CR 115.2)
-count = 1                # u32, required - exact target count
+count = 1                # u32, required - see above for what it means with up_to/at_least
+up_to = false            # optional, default false - CR 601.2c/115.6 "up to N"
+at_least = false         # optional, default false - CR 601.2c/115.6 "N or more"; mutually
+                         # exclusive with up_to
+exclude_source = false   # optional, default false - CR 115.4 "another target": excludes the
+                         # spell/ability's own source from ever being a legal candidate
 ```
 
 See `crates/engine/tests/scenarios/phase5_targeting_basics.toml` for a worked example (an "any

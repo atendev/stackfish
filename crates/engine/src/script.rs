@@ -1957,7 +1957,47 @@ fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError>
                 None => None,
             };
 
-            Ok(TargetFilter::Object { card_types, subtypes, supertypes, controller, zone: None })
+            // CR 601.2c/115's negated form - "target nonland permanent,"
+            // same shape/table key `card_types` just above uses.
+            let excluded_card_types_table: Option<Table> =
+                table.get("excluded_card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let excluded_card_types = match excluded_card_types_table {
+                Some(t) => {
+                    let mut set = CardTypeSet::empty();
+                    for entry in t.sequence_values::<String>() {
+                        set |=
+                            parse_card_type_name(&entry.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+                    }
+                    Some(set)
+                }
+                None => None,
+            };
+
+            // CR 601.2c/115/205.4b's negated form - "target creature that
+            // isn't a Wall," same shape/table key `subtypes` just above
+            // uses.
+            let excluded_subtypes_table: Option<Table> =
+                table.get("excluded_subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let excluded_subtypes = match excluded_subtypes_table {
+                Some(t) => {
+                    let mut list = Vec::new();
+                    for entry in t.sequence_values::<String>() {
+                        list.push(Subtype(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?));
+                    }
+                    Some(list)
+                }
+                None => None,
+            };
+
+            Ok(TargetFilter::Object {
+                card_types,
+                excluded_card_types,
+                subtypes,
+                excluded_subtypes,
+                supertypes,
+                controller,
+                zone: None,
+            })
         }
         other => Err(ScriptError::LoadError(format!(
             "unknown Game.SelectTargets filter type '{other}' - expected object/player/any"

@@ -106,7 +106,7 @@ fn equip_ability(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
                 supertypes: None,

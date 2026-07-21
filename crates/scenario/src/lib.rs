@@ -297,11 +297,21 @@ pub struct TargetRequirementSpec {
     pub filter: String,
     #[serde(default)]
     pub card_types: Vec<String>,
+    /// CR 601.2c/115's negated form — e.g. `["Land"]` for "target nonland
+    /// permanent". See `TargetFilter::Object::excluded_card_types`'s own
+    /// doc comment.
+    #[serde(default)]
+    pub excluded_card_types: Vec<String>,
     /// CR 205.4b — e.g. `["Human"]` for "target Human". Matches as an "or"
     /// across the list, same convention `TargetFilter::Object::subtypes`
     /// itself documents.
     #[serde(default)]
     pub subtypes: Vec<String>,
+    /// CR 601.2c/115/205.4b's negated form — e.g. `["Wall"]` for "target
+    /// creature that isn't a Wall". See `TargetFilter::Object::
+    /// excluded_subtypes`'s own doc comment.
+    #[serde(default)]
+    pub excluded_subtypes: Vec<String>,
     /// CR 205.4a — e.g. `["Legendary"]` for "target legendary creature".
     #[serde(default)]
     pub supertypes: Vec<String>,
@@ -959,8 +969,12 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
     let filter = match spec.filter.as_str() {
         "object" => TargetFilter::Object {
             card_types: (!spec.card_types.is_empty()).then(|| parse_card_types(&spec.card_types)),
+            excluded_card_types: (!spec.excluded_card_types.is_empty())
+                .then(|| parse_card_types(&spec.excluded_card_types)),
             subtypes: (!spec.subtypes.is_empty())
                 .then(|| spec.subtypes.iter().cloned().map(Subtype).collect()),
+            excluded_subtypes: (!spec.excluded_subtypes.is_empty())
+                .then(|| spec.excluded_subtypes.iter().cloned().map(Subtype).collect()),
             supertypes: (!spec.supertypes.is_empty()).then(|| parse_supertypes(&spec.supertypes)),
             controller: spec.controller.as_deref().map(parse_filter_controller),
             zone: spec.zone.as_deref().map(parse_zone_kind),

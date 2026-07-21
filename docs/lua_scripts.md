@@ -874,8 +874,12 @@ parser exists anywhere yet (same boundary `CastSpell`'s own cost has).
 `phase5/player-target-script-filter`) gives a script-registered activated ability a real target —
 goes through `decode_target_filter_value`. A plain table (no `filter` key) reuses
 `decode_target_filter_table`, the same table-shape decoder `Game.SelectTargets` already uses
-(`{type="object"|"player"|"any", card_types={...}, subtypes={...}, supertypes={...},
-controller="you"|"opponent"|"any"}`, `type` defaults to `"object"`). A bare function —
+(`{type="object"|"player"|"any", card_types={...}, excluded_card_types={...}, subtypes={...},
+excluded_subtypes={...}, supertypes={...}, controller="you"|"opponent"|"any"}`, `type` defaults to
+`"object"`; `excluded_card_types`/`excluded_subtypes` (`phase5/negative-target-filters`, CR
+601.2c/115/205.4b — "target nonland permanent," "target creature that isn't a Wall") are the
+negated form of `card_types`/`subtypes`, checked independently so a filter can combine a positive
+`card_types` with an `excluded_subtypes`). A bare function —
 `function(object, source, controller, state) -> bool` — becomes a scripted `TargetFilter::Script`
 legality predicate instead, for an object-candidate shape the flat option-bag table can't express
 (e.g. "target creature with power 4 or greater"). `{ type = "player", filter = function(player,
@@ -958,11 +962,16 @@ synchronously. A script that never calls `Game.SelectTargets` behaves identicall
 existed — nothing about existing operations changes.
 
 `filter` is the same flat option-bag shape `:SetAffected`/cost filters already use, plus a `type`
-discriminator: `{ type = "object"|"player"|"any", card_types = {...}, subtypes = {...}, supertypes =
-{...}, controller = "you"|"opponent"|"any" }`, every key optional (`type` defaults to `"object"`).
+discriminator: `{ type = "object"|"player"|"any", card_types = {...}, excluded_card_types = {...},
+subtypes = {...}, excluded_subtypes = {...}, supertypes = {...}, controller =
+"you"|"opponent"|"any" }`, every key optional (`type` defaults to `"object"`).
 `subtypes` (`phase5/targeting-subtype-filter`, CR 205.4b — "target Human," "Equip Dragons") is a
 plain list of subtype name strings, matched as an "or" (no parser — `Subtype` is a bare string
-newtype, any value is legal). `supertypes` (`phase5/targeting-supertype-filter`, CR 205.4a —
+newtype, any value is legal). `excluded_card_types`/`excluded_subtypes`
+(`phase5/negative-target-filters`, CR 601.2c/115/205.4b — "target nonland permanent," "target
+creature that isn't a Wall") are the negated form of `card_types`/`subtypes`, checked independently
+so a filter can combine a positive `card_types` with an `excluded_subtypes`. `supertypes`
+(`phase5/targeting-supertype-filter`, CR 205.4a —
 "target legendary creature") is a list of supertype names (`"Basic"`/`"Legendary"`/`"Snow"`/
 `"World"`, same `parse_supertype_name` table `:SetAffected`'s own `supertypes` key already uses),
 matched as an intersection against `SupertypeSet`. `target` resumes as a tagged table, `{ kind =
