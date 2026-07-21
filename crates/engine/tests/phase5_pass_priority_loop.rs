@@ -6,83 +6,14 @@
 //! full access to `Engine`'s internals (`StepStatus`, `pipeline_context_active`)
 //! that the higher-level scenario-TOML harness abstracts away.
 
-use std::collections::HashMap;
-
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
+use stackfish_testutil::{drain, two_player_state as base_two_player_state};
 
+/// Bare pregame skeleton - no zones/objects at all, since these tests only
+/// exercise the priority pass-loop itself, not zone moves.
 fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        players: vec![
-            PlayerState {
-                player_id: p0,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-            PlayerState {
-                player_id: p1,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-        ],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        phase: Phase::PreGame,
-        step: Step::Untap,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::new(),
-        objects: HashMap::new(),
-        zones: Vec::new(),
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 0,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
-}
-
-/// Runs `step()` until it stops being `Progressed`, returning the last
-/// status. Mirrors `stackfish_scenario::run_action`'s loop but keeps the
-/// status visible to the caller instead of collapsing it to `StepOutcome`.
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        let result = engine.step();
-        match result.status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
+    GameState { phase: Phase::PreGame, zones: Vec::new(), next_object_id: 0, ..base_two_player_state(Vec::new()) }
 }
 
 #[test]
