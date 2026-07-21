@@ -146,7 +146,7 @@
     spell's own `target_requirement` — all still open, unchanged by this slice.
   - `Game.SelectTargets` mid-resolution choices can't express "another target" (see above).
 
-## Slice: player-target-script-filter (implemented, not yet merged)
+## Slice: player-target-script-filter (merged)
 
 - Branch `phase5/player-target-script-filter`.
 - Scope: CR 601.2c/602.2b — `TargetFilter::Script`'s player-candidate twin. A custom Lua legality
