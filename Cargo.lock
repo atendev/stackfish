@@ -271,6 +271,7 @@ dependencies = [
  "bitflags",
  "mlua",
  "stackfish-scenario",
+ "stackfish-testutil",
 ]
 
 [[package]]
@@ -280,6 +281,13 @@ dependencies = [
  "serde",
  "stackfish-engine",
  "toml",
+]
+
+[[package]]
+name = "stackfish-testutil"
+version = "0.1.0"
+dependencies = [
+ "stackfish-engine",
 ]
 
 [[package]]
