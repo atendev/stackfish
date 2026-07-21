@@ -61,7 +61,7 @@ fn volley_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 2,
-            up_to: true,
+            up_to: true, at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),

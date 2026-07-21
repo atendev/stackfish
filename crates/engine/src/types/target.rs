@@ -88,15 +88,18 @@ pub enum TargetFilter {
 
 /// A number of targets matching `filter`, chosen once for one instance of
 /// the word "target" (CR 601.2c/115.3's dedup applies within this one
-/// requirement, not across several). `count` is the maximum — exactly
-/// `count` if `up_to` is `false` (the common case, e.g. "target creature"),
-/// or anywhere from 0 to `count` if `up_to` is `true` (CR 601.2c/115.6,
-/// e.g. "choose up to three target creatures"). Choosing zero under `up_to`
-/// is a legal, common outcome — CR 601.2c doesn't require a caster to use
-/// the full allowance.
-///
-/// TODO(CR 601.2c/115.6): "N or more" isn't modeled — rare enough on real
-/// cards that it wasn't worth bundling into this slice alongside "up to N".
+/// requirement, not across several). `count`'s meaning depends on `up_to`/
+/// `at_least` (mutually exclusive - at most one is ever `true`):
+/// - both `false` (the common case, e.g. "target creature"): exactly `count`.
+/// - `up_to` (CR 601.2c/115.6, e.g. "choose up to three target creatures"):
+///   anywhere from 0 to `count`. Choosing zero is a legal, common outcome —
+///   CR 601.2c doesn't require a caster to use the full allowance.
+/// - `at_least` (CR 601.2c/115.6, e.g. "target two or more creatures" or
+///   "any number of target creatures", the latter being `count: 0`): `count`
+///   or more, with no upper bound of its own — capped only by how many
+///   legal candidates the caster actually submits, same as every other
+///   shape (`commands::validate_targets` never enumerates "all possible
+///   legal targets" itself).
 ///
 /// TODO: a spell/ability with more than one distinct "target" word (e.g.
 /// "target creature and target player") needs more than one
@@ -107,6 +110,10 @@ pub struct TargetRequirement {
     pub filter: TargetFilter,
     pub count: u32,
     pub up_to: bool,
+    /// CR 601.2c/115.6's "N or more" shape - see this struct's own doc
+    /// comment for the full three-way `count`/`up_to`/`at_least` semantics.
+    /// Checked in `commands::validate_targets`.
+    pub at_least: bool,
     /// CR 115.4/"another target" (e.g. Olivia Voldaren's "deals 1 damage to
     /// another target creature"): when `true`, the spell/ability's own
     /// source is never a legal candidate for this requirement, regardless

@@ -63,7 +63,7 @@ fn counters_spell_definition(kind: CounterKind, amount: i32) -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
@@ -301,7 +301,7 @@ fn counters_ability_works_the_same_as_a_counters_spell() {
         target: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),

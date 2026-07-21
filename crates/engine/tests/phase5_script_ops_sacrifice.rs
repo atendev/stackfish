@@ -69,7 +69,7 @@ fn sacrifice_spell_definition() -> CardDefinition {
                 zone: None,
             },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
@@ -296,7 +296,7 @@ fn sacrifice_activated_ability_also_works() {
         target: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: Some(FilterController::You), zone: None },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),

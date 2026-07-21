@@ -114,7 +114,7 @@ fn equip_ability(source: ObjectId) -> RegisteredAbility {
                 zone: None,
             },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),
