@@ -428,6 +428,16 @@ pub(crate) fn target_is_legal(
             }
             script_runtime.invoke_target_legal(*handle, state, id, source, caster).unwrap_or(false)
         }
+        // `Script`'s player-candidate twin - same treatment `Player` above
+        // gets (no protection check, this engine doesn't model player-side
+        // protection), plus the script predicate.
+        TargetFilter::PlayerScript(handle) => {
+            let Target::Player(pid) = target else { return false };
+            if state.player(pid).is_none() {
+                return false;
+            }
+            script_runtime.invoke_player_target_legal(*handle, state, pid, source, caster).unwrap_or(false)
+        }
     }
 }
 

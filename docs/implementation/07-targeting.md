@@ -142,7 +142,34 @@
     (e.g. the `Damage` effect arm) — only this one recheck call had the mismatch. Fixed at the same
     call site this slice needed to touch anyway, not filed as a separate slice.
 - Unresolved:
-  - "N or more" counts, negative filters, multi-target-word spells, player-target script
-    predicates, no Lua builder path for a spell's own `target_requirement` — all still open,
-    unchanged by this slice.
+  - "N or more" counts, negative filters, multi-target-word spells, no Lua builder path for a
+    spell's own `target_requirement` — all still open, unchanged by this slice.
   - `Game.SelectTargets` mid-resolution choices can't express "another target" (see above).
+
+## Slice: player-target-script-filter (implemented, not yet merged)
+
+- Branch `phase5/player-target-script-filter`.
+- Scope: CR 601.2c/602.2b — `TargetFilter::Script`'s player-candidate twin. A custom Lua legality
+  predicate for a *player* target requirement, for a shape plain `TargetFilter::Player` can't
+  express (e.g. "target player with 10 or less life").
+- Verify: 4 new tests (`phase5_player_target_script_filter.rs`), full workspace suite green.
+- Key changes:
+  - `TargetFilter::PlayerScript(ScriptHandle)` new sibling variant to `Object`/`Player`/
+    `AnyTarget`/`Script` — kept separate rather than widening `Script` to accept either target
+    kind, since `Script`'s Lua contract already passes a bare object id number as its first call
+    argument; folding players in would mean either breaking that contract for every existing
+    object-script card or tagging every call with a kind, neither of which any real card built so
+    far needs.
+  - `ScriptRuntime::invoke_player_target_legal(handle, state, player, source, controller) ->
+    Result<bool, ScriptError>` — same call shape as `invoke_target_legal`, `player.0` in place of
+    `object.0`.
+  - `commands::target_is_legal`'s new `PlayerScript` arm: candidate must be `Target::Player` and
+    the player must exist, then asks the script. No protection check — same posture plain
+    `TargetFilter::Player` already has (this engine doesn't model player-side protection).
+  - `decode_target_filter_value` (script.rs): `{ type = "player", filter = function(player,
+    source, controller, state) -> bool }` decodes to `PlayerScript`, checked ahead of the plain
+    flat-option-bag decode so a bare `{type="player"}` (no `filter` function) still falls through
+    to `TargetFilter::Player` unchanged.
+- Unresolved:
+  - "N or more" counts, negative filters, multi-target-word spells, no Lua builder path for a
+    spell's own `target_requirement` — all still open, unchanged by this slice.

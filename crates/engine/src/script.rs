@@ -1692,6 +1692,24 @@ impl ScriptRuntime {
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
+    /// `TargetFilter::PlayerScript`'s real body — `invoke_target_legal`'s
+    /// player-candidate twin, `function(player, source, controller, state)
+    /// -> bool`. Called from `commands::target_is_legal`.
+    pub fn invoke_player_target_legal(
+        &self,
+        handle: ScriptHandle,
+        state: &GameState,
+        player: PlayerId,
+        source: ObjectId,
+        controller: PlayerId,
+    ) -> Result<bool, ScriptError> {
+        let function = self.function(handle)?;
+        let state_value = state_to_lua(&self.lua, state)?;
+        function
+            .call::<_, bool>((player.0, source.0, controller.0, state_value))
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))
+    }
+
     /// Real body, narrowed design ("Lua asks, Rust decides"): the loaded
     /// function is invoked as a coroutine (`Lua::create_thread` +
     /// `Thread::resume`) rather than a plain call — transparent for any
@@ -1960,6 +1978,24 @@ fn decode_target_filter_value(
     value: Value,
 ) -> Result<TargetFilter, ScriptError> {
     match value {
+        // `{ type = "player", filter = function(player, source, controller,
+        // state) -> bool }` — `TargetFilter::PlayerScript`'s Lua entry
+        // point. Checked ahead of the plain flat-option-bag decode below
+        // since a bare `{type="player"}` (no `filter` function) must still
+        // fall through to `decode_target_filter_table`'s existing
+        // `TargetFilter::Player` path unchanged.
+        Value::Table(ref table) if matches!(table.get::<_, Option<String>>("type"), Ok(Some(ref k)) if k == "player")
+            && matches!(table.get::<_, Value>("filter"), Ok(Value::Function(_))) =>
+        {
+            let function: Function =
+                table.get("filter").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let key = lua
+                .create_registry_value(function)
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let handle = registry.next_script_handle();
+            registry.scripts.insert(handle, key);
+            Ok(TargetFilter::PlayerScript(handle))
+        }
         Value::Table(table) => decode_target_filter_table(table),
         Value::Function(function) => {
             let key = lua
