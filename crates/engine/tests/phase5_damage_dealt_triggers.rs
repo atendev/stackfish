@@ -178,7 +178,7 @@ fn deals_damage_trigger_fires_when_the_attacker_connects() {
         bands: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source: attacker,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DealsDamage)),
@@ -220,7 +220,7 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
     // Registered on a bystander that isn't attacking/blocking at all -
     // never a `source` of any DamageDealt event this combat.
     put_on_battlefield(&mut state, permanent(bystander, creature_definition("Sprout", 0, 1), p0));
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(1),
         source: bystander,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DealsDamage)),
@@ -255,7 +255,7 @@ fn is_dealt_damage_trigger_fires_on_the_creature_taking_damage() {
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 5), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(2),
         source: blocker,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::IsDealtDamage)),

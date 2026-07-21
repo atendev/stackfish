@@ -23,7 +23,7 @@ use crate::types::effect::{
 };
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
-use crate::types::ids::{CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo, Target};
+use crate::types::ids::{AbilityId, CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::mana::{ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::{effective_max_hand_size, PlayerState};
@@ -864,7 +864,9 @@ fn register_token_abilities(
     };
     match spec {
         TokenSpec::Named(NamedToken::Clue) => {
+            let id = state.allocate_ability_id();
             state.abilities.push(RegisteredAbility {
+                id,
                 source: token_id,
                 kind: AbilityKind::Activated,
                 condition: None,
@@ -883,7 +885,9 @@ fn register_token_abilities(
             });
         }
         TokenSpec::Named(NamedToken::Food) => {
+            let id = state.allocate_ability_id();
             state.abilities.push(RegisteredAbility {
+                id,
                 source: token_id,
                 kind: AbilityKind::Activated,
                 condition: None,
@@ -3859,7 +3863,7 @@ impl Engine {
                     // just a later turn) is correctly excluded too.
                     for trigger in &matches {
                         if trigger.once_per_turn {
-                            self.state.once_per_turn_triggered.insert((trigger.source, trigger.ability_index));
+                            self.state.once_per_turn_triggered.insert(trigger.ability);
                         }
                     }
                     pending.extend(matches);
@@ -3891,25 +3895,20 @@ impl Engine {
                 let Some((player, group)) = pending_groups.pop_front() else {
                     // Push each trigger in `ordered` onto self.state.stack
                     // as a real StackObject (CR 603.3b/603.4) - looked up by
-                    // (source, ability_index) via commands::find_ability,
-                    // same "nth ability on this source" convention
-                    // ActivateAbility already relies on.
+                    // its own stable AbilityId via commands::find_ability_by_id
+                    // (phase5/ability-stable-id; see AbilityId's own doc
+                    // comment for why a position was no longer safe here).
                     for trigger in ordered {
                         // CR 603.10: a Dies/LeavesBattlefield trigger's
                         // source never resolves live in state.abilities
                         // (retire_object already purged it) - fall back to
                         // the same departed_triggered_abilities stash
                         // collect_triggers itself consulted to produce this
-                        // PendingTrigger in the first place. Same "nth
-                        // ability for this source, in that list's own
-                        // order" convention triggers::collect_triggers's
-                        // departed-abilities loop counts by.
-                        let ability = commands::find_ability(&self.state, trigger.source, trigger.ability_index)
+                        // PendingTrigger in the first place, matching on the
+                        // same stable id.
+                        let ability = commands::find_ability_by_id(&self.state, trigger.ability)
                             .or_else(|| {
-                                self.departed_triggered_abilities
-                                    .iter()
-                                    .filter(|a| a.source == trigger.source)
-                                    .nth(trigger.ability_index as usize)
+                                self.departed_triggered_abilities.iter().find(|a| a.id == trigger.ability)
                             });
                         let Some(ability) = ability else {
                             // Neither state.abilities nor the departed stash
@@ -4878,7 +4877,7 @@ mod tests {
     }
 
     fn trigger(id: u64, controller: PlayerId) -> PendingTrigger {
-        PendingTrigger { source: ObjectId(id), controller, ability_index: 0, once_per_turn: false }
+        PendingTrigger { source: ObjectId(id), controller, ability: AbilityId(id), once_per_turn: false }
     }
 
     #[test]

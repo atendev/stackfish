@@ -324,7 +324,7 @@ fn control_changed_activation_state() -> (GameState, PlayerId, PlayerId, ObjectI
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
-        abilities: vec![RegisteredAbility {
+        abilities: vec![RegisteredAbility { id: AbilityId(0),
             source,
             kind: AbilityKind::Activated,
             condition: None,
@@ -442,7 +442,7 @@ fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
-        abilities: vec![RegisteredAbility {
+        abilities: vec![RegisteredAbility { id: AbilityId(1),
             source,
             kind: AbilityKind::Activated,
             condition: None,

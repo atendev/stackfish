@@ -100,7 +100,7 @@ fn equipment_definition() -> CardDefinition {
 /// test file in this repo uses. Free ({0}) cost, since cost payment isn't
 /// this slice's own concern.
 fn equip_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,

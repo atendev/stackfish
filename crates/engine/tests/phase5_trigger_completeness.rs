@@ -172,7 +172,7 @@ fn cards_surveiled_event(player: PlayerId) -> GameEvent {
 }
 
 fn watcher_ability(source: ObjectId, condition: ConditionPrimitive) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(condition)),
@@ -360,7 +360,7 @@ end
 "#;
 
 fn interveningif_upkeep_ability_script(source: ObjectId, handle: ScriptHandle) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(1),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),

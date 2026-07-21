@@ -326,7 +326,7 @@ fn shuffle_ability_works_the_same_as_a_shuffle_spell() {
     stock_library(&mut state, p0, &["First", "Second", "Third", "Fourth", "Fifth"]);
     state.objects.insert(source, card_object(source, creature_definition(1, "Scribe"), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,

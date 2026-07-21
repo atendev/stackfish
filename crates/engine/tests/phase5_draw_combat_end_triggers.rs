@@ -85,7 +85,7 @@ fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: 
 }
 
 fn ability(source: ObjectId, condition: ConditionPrimitive) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(condition)),

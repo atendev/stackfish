@@ -30,6 +30,35 @@ pub struct SequenceNo(pub u64);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CommandId(pub u64);
 
+/// Unique per `RegisteredAbility`, stable for its lifetime (survives a CR
+/// 400.7 zone-change remap of its own `source` — `commands::remap_abilities`
+/// only rewrites `source` in place, never touches `id`). Minted via
+/// `GameState::allocate_ability_id`, which draws from the same counter
+/// `allocate_sequence_no` already does (no dedicated `next_ability_id`
+/// counter field — `GameState` is constructed as a full literal in 100+
+/// test fixtures, and this engine already reuses `SequenceNo`'s counter for
+/// more than one purpose, e.g. `GameObject.timestamp`, so a second reuse
+/// here avoids that mechanical fallout rather than inventing a new field).
+/// A distinct type from `SequenceNo` regardless — same "shared counter,
+/// different meaning" stance as `GameObject.timestamp`'s own doc comment.
+///
+/// Replaces positional "the nth ability registered to this source"
+/// indexing for `triggers::PendingTrigger` (`phase5/ability-stable-id`) —
+/// that index was computed once at trigger-collection time but consulted
+/// later, after an `AwaitingTriggerOrderChoice` pause and potentially
+/// arbitrary intervening game actions, by which point a *different*
+/// pending trigger's own source could (once CR 613.1f's "loses all
+/// abilities" someday strips real `RegisteredAbility` entries, still
+/// unimplemented — see `99-backlog.md`) have had its ability list shift
+/// out from under a stale position. `PlayerActionKind::ActivateAbility`'s
+/// own `ability_index: u32` deliberately keeps its old positional meaning
+/// unchanged — it's chosen and consumed in the same synchronous step, never
+/// spanning a pause the way a `PendingTrigger` does, so it was never
+/// actually at risk (confirmed by finding its only consumer, `find_ability`,
+/// is never called across a real time gap).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct AbilityId(pub u64);
+
 /// Anything that can legally be targeted, attacked, or dealt damage:
 /// permanents/spells/abilities (`Object`) or a player directly (`Player`).
 /// Battles and planeswalkers are still `Object` — they're `GameObject`s like

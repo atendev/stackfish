@@ -108,7 +108,7 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
-        abilities: vec![RegisteredAbility {
+        abilities: vec![RegisteredAbility { id: AbilityId(0),
             source: ability_owner,
             kind: AbilityKind::Activated,
             condition: None,

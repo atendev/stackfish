@@ -150,7 +150,7 @@ fn state_with_cost_and_ward(cost: CostSpec, ward_script: &str) -> (GameState, Pl
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
-        abilities: vec![RegisteredAbility {
+        abilities: vec![RegisteredAbility { id: AbilityId(0),
             source,
             kind: AbilityKind::Activated,
             condition: None,

@@ -245,7 +245,7 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
     let mut state = base_state();
     state.objects.insert(source, card_object(source, permanent_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,

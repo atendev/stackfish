@@ -93,7 +93,7 @@ fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: 
 }
 
 fn interveningif_upkeep_ability(source: ObjectId, threshold: i32) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),

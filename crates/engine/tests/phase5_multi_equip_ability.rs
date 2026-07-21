@@ -5,9 +5,10 @@
 //! Turned out not to need any new production code: `commands::find_ability`
 //! already looks up `state.abilities` filtered by `source` and indexed by
 //! registration order ("any kind, in registration order" - its own doc
-//! comment), shared by `ActivateAbility`'s `ability_index` field and
-//! `triggers::collect_triggers`'s `PendingTrigger::ability_index`. Nothing
-//! about that mechanism is Attach-specific or equip-specific - two
+//! comment), used by `ActivateAbility`'s `ability_index` field (still
+//! positional as of `phase5/ability-stable-id` - it's chosen and consumed in
+//! the same synchronous step, never at risk the way `PendingTrigger` was).
+//! Nothing about that mechanism is Attach-specific or equip-specific - two
 //! `RegisteredAbility` entries with the same `source` and
 //! `effect: Some(AbilityEffect::Attach)` already resolve independently by
 //! index, each keeping its own distinct `target`/`cost`. This slice is pure
@@ -75,7 +76,7 @@ fn equipment_definition() -> CardDefinition {
 
 /// Index 0: "Equip {0}" - any creature you control.
 fn equip_any(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,
@@ -100,7 +101,7 @@ fn equip_any(source: ObjectId) -> RegisteredAbility {
 
 /// Index 1: "Equip Dragon {0}" - CR 702.6c, only a Dragon you control.
 fn equip_dragon(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(1),
         source,
         kind: AbilityKind::Activated,
         condition: None,

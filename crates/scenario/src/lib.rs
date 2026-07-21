@@ -1066,6 +1066,17 @@ pub fn build_initial_state(
     file: &ScenarioFile,
 ) -> (GameState, HashMap<String, ObjectId>, Vec<PendingTriggerScript>) {
     let mut next_object_id: u64 = 0;
+    // Seeds `AbilityId`s for any `mana_ability` built below - draws from a
+    // local counter rather than hardcoding a placeholder (unlike
+    // `build_continuous_effect`'s own `SequenceNo(0)` timestamp placeholder)
+    // because `AbilityId` is minted from the *same* counter
+    // `allocate_sequence_no` uses at real runtime (see that type's own doc
+    // comment) - a hardcoded placeholder here could collide with a real
+    // self-registered ability's id later in the same game. `next_sequence_no`
+    // below is seeded past whatever this counter reaches, same "avoid
+    // colliding with anything seeded here" reasoning `next_object_id` above
+    // already gets.
+    let mut next_ability_id: u64 = 0;
     let mut card_ids: HashMap<String, ObjectId> = HashMap::new();
     let mut trigger_scripts: Vec<PendingTriggerScript> = Vec::new();
 
@@ -1192,6 +1203,7 @@ pub fn build_initial_state(
         if !spec.mana_ability.is_empty() {
             let units = spec.mana_ability.iter().map(|s| parse_mana_unit(s)).collect();
             abilities.push(RegisteredAbility {
+                id: AbilityId(next_ability_id),
                 source: object_id,
                 kind: AbilityKind::Activated,
                 condition: None,
@@ -1201,6 +1213,7 @@ pub fn build_initial_state(
                 effect: Some(AbilityEffect::AddMana(units)),
                 intervening_if: None,
             });
+            next_ability_id += 1;
         }
         if let Some(operation) = &spec.trigger_operation {
             trigger_scripts.push(PendingTriggerScript {
@@ -1252,7 +1265,7 @@ pub fn build_initial_state(
         ledger: Vec::new(),
         rng: RngState { seed: file.seed.expect("`seed` is required when `[game]` is not set"), draws_consumed: 0 },
         next_event_id: 0,
-        next_sequence_no: 0,
+        next_sequence_no: next_ability_id,
         next_object_id,
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
@@ -1281,7 +1294,9 @@ fn register_trigger_ability(
             .load_condition(src)
             .unwrap_or_else(|e| panic!("trigger_condition script failed to load: {e:?}"))
     });
+    let id = engine.state_mut().allocate_ability_id();
     engine.state_mut().abilities.push(RegisteredAbility {
+        id,
         source,
         kind: AbilityKind::Triggered,
         condition,
@@ -1711,7 +1726,9 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
             let spec = card_specs[key.as_str()];
             if !spec.mana_ability.is_empty() {
                 let units = spec.mana_ability.iter().map(|s| parse_mana_unit(s)).collect();
+                let id = engine.state_mut().allocate_ability_id();
                 engine.state_mut().abilities.push(RegisteredAbility {
+                    id,
                     source: card_ids[key],
                     kind: AbilityKind::Activated,
                     condition: None,

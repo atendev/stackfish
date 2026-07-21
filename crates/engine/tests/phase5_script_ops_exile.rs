@@ -98,7 +98,7 @@ fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: 
 }
 
 fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::LeavesBattlefield)),
@@ -253,7 +253,7 @@ fn exile_activated_ability_also_works() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
     state.objects.insert(target, card_object(target, creature_definition(2, "Prey", KeywordSet::empty()), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(1),
         source,
         kind: AbilityKind::Activated,
         condition: None,

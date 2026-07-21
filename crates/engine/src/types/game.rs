@@ -5,7 +5,7 @@ use crate::types::combat::CombatState;
 use crate::types::cost::CostModifier;
 use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
-use crate::types::ids::{EventId, ObjectId, PlayerId, SequenceNo};
+use crate::types::ids::{AbilityId, EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
 use crate::types::player::{HandSizeModifier, PlayerState};
 use crate::types::stack::StackObject;
@@ -113,14 +113,13 @@ pub struct GameState {
     /// say "skip your next draw step" (etc.) push here; the CR 103.8a
     /// two-player turn-1 draw skip is seeded here at game start.
     pub pending_step_skips: Vec<(PlayerId, Step)>,
-    /// CR 603.2h: which triggered abilities (`(source, ability_index)`,
-    /// same indexing convention `triggers::PendingTrigger`/
-    /// `commands::find_ability` already use) have already triggered this
-    /// turn, for a `ConditionSpec::PrimitiveOncePerTurn` condition ("This
-    /// ability triggers only once each turn"). Checked and populated by
+    /// CR 603.2h: which triggered abilities (by stable `AbilityId` — see
+    /// that type's own doc comment) have already triggered this turn, for a
+    /// `ConditionSpec::PrimitiveOncePerTurn` condition ("This ability
+    /// triggers only once each turn"). Checked and populated by
     /// `triggers::collect_triggers`/`Engine`'s `CollectTriggers` stage;
     /// reset alongside `lands_played_this_turn` whenever a new turn begins.
-    pub once_per_turn_triggered: std::collections::HashSet<(ObjectId, u32)>,
+    pub once_per_turn_triggered: std::collections::HashSet<AbilityId>,
     /// CR 903.9a: which commander object ids currently sitting in a
     /// graveyard or exile have already been offered the "owner may put it
     /// into the command zone" state-based choice — a *declined* offer must
@@ -151,6 +150,13 @@ impl GameState {
         let id = ObjectId(self.next_object_id);
         self.next_object_id += 1;
         id
+    }
+
+    /// Mints a fresh `AbilityId` — see that type's own doc comment for why
+    /// this draws from `allocate_sequence_no`'s counter rather than a
+    /// dedicated one.
+    pub fn allocate_ability_id(&mut self) -> AbilityId {
+        AbilityId(self.allocate_sequence_no().0)
     }
 
     pub fn object(&self, id: ObjectId) -> Option<&GameObject> {

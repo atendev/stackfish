@@ -223,7 +223,7 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
     let watcher = ObjectId(0);
     state.objects.insert(watcher, permanent(watcher, creature_definition("Watcher"), p0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(watcher);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source: watcher,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DiscardsCard)),
@@ -275,7 +275,7 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
     let watcher = ObjectId(0);
     state.objects.insert(watcher, permanent(watcher, creature_definition("Watcher"), p0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(watcher);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(1),
         source: watcher,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DiscardsCard)),
@@ -292,8 +292,8 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
     engine.submit_discard(vec![ids[0], ids[1]]).expect("valid discard");
     let status = step_until_pause(&mut engine);
 
-    // Two discarded cards, both matched by the same (source, ability_index)
-    // - CR 603.3b pauses for p0 to choose their relative stack order rather
+    // Two discarded cards, both matched by the same ability's stable id -
+    // CR 603.3b pauses for p0 to choose their relative stack order rather
     // than pushing both outright, same "group size proves it" shape
     // phase5_trigger_once_per_turn.rs's own uncapped test uses.
     match status {

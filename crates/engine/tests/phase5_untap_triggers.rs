@@ -158,7 +158,7 @@ fn beginning_of_your_untap_trigger_is_already_on_the_stack_by_the_time_upkeep_pr
     let mut state = two_player_state();
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(0),
         source: permanent,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUntap)),
@@ -196,7 +196,7 @@ fn beginning_of_your_untap_trigger_does_not_fire_for_a_different_controller() {
     // p0 - BeginningOfYourUntap must not fire for p1 here.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(1),
         source: permanent,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUntap)),
@@ -224,7 +224,7 @@ fn beginning_of_each_untap_trigger_fires_regardless_of_whose_turn_it_is() {
     // anyway, unlike BeginningOfYourUntap above.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
-    state.abilities.push(RegisteredAbility {
+    state.abilities.push(RegisteredAbility { id: AbilityId(2),
         source: permanent,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfEachUntap)),

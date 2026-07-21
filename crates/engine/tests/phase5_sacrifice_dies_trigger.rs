@@ -86,7 +86,7 @@ fn discard_cost() -> CostSpec {
 }
 
 fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility {
+    RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
@@ -167,7 +167,7 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, PlayerId, ObjectId, 
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
         abilities: vec![
-            RegisteredAbility {
+            RegisteredAbility { id: AbilityId(1),
                 source,
                 kind: AbilityKind::Activated,
                 condition: None,

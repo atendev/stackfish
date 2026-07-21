@@ -181,6 +181,7 @@ fn pass_until_turn_advances(engine: &mut Engine, starting_turn: u32) -> StepStat
 
 fn dealsdamage_ability(source: ObjectId, once_per_turn: bool) -> RegisteredAbility {
     RegisteredAbility {
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(if once_per_turn {
@@ -303,7 +304,7 @@ fn once_per_turn_trigger_resets_after_a_new_turn_begins() {
     // Simulate "already triggered earlier this same turn" directly, rather
     // than re-deriving it via a first combat - this test only cares whether
     // a fresh turn clears the record.
-    state.once_per_turn_triggered.insert((attacker, 0));
+    state.once_per_turn_triggered.insert(AbilityId(0));
 
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker1, 2), (blocker2, 1)])]);
@@ -315,5 +316,5 @@ fn once_per_turn_trigger_resets_after_a_new_turn_begins() {
     let status = pass_until_turn_advances(&mut engine, 1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "turn rotated, got {status:?}");
     assert_eq!(engine.state().turn_number, 2);
-    assert!(!engine.state().once_per_turn_triggered.contains(&(attacker, 0)), "the cap reset with the new turn");
+    assert!(!engine.state().once_per_turn_triggered.contains(&AbilityId(0)), "the cap reset with the new turn");
 }
