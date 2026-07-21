@@ -66,6 +66,7 @@ fn growth_definition(duration: EffectDuration) -> CardDefinition {
             filter: TargetFilter::AnyTarget,
             count: 1,
             up_to: false,
+            exclude_source: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Pump { power: 3, toughness: 3, duration }),

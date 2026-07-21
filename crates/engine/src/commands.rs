@@ -325,7 +325,15 @@ pub(crate) fn target_is_legal(
     filter: &TargetFilter,
     caster: PlayerId,
     source: ObjectId,
+    exclude_source: bool,
 ) -> bool {
+    // CR 115.4/"another target": the source is never a legal candidate for
+    // a requirement that says so, regardless of what the rest of `filter`
+    // would otherwise allow - checked once, ahead of every filter variant,
+    // rather than duplicated in each match arm below.
+    if exclude_source && target == Target::Object(source) {
+        return false;
+    }
     match filter {
         TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
         TargetFilter::Object { card_types, subtypes, supertypes, controller, zone } => {
@@ -473,7 +481,7 @@ fn validate_targets(
                 }
             }
             for t in targets {
-                if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source) {
+                if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source) {
                     return Err(CommandError::InvalidTarget);
                 }
             }

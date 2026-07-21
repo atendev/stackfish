@@ -81,6 +81,7 @@ fn legend_bolt_definition() -> CardDefinition {
             },
             count: 1,
             up_to: false,
+            exclude_source: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Damage(2)),

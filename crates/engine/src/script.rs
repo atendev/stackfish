@@ -1076,7 +1076,7 @@ impl UserData for ActivatedAbilityBuilder {
             let target = this
                 .target
                 .clone()
-                .map(|filter| TargetSpec::Primitive(TargetRequirement { filter, count: 1, up_to: false }));
+                .map(|filter| TargetSpec::Primitive(TargetRequirement { filter, count: 1, up_to: false, exclude_source: false }));
             let ability = RegisteredAbility {
                 source: this.source,
                 kind: AbilityKind::Activated,

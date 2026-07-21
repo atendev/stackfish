@@ -1300,7 +1300,14 @@ impl Engine {
         // protection checks against, not the controller - same distinction
         // validate_targets' own callers already make for a static target
         // requirement.
-        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller, *stack_id) {
+        // TODO(CR 115.4/"another target"): ScriptChoiceRequest::SelectTarget
+        // carries a bare TargetFilter, not a full TargetRequirement, so
+        // there's no exclude_source to read here - a Game.SelectTargets
+        // mid-resolution choice can't express "another target" yet, only a
+        // static card-level target_requirement can (see validate_targets'
+        // own call site).
+        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller, *stack_id, false)
+        {
             return Err(ScriptChoiceError::InvalidCandidate);
         }
         let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, mut events_so_far, .. } =
@@ -2728,7 +2735,23 @@ impl Engine {
                                 *t,
                                 &req.filter,
                                 top.controller,
-                                top.stack_id,
+                                // top.source, not top.stack_id - they only
+                                // coincide for a Spell (see StackObject's
+                                // own construction sites); for an
+                                // ActivatedAbility/TriggeredAbility,
+                                // top.stack_id is a bare, never-a-real-
+                                // GameObject id, and passing it here as
+                                // "source" silently broke both protection-
+                                // from-source-quality checks (target_has_
+                                // protection_from's state.object(source)
+                                // lookup would just miss and return false)
+                                // and this slice's own exclude_source below
+                                // - every other resolution site already uses
+                                // top.source for "the real thing this
+                                // effect comes from" (e.g. the Damage
+                                // AbilityEffect arm further down).
+                                top.source,
+                                req.exclude_source,
                             )
                         })
                         .collect(),

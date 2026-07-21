@@ -73,6 +73,7 @@ fn threaten_definition(duration: EffectDuration) -> CardDefinition {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 1,
             up_to: false,
+            exclude_source: false,
         })),
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::GainControl(duration)),
