@@ -59,7 +59,7 @@ fn destroy_spell_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_destroy".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
             count: 1,
             up_to: false, at_least: false,
             exclude_source: false,
@@ -320,7 +320,7 @@ fn destroy_ability_works_the_same_as_a_destroy_spell() {
         condition: None,
         cost: Some(CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() }),
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
             count: 1,
             up_to: false, at_least: false,
             exclude_source: false,

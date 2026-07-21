@@ -76,6 +76,7 @@ fn legend_bolt_definition() -> CardDefinition {
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
                 supertypes: Some(SupertypeSet::LEGENDARY),
+                excluded_supertypes: None,
                 controller: None,
                 zone: None,
             },

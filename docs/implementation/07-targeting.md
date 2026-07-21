@@ -229,8 +229,9 @@
     with a scoped `perl` pass (guarded to skip any literal containing `..`), verified clean by
     `cargo build --workspace --tests`.
 - Unresolved:
-  - Negated supertypes, multi-target-word spells, no Lua builder path for a spell's own
-    `target_requirement` — all still open, unchanged by this slice.
+  - Negated supertypes (closed by `phase5/negated-target-supertypes`, below), multi-target-word
+    spells, no Lua builder path for a spell's own `target_requirement` — the latter two still open,
+    unchanged by this slice.
 
 ## Slice: spell-target-script (merged)
 
@@ -277,3 +278,36 @@
   - `build_new_game_engine`'s per-instance loop only wires commander-zone cards' library
     counterparts (`gp.library`), not `gp.commanders` — pre-existing scope boundary
     `trigger_operation`/`mana_ability` already have in that function, not touched by this slice.
+
+## Slice: negated-target-supertypes (merged)
+
+- Branch `phase5/negated-target-supertypes`.
+- Scope: CR 601.2c/115/205.4a's negated supertype form ("target nonlegendary creature") —
+  `TargetFilter::Object`'s last remaining negation gap, named as a follow-up by
+  `negative-target-filters` rather than guessed at (no real card built at the time needed it).
+- Verify: 5 new tests (`phase5_targeting_negative_supertype_filter.rs`), full workspace suite green.
+- Key changes:
+  - `TargetFilter::Object.excluded_supertypes: Option<SupertypeSet>` ("target nonlegendary
+    creature") — the negation of the existing `supertypes` intersection match, checked
+    independently so a filter can combine a positive `card_types` with an `excluded_supertypes`
+    (the worked example: `card_types: Creature, excluded_supertypes: [Legendary], controller:
+    Opponent`). Exact same shape `excluded_card_types`/`excluded_subtypes` already established.
+  - `commands::target_is_legal`'s `Object` arm gets one new reject check, mirroring the existing
+    `excluded_subtypes` check exactly (intersection test against `effective.supertypes`).
+  - `sba.rs`'s synthetic Equipment-attach filter and `decode_target_filter_table` (script.rs, the
+    `:SetTarget`/`Game.SelectTargets` table shape) both got the new field — `None` for the former
+    (no behavior change), a real `excluded_supertypes` table key for the latter, same decode
+    pattern the positive `supertypes` key already uses.
+  - `TargetRequirementSpec.excluded_supertypes` (scenario TOML), threaded through
+    `build_target_requirement`.
+- Deviations:
+  - Every existing `TargetFilter::Object { ... }` construction (~26 files, ~35 sites) needed the new
+    field added, compiler-guided/mechanical, same precedent every prior `Object`-field addition
+    already set — done with a scoped `perl` pass keyed off `supertypes: None,` immediately
+    preceding `controller:` (safe against `cost.rs`'s unrelated `FilterSpec`, whose own field order
+    puts `subtypes` between them), plus one manual fix for the sole site with a real `supertypes:
+    Some(...)` value. Verified clean by `cargo build --workspace --tests`.
+- Unresolved:
+  - Multi-target-word spells, no Lua builder path for a spell's own `target_requirement` (closed by
+    `phase5/spell-target-script`, above, for the scenario side — TOML modal spells still don't
+    exist) — unchanged by this slice.
