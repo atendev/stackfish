@@ -11,7 +11,8 @@
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
-    card_object, drain, minimal_card_definition, player_state, two_player_state as base_two_player_state,
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, player_state,
+    two_player_state as base_two_player_state,
 };
 
 fn spell_definition(mana_cost: ManaCost, card_types: CardTypeSet) -> CardDefinition {
@@ -24,17 +25,10 @@ fn spell_definition(mana_cost: ManaCost, card_types: CardTypeSet) -> CardDefinit
 fn two_player_state(pool: ManaPool, cost_modifiers: Vec<CostModifier>) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    let zones = vec![
-        Zone::new(ZoneKind::Hand, Some(p0)),
-        Zone::new(ZoneKind::Hand, Some(p1)),
-        Zone::new(ZoneKind::Battlefield, None),
-        Zone::new(ZoneKind::Graveyard, Some(p0)),
-        Zone::new(ZoneKind::Graveyard, Some(p1)),
-    ];
     GameState {
         players: vec![PlayerState { mana_pool: pool, ..player_state(p0) }, player_state(p1)],
         cost_modifiers,
-        ..base_two_player_state(zones)
+        ..base_two_player_state(hand_battlefield_graveyard_zones(p0, p1))
     }
 }
 

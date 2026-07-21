@@ -56,3 +56,13 @@ pub fn two_player_state(zones: Vec<Zone>) -> GameState {
 pub fn hand_and_battlefield_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone> {
     vec![Zone::new(ZoneKind::Hand, Some(p0)), Zone::new(ZoneKind::Hand, Some(p1)), Zone::new(ZoneKind::Battlefield, None)]
 }
+
+/// `hand_and_battlefield_zones` plus each player's graveyard — for tests that
+/// also need a card to resolve/die/discard somewhere (spell resolution,
+/// cost-modifier tests that send a card to the graveyard, ...).
+pub fn hand_battlefield_graveyard_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone> {
+    let mut zones = hand_and_battlefield_zones(p0, p1);
+    zones.push(Zone::new(ZoneKind::Graveyard, Some(p0)));
+    zones.push(Zone::new(ZoneKind::Graveyard, Some(p1)));
+    zones
+}
