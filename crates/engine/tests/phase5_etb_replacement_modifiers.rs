@@ -13,12 +13,11 @@
 //! (`move_resolving_spell`), and `submit_search_choice`'s
 //! `SearchDestination::Battlefield` arm.
 
-use std::collections::{HashMap, VecDeque};
-
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
 
 const ENTERS_TAPPED: &str = r#"
 local s = {}
@@ -121,32 +120,6 @@ fn creature_definition(name: &str, script: &str) -> CardDefinition {
     }
 }
 
-fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
-}
-
 fn player_state(id: PlayerId) -> PlayerState {
     PlayerState {
         player_id: id,
@@ -164,55 +137,7 @@ fn player_state(id: PlayerId) -> PlayerState {
 }
 
 fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        players: vec![player_state(p0), player_state(p1)],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        phase: Phase::Main,
-        step: Step::Untap,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::new(),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        // Deliberately not 0/1 - those collide with the literal ObjectIds
-        // the tests below assign to fixture cards, same reasoning as
-        // phase5_play_land.rs's two_player_state.
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
+    base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
 
 /// Every fixture card in this file has an empty `mana_cost` - pays it via the
