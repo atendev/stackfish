@@ -100,7 +100,7 @@ fn another_target_creature_ability(source: ObjectId) -> RegisteredAbility {
         target: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: true,
         })),
         operation: ScriptHandle(0),
@@ -249,7 +249,7 @@ fn an_ability_targeting_its_own_source_fizzles_at_resolution_recheck() {
         Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: true,
         })),
         None,

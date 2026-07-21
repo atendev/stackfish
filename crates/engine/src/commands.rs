@@ -454,8 +454,9 @@ pub(crate) fn target_is_legal(
 /// since nothing asked for them.
 ///
 /// CR 601.2c/115.6: "up to N" (`TargetRequirement::up_to`) accepts anywhere
-/// from 0 to `count` chosen - "N or more" still isn't modeled, see
-/// `TargetRequirement`'s own doc.
+/// from 0 to `count` chosen; "N or more" (`TargetRequirement::at_least`)
+/// accepts `count` or more chosen, no upper bound - see `TargetRequirement`'s
+/// own doc for the full three-way shape.
 /// TODO(CR 601.2d): no division/distribution step for effects that split
 /// among several targets.
 fn validate_targets(
@@ -476,9 +477,16 @@ fn validate_targets(
         }
         Some(TargetSpec::Primitive(req)) => {
             // CR 601.2c/115.6: "up to N" accepts anywhere from 0 to `count`
-            // chosen - the common exact-count case still requires exactly
+            // chosen; "N or more" accepts `count` or more with no upper
+            // bound; the common exact-count case still requires exactly
             // `count`.
-            let count_ok = if req.up_to { targets.len() <= req.count as usize } else { targets.len() == req.count as usize };
+            let count_ok = if req.up_to {
+                targets.len() <= req.count as usize
+            } else if req.at_least {
+                targets.len() >= req.count as usize
+            } else {
+                targets.len() == req.count as usize
+            };
             if !count_ok {
                 return Err(CommandError::InvalidTarget);
             }

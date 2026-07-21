@@ -170,7 +170,7 @@ fn become_copy_ability(source: ObjectId) -> RegisteredAbility {
         target: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: false,
         })),
         operation: ScriptHandle(0),

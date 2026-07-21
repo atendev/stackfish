@@ -80,7 +80,7 @@ fn legend_bolt_definition() -> CardDefinition {
                 zone: None,
             },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),

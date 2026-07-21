@@ -93,7 +93,7 @@ fn exile_spell_definition() -> CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
             filter: TargetFilter::Object { card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, controller: None, zone: None },
             count: 1,
-            up_to: false,
+            up_to: false, at_least: false,
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),

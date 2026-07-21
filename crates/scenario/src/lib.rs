@@ -288,9 +288,10 @@ pub struct ContinuousEffectSpec {
 /// `TargetFilter` variant this is: `"object"` (uses `card_types`/
 /// `subtypes`/`controller`/`zone`, CR 115.2's battlefield default applies
 /// when `zone` is unset), `"player"` (any player), or `"any"` (CR 115.4's
-/// "any target" — creature/player/planeswalker/battle). `count` is the
-/// maximum — exact unless `up_to` is set (CR 601.2c/115.6, "up to N"; "N or
-/// more" still isn't modeled, see `TargetRequirement`'s own doc).
+/// "any target" — creature/player/planeswalker/battle). `count`'s meaning
+/// depends on `up_to`/`at_least` (mutually exclusive) — see
+/// `TargetRequirement`'s own doc for the full three-way shape (exact/"up to
+/// N"/"N or more", CR 601.2c/115.6).
 #[derive(Deserialize)]
 pub struct TargetRequirementSpec {
     pub filter: String,
@@ -311,6 +312,10 @@ pub struct TargetRequirementSpec {
     pub count: u32,
     #[serde(default)]
     pub up_to: bool,
+    /// CR 601.2c/115.6's "N or more" shape - see `TargetRequirement::at_least`'s
+    /// own doc comment.
+    #[serde(default)]
+    pub at_least: bool,
     /// CR 115.4/"another target" - see `TargetRequirement::exclude_source`'s
     /// own doc comment.
     #[serde(default)]
@@ -971,6 +976,7 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
         filter,
         count: spec.count,
         up_to: spec.up_to,
+        at_least: spec.at_least,
         exclude_source: spec.exclude_source,
     })
 }

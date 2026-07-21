@@ -173,3 +173,27 @@
 - Unresolved:
   - "N or more" counts, negative filters, multi-target-word spells, no Lua builder path for a
     spell's own `target_requirement` — all still open, unchanged by this slice.
+
+## Slice: target-count-at-least (implemented, not yet merged)
+
+- Branch `phase5/target-count-at-least`.
+- Scope: CR 601.2c/115.6 "N or more" target counts — `TargetRequirement`'s third count shape
+  alongside exact-count and "up to N" (e.g. "target two or more creatures," "any number of target
+  creatures" as `count: 0`).
+- Verify: 6 new tests (`phase5_targeting_at_least_n.rs`), full workspace suite green.
+- Key changes:
+  - `TargetRequirement.at_least: bool` — mutually exclusive with `up_to`. `count` becomes the
+    minimum with no upper bound of its own when set, same "caller submits the list, engine never
+    enumerates all legal candidates itself" posture every other count shape already has.
+  - `commands::validate_targets`'s count check gets a third arm: `targets.len() >= req.count`.
+  - `TargetRequirementSpec.at_least` (scenario TOML), threaded through `build_target_requirement`.
+  - No resolution-time fizzle-logic change needed — already keyed off `!top.targets.is_empty()`,
+    not `count`/`up_to`, since `targeting-up-to-n` fixed that; shape-agnostic for free.
+- Deviations:
+  - ~41 existing `TargetRequirement { ... }` literals across ~30 test files needed the new field
+    added, compiler-guided/mechanical (same precedent `exclude_source`'s 42-site and `subtypes`'
+    21-site additions already set) — done with a scoped `sed` pass rather than by hand, verified
+    clean by `cargo build --workspace --tests`.
+- Unresolved:
+  - Negative filters, multi-target-word spells, no Lua builder path for a spell's own
+    `target_requirement` — all still open, unchanged by this slice.
