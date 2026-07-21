@@ -13,12 +13,13 @@
 //! sites needed, since `ScriptRuntime::run_card_script` now drains both
 //! `pending_triggered` and `pending_static` in one pass.
 
-use std::collections::{HashMap, VecDeque};
-
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state as base_two_player_state,
+};
 
 const SELF_BUFF: &str = r#"
 local s = {}
@@ -95,142 +96,25 @@ return s
 
 fn bear_definition(script: &str) -> CardDefinition {
     CardDefinition {
-        definition_id: 1,
-        name: "Test Bear".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: "Static ability self-registration test fixture.".to_string(),
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
+        oracle_text: "Static ability self-registration test fixture.".to_string(),
         script_ref: ScriptReference::Inline(script.to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
+        ..minimal_card_definition(1, "Test Bear", "test_bear", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
     }
 }
 
 fn vanilla_bear_definition() -> CardDefinition {
     CardDefinition {
-        definition_id: 2,
-        name: "Vanilla Bear".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("vanilla_bear".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
-    }
-}
-
-fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+        ..minimal_card_definition(2, "Vanilla Bear", "vanilla_bear", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
     }
 }
 
 /// Mirrors `phase5_script_self_registration::two_player_state`.
 fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        players: vec![
-            PlayerState {
-                player_id: p0,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-            PlayerState {
-                player_id: p1,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-        ],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        phase: Phase::Main,
-        step: Step::Untap,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::new(),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
+    base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
 
 // ---------------------------------------------------------------------
@@ -362,15 +246,6 @@ fn dying_creatures_registered_static_ability_is_purged_by_sba() {
 // actually changes effective_characteristics once the source resolves.
 // ---------------------------------------------------------------------
 
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
-}
-
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(
@@ -452,23 +327,8 @@ fn play_land_self_registering_anthem_buffs_other_creatures_you_control() {
 /// rather than `CastSpell`.
 fn bear_definition_as_land() -> CardDefinition {
     CardDefinition {
-        definition_id: 3,
-        name: "Test Anthem Land".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::LAND,
-        subtypes: Vec::new(),
         oracle_text: "Creatures you control get +1/+1.".to_string(),
-        power: None,
-        toughness: None,
-        loyalty: None,
-        defense: None,
         script_ref: ScriptReference::Inline(ANTHEM_YOUR_CREATURES.to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
+        ..minimal_card_definition(3, "Test Anthem Land", "test_anthem_land", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
     }
 }
