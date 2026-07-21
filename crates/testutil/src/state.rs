@@ -66,3 +66,15 @@ pub fn hand_battlefield_graveyard_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone>
     zones.push(Zone::new(ZoneKind::Graveyard, Some(p1)));
     zones
 }
+
+/// Shared battlefield plus each player's graveyard, plus the single shared
+/// exile zone (CR 400.10) — for tests whose creatures die or get exiled and
+/// need somewhere real to land.
+pub fn battlefield_graveyard_exile_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone> {
+    vec![
+        Zone::new(ZoneKind::Battlefield, None),
+        Zone::new(ZoneKind::Graveyard, Some(p0)),
+        Zone::new(ZoneKind::Graveyard, Some(p1)),
+        Zone::new(ZoneKind::Exile, None),
+    ]
+}
