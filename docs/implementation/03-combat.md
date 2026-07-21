@@ -78,3 +78,18 @@
   - `DeclareBlockers` per-pair check (alongside Fear/Intimidate/Shadow/Horsemanship): if the attacker's `landwalk_subtypes` is non-empty and the *defending player* (`command.actor`) controls any battlefield permanent whose effective subtypes intersect it, the block is rejected outright - unlike the other evasion keywords, this checks the defending player's battlefield, not the blocker's own characteristics.
 - Unresolved:
   - CR 702.14a's card-type/supertype-combination forms ("artifact landwalk," "nonbasic landwalk," "snow swampwalk").
+
+## Slice: banding (implemented, not yet merged)
+
+- Branch `phase5/banding`.
+- Scope: CR 702.22 Banding, narrowed to the plain form (not "bands with other [quality]").
+- Verify: 5 new tests, full workspace suite green (including a rewrite of the pre-existing `AssignCombatDamage` handler).
+- Key changes:
+  - `KeywordSet::BANDING` (plain bit - no parameter needed for the base form, unlike Landwalk).
+  - `CombatState::bands: Vec<Vec<ObjectId>>`, new `PlayerActionKind::DeclareBands` action (its own action rather than a field on `DeclareAttackers`, to avoid touching every existing `DeclareAttackers` call site - only legal during `Step::DeclareAttackers`, active player only, replaces `bands` wholesale). Validates CR 702.22c (>=1 banding member, <=1 non-banding member) and CR 702.22d/802.3b (every member shares one attack target).
+  - `DeclareBlockers` (CR 702.22h): after the normal per-pair validation, a propagation pass forces every other member of a directly-blocked attacker's band onto the same blocker - bypassing every evasion/protection check already run (the CR 702.22h worked example blocks a swampwalker this way even though the defender controls a Swamp). Scoped to direct blocks in the same submission only (CR 702.22d already forces one shared defending player per band).
+  - `AssignCombatDamage` generalized rather than left attacker-only: a blocker forced onto 2+ attackers by band propagation (CR 702.22k) now needs the same kind of chosen split `requires_assignment` already modeled attacker-side, reusing the same `assignments: Vec<(ObjectId, Vec<(ObjectId,u32)>)>` shape (disambiguated by which of `blockers_by_attacker`/`attackers_by_blocker` contains the id). No trample-style carve-out on the blocker side - a blocker has no "spill to the player" outlet, so its split must sum to exactly its power.
+- Unresolved:
+  - CR 702.22b/c's "bands with other [quality]" variant (needs a parameter - same shape gap Landwalk's own removal from `KeywordSet` documents).
+  - CR 702.22i (a band member blocked "due to an effect" forces the whole band blocked) - no such effect exists in this engine yet.
+  - CR 702.22j (the defending player, not the active player, chooses an attacker's split when it's blocked by a creature with banding) - `AssignCombatDamage`'s actor is hardcoded to the active player for the whole atomic action; a real fix needs that action to accept a split submission from either player depending on which attacker it covers, deferred as a known deviation.

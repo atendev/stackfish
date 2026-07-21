@@ -60,19 +60,41 @@ pub enum PlayerActionKind {
     /// "defending players" list: which defender goes with which attacker is
     /// the declaration itself, not derivable from two parallel lists.
     DeclareAttackers { attackers: Vec<(ObjectId, Target)> },
+    /// CR 508.1e/702.22c: banding - the active player groups one or more
+    /// just-declared attacking creatures with banding (plus up to one
+    /// attacking creature without banding) into a "band." A separate
+    /// action from `DeclareAttackers` rather than a field on it (unlike CR
+    /// 508.1e's own "as a player declares attackers" wording) so the
+    /// overwhelmingly common no-banding case - every other `DeclareAttackers`
+    /// call site in this codebase - never has to carry an always-empty
+    /// field. Only legal in the same window as `DeclareAttackers` itself
+    /// (`Step::DeclareAttackers`, after attackers have been declared this
+    /// combat); each call replaces `CombatState::bands` wholesale, so a
+    /// player can resubmit to fix a mistake before priority opens. Empty
+    /// `bands` is a legal (if pointless) submission, same "declare zero"
+    /// convention `DeclareBlockers` already allows.
+    DeclareBands { bands: Vec<Vec<ObjectId>> },
     DeclareBlockers { blocks: Vec<(ObjectId, ObjectId)> },
     /// CR 510.1/510.2: assign + deal combat damage, collapsed into one
     /// action (510.2 - "no priority window between assign and deal"). Only
     /// the active player ever submits a real choice under this engine's
-    /// block model (`CombatState.blocks` is one blocker/one attacker, no
-    /// banding) - a blocker always deals 100% of its power to the one
-    /// attacker it blocks (510.1d, never ambiguous), and an attacker with
-    /// 0 or 1 blockers has nowhere to split either (510.1b/c). The only
-    /// real choice is an attacker with 2+ blockers splitting its damage
-    /// among them (510.1c) - `assignments` covers exactly that subset,
-    /// attacker -> (blocker, amount) pairs summing to the attacker's power
-    /// (510.1e atomicity). Engine computes every other attacker's and every
-    /// blocker's damage automatically.
+    /// block model - CR 702.22k already makes that the correct chooser even
+    /// for banding's blocker-forced-onto-multiple-attackers case, so no
+    /// separate defending-player-side submission is needed for that half.
+    /// `assignments` is generic over which side needs a split: an attacker
+    /// with 2+ blockers (510.1c) or exactly 1 with trample (702.19b) splits
+    /// its power among blockers; a blocker forced onto 2+ attackers by band
+    /// propagation (702.22h) splits its power among attackers instead - same
+    /// `id -> (recipient, amount)` tuple shape either way, disambiguated at
+    /// lookup time by which of `blockers_by_attacker`/`attackers_by_blocker`
+    /// contains `id` (`commands.rs`). Every other attacker/blocker (0 or 1
+    /// recipient, no trample) has exactly one legal place for its damage to
+    /// go and needs no entry (510.1e atomicity - `assignments` must cover
+    /// exactly the set that needs one). CR 702.22j (defending player, not
+    /// active player, chooses an attacker's split when it's blocked by a
+    /// creature with banding) is NOT modeled - this action's actor is always
+    /// the active player, full stop; that half of banding stays a known
+    /// deviation.
     AssignCombatDamage { assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)> },
     SubmitPayment { plan: PaymentPlan },
     MakeChoice { description: String, selection: Vec<Target> },

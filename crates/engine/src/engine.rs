@@ -985,6 +985,7 @@ impl Engine {
         let is_combat_turn_based_action = matches!(
             action.kind,
             PlayerActionKind::DeclareAttackers { .. }
+                | PlayerActionKind::DeclareBands { .. }
                 | PlayerActionKind::DeclareBlockers { .. }
                 | PlayerActionKind::AssignCombatDamage { .. }
         );
