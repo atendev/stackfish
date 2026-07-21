@@ -336,7 +336,7 @@ pub(crate) fn target_is_legal(
     }
     match filter {
         TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
-        TargetFilter::Object { card_types, excluded_card_types, subtypes, excluded_subtypes, supertypes, controller, zone } => {
+        TargetFilter::Object { card_types, excluded_card_types, subtypes, excluded_subtypes, supertypes, excluded_supertypes, controller, zone } => {
             let Target::Object(id) = target else { return false };
             let Some(obj) = state.object(id) else { return false };
             if obj.zone != zone.unwrap_or(ZoneKind::Battlefield) {
@@ -347,6 +347,7 @@ pub(crate) fn target_is_legal(
                 || subtypes.is_some()
                 || excluded_subtypes.is_some()
                 || supertypes.is_some()
+                || excluded_supertypes.is_some()
             {
                 let effective = crate::layers::effective_characteristics(state, script_runtime, id);
                 if let Some(types) = card_types {
@@ -389,6 +390,16 @@ pub(crate) fn target_is_legal(
                 // card_types gets, mirroring cost.rs's FilterSpec::matches.
                 if let Some(types) = supertypes {
                     if !effective.supertypes.intersects(*types) {
+                        return false;
+                    }
+                }
+                // CR 601.2c/115/205.4a's negated form - "target nonlegendary
+                // creature." Rejects if the target's supertypes intersect
+                // this set, the negation of supertypes' match above, checked
+                // independently of it (same "can combine positive and
+                // negative" stance excluded_subtypes already documents).
+                if let Some(types) = excluded_supertypes {
+                    if effective.supertypes.intersects(*types) {
                         return false;
                     }
                 }

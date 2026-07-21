@@ -693,6 +693,7 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
         subtypes: None,
         excluded_subtypes: None,
         supertypes: None,
+        excluded_supertypes: None,
         controller: None,
         zone: None,
     };

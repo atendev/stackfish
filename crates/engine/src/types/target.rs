@@ -32,23 +32,23 @@ pub enum TargetFilter {
     /// bits" semantics `cost.rs`'s `FilterSpec::supertypes` already has, now
     /// mirrored here.
     ///
-    /// `excluded_card_types`/`excluded_subtypes` (CR 601.2c/115/205.4b's
-    /// negated form — "target nonland permanent," "target creature that
-    /// isn't a Wall") reject a target whose card types intersect
-    /// `excluded_card_types`, or whose subtypes include any of
-    /// `excluded_subtypes` — the negation of the positive `card_types`/
-    /// `subtypes` checks above, checked independently of them (a filter can
-    /// combine a positive `card_types` with an `excluded_subtypes`, e.g.
-    /// "target creature that isn't a Wall"). No `excluded_supertypes` yet —
-    /// no real card built so far needs "nonlegendary," same "only what a
-    /// first real spell needs" scoping this whole enum's fields already
-    /// follow.
+    /// `excluded_card_types`/`excluded_subtypes`/`excluded_supertypes` (CR
+    /// 601.2c/115/205.4a-b's negated form — "target nonland permanent,"
+    /// "target creature that isn't a Wall," "target nonlegendary creature")
+    /// reject a target whose card types intersect `excluded_card_types`,
+    /// whose subtypes include any of `excluded_subtypes`, or whose
+    /// supertypes intersect `excluded_supertypes` — the negation of the
+    /// positive `card_types`/`subtypes`/`supertypes` checks above, checked
+    /// independently of them (a filter can combine a positive `card_types`
+    /// with an `excluded_subtypes`, e.g. "target creature that isn't a
+    /// Wall").
     Object {
         card_types: Option<CardTypeSet>,
         excluded_card_types: Option<CardTypeSet>,
         subtypes: Option<Vec<Subtype>>,
         excluded_subtypes: Option<Vec<Subtype>>,
         supertypes: Option<SupertypeSet>,
+        excluded_supertypes: Option<SupertypeSet>,
         controller: Option<FilterController>,
         zone: Option<ZoneKind>,
     },

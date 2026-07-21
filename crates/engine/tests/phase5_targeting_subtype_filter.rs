@@ -79,7 +79,7 @@ fn human_bolt_definition() -> CardDefinition {
             filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: Some(vec![Subtype("Human".to_string())]),
-                supertypes: None,
+                supertypes: None, excluded_supertypes: None,
                 controller: None,
                 zone: None,
             },

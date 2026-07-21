@@ -315,6 +315,11 @@ pub struct TargetRequirementSpec {
     /// CR 205.4a — e.g. `["Legendary"]` for "target legendary creature".
     #[serde(default)]
     pub supertypes: Vec<String>,
+    /// CR 601.2c/115/205.4a's negated form — e.g. `["Legendary"]` for
+    /// "target nonlegendary creature". See `TargetFilter::Object::
+    /// excluded_supertypes`'s own doc comment.
+    #[serde(default)]
+    pub excluded_supertypes: Vec<String>,
     #[serde(default)]
     pub controller: Option<String>,
     #[serde(default)]
@@ -997,6 +1002,8 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
             excluded_subtypes: (!spec.excluded_subtypes.is_empty())
                 .then(|| spec.excluded_subtypes.iter().cloned().map(Subtype).collect()),
             supertypes: (!spec.supertypes.is_empty()).then(|| parse_supertypes(&spec.supertypes)),
+            excluded_supertypes: (!spec.excluded_supertypes.is_empty())
+                .then(|| parse_supertypes(&spec.excluded_supertypes)),
             controller: spec.controller.as_deref().map(parse_filter_controller),
             zone: spec.zone.as_deref().map(parse_zone_kind),
         },

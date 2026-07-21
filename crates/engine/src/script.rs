@@ -2004,12 +2004,29 @@ fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError>
                 None => None,
             };
 
+            // CR 601.2c/115/205.4a's negated form - "target nonlegendary
+            // creature," same shape/table key `supertypes` just above uses.
+            let excluded_supertypes_table: Option<Table> =
+                table.get("excluded_supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let excluded_supertypes = match excluded_supertypes_table {
+                Some(t) => {
+                    let mut set = SupertypeSet::empty();
+                    for entry in t.sequence_values::<String>() {
+                        let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                        set |= parse_supertype_name(&name)?;
+                    }
+                    Some(set)
+                }
+                None => None,
+            };
+
             Ok(TargetFilter::Object {
                 card_types,
                 excluded_card_types,
                 subtypes,
                 excluded_subtypes,
                 supertypes,
+                excluded_supertypes,
                 controller,
                 zone: None,
             })
