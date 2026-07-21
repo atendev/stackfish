@@ -62,6 +62,21 @@ pub enum LegendRuleChoiceError {
     InvalidCandidate,
 }
 
+/// Why `submit_attach_choice` rejected an answer to a CR 303.4d "an Aura
+/// can't enchant more than one object or player" choice. Dormant as of
+/// this slice — no effect in this engine ever computes more than one
+/// simultaneous attach candidate for one Aura (see `commands::propose_attach`'s
+/// own doc comment), so this pause is only ever reached by a test
+/// constructing `ProcessState::AwaitingAttachChoice` directly, not through
+/// real gameplay.
+#[derive(Debug)]
+pub enum AttachChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingAttachChoice`.
+    NotAwaitingChoice,
+    /// `chosen` wasn't one of the offered `candidates`.
+    InvalidCandidate,
+}
+
 /// Why `submit_commander_return_choice` rejected an answer to a CR 903.9a
 /// commander-return choice.
 #[derive(Debug)]
@@ -276,6 +291,15 @@ pub enum StepStatus {
     /// point" rationale as `AwaitingReplacementChoice`/
     /// `AwaitingLegendRuleChoice`.
     AwaitingCommanderReturnChoice { player: PlayerId, commander: ObjectId },
+    /// CR 303.4d: `commands::propose_attach` found more than one candidate
+    /// for a single Aura's attachment at once — `aura`'s controller
+    /// (`player`) must choose which of `candidates` it becomes attached to,
+    /// then call `submit_attach_choice`. Dormant as of this slice (see
+    /// `AttachChoiceError`'s own doc comment) — no real effect in this
+    /// engine ever produces more than one simultaneous candidate, so this
+    /// is only ever reached by directly constructing
+    /// `ProcessState::AwaitingAttachChoice`.
+    AwaitingAttachChoice { player: PlayerId, aura: ObjectId, candidates: Vec<ObjectId> },
     /// Backlog item 9: a card script (via `Game.SelectTargets`) yielded
     /// mid-resolution, asking `player` to choose a real target matching
     /// `request` before the operation can finish — the caller should prompt
@@ -529,6 +553,14 @@ pub enum ProcessState {
     /// exile, not yet offered the "may return" choice. `then` plays the
     /// same role it does on `AwaitingLegendRuleChoice` above.
     AwaitingCommanderReturnChoice { player: PlayerId, commander: ObjectId, then: SbaResumeThen },
+    /// CR 303.4d: paused because `commands::propose_attach` found more than
+    /// one simultaneous candidate for a single Aura's attachment. No `then`
+    /// continuation, unlike `AwaitingLegendRuleChoice`/
+    /// `AwaitingCommanderReturnChoice` above — there's no real producer to
+    /// dictate which pipeline this resumes into (see `AttachChoiceError`'s
+    /// own doc comment), so `submit_attach_choice` resumes to the generic
+    /// `PriorityWindow` once the chosen candidate is attached.
+    AwaitingAttachChoice { aura: ObjectId, controller: PlayerId, candidates: Vec<ObjectId> },
     /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
     /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —
     /// `thread`/`request` are the suspended coroutine's own handle and its
@@ -1226,6 +1258,30 @@ impl Engine {
             .map(|id| sba::DyingCandidate { id, is_destroy: false })
             .collect();
         self.process_state = self.resume_sba_death(losers, Vec::new(), Vec::new(), then);
+        Ok(())
+    }
+
+    /// Answers a pending CR 303.4d attach choice raised by
+    /// `StepStatus::AwaitingAttachChoice` — `chosen` must be one of that
+    /// status's `candidates`. Dormant as of this slice (see
+    /// `AttachChoiceError`'s own doc comment) — nothing in real gameplay
+    /// reaches this pause yet, so `resume`s to the generic `PriorityWindow`
+    /// rather than a specific continuation, unlike `submit_legend_rule_choice`/
+    /// `submit_commander_return_choice`'s `SbaResumeThen` (there's no real
+    /// pipeline stage to hand back to).
+    pub fn submit_attach_choice(&mut self, chosen: ObjectId) -> Result<(), AttachChoiceError> {
+        let ProcessState::AwaitingAttachChoice { candidates, .. } = &self.process_state else {
+            return Err(AttachChoiceError::NotAwaitingChoice);
+        };
+        if !candidates.contains(&chosen) {
+            return Err(AttachChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingAttachChoice { aura, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        commands::attach_permanent(&mut self.state, aura, chosen);
         Ok(())
     }
 
@@ -3613,6 +3669,16 @@ impl Engine {
                 status
             }
 
+            ProcessState::AwaitingAttachChoice { aura, controller, candidates } => {
+                // Nothing to do until submit_attach_choice answers - same
+                // "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status =
+                    StepStatus::AwaitingAttachChoice { player: controller, aura, candidates: candidates.clone() };
+                self.process_state = ProcessState::AwaitingAttachChoice { aura, controller, candidates };
+                status
+            }
+
             ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far } => {
                 // Nothing to do until submit_script_choice answers - same
                 // "put the exact same state back" pattern every other
@@ -5010,5 +5076,64 @@ mod tests {
 
         let last = engine.state().ledger.last().expect("CommitEvents must have appended the resolved event");
         assert!(matches!(last.kind, GameEventKind::DamageDealt { amount: 0, .. }));
+    }
+
+    // ---------------------------------------------------------------------
+    // CR 303.4d attach choice - dormant as of this slice (see
+    // AttachChoiceError's own doc comment): no real effect in this engine
+    // ever produces more than one simultaneous attach candidate for one
+    // Aura, so - same as AwaitingReplacementChoice's own unit tests above -
+    // these drive the pause by constructing ProcessState::AwaitingAttachChoice
+    // directly rather than through a real card/spell pipeline.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn submit_attach_choice_rejects_invalid_candidate_and_not_awaiting() {
+        let mut engine = Engine::new(minimal_state());
+        let err = engine.submit_attach_choice(ObjectId(0)).unwrap_err();
+        assert!(matches!(err, AttachChoiceError::NotAwaitingChoice));
+
+        engine.process_state = ProcessState::AwaitingAttachChoice {
+            aura: ObjectId(0),
+            controller: PlayerId(0),
+            candidates: vec![ObjectId(1), ObjectId(2)],
+        };
+        let err = engine.submit_attach_choice(ObjectId(99)).unwrap_err();
+        assert!(matches!(err, AttachChoiceError::InvalidCandidate));
+        // A rejected answer must not have consumed the pending state.
+        assert!(matches!(engine.process_state, ProcessState::AwaitingAttachChoice { .. }));
+    }
+
+    #[test]
+    fn attach_choice_surfaces_via_step_and_a_valid_answer_attaches_and_resumes() {
+        let p0 = PlayerId(0);
+        let aura = ObjectId(0);
+        let candidate_a = ObjectId(1);
+        let candidate_b = ObjectId(2);
+        let mut state = minimal_state();
+        state.objects.insert(aura, dummy_object(aura, p0));
+        state.objects.insert(candidate_a, dummy_object(candidate_a, p0));
+        state.objects.insert(candidate_b, dummy_object(candidate_b, p0));
+
+        let mut engine = Engine::new(state);
+        engine.process_state = ProcessState::AwaitingAttachChoice {
+            aura,
+            controller: p0,
+            candidates: vec![candidate_a, candidate_b],
+        };
+
+        let status = engine.step().status;
+        let StepStatus::AwaitingAttachChoice { player, aura: paused_aura, candidates } = status else {
+            panic!("expected AwaitingAttachChoice, got {status:?}");
+        };
+        assert_eq!(player, p0);
+        assert_eq!(paused_aura, aura);
+        assert_eq!(candidates, vec![candidate_a, candidate_b]);
+
+        engine.submit_attach_choice(candidate_a).expect("candidate_a is a real candidate");
+        assert!(matches!(engine.process_state, ProcessState::PriorityWindow));
+        assert_eq!(engine.state().object(aura).unwrap().attached_to, Some(candidate_a));
+        assert!(engine.state().object(candidate_a).unwrap().attachments.contains(&aura));
+        assert!(!engine.state().object(candidate_b).unwrap().attachments.contains(&aura));
     }
 }

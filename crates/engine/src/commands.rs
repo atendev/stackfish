@@ -672,6 +672,56 @@ pub(crate) fn attach_permanent(state: &mut GameState, attaching_id: ObjectId, ta
     }
 }
 
+/// `propose_attach`'s result: what to do with `candidates` for one Aura's
+/// attachment.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AttachProposal {
+    /// No candidate at all - nothing to attach (CR 303.4g/i: an Aura with no
+    /// legal object/player stays wherever it is, or goes to the graveyard if
+    /// it was on the stack - `propose_attach` itself doesn't perform either,
+    /// the caller still owns that decision).
+    None,
+    /// Exactly one candidate - attach immediately, no choice needed.
+    Attach(ObjectId),
+    /// CR 303.4d: more than one simultaneous candidate for the same Aura -
+    /// its controller must choose which one it becomes attached to.
+    NeedsChoice(Vec<ObjectId>),
+}
+
+/// CR 303.4d's third clause: "An Aura can't enchant more than one object or
+/// player. If a spell or ability would cause an Aura to become attached to
+/// more than one object or player, the Aura's controller chooses which
+/// object or player it becomes attached to." A pure decision function over
+/// however many candidates the caller computed - `attach_permanent` itself
+/// stays single-target (it always did; `GameObject.attached_to` is a plain
+/// `Option<ObjectId>`, not a set, so there's no way to represent "attached
+/// to two things" even transiently).
+///
+/// Dormant as of this slice: no effect, spell, or ability in this engine
+/// ever computes more than one simultaneous attach candidate for one Aura -
+/// both real call sites (`ResolveStackTop`'s Aura-ETB-attach, `Equip`'s own
+/// resolution) already narrow to a single legal target via `TargetRequirement
+/// { count: 1 }` before this would ever run. This function exists so the
+/// rule is genuinely enforced *if* a future effect ever produces multiple
+/// candidates, not because anything does today - exercised in
+/// `phase5_aura_attach_choice.rs` by calling it directly with a
+/// hand-built candidate list, the same "no real producer, tested by direct
+/// construction" precedent `ProcessState::AwaitingAttachChoice` documents at
+/// its own definition.
+///
+/// Player candidates (CR 303.4b: an Aura can also enchant a player) are out
+/// of scope - `attached_to`/`attach_permanent` are `ObjectId`-only, since
+/// this engine has no support at all yet for an Aura enchanting a player, a
+/// separate and larger pre-existing gap. `candidates` here is therefore
+/// object ids only.
+pub fn propose_attach(candidates: &[ObjectId]) -> AttachProposal {
+    match candidates {
+        [] => AttachProposal::None,
+        [only] => AttachProposal::Attach(*only),
+        _ => AttachProposal::NeedsChoice(candidates.to_vec()),
+    }
+}
+
 pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<RegisteredAbility> {
     let removed = state.objects.remove(&old_id);
     // CR 303.4b/301.5a: if old_id was itself attached to something (an Aura/
