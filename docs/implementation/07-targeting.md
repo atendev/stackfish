@@ -174,7 +174,7 @@
   - "N or more" counts, negative filters, multi-target-word spells, no Lua builder path for a
     spell's own `target_requirement` — all still open, unchanged by this slice.
 
-## Slice: target-count-at-least (implemented, not yet merged)
+## Slice: target-count-at-least (merged)
 
 - Branch `phase5/target-count-at-least`.
 - Scope: CR 601.2c/115.6 "N or more" target counts — `TargetRequirement`'s third count shape
