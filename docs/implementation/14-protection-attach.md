@@ -34,12 +34,54 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
   then dies in the same pass). CR 303.4e (only the Aura's own controller activates its own
   ability) was already correct by construction - `ActivateAbility`'s actor check reads the
   ability's registered source's controller, which is the Aura itself for the Aura's own ability -
-  confirmed by a regression test, no code change needed. Still open: CR 303.4d's "can't enchant
-  more than one object" clause (no attach call site can attempt that), CR 303.4f/g/h/i (a
-  permanent entering the battlefield pre-attached by a non-casting, non-equip-activation effect -
+  confirmed by a regression test, no code change needed. CR 303.4d's third clause ("can't enchant
+  more than one object" - if a spell/ability would cause that, the Aura's controller picks which
+  one) is real now too (`phase5/aura-attach-choice`, see that slice's own note below) - **dormant**,
+  since no attach call site can produce multiple simultaneous candidates. Still open: CR 303.4f/g/h/i
+  (a permanent entering the battlefield pre-attached by a non-casting, non-equip-activation effect -
   no such effect exists in this engine yet), CR 303.4k (morph - no face-down mechanic exists), and
   CR 303.4m ("the enchanted X" as a script reference - no such reference plumbing exists yet,
   Aura-specific or generic).
+
+## Slice: aura-attach-choice (implemented, not yet merged)
+
+- Branch `phase5/aura-attach-choice`.
+- Scope: CR 303.4d's third clause - "An Aura can't enchant more than one object or player. If a
+  spell or ability would cause an Aura to become attached to more than one object or player, the
+  Aura's controller chooses which object or player it becomes attached to." The last open piece of
+  CR 303.4d, deferred by `phase5/aura-self-enchant` since it needed a "player picks one of several
+  candidates" mechanism rather than another SBA scan.
+- Verify: 3 new tests (`phase5_aura_attach_choice.rs`, external - `propose_attach` is `pub`) + 2 new
+  tests inside `engine.rs`'s own `#[cfg(test)] mod tests` (the pause/resume half, since
+  `process_state` is a private field), full workspace suite green.
+- **Explicitly dormant**: no effect, spell, or ability anywhere in this engine ever computes more
+  than one simultaneous attach candidate for one Aura - both real attach call sites
+  (`ResolveStackTop`'s Aura-ETB-attach, `Equip`'s own resolution) already narrow to a single legal
+  target via `TargetRequirement { count: 1 }` before this logic would ever run. This was a deliberate
+  choice, confirmed with the user before building: the rule is genuinely possible in real Magic (some
+  future redirect/duplicate-attachment effect could trigger it) even though nothing in this codebase
+  produces the precondition today, so the machinery is built for real but only exercised by direct
+  construction, not through any real card/spell pipeline.
+- Key changes:
+  - `commands::propose_attach(candidates: &[ObjectId]) -> AttachProposal` - pure decision function:
+    0 candidates -> `None`, 1 -> `Attach(id)` (no choice needed), 2+ -> `NeedsChoice(candidates)`.
+    `attach_permanent` itself stays single-target, unchanged - `GameObject.attached_to` is a plain
+    `Option<ObjectId>`, not a set, so "attached to two things" was never representable even
+    transiently.
+  - `ProcessState::AwaitingAttachChoice { aura, controller, candidates }` /
+    `StepStatus::AwaitingAttachChoice { player, aura, candidates }` - same "put the exact state back
+    until answered" idiom every other choice-pause (`AwaitingLegendRuleChoice` etc.) already uses.
+  - `Engine::submit_attach_choice(chosen) -> Result<(), AttachChoiceError>` - validates `chosen` is
+    one of the offered candidates, then calls `attach_permanent` and resumes to the generic
+    `PriorityWindow` (no `SbaResumeThen`-style continuation, unlike legend-rule/commander-return -
+    there's no real pipeline stage to hand back to since nothing produces this pause yet).
+  - `crates/scenario/src/lib.rs`'s `drain` match gained the new `StepStatus` arm (mechanical,
+    compiler-forced by the new non-exhaustive variant).
+- Scoping notes: player candidates (CR 303.4b: an Aura can enchant a player too) are out of scope -
+  `attached_to`/`attach_permanent` are `ObjectId`-only, since this engine has no support at all yet
+  for an Aura enchanting a player (a separate, larger, pre-existing gap, not touched here).
+- Unresolved: CR 303.4f/g/h/i, CR 303.4k, CR 303.4m (see the note above, unchanged by this slice);
+  player-candidate attach choice (blocked on the pre-existing Aura-enchants-a-player gap).
 
 ## Equipment / Equip (CR 702.6)
 
