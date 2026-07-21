@@ -163,6 +163,7 @@ fn all_pass_with_nonempty_stack_resolves_top_instead_of_advancing_step() {
         kind: StackEntryKind::Spell,
         source: stack_id,
         source_lki: None,
+        owner: PlayerId(0),
         controller: PlayerId(0),
         chosen_modes: Vec::new(),
         targets: Vec::new(),

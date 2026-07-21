@@ -9,6 +9,7 @@ use crate::types::counter::CounterKind;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
+use crate::types::stack::StackEntryKind;
 use crate::types::zone::ZoneKind;
 
 /// What one `check_state_based_actions` pass produced.
@@ -361,9 +362,24 @@ fn remove_players_objects(state: &mut GameState, player: PlayerId) {
         commands::retire_object(state, id);
     }
 
-    let stack_ids: Vec<ObjectId> =
-        state.stack.iter().filter(|so| so.controller == player).map(|so| so.stack_id).collect();
-    state.stack.retain(|so| so.controller != player);
+    // CR 800.4a: "all objects owned by that player leave the game" removes
+    // an owned spell (a spell is represented by a card, so it's caught by
+    // ownership, same as everything else this function purges by owner
+    // above) regardless of who's controlling it; "then, if that player
+    // controlled any objects on the stack not represented by cards [i.e.
+    // abilities], those objects cease to exist" is a second, narrower
+    // clause that only reaches abilities, by controller. `StackEntryKind::
+    // Copy` isn't constructed anywhere in this engine yet (no spell-copy
+    // effect exists) - once one does, a copy is also "not represented by a
+    // card" and would need the controller-side clause too, not just Spell's
+    // owner-side one.
+    let stack_ids: Vec<ObjectId> = state
+        .stack
+        .iter()
+        .filter(|so| so.owner == player || (so.controller == player && !matches!(so.kind, StackEntryKind::Spell)))
+        .map(|so| so.stack_id)
+        .collect();
+    state.stack.retain(|so| !stack_ids.contains(&so.stack_id));
     for id in stack_ids {
         commands::retire_object(state, id);
     }

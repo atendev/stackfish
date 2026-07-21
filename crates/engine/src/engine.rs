@@ -3847,10 +3847,20 @@ impl Engine {
                         // fixed/no-choice target) so ResolveStackTop's CR
                         // 608.2b recheck applies uniformly regardless of
                         // StackEntryKind.
+                        // CR 800.4a: the source's own current owner when
+                        // it's still live; `PendingTrigger` has no
+                        // last-known-owner of its own for the departed-
+                        // source case (a Dies/LeavesBattlefield trigger),
+                        // so that narrow case falls back to `controller` -
+                        // same proxy this field replaces everywhere else,
+                        // now scoped to just this one gap.
+                        let source_owner =
+                            self.state.object(trigger.source).map(|o| o.owner).unwrap_or(trigger.controller);
                         self.state.stack.push(StackObject::new(
                             stack_id,
                             StackEntryKind::TriggeredAbility,
                             trigger.source,
+                            source_owner,
                             trigger.controller,
                             Vec::new(),
                             Vec::new(),

@@ -436,6 +436,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
         kind: StackEntryKind::Spell,
         source: already_on_stack,
         source_lki: None,
+        owner: p0,
         controller: p0,
         chosen_modes: Vec::new(),
         targets: Vec::new(),

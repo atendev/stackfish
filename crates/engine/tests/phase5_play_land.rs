@@ -297,6 +297,7 @@ fn play_land_rejects_nonempty_stack() {
         kind: StackEntryKind::Spell,
         source: ObjectId(99),
         source_lki: None,
+        owner: p0,
         controller: p0,
         chosen_modes: Vec::new(),
         targets: Vec::new(),

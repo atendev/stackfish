@@ -22,6 +22,18 @@
   - Remove eliminated player's objects per CR 800.4a; purge via `retire_object`.
   - Gate on `turn_order.len() >= 2` to protect solo fixtures.
 
+## Slice: stack-owner-and-dead-stubs (implemented, not yet merged)
+
+- Branch `phase5/stack-owner-and-dead-stubs`.
+- Scope: backlog items "Stack owner" and "Dead Phase-3 stubs" - two small, unrelated fixes bundled as one cleanup slice.
+- Verify: 3 new tests (stack cleanup), full workspace suite green.
+- Key changes:
+  - `StackObject::owner: PlayerId` added alongside the pre-existing `controller` - a spell's is its card's owner, an ability's is its source permanent's owner (falls back to `controller` only for a departed trigger source with no live object left to read - `PendingTrigger` has no last-known-owner of its own).
+  - `sba::remove_players_objects`'s stack cleanup now matches CR 800.4a's actual two-clause text: a spell (represented by a card) leaves the stack by *owner*; an ability (not represented by a card) leaves by *controller*. Previously both used `controller` as a proxy for both.
+  - Removed, not implemented (confirmed zero real callers each): `Subtype::new`/`as_str`, `CardDefinition::has_type`/`has_supertype`/`has_subtype` (plus the `CardType`/`Supertype` enums that existed only to serve those methods), `ManaCost::from_symbols`/`from_pool`/`is_empty`/`generic_total`, `ManaPool::empty`/`add`/`total`/`clear`.
+- Unresolved:
+  - `StackEntryKind::Copy` is still never constructed anywhere (no spell-copy effect exists) - once one does, a copy is "not represented by a card" too and would need the controller-side cleanup clause, not the owner-side one `Spell` gets.
+
 ## Slice: commander-marking-and-casting (merged)
 
 - Branch `phase5/commander-marking-and-casting`.

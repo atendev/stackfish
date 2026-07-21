@@ -19,6 +19,19 @@ pub struct StackObject {
     /// Last-known-information snapshot, captured if `source` may leave the
     /// zone it was in before this resolves (CR 608.2b).
     pub source_lki: Option<GameObject>,
+    /// CR 800.4a: the *owner* of whatever this object represents - a
+    /// spell's is its card's own `GameObject::owner` (independent of who's
+    /// casting it, e.g. a stolen creature's spell still owed to its
+    /// original owner - not applicable in this engine yet since nothing
+    /// grants "cast a card you don't own," but the field is correct
+    /// regardless); an ability's is its source permanent's owner, not its
+    /// controller (which may differ under a `GainControl` effect). Distinct
+    /// from `controller` below - CR 800.4a removes owned objects (including
+    /// spells, which are cards) when their owner leaves the game, but only
+    /// removes an *ability* (not represented by a card) when its
+    /// *controller* leaves - see `sba::remove_players_objects`'s own stack
+    /// cleanup for where that distinction actually matters.
+    pub owner: PlayerId,
     pub controller: PlayerId,
     pub chosen_modes: Vec<u32>,
     pub targets: Vec<Target>,
@@ -74,6 +87,7 @@ impl StackObject {
         stack_id: ObjectId,
         kind: StackEntryKind,
         source: ObjectId,
+        owner: PlayerId,
         controller: PlayerId,
         chosen_modes: Vec<u32>,
         targets: Vec<Target>,
@@ -92,6 +106,7 @@ impl StackObject {
             // might actually leave its zone before this resolves (CR
             // 608.2b), which is a later mutation, not part of building this.
             source_lki: None,
+            owner,
             controller,
             chosen_modes,
             targets,

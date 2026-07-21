@@ -108,33 +108,6 @@ pub struct ManaCost {
 }
 
 impl ManaCost {
-    pub fn from_symbols(symbols: Vec<ManaSymbol>) -> Self {
-        // TODO: ManaCost { symbols }.
-        todo!()
-    }
-
-    pub fn from_pool(pool: &ManaPool) -> Self {
-        // TODO: one Atom(Colored(_))/Atom(Colorless) symbol per unit of
-        // mana actually present in pool (e.g. pool.white=2 -> two
-        // Atom(Colored(White)) symbols) — this represents floating mana as
-        // a cost shape, used wherever something needs to compare/describe
-        // pool contents using ManaCost's vocabulary.
-        todo!()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        // TODO: self.symbols.is_empty().
-        todo!()
-    }
-
-    /// Sum of all `Generic`/numeric components. Doesn't include colored or
-    /// `X` symbols.
-    pub fn generic_total(&self) -> u32 {
-        // TODO: sum Generic(n) across self.symbols (Atom and inside Hybrid
-        // pairs both count, e.g. {2/W} contributes 2 if paid generically).
-        todo!()
-    }
-
     /// Union of colors across all symbols (CR 202.2).
     pub fn colors(&self) -> ColorSet {
         self.symbols.iter().fold(ColorSet::empty(), |acc, s| acc | s.colors())
@@ -445,31 +418,6 @@ impl ManaPool {
         }
     }
 
-    pub fn empty() -> Self {
-        // TODO: all fields zero.
-        todo!()
-    }
-
-    pub fn add(&mut self, symbol: AtomicManaSymbol, amount: u32) {
-        // TODO: match symbol: Colored(c) -> add amount to the matching
-        // field; Colorless -> add to colorless; Generic/Snow/Phyrexian
-        // aren't valid things to *add* to a pool (you add the colors mana
-        // resolves to, not a cost shape) — decide whether to panic or be
-        // unreachable for those once callers exist.
-        todo!()
-    }
-
-    /// Total mana of any type/color currently floating.
-    pub fn total(&self) -> u32 {
-        // TODO: sum all six fields.
-        todo!()
-    }
-
-    /// Cleared at the end of each step/phase per CR 106.4.
-    pub fn clear(&mut self) {
-        // TODO: set all six fields to 0.
-        todo!()
-    }
 }
 
 #[cfg(test)]

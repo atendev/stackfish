@@ -1407,6 +1407,9 @@ pub fn execute_command(
                 new_id,
                 StackEntryKind::Spell,
                 new_id,
+                // CR 800.4a: a spell's owner is its card's own owner, not
+                // necessarily whoever is casting it.
+                last_known_info.owner,
                 command.actor,
                 modes,
                 targets,
@@ -1460,6 +1463,10 @@ pub fn execute_command(
             }
 
             let source_object = state.object(source).ok_or(CommandError::InvalidTarget)?;
+            // CR 800.4a: an ability's owner is its source permanent's owner,
+            // not its (possibly `GainControl`'d) controller - captured now,
+            // this borrow doesn't survive past this statement.
+            let source_owner = source_object.owner;
             // CR 602.2a: only the source's *current* controller may activate
             // it - layers::effective_controller, not the raw field, so a
             // GainControl'd permanent's abilities follow its new controller.
@@ -1677,6 +1684,7 @@ pub fn execute_command(
                         stack_id,
                         StackEntryKind::ActivatedAbility,
                         source,
+                        source_owner,
                         command.actor,
                         // TODO: no modes/X value on activated abilities yet.
                         Vec::new(),
