@@ -3,25 +3,34 @@
 //! same shape gap `KeywordSet::BANDING`'s own doc comment documents for
 //! Landwalk - and isn't modeled).
 //!
-//! Three real pieces:
+//! Four real pieces:
 //! - CR 508.1e/702.22c/d: `PlayerActionKind::DeclareBands` groups just-
 //!   declared attackers into `CombatState::bands`, validated (>=1 banding
 //!   member, <=1 non-banding member, everyone shares one attack target).
 //! - CR 702.22h: `DeclareBlockers` propagates a direct block onto every
 //!   other band member, bypassing every other evasion/protection check -
 //!   even a member that couldn't legally be blocked on its own.
-//! - CR 702.22k: a blocker forced onto 2+ attackers by that propagation
-//!   needs the same kind of chosen split `AssignCombatDamage` already
-//!   required attacker-side (2+ blockers) - generalized rather than
-//!   duplicated, no "spill to the player" carve-out since a blocker has no
-//!   such outlet.
+//! - CR 702.22j/k (`phase5/banding-split-actor`): who chooses a combat
+//!   damage split is no longer hardcoded to the active player.
+//!   `AssignCombatDamage` now computes a required chooser per split id -
+//!   the object's own controller by default (510.1c/d), flipped to the
+//!   *other* side when a `BANDING` creature is involved in that particular
+//!   block (702.22j: attacker blocked by a banding creature -> defending
+//!   player; 702.22k: blocker blocking a banding creature -> active
+//!   player). 702.22k's blocker-forced-multi-block case was already
+//!   correct before this slice, but only by accident: every band needs
+//!   >=1 banding member, so the old blanket-active-player hardcode always
+//!   happened to match.
 //!
 //! Deliberately unmodeled, named rather than guessed at: CR 702.22i
 //! (effect-triggered blocking propagation - no such effect exists yet in
-//! this engine) and CR 702.22j (the defending player, not the active
-//! player, chooses an attacker's split when it's blocked by a banding
-//! creature - `AssignCombatDamage`'s actor is hardcoded to the active
-//! player, a known deviation, see that action's own doc comment).
+//! this engine), the "bands with other [quality]" variant (needs a
+//! parameter, same gap `KeywordSet::BANDING`'s own doc comment names for
+//! Landwalk), and a combat damage step that needs splits chosen by *two
+//! different* players at once (e.g. a plain multi-block plus a separate
+//! banding-blocked attacker, simultaneously) - `AssignCombatDamage` rejects
+//! that combination outright rather than attempting a two-phase
+//! per-player submission, see that action's own doc comment.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -349,4 +358,116 @@ fn a_band_forced_blocker_must_split_its_damage_among_both_attackers() {
 
     let status = assign_combat_damage(&mut engine, p0, vec![(blocker, vec![(a, 3), (b, 1)])]);
     assert!(!matches!(status, StepStatus::Error(_)), "expected the split to be accepted, got {status:?}");
+}
+
+// ---------------------------------------------------------------------
+// CR 702.22j: an attacker blocked by a banding creature has its split
+// chosen by the defending player, not the active player.
+// ---------------------------------------------------------------------
+
+#[test]
+fn attacker_double_blocked_by_a_banding_creature_needs_the_defending_players_choice() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let bander = ObjectId(1);
+    let plain = ObjectId(2);
+
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Attacker", 4, 4, KeywordSet::empty()), p0));
+    put_on_battlefield(&mut state, permanent(bander, creature_definition(2, "Bander", 1, 5, KeywordSet::BANDING), p1));
+    put_on_battlefield(&mut state, permanent(plain, creature_definition(3, "Plain", 1, 5, KeywordSet::empty()), p1));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    pass_to_step(&mut engine, Step::DeclareBlockers);
+    declare_blockers(&mut engine, p1, vec![(bander, attacker), (plain, attacker)]);
+    pass_to_step(&mut engine, Step::CombatDamage);
+
+    // The active player no longer gets to choose this split - one of the
+    // attacker's blockers has banding.
+    assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(bander, 2), (plain, 2)])]));
+
+    let status = assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(bander, 2), (plain, 2)])]);
+    assert!(!matches!(status, StepStatus::Error(_)), "expected the defending player's split to be accepted, got {status:?}");
+}
+
+#[test]
+fn trampler_blocked_by_a_single_banding_creature_still_needs_the_defending_players_choice() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let bander = ObjectId(1);
+
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Trampler", 5, 5, KeywordSet::TRAMPLE), p0));
+    put_on_battlefield(&mut state, permanent(bander, creature_definition(2, "Bander", 1, 2, KeywordSet::BANDING), p1));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    pass_to_step(&mut engine, Step::DeclareBlockers);
+    declare_blockers(&mut engine, p1, vec![(bander, attacker)]);
+    pass_to_step(&mut engine, Step::CombatDamage);
+
+    // A single blocker with trample still needs a chosen lethal-vs-excess
+    // split (CR 702.19b) - and per 702.22j it's the defending player's
+    // choice here, since the lone blocker has banding.
+    assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(bander, 2)])]));
+
+    let status = assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(bander, 2)])]);
+    assert!(!matches!(status, StepStatus::Error(_)), "expected the defending player's split (2 lethal, 3 trampling) to be accepted, got {status:?}");
+}
+
+// ---------------------------------------------------------------------
+// A damage step needing splits chosen by two different players at once
+// isn't supported - rejected outright rather than silently letting one
+// player choose for both.
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_damage_step_needing_two_different_choosers_at_once_is_rejected() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let plain_attacker = ObjectId(0);
+    let plain_blocker_a = ObjectId(1);
+    let plain_blocker_b = ObjectId(2);
+    let banded_attacker = ObjectId(3);
+    let bander = ObjectId(4);
+
+    let mut state = combat_state();
+    put_on_battlefield(
+        &mut state,
+        permanent(plain_attacker, creature_definition(1, "PlainAttacker", 4, 4, KeywordSet::empty()), p0),
+    );
+    put_on_battlefield(&mut state, permanent(plain_blocker_a, creature_definition(2, "BlockerA", 1, 5, KeywordSet::empty()), p1));
+    put_on_battlefield(&mut state, permanent(plain_blocker_b, creature_definition(3, "BlockerB", 1, 5, KeywordSet::empty()), p1));
+    put_on_battlefield(
+        &mut state,
+        permanent(banded_attacker, creature_definition(4, "BandedAttacker", 4, 4, KeywordSet::empty()), p0),
+    );
+    put_on_battlefield(&mut state, permanent(bander, creature_definition(5, "Bander", 1, 5, KeywordSet::BANDING), p1));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(
+        &mut engine,
+        p0,
+        vec![(plain_attacker, Target::Player(p1)), (banded_attacker, Target::Player(p1))],
+    );
+    pass_to_step(&mut engine, Step::DeclareBlockers);
+    declare_blockers(
+        &mut engine,
+        p1,
+        vec![(plain_blocker_a, plain_attacker), (plain_blocker_b, plain_attacker), (bander, banded_attacker)],
+    );
+    pass_to_step(&mut engine, Step::CombatDamage);
+
+    let assignments = vec![
+        (plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)]),
+        (banded_attacker, vec![(bander, 4)]),
+    ];
+    // Neither player can submit this in one shot - the two splits need
+    // different choosers (active player for the plain double-block,
+    // defending player for the banding-blocked one).
+    assert_illegal(assign_combat_damage(&mut engine, p0, assignments.clone()));
+    assert_illegal(assign_combat_damage(&mut engine, p1, assignments));
 }

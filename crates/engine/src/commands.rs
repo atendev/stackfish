@@ -2347,13 +2347,11 @@ pub fn execute_command(
         }
         PlayerActionKind::AssignCombatDamage { assignments } => {
             // CR 510.1/509.1's turn-based-action shape, same as
-            // DeclareAttackers/DeclareBlockers: active player only, only
-            // during the combat damage step.
-            if command.actor != state.active_player {
-                return Err(CommandError::IllegalAction(
-                    "only the active player assigns combat damage".to_string(),
-                ));
-            }
+            // DeclareAttackers/DeclareBlockers: only during the combat
+            // damage step. Which player is allowed to be `command.actor`
+            // is resolved further down, once we know which splits (if any)
+            // this step actually needs - see the "required chooser" block
+            // below `requires_assignment`.
             if state.phase != Phase::Combat
                 || !matches!(state.step, Step::CombatDamage | Step::FirstStrikeDamage)
             {
@@ -2470,6 +2468,69 @@ pub fn execute_command(
             requires_assignment.extend(
                 attackers_by_blocker.iter().filter(|(_, attackers)| attackers.len() >= 2).map(|(blocker, _)| *blocker),
             );
+
+            // CR 510.1c/d: a split is chosen by the object's own controller
+            // by default - attacker splits by the attacker's controller,
+            // blocker splits by the blocker's controller. CR 702.22j/k flip
+            // that per-id when a `BANDING` creature is on the *other* side
+            // of that particular block: an attacker blocked by a banding
+            // creature has its split chosen by the defending player instead
+            // (702.22j); a blocker blocking a banding creature has its
+            // split chosen by the active player instead (702.22k - this
+            // also covers the pre-existing band-forced-blocker case for
+            // real now, rather than by the old blanket-active-player
+            // hardcode's accident: every band needs >=1 banding member, so
+            // a band-forced blocker split was always going to resolve to
+            // "active player" here anyway).
+            let attacker_defending_player = |attacker: &ObjectId| -> PlayerId {
+                let (_, target) =
+                    combat.attackers.iter().find(|(id, _)| id == attacker).expect("attacker is attacking");
+                match target {
+                    Target::Player(pid) => *pid,
+                    Target::Object(target_id) => crate::layers::effective_controller(state, script_runtime, *target_id),
+                }
+            };
+            let mut required_actors: HashSet<PlayerId> = HashSet::new();
+            for id in &requires_assignment {
+                let actor = if let Some(blockers) = blockers_by_attacker.get(id) {
+                    let banding_blocker = blockers
+                        .iter()
+                        .any(|b| effective_keywords(state, script_runtime, *b).contains(KeywordSet::BANDING));
+                    if banding_blocker {
+                        attacker_defending_player(id)
+                    } else {
+                        crate::layers::effective_controller(state, script_runtime, *id)
+                    }
+                } else {
+                    let attackers_for_blocker = &attackers_by_blocker[id];
+                    let banding_attacker = attackers_for_blocker
+                        .iter()
+                        .find(|a| effective_keywords(state, script_runtime, **a).contains(KeywordSet::BANDING));
+                    match banding_attacker {
+                        Some(attacker) => crate::layers::effective_controller(state, script_runtime, *attacker),
+                        None => crate::layers::effective_controller(state, script_runtime, *id),
+                    }
+                };
+                required_actors.insert(actor);
+            }
+            if required_actors.len() > 1 {
+                return Err(CommandError::IllegalAction(
+                    "this combat damage step needs splits chosen by two different players at \
+                     once (e.g. a plain multi-block plus a separate banding-blocked attacker) - \
+                     not yet supported, see AssignCombatDamage's own doc comment"
+                        .to_string(),
+                ));
+            }
+            // No split needed at all this step - same turn-based-action
+            // convention DeclareAttackers/DeclareBlockers use, active
+            // player only (matches every pre-existing zero-split test).
+            let required_actor = required_actors.into_iter().next().unwrap_or(state.active_player);
+            if command.actor != required_actor {
+                return Err(CommandError::IllegalAction(
+                    "actor is not the player who chooses this combat damage step's split(s)"
+                        .to_string(),
+                ));
+            }
 
             // CR 510.1e atomicity: `assignments` must cover exactly the
             // set that needs one - no extra (nothing to split for an
