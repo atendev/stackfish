@@ -7,11 +7,12 @@
 //! path — the prior slice's TODO comments overstated a blocker that didn't
 //! actually apply here (see docs/implementation.md).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use stackfish_engine::commands::CommandError as EngineCommandError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
 
 fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -37,51 +38,13 @@ fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId, controlled_since_turn: u32) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    GameObject { controlled_since_turn, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
     state.objects.insert(id, object);
-}
-
-fn player_state(id: PlayerId) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life: 20,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
 }
 
 /// Two players, `p0` active/attacking, `p1` defending, `Phase::Combat`/
@@ -91,33 +54,10 @@ fn combat_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![player_state(p0), player_state(p1)],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
         phase: Phase::Combat,
         step: Step::DeclareAttackers,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
-        objects: HashMap::new(),
-        zones: vec![Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() }],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
+        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield]))
     }
 }
 
@@ -128,16 +68,6 @@ fn combat_damage_state(combat: CombatState) -> GameState {
     state.step = Step::CombatDamage;
     state.combat = Some(combat);
     state
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        let result = engine.step();
-        match result.status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
 }
 
 fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
