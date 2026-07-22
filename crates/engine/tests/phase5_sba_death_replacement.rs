@@ -7,12 +7,11 @@
 //! resume target). See docs/implementation.md's
 //! phase5-fix-replacement-bypasses slice notes for the bug this closes.
 
-use std::collections::{HashMap, VecDeque};
-
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
 
 fn creature_definition(toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -38,29 +37,7 @@ fn creature_definition(toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition: creature_definition(toughness),
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    GameObject { damage_marked, ..card_object(id, creature_definition(toughness), owner, ZoneKind::Battlefield) }
 }
 
 fn would_die_exile_effect(source: ObjectId, consumption: ConsumptionPolicy) -> ReplacementEffect {
@@ -92,60 +69,16 @@ fn would_die_command_zone_effect(source: ObjectId) -> ReplacementEffect {
     }
 }
 
-fn player_state(id: PlayerId, life: i32) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
-}
-
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    GameState {
-        players: vec![player_state(p0, 20), player_state(p1, 20)],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        phase: Phase::Main,
-        step: Step::PreCombatMain,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            // Exile is a shared zone (CR 400.10, owner: None).
-            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Command, owner: Some(p0), contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
+    // Graveyard/Command are only needed for p0 here (the dying creature's
+    // controller); Exile is a shared zone (CR 400.10, owner: None).
+    let mut zones = zones(p0, p1, &[ZoneKind::Battlefield]);
+    zones.push(Zone::new(ZoneKind::Graveyard, Some(p0)));
+    zones.push(Zone::new(ZoneKind::Exile, None));
+    zones.push(Zone::new(ZoneKind::Command, Some(p0)));
+    base_two_player_state(zones)
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
@@ -158,48 +91,27 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
 /// replacement effect" - distinct from the dying creature itself, so a test
 /// with two such effects can tell them apart by `ReplacementEffect::source`.
 fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition: CardDefinition {
-            definition_id: 2,
-            name: "Test Shield".to_string(),
-            mana_cost: ManaCost { symbols: Vec::new() },
-            color_indicator: None,
-            supertypes: SupertypeSet::empty(),
-            card_types: CardTypeSet::ARTIFACT,
-            subtypes: Vec::new(),
-            oracle_text: String::new(),
-            power: None,
-            toughness: None,
-            loyalty: None,
-            defense: None,
-            script_ref: ScriptReference::ByKey("test_shield".to_string()),
-            keywords: KeywordSet::empty(),
-            target_requirement: None,
-            alternative_costs: Vec::new(),
-            effect: None,
-            modes: Vec::new(),
-        },
-        owner: controller,
-        controller,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    let definition = CardDefinition {
+        definition_id: 2,
+        name: "Test Shield".to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::ARTIFACT,
+        subtypes: Vec::new(),
+        oracle_text: String::new(),
+        power: None,
+        toughness: None,
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::ByKey("test_shield".to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: None,
+        modes: Vec::new(),
+    };
+    card_object(id, definition, controller, ZoneKind::Battlefield)
 }
 
 // ---------------------------------------------------------------------
@@ -265,15 +177,6 @@ fn two_would_die_replacements_on_the_same_creature_pause_for_an_ordering_choice(
 // SbaLoop, pauses on AwaitingReplacementChoice, and submit_replacement_choice
 // resumes it correctly.
 // ---------------------------------------------------------------------
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
-}
 
 #[test]
 fn engine_pauses_mid_sba_and_resumes_correctly_after_a_replacement_choice() {
