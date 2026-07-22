@@ -15,11 +15,12 @@
 //! shape from `AdvanceTurnStep`) stays out of scope, named as its own
 //! follow-up in this slice's own requirements report.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
 
 fn land_definition(name: &str) -> CardDefinition {
     CardDefinition {
@@ -67,32 +68,6 @@ fn ward_definition(script: &str) -> CardDefinition {
     }
 }
 
-fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
-}
-
 /// Two players, starting mid-Beginning-phase (`Phase::Beginning`/
 /// `Step::Upkeep`, turn 2 so the draw isn't skipped) so a single `pass_both`
 /// reaches `Step::Draw` - mirrors `phase5_draw_combat_end_triggers.rs::
@@ -102,80 +77,16 @@ fn state_at_upkeep_turn_2() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let ward = ObjectId(999);
-    let mut objects = HashMap::new();
-    objects.insert(ward, card_object(ward, ward_definition(""), p0, ZoneKind::Battlefield));
-    GameState {
-        players: vec![
-            PlayerState {
-                player_id: p0,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-            PlayerState {
-                player_id: p1,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-        ],
-        turn_order: vec![p0, p1],
-        active_player: p0,
+    let mut state = GameState {
         turn_number: 2,
         phase: Phase::Beginning,
         step: Step::Upkeep,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
         last_active_turn_number: HashMap::from([(p0, 2), (p1, 1)]),
-        objects,
-        zones: vec![
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Library, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Library, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::from([ward]) },
-            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
+        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Exile]))
+    };
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(ward);
+    state.objects.insert(ward, card_object(ward, ward_definition(""), p0, ZoneKind::Battlefield));
+    state
 }
 
 fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
