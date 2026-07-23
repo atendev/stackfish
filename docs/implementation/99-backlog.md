@@ -3,7 +3,7 @@
 ## Live TODOs / unresolved gaps
 
 - **Layer 2 internal filtering**: `applicable_effects_in_layer`/`applies_to` still read raw `GameObject.controller`, not `effective_controller` — deliberate to avoid recursive layer-2 resolution.
-- **Layer 1 (copy)**: bare copy only; no CR 707.9 exception, no ETB-replacement "enters as copy" path.
+- **Layer 1 (copy)**: CR 707.9's two most common real exceptions are real now (`phase5/copy-exceptions`) — `CopyExceptions { set_power_toughness, add_keywords }`, applied to the snapshot by both `AbilityEffect::BecomeCopy` and `TokenSpec::CopyOf` before it's frozen. Still unmodeled: CR 707.9c (characteristics not copied, original retained), CR 707.9e/g (exceptions tied to "the most recent copy effect" — no such history exists in this snapshot model), and no ETB-replacement "enters as copy" path (Clone itself).
 - **Layer 3 (text-changing)**: only CR 612.8 name-setting is real; general word substitution / Exchange of Words / Volrath's Shapeshifter / Spy Kit unmodeled.
 - **Layer 7d (counters)**: pre-netted into base P/T before continuous effects; not timestamp-interleaved per CR 613.4 literal text.
 - **CR 613.6-8 dependency**: `EffectPayload::Script` effects never participate in dependency ordering.

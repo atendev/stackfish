@@ -1853,7 +1853,7 @@ pub fn execute_command(
                 | Some(AbilityEffect::Scry(_))
                 | Some(AbilityEffect::Surveil(_))
                 | Some(AbilityEffect::Search { .. })
-                | Some(AbilityEffect::BecomeCopy)
+                | Some(AbilityEffect::BecomeCopy(_))
                 | Some(AbilityEffect::Attach)) => {
                     validate_targets(
                         state,

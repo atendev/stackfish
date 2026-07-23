@@ -113,6 +113,38 @@
 - Unresolved:
   - General CR 612.2 text substitution, single-card rules (612.5-612.10).
 
+## Slice: copy-exceptions (merged)
+
+- Branch `phase5/copy-exceptions`.
+- Scope: CR 707.9's copy-effect exceptions/modifications - closes the "no CR 707.9 exception support,
+  always a bare copy" TODO the layer-engine-copy work left on both real copy-producing sites
+  (`AbilityEffect::BecomeCopy`, `TokenSpec::CopyOf`). CR 707.9's real shapes are open-ended (arbitrary
+  card text), so narrowed to the two overwhelmingly common ones - matching this codebase's own
+  precedent everywhere else of modeling a fixed, parametrized primitive rather than a general
+  text-modification system.
+- Verify: 13 tests in `phase5_layer_engine_copy.rs` (7 pre-existing regression + 6 new), full
+  workspace suite green.
+- Key changes:
+  - `CopyExceptions { set_power_toughness: Option<(i32, i32)>, add_keywords: KeywordSet }`
+    (`types/ability.rs`, co-located with `BecomeCopy`/`CopyOf`) - 707.9b (base P/T override, the
+    single most common real exception on Clone-variant cards) and 707.9a (gains an ability as part of
+    copying, union with whatever the copy already grants). `Default` is a bare copy, unaffected.
+    `CopyExceptions::apply(&mut CardDefinition)` mutates a snapshot in place, shared by both real call
+    sites so they can't drift.
+  - `AbilityEffect::BecomeCopy`/`TokenSpec::CopyOf` each gained a `CopyExceptions` field - small,
+    contained ripple (a handful of real match sites, not the `CardDefinition`-scale problem a past
+    slice found for a *new* field on that particular struct).
+  - `Game.Ops.BecomeCopy(opts?)` / `Game.Tokens.CopyOf(objectId, opts?)` - `decode_copy_exceptions`
+    shared by both, `{ power = N, toughness = N }` (both required together - a lone `power` or
+    `toughness` is rejected at load time, not silently ignored) and/or `{ keywords = { "Flying", ... } }`.
+- Unresolved:
+  - CR 707.9c (characteristics specifically *not* copied, original retained) - the inverse of 9a/9b,
+    no real card needed it yet.
+  - CR 707.9e/9g (an exception tied to "was this the most recent copy effect applied") - this
+    snapshot model has no such history to consult; would need real design work, not a narrow add.
+  - Everything `layer-engine-copy` itself already named as out of scope (ETB-replacement "enters as a
+    copy," CR 707.10 stack-copy, CR 707.8 double-faced-card copying) - unchanged.
+
 ## Fix: layer 5 base color (CR 105.2a/202.2)
 
 - `effective_characteristics` now seeds layer 5 from `CardDefinition::colors()` instead of raw `color_indicator`.

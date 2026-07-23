@@ -320,12 +320,14 @@ pub enum AbilityEffect {
     /// under its old identity (CR 707.2a: "doesn't wind up with two values
     /// of each ability").
     ///
-    /// TODO(CR 707.9): no exception/modification support - always a bare
-    /// copy. TODO(CR 707.6): "as ~ enters" choices aren't re-prompted here
-    /// - out of scope for this path, since it never re-enters the
-    /// battlefield; only relevant once a real ETB-replacement "enters as a
-    /// copy" path (Clone itself) exists, a separate follow-up.
-    BecomeCopy,
+    /// CR 707.9's exceptions/modifications, applied to the copied snapshot
+    /// before it's frozen into `copiable_override` - see `CopyExceptions`'
+    /// own doc comment for what's representable. TODO(CR 707.6): "as ~
+    /// enters" choices aren't re-prompted here - out of scope for this path,
+    /// since it never re-enters the battlefield; only relevant once a real
+    /// ETB-replacement "enters as a copy" path (Clone itself) exists, a
+    /// separate follow-up.
+    BecomeCopy(CopyExceptions),
     /// The `Game.Ops.Attach` primitive (CR 702.6a, Equip: "`[Cost]`: Attach
     /// this permanent to target creature you control. Activate only as a
     /// sorcery.") — attaches the resolving `StackObject`'s own source
@@ -425,9 +427,56 @@ pub enum TokenSpec {
     /// token's copied triggered/static abilities actually self-register
     /// (CR 707.2a: abilities are copiable) — every other `TokenSpec` skips
     /// that call entirely since a Named/Creature token has no script.
-    /// TODO(CR 707.9): no exception/modification support - always a bare
-    /// copy of the target's current values.
-    CopyOf(ObjectId),
+    /// CR 707.9's exceptions/modifications, applied to the copied snapshot
+    /// before it's frozen as the token's own `definition` - see
+    /// `CopyExceptions`' own doc comment for what's representable.
+    CopyOf(ObjectId, CopyExceptions),
+}
+
+/// CR 707.9's copy-effect exceptions/modifications, applied to a copy
+/// snapshot at the moment it's taken (by `BecomeCopy`/`CopyOf`) before it's
+/// frozen into `GameObject.copiable_override`/a token's own `definition`.
+/// CR 707.9's real shapes are open-ended (arbitrary card text) - narrowed to
+/// the two overwhelmingly common real ones, matching this codebase's own
+/// precedent everywhere else of modeling a fixed, parametrized primitive
+/// rather than a general text-modification system:
+/// - 707.9b (modify a characteristic): `set_power_toughness`, e.g. "except
+///   it has base power and toughness 1/1" - the single most common real
+///   exception on Clone-variant cards.
+/// - 707.9a (gain an ability as part of copying): `add_keywords`, e.g.
+///   "except it also has flying" - same shape, applied to the snapshot's
+///   `keywords` field directly (union, same "in addition to" convention
+///   `EffectPrimitive::AddKeyword` already uses for continuous effects).
+///
+/// `Default`'s all-empty value is a bare copy - unaffected, same result as
+/// before this type existed. Not modeled, named rather than guessed at:
+/// 707.9c (some characteristics specifically *not* copied, original
+/// retained - the inverse of 9a/9b, no real card needed it yet), 707.9e/g
+/// (an exception tied to "was this the most recent copy effect applied" -
+/// this snapshot model has no such history to consult).
+#[derive(Clone, Debug)]
+pub struct CopyExceptions {
+    pub set_power_toughness: Option<(i32, i32)>,
+    pub add_keywords: KeywordSet,
+}
+
+impl Default for CopyExceptions {
+    fn default() -> Self {
+        CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::empty() }
+    }
+}
+
+impl CopyExceptions {
+    /// Applies these exceptions to `snapshot` in place, right before it's
+    /// frozen - shared by `BecomeCopy` and `CreateToken`'s `CopyOf` arm so
+    /// the two real copy-producing call sites can't drift.
+    pub fn apply(&self, snapshot: &mut crate::types::card::CardDefinition) {
+        if let Some((power, toughness)) = self.set_power_toughness {
+            snapshot.power = Some(crate::types::card::PTValue::Fixed(power));
+            snapshot.toughness = Some(crate::types::card::PTValue::Fixed(toughness));
+        }
+        snapshot.keywords |= self.add_keywords;
+    }
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a

@@ -28,7 +28,7 @@ use crate::types::mana::{ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::{effective_max_hand_size, PlayerState};
 use crate::types::stack::{StackEntryKind, StackObject};
-use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
+use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
 
@@ -808,7 +808,7 @@ pub struct Engine {
 /// comment), before this function would ever be reached.
 fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
     match spec {
-        TokenSpec::CopyOf(_) => unreachable!(
+        TokenSpec::CopyOf(_, _) => unreachable!(
             "TokenSpec::CopyOf is built from the copied object's snapshot, not build_token_definition"
         ),
         TokenSpec::Named(NamedToken::Clue) => CardDefinition {
@@ -941,7 +941,7 @@ fn register_token_abilities(
         // A copy token's abilities come from run_card_script against its
         // copied CardDefinition (see the CreateToken resolution site), not
         // from this hand-built-Rust-native path.
-        TokenSpec::CopyOf(_) => {}
+        TokenSpec::CopyOf(_, _) => {}
     }
 }
 
@@ -3588,12 +3588,13 @@ impl Engine {
                             // pre-copy identity is purged first and
                             // run_card_script re-runs against the new
                             // snapshot right after.
-                            Some(AbilityEffect::BecomeCopy) => {
+                            Some(AbilityEffect::BecomeCopy(exceptions)) => {
                                 if let Some(Target::Object(target_id)) = top.targets.first().copied() {
                                     let snapshot = self.state.object(target_id).map(|obj| {
                                         obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
                                     });
-                                    if let Some(snapshot) = snapshot {
+                                    if let Some(mut snapshot) = snapshot {
+                                        exceptions.apply(&mut snapshot);
                                         let source_id = top.source;
                                         let became_copy =
                                             self.state.objects.get_mut(&source_id).is_some_and(|source_obj| {
@@ -3645,15 +3646,18 @@ impl Engine {
                             Some(AbilityEffect::CreateToken { spec, count }) => {
                                 let controller = top.controller;
                                 let copy_snapshot = match spec {
-                                    TokenSpec::CopyOf(source_id) => self.state.object(*source_id).map(|obj| {
-                                        obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
+                                    TokenSpec::CopyOf(source_id, exceptions) => self.state.object(*source_id).map(|obj| {
+                                        let mut snapshot =
+                                            obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone());
+                                        exceptions.apply(&mut snapshot);
+                                        snapshot
                                     }),
                                     _ => None,
                                 };
                                 for _ in 0..*count {
                                     let token_def = match (&copy_snapshot, spec) {
                                         (Some(def), _) => def.clone(),
-                                        (None, TokenSpec::CopyOf(_)) => {
+                                        (None, TokenSpec::CopyOf(_, _)) => {
                                             // Source no longer resolves - skip rather
                                             // than guess, same stance every other
                                             // unresolvable reference in this engine
@@ -3692,7 +3696,7 @@ impl Engine {
                                         self.state.objects.insert(token_id, token_obj);
                                     }
                                     register_token_abilities(&mut self.state, token_id, spec, controller);
-                                    if matches!(spec, TokenSpec::CopyOf(_)) {
+                                    if matches!(spec, TokenSpec::CopyOf(_, _)) {
                                         // TODO: a script error here is silently dropped,
                                         // same gap every other run_card_script call site
                                         // in this file already flags.
