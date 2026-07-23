@@ -15,11 +15,10 @@
 //! `object`/`source`/`controller` identity or a constant, never real board
 //! state.
 
-use std::collections::{HashMap, VecDeque};
-
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
 
 fn creature_definition(power: i32, toughness: i32, script_ref: ScriptReference) -> CardDefinition {
     CardDefinition {
@@ -45,135 +44,19 @@ fn creature_definition(power: i32, toughness: i32, script_ref: ScriptReference) 
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition: creature_definition(power, toughness, ScriptReference::ByKey("vanilla".to_string())),
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    let definition = creature_definition(power, toughness, ScriptReference::ByKey("vanilla".to_string()));
+    card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
 fn scripted_creature(id: ObjectId, owner: PlayerId, source: &str) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition: creature_definition(2, 2, ScriptReference::Inline(source.to_string())),
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
-}
-
-fn player_state(id: PlayerId, life: i32) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
+    let definition = creature_definition(2, 2, ScriptReference::Inline(source.to_string()));
+    card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    GameState {
-        players: vec![player_state(p0, 20), player_state(p1, 20)],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        phase: Phase::Main,
-        step: Step::PreCombatMain,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::new(),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
-}
-
-fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    GameState { step: Step::PreCombatMain, ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard])) }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
@@ -304,7 +187,7 @@ fn run_card_script_self_registers_a_script_backed_affects_predicate() {
     let mut state = base_state();
     let bear = ObjectId(0);
     let definition = creature_definition(2, 2, ScriptReference::Inline(SCRIPT_AFFECTS_SELF_ONLY.to_string()));
-    put_on_battlefield(&mut state, card_object(bear, definition.clone(), PlayerId(0)));
+    put_on_battlefield(&mut state, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
 
     let mut runtime = ScriptRuntime::new();
     runtime.run_card_script(&mut state, &definition, bear).expect("Register() succeeds with a function :SetAffected");
@@ -319,7 +202,7 @@ fn run_card_script_self_registers_a_script_backed_effect_payload() {
     let mut state = base_state();
     let bear = ObjectId(0);
     let definition = creature_definition(2, 2, ScriptReference::Inline(SCRIPT_EFFECT_MODIFY_PT.to_string()));
-    put_on_battlefield(&mut state, card_object(bear, definition.clone(), PlayerId(0)));
+    put_on_battlefield(&mut state, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
 
     let mut runtime = ScriptRuntime::new();
     runtime.run_card_script(&mut state, &definition, bear).expect(
