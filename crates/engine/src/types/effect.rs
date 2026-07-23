@@ -118,6 +118,32 @@ pub enum Layer {
 /// addition to its other types") isn't modeled — `EffectiveCharacteristics.
 /// supertypes`/`.subtypes` stay a straight `CardDefinition` copy. Natural
 /// next extension of the same `AddCardType` pattern once needed.
+/// CR 702.14a: a landwalk grant's "[type]" when it's more than a bare land
+/// type — "the card type land plus any combination of land types, card
+/// types, and/or supertypes." All specified fields must hold simultaneously
+/// against a candidate land (a card names one specific combination, not a
+/// menu of alternatives) — `None`/empty fields impose no constraint on that
+/// axis. `subtypes` is a `Vec` (not `Option`) for the plain "no subtype
+/// required" case (e.g. "nonbasic landwalk") to just be `Vec::new()`, same
+/// "empty means unconstrained" reading `AddLandwalkSubtype`'s all-subtypes
+/// list would use if it had one. See `commands::DeclareBlockers`'s
+/// enforcement for the actual per-field match.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct LandwalkQuality {
+    /// Land subtype(s) that must ALL be present (e.g. `vec![Swamp]` for
+    /// "snow swampwalk"). Empty = no subtype required.
+    pub subtypes: Vec<Subtype>,
+    /// If `Some`, the land's own card types must intersect this (e.g.
+    /// `ARTIFACT` for "artifact landwalk").
+    pub card_types: Option<CardTypeSet>,
+    /// If `Some`, the land's supertypes must contain all of these (e.g.
+    /// `SNOW` for "snow swampwalk").
+    pub supertypes: Option<SupertypeSet>,
+    /// If `Some`, the land's supertypes must contain none of these (e.g.
+    /// `BASIC` for "nonbasic landwalk").
+    pub excluded_supertypes: Option<SupertypeSet>,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum EffectPrimitive {
     /// Layer 3 (CR 612.8): sets the object's name outright — it "loses any
@@ -246,14 +272,30 @@ pub enum EffectPrimitive {
     /// abilities. Same "no printed field on `CardDefinition`, always
     /// effect-granted" shape as every `AddProtection*` primitive: a card
     /// with printed Islandwalk self-registers an always-on static ability
-    /// via its script, same as printed protection does. Only single-subtype
-    /// matching is modeled — CR 702.14a's card-type/supertype-combination
+    /// via its script, same as printed protection does. Only the plain
+    /// single-land-type form — CR 702.14a's card-type/supertype-combination
     /// forms ("artifact landwalk," "nonbasic landwalk," "snow swampwalk")
-    /// are TODO, unmodeled. See `EffectiveCharacteristics::landwalk_subtypes`
-    /// and `commands::DeclareBlockers`'s enforcement (checks the *defending
-    /// player's* battlefield, not the blocker's own characteristics — the
-    /// one respect this isn't shaped like protection).
+    /// are `AddLandwalkQuality` below instead, a separate primitive rather
+    /// than widening this one's payload (keeps every existing plain-subtype
+    /// call site, in code and Lua, untouched). See
+    /// `EffectiveCharacteristics::landwalk_subtypes` and `commands::
+    /// DeclareBlockers`'s enforcement (checks the *defending player's*
+    /// battlefield, not the blocker's own characteristics — the one respect
+    /// this isn't shaped like protection).
     AddLandwalkSubtype(Subtype),
+    /// Layer 6 (CR 613.1/702.14a, landwalk's card-type/supertype-combination
+    /// forms): same grant as `AddLandwalkSubtype`, but the specified `[type]`
+    /// is "the card type land plus any combination of land types, card
+    /// types, and/or supertypes" instead of a bare land type — "artifact
+    /// landwalk" (`card_types: Some(ARTIFACT)`), "nonbasic landwalk"
+    /// (`excluded_supertypes: Some(BASIC)`), "snow swampwalk"
+    /// (`supertypes: Some(SNOW), subtypes: vec![Swamp]`). See
+    /// `LandwalkQuality`'s own doc comment for how its fields combine, and
+    /// `EffectiveCharacteristics::landwalk_qualities`/`commands::
+    /// DeclareBlockers` for enforcement (a separate `Vec` folded and checked
+    /// alongside `landwalk_subtypes`, not merged into it — the two
+    /// primitives' payloads aren't the same shape).
+    AddLandwalkQuality(LandwalkQuality),
     /// Layer 6 (CR 613.1/702.22b/c, "bands with other [quality]"): grants
     /// CR 702.22c's second band-formation path for the named quality (e.g.
     /// "Elf" for "bands with other Elves"), in addition to whatever the
@@ -939,6 +981,13 @@ pub struct EffectiveCharacteristics {
     /// blocker's own characteristics — CR 702.14c's condition lives outside
     /// either combatant.
     pub landwalk_subtypes: Vec<Subtype>,
+    /// CR 702.14a's combination forms ("artifact landwalk," "nonbasic
+    /// landwalk," "snow swampwalk") — every applicable layer 6
+    /// `EffectPrimitive::AddLandwalkQuality`, checked separately from
+    /// `landwalk_subtypes` since the two primitives' payloads aren't the
+    /// same shape (a bare `Subtype` vs a whole `LandwalkQuality`). Same
+    /// empty-base/always-effect-granted posture.
+    pub landwalk_qualities: Vec<LandwalkQuality>,
     /// CR 702.22b/c's "bands with other [quality]": subtype(s) this object
     /// can band with under CR 702.22c's second band-formation path, from
     /// every applicable layer 6 `EffectPrimitive::AddBandsWithOther`. Same

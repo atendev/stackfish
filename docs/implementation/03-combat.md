@@ -77,7 +77,19 @@
   - No printed field on `CardDefinition` - always effect-granted, same "no printed-protection field" precedent; a card with printed Islandwalk self-registers an always-on static ability via its script.
   - `DeclareBlockers` per-pair check (alongside Fear/Intimidate/Shadow/Horsemanship): if the attacker's `landwalk_subtypes` is non-empty and the *defending player* (`command.actor`) controls any battlefield permanent whose effective subtypes intersect it, the block is rejected outright - unlike the other evasion keywords, this checks the defending player's battlefield, not the blocker's own characteristics.
 - Unresolved:
-  - CR 702.14a's card-type/supertype-combination forms ("artifact landwalk," "nonbasic landwalk," "snow swampwalk").
+  - CR 702.14a's card-type/supertype-combination forms ("artifact landwalk," "nonbasic landwalk," "snow swampwalk") - closed by `phase5/landwalk-quality-forms` below.
+
+## Slice: landwalk-quality-forms (merged)
+
+- Branch `phase5/landwalk-quality-forms`.
+- Scope: CR 702.14a's card-type/supertype-combination forms, the gap named by `landwalk` above - "[type]" as "the card type land plus any combination of land types, card types, and/or supertypes" instead of a bare land type.
+- Verify: 6 new tests (`phase5_landwalk.rs`, 3 combination forms x both sides), full workspace suite green.
+- Key changes:
+  - `LandwalkQuality { subtypes: Vec<Subtype>, card_types: Option<CardTypeSet>, supertypes: Option<SupertypeSet>, excluded_supertypes: Option<SupertypeSet> }` - every specified field must hold simultaneously against a candidate land (a card names one specific combination, not a menu); `None`/empty imposes no constraint on that axis. "Artifact landwalk" is `card_types: Some(ARTIFACT)`; "nonbasic landwalk" is `excluded_supertypes: Some(BASIC)`; "snow swampwalk" is `subtypes: vec![Swamp], supertypes: Some(SNOW)`.
+  - New `EffectPrimitive::AddLandwalkQuality(LandwalkQuality)` (layer 6) - a separate primitive from `AddLandwalkSubtype` rather than widening its payload, so every existing plain-subtype call site (code and Lua) stays untouched. `EffectiveCharacteristics::landwalk_qualities: Vec<LandwalkQuality>` folds/resets alongside `landwalk_subtypes` in the same layer-6 loop (including `RemoveAllAbilities`).
+  - `DeclareBlockers`'s landwalk check now matches if the defending player controls a land satisfying *either* `landwalk_subtypes` (unchanged) *or* any `landwalk_qualities` entry - the latter also requires the land's own card types include Land explicitly (the "[type]" is always "land plus...", so an artifact landwalk quality shouldn't match a non-land artifact that happened to intersect the card-type filter).
+  - `Game.Effects.AddLandwalkQuality(opts)` - table decode reusing the exact `{subtypes/card_types/supertypes/excluded_supertypes}` key vocabulary `decode_filter_table`'s `TargetFilter::Object` branch already established, minus `controller`/`zone` (not applicable here).
+- Unresolved: none - this was the last named gap in CR 702.14 Landwalk.
 
 ## Slice: banding (merged)
 
