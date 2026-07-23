@@ -574,12 +574,33 @@ pub enum ReplacementPayload {
     /// CR 614.1c/122.6: the matched `WouldMoveZone(_, Battlefield)` event's
     /// resulting permanent enters with `amount` counters of `kind` on it
     /// (e.g. Fading N, Modular N, Graft N — fixed printed numbers only;
-    /// game-state-dependent amounts like Bloodthirst/Sunburst/Devour aren't
-    /// representable by this `Primitive` shape, see `ReplacementSpec::Script`'s
-    /// own doc comment). Same "nothing to rewrite on the event itself" stance
-    /// as `EntersTapped` above — applied by
-    /// `replacement::apply_enters_battlefield_modifiers`, not `apply()`.
+    /// most other game-state-dependent amounts (Sunburst, Devour, Amplify)
+    /// still aren't representable by this `Primitive` shape, see
+    /// `ReplacementSpec::Script`'s own doc comment — Sunburst needs the cast
+    /// payment's chosen mana colors threaded this far, which nothing
+    /// currently carries; Devour/Amplify need a genuine mid-ETB player
+    /// choice, which needs a new pause/resume `ProcessState` of its own,
+    /// same category of work as `AwaitingAttachChoice`). Same "nothing to
+    /// rewrite on the event itself" stance as `EntersTapped` above —
+    /// applied by `replacement::apply_enters_battlefield_modifiers`, not
+    /// `apply()`.
     EntersWithCounters { kind: CounterKind, amount: i32 },
+    /// CR 702.54a (Bloodthirst N): like `EntersWithCounters` above, but
+    /// gated on a state query instead of unconditional — the permanent
+    /// enters with `amount` counters of `kind` only if an opponent of its
+    /// *own* controller was dealt damage this turn (by any source, combat
+    /// or otherwise — matching real Bloodthirst rulings, not restricted to
+    /// combat damage). Unlike `EntersWithCounters`, this needs no dynamic
+    /// script callback: the condition is answerable purely from
+    /// `state.ledger` (scan back to the most recent `GameEventKind::
+    /// TurnStarted`, then check for a `DamageDealt` targeting a player who
+    /// isn't the entering permanent's controller) — see
+    /// `replacement::opponent_damaged_this_turn`. CR 702.54b's "Bloodthirst
+    /// X" variant (amount = *total* damage dealt to opponents this turn,
+    /// not a fixed gate) reuses the identical scan and is a cheap follow-up,
+    /// deliberately not bundled in here to keep this primitive matching
+    /// exactly what was scoped.
+    EntersWithCountersBloodthirst { kind: CounterKind, amount: i32 },
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this

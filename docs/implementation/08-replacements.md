@@ -164,8 +164,9 @@
   checked/committed at all three producers — a self-registered effect is already in
   `state.replacement_effects` by the time `apply_enters_battlefield_modifiers` runs right after.
 - Unresolved:
-  - Dynamic/choice-based amounts (Bloodthirst, Sunburst, Devour, Amplify) — needs a `Script`
-    payload variant, only fixed printed `amount` is real.
+  - Dynamic/choice-based amounts (Bloodthirst, closed by `phase5/bloodthirst` below; Sunburst,
+    Devour, Amplify still unmodeled) — needs a `Script` payload variant for the ones that stay
+    dynamic; only fixed printed `amount` (plus Bloodthirst's state-gated fixed `amount`) is real.
   - CR 614.12a/b (choices required by an ETB modifier, payability ordering across simultaneous
     entries) — unmodeled.
   - Token creation (`Game.Ops.CreateToken`) — a 4th real to-Battlefield producer, not wired.
@@ -175,6 +176,37 @@
     "can't enter, goes to the graveyard instead" effect is still unreachable.
   - CR 122.6a (which player places ETB counters) always defaults to the object's controller — no
     multiplayer override.
+
+## Slice: bloodthirst (merged)
+
+- Branch `phase5/bloodthirst`.
+- Scope: CR 702.54a Bloodthirst N, narrowed out of the broader "dynamic ETB counts" backlog note
+  above — the one of the four (Bloodthirst/Sunburst/Devour/Amplify) answerable from a pure state
+  query rather than needing new plumbing (mana-color-spent tracking for Sunburst; a genuine mid-ETB
+  player-choice pause, a new `ProcessState`, for Devour/Amplify).
+- Verify: 6 new tests (`phase5_bloodthirst.rs` — unit-level `apply_enters_battlefield_modifiers`
+  calls, Lua registration, and one real end-to-end cast-and-resolve after a real `DamageDealt`
+  event), full workspace suite green.
+- Key changes:
+  - `ReplacementPayload::EntersWithCountersBloodthirst { kind: CounterKind, amount: i32 }` — same
+    "propose a `CounterAdded` event, don't mutate directly" shape `EntersWithCounters` already
+    established, gated on a condition instead of unconditional. Paired into
+    `validate_replacement_filter_payload_pairing`'s `WouldMoveZone(_, Battlefield)` arm alongside
+    its siblings, and into `apply_enters_battlefield_modifiers`'s own matching-filter and dispatch
+    arms.
+  - `replacement::opponent_damaged_this_turn(state, controller) -> bool` — scans `state.ledger`
+    back to the most recent `GameEventKind::TurnStarted` (append-only, so its position is always
+    the current turn's start; no `TurnStarted` yet scans from the ledger's beginning rather than
+    treating the condition as unknowable), then checks for a `DamageDealt` whose `target` is
+    `Target::Player` and isn't `controller` — damage to an opponent's *permanents* doesn't count,
+    matching the keyword's own "an opponent was dealt damage" wording.
+  - `Game.ReplacementPayloads.EntersWithCountersBloodthirst(kindName, amount)` — same construction
+    shape as `EntersWithCounters`.
+- Unresolved:
+  - CR 702.54b's "Bloodthirst X" variant (amount = *total* damage dealt to opponents this turn, not
+    a fixed gate) — reuses the identical ledger scan, named as a cheap follow-up, not built.
+  - Sunburst, Devour, Amplify — unchanged, still need their own real prerequisite plumbing (see
+    above).
 
 ## Slice: protection-as-replacement (merged)
 

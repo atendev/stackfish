@@ -805,24 +805,31 @@ applies first) is deliberately not invoked for these two payloads even when seve
 entry: `EntersTapped` is idempotent and `EntersWithCounters` is additive, so unlike a
 `ReplaceZoneDestination`-style rewrite, no ordering of multiple matches changes the final result.
 
+CR 702.54a Bloodthirst N is real too now — `Game.ReplacementPayloads.EntersWithCountersBloodthirst(
+kindName, amount)`, same construction shape as `EntersWithCounters` above, gated on
+`replacement::opponent_damaged_this_turn` (a pure `state.ledger` scan back to the most recent
+`TurnStarted`, no player choice or new plumbing needed).
+
 Not modeled this slice (real, named gaps, not silently guessed at):
 
-- **Dynamic/choice-based amounts** — Bloodthirst, Sunburst, Devour, Amplify: the counter count
-  depends on game state or a player choice made as the permanent enters (CR 614.12a). Only a fixed
-  printed `amount` is representable via this `Primitive` shape; a `Script`-backed payload is the
-  natural follow-up.
+- **Sunburst/Devour/Amplify's dynamic amounts** — Sunburst needs the cast payment's chosen mana
+  colors threaded to the ETB step (no such plumbing exists); Devour/Amplify need a genuine mid-ETB
+  player choice, which needs a new pause/resume `ProcessState` of its own (same category of work as
+  `AwaitingAttachChoice`). Only a fixed printed `amount` (plus Bloodthirst's state-gated fixed
+  `amount`) is representable via this `Primitive` shape so far.
 - **Token creation** (`Game.Ops.CreateToken`) — a real to-Battlefield producer, not wired to this
   mechanism yet. Same shape as the other three, just not done this slice.
 - **General CR 616 propose/replace/commit for battlefield entry** — `PlayLand`/`CastSpell`
   resolution/search-to-battlefield still mutate eagerly rather than going through a real
   propose-then-replace-then-commit split; a `ReplaceZoneDestination`-style "this can't enter, goes
   to the graveyard instead" effect (Torpor Orb-adjacent) stays unreachable. This carve-out only
-  covers `EntersTapped`/`EntersWithCounters` specifically.
+  covers `EntersTapped`/`EntersWithCounters`/`EntersWithCountersBloodthirst` specifically.
 
 Real, tested end to end: `crates/engine/tests/phase5_etb_replacement_modifiers.rs` (self and
 externally granted `EntersTapped` via `PlayLand`, self-registered `EntersWithCounters` via
 `CastSpell` resolution, `LimitedUses`/`Repeatable` consumption bookkeeping, and the
-`WouldMoveZone(_, "Battlefield")`-only pairing rejection).
+`WouldMoveZone(_, "Battlefield")`-only pairing rejection); Bloodthirst itself in
+`crates/engine/tests/phase5_bloodthirst.rs`.
 
 ## Self-registering an activated ability
 
