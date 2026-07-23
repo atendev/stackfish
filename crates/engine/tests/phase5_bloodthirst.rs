@@ -99,7 +99,7 @@ fn bloodthirst_grants_counters_when_an_opponent_was_damaged_this_turn() {
     state.replacement_effects.push(bloodthirst_effect(entrant, 2));
 
     let runtime = ScriptRuntime::new();
-    let events = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand);
+    let events = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand, ColorSet::empty());
 
     assert_eq!(events.len(), 1, "an opponent (p1) was damaged this turn - the counters should be granted, got {events:?}");
     assert!(matches!(
@@ -120,7 +120,7 @@ fn bloodthirst_grants_nothing_when_no_opponent_was_damaged_this_turn() {
     state.replacement_effects.push(bloodthirst_effect(entrant, 2));
 
     let runtime = ScriptRuntime::new();
-    let events = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand);
+    let events = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand, ColorSet::empty());
 
     assert!(events.is_empty(), "no damage was dealt this turn - Bloodthirst's condition is unmet, got {events:?}");
 }
@@ -139,7 +139,7 @@ fn bloodthirst_ignores_damage_dealt_to_its_own_controller() {
     state.replacement_effects.push(bloodthirst_effect(entrant, 2));
 
     let runtime = ScriptRuntime::new();
-    let events = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand);
+    let events = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand, ColorSet::empty());
 
     assert!(events.is_empty(), "only the controller was damaged, not an opponent - condition unmet, got {events:?}");
 }
@@ -159,7 +159,7 @@ fn bloodthirst_condition_resets_across_a_turn_boundary() {
     state.replacement_effects.push(bloodthirst_effect(entrant, 2));
 
     let runtime = ScriptRuntime::new();
-    let events = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand);
+    let events = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand, ColorSet::empty());
 
     assert!(events.is_empty(), "the damage happened last turn, not this one - condition unmet, got {events:?}");
 }

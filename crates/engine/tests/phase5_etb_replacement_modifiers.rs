@@ -378,7 +378,7 @@ fn limited_uses_enters_with_counters_is_consumed_after_first_entry() {
     let entrant_a = ObjectId(1);
     state.objects.insert(entrant_a, card_object(entrant_a, creature_definition("A", ""), p0, ZoneKind::Battlefield));
     let runtime = ScriptRuntime::new();
-    let events_a = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant_a, ZoneKind::Hand);
+    let events_a = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant_a, ZoneKind::Hand, ColorSet::empty());
     assert_eq!(events_a.len(), 1, "first entry should be granted the counter, got {events_a:?}");
     assert!(matches!(
         events_a[0],
@@ -388,7 +388,7 @@ fn limited_uses_enters_with_counters_is_consumed_after_first_entry() {
 
     let entrant_b = ObjectId(2);
     state.objects.insert(entrant_b, card_object(entrant_b, creature_definition("B", ""), p0, ZoneKind::Battlefield));
-    let events_b = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant_b, ZoneKind::Hand);
+    let events_b = replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant_b, ZoneKind::Hand, ColorSet::empty());
     assert!(events_b.is_empty(), "the shield is gone - a second entry gets nothing");
 }
 
@@ -411,7 +411,7 @@ fn repeatable_enters_tapped_applies_to_every_entry() {
     for i in 1..=2 {
         let entrant = ObjectId(i);
         state.objects.insert(entrant, card_object(entrant, creature_definition("Entrant", ""), p0, ZoneKind::Battlefield));
-        replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand);
+        replacement::apply_enters_battlefield_modifiers(&mut state, &runtime, entrant, ZoneKind::Hand, ColorSet::empty());
         assert!(state.object(entrant).unwrap().tapped, "entry {i} should have been tapped by the Repeatable granter");
     }
     assert_eq!(state.replacement_effects.len(), 1, "a Repeatable effect is never removed");

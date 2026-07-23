@@ -15,7 +15,7 @@ use crate::types::ability::{
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
-use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec, PaymentPlan};
+use crate::types::cost::{colors_spent, AdditionalCost, CostSpec, FilterController, FilterSpec, PaymentPlan};
 use crate::types::counter::CounterSet;
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
@@ -24,7 +24,7 @@ use crate::types::effect::{
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
 use crate::types::ids::{AbilityId, CommandId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, SequenceNo, Target};
-use crate::types::mana::{ManaCost, ManaPool};
+use crate::types::mana::{ColorSet, ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::{effective_max_hand_size, PlayerState};
 use crate::types::stack::{StackEntryKind, StackObject};
@@ -1786,6 +1786,7 @@ impl Engine {
                         &self.script_runtime,
                         new_id,
                         ZoneKind::Library,
+                        ColorSet::empty(),
                     );
                     events_so_far.extend(counter_events);
 
@@ -2871,6 +2872,7 @@ impl Engine {
                         &self.script_runtime,
                         *object_id,
                         ZoneKind::Hand,
+                        ColorSet::empty(),
                     );
                     outcome.events.extend(counter_events);
                 }
@@ -3165,11 +3167,17 @@ impl Engine {
                                 // directly, same as the PlayLand and
                                 // search-to-battlefield call sites below.
                                 if let GameEventKind::ZoneChange { object, to: ZoneKind::Battlefield, .. } = &event {
+                                    // CR 702.44b: only a resolving spell can
+                                    // ever have a nonempty `costs_paid` to
+                                    // read colors from - `top` is this same
+                                    // spell's own `StackObject`, captured
+                                    // above before its zone move.
                                     let counter_events = replacement::apply_enters_battlefield_modifiers(
                                         &mut self.state,
                                         &self.script_runtime,
                                         *object,
                                         ZoneKind::Stack,
+                                        colors_spent(&top.costs_paid),
                                     );
                                     events.push(event);
                                     events.extend(counter_events);

@@ -961,6 +961,7 @@ fn validate_replacement_filter_payload_pairing(
             ReplacementPayload::EntersTapped
                 | ReplacementPayload::EntersWithCounters { .. }
                 | ReplacementPayload::EntersWithCountersBloodthirst { .. }
+                | ReplacementPayload::EntersWithCountersSunburst
         )
     );
     if paired {
@@ -2682,6 +2683,11 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
             Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersBloodthirst { kind, amount }))
         })?,
     )?;
+    // CR 702.44: `Game.ReplacementPayloads.EntersWithCountersSunburst` - no
+    // arguments, unlike every other `EntersWithCounters*` above. Both kind
+    // and amount are derived at apply time (see the variant's own doc
+    // comment) instead of declared here.
+    replacement_payloads.set("EntersWithCountersSunburst", ReplacementPayloadTag(ReplacementPayload::EntersWithCountersSunburst))?;
 
     // `Game.Consumption.*` - a ReplacementEffect's ConsumptionPolicy
     // (ReplacementEffectBuilder::SetConsumption).
