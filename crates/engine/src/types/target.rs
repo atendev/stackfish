@@ -140,12 +140,34 @@ pub struct TargetRequirement {
 }
 
 /// `None` means "takes no targets" (`CardDefinition`/`RegisteredAbility`'s
-/// own doc comments); `Some(Primitive(_))` is every real requirement this
-/// engine builds. No top-level `Script` variant here (there used to be one,
+/// own doc comments); `Some(Primitive(_))` is the overwhelmingly common real
+/// requirement this engine builds (a spell/ability with exactly one distinct
+/// "target" word). No top-level `Script` variant here (there used to be one,
 /// never constructed in 5+ slices) — a script-backed legality predicate now
 /// lives at `TargetFilter::Script`, nested inside `TargetRequirement`, so it
 /// still gets a real `count`/`up_to` instead of an ungoverned bare handle.
 #[derive(Clone, Debug)]
 pub enum TargetSpec {
     Primitive(TargetRequirement),
+    /// CR 601.2c: a spell/ability that uses the word "target" in more than
+    /// one place (e.g. "Destroy target nonblack creature and target land" —
+    /// CR 608.2b's own worked example). Each entry is one distinct target
+    /// word, in order — CR 601.2c/115.3's same-target dedup applies *within*
+    /// each entry independently, never across entries (the rule's own
+    /// example: "the same object or player can be chosen once for each
+    /// instance of the word 'target'"). `commands::validate_targets`/the CR
+    /// 608.2b resolution recheck split a flat submitted-targets list into
+    /// one contiguous chunk per entry, in order, each exactly `count` long —
+    /// every entry must use an exact count (`up_to`/`at_least` both `false`);
+    /// there's no way to split a flat list unambiguously by a variable-length
+    /// entry, so that combination is rejected rather than guessed at. Real
+    /// resolution of a *uniform-verb* multi-word spell (Plague Spores'
+    /// "destroy" applying across both words) needs no further engine
+    /// support: downstream effect arms (`AbilityEffect::Destroy` etc.)
+    /// already just iterate the concatenated per-word legal-target list
+    /// unchanged. A *role-differentiated* multi-word spell (different words
+    /// feeding different verbs) has no matching `AbilityEffect` primitive
+    /// either way and would need a `Script` effect regardless — not a new
+    /// gap this variant introduces.
+    Multiple(Vec<TargetRequirement>),
 }
