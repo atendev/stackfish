@@ -13,15 +13,20 @@
 //! `bands_with_other_subtypes` containing quality Q, every *other* member's
 //! own subtypes include Q) - a band is legal if it matches either shape.
 //!
+//! CR 702.22j/k's *other* trigger condition is real now too
+//! (`phase5/bands-with-other-split-trigger`): independent of any declared
+//! band, if the creatures grouped by a block (an attacker's blockers, or a
+//! blocker's forced-onto attackers) contain a creature X with "bands with
+//! other [quality]" and another creature Y (Y != X) whose own subtypes
+//! include that quality, the combat-damage split chooser flips exactly the
+//! way a plain `BANDING` creature already flips it -
+//! `commands::AssignCombatDamage`'s `has_bands_with_other_pair` helper,
+//! checked alongside the pre-existing `BANDING`-keyword check.
+//!
 //! Deliberately narrow, matching Landwalk's own precedent: only
 //! single-subtype ("quality") matching is modeled. CR 702.22c/m's
 //! supertype-quality form ("bands with other Legends," i.e. Legendary) is
-//! TODO, unmodeled. CR 702.22j/k's *other* trigger condition - a blocking
-//! creature with bands-with-other[quality] alongside another matching-
-//! quality blocker flips the combat-damage split chooser independent of any
-//! declared band at all - is a separate mechanic (pure blocker-side check
-//! at the damage step) and is out of scope for this slice; named as a
-//! follow-up, not silently dropped.
+//! TODO, unmodeled.
 
 use std::collections::HashMap;
 
@@ -31,6 +36,17 @@ use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
 
 fn creature_definition(id: u64, name: &str, subtypes: &[&str], keywords: KeywordSet) -> CardDefinition {
+    creature_definition_pt(id, name, subtypes, keywords, 2, 2)
+}
+
+fn creature_definition_pt(
+    id: u64,
+    name: &str,
+    subtypes: &[&str],
+    keywords: KeywordSet,
+    power: i32,
+    toughness: i32,
+) -> CardDefinition {
     CardDefinition {
         definition_id: id,
         name: name.to_string(),
@@ -40,8 +56,8 @@ fn creature_definition(id: u64, name: &str, subtypes: &[&str], keywords: Keyword
         card_types: CardTypeSet::CREATURE,
         subtypes: subtypes.iter().map(|s| Subtype(s.to_string())).collect(),
         oracle_text: String::new(),
-        power: Some(PTValue::Fixed(2)),
-        toughness: Some(PTValue::Fixed(2)),
+        power: Some(PTValue::Fixed(power)),
+        toughness: Some(PTValue::Fixed(toughness)),
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::ByKey(name.to_string()),
@@ -104,12 +120,46 @@ fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>
     drain(engine)
 }
 
+fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> StepStatus {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
+        .expect("player holds priority");
+    drain(engine)
+}
+
+fn assign_combat_damage(
+    engine: &mut Engine,
+    player: PlayerId,
+    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+) -> StepStatus {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        .expect("turn-based action, no priority required");
+    drain(engine)
+}
+
+fn pass_to_step(engine: &mut Engine, step: Step) {
+    for _ in 0..20 {
+        if engine.state().step == step {
+            return;
+        }
+        let active = engine.state().priority_player;
+        engine.submit_action(PlayerAction { player: active, kind: PlayerActionKind::PassPriority }).expect("priority window");
+        drain(engine);
+    }
+    panic!("never reached {step:?} - state.step = {:?}", engine.state().step);
+}
+
 fn assert_illegal(status: StepStatus) {
     assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "expected an illegal action, got {status:?}");
 }
 
 fn assert_legal_band(status: StepStatus) {
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal band declaration, got {status:?}");
+}
+
+fn assert_accepted(status: StepStatus) {
+    assert!(!matches!(status, StepStatus::Error(_)), "expected the split to be accepted, got {status:?}");
 }
 
 // ---------------------------------------------------------------------
@@ -217,4 +267,65 @@ fn plain_banding_path_unaffected_by_this_slice() {
         vec![(banding_creature, Target::Player(PlayerId(1))), (plain_creature, Target::Player(PlayerId(1)))],
     );
     assert_legal_band(declare_bands(&mut engine, p0, vec![vec![banding_creature, plain_creature]]));
+}
+
+// ---------------------------------------------------------------------
+// CR 702.22j/k's other trigger: a quality pair among the blockers/attackers
+// flips the combat-damage split chooser, with no `BANDING` keyword and no
+// declared band involved at all.
+// ---------------------------------------------------------------------
+
+#[test]
+fn attacker_double_blocked_by_a_bands_with_other_pair_needs_the_defending_players_choice() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let elf_lord = ObjectId(1);
+    let elf = ObjectId(2);
+
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition_pt(1, "Attacker", &[], KeywordSet::empty(), 4, 4), p0));
+    put_on_battlefield(&mut state, permanent(elf_lord, creature_definition_pt(2, "Elf Lord", &["Elf"], KeywordSet::empty(), 1, 5), p1));
+    put_on_battlefield(&mut state, permanent(elf, creature_definition_pt(3, "Elf", &["Elf"], KeywordSet::empty(), 1, 5), p1));
+    // Neither blocker has plain Banding - only the quality pair (elf_lord's
+    // bands-with-other Elf + elf's own Elf subtype) can flip the chooser.
+    state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    pass_to_step(&mut engine, Step::DeclareBlockers);
+    declare_blockers(&mut engine, p1, vec![(elf_lord, attacker), (elf, attacker)]);
+    pass_to_step(&mut engine, Step::CombatDamage);
+
+    // The active player no longer gets to choose this split - the
+    // attacker's blockers contain a bands-with-other/quality pair.
+    assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(elf_lord, 2), (elf, 2)])]));
+    assert_accepted(assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(elf_lord, 2), (elf, 2)])]));
+}
+
+#[test]
+fn double_blocked_attacker_with_no_quality_pair_still_defaults_to_active_player() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let elf_lord = ObjectId(1);
+    let bear = ObjectId(2);
+
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition_pt(1, "Attacker", &[], KeywordSet::empty(), 4, 4), p0));
+    put_on_battlefield(&mut state, permanent(elf_lord, creature_definition_pt(2, "Elf Lord", &["Elf"], KeywordSet::empty(), 1, 5), p1));
+    put_on_battlefield(&mut state, permanent(bear, creature_definition_pt(3, "Bear", &["Bear"], KeywordSet::empty(), 1, 5), p1));
+    // elf_lord's named quality (Elf) matches nothing else blocking this
+    // attacker - bear isn't an Elf, so no pair exists and the chooser stays
+    // the active player, same as any ordinary multi-block.
+    state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    pass_to_step(&mut engine, Step::DeclareBlockers);
+    declare_blockers(&mut engine, p1, vec![(elf_lord, attacker), (bear, attacker)]);
+    pass_to_step(&mut engine, Step::CombatDamage);
+
+    assert_illegal(assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(elf_lord, 2), (bear, 2)])]));
+    assert_accepted(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(elf_lord, 2), (bear, 2)])]));
 }
