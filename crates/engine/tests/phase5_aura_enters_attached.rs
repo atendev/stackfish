@@ -8,9 +8,11 @@
 //! field.
 //!
 //! Scoped to Auras only (`commands::is_aura`) - Equipment/Fortification
-//! pre-attached entry is a separate, still-open follow-up (Equipment's
+//! pre-attached entry is closed separately in
+//! `phase5_attach_entry_equipment_fortification.rs` (Equipment/Fortification
 //! attach legality isn't governed by a `target_requirement` the way an
-//! Aura's enchant ability is, so it needs its own legality shape).
+//! Aura's enchant ability is, so it needed its own legality shape and its
+//! own file rather than folding into this one).
 //!
 //! - 1 legal candidate: attaches immediately, no pause.
 //! - 2+ legal candidates (CR 303.4f, "that player chooses"): a real (not
@@ -226,7 +228,7 @@ fn aura_with_two_legal_candidates_pauses_and_resumes_the_search_afterward() {
     engine.submit_search_choice(vec![aura]).expect("aura is a candidate");
 
     let status = drain(&mut engine);
-    let StepStatus::AwaitingAuraEntryAttachChoice { player, aura: paused_aura, candidates } = status else {
+    let StepStatus::AwaitingEntryAttachChoice { player, attaching: paused_aura, candidates } = status else {
         panic!("expected a CR 303.4f attach-choice pause, got {status:?}")
     };
     assert_eq!(player, p0);
@@ -241,7 +243,7 @@ fn aura_with_two_legal_candidates_pauses_and_resumes_the_search_afterward() {
     assert_eq!(engine.state().object(paused_aura).unwrap().zone, ZoneKind::Battlefield);
     assert_eq!(engine.state().object(paused_aura).unwrap().attached_to, None);
 
-    engine.submit_aura_entry_attach_choice(bear_b).expect("bear_b is an offered candidate");
+    engine.submit_entry_attach_choice(bear_b).expect("bear_b is an offered candidate");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "the search's remaining work (shuffle, resolve) should finish, got {status:?}");
 
@@ -287,7 +289,7 @@ fn aura_entry_attach_choice_rejects_a_candidate_not_offered() {
     drain(&mut engine);
 
     // No creature with this id exists anywhere - never a legal candidate.
-    let err = engine.submit_aura_entry_attach_choice(ObjectId(999)).unwrap_err();
+    let err = engine.submit_entry_attach_choice(ObjectId(999)).unwrap_err();
     assert!(matches!(err, AttachChoiceError::InvalidCandidate));
 }
 

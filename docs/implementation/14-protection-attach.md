@@ -128,18 +128,62 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
     "two simultaneous choosers" problem the way `AssignCombatDamage`'s own banding note has).
   - `Game.Ops.Search`'s Lua builder gained `opts.enters_attached` alongside `opts.tapped`.
 - Unresolved:
-  - Equipment/Fortification pre-attached entry — named follow-up, not built.
+  - Equipment/Fortification pre-attached entry — named follow-up, closed by
+    `phase5/attach-entry-equipment-fortification` below.
   - CR 303.4i (an effect specifies an *explicit* illegal enchant target, as opposed to CR 303.4f's
     "nothing specified") — genuinely different from what this slice built (nothing in this engine's
     `Search` shape can specify an attach target at all, only "let the player choose" or "none"), so
     still open, not silently narrowed into 303.4g's coverage.
   - CR 303.4k (morph), CR 303.4m ("the enchanted X" script reference) — unchanged, still open.
 
+## Slice: attach-entry-equipment-fortification (merged)
+
+- Branch `phase5/attach-entry-equipment-fortification`.
+- Scope: CR 301.5e/301.6 — extends `aura-enters-attached`'s `SearchDestination::Battlefield {
+  enters_attached }` machinery from Auras to Equipment and Fortification. Equipment/Fortification
+  attach legality isn't `target_requirement`-shaped the way an Aura's enchant ability is — CR 702.6c
+  already establishes that an Equip ability's own quality restrictions ("Equip [quality]") don't
+  restrict what the Equipment may be attached to at all, so legality is just "every creature/land
+  currently on the battlefield," no filter to evaluate.
+- Verify: 4 new tests (`phase5_attach_entry_equipment_fortification.rs`), 9 existing Aura tests
+  (`phase5_aura_enters_attached.rs`) updated for the rename below and re-verified green, full
+  workspace suite green.
+- Key finding that reshaped the plan: the 0-candidate case is a genuine behavior divergence, not
+  just a renamed code path. CR 303.4g says a 0-candidate Aura remains in its current zone entirely
+  (never enters the battlefield); CR 301.5e/301.6 say a 0-candidate Equipment/Fortification *still
+  enters the battlefield*, just unattached. The old code's `0 => unreachable!(...)` arm (safe only
+  because the Aura-only 0-candidate case was filtered out earlier via an early `continue`) had to
+  become a real, reachable branch that does nothing (the object already entered normally by the time
+  that match runs).
+- Key changes:
+  - `commands::is_fortification` — mirrors `is_equipment`'s ad hoc subtype-string-comparison shape.
+  - `commands::legal_entry_attach_candidates(state, script_runtime, definition, controller, source)
+    -> Option<Vec<ObjectId>>` — the new dispatch point, replacing the old direct call to
+    `legal_aura_entry_candidates` at the one call site. `Some(...)` for all three attach-capable
+    kinds (Aura delegates to the pre-existing `legal_aura_entry_candidates`; Equipment/Fortification
+    scan `state.objects` for battlefield objects whose *effective* `card_types` — not the raw printed
+    ones — intersect `CREATURE`/`LAND`), `None` for anything else, so the caller can tell
+    "not attach-capable, always unattached, no scan" (CR 303.4h) apart from "attach-capable, zero
+    live candidates right now" (`Some(vec![])`).
+  - `Engine::continue_search_battlefield_entry` — the early "0 candidates → skip this card" branch
+    is now gated on `commands::is_aura` specifically (CR 303.4g), not on "candidates is empty";
+    Equipment/Fortification fall through to the normal move-onto-battlefield path, and the
+    end-of-loop match's `0` arm is now a real no-op (enters unattached) instead of `unreachable!()`.
+  - Renamed `ProcessState`/`StepStatus::AwaitingAuraEntryAttachChoice` →
+    `AwaitingEntryAttachChoice` (field `aura` → `attaching`) and
+    `Engine::submit_aura_entry_attach_choice` → `submit_entry_attach_choice`, since the pause is no
+    longer Aura-exclusive — keeping the old name once it also serves Equipment/Fortification would
+    have misled the next reader. Mechanical ripple: `crates/scenario/src/lib.rs`'s `drain` match arm.
+- Unresolved: CR 801.9's range-of-influence carve-out (out of scope — this engine is 2-player only
+  and models no ROI anywhere else either, not a new gap); CR 303.4i/k/m (Aura-specific, unchanged).
+
 ## Equipment / Equip (CR 702.6)
 
 - `AbilityEffect::Attach` primitive; `ActivateAbility` enforces "only as sorcery" for `Attach`.
 - `commands::attach_permanent` handles reattach safely for Equipment.
 - `sba::collect_illegally_attached_equipment`/`commit_unattach` keeps Equipment on battlefield, unattached in place.
+- Pre-attached battlefield entry (CR 301.5e/301.6, Fortification too) real now — see
+  `phase5/attach-entry-equipment-fortification` above.
 - `Game.Tokens.Treasure` deferred — needs coroutine color choice.
 
 ## Attach-related keywords

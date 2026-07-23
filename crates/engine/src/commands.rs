@@ -722,6 +722,14 @@ pub(crate) fn is_equipment(definition: &CardDefinition) -> bool {
         && definition.subtypes.iter().any(|s| s.0 == "Equipment")
 }
 
+/// CR 301.6: `definition` is a Fortification - an artifact (card type) with
+/// the "Fortification" subtype. Same ad hoc string-comparison shape
+/// `is_equipment` already establishes.
+pub(crate) fn is_fortification(definition: &CardDefinition) -> bool {
+    definition.card_types.contains(CardTypeSet::ARTIFACT)
+        && definition.subtypes.iter().any(|s| s.0 == "Fortification")
+}
+
 /// CR 303.4f: every object currently a legal enchant target for `aura`'s own
 /// enchant ability (`aura_definition.target_requirement`), evaluated fresh
 /// against `state` right now - unlike the normal cast-time path, no target
@@ -760,6 +768,52 @@ pub(crate) fn legal_aura_entry_candidates(
         })
         .map(|obj| obj.object_id)
         .collect()
+}
+
+/// CR 303.4f/301.5e/301.6: every object currently a legal attach target for
+/// `definition` entering the battlefield already attached, dispatched by
+/// permanent kind - the three don't share a legality shape. An Aura's
+/// legality is packed into the card's own `target_requirement`
+/// (`legal_aura_entry_candidates`), but CR 702.6c already establishes an
+/// Equip ability's own quality restrictions ("Equip [quality]") don't
+/// restrict what the Equipment may be attached to at all - so Equipment/
+/// Fortification legality is just "every creature/land on the battlefield,"
+/// no filter to evaluate, checked against `effective_characteristics` (not
+/// the raw printed `card_types`) so something that became a creature/land
+/// only through a continuous effect still counts. Returns `None` for any
+/// other card kind - not attach-capable at all (CR 303.4h) - so the caller
+/// can tell that apart from "attach-capable but zero legal candidates right
+/// now" (`Some(vec![])`), since the two are handled differently by CR
+/// 303.4g (Aura: stays put) vs CR 301.5e/301.6 (Equipment/Fortification:
+/// enters unattached).
+pub(crate) fn legal_entry_attach_candidates(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    definition: &CardDefinition,
+    controller: PlayerId,
+    source: ObjectId,
+) -> Option<Vec<ObjectId>> {
+    if is_aura(definition) {
+        return Some(legal_aura_entry_candidates(state, script_runtime, definition, controller, source));
+    }
+    let wanted = if is_equipment(definition) {
+        CardTypeSet::CREATURE
+    } else if is_fortification(definition) {
+        CardTypeSet::LAND
+    } else {
+        return None;
+    };
+    Some(
+        state
+            .objects
+            .values()
+            .filter(|obj| {
+                obj.zone == ZoneKind::Battlefield
+                    && crate::layers::effective_characteristics(state, script_runtime, obj.object_id).card_types.intersects(wanted)
+            })
+            .map(|obj| obj.object_id)
+            .collect(),
+    )
 }
 
 /// CR 303.4b/301.5a: attaches `attaching_id` (an Aura or an Equipment) to
