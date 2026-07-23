@@ -14,7 +14,7 @@ use crate::types::counter::CounterKind;
 use crate::types::cost::{AdditionalCost, CostModifier, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
-    EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
+    EffectPrimitive, EventFilter, Layer, LandwalkQuality, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
@@ -680,6 +680,58 @@ fn decode_creature_token_opts(
         }
     }
     Ok((keywords, name, additional_types, additional_supertypes))
+}
+
+/// CR 702.14a's landwalk combination forms - `Game.Effects.
+/// AddLandwalkQuality(opts)`'s `opts` table. Same `{subtypes/card_types/
+/// supertypes/excluded_supertypes}` key vocabulary `decode_filter_table`'s
+/// `"object"` branch already establishes for `TargetFilter::Object`, minus
+/// `controller`/`zone` (a landwalk quality has no such axes - it's always
+/// checked against the defending player's own battlefield). Every field is
+/// optional; an empty table decodes to `LandwalkQuality::default()` (matches
+/// any land at all, i.e. plain "landwalk" - not a real keyword, but harmless
+/// to allow rather than reject).
+fn decode_landwalk_quality(opts: mlua::Table) -> Result<LandwalkQuality, ScriptError> {
+    let mut subtypes = Vec::new();
+    if let Ok(Some(t)) = opts.get::<_, Option<mlua::Table>>("subtypes") {
+        for pair in t.sequence_values::<String>() {
+            subtypes.push(Subtype(pair.map_err(|e| ScriptError::LoadError(e.to_string()))?));
+        }
+    }
+    let card_types = match opts.get::<_, Option<mlua::Table>>("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))? {
+        Some(t) => {
+            let mut set = CardTypeSet::empty();
+            for pair in t.sequence_values::<String>() {
+                set |= parse_card_type_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+    let supertypes = match opts.get::<_, Option<mlua::Table>>("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))? {
+        Some(t) => {
+            let mut set = SupertypeSet::empty();
+            for pair in t.sequence_values::<String>() {
+                set |= parse_supertype_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+    let excluded_supertypes = match opts
+        .get::<_, Option<mlua::Table>>("excluded_supertypes")
+        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+    {
+        Some(t) => {
+            let mut set = SupertypeSet::empty();
+            for pair in t.sequence_values::<String>() {
+                set |= parse_supertype_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+    Ok(LandwalkQuality { subtypes, card_types, supertypes, excluded_supertypes })
 }
 
 /// CR 707.9's copy-effect exceptions/modifications - shared by
@@ -2523,6 +2575,13 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     effects.set(
         "AddLandwalkSubtype",
         lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddLandwalkSubtype(Subtype(name)))))?,
+    )?;
+    effects.set(
+        "AddLandwalkQuality",
+        lua.create_function(|_, opts: Table| {
+            let quality = decode_landwalk_quality(opts).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddLandwalkQuality(quality)))
+        })?,
     )?;
     effects.set(
         "AddBandsWithOther",

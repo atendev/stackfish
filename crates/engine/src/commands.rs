@@ -2402,14 +2402,27 @@ pub fn execute_command(
                 // *defending player's own battlefield*, not the blocker's
                 // own characteristics - see EffectiveCharacteristics::
                 // landwalk_subtypes' own doc comment for why.
-                if !attacker_characteristics.landwalk_subtypes.is_empty() {
+                if !attacker_characteristics.landwalk_subtypes.is_empty() || !attacker_characteristics.landwalk_qualities.is_empty() {
                     let defender_controls_matching_land = state.objects.values().any(|land| {
-                        land.zone == ZoneKind::Battlefield
-                            && crate::layers::effective_controller(state, script_runtime, land.object_id) == command.actor
-                            && crate::layers::effective_characteristics(state, script_runtime, land.object_id)
-                                .subtypes
-                                .iter()
-                                .any(|s| attacker_characteristics.landwalk_subtypes.contains(s))
+                        if land.zone != ZoneKind::Battlefield
+                            || crate::layers::effective_controller(state, script_runtime, land.object_id) != command.actor
+                        {
+                            return false;
+                        }
+                        let land_characteristics = crate::layers::effective_characteristics(state, script_runtime, land.object_id);
+                        land_characteristics.subtypes.iter().any(|s| attacker_characteristics.landwalk_subtypes.contains(s))
+                            // CR 702.14a's combination forms - the land must
+                            // satisfy every field the matched `LandwalkQuality`
+                            // specifies, in addition to being a land at all
+                            // (the "[type]" is always "land plus ...", never
+                            // just "artifact"/"snow" alone).
+                            || attacker_characteristics.landwalk_qualities.iter().any(|quality| {
+                                land_characteristics.card_types.contains(CardTypeSet::LAND)
+                                    && quality.subtypes.iter().all(|s| land_characteristics.subtypes.contains(s))
+                                    && quality.card_types.is_none_or(|ct| land_characteristics.card_types.intersects(ct))
+                                    && quality.supertypes.is_none_or(|st| land_characteristics.supertypes.contains(st))
+                                    && quality.excluded_supertypes.is_none_or(|st| !land_characteristics.supertypes.intersects(st))
+                            })
                     });
                     if defender_controls_matching_land {
                         return Err(CommandError::IllegalAction(

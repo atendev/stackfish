@@ -132,6 +132,7 @@ pub fn effective_characteristics(
     let mut protection_everything = false;
     let mut protection_players: Vec<crate::types::cost::FilterController> = Vec::new();
     let mut landwalk_subtypes: Vec<crate::Subtype> = Vec::new();
+    let mut landwalk_qualities: Vec<crate::types::effect::LandwalkQuality> = Vec::new();
     let mut bands_with_other_subtypes: Vec<crate::Subtype> = Vec::new();
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
@@ -159,6 +160,11 @@ pub fn effective_characteristics(
                     landwalk_subtypes.push(added);
                 }
             }
+            Some(EffectPrimitive::AddLandwalkQuality(added)) => {
+                if !landwalk_qualities.contains(&added) {
+                    landwalk_qualities.push(added);
+                }
+            }
             Some(EffectPrimitive::AddBandsWithOther(added)) => {
                 if !bands_with_other_subtypes.contains(&added) {
                     bands_with_other_subtypes.push(added);
@@ -173,6 +179,7 @@ pub fn effective_characteristics(
                 protection_everything = false;
                 protection_players = Vec::new();
                 landwalk_subtypes = Vec::new();
+                landwalk_qualities = Vec::new();
                 bands_with_other_subtypes = Vec::new();
             }
             _ => {}
@@ -271,6 +278,7 @@ pub fn effective_characteristics(
         protection_everything,
         protection_players,
         landwalk_subtypes,
+        landwalk_qualities,
         bands_with_other_subtypes,
         power,
         toughness,
