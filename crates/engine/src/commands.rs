@@ -1984,6 +1984,15 @@ pub fn execute_command(
                 let mut target: Option<Target> = None;
                 let mut banding_members = 0u32;
                 let mut non_banding_members = 0u32;
+                // CR 702.22c's second band-formation path: one or more
+                // members with "bands with other [quality]" for some
+                // quality Q, plus any number of other members whose own
+                // subtypes include Q. `member_subtypes`/`bands_with_other`
+                // collected per member below, checked once the whole band
+                // is known (a member's own quality can qualify a bandmate
+                // that comes later in the list).
+                let mut member_subtypes: Vec<Vec<crate::Subtype>> = Vec::new();
+                let mut member_bands_with_other: Vec<Vec<crate::Subtype>> = Vec::new();
                 for member in band {
                     let (_, member_target) = combat.attackers.iter().find(|(id, _)| id == member).ok_or_else(|| {
                         CommandError::IllegalAction(
@@ -2016,17 +2025,35 @@ pub fn execute_command(
                     } else {
                         non_banding_members += 1;
                     }
+
+                    let characteristics =
+                        crate::layers::effective_characteristics(state, script_runtime, *member);
+                    member_subtypes.push(characteristics.subtypes);
+                    member_bands_with_other.push(characteristics.bands_with_other_subtypes);
                 }
-                // CR 702.22c: one or more attacking creatures with banding,
-                // plus up to one attacking creature without banding.
-                if banding_members == 0 {
+
+                // CR 702.22c, first path: one or more attacking creatures
+                // with banding, plus up to one attacking creature without
+                // banding.
+                let plain_banding_shape = banding_members >= 1 && non_banding_members <= 1;
+                // CR 702.22c, second path ("bands with other [quality]"): at
+                // least one member has bands-with-other for some quality Q,
+                // and every *other* member's own subtypes include Q. Tries
+                // every quality named by any member in turn - the band is
+                // legal if any one of them makes every other member match.
+                let quality_shape = member_bands_with_other.iter().enumerate().any(|(i, qualities)| {
+                    qualities.iter().any(|quality| {
+                        member_subtypes
+                            .iter()
+                            .enumerate()
+                            .all(|(j, subtypes)| j == i || subtypes.contains(quality))
+                    })
+                });
+                if !plain_banding_shape && !quality_shape {
                     return Err(CommandError::IllegalAction(
-                        "a band needs at least one attacking creature with banding".to_string(),
-                    ));
-                }
-                if non_banding_members > 1 {
-                    return Err(CommandError::IllegalAction(
-                        "a band can include at most one attacking creature without banding"
+                        "a band needs either at least one attacking creature with banding (and \
+                         at most one without), or a creature with \"bands with other [quality]\" \
+                         whose bandmates all share that quality"
                             .to_string(),
                     ));
                 }
