@@ -17,11 +17,17 @@
 //! identity and re-run `ScriptRuntime::run_card_script` against the new
 //! snapshot (CR 707.2a: abilities are copiable).
 //!
+//! CR 707.9's two most common real exception shapes are real now too
+//! (`phase5/copy-exceptions`): `CopyExceptions` (`set_power_toughness`/
+//! `add_keywords`), applied to the snapshot right before it's frozen, shared
+//! by both entry points.
+//!
 //! Narrower than the full rules text - see this slice's own pre-slice
-//! scoping notes in docs/implementation.md: no CR 707.9 exception/
-//! modification support (always a bare copy), no ETB-replacement "enters as
-//! a copy" path (Clone itself), no stack-copy (CR 707.10, Fork-style), no
-//! double-faced-card copying (CR 707.8).
+//! scoping notes in docs/implementation.md: CR 707.9's other shapes (9c
+//! excluded characteristics, 9e/9g linked-effect/trigger exceptions) stay
+//! unmodeled, no ETB-replacement "enters as a copy" path (Clone itself), no
+//! stack-copy (CR 707.10, Fork-style), no double-faced-card copying (CR
+//! 707.8).
 
 use std::collections::{HashMap, VecDeque};
 
@@ -137,6 +143,10 @@ fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinit
 }
 
 fn become_copy_ability(source: ObjectId) -> RegisteredAbility {
+    become_copy_ability_with_exceptions(source, CopyExceptions::default())
+}
+
+fn become_copy_ability_with_exceptions(source: ObjectId, exceptions: CopyExceptions) -> RegisteredAbility {
     RegisteredAbility { id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
@@ -149,7 +159,7 @@ fn become_copy_ability(source: ObjectId) -> RegisteredAbility {
             exclude_source: false,
         })),
         operation: ScriptHandle(0),
-        effect: Some(AbilityEffect::BecomeCopy),
+        effect: Some(AbilityEffect::BecomeCopy(exceptions)),
         intervening_if: None,
     }
 }
@@ -319,6 +329,57 @@ fn become_copy_purges_old_abilities_and_registers_the_copys_own() {
     assert!(events.iter().any(|e| matches!(e, GameEventKind::BecameCopy { object, copied } if *object == doppel && *copied == bear)));
 }
 
+/// CR 707.9b: a P/T exception overrides the copy's base power/toughness -
+/// everything else (name, keywords) still comes from the copied object.
+#[test]
+fn become_copy_with_pt_exception_overrides_base_power_and_toughness() {
+    let p0 = PlayerId(0);
+    let doppel = ObjectId(0);
+    let bear = ObjectId(1);
+    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty() };
+    let state = one_player_state(
+        vec![
+            card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
+            card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+        ],
+        vec![become_copy_ability_with_exceptions(doppel, exceptions)],
+    );
+    let mut engine = Engine::new(state);
+
+    activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
+
+    let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
+    assert_eq!(chars.name, "Bear", "name still comes from the copied object");
+    assert_eq!(chars.power, Some(1), "overridden by the P/T exception");
+    assert_eq!(chars.toughness, Some(1), "overridden by the P/T exception");
+    assert!(chars.keywords.contains(KeywordSet::FLYING), "keywords still come from the copied object");
+}
+
+/// CR 707.9a: a keyword exception adds to whatever the copied object
+/// already grants, rather than replacing it.
+#[test]
+fn become_copy_with_keyword_exception_adds_the_keyword() {
+    let p0 = PlayerId(0);
+    let doppel = ObjectId(0);
+    let salamander = ObjectId(1);
+    let exceptions = CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::TRAMPLE };
+    let state = one_player_state(
+        vec![
+            card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
+            card_object(salamander, salamander_definition(), p0, ZoneKind::Battlefield),
+        ],
+        vec![become_copy_ability_with_exceptions(doppel, exceptions)],
+    );
+    let mut engine = Engine::new(state);
+
+    activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(salamander)]);
+
+    let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
+    assert_eq!(chars.name, "Salamander");
+    assert_eq!(chars.power, Some(5), "P/T still comes from the copied object - no P/T exception this time");
+    assert!(chars.keywords.contains(KeywordSet::TRAMPLE), "granted by the keyword exception");
+}
+
 /// CR 707.3: copying an object that's itself already a copy uses *that*
 /// object's current copiable values, not its own printed `CardDefinition` -
 /// a Clone copying a Vesuvan Doppelganger that already copied a Bear ends
@@ -398,7 +459,7 @@ fn become_copy_with_no_object_target_is_a_no_op() {
             cost: None,
             target: None,
             operation: ScriptHandle(0),
-            effect: Some(AbilityEffect::BecomeCopy),
+            effect: Some(AbilityEffect::BecomeCopy(CopyExceptions::default())),
             intervening_if: None,
         }],
     );
@@ -429,7 +490,7 @@ fn copy_token_matches_source_characteristics_and_abilities() {
         card,
         card_object(
             card,
-            instant_definition(10, "Clone Spell", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(bear), count: 1 }),
+            instant_definition(10, "Clone Spell", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(bear, CopyExceptions::default()), count: 1 }),
             p0,
             ZoneKind::Hand,
         ),
@@ -454,6 +515,44 @@ fn copy_token_matches_source_characteristics_and_abilities() {
     assert!(matches!(token_abilities[0].effect, Some(AbilityEffect::GainLife(1))));
 }
 
+/// CR 707.9b: a copy token's P/T exception overrides its base power/
+/// toughness - same as `BecomeCopy`'s own exception handling, applied
+/// before the snapshot is frozen as the token's `definition`.
+#[test]
+fn copy_token_with_pt_exception_overrides_base_power_and_toughness() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let bear = ObjectId(0);
+    state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+
+    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty() };
+    let card = ObjectId(1);
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            instant_definition(10, "Clone Spell", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(bear, exceptions), count: 1 }),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
+    let token_id = bf.contents.iter().find(|&&id| id != bear).copied().expect("the copy token landed");
+    let token = engine.state().object(token_id).unwrap();
+    assert_eq!(token.definition.name, "Bear", "name still comes from the copied object");
+    assert!(matches!(token.definition.power, Some(PTValue::Fixed(1))), "overridden by the P/T exception");
+    assert!(matches!(token.definition.toughness, Some(PTValue::Fixed(1))), "overridden by the P/T exception");
+}
+
 /// `TokenSpec::CopyOf` naming an `ObjectId` that doesn't resolve creates no
 /// token - "skip rather than guess," same stance every other unresolvable
 /// reference in this engine takes.
@@ -469,7 +568,7 @@ fn copy_token_of_a_missing_source_creates_nothing() {
         card,
         card_object(
             card,
-            instant_definition(10, "Clone Spell", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(missing), count: 1 }),
+            instant_definition(10, "Clone Spell", AbilityEffect::CreateToken { spec: TokenSpec::CopyOf(missing, CopyExceptions::default()), count: 1 }),
             p0,
             ZoneKind::Hand,
         ),
@@ -482,4 +581,38 @@ fn copy_token_of_a_missing_source_creates_nothing() {
     pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty(), "no token was created");
+}
+
+// ── Game.Ops.BecomeCopy(opts?) / Game.Tokens.CopyOf(objectId, opts?) Lua
+// binding decoding ─────────────────────────────────────────────────────
+
+#[test]
+fn game_ops_become_copy_decodes_pt_and_keyword_exceptions() {
+    let mut runtime = ScriptRuntime::new();
+    let (effect, _handle) = runtime
+        .load_operation(r#"return Game.Ops.BecomeCopy({ power = 1, toughness = 1, keywords = { "Trample" } })"#)
+        .expect("primitive loads");
+    let Some(AbilityEffect::BecomeCopy(exceptions)) = effect else {
+        panic!("expected Some(AbilityEffect::BecomeCopy(_)), got {effect:?}")
+    };
+    assert_eq!(exceptions.set_power_toughness, Some((1, 1)));
+    assert!(exceptions.add_keywords.contains(KeywordSet::TRAMPLE));
+}
+
+#[test]
+fn game_ops_become_copy_with_no_opts_is_a_bare_copy() {
+    let mut runtime = ScriptRuntime::new();
+    let (effect, _handle) = runtime.load_operation("return Game.Ops.BecomeCopy()").expect("primitive loads");
+    let Some(AbilityEffect::BecomeCopy(exceptions)) = effect else {
+        panic!("expected Some(AbilityEffect::BecomeCopy(_)), got {effect:?}")
+    };
+    assert_eq!(exceptions.set_power_toughness, None);
+    assert_eq!(exceptions.add_keywords, KeywordSet::empty());
+}
+
+#[test]
+fn game_ops_become_copy_rejects_power_without_toughness() {
+    let mut runtime = ScriptRuntime::new();
+    let result = runtime.load_operation("return Game.Ops.BecomeCopy({ power = 1 })");
+    assert!(result.is_err(), "power/toughness must be set together, not just one");
 }

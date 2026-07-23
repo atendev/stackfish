@@ -5,7 +5,7 @@ use std::rc::Rc;
 use mlua::{Function, Lua, RegistryKey, Table, Thread, ThreadStatus, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{
-    AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, CreatureTokenSpec,
+    AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, CopyExceptions, CreatureTokenSpec,
     InterveningIfPrimitive, InterveningIfSpec, NamedToken, RegisteredAbility, SearchDestination,
     TokenSpec,
 };
@@ -680,6 +680,34 @@ fn decode_creature_token_opts(
         }
     }
     Ok((keywords, name, additional_types, additional_supertypes))
+}
+
+/// CR 707.9's copy-effect exceptions/modifications - shared by
+/// `Game.Ops.BecomeCopy(opts?)` and `Game.Tokens.CopyOf(objectId, opts?)`.
+/// `opts` is `{ power = N, toughness = N }` (707.9b, both fields required
+/// together - a P/T override wouldn't mean anything with only one) and/or
+/// `{ keywords = { "Flying", ... } }` (707.9a). `None`/omitted is a bare
+/// copy - `CopyExceptions::default()`.
+fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyExceptions, ScriptError> {
+    let Some(opts) = opts else { return Ok(CopyExceptions::default()) };
+    let power: Option<i32> = opts.get("power").ok().flatten();
+    let toughness: Option<i32> = opts.get("toughness").ok().flatten();
+    let set_power_toughness = match (power, toughness) {
+        (Some(p), Some(t)) => Some((p, t)),
+        (None, None) => None,
+        _ => {
+            return Err(ScriptError::LoadError(
+                "CopyExceptions power/toughness must be set together, not just one".to_string(),
+            ))
+        }
+    };
+    let mut add_keywords = KeywordSet::empty();
+    if let Ok(Some(kws)) = opts.get::<_, Option<mlua::Table>>("keywords") {
+        for pair in kws.sequence_values::<String>() {
+            add_keywords |= parse_keyword_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
+        }
+    }
+    Ok(CopyExceptions { set_power_toughness, add_keywords })
 }
 
 /// `TriggeredAbilityBuilder`'s `:SetLayer` decoder — only a `Game.Layers.*`
@@ -2367,11 +2395,17 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         }))
     })?;
     ops.set("Search", search)?;
-    // `Game.Ops.BecomeCopy()` (CR 707.2, layer 1) - no arguments, same
-    // toggle shape as `Game.Ops.Destroy`/`Sacrifice`/`Exile`/`Shuffle`; the
-    // copy target is whatever the ability's own targeting already resolved,
-    // not a value passed here.
-    ops.set("BecomeCopy", OperationTag(AbilityEffect::BecomeCopy))?;
+    // `Game.Ops.BecomeCopy(opts?)` (CR 707.2/707.9, layer 1) - the copy
+    // target is whatever the ability's own targeting already resolved, not a
+    // value passed here. `opts` is `CopyExceptions` (CR 707.9's "copy,
+    // except..." shapes) - `{ power = N, toughness = N }` (707.9b) and/or
+    // `{ keywords = { "Flying", ... } }` (707.9a); omitted or `nil` is a
+    // bare copy, unchanged from before this field existed.
+    let become_copy = lua.create_function(|_, opts: Option<Table>| {
+        let exceptions = decode_copy_exceptions(opts).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::BecomeCopy(exceptions)))
+    })?;
+    ops.set("BecomeCopy", become_copy)?;
     // `Game.Ops.Attach` (CR 702.6a, Equip) - no arguments, same toggle shape
     // as `Game.Ops.Destroy`/`Sacrifice`/`Exile`/`Shuffle`/`BecomeCopy`; the
     // attach target is whatever the activated ability's own `:SetTarget`
@@ -2702,12 +2736,17 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
             })))
         })?,
     )?;
-    // `Game.Tokens.CopyOf(objectId)` (CR 707.10f) - see `TokenSpec::CopyOf`'s
-    // own doc comment for why this token's `CardDefinition` isn't built
-    // from any of the opts the other `Game.Tokens.*` entries above take.
+    // `Game.Tokens.CopyOf(objectId, opts?)` (CR 707.10f/707.9) - see
+    // `TokenSpec::CopyOf`'s own doc comment for why this token's
+    // `CardDefinition` isn't built from any of the opts the other
+    // `Game.Tokens.*` entries above take. `opts` is `CopyExceptions`, same
+    // shape `Game.Ops.BecomeCopy`'s own `opts` takes (`decode_copy_exceptions`).
     tokens.set(
         "CopyOf",
-        lua.create_function(|_, source: u64| Ok(TokenTag(TokenSpec::CopyOf(ObjectId(source)))))?,
+        lua.create_function(|_, (source, opts): (u64, Option<mlua::Table>)| {
+            let exceptions = decode_copy_exceptions(opts).map_err(to_lua_err)?;
+            Ok(TokenTag(TokenSpec::CopyOf(ObjectId(source), exceptions)))
+        })?,
     )?;
 
     // Backlog item 9: `Game.SelectTargets(filter)` yields the request
