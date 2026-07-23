@@ -165,8 +165,9 @@
   `state.replacement_effects` by the time `apply_enters_battlefield_modifiers` runs right after.
 - Unresolved:
   - Dynamic/choice-based amounts (Bloodthirst, closed by `phase5/bloodthirst` below; Sunburst,
-    Devour, Amplify still unmodeled) — needs a `Script` payload variant for the ones that stay
-    dynamic; only fixed printed `amount` (plus Bloodthirst's state-gated fixed `amount`) is real.
+    closed by `phase5/sunburst` below; Devour, Amplify still unmodeled) — needs a `Script` payload
+    variant for the ones that stay dynamic; only fixed printed `amount` (plus Bloodthirst's
+    state-gated fixed `amount` and Sunburst's fully-derived kind/amount) is real.
   - CR 614.12a/b (choices required by an ETB modifier, payability ordering across simultaneous
     entries) — unmodeled.
   - Token creation (`Game.Ops.CreateToken`) — a 4th real to-Battlefield producer, not wired.
@@ -205,8 +206,46 @@
 - Unresolved:
   - CR 702.54b's "Bloodthirst X" variant (amount = *total* damage dealt to opponents this turn, not
     a fixed gate) — reuses the identical ledger scan, named as a cheap follow-up, not built.
-  - Sunburst, Devour, Amplify — unchanged, still need their own real prerequisite plumbing (see
-    above).
+  - Sunburst — closed by `phase5/sunburst` below. Devour, Amplify — unchanged, still need a genuine
+    mid-ETB player-choice pause (see above).
+
+## Slice: sunburst (merged)
+
+- Branch `phase5/sunburst`.
+- Scope: CR 702.44 Sunburst, the second of the four "dynamic ETB counts" items — unlike
+  Bloodthirst's fixed-amount state-gate, Sunburst's amount is genuinely dynamic (colors of mana
+  spent to cast it), but still fully deterministic, no player choice involved — the missing
+  prerequisite was purely plumbing: `StackObject::costs_paid` (CR 118.13a's exact payment record)
+  already existed, but nothing threaded it as far as the ETB step.
+- Verify: 10 new tests (`phase5_sunburst.rs` — `cost::colors_spent` unit tests, unit-level
+  `apply_enters_battlefield_modifiers` calls, Lua registration, and two real end-to-end
+  cast-and-resolve tests with a real colored mana payment, one creature/one non-creature), full
+  workspace suite green.
+- Key changes:
+  - `ReplacementPayload::EntersWithCountersSunburst` — no fields at all, unlike every other
+    `EntersWithCounters*` variant. Both `kind` and `amount` are derived at apply time instead:
+    `amount` is the popcount of a new `colors_spent: ColorSet` parameter threaded onto
+    `apply_enters_battlefield_modifiers` itself; `kind` is `PlusOnePlusOne` if the entering object's
+    own *printed* `CardDefinition.card_types` include Creature, `Charge` otherwise — CR 702.44a's
+    "ignoring any type-changing effects that would affect it" is explicit that this is the printed
+    type, not `EffectiveCharacteristics::card_types` (layer 4), the one respect this isn't shaped
+    like every other characteristic-sensitive check in this engine.
+  - `cost::colors_spent(payments: &[CostPayment]) -> ColorSet` — new helper, sums the distinct
+    colors across every `CostPayment::Mana` entry's `units` (a `SnowColored` unit counts toward its
+    color same as a plain one; non-`Mana` payments contribute nothing).
+  - `apply_enters_battlefield_modifiers` gained a `colors_spent: ColorSet` parameter. Only the
+    resolve-spell-from-stack call site (`ResolveStackTop`) can supply a real value — `top` (the
+    captured `StackObject`) still has its own `costs_paid` at that point, read via
+    `cost::colors_spent(&top.costs_paid)`. `PlayLand`/`Search`'s battlefield-entry call sites always
+    pass `ColorSet::empty()`, which is exactly correct per CR 702.44b (no cast, no colors, no
+    counters) rather than a placeholder needing a follow-up.
+  - `Game.ReplacementPayloads.EntersWithCountersSunburst` — a bare value (like `EntersTapped`), not
+    a constructor function, since there's nothing to parametrize.
+  - Paired into `validate_replacement_filter_payload_pairing`'s `WouldMoveZone(_, Battlefield)` arm
+    alongside its siblings.
+- Unresolved: CR 702.44c's "Sunburst used to set a variable number for another ability" (e.g.
+  "Modular—Sunburst") — no such cross-keyword reference plumbing exists, not attempted. Devour,
+  Amplify — still need a genuine mid-ETB player-choice pause, unchanged by this slice.
 
 ## Slice: protection-as-replacement (merged)
 

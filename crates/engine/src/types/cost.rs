@@ -1,5 +1,5 @@
 use crate::{
-    AtomicManaSymbol, CardTypeSet, Color, GameObject, GameState, ManaCost, ManaPool, ManaSymbol,
+    AtomicManaSymbol, CardTypeSet, Color, ColorSet, GameObject, GameState, ManaCost, ManaPool, ManaSymbol,
     ManaUnit, ObjectId, PlayerId, Subtype, SupertypeSet, ZoneKind,
 };
 use crate::script::ScriptRuntime;
@@ -510,6 +510,33 @@ pub enum CostPayment {
     Tap(ObjectId),
     Life(u32),
     Other { description: String },
+}
+
+/// CR 702.44b (Sunburst): the distinct colors of mana actually spent across
+/// every `CostPayment::Mana` entry in `payments` — a snow-colored unit
+/// counts toward its color same as a plain one (CR 702.44a doesn't
+/// distinguish). Non-`Mana` payments (Sacrifice/Discard/Tap/Life/Other)
+/// contribute nothing, same "only colored mana units count" reading CR
+/// 702.44b's own text takes.
+pub fn colors_spent(payments: &[CostPayment]) -> ColorSet {
+    let mut set = ColorSet::empty();
+    for payment in payments {
+        let CostPayment::Mana { units, .. } = payment else { continue };
+        for unit in units {
+            let bit = match unit {
+                ManaUnit::Colored(c) | ManaUnit::SnowColored(c) => match c {
+                    Color::White => ColorSet::WHITE,
+                    Color::Blue => ColorSet::BLUE,
+                    Color::Black => ColorSet::BLACK,
+                    Color::Red => ColorSet::RED,
+                    Color::Green => ColorSet::GREEN,
+                },
+                ManaUnit::Colorless | ManaUnit::SnowColorless => continue,
+            };
+            set |= bit;
+        }
+    }
+    set
 }
 
 /// A fully chosen, validated-before-commit set of payments for a `CostSpec`.

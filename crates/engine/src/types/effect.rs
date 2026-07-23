@@ -615,14 +615,13 @@ pub enum ReplacementPayload {
     EntersTapped,
     /// CR 614.1c/122.6: the matched `WouldMoveZone(_, Battlefield)` event's
     /// resulting permanent enters with `amount` counters of `kind` on it
-    /// (e.g. Fading N, Modular N, Graft N — fixed printed numbers only;
-    /// most other game-state-dependent amounts (Sunburst, Devour, Amplify)
-    /// still aren't representable by this `Primitive` shape, see
-    /// `ReplacementSpec::Script`'s own doc comment — Sunburst needs the cast
-    /// payment's chosen mana colors threaded this far, which nothing
-    /// currently carries; Devour/Amplify need a genuine mid-ETB player
+    /// (e.g. Fading N, Modular N, Graft N — fixed printed numbers only).
+    /// Sunburst's own game-state-dependent amount is `EntersWithCountersSunburst`
+    /// below instead, a separate variant since its kind/amount are both
+    /// derived at apply time, not fixed at registration. Devour/Amplify
+    /// still aren't representable — both need a genuine mid-ETB player
     /// choice, which needs a new pause/resume `ProcessState` of its own,
-    /// same category of work as `AwaitingAttachChoice`). Same "nothing to
+    /// same category of work as `AwaitingAttachChoice`. Same "nothing to
     /// rewrite on the event itself" stance as `EntersTapped` above —
     /// applied by `replacement::apply_enters_battlefield_modifiers`, not
     /// `apply()`.
@@ -643,6 +642,24 @@ pub enum ReplacementPayload {
     /// deliberately not bundled in here to keep this primitive matching
     /// exactly what was scoped.
     EntersWithCountersBloodthirst { kind: CounterKind, amount: i32 },
+    /// CR 702.44 (Sunburst): like `EntersWithCounters`, but both `kind` and
+    /// `amount` are derived at apply time instead of fixed at registration —
+    /// no fields on this variant at all. `amount` is the number of *distinct*
+    /// colors of mana spent to cast this object (CR 702.44b: zero if no
+    /// colored mana was spent, or if this object isn't entering from the
+    /// stack as a resolving spell at all — a `ColorSet` this engine has
+    /// nowhere else to source except `StackObject.costs_paid`, which only
+    /// exists while a spell is still on the stack). `kind` is `PlusOnePlusOne`
+    /// if this object's own *printed* `CardDefinition.card_types` include
+    /// Creature, `Charge` otherwise — CR 702.44a's "ignoring any
+    /// type-changing effects that would affect it" is explicit that this
+    /// reads the printed type, not `EffectiveCharacteristics::card_types`
+    /// (layer 4), the one respect this isn't shaped like every other
+    /// characteristic-sensitive check in this engine. See
+    /// `replacement::apply_enters_battlefield_modifiers`'s own doc comment
+    /// for where `colors_spent` comes from and why the other two call sites
+    /// (PlayLand, Search) always pass an empty `ColorSet`.
+    EntersWithCountersSunburst,
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this

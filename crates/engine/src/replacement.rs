@@ -1,9 +1,12 @@
 use crate::script::ScriptRuntime;
+use crate::types::card::CardTypeSet;
 use crate::types::cost::FilterController;
+use crate::types::counter::CounterKind;
 use crate::types::effect::{ConsumptionPolicy, ReplacementPayload, ReplacementSpec};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
+use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
 
 /// What `apply_replacements` produced for one proposed event. Not just a
@@ -404,11 +407,23 @@ pub(crate) fn apply_replacements_from(
 /// matching `EntersWithCounters` effect) for the caller to append to its own
 /// event list, same ledger-visibility convention `AbilityEffect::Counters`
 /// already established.
+///
+/// `colors_spent` (CR 702.44, Sunburst): the distinct colors of mana spent
+/// to pay for `object`'s own cast, if any — sourced from `StackObject::
+/// costs_paid`, which only exists while a spell is still on the stack, so
+/// only the resolve-spell-from-stack call site can supply a real value.
+/// `ColorSet::empty()` at every other call site (`PlayLand`, `Search`) is
+/// exactly correct, not a placeholder — CR 702.44b already denies Sunburst's
+/// counters whenever the object isn't entering from the stack as a resolving
+/// spell, which an empty set naturally does too (indistinguishable from "no
+/// colored mana was spent," and both cases mean the same thing here: no
+/// counters).
 pub fn apply_enters_battlefield_modifiers(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
     object: ObjectId,
     from: ZoneKind,
+    colors_spent: ColorSet,
 ) -> Vec<GameEventKind> {
     // `GameEventKind` isn't `Clone` - rebuilt fresh at each use site below
     // instead of cloned once, same shape every time (`object`/`from` are
@@ -424,7 +439,8 @@ pub fn apply_enters_battlefield_modifiers(
                 ReplacementSpec::Primitive {
                     payload: ReplacementPayload::EntersTapped
                         | ReplacementPayload::EntersWithCounters { .. }
-                        | ReplacementPayload::EntersWithCountersBloodthirst { .. },
+                        | ReplacementPayload::EntersWithCountersBloodthirst { .. }
+                        | ReplacementPayload::EntersWithCountersSunburst,
                     ..
                 }
             )
@@ -468,6 +484,25 @@ pub fn apply_enters_battlefield_modifiers(
             ReplacementPayload::EntersWithCountersBloodthirst { kind, amount } => {
                 let controller = state.object(object).map(|o| o.controller);
                 if controller.is_some_and(|c| opponent_damaged_this_turn(state, c)) {
+                    counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
+                }
+            }
+            // CR 702.44a/b: both `kind` and `amount` are derived here rather
+            // than carried by the payload - see `EntersWithCountersSunburst`'s
+            // own doc comment. `colors_spent.bits().count_ones()` is exactly
+            // "the number of colors" since `ColorSet` is a bitflag over the
+            // 5 WUBRG bits, one bit per color, never double-counted.
+            ReplacementPayload::EntersWithCountersSunburst => {
+                let amount = colors_spent.bits().count_ones() as i32;
+                if amount > 0 {
+                    let kind = if state
+                        .object(object)
+                        .is_some_and(|o| o.definition.card_types.contains(CardTypeSet::CREATURE))
+                    {
+                        CounterKind::PlusOnePlusOne
+                    } else {
+                        CounterKind::Charge
+                    };
                     counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
                 }
             }
