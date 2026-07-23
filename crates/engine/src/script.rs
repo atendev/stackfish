@@ -2322,9 +2322,11 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     // `Discard`/`TapPermanents` already accept, extended with
     // `supertypes`/`subtypes` alongside this backlog-item-14b slice).
     // `opts.destination` is `"hand"` (default) or `"battlefield"`;
-    // `opts.tapped` only matters for `"battlefield"`; `opts.shuffle`
-    // defaults to `true` (CR 701.24a: nearly every real search effect pairs
-    // with "then shuffle").
+    // `opts.tapped`/`opts.enters_attached` only matter for `"battlefield"`
+    // (CR 303.4f/g/h, `phase5/aura-enters-attached` — meaningful only for a
+    // found Aura card, see `SearchDestination::Battlefield`'s own doc
+    // comment); `opts.shuffle` defaults to `true` (CR 701.24a: nearly every
+    // real search effect pairs with "then shuffle").
     let search = lua.create_function(|_, (filter_table, count, opts): (Table, u32, Option<Table>)| {
         let filter = decode_filter_table(filter_table).map_err(to_lua_err)?;
         let destination_name: Option<String> = match &opts {
@@ -2338,7 +2340,14 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
                     Some(t) => t.get("tapped").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
                     None => None,
                 };
-                SearchDestination::Battlefield { tapped: tapped.unwrap_or(false) }
+                let enters_attached: Option<bool> = match &opts {
+                    Some(t) => t.get("enters_attached").map_err(|e| to_lua_err(ScriptError::LoadError(e.to_string())))?,
+                    None => None,
+                };
+                SearchDestination::Battlefield {
+                    tapped: tapped.unwrap_or(false),
+                    enters_attached: enters_attached.unwrap_or(false),
+                }
             }
             Some(other) => {
                 return Err(to_lua_err(ScriptError::LoadError(format!(

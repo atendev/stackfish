@@ -365,13 +365,20 @@ pub enum AbilityEffect {
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
-/// overwhelmingly common real destinations. `Battlefield { tapped }` covers
-/// fetch lands (most enter tapped, some don't); no Graveyard/Exile
+/// overwhelmingly common real destinations. `Battlefield { tapped, .. }`
+/// covers fetch lands (most enter tapped, some don't); no Graveyard/Exile
 /// destination this slice (rare in practice, deferred).
 #[derive(Clone, Copy, Debug)]
 pub enum SearchDestination {
     Hand,
-    Battlefield { tapped: bool },
+    /// CR 303.4f/g/h (`phase5/aura-enters-attached`): `enters_attached`
+    /// applies only to a found Aura card (`commands::is_aura`) — it enters
+    /// already attached, choosing among legal enchant candidates as it
+    /// enters (0 candidates: CR 303.4g, stays in the library instead;
+    /// `false`, the default/common case, is every plain fetch-land-style
+    /// search unaffected by this). A non-Aura card with this set simply
+    /// enters unattached (CR 303.4h) — the field is a no-op for it.
+    Battlefield { tapped: bool, enters_attached: bool },
 }
 
 /// Which named token to create — covers the fixed-spec artifact tokens.

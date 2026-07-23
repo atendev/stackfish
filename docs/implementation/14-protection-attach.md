@@ -37,11 +37,11 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
   confirmed by a regression test, no code change needed. CR 303.4d's third clause ("can't enchant
   more than one object" - if a spell/ability would cause that, the Aura's controller picks which
   one) is real now too (`phase5/aura-attach-choice`, see that slice's own note below) - **dormant**,
-  since no attach call site can produce multiple simultaneous candidates. Still open: CR 303.4f/g/h/i
-  (a permanent entering the battlefield pre-attached by a non-casting, non-equip-activation effect -
-  no such effect exists in this engine yet), CR 303.4k (morph - no face-down mechanic exists), and
-  CR 303.4m ("the enchanted X" as a script reference - no such reference plumbing exists yet,
-  Aura-specific or generic).
+  since no attach call site can produce multiple simultaneous candidates. CR 303.4f/g/h are real now
+  too, for Auras (`phase5/aura-enters-attached`, see that slice's own note below). Still open: CR
+  303.4i (permanent-attachment-attempt-to-an-illegal-target, distinct from entry - no such effect
+  exists), CR 303.4k (morph - no face-down mechanic exists), and CR 303.4m ("the enchanted X" as a
+  script reference - no such reference plumbing exists yet, Aura-specific or generic).
 
 ## Slice: aura-attach-choice (merged)
 
@@ -82,6 +82,58 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
   for an Aura enchanting a player (a separate, larger, pre-existing gap, not touched here).
 - Unresolved: CR 303.4f/g/h/i, CR 303.4k, CR 303.4m (see the note above, unchanged by this slice);
   player-candidate attach choice (blocked on the pre-existing Aura-enchants-a-player gap).
+
+## Slice: aura-enters-attached (merged)
+
+- Branch `phase5/aura-enters-attached`.
+- Scope: CR 303.4f/g/h — a permanent entering the battlefield already attached, by an effect other
+  than resolving as an Aura spell or activating Equip. Closes the last open piece of CR 303.4 named
+  by `phase5_aura_attach.rs`'s own doc comment ("no effect in this engine puts an Aura onto the
+  battlefield except by resolving as a spell"), for the one real non-casting battlefield-entry
+  producer that exists in this engine: `SearchDestination::Battlefield`. Scoped to Auras only —
+  Equipment/Fortification pre-attached entry is a separate, still-open follow-up (Equipment's attach
+  legality isn't governed by a `target_requirement` the way an Aura's enchant ability is, so it needs
+  its own legality shape).
+- Verify: 5 new tests (`phase5_aura_enters_attached.rs`), full workspace suite green.
+- Key finding that reshaped the plan: CR 303.4f's "the player chooses what it will enchant as it
+  enters" needed a real, *live* continuation of the search-resolution pipeline once answered — the
+  pre-existing `ProcessState::AwaitingAttachChoice`/`submit_attach_choice` (built by
+  `aura-attach-choice`) was dormant specifically because it had no such continuation ("there's no
+  real pipeline stage to hand back to since nothing produces this pause yet" — its own doc comment).
+  Rather than retrofitting that continuation onto a pause type named for a different CR clause (CR
+  303.4d, "more than one candidate for an *already-targeted* attach"), this slice adds its own
+  sibling pause, `ProcessState::AwaitingAuraEntryAttachChoice`, carrying everything
+  `submit_search_choice`'s battlefield-entry loop needs to pick back up.
+- Key changes:
+  - `SearchDestination::Battlefield { tapped, enters_attached: bool }` — new field, `false` (the
+    default/common case) leaves every plain fetch-land-style search unaffected. Meaningful only for
+    a found Aura card (`commands::is_aura`); a no-op for anything else (CR 303.4h).
+  - `commands::legal_aura_entry_candidates(state, script_runtime, aura_definition, controller,
+    aura_source) -> Vec<ObjectId>` — scans every object in `state` for `target_is_legal` matches
+    against the Aura's own `target_requirement`, evaluated fresh (unlike the cast-time path, no
+    target was ever chosen to recheck). Reuses `target_is_legal` directly — no new legality logic.
+    Player candidates (CR 303.4b) are out of scope, same posture `aura-attach-choice` already took.
+  - `Engine::continue_search_battlefield_entry` — `submit_search_choice`'s old inline per-card loop,
+    factored into its own method taking a `VecDeque<ObjectId>` of still-unprocessed chosen cards so
+    it can be re-entered after a pause. For a `Battlefield { enters_attached: true }` Aura: 0
+    candidates (CR 303.4g, current zone isn't the stack) skips the card entirely — it stays in the
+    library, nothing moves; 1 candidate attaches immediately, no pause; 2+ candidates commits the
+    zone-move (the Aura is already a real, unattached battlefield permanent — same order the
+    cast-time Aura-ETB-attach path uses) then pauses via `AwaitingAuraEntryAttachChoice`, saving
+    `remaining`/`destination`/`controller`/`stack_id`/`shuffle_after`/`events_so_far`.
+  - `Engine::submit_aura_entry_attach_choice(chosen) -> Result<(), AttachChoiceError>` — validates,
+    attaches, logs `Attached`, then calls `continue_search_battlefield_entry` again with the saved
+    `remaining` queue, so a search with several chosen cards can pause and resume once per card that
+    needs it (each pause is independent and sequential — never more than one active at a time, so no
+    "two simultaneous choosers" problem the way `AssignCombatDamage`'s own banding note has).
+  - `Game.Ops.Search`'s Lua builder gained `opts.enters_attached` alongside `opts.tapped`.
+- Unresolved:
+  - Equipment/Fortification pre-attached entry — named follow-up, not built.
+  - CR 303.4i (an effect specifies an *explicit* illegal enchant target, as opposed to CR 303.4f's
+    "nothing specified") — genuinely different from what this slice built (nothing in this engine's
+    `Search` shape can specify an attach target at all, only "let the player choose" or "none"), so
+    still open, not silently narrowed into 303.4g's coverage.
+  - CR 303.4k (morph), CR 303.4m ("the enchanted X" script reference) — unchanged, still open.
 
 ## Equipment / Equip (CR 702.6)
 

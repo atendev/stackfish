@@ -657,6 +657,46 @@ pub(crate) fn is_equipment(definition: &CardDefinition) -> bool {
         && definition.subtypes.iter().any(|s| s.0 == "Equipment")
 }
 
+/// CR 303.4f: every object currently a legal enchant target for `aura`'s own
+/// enchant ability (`aura_definition.target_requirement`), evaluated fresh
+/// against `state` right now - unlike the normal cast-time path, no target
+/// has been chosen yet, so this scans every object in `state` rather than
+/// rechecking one. Reuses `target_is_legal` (same filter/legality logic the
+/// cast-time path already consults) once per candidate; player candidates
+/// (CR 303.4b) are out of scope, same posture `phase5/aura-attach-choice`
+/// already took for the identical reason (this engine has no support for an
+/// Aura enchanting a player at all yet). `aura_source` both supplies CR
+/// 115.4's "another target" check (`exclude_source`) and is excluded from
+/// the scan implicitly by `aura_source` not yet existing in `state.objects`
+/// at the point this is called (see `SearchDestination::Battlefield`'s call
+/// site - the Aura's own not-yet-inserted `ObjectId` is passed here before
+/// any zone move happens, so it can never appear as a candidate of itself;
+/// CR 303.4d self-enchant only matters once the Aura already exists on the
+/// battlefield, which this narrow entry path doesn't produce). No `Aura`
+/// carrying a `target_requirement` other than `TargetSpec::Primitive` (i.e.
+/// none, this engine never builds one) returns no candidates rather than
+/// panicking - same "skip rather than guess" stance every other
+/// unresolvable-requirement case in this codebase already takes.
+pub(crate) fn legal_aura_entry_candidates(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    aura_definition: &CardDefinition,
+    controller: PlayerId,
+    aura_source: ObjectId,
+) -> Vec<ObjectId> {
+    let Some(TargetSpec::Primitive(req)) = &aura_definition.target_requirement else {
+        return Vec::new();
+    };
+    state
+        .objects
+        .values()
+        .filter(|obj| {
+            target_is_legal(state, script_runtime, Target::Object(obj.object_id), &req.filter, controller, aura_source, req.exclude_source)
+        })
+        .map(|obj| obj.object_id)
+        .collect()
+}
+
 /// CR 303.4b/301.5a: attaches `attaching_id` (an Aura or an Equipment) to
 /// `target_id` - sets the attaching object's own `attached_to` and pushes
 /// into the target's `attachments`, kept in sync in both directions. The
