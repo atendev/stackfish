@@ -308,9 +308,9 @@
     puts `subtypes` between them), plus one manual fix for the sole site with a real `supertypes:
     Some(...)` value. Verified clean by `cargo build --workspace --tests`.
 - Unresolved:
-  - Multi-target-word spells, no Lua builder path for a spell's own `target_requirement` (closed by
-    `phase5/spell-target-script`, above, for the scenario side — TOML modal spells still don't
-    exist) — unchanged by this slice.
+  - Multi-target-word spells (closed by `phase5/multi-target-word-spells`, below), no Lua builder
+    path for a spell's own `target_requirement` (closed by `phase5/spell-target-script`, above, for
+    the scenario side — TOML modal spells still don't exist) — unchanged by this slice.
 
 ## Slice: modal-spell-toml (merged)
 
@@ -341,3 +341,44 @@
     slice). CR 700.2d/e/h/i (choose 2+, another player chooses, per-mode additional cost, pawprint
     budgets) — still unmodeled engine-side, unchanged by this slice. Multi-target-word spells — still
     open.
+
+## Slice: multi-target-word-spells (merged)
+
+- Branch `phase5/multi-target-word-spells`.
+- Scope: CR 601.2c/608.2b — a spell/ability that uses the word "target" in more than one place (CR
+  608.2b's own worked example, Plague Spores: "Destroy target nonblack creature and target land").
+  Every prior targeting slice carried this forward as still open — only one `TargetRequirement` per
+  spell/ability was representable at all.
+- Verify: 6 new tests (`phase5_multi_target_word_spells.rs`), full workspace suite green.
+- Key finding that reshaped the plan: no `CardDefinition` field change needed (a past slice found
+  adding one prohibitively wide-ripple, ~403 struct-literal sites with no `Default` impl) — the whole
+  gap was a missing `TargetSpec` variant, touching only the two real places that already consume
+  `TargetSpec` (`commands::validate_targets`, the CR 608.2b resolution recheck in `engine.rs`). Also:
+  for the common real shape (one effect verb applied uniformly across every word — the rules' own
+  Plague Spores example), zero changes were needed to effect-resolution code at all — `AbilityEffect::
+  Destroy`/`Damage`/etc. already just iterate a flat `legal_targets` list, and concatenating each
+  word's own legal subset into that list (in order) produces the correct result for free. A
+  role-differentiated multi-word spell (different words feeding different verbs) has no matching
+  `AbilityEffect` primitive either way and would need a `Script` effect regardless — not a new gap.
+- Key changes:
+  - `TargetSpec::Multiple(Vec<TargetRequirement>)` — one entry per distinct target word, in order.
+    Every entry must use an exact count (`up_to`/`at_least` both `false`) — there's no way to split a
+    flat submitted-targets list unambiguously by a variable-length chunk, so that combination is
+    rejected rather than guessed at.
+  - `commands::split_targets_by_requirement(reqs, targets) -> Option<Vec<&[Target]>>` — splits a flat
+    list into one contiguous chunk per requirement; `None` on any exact-count violation, a too-short
+    list, or a leftover remainder.
+  - `commands::validate_one_target_requirement` — the pre-existing single-requirement validation body
+    (count check, CR 115.3/601.2c per-instance dedup, per-target legality), factored out so
+    `validate_targets`'s `Primitive` arm (whole list) and new `Multiple` arm (one chunk per
+    requirement, each with its own independent `seen` dedup set) share it. Confirms CR 601.2c's own
+    text directly: dedup is per word, not across words — the same object can legally be chosen for
+    two different target words.
+  - `engine.rs`'s CR 608.2b recheck gained a matching `Multiple` arm: concatenates each word's own
+    `target_is_legal`-filtered subset into `legal_targets`; fizzle is gated on the *total* union being
+    empty (CR 608.2b: "if all its targets, for every instance of the word target, are now illegal").
+- Unresolved:
+  - `up_to`/`at_least` combined with multiple target words — named, unsupported combination (see
+    `TargetSpec::Multiple`'s own doc comment for why).
+  - No Lua builder path for constructing `TargetSpec::Multiple` — same "direct struct literal only"
+    limit `alternative_costs`/`effect` have for TOML/script-built cards; not attempted this slice.

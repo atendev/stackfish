@@ -15,7 +15,7 @@ use crate::types::ids::{AbilityId, ObjectId, ObjectLineage, PlayerId, ScriptHand
 use crate::types::mana::{ColorSet, ManaUnit};
 use crate::types::object::GameObject;
 use crate::types::stack::{StackEntryKind, StackObject};
-use crate::types::target::{TargetFilter, TargetSpec};
+use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
@@ -510,35 +510,100 @@ fn validate_targets(
             }
         }
         Some(TargetSpec::Primitive(req)) => {
-            // CR 601.2c/115.6: "up to N" accepts anywhere from 0 to `count`
-            // chosen; "N or more" accepts `count` or more with no upper
-            // bound; the common exact-count case still requires exactly
-            // `count`.
-            let count_ok = if req.up_to {
-                targets.len() <= req.count as usize
-            } else if req.at_least {
-                targets.len() >= req.count as usize
-            } else {
-                targets.len() == req.count as usize
-            };
-            if !count_ok {
+            validate_one_target_requirement(state, script_runtime, req, targets, caster, source)
+        }
+        Some(TargetSpec::Multiple(reqs)) => {
+            // CR 601.2c: a flat submitted-targets list, split into one
+            // contiguous chunk per requirement in order - see
+            // `TargetSpec::Multiple`'s own doc comment for why every
+            // requirement here must use an exact count.
+            let Some(chunks) = split_targets_by_requirement(reqs, targets) else {
                 return Err(CommandError::InvalidTarget);
-            }
-            // CR 115.3/601.2c: the same target can't be chosen twice for one
-            // instance of the word "target".
-            let mut seen = HashSet::new();
-            for t in targets {
-                if !seen.insert(*t) {
-                    return Err(CommandError::InvalidTarget);
-                }
-            }
-            for t in targets {
-                if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source) {
-                    return Err(CommandError::InvalidTarget);
-                }
+            };
+            // CR 115.3/601.2c: dedup is checked independently per word by
+            // `validate_one_target_requirement` below (its own `seen` set is
+            // fresh each call) - the same object/player legally can, and
+            // often will, appear in two different words' chunks.
+            for (req, chunk) in reqs.iter().zip(chunks) {
+                validate_one_target_requirement(state, script_runtime, req, chunk, caster, source)?;
             }
             Ok(())
         }
+    }
+}
+
+/// One target word's worth of validation (CR 601.2c count check, CR
+/// 115.3/601.2c same-instance dedup, per-target legality) - shared by
+/// `validate_targets`'s `Primitive` arm (the whole submitted list) and its
+/// `Multiple` arm (one chunk per requirement).
+fn validate_one_target_requirement(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    req: &TargetRequirement,
+    targets: &[Target],
+    caster: PlayerId,
+    source: ObjectId,
+) -> Result<(), CommandError> {
+    // CR 601.2c/115.6: "up to N" accepts anywhere from 0 to `count`
+    // chosen; "N or more" accepts `count` or more with no upper
+    // bound; the common exact-count case still requires exactly
+    // `count`.
+    let count_ok = if req.up_to {
+        targets.len() <= req.count as usize
+    } else if req.at_least {
+        targets.len() >= req.count as usize
+    } else {
+        targets.len() == req.count as usize
+    };
+    if !count_ok {
+        return Err(CommandError::InvalidTarget);
+    }
+    // CR 115.3/601.2c: the same target can't be chosen twice for one
+    // instance of the word "target".
+    let mut seen = HashSet::new();
+    for t in targets {
+        if !seen.insert(*t) {
+            return Err(CommandError::InvalidTarget);
+        }
+    }
+    for t in targets {
+        if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source) {
+            return Err(CommandError::InvalidTarget);
+        }
+    }
+    Ok(())
+}
+
+/// CR 601.2c: splits `targets` into one contiguous slice per entry of
+/// `reqs`, in order, each exactly `req.count` long. `None` (rather than a
+/// panic) if any entry isn't an exact count (`up_to`/`at_least`, unsupported
+/// combination - see `TargetSpec::Multiple`'s own doc comment), if `targets`
+/// is too short to cover every entry, or if there's a leftover remainder
+/// after every entry has claimed its chunk (a caller/count mismatch, same
+/// "reject rather than guess" stance every other validation failure here
+/// takes).
+pub(crate) fn split_targets_by_requirement<'a>(
+    reqs: &[TargetRequirement],
+    targets: &'a [Target],
+) -> Option<Vec<&'a [Target]>> {
+    let mut rest = targets;
+    let mut chunks = Vec::with_capacity(reqs.len());
+    for req in reqs {
+        if req.up_to || req.at_least {
+            return None;
+        }
+        let n = req.count as usize;
+        if rest.len() < n {
+            return None;
+        }
+        let (chunk, remainder) = rest.split_at(n);
+        chunks.push(chunk);
+        rest = remainder;
+    }
+    if rest.is_empty() {
+        Some(chunks)
+    } else {
+        None
     }
 }
 

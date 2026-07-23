@@ -28,7 +28,7 @@ use crate::types::mana::{ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::{effective_max_hand_size, PlayerState};
 use crate::types::stack::{StackEntryKind, StackObject};
-use crate::types::target::{TargetFilter, TargetSpec};
+use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
 
@@ -2945,38 +2945,53 @@ impl Engine {
                 // one the original single-target-only code path meant (CR
                 // 608.2b's second sentence - "still resolves, but it won't
                 // affect those targets that are illegal, if any").
+                // `top.source`, not `top.stack_id` - they only coincide for
+                // a Spell (see `StackObject`'s own construction sites); for
+                // an ActivatedAbility/TriggeredAbility, `top.stack_id` is a
+                // bare, never-a-real-GameObject id, and passing it here as
+                // "source" silently broke both protection-from-source-
+                // quality checks (`target_has_protection_from`'s
+                // `state.object(source)` lookup would just miss and return
+                // `false`) and `exclude_source` below - every other
+                // resolution site already uses `top.source` for "the real
+                // thing this effect comes from" (e.g. the Damage
+                // `AbilityEffect` arm further down).
+                let is_legal_now = |t: &Target, req: &TargetRequirement| {
+                    commands::target_is_legal(
+                        &self.state,
+                        &self.script_runtime,
+                        *t,
+                        &req.filter,
+                        top.controller,
+                        top.source,
+                        req.exclude_source,
+                    )
+                };
                 let legal_targets: Vec<Target> = match &top.target_requirement {
-                    Some(TargetSpec::Primitive(req)) => top
-                        .targets
-                        .iter()
-                        .copied()
-                        .filter(|t| {
-                            commands::target_is_legal(
-                                &self.state,
-                                &self.script_runtime,
-                                *t,
-                                &req.filter,
-                                top.controller,
-                                // top.source, not top.stack_id - they only
-                                // coincide for a Spell (see StackObject's
-                                // own construction sites); for an
-                                // ActivatedAbility/TriggeredAbility,
-                                // top.stack_id is a bare, never-a-real-
-                                // GameObject id, and passing it here as
-                                // "source" silently broke both protection-
-                                // from-source-quality checks (target_has_
-                                // protection_from's state.object(source)
-                                // lookup would just miss and return false)
-                                // and this slice's own exclude_source below
-                                // - every other resolution site already uses
-                                // top.source for "the real thing this
-                                // effect comes from" (e.g. the Damage
-                                // AbilityEffect arm further down).
-                                top.source,
-                                req.exclude_source,
-                            )
+                    Some(TargetSpec::Primitive(req)) => {
+                        top.targets.iter().copied().filter(|t| is_legal_now(t, req)).collect()
+                    }
+                    // CR 601.2c/608.2b: each word's own legal subset,
+                    // concatenated - downstream effect-resolution arms
+                    // (Damage/Destroy/etc) consume this same flattened list
+                    // exactly as they already do for a single-word
+                    // requirement, which is correct for a uniform-verb
+                    // multi-word spell (CR 608.2b's own Plague Spores
+                    // example) - see `TargetSpec::Multiple`'s own doc
+                    // comment. `split_targets_by_requirement` returning
+                    // `None` here would mean `top.targets` was never valid
+                    // in the first place (validated at cast/activation
+                    // time) - falls back to empty rather than panicking,
+                    // same "recheck, don't assume" posture this whole block
+                    // already takes.
+                    Some(TargetSpec::Multiple(reqs)) => commands::split_targets_by_requirement(reqs, &top.targets)
+                        .map(|chunks| {
+                            reqs.iter()
+                                .zip(chunks)
+                                .flat_map(|(req, chunk)| chunk.iter().copied().filter(|t| is_legal_now(t, req)).collect::<Vec<_>>())
+                                .collect()
                         })
-                        .collect(),
+                        .unwrap_or_default(),
                     // `None` (no targets required) or a `Script`-backed
                     // requirement (not evaluable this slice, see
                     // `TargetSpec`'s own doc comment) - every submitted
@@ -2993,7 +3008,9 @@ impl Engine {
                     // legally choose zero targets, which must never fizzle
                     // (same as a `None`/count-0 requirement) even though
                     // `req.count` itself is still nonzero.
-                    Some(TargetSpec::Primitive(_)) if !top.targets.is_empty() => legal_targets.is_empty(),
+                    Some(TargetSpec::Primitive(_) | TargetSpec::Multiple(_)) if !top.targets.is_empty() => {
+                        legal_targets.is_empty()
+                    }
                     _ => false,
                 };
 
