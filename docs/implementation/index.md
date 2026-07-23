@@ -2,7 +2,7 @@
 
 Compact reference for my own use. Each file covers one subsystem.
 
-- [00-overview](00-overview.md) — repo layout, phase 1 data model, phase 2-4 baseline
+- [00-overview](00-overview.md) — repo layout, phase 1 data model, phase 2-4 baseline, `stackfish-testutil` fixture-builder convention
 - [01-pipeline](01-pipeline.md) — `ProcessState`, pass priority, replacement/trigger pause plumbing
 - [02-zone-moves](02-zone-moves.md) — play land, cast spell, payment, beginning/ending phases, CR 400.7 id minting
 - [03-combat](03-combat.md) — attackers, blockers, combat damage, first/double strike

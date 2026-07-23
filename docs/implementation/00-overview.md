@@ -7,6 +7,20 @@
 - Logic modules live at `crates/engine/src/` sibling to `types/`: `engine`, `commands`, `layers`, `replacement`, `sba`, `triggers`, `script`, `script_api`, `color_identity`.
 - Internal imports inside `types/` use full `crate::types::*` paths; external code uses flat `crate::TypeName`.
 - `bitflags` used for `CardTypeSet`, `SupertypeSet`, `KeywordSet` (later widened to `u32`), `ColorSet`.
+- `crates/testutil` (`stackfish-testutil`) — shared `GameState`/`GameObject`/`PlayerState` fixture builders for `crates/engine/tests/phase5_*.rs`. See "Test fixtures" below.
+
+## Test fixtures
+
+`crates/engine/tests/phase5_*.rs` integration tests build fixtures via `stackfish_testutil` rather than hand-rolling `GameState`/`GameObject`/`PlayerState` struct literals per file — that duplication (~240 near-identical builder copies) was paid down in the `refactor/test-suite` branch (merged to master).
+
+**When writing or migrating a phase5 test, use `stackfish_testutil`'s builders, overriding only what the test varies via struct-update syntax:**
+- `card_object(id, definition, owner, zone) -> GameObject` (`crates/testutil/src/object.rs`)
+- `player_state(id) -> PlayerState` — life 20, empty pools/counters (`player.rs`)
+- `drain(engine) -> StepStatus` — loops `step()` until non-`Progressed` (`engine_ext.rs`)
+- `two_player_state(zones) -> GameState` / `single_player_state(player, zones) -> GameState` — turn 1, `Phase::Main`, `next_object_id` 1000 (`state.rs`)
+- `hand_and_battlefield_zones` / `hand_battlefield_graveyard_zones` / `battlefield_graveyard_exile_zones` / `zones(p0, p1, kinds)` — common zone-set presets (`state.rs`)
+
+Example: `GameState { step: Step::PreCombatMain, ..two_player_state(hand_battlefield_graveyard_zones(p0, p1)) }`. Only build a fully custom `GameState`/`Zone` literal when a fixture's shape genuinely doesn't fit an existing preset — add a new preset to `testutil` first if the shape looks reusable, rather than hand-rolling in the test file again.
 
 ## Phase 1: data model
 
