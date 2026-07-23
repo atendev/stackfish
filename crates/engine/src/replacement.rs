@@ -422,7 +422,9 @@ pub fn apply_enters_battlefield_modifiers(
             matches!(
                 &r.spec,
                 ReplacementSpec::Primitive {
-                    payload: ReplacementPayload::EntersTapped | ReplacementPayload::EntersWithCounters { .. },
+                    payload: ReplacementPayload::EntersTapped
+                        | ReplacementPayload::EntersWithCounters { .. }
+                        | ReplacementPayload::EntersWithCountersBloodthirst { .. },
                     ..
                 }
             )
@@ -457,6 +459,18 @@ pub fn apply_enters_battlefield_modifiers(
             ReplacementPayload::EntersWithCounters { kind, amount } => {
                 counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
             }
+            // CR 702.54a: same event-proposal shape as `EntersWithCounters`
+            // above, gated on `opponent_damaged_this_turn` - `object` is
+            // already present in `state.objects` by this point (same
+            // "already-constructed GameObject" precondition every other
+            // arm here relies on), so its controller is read directly
+            // rather than threaded in as a parameter.
+            ReplacementPayload::EntersWithCountersBloodthirst { kind, amount } => {
+                let controller = state.object(object).map(|o| o.controller);
+                if controller.is_some_and(|c| opponent_damaged_this_turn(state, c)) {
+                    counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
+                }
+            }
             _ => continue,
         }
         // CR 614.13/701.19b-style consumption bookkeeping (OneShot/
@@ -466,6 +480,25 @@ pub fn apply_enters_battlefield_modifiers(
         apply_one_replacement(state, source, candidate());
     }
     counter_events
+}
+
+/// CR 702.54a's condition: was any opponent of `controller` dealt damage
+/// this turn, by any source (combat or otherwise - real Bloodthirst
+/// rulings aren't restricted to combat damage). "This turn" is bounded by
+/// the most recent `GameEventKind::TurnStarted` in `state.ledger` (append-
+/// only, so its position is always the current turn's start); no
+/// `TurnStarted` yet (a fixture built mid-turn with no pregame history)
+/// scans from the beginning of the ledger instead of treating the
+/// condition as unknowable. Damage to an opponent's *permanents* doesn't
+/// count - only `GameEventKind::DamageDealt` whose `target` is
+/// `Target::Player`, matching the keyword's own "an opponent was dealt
+/// damage" wording (a player, not their creatures).
+pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bool {
+    let turn_start = state.ledger.iter().rposition(|e| matches!(e.kind, GameEventKind::TurnStarted { .. }));
+    let scan_from = turn_start.map(|i| i + 1).unwrap_or(0);
+    state.ledger[scan_from..]
+        .iter()
+        .any(|e| matches!(&e.kind, GameEventKind::DamageDealt { target: Target::Player(p), .. } if *p != controller))
 }
 
 #[cfg(test)]

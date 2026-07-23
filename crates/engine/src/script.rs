@@ -878,7 +878,9 @@ fn validate_replacement_filter_payload_pairing(
         (kind, payload),
         (
             EventFilterKind::WouldMoveZone { to: Some(ZoneKind::Battlefield), .. },
-            ReplacementPayload::EntersTapped | ReplacementPayload::EntersWithCounters { .. }
+            ReplacementPayload::EntersTapped
+                | ReplacementPayload::EntersWithCounters { .. }
+                | ReplacementPayload::EntersWithCountersBloodthirst { .. }
         )
     );
     if paired {
@@ -2558,14 +2560,24 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     replacement_payloads.set("EntersTapped", ReplacementPayloadTag(ReplacementPayload::EntersTapped))?;
     // CR 614.1c/122.6: `Game.ReplacementPayloads.EntersWithCounters(kindName, amount)`
     // - fixed printed amounts only, same `parse_counter_kind_name` table
-    // `Game.Ops.Counters` already uses. Game-state-dependent amounts
-    // (Bloodthirst/Sunburst/Devour) aren't representable this way - see
-    // `ReplacementPayload::EntersWithCounters`'s own doc comment.
+    // `Game.Ops.Counters` already uses. Sunburst/Devour/Amplify's own
+    // game-state-dependent amounts still aren't representable this way -
+    // see `ReplacementPayload::EntersWithCounters`'s own doc comment.
     replacement_payloads.set(
         "EntersWithCounters",
         lua.create_function(|_, (kind_name, amount): (String, i32)| {
             let kind = parse_counter_kind_name(&kind_name);
             Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCounters { kind, amount }))
+        })?,
+    )?;
+    // CR 702.54a: `Game.ReplacementPayloads.EntersWithCountersBloodthirst(kindName, amount)`
+    // - same fixed-amount shape as `EntersWithCounters` above, gated on
+    // `replacement::opponent_damaged_this_turn` instead of unconditional.
+    replacement_payloads.set(
+        "EntersWithCountersBloodthirst",
+        lua.create_function(|_, (kind_name, amount): (String, i32)| {
+            let kind = parse_counter_kind_name(&kind_name);
+            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersBloodthirst { kind, amount }))
         })?,
     )?;
 
