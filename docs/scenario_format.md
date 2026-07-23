@@ -361,6 +361,32 @@ still legal) — the reject/fizzle paths (wrong count, filter mismatch, duplicat
 becoming illegal before resolution) are exercised exhaustively in
 `crates/engine/tests/phase5_targeting_basics.rs` instead, not via TOML.
 
+**`modes` (CR 700.2, modal spells):** if non-empty, this card is modal — casting it requires
+`PlayerActionKind::CastSpell::modes` to supply exactly one valid index into this list (CR 700.2a,
+"choose exactly one"; see backlog for what's still deferred — choosing 2+, another player
+choosing, a mode's own additional cost, pawprint budgets). The chosen mode's own
+`target_requirement` is used instead of the card's top-level `target_requirement` for the rest of
+casting/resolution (CR 700.2c: a mode with no `target_requirement` casts as though it required no
+targets at all, regardless of what other modes on the same card ask for).
+
+```toml
+[[cards.modes]]
+# mode 0: no target_requirement — e.g. "You gain 3 life."
+
+[[cards.modes]]
+[cards.modes.target_requirement]
+filter = "object"        # same TargetRequirementSpec shape as the top-level target_requirement
+card_types = ["Creature"]
+count = 1
+```
+
+No TOML field for a mode's own effect yet (same pre-existing gap as `CardSpec` itself having no
+field for a Rust-native `AbilityEffect` — only reachable via direct `CardDefinition`/`SpellMode`
+struct literals in a Rust integration test, e.g.
+`crates/engine/tests/phase5_script_modal_spells.rs`). See
+`crates/engine/tests/scenarios/phase5_modal_spell_toml.toml` for a worked example proving the
+TOML → `CardDefinition.modes` → `CastSpell` mode-selection pipeline, one cast per mode.
+
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
 `Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and
 subtypes (`Human`, `Aura`, etc) aren't settable from a scenario file yet — add fields to
