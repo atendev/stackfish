@@ -237,6 +237,28 @@ pub struct CardSpec {
     /// doc comment. `None` means no targets required (the common case).
     #[serde(default)]
     pub target_requirement: Option<TargetRequirementSpec>,
+    /// CR 700.2 modal spells — empty for the overwhelming majority of cards
+    /// (non-modal), same "empty means non-modal" convention
+    /// `CardDefinition.modes` itself documents. Each entry is one mode's own
+    /// `target_requirement` (`SpellModeSpec`'s own doc comment covers what a
+    /// mode can and can't carry from TOML). `commands.rs`'s existing mode-
+    /// selection logic (`PlayerActionKind::CastSpell::modes`) is what
+    /// actually consumes this at cast time — unchanged by this field.
+    #[serde(default)]
+    pub modes: Vec<SpellModeSpec>,
+}
+
+/// One entry of `CardSpec.modes` (CR 700.2's "Choose one —" options).
+/// `target_requirement` mirrors the top-level `CardSpec.target_requirement`
+/// field exactly, `None` meaning this mode requires no targets (e.g. "You
+/// gain 3 life"). No `effect` field — same pre-existing gap
+/// `CardSpec.effect` itself has (no TOML representation for a Rust-native
+/// `AbilityEffect` yet, only via `script`); a mode built from TOML always
+/// resolves with `effect: None`, same as any other TOML-built spell today.
+#[derive(Deserialize)]
+pub struct SpellModeSpec {
+    #[serde(default)]
+    pub target_requirement: Option<TargetRequirementSpec>,
 }
 
 /// `CardSpec.continuous_effect`'s shape — `layer` picks which of the layer
@@ -1027,6 +1049,18 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
     })
 }
 
+/// `CardSpec.modes` -> `Vec<SpellMode>` (CR 700.2). `effect` is always
+/// `None` per mode - see `SpellModeSpec`'s own doc comment for why.
+fn build_spell_modes(specs: &[SpellModeSpec]) -> Vec<SpellMode> {
+    specs
+        .iter()
+        .map(|m| SpellMode {
+            target_requirement: m.target_requirement.as_ref().map(build_target_requirement),
+            effect: None,
+        })
+        .collect()
+}
+
 /// `assert_object_counters`/`assert_player_counters`'s `kind` field, by CR
 /// 122.3 name, into `CounterKind`.
 fn parse_counter_kind(name: &str) -> CounterKind {
@@ -1188,11 +1222,7 @@ pub fn build_initial_state(
             target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
             alternative_costs: Vec::new(),
             effect: None,
-            // TODO: no TOML schema for modal cards yet (CardSpec has no
-            // `[[cards.modes]]`-style field) - same pre-existing gap as
-            // `effect` above having no TOML representation either. A modal
-            // test fixture needs a direct CardDefinition struct literal.
-            modes: Vec::new(),
+            modes: build_spell_modes(&spec.modes),
         };
 
         let owner = PlayerId(entry.player);
@@ -1727,9 +1757,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 // "direct struct literal only" limit as alternative_costs
                 // above.
                 effect: None,
-                // TODO: no TOML scenario field for modal spells (CR 700.2)
-                // either - same "direct struct literal only" limit.
-                modes: Vec::new(),
+                modes: build_spell_modes(&spec.modes),
             }
         }).collect();
         // CR 903.6: minted after this player's library, matching
@@ -1761,7 +1789,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
                 alternative_costs: Vec::new(),
                 effect: None,
-                modes: Vec::new(),
+                modes: build_spell_modes(&spec.modes),
             }
         }).collect();
         PlayerConfig { player_id: PlayerId(gp.id), library, commanders, life_override: gp.life_override }

@@ -311,3 +311,33 @@
   - Multi-target-word spells, no Lua builder path for a spell's own `target_requirement` (closed by
     `phase5/spell-target-script`, above, for the scenario side — TOML modal spells still don't
     exist) — unchanged by this slice.
+
+## Slice: modal-spell-toml (merged)
+
+- Branch `phase5/modal-spell-toml`.
+- Scope: closes the "TOML modal spells still don't exist" note carried forward by every prior
+  targeting slice above. Engine-side CR 700.2a mode-selection (`CardDefinition.modes`/`SpellMode`,
+  `commands.rs`'s "choose exactly one" validation) was already real and exhaustively tested via
+  direct `CardDefinition` struct literals (`phase5_script_modal_spells.rs`) — the entire gap was
+  scenario-crate-only: `CardSpec` had no `modes` field, so a modal card was never constructible from
+  a TOML fixture.
+- Verify: 1 new TOML fixture (`tests/scenarios/phase5_modal_spell_toml.toml`, auto-picked up by
+  `scenarios.rs`'s directory scan) casting two modal instants — one choosing the no-target mode,
+  one choosing the Creature-target mode — full workspace suite green.
+- Key changes:
+  - `SpellModeSpec { target_requirement: Option<TargetRequirementSpec> }` — one entry per mode, same
+    shape the top-level `CardSpec.target_requirement` already uses. No `effect` field: same
+    pre-existing gap `CardSpec` itself has (no TOML representation for a Rust-native `AbilityEffect`
+    yet, only via `script`) — a TOML-built mode always resolves with `effect: None`, same as any
+    other TOML-built spell today.
+  - `CardSpec.modes: Vec<SpellModeSpec>` (`#[serde(default)]`, empty = non-modal, matching
+    `CardDefinition.modes`'s own convention).
+  - `build_spell_modes(&[SpellModeSpec]) -> Vec<SpellMode>` — maps each entry through the existing
+    `build_target_requirement` helper.
+  - Wired into all 3 sites that previously hardcoded `modes: Vec::new()`: `build_initial_state`'s
+    `[[setup]]` loop, and `build_new_game_engine`'s per-player library and commander loops.
+- Unresolved:
+  - No TOML field for a mode's own effect (pre-existing `CardSpec.effect` gap, unrelated to this
+    slice). CR 700.2d/e/h/i (choose 2+, another player chooses, per-mode additional cost, pawprint
+    budgets) — still unmodeled engine-side, unchanged by this slice. Multi-target-word spells — still
+    open.

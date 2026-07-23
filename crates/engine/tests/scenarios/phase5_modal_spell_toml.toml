@@ -1,0 +1,136 @@
+# Modal spell TOML support (CR 700.2a): CardSpec.modes closes the
+# scenario-crate gap the engine side already had covered - mode-selection
+# itself (CastSpell's `modes` field, chosen mode's own target_requirement/
+# effect used instead of the card's singular fields) was already real and
+# exhaustively tested in crates/engine/tests/phase5_script_modal_spells.rs
+# via direct CardDefinition struct literals; this fixture only proves the
+# TOML -> CardSpec.modes -> CardDefinition.modes wiring connects for real,
+# same "prove the pipeline, not the logic" convention
+# phase5_targeting_basics.toml already establishes.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Test Bear"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+# "Choose one - * (no target) * target creature." Mode 0 requires no targets
+# at all (CR 601.2c); mode 1 requires exactly one Object/Creature target.
+# Two separate card keys sharing this same modal shape, one per cast below -
+# each card can only be cast once in this fixture.
+[[cards]]
+key = "modal_a"
+name = "Test Modal Spell A"
+types = ["Instant"]
+
+[[cards.modes]]
+# mode 0: no target_requirement at all.
+
+[[cards.modes]]
+[cards.modes.target_requirement]
+filter = "object"
+card_types = ["Creature"]
+count = 1
+
+[[cards]]
+key = "modal_b"
+name = "Test Modal Spell B"
+types = ["Instant"]
+
+[[cards.modes]]
+
+[[cards.modes]]
+[cards.modes.target_requirement]
+filter = "object"
+card_types = ["Creature"]
+count = 1
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "modal_a"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "modal_b"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+
+# Mode 0, no targets supplied - legal only because mode 0 has no target
+# requirement at all. If mode 1's requirement leaked in here, this cast
+# would be illegally rejected for a missing target instead.
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "modal_a"
+modes = [0]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+# modal_a has no mana_cost - still needs an explicit empty plan (CR 118.5a).
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "modal_a"
+equals = "graveyard"
+
+# Mode 1 requires a Creature target - "bear" is legal.
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "modal_b"
+modes = [1]
+targets = ["bear"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "modal_b"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
