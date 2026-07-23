@@ -13,12 +13,13 @@
 //! that doesn't exist yet" pattern `mana_pool`/`controlled_since_turn` used
 //! before their real producers landed.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, player_state, single_player_state};
 
 /// This slice's fixtures never register a `ReplacementEffect` on a dying
 /// creature - a real CR 616.1 pause here would mean the fixture itself is
@@ -62,45 +63,7 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
 }
 
 fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition: creature_definition(2, toughness),
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
-}
-
-fn player_state(id: PlayerId, life: i32) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
+    GameObject { damage_marked, ..card_object(id, creature_definition(2, toughness), owner, ZoneKind::Battlefield) }
 }
 
 /// One player, an empty battlefield + that player's graveyard already
@@ -108,36 +71,9 @@ fn player_state(id: PlayerId, life: i32) -> PlayerState {
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     GameState {
-        players: vec![player_state(p0, 20)],
-        turn_order: vec![p0],
-        active_player: p0,
-        turn_number: 1,
         phase: Phase::Combat,
         step: Step::CombatDamage,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::from([(p0, 1)]),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
+        ..single_player_state(p0, vec![Zone::new(ZoneKind::Battlefield, None), Zone::new(ZoneKind::Graveyard, Some(p0))])
     }
 }
 
@@ -145,15 +81,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(id);
     state.objects.insert(id, object);
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
 }
 
 /// One solo-player `PassPriority` + drain - each call advances exactly one
@@ -394,7 +321,7 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
     let infector = ObjectId(0);
     let mut state = base_state();
     state.turn_order = vec![p0, p1];
-    state.players.push(player_state(p1, 20));
+    state.players.push(player_state(p1));
     state.combat = Some(CombatState {
         attackers: vec![(infector, Target::Player(p1))],
         blocks: Vec::new(),
@@ -442,7 +369,7 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
 
 #[test]
 fn commander_damage_from_finds_the_matching_source_or_zero() {
-    let mut player = player_state(PlayerId(0), 20);
+    let mut player = player_state(PlayerId(0));
     let commander = ObjectId(0);
     player.commander_damage_taken.push((commander, 15));
 
@@ -502,7 +429,7 @@ fn lethal_damage_dies_through_the_real_engine_pipeline() {
     let bear = ObjectId(0);
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
     state.turn_order = vec![p0, PlayerId(1)];
-    state.players.push(player_state(PlayerId(1), 20));
+    state.players.push(player_state(PlayerId(1)));
 
     let mut engine = Engine::new(state);
     engine
