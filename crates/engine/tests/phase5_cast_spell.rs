@@ -7,214 +7,40 @@
 //! `phase5_play_land.rs`, since the engine's own constructors are still
 //! `todo!()`.
 
-use std::collections::{HashMap, VecDeque};
-
 use stackfish_engine::commands::CommandError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
+use stackfish_testutil::{
+    card_object, drain, hand_battlefield_graveyard_zones, minimal_card_definition, two_player_state as base_two_player_state,
+};
 
 fn land_definition() -> CardDefinition {
     CardDefinition {
-        definition_id: 1,
-        name: "Forest".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
         supertypes: SupertypeSet::BASIC,
-        card_types: CardTypeSet::LAND,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: None,
-        toughness: None,
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("forest".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
+        ..minimal_card_definition(1, "Forest", "forest", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
     }
 }
 
 fn instant_definition() -> CardDefinition {
-    CardDefinition {
-        definition_id: 2,
-        name: "Shock".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::INSTANT,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: None,
-        toughness: None,
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("shock".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
-    }
+    minimal_card_definition(2, "Shock", "shock", ManaCost { symbols: Vec::new() }, CardTypeSet::INSTANT)
 }
 
 fn sorcery_definition() -> CardDefinition {
-    CardDefinition {
-        definition_id: 3,
-        name: "Rampant Growth".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::SORCERY,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: None,
-        toughness: None,
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("rampant_growth".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
-    }
+    minimal_card_definition(3, "Rampant Growth", "rampant_growth", ManaCost { symbols: Vec::new() }, CardTypeSet::SORCERY)
 }
 
 fn creature_definition() -> CardDefinition {
     CardDefinition {
-        definition_id: 4,
-        name: "Grizzly Bears".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("grizzly_bears".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
-    }
-}
-
-fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+        ..minimal_card_definition(4, "Grizzly Bears", "grizzly_bears", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
     }
 }
 
 /// Two players, hand/battlefield/graveyard zones present for both, stack
 /// empty. Mirrors `phase5_play_land::two_player_state`.
 fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        players: vec![
-            PlayerState {
-                player_id: p0,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-            PlayerState {
-                player_id: p1,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-        ],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        // CastSpell's non-instant branch is sorcery-speed only (same as
-        // PlayLand) - default to Main so callers don't have to set it per
-        // test; tests exercising their own timing rejection still set
-        // `phase`/`active_player` themselves.
-        phase: Phase::Main,
-        step: Step::Untap,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::new(),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        // Deliberately not 0/1 - those collide with the literal ObjectIds
-        // the tests below assign to fixture cards, same reasoning as
-        // phase5_play_land.rs's two_player_state.
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        let result = engine.step();
-        match result.status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
+    base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
 
 /// Every fixture card in this file has an empty `mana_cost` - this pays it

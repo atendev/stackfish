@@ -1,163 +1,33 @@
 //! Phase 5 vertical slice: `PlayLand` (CR 305.1 - lands aren't spells, no
 //! stack involved) plus the zone helpers (`Zone::remove`/`push_bottom`,
-//! `GameState::object_mut`/`zone_mut`) it's the first real caller of. Same
-//! struct-literal `GameState` construction pattern as
-//! `phase5_pass_priority_loop.rs`, since the engine's own constructors are
-//! still `todo!()`.
-
-use std::collections::{HashMap, VecDeque};
+//! `GameState::object_mut`/`zone_mut`) it's the first real caller of.
 
 use stackfish_engine::commands::CommandError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
+use stackfish_testutil::{
+    card_object, drain, hand_and_battlefield_zones, minimal_card_definition, two_player_state as base_two_player_state,
+};
 
 fn land_definition() -> CardDefinition {
     CardDefinition {
-        definition_id: 1,
-        name: "Forest".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
         supertypes: SupertypeSet::BASIC,
-        card_types: CardTypeSet::LAND,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: None,
-        toughness: None,
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("forest".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
+        ..minimal_card_definition(1, "Forest", "forest", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND)
     }
 }
 
 fn instant_definition() -> CardDefinition {
-    CardDefinition {
-        definition_id: 2,
-        name: "Shock".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::INSTANT,
-        subtypes: Vec::new(),
-        oracle_text: String::new(),
-        power: None,
-        toughness: None,
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("shock".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
-    }
-}
-
-fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    minimal_card_definition(2, "Shock", "shock", ManaCost { symbols: Vec::new() }, CardTypeSet::INSTANT)
 }
 
 /// Two players, both zone sets present (hand/battlefield) so `PlayLand` has
-/// somewhere real to move a card to/from. Mirrors
-/// `phase5_pass_priority_loop::two_player_state` otherwise.
+/// somewhere real to move a card to/from. `base_two_player_state` already
+/// defaults to Main phase (sorcery-speed timing, CR 305.1/305.3), so callers
+/// don't have to set it per test; the rejection tests below still test their
+/// own intended failure (non-Land, not-in-hand), not an incidental timing
+/// failure.
 fn two_player_state() -> GameState {
-    let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
-    GameState {
-        players: vec![
-            PlayerState {
-                player_id: p0,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-            PlayerState {
-                player_id: p1,
-                life: 20,
-                mana_pool: ManaPool::default(),
-                counters: CounterSet::new(),
-                emblems: Vec::new(),
-                commander_damage_taken: Vec::new(),
-                eliminated: false,
-                drew_from_empty_library: false,
-                mulligans_taken: 0,
-                hand_kept: false,
-                commander_casts: std::collections::HashMap::new(),
-            },
-        ],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        // PlayLand is sorcery-speed only (CR 305.1/305.3) - a main phase of
-        // the actor's own turn, stack empty, actor holding priority. Default
-        // to Main so callers don't have to set it per test; the rejection
-        // tests below still test their own intended failure (non-Land,
-        // not-in-hand), not an incidental timing failure.
-        phase: Phase::Main,
-        step: Step::Untap,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::new(),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        // Deliberately not 0/1 - those collide with the literal ObjectIds
-        // (0, 1, 99) the tests below assign to fixture cards/stack objects.
-        // A clearly distinct starting value makes a real id-collision bug
-        // visible instead of accidentally passing.
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
+    base_two_player_state(hand_and_battlefield_zones(PlayerId(0), PlayerId(1)))
 }
 
 /// CR 400.7: `PlayLand` mints a new `ObjectId` for the permanent rather than
@@ -168,16 +38,6 @@ fn moved_object_id(engine: &Engine) -> ObjectId {
     match engine.state().ledger.last().expect("expected a ledger entry").kind {
         GameEventKind::ZoneChange { object, .. } => object,
         _ => panic!("expected a ZoneChange event"),
-    }
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        let result = engine.step();
-        match result.status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
     }
 }
 

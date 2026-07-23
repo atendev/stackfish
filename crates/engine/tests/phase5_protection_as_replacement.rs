@@ -20,11 +20,12 @@
 //! protection no longer matches once the event's target has moved away from
 //! the protected creature.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
 
 const STATIC_PROTECTION_FROM_RED: &str = r#"
 local s = {}
@@ -106,29 +107,7 @@ fn vanilla_creature(id: u64, name: &str, power: i32, toughness: i32, color: Opti
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
@@ -137,62 +116,15 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-fn player_state(id: PlayerId) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life: 20,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
-}
-
 fn combat_damage_state(combat: CombatState) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![player_state(p0), player_state(p1)],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
         phase: Phase::Combat,
         step: Step::CombatDamage,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
         combat: Some(combat),
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
-        objects: HashMap::new(),
-        zones: vec![Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() }],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
+        ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield]))
     }
 }
 

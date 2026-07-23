@@ -20,6 +20,7 @@ use std::collections::{HashMap, VecDeque};
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, single_player_state};
 
 fn vanilla_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
@@ -68,29 +69,7 @@ fn ward_definition(script: &str) -> CardDefinition {
 }
 
 fn object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    card_object(id, definition, owner, zone)
 }
 
 /// One player, main phase, empty stack - a battlefield `source` whose only
@@ -115,41 +94,13 @@ fn state_with_cost_and_ward(cost: CostSpec, ward_script: &str) -> (GameState, Pl
     objects.insert(ward, object(ward, ward_definition.clone(), p0, ZoneKind::Battlefield));
 
     let mut state = GameState {
-        players: vec![PlayerState {
-            player_id: p0,
-            life: 20,
-            mana_pool: ManaPool::default(),
-            counters: CounterSet::new(),
-            emblems: Vec::new(),
-            commander_damage_taken: Vec::new(),
-            eliminated: false,
-            drew_from_empty_library: false,
-            mulligans_taken: 0,
-            hand_kept: false,
-            commander_casts: std::collections::HashMap::new(),
-        }],
-        turn_order: vec![p0],
-        active_player: p0,
-        turn_number: 1,
-        phase: Phase::Main,
-        step: Step::PreCombatMain,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: { let mut m = HashMap::new(); m.insert(p0, 1); m },
         objects,
         zones: vec![
             Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::from([source, fodder, ward]) },
             Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::from([hand_card]) },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
+            Zone::new(ZoneKind::Graveyard, Some(p0)),
+            Zone::new(ZoneKind::Exile, None),
         ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
         abilities: vec![RegisteredAbility { id: AbilityId(0),
             source,
             kind: AbilityKind::Activated,
@@ -160,29 +111,13 @@ fn state_with_cost_and_ward(cost: CostSpec, ward_script: &str) -> (GameState, Pl
             effect: Some(AbilityEffect::GainLife(1)),
             intervening_if: None,
         }],
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
+        ..single_player_state(p0, Vec::new())
     };
 
     ScriptRuntime::new().run_card_script(&mut state, &ward_definition, ward).expect("ward script self-registers cleanly");
     assert_eq!(state.replacement_effects.len(), 1, "the ward's own replacement effect must have registered");
 
     (state, p0, source, fodder, hand_card)
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
 }
 
 fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: ObjectId) {

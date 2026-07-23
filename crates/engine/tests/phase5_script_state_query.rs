@@ -16,11 +16,10 @@
 //! unbounded recursion the moment a battlefield object has its own CDA/
 //! scripted continuous effect).
 
-use std::collections::{HashMap, VecDeque};
-
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
 
 fn creature_definition(power: i32, toughness: i32, script_ref: ScriptReference) -> CardDefinition {
     CardDefinition {
@@ -46,55 +45,13 @@ fn creature_definition(power: i32, toughness: i32, script_ref: ScriptReference) 
 }
 
 fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition: creature_definition(power, toughness, ScriptReference::ByKey("vanilla".to_string())),
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    let definition = creature_definition(power, toughness, ScriptReference::ByKey("vanilla".to_string()));
+    card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
 fn scripted_creature(id: ObjectId, owner: PlayerId, source: &str) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition: creature_definition(0, 0, ScriptReference::Inline(String::new())).with_cda_power(source),
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    let definition = creature_definition(0, 0, ScriptReference::Inline(String::new())).with_cda_power(source);
+    card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
 trait WithCdaPower {
@@ -112,64 +69,16 @@ impl WithCdaPower for CardDefinition {
     }
 }
 
-fn player_state(id: PlayerId, life: i32) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
-}
-
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![player_state(p0, 20), player_state(p1, 20)],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        phase: Phase::Main,
         step: Step::PreCombatMain,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: HashMap::new(),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Library, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Library, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Command, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Command, owner: Some(p1), contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[ZoneKind::Battlefield, ZoneKind::Exile, ZoneKind::Graveyard, ZoneKind::Hand, ZoneKind::Library, ZoneKind::Command],
+        ))
     }
 }
 

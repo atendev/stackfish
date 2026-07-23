@@ -16,11 +16,10 @@
 //! The card-type/supertype-combination forms ("artifact landwalk,"
 //! "nonbasic landwalk," "snow swampwalk") are TODO, unmodeled.
 
-use std::collections::{HashMap, VecDeque};
-
 use stackfish_engine::commands::CommandError as EngineCommandError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, player_state};
 
 fn creature_definition(id: u64, name: &str, extra_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
@@ -69,29 +68,7 @@ fn land_definition(id: u64, name: &str, subtype: &str) -> CardDefinition {
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
@@ -117,61 +94,22 @@ fn islandwalk(source: ObjectId) -> ContinuousEffect {
     }
 }
 
-fn player_state(id: PlayerId) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life: 20,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
-}
-
+/// Same game-start defaults `stackfish_testutil::two_player_state` builds,
+/// but for a variable player count (this file's multiplayer test needs 3) -
+/// every field below is overridden, `two_player_state(Vec::new())` supplies
+/// only the shared boilerplate (rng, empty collections, ...).
 fn combat_state(players: Vec<PlayerId>) -> GameState {
     let last_active_turn_number = players.iter().enumerate().map(|(i, p)| (*p, if i == 0 { 1 } else { 0 })).collect();
     GameState {
         players: players.iter().map(|p| player_state(*p)).collect(),
         turn_order: players.clone(),
         active_player: players[0],
-        turn_number: 1,
         phase: Phase::Combat,
         step: Step::DeclareAttackers,
         priority_player: players[0],
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
         last_active_turn_number,
-        objects: HashMap::new(),
-        zones: vec![Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() }],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
+        zones: vec![Zone::new(ZoneKind::Battlefield, None)],
+        ..stackfish_testutil::two_player_state(Vec::new())
     }
 }
 

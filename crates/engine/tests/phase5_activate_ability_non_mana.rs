@@ -9,106 +9,37 @@
 //! discard/life/multi-tap additional costs are covered by
 //! phase5_activate_ability_costs.rs instead of here.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use stackfish_engine::commands::CommandError as EngineCommandError;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, minimal_card_definition, single_player_state};
 
 fn creature_definition() -> CardDefinition {
     CardDefinition {
-        definition_id: 1,
-        name: "Test Cleric".to_string(),
-        mana_cost: ManaCost { symbols: Vec::new() },
-        color_indicator: None,
-        supertypes: SupertypeSet::empty(),
-        card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
-        oracle_text: "{T}: You gain 1 life.".to_string(),
         power: Some(PTValue::Fixed(1)),
         toughness: Some(PTValue::Fixed(1)),
-        loyalty: None,
-        defense: None,
-        script_ref: ScriptReference::ByKey("test_cleric".to_string()),
-        keywords: KeywordSet::empty(),
-        target_requirement: None,
-        alternative_costs: Vec::new(),
-        effect: None,
-        modes: Vec::new(),
+        oracle_text: "{T}: You gain 1 life.".to_string(),
+        ..minimal_card_definition(1, "Test Cleric", "test_cleric", ManaCost { symbols: Vec::new() }, CardTypeSet::CREATURE)
     }
 }
 
+/// Controlled well before turn 1 started - never summoning sick by default.
+/// The sickness test overrides this field directly.
 fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        // Controlled well before turn 1 started - never summoning sick by
-        // default. The sickness test overrides this field directly.
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
 /// One player, main phase, empty stack, a battlefield creature with a
 /// `{T}: gain 1 life` ability as its only registered ability.
 fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: ObjectId) -> GameState {
+    let mut objects = std::collections::HashMap::new();
+    objects.insert(source, permanent_object(source, creature_definition(), controller));
     GameState {
-        players: vec![PlayerState {
-            player_id: controller,
-            life: 20,
-            mana_pool: ManaPool::default(),
-            counters: CounterSet::new(),
-            emblems: Vec::new(),
-            commander_damage_taken: Vec::new(),
-            eliminated: false,
-            drew_from_empty_library: false,
-            mulligans_taken: 0,
-            hand_kept: false,
-            commander_casts: std::collections::HashMap::new(),
-        }],
-        turn_order: vec![controller],
-        active_player: controller,
-        turn_number: 1,
-        phase: Phase::Main,
-        step: Step::PreCombatMain,
-        priority_player: controller,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
-        last_active_turn_number: { let mut m = HashMap::new(); m.insert(controller, 1); m },
-        objects: {
-            let mut objects = HashMap::new();
-            objects.insert(source, permanent_object(source, creature_definition(), controller));
-            objects
-        },
-        zones: vec![Zone {
-            kind: ZoneKind::Battlefield,
-            owner: None,
-            contents: VecDeque::from([source]),
-        }],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: vec![RegisteredAbility { id: AbilityId(0),
+        objects,
+        abilities: vec![RegisteredAbility {
+            id: AbilityId(0),
             source: ability_owner,
             kind: AbilityKind::Activated,
             condition: None,
@@ -122,24 +53,7 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
             effect: Some(AbilityEffect::GainLife(1)),
             intervening_if: None,
         }],
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
-    }
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        let result = engine.step();
-        match result.status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
+        ..single_player_state(controller, vec![Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::from([source]) }])
     }
 }
 

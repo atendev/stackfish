@@ -11,48 +11,18 @@
 //! `state.object(e.source)` check already treats an unresolvable source as
 //! inapplicable), so they were never part of this gap.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn empty_zone(kind: ZoneKind, owner: Option<PlayerId>) -> Zone {
-    Zone { kind, owner, contents: VecDeque::new() }
-}
-
-fn player_state(id: PlayerId) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life: 20,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: HashMap::new(),
-    }
-}
-
 fn base_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone> {
-    vec![
-        empty_zone(ZoneKind::Library, Some(p0)),
-        empty_zone(ZoneKind::Hand, Some(p0)),
-        empty_zone(ZoneKind::Graveyard, Some(p0)),
-        empty_zone(ZoneKind::Command, Some(p0)),
-        empty_zone(ZoneKind::Library, Some(p1)),
-        empty_zone(ZoneKind::Hand, Some(p1)),
-        empty_zone(ZoneKind::Graveyard, Some(p1)),
-        empty_zone(ZoneKind::Command, Some(p1)),
-        empty_zone(ZoneKind::Battlefield, None),
-        empty_zone(ZoneKind::Exile, None),
-    ]
+    zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Command, ZoneKind::Battlefield, ZoneKind::Exile])
 }
 
 /// A minimal 2-player state sitting at `(Ending, End)`, active player
@@ -63,33 +33,14 @@ fn state_at_end_step(active: PlayerId) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![player_state(p0), player_state(p1)],
-        turn_order: vec![p0, p1],
         active_player: active,
         turn_number: 2,
         phase: Phase::Ending,
         step: Step::End,
         priority_player: active,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        objects: HashMap::new(),
-        zones: base_zones(p0, p1),
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
         next_object_id: 100,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
+        ..base_two_player_state(base_zones(p0, p1))
     }
 }
 
@@ -100,33 +51,11 @@ fn state_at_end_of_combat() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![player_state(p0), player_state(p1)],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
         phase: Phase::Combat,
         step: Step::EndOfCombat,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
         last_active_turn_number: HashMap::from([(p0, 1)]),
-        objects: HashMap::new(),
-        zones: base_zones(p0, p1),
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
         next_object_id: 100,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
+        ..base_two_player_state(base_zones(p0, p1))
     }
 }
 
@@ -154,29 +83,7 @@ fn creature_definition() -> CardDefinition {
 }
 
 fn permanent(id: ObjectId, owner: PlayerId, controller: PlayerId) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition: creature_definition(),
-        owner,
-        controller,
-        zone: ZoneKind::Battlefield,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 1,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
+    GameObject { controller, controlled_since_turn: 1, ..card_object(id, creature_definition(), owner, ZoneKind::Battlefield) }
 }
 
 fn put_on_battlefield(state: &mut GameState, object: GameObject) {
