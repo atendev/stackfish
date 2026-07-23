@@ -963,6 +963,7 @@ fn validate_replacement_filter_payload_pairing(
                 | ReplacementPayload::EntersWithCountersBloodthirst { .. }
                 | ReplacementPayload::EntersWithCountersSunburst
                 | ReplacementPayload::EntersWithCountersDevour { .. }
+                | ReplacementPayload::EntersWithCountersAmplify { .. }
         )
     );
     if paired {
@@ -2664,9 +2665,12 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     replacement_payloads.set("EntersTapped", ReplacementPayloadTag(ReplacementPayload::EntersTapped))?;
     // CR 614.1c/122.6: `Game.ReplacementPayloads.EntersWithCounters(kindName, amount)`
     // - fixed printed amounts only, same `parse_counter_kind_name` table
-    // `Game.Ops.Counters` already uses. Sunburst/Devour/Amplify's own
-    // game-state-dependent amounts still aren't representable this way -
-    // see `ReplacementPayload::EntersWithCounters`'s own doc comment.
+    // `Game.Ops.Counters` already uses. Sunburst's game-state-dependent
+    // amount isn't representable this way (own dedicated payload instead);
+    // Devour/Amplify's fixed per-unit rate is representable, but their
+    // *choice* of which units count still needs a real pause, not this
+    // payload alone - see `ReplacementPayload::EntersWithCounters`'s own
+    // doc comment.
     replacement_payloads.set(
         "EntersWithCounters",
         lua.create_function(|_, (kind_name, amount): (String, i32)| {
@@ -2697,6 +2701,16 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         "EntersWithCountersDevour",
         lua.create_function(|_, per_creature: i32| {
             Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersDevour { per_creature }))
+        })?,
+    )?;
+    // CR 702.38a: `Game.ReplacementPayloads.EntersWithCountersAmplify(perCard)`
+    // - the choice of *which* cards (if any) to reveal from hand is handled
+    // entirely outside this payload (see its own doc comment) - all it
+    // carries is the fixed printed per-card rate.
+    replacement_payloads.set(
+        "EntersWithCountersAmplify",
+        lua.create_function(|_, per_card: i32| {
+            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersAmplify { per_card }))
         })?,
     )?;
 

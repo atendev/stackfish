@@ -619,12 +619,12 @@ pub enum ReplacementPayload {
     /// Sunburst's own game-state-dependent amount is `EntersWithCountersSunburst`
     /// below instead, a separate variant since its kind/amount are both
     /// derived at apply time, not fixed at registration. Devour/Amplify
-    /// still aren't representable — both need a genuine mid-ETB player
-    /// choice, which needs a new pause/resume `ProcessState` of its own,
-    /// same category of work as `AwaitingAttachChoice`. Same "nothing to
-    /// rewrite on the event itself" stance as `EntersTapped` above —
-    /// applied by `replacement::apply_enters_battlefield_modifiers`, not
-    /// `apply()`.
+    /// (also below) each needed a genuine mid-ETB player choice on top of a
+    /// fixed per-unit rate, so neither is a bare `EntersWithCounters` either
+    /// — each has its own pause/resume `ProcessState`, same category of work
+    /// as `AwaitingAttachChoice`. Same "nothing to rewrite on the event
+    /// itself" stance as `EntersTapped` above — applied by `replacement::
+    /// apply_enters_battlefield_modifiers`, not `apply()`.
     EntersWithCounters { kind: CounterKind, amount: i32 },
     /// CR 702.54a (Bloodthirst N): like `EntersWithCounters` above, but
     /// gated on a state query instead of unconditional — the permanent
@@ -681,6 +681,32 @@ pub enum ReplacementPayload {
     /// [quality] rather than just creatures) isn't modeled — `per_creature`
     /// always means "per creature," full stop.
     EntersWithCountersDevour { per_creature: i32 },
+    /// CR 702.38a (Amplify N): "as this object enters, reveal any number of
+    /// cards from your hand that share a creature type with it. This
+    /// permanent enters with N +1/+1 counters on it for each card revealed
+    /// this way." Same category of gap as `EntersWithCountersDevour` above —
+    /// a genuine mid-ETB player choice, so never applied by
+    /// `replacement::apply_enters_battlefield_modifiers` at all. Checked
+    /// directly by `ResolveStackTop` via `replacement::pending_amplify_choice`,
+    /// pausing on `ProcessState::AwaitingAmplifyChoice` and resuming via
+    /// `Engine::submit_amplify_choice`. Unlike Devour, revealing a hand card
+    /// changes nothing about its zone — no sacrifice, no dies triggers, no
+    /// `continue_scripted_zone_move` needed; the resume just folds a
+    /// `CounterAdded` straight into `events_so_far` and finishes the
+    /// resolution the same way any other synchronous-only path does.
+    /// "Shares a creature type" is approximated as raw subtype overlap
+    /// (`EffectiveCharacteristics::subtypes`) — this engine has no separate
+    /// "creature type" category distinct from land/artifact/etc. subtypes,
+    /// same imprecision `landwalk_subtypes`/`bands_with_other_subtypes`
+    /// already accept for their own quality checks. CR 702.38a's "can't
+    /// reveal cards entering the battlefield at the same time as this card"
+    /// is unmodeled — no producer in this engine ever enters multiple
+    /// permanents from hand simultaneously, so the exclusion is unreachable.
+    /// CR 702.38b (multiple separate Amplify instances "work separately")
+    /// is unmodeled too — `pending_amplify_choice` matches only the first
+    /// registered instance, same single-match shape `pending_devour_choice`
+    /// already has.
+    EntersWithCountersAmplify { per_card: i32 },
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this

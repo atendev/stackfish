@@ -810,13 +810,30 @@ kindName, amount)`, same construction shape as `EntersWithCounters` above, gated
 `replacement::opponent_damaged_this_turn` (a pure `state.ledger` scan back to the most recent
 `TurnStarted`, no player choice or new plumbing needed).
 
+CR 702.44 Sunburst is real too now — `Game.ReplacementPayloads.EntersWithCountersSunburst`, no
+arguments; both `kind` and `amount` are derived at apply time from `colors_spent` (only a resolving
+spell can supply a real value, via `StackObject.costs_paid`).
+
+CR 702.82a Devour N and CR 702.38a Amplify N are both real too now — the first two payloads that
+genuinely need a mid-ETB player choice, so neither is applied by
+`replacement::apply_enters_battlefield_modifiers` at all. Each is checked directly by
+`ResolveStackTop` (`replacement::pending_devour_choice`/`pending_amplify_choice`), pausing on its
+own `ProcessState`/`StepStatus` (`AwaitingDevourChoice`/`AwaitingAmplifyChoice`) and resuming via
+`Engine::submit_devour_choice`/`submit_amplify_choice`. Devour's resume performs real sacrifices
+(`continue_scripted_zone_move`, so CR 616.1 ordering and dies-triggers apply); Amplify's resume
+needs none of that — revealing a hand card doesn't move it anywhere, so it folds straight into the
+same `StackObjectResolved`/`ReplacementCheck` tail any synchronous-only resolution ends on.
+`Game.ReplacementPayloads.EntersWithCountersDevour(perCreature)`/`EntersWithCountersAmplify(perCard)`
+only carry the fixed printed rate — the choice of *which* creatures/cards is handled entirely by the
+pause, not the payload.
+
 Not modeled this slice (real, named gaps, not silently guessed at):
 
-- **Sunburst/Devour/Amplify's dynamic amounts** — Sunburst needs the cast payment's chosen mana
-  colors threaded to the ETB step (no such plumbing exists); Devour/Amplify need a genuine mid-ETB
-  player choice, which needs a new pause/resume `ProcessState` of its own (same category of work as
-  `AwaitingAttachChoice`). Only a fixed printed `amount` (plus Bloodthirst's state-gated fixed
-  `amount`) is representable via this `Primitive` shape so far.
+- **CR 702.82c "Devour [quality] N"** (sacrifice permanents of a quality rather than just creatures)
+  and **CR 702.38b** (a creature with multiple separate Amplify instances working independently —
+  only the first registered instance is ever matched) are both unmodeled.
+- **CR 702.38a's "can't reveal cards entering the battlefield at the same time as this card"** is
+  unmodeled — no producer in this engine ever enters multiple permanents from hand simultaneously.
 - **Token creation** (`Game.Ops.CreateToken`) — a real to-Battlefield producer, not wired to this
   mechanism yet. Same shape as the other three, just not done this slice.
 - **General CR 616 propose/replace/commit for battlefield entry** — `PlayLand`/`CastSpell`
