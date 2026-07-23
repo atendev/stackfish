@@ -16,7 +16,7 @@ use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, Scrip
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{colors_spent, AdditionalCost, CostSpec, FilterController, FilterSpec, PaymentPlan};
-use crate::types::counter::CounterSet;
+use crate::types::counter::{CounterKind, CounterSet};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
@@ -75,6 +75,20 @@ pub enum AttachChoiceError {
     NotAwaitingChoice,
     /// `chosen` wasn't one of the offered `candidates`.
     InvalidCandidate,
+}
+
+/// Why `submit_devour_choice` rejected an answer to a CR 702.82a Devour
+/// choice.
+#[derive(Debug)]
+pub enum DevourChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingDevourChoice`.
+    NotAwaitingChoice,
+    /// One of `sacrificed` wasn't one of the offered `candidates`.
+    InvalidCandidate,
+    /// The same id appeared twice in `sacrificed` — each creature can only
+    /// be sacrificed once, same "no duplicate choice" stance the rest of
+    /// this engine's multi-select choices take.
+    DuplicateCandidate,
 }
 
 /// Why `submit_commander_return_choice` rejected an answer to a CR 903.9a
@@ -308,6 +322,13 @@ pub enum StepStatus {
     /// call `submit_entry_attach_choice`. Real (not dormant) — the search
     /// pathway is a genuine producer.
     AwaitingEntryAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<ObjectId> },
+    /// CR 702.82a (Devour): `replacement::pending_devour_choice` found a
+    /// registered Devour effect on `object` (already a real battlefield
+    /// permanent by this point) with 1+ creatures `player` controls to
+    /// choose from — `player` picks any subset of `candidates` (including
+    /// none) to sacrifice, then calls `submit_devour_choice`. `object`
+    /// enters with `per_creature` counters times however many were chosen.
+    AwaitingDevourChoice { player: PlayerId, object: ObjectId, per_creature: i32, candidates: Vec<ObjectId> },
     /// Backlog item 9: a card script (via `Game.SelectTargets`) yielded
     /// mid-resolution, asking `player` to choose a real target matching
     /// `request` before the operation can finish — the caller should prompt
@@ -448,8 +469,14 @@ pub enum ReplacementResumeTarget {
     /// scripted zone-move op here uses), so `remaining` is just the rest of
     /// this same op's own target list, not yet proposed. `stack_id` is
     /// needed for the final `StackObjectResolved` event once every target's
-    /// been processed.
-    ScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, stack_id: ObjectId },
+    /// been processed. `trailing` (CR 702.82a, Devour): extra events still
+    /// owed once every target's processed — e.g. `submit_devour_choice`'s
+    /// own `events_so_far` plus a `CounterAdded`, which must survive a CR
+    /// 616.1 ordering-choice pause raised mid-sacrifice just as intact as
+    /// `remaining`/`stack_id` do. Empty for every other caller (`Destroy`/
+    /// `Exile`/the plain `AbilityEffect::Sacrifice` path), which have
+    /// nothing to carry forward.
+    ScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, stack_id: ObjectId, trailing: Vec<GameEventKind> },
     /// Reached from `Engine::continue_cost_zone_moves` (`Engine::
     /// submit_payment`'s own `Sacrifice`/`Discard` handling). Same "each
     /// target proposes+commits independently" shape `ScriptedZoneMove`
@@ -601,6 +628,26 @@ pub enum ProcessState {
         remaining: std::collections::VecDeque<ObjectId>,
         destination: SearchDestination,
         shuffle_after: bool,
+    },
+    /// CR 702.82a (Devour): paused mid-`ResolveStackTop`, right where
+    /// `apply_enters_battlefield_modifiers` would otherwise run for `object`
+    /// — `replacement::pending_devour_choice` found a registered Devour
+    /// effect on it with 1+ legal creature candidates. `stack_id`/
+    /// `events_so_far` are exactly what this resolution had already built
+    /// before reaching this point (same "not yet committed, still a local
+    /// `Vec`" state `AwaitingScriptChoice` below carries for the identical
+    /// reason) — `submit_devour_choice` resumes by performing the chosen
+    /// sacrifices (`Engine::continue_scripted_zone_move`, so CR 616.1's
+    /// ordering choice and dies-triggers all apply for free), then folding
+    /// `events_so_far` plus a `CounterAdded` (if any creatures were
+    /// sacrificed) into that same continuation's own tail.
+    AwaitingDevourChoice {
+        object: ObjectId,
+        controller: PlayerId,
+        per_creature: i32,
+        candidates: Vec<ObjectId>,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
     },
     /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
     /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —
@@ -1173,10 +1220,10 @@ impl Engine {
                     }
                 }
             },
-            ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id } => match outcome {
+            ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
                     self.commit_scripted_zone_move(kind, event);
-                    self.continue_scripted_zone_move(kind, remaining, stack_id)
+                    self.continue_scripted_zone_move(kind, remaining, stack_id, trailing)
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                     ProcessState::AwaitingReplacementChoice {
@@ -1184,7 +1231,7 @@ impl Engine {
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id },
+                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing },
                     }
                 }
             },
@@ -1859,6 +1906,54 @@ impl Engine {
         commands::attach_permanent(&mut self.state, attaching, chosen);
         events_so_far.push(GameEventKind::Attached { object: attaching, attached_to: chosen });
         self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);
+        Ok(())
+    }
+
+    /// Answers a pending CR 702.82a Devour choice raised by `StepStatus::
+    /// AwaitingDevourChoice` — `sacrificed` must be a subset (any size,
+    /// including empty — CR 702.82a's "any number") of that status's own
+    /// `candidates`, no duplicates. Performs the sacrifices via
+    /// `continue_scripted_zone_move` (so CR 616.1's ordering choice and
+    /// dies-triggers all apply exactly as they would for a real `Sacrifice`
+    /// ability effect), then folds this resolution's own pre-choice
+    /// `events_so_far` plus a `CounterAdded` (if `sacrificed` wasn't empty)
+    /// into that same continuation's `trailing` parameter, so both reach
+    /// `ReplacementCheck`/`CommitEvents` together with the sacrifice's own
+    /// events, not as a separate untracked mutation.
+    pub fn submit_devour_choice(&mut self, sacrificed: Vec<ObjectId>) -> Result<(), DevourChoiceError> {
+        let ProcessState::AwaitingDevourChoice { candidates, .. } = &self.process_state else {
+            return Err(DevourChoiceError::NotAwaitingChoice);
+        };
+        if !sacrificed.iter().all(|id| candidates.contains(id)) {
+            return Err(DevourChoiceError::InvalidCandidate);
+        }
+        let mut seen = std::collections::HashSet::new();
+        if !sacrificed.iter().all(|id| seen.insert(*id)) {
+            return Err(DevourChoiceError::DuplicateCandidate);
+        }
+        let ProcessState::AwaitingDevourChoice { object, per_creature, stack_id, mut events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        // CR 614.13/701.19b-style consumption bookkeeping - same helper
+        // apply_enters_battlefield_modifiers's own tail uses for every
+        // other EntersWithCounters* payload, called here instead since this
+        // payload is never routed through that function at all (see
+        // EntersWithCountersDevour's own doc comment).
+        let candidate_event =
+            GameEventKind::ZoneChange { object, from: ZoneKind::Stack, to: ZoneKind::Battlefield, last_known_info: None };
+        replacement::apply_one_replacement(&mut self.state, object, candidate_event);
+        let amount = per_creature * sacrificed.len() as i32;
+        if amount > 0 {
+            events_so_far.push(GameEventKind::CounterAdded { object, kind: CounterKind::PlusOnePlusOne, amount });
+        }
+        self.process_state = self.continue_scripted_zone_move(
+            ScriptedZoneMoveKind::Sacrifice,
+            sacrificed.into(),
+            stack_id,
+            events_so_far,
+        );
         Ok(())
     }
 
@@ -3167,6 +3262,32 @@ impl Engine {
                                 // directly, same as the PlayLand and
                                 // search-to-battlefield call sites below.
                                 if let GameEventKind::ZoneChange { object, to: ZoneKind::Battlefield, .. } = &event {
+                                    let object_id = *object;
+                                    // CR 702.82a: checked *before*
+                                    // apply_enters_battlefield_modifiers -
+                                    // only this call site (a resolving
+                                    // spell) can raise this pause; see
+                                    // pending_devour_choice's own doc
+                                    // comment for why PlayLand/Search never
+                                    // check this at all.
+                                    if let Some((per_creature, candidates)) = replacement::pending_devour_choice(
+                                        &self.state,
+                                        &self.script_runtime,
+                                        object_id,
+                                        ZoneKind::Stack,
+                                        top.controller,
+                                    ) {
+                                        events.push(event);
+                                        self.process_state = ProcessState::AwaitingDevourChoice {
+                                            object: object_id,
+                                            controller: top.controller,
+                                            per_creature,
+                                            candidates,
+                                            stack_id: top.stack_id,
+                                            events_so_far: events,
+                                        };
+                                        return StepStatus::Progressed;
+                                    }
                                     // CR 702.44b: only a resolving spell can
                                     // ever have a nonempty `costs_paid` to
                                     // read colors from - `top` is this same
@@ -3175,7 +3296,7 @@ impl Engine {
                                     let counter_events = replacement::apply_enters_battlefield_modifiers(
                                         &mut self.state,
                                         &self.script_runtime,
-                                        *object,
+                                        object_id,
                                         ZoneKind::Stack,
                                         colors_spent(&top.costs_paid),
                                     );
@@ -3293,6 +3414,7 @@ impl Engine {
                                     ScriptedZoneMoveKind::Sacrifice,
                                     targets,
                                     top.stack_id,
+                                    Vec::new(),
                                 );
                                 return StepStatus::Progressed;
                             }
@@ -3329,6 +3451,7 @@ impl Engine {
                                     ScriptedZoneMoveKind::Destroy,
                                     targets,
                                     top.stack_id,
+                                    Vec::new(),
                                 );
                                 return StepStatus::Progressed;
                             }
@@ -3357,6 +3480,7 @@ impl Engine {
                                     ScriptedZoneMoveKind::Exile,
                                     targets,
                                     top.stack_id,
+                                    Vec::new(),
                                 );
                                 return StepStatus::Progressed;
                             }
@@ -3904,6 +4028,21 @@ impl Engine {
                 self.process_state = ProcessState::AwaitingEntryAttachChoice {
                     attaching, controller, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
                 };
+                status
+            }
+
+            ProcessState::AwaitingDevourChoice { object, controller, per_creature, candidates, stack_id, events_so_far } => {
+                // Nothing to do until submit_devour_choice answers - same
+                // "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingDevourChoice {
+                    player: controller,
+                    object,
+                    per_creature,
+                    candidates: candidates.clone(),
+                };
+                self.process_state =
+                    ProcessState::AwaitingDevourChoice { object, controller, per_creature, candidates, stack_id, events_so_far };
                 status
             }
 
@@ -4585,17 +4724,24 @@ impl Engine {
     /// 616.1's ordering-choice pause can be raised by any of them, not just
     /// the first, since each target independently proposes+replacement-
     /// checks+commits its own `ZoneChange` (`commit_scripted_zone_move`).
-    /// Returns the same `ReplacementCheck { remaining: [StackObjectResolved] }`
+    /// Returns the same `ReplacementCheck { remaining: [..trailing, StackObjectResolved] }`
     /// transition the pre-`ScriptedZoneMove` non-pausing path already used
     /// once the queue empties, or pauses immediately on
     /// `AwaitingReplacementChoice` the instant one target needs an ordering
     /// choice, carrying the rest of the queue in `ReplacementResumeTarget::
     /// ScriptedZoneMove` for `submit_replacement_choice` to continue later.
+    /// `trailing` (CR 702.82a, Devour): extra not-yet-committed events owed
+    /// once the queue empties — empty for every caller except
+    /// `submit_devour_choice`, which still needs `events_so_far` (this
+    /// resolution's own pre-choice progress) and a `CounterAdded` to reach
+    /// `ReplacementCheck` too, not just the sacrifices this function itself
+    /// drives.
     fn continue_scripted_zone_move(
         &mut self,
         kind: ScriptedZoneMoveKind,
         mut remaining: VecDeque<ObjectId>,
         stack_id: ObjectId,
+        trailing: Vec<GameEventKind>,
     ) -> ProcessState {
         while let Some(id) = remaining.pop_front() {
             let Some(last_known_info) =
@@ -4637,15 +4783,14 @@ impl Engine {
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id },
+                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing },
                     };
                 }
             }
         }
-        ProcessState::ReplacementCheck {
-            remaining: VecDeque::from([GameEventKind::StackObjectResolved { stack_id }]),
-            checked: Vec::new(),
-        }
+        let mut final_events: VecDeque<GameEventKind> = trailing.into();
+        final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
+        ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() }
     }
 
     /// CR 120.3/121/616.1: drains `remaining` scripted draws one at a time,

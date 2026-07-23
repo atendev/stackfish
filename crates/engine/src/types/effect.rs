@@ -660,6 +660,27 @@ pub enum ReplacementPayload {
     /// for where `colors_spent` comes from and why the other two call sites
     /// (PlayLand, Search) always pass an empty `ColorSet`.
     EntersWithCountersSunburst,
+    /// CR 702.82a (Devour N): "as this object enters, you may sacrifice any
+    /// number of creatures. This permanent enters with N +1/+1 counters on
+    /// it for each creature sacrificed this way." Unlike every other
+    /// `EntersWithCounters*` variant, this one needs a genuine mid-ETB
+    /// player choice — *which* creatures (if any) to sacrifice — so it's
+    /// never applied by `replacement::apply_enters_battlefield_modifiers`
+    /// at all (that function only ever mutates state/proposes events
+    /// synchronously, it can't pause the engine). Instead,
+    /// `replacement::pending_devour_choice` is checked directly by
+    /// `ResolveStackTop` — the one call site that can raise a real pause
+    /// (`ProcessState::AwaitingDevourChoice`) and resume afterward
+    /// (`Engine::submit_devour_choice`) — before `apply_enters_battlefield_
+    /// modifiers` even runs for this object. `PlayLand`/`Search`'s
+    /// battlefield-entry call sites never check for this payload at all —
+    /// a land can never have Devour, and a Search-fetched Devour creature
+    /// choosing not to offer this choice is a named, narrow gap (see
+    /// `pending_devour_choice`'s own doc comment). CR 702.82c's
+    /// "Devour [quality] N" variant (sacrifice permanents with quality
+    /// [quality] rather than just creatures) isn't modeled — `per_creature`
+    /// always means "per creature," full stop.
+    EntersWithCountersDevour { per_creature: i32 },
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this
