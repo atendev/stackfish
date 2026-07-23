@@ -254,13 +254,29 @@ pub enum EffectPrimitive {
     /// player's* battlefield, not the blocker's own characteristics — the
     /// one respect this isn't shaped like protection).
     AddLandwalkSubtype(Subtype),
+    /// Layer 6 (CR 613.1/702.22b/c, "bands with other [quality]"): grants
+    /// CR 702.22c's second band-formation path for the named quality (e.g.
+    /// "Elf" for "bands with other Elves"), in addition to whatever the
+    /// object already has. Same shape as `AddLandwalkSubtype` in every
+    /// respect (one subtype per primitive, no printed `CardDefinition`
+    /// field — always effect-granted via a self-registered static ability)
+    /// except what it's checked against: `commands::PlayerActionKind::
+    /// DeclareBands` reads `EffectiveCharacteristics::
+    /// bands_with_other_subtypes` to accept a band whose members share this
+    /// quality, instead of `DeclareBlockers` reading the defending player's
+    /// battlefield the way landwalk does. Only single-subtype ("quality")
+    /// matching is modeled — CR 702.22c/m's supertype form ("bands with
+    /// other Legends," i.e. Legendary) is TODO, unmodeled, same class of
+    /// narrowing `AddLandwalkSubtype`'s own doc comment already takes for
+    /// card-type/supertype-combination forms.
+    AddBandsWithOther(Subtype),
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
     /// abilities"): resets the running `keywords`, `protection_colors`,
     /// `protection_card_types`, `protection_subtypes`, `protection_names`,
-    /// `protection_everything`, `protection_players`, *and*
-    /// `landwalk_subtypes` accumulators to empty/false at this effect's
-    /// position in `effective_characteristics`'s
-    /// layer-6 fold — protection is an ability too, regardless of which
+    /// `protection_everything`, `protection_players`, `landwalk_subtypes`,
+    /// *and* `bands_with_other_subtypes` accumulators to empty/false at this
+    /// effect's position in `effective_characteristics`'s layer-6 fold —
+    /// protection is an ability too, regardless of which
     /// quality it names (CR 613.1f names "ability-adding... and
     /// ability-removing effects" together, no carve-out for protection
     /// specifically). Not a flat override the way `SetName`/`SetPT`/
@@ -902,6 +918,15 @@ pub struct EffectiveCharacteristics {
     /// blocker's own characteristics — CR 702.14c's condition lives outside
     /// either combatant.
     pub landwalk_subtypes: Vec<Subtype>,
+    /// CR 702.22b/c's "bands with other [quality]": subtype(s) this object
+    /// can band with under CR 702.22c's second band-formation path, from
+    /// every applicable layer 6 `EffectPrimitive::AddBandsWithOther`. Same
+    /// `Vec`/empty-base/always-effect-granted shape as `landwalk_subtypes`.
+    /// Enforcement (`commands::PlayerActionKind::DeclareBands`) checks it
+    /// against this object's *bandmates'* own subtypes, not an opponent's
+    /// battlefield — unlike landwalk, both sides of the check are combatants
+    /// in the same declared band.
+    pub bands_with_other_subtypes: Vec<Subtype>,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,

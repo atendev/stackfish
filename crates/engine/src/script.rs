@@ -833,6 +833,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionEverything)
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionPlayer(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddLandwalkSubtype(_))
+            | (Layer::AbilityAdding, EffectPrimitive::AddBandsWithOther(_))
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
             | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
             | (Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)
@@ -2477,6 +2478,10 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     effects.set(
         "AddLandwalkSubtype",
         lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddLandwalkSubtype(Subtype(name)))))?,
+    )?;
+    effects.set(
+        "AddBandsWithOther",
+        lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddBandsWithOther(Subtype(name)))))?,
     )?;
     effects.set(
         "AddCardType",

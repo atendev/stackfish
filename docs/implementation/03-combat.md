@@ -105,3 +105,17 @@
   - No-split-needed damage steps keep the old convention (active player submits an empty batch) - every pre-existing zero-split `AssignCombatDamage` call site across the test suite is unaffected.
 - Unresolved:
   - A damage step needing splits chosen by two different players *at once* (e.g. a plain multi-block plus a separate banding-blocked attacker, simultaneously) - CR 510.1e implies both players submit their own creatures' splits independently, which would need a real two-phase pause-and-resume protocol (a new `ProcessState`, similar to `AwaitingAttachChoice`). Deliberately narrowed instead: rejected outright with a clear `IllegalAction` rather than silently letting one player choose for both.
+
+## Slice: bands-with-other (merged)
+
+- Branch `phase5/bands-with-other`.
+- Scope: CR 702.22b/c's "bands with other [quality]" - the second, quality-parametrized way to form an attacking band, left unmodeled by `banding` above ("needs a parameter, same shape gap Landwalk's own removal from `KeywordSet` documents").
+- Verify: 5 new tests (`phase5_bands_with_other.rs`), full workspace suite green.
+- Key changes:
+  - `EffectPrimitive::AddBandsWithOther(Subtype)` (layer 6) / `EffectiveCharacteristics::bands_with_other_subtypes: Vec<Subtype>` / `Game.Effects.AddBandsWithOther(name)` - exact mirror of `AddLandwalkSubtype`'s existing shape (no printed `CardDefinition` field, always effect-granted; `RemoveAllAbilities` clears it alongside `landwalk_subtypes` and the other layer-6 accumulators).
+  - `DeclareBands` now accepts a band matching *either* of CR 702.22c's two sentences: the pre-existing plain form (>=1 `BANDING` member, <=1 non-banding member), or the new quality form (>=1 member with `bands_with_other_subtypes` containing quality Q, every *other* member's own `subtypes` include Q - no banding-keyword requirement, no cap on member count). Tries every quality named by any member in turn; legal if any one of them makes every other member match.
+  - Quality = creature subtype only, same narrowing precedent Landwalk set (single-subtype matching only).
+- Unresolved:
+  - CR 702.22c/m's supertype-quality form ("bands with other Legends," i.e. Legendary) - TODO, unmodeled, same class of gap Landwalk's own card-type/supertype-combination forms document.
+  - CR 702.22b (losing the keyword loses bands-with-other too) - no effect in this engine removes a keyword yet, untestable, not built.
+  - CR 702.22j/k's *other* trigger condition - a blocking creature with bands-with-other[quality] alongside another matching-quality blocker flips the combat-damage split chooser **independent of any declared band at all** (a pure blocker-side check at the damage step, not band-formation). Materially separate mechanic from this slice's scope; deferred to its own follow-up, matching the project's own precedent of splitting `banding` and `banding-split-actor` into two slices.
