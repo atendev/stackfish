@@ -33,10 +33,11 @@
 //! `docs/implementation.md`'s "Known unresolved gaps" list already) - noted
 //! here so the missing Exile-specific test isn't mistaken for an oversight.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
+use stackfish_testutil::{card_object, drain, two_player_state, zones};
 
 fn creature_definition(definition_id: u64, name: &str, toughness: i32) -> CardDefinition {
     CardDefinition {
@@ -214,95 +215,13 @@ fn sacrifice_spell_definition() -> CardDefinition {
     }
 }
 
-fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
-    GameObject {
-        object_id: id,
-        copiable_override: None,
-        lineage: ObjectLineage { previous: None },
-        definition,
-        owner,
-        controller: owner,
-        zone,
-        tapped: false,
-        flipped: false,
-        face_down: false,
-        phased_out: false,
-        damage_marked: 0,
-        deathtouched: false,
-        counters: CounterSet::new(),
-        attachments: Vec::new(),
-        attached_to: None,
-        timestamp: SequenceNo(0),
-        controlled_since_turn: 0,
-        is_token: false,
-        is_commander: false,
-        visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
-    }
-}
-
-fn player_state(id: PlayerId) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life: 20,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
-}
-
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     GameState {
-        players: vec![player_state(p0), player_state(p1)],
-        turn_order: vec![p0, p1],
-        active_player: p0,
-        turn_number: 1,
-        phase: Phase::Main,
         step: Step::PreCombatMain,
-        priority_player: p0,
-        consecutive_passes: 0,
-        lands_played_this_turn: HashMap::new(),
-        combat: None,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        objects: HashMap::new(),
-        zones: vec![
-            Zone { kind: ZoneKind::Hand, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Hand, owner: Some(p1), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p0), contents: VecDeque::new() },
-            Zone { kind: ZoneKind::Graveyard, owner: Some(p1), contents: VecDeque::new() },
-            // owner: None - Exile is a shared zone (CR 400.10), same
-            // convention `commit_scripted_zone_move`'s own Exile-kind branch
-            // always used. `sba::commit_death`'s own Battlefield->Exile
-            // lookup previously (incorrectly) used owner: Some(owner)
-            // instead, which this fixture used to match - fixed by
-            // `phase5/replacement-effect-shapes` (docs/implementation.md),
-            // caught by that slice's own end-to-end exile test actually
-            // failing, not by inspection. This fixture updated to match the
-            // real, now-consistent convention rather than the bug.
-            Zone { kind: ZoneKind::Exile, owner: None, contents: VecDeque::new() },
-        ],
-        stack: Vec::new(),
-        continuous_effects: Vec::new(),
-        replacement_effects: Vec::new(),
-        cost_modifiers: Vec::new(),
-        hand_size_modifiers: Vec::new(),
-        abilities: Vec::new(),
-        ledger: Vec::new(),
-        rng: RngState { seed: 1, draws_consumed: 0 },
-        next_event_id: 0,
-        next_sequence_no: 0,
-        next_object_id: 1000,
-        pending_step_skips: Vec::new(),
-        once_per_turn_triggered: std::collections::HashSet::new(),
-        commander_return_offered: std::collections::HashSet::new(),
+        ..two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile]))
     }
 }
 
@@ -317,15 +236,6 @@ fn put_in_hand(state: &mut GameState, object: GameObject) {
     let owner = object.owner;
     state.zone_mut(ZoneKind::Hand, Some(owner)).unwrap().push_bottom(id);
     state.objects.insert(id, object);
-}
-
-fn drain(engine: &mut Engine) -> StepStatus {
-    loop {
-        match engine.step().status {
-            StepStatus::Progressed => continue,
-            other => return other,
-        }
-    }
 }
 
 fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
