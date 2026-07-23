@@ -91,6 +91,20 @@ pub enum DevourChoiceError {
     DuplicateCandidate,
 }
 
+/// Why `submit_amplify_choice` rejected an answer to a CR 702.38a Amplify
+/// choice. Same shape as `DevourChoiceError` — see that type's own doc
+/// comment.
+#[derive(Debug)]
+pub enum AmplifyChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingAmplifyChoice`.
+    NotAwaitingChoice,
+    /// One of `revealed` wasn't one of the offered `candidates`.
+    InvalidCandidate,
+    /// The same id appeared twice in `revealed` — each card can only be
+    /// revealed once.
+    DuplicateCandidate,
+}
+
 /// Why `submit_commander_return_choice` rejected an answer to a CR 903.9a
 /// commander-return choice.
 #[derive(Debug)]
@@ -329,6 +343,14 @@ pub enum StepStatus {
     /// none) to sacrifice, then calls `submit_devour_choice`. `object`
     /// enters with `per_creature` counters times however many were chosen.
     AwaitingDevourChoice { player: PlayerId, object: ObjectId, per_creature: i32, candidates: Vec<ObjectId> },
+    /// CR 702.38a (Amplify): `replacement::pending_amplify_choice` found a
+    /// registered Amplify effect on `object` (already a real battlefield
+    /// permanent by this point) with 1+ hand cards `player` could reveal —
+    /// `player` picks any subset of `candidates` (including none) to
+    /// reveal, then calls `submit_amplify_choice`. `object` enters with
+    /// `per_card` counters times however many were revealed; revealed cards
+    /// stay in hand untouched.
+    AwaitingAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
     /// Backlog item 9: a card script (via `Game.SelectTargets`) yielded
     /// mid-resolution, asking `player` to choose a real target matching
     /// `request` before the operation can finish — the caller should prompt
@@ -645,6 +667,26 @@ pub enum ProcessState {
         object: ObjectId,
         controller: PlayerId,
         per_creature: i32,
+        candidates: Vec<ObjectId>,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+    },
+    /// CR 702.38a (Amplify): paused mid-`ResolveStackTop`, right where
+    /// `apply_enters_battlefield_modifiers` would otherwise run for `object`
+    /// — `replacement::pending_amplify_choice` found a registered Amplify
+    /// effect on it with 1+ legal hand-card candidates. `stack_id`/
+    /// `events_so_far` are exactly what this resolution had already built
+    /// before reaching this point, same "not yet committed, still a local
+    /// `Vec`" state `AwaitingDevourChoice` above carries. Unlike Devour,
+    /// `submit_amplify_choice` needs no `continue_scripted_zone_move` at
+    /// all — revealing changes nothing about the chosen cards' zone — it
+    /// folds `events_so_far` plus a `CounterAdded` (if any cards were
+    /// revealed) straight into the same `StackObjectResolved`/
+    /// `ReplacementCheck` tail every non-pausing resolution already ends on.
+    AwaitingAmplifyChoice {
+        object: ObjectId,
+        controller: PlayerId,
+        per_card: i32,
         candidates: Vec<ObjectId>,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
@@ -1954,6 +1996,48 @@ impl Engine {
             stack_id,
             events_so_far,
         );
+        Ok(())
+    }
+
+    /// Answers a pending CR 702.38a Amplify choice raised by `StepStatus::
+    /// AwaitingAmplifyChoice` — `revealed` must be a subset (any size,
+    /// including empty — CR 702.38a's "any number") of that status's own
+    /// `candidates`, no duplicates. Unlike `submit_devour_choice`, revealing
+    /// a hand card doesn't move it anywhere or trigger anything, so this
+    /// just folds `events_so_far` plus a `CounterAdded` (if `revealed` wasn't
+    /// empty) straight into the same `StackObjectResolved`/`ReplacementCheck`
+    /// tail every other synchronous-only resolution already ends on — no
+    /// `continue_scripted_zone_move` needed.
+    pub fn submit_amplify_choice(&mut self, revealed: Vec<ObjectId>) -> Result<(), AmplifyChoiceError> {
+        let ProcessState::AwaitingAmplifyChoice { candidates, .. } = &self.process_state else {
+            return Err(AmplifyChoiceError::NotAwaitingChoice);
+        };
+        if !revealed.iter().all(|id| candidates.contains(id)) {
+            return Err(AmplifyChoiceError::InvalidCandidate);
+        }
+        let mut seen = std::collections::HashSet::new();
+        if !revealed.iter().all(|id| seen.insert(*id)) {
+            return Err(AmplifyChoiceError::DuplicateCandidate);
+        }
+        let ProcessState::AwaitingAmplifyChoice { object, per_card, stack_id, mut events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        // CR 614.13/701.19b-style consumption bookkeeping - same helper
+        // apply_enters_battlefield_modifiers's own tail uses for every other
+        // EntersWithCounters* payload, called here instead since this
+        // payload is never routed through that function at all (see
+        // EntersWithCountersAmplify's own doc comment).
+        let candidate_event =
+            GameEventKind::ZoneChange { object, from: ZoneKind::Stack, to: ZoneKind::Battlefield, last_known_info: None };
+        replacement::apply_one_replacement(&mut self.state, object, candidate_event);
+        let amount = per_card * revealed.len() as i32;
+        if amount > 0 {
+            events_so_far.push(GameEventKind::CounterAdded { object, kind: CounterKind::PlusOnePlusOne, amount });
+        }
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
         Ok(())
     }
 
@@ -3288,6 +3372,30 @@ impl Engine {
                                         };
                                         return StepStatus::Progressed;
                                     }
+                                    // CR 702.38a: same "checked before
+                                    // apply_enters_battlefield_modifiers,
+                                    // only this call site can pause" posture
+                                    // as Devour above - see
+                                    // pending_amplify_choice's own doc
+                                    // comment.
+                                    if let Some((per_card, candidates)) = replacement::pending_amplify_choice(
+                                        &self.state,
+                                        &self.script_runtime,
+                                        object_id,
+                                        ZoneKind::Stack,
+                                        top.controller,
+                                    ) {
+                                        events.push(event);
+                                        self.process_state = ProcessState::AwaitingAmplifyChoice {
+                                            object: object_id,
+                                            controller: top.controller,
+                                            per_card,
+                                            candidates,
+                                            stack_id: top.stack_id,
+                                            events_so_far: events,
+                                        };
+                                        return StepStatus::Progressed;
+                                    }
                                     // CR 702.44b: only a resolving spell can
                                     // ever have a nonempty `costs_paid` to
                                     // read colors from - `top` is this same
@@ -4043,6 +4151,21 @@ impl Engine {
                 };
                 self.process_state =
                     ProcessState::AwaitingDevourChoice { object, controller, per_creature, candidates, stack_id, events_so_far };
+                status
+            }
+
+            ProcessState::AwaitingAmplifyChoice { object, controller, per_card, candidates, stack_id, events_so_far } => {
+                // Nothing to do until submit_amplify_choice answers - same
+                // "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingAmplifyChoice {
+                    player: controller,
+                    object,
+                    per_card,
+                    candidates: candidates.clone(),
+                };
+                self.process_state =
+                    ProcessState::AwaitingAmplifyChoice { object, controller, per_card, candidates, stack_id, events_so_far };
                 status
             }
 

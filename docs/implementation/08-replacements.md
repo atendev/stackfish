@@ -298,9 +298,44 @@
   their own competing CR 616.1 ordering choice, exercising `trailing` surviving *that* pause
   specifically) isn't separately tested — the code path is structurally identical to the
   pre-existing `NeedsOrderingChoice` arm (just carrying one more field), and the non-paused majority
-  path is covered directly. Amplify still needs its own slice — different candidate source (hand
-  cards sharing a creature type) and CR 702.38a's "can't reveal cards entering simultaneously"
-  carve-out, but can reuse this slice's pause/resume shape directly.
+  path is covered directly. Amplify — closed by `phase5/amplify` below.
+
+## Slice: amplify (merged)
+
+- Branch `phase5/amplify`.
+- Scope: CR 702.38a Amplify N, the last of the four "dynamic ETB counts" items — reuses Devour's
+  pause/resume shape (own `ProcessState`/`StepStatus` variant, checked at the same `ResolveStackTop`
+  call site before `apply_enters_battlefield_modifiers` runs) but with a different candidate source
+  and no zone-move consequence.
+- Verify: 10 new tests (`phase5_amplify.rs` — `pending_amplify_choice` unit tests, Lua registration,
+  and five real end-to-end cast-and-resolve tests: full reveal, reveal-nothing, and both
+  `AmplifyChoiceError` rejections), full workspace suite green.
+- Key changes:
+  - `ReplacementPayload::EntersWithCountersAmplify { per_card: i32 }` — same "never applied by
+    `apply_enters_battlefield_modifiers`" shape as `EntersWithCountersDevour`.
+  - `replacement::pending_amplify_choice(state, script_runtime, object, from, controller) ->
+    Option<(i32, Vec<ObjectId>)>` — candidates are cards in `controller`'s hand whose
+    `EffectiveCharacteristics::subtypes` overlap `object`'s own. "Shares a creature type" is
+    approximated as raw subtype overlap — this engine has no separate "creature type" category
+    distinct from land/artifact/etc. subtypes, same imprecision `landwalk_subtypes`/
+    `bands_with_other_subtypes` already accept for their own quality checks.
+  - `ProcessState`/`StepStatus::AwaitingAmplifyChoice` — same "player must answer before this
+    resolution can finish" shape `AwaitingDevourChoice` uses.
+  - `Engine::submit_amplify_choice(revealed) -> Result<(), AmplifyChoiceError>` — **the one real
+    divergence from Devour**: revealing a hand card doesn't move it anywhere or trigger anything, so
+    the resume needs no `continue_scripted_zone_move` at all. It folds `events_so_far` plus a
+    `CounterAdded` (if `revealed` wasn't empty) straight into the same `StackObjectResolved`/
+    `ReplacementCheck` tail every other synchronous-only resolution already ends on — simpler than
+    Devour's own resume, not just a copy of it.
+  - `Game.ReplacementPayloads.EntersWithCountersAmplify(perCard)` — same construction shape as
+    `EntersWithCountersDevour`, paired into `validate_replacement_filter_payload_pairing`'s
+    `WouldMoveZone(_, Battlefield)` arm alongside its siblings.
+- Unresolved: CR 702.82c's Devour sibling gap aside, CR 702.38a's "can't reveal this card or any
+  other cards entering the battlefield at the same time as this card" is unmodeled — no producer in
+  this engine ever enters multiple permanents from hand simultaneously, so the exclusion is
+  unreachable, not built. CR 702.38b (multiple separate Amplify instances on one creature "work
+  separately") is unmodeled too — `pending_amplify_choice` matches only the first registered
+  instance via `find_map`, same single-match shape `pending_devour_choice` already has.
 
 ## Slice: protection-as-replacement (merged)
 

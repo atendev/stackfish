@@ -581,6 +581,63 @@ pub fn pending_devour_choice(
     Some((per_creature, candidates))
 }
 
+/// CR 702.38a (Amplify): is `object` (already on the battlefield, `from`/
+/// `controller` describing how it got there — same call-site convention
+/// `pending_devour_choice` above uses) carrying a registered
+/// `EntersWithCountersAmplify` effect that still needs its choice made?
+/// Same "checked separately from `apply_enters_battlefield_modifiers`, only
+/// the one call site that can actually pause should call this" posture as
+/// `pending_devour_choice` — see `EntersWithCountersAmplify`'s own doc
+/// comment.
+///
+/// Returns `Some((per_card, candidates))` — `candidates` is every card in
+/// `controller`'s hand whose `effective_characteristics` subtypes overlap
+/// `object`'s own (CR 702.38a "share a creature type with it" — approximated
+/// as raw subtype overlap, this engine has no separate "creature type"
+/// category, same imprecision `pending_devour_choice`'s siblings
+/// `landwalk_subtypes`/`bands_with_other_subtypes` already accept).
+/// `None` if no such effect is registered, or `object` has no subtypes to
+/// share, or nothing in hand shares one — CR 702.38a's "any number,"
+/// including zero, needs no choice to make either way.
+pub fn pending_amplify_choice(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    object: ObjectId,
+    from: ZoneKind,
+    controller: PlayerId,
+) -> Option<(i32, Vec<ObjectId>)> {
+    let candidate = GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
+    let per_card = state.replacement_effects.iter().find_map(|r| match &r.spec {
+        ReplacementSpec::Primitive { payload: ReplacementPayload::EntersWithCountersAmplify { per_card }, .. }
+            if r.matches(&candidate, false, state, script_runtime) =>
+        {
+            Some(*per_card)
+        }
+        _ => None,
+    })?;
+    let object_subtypes = crate::layers::effective_characteristics(state, script_runtime, object).subtypes;
+    if object_subtypes.is_empty() {
+        return None;
+    }
+    let candidates: Vec<ObjectId> = state
+        .objects
+        .values()
+        .filter(|obj| {
+            obj.zone == ZoneKind::Hand
+                && obj.controller == controller
+                && crate::layers::effective_characteristics(state, script_runtime, obj.object_id)
+                    .subtypes
+                    .iter()
+                    .any(|s| object_subtypes.contains(s))
+        })
+        .map(|obj| obj.object_id)
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    Some((per_card, candidates))
+}
+
 /// CR 702.54a's condition: was any opponent of `controller` dealt damage
 /// this turn, by any source (combat or otherwise - real Bloodthirst
 /// rulings aren't restricted to combat damage). "This turn" is bounded by
