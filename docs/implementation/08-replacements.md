@@ -206,8 +206,9 @@
 - Unresolved:
   - CR 702.54b's "Bloodthirst X" variant (amount = *total* damage dealt to opponents this turn, not
     a fixed gate) — reuses the identical ledger scan, named as a cheap follow-up, not built.
-  - Sunburst — closed by `phase5/sunburst` below. Devour, Amplify — unchanged, still need a genuine
-    mid-ETB player-choice pause (see above).
+  - Sunburst — closed by `phase5/sunburst` below. Devour — closed by `phase5/devour` below. Amplify
+    — still unmodeled, needs its own candidate-computation (hand cards sharing a creature type) but
+    can reuse `phase5/devour`'s pause/resume shape.
 
 ## Slice: sunburst (merged)
 
@@ -245,7 +246,61 @@
     alongside its siblings.
 - Unresolved: CR 702.44c's "Sunburst used to set a variable number for another ability" (e.g.
   "Modular—Sunburst") — no such cross-keyword reference plumbing exists, not attempted. Devour,
-  Amplify — still need a genuine mid-ETB player-choice pause, unchanged by this slice.
+  Amplify — Devour closed by `phase5/devour` below; Amplify still needs its own slice.
+
+## Slice: devour (merged)
+
+- Branch `phase5/devour`.
+- Scope: CR 702.82a Devour N — the last of the four "dynamic ETB counts" items, and the first that
+  genuinely needs a mid-ETB player choice (*which* creatures, if any, to sacrifice), unlike
+  Bloodthirst/Sunburst's fully deterministic amounts. Bigger than any other slice this session —
+  touched `ResolveStackTop`'s own resolution tail and `continue_scripted_zone_move`'s shared
+  sacrifice/destroy/exile machinery, not just an additive new match arm.
+- Verify: 11 new tests (`phase5_devour.rs` — `pending_devour_choice` unit tests, Lua registration,
+  and five real end-to-end cast-and-resolve tests: full sacrifice, sacrifice-nothing, self-devour,
+  and both `DevourChoiceError` rejections), full workspace suite green.
+- Key finding that reshaped the plan: `ResolveStackTop` defers *everything* about a resolution
+  (including the entering permanent's own `ZoneChange`) into one `ReplacementCheck` pass at the very
+  end — nothing is committed to the ledger yet at the point Devour's choice needs to happen. So this
+  couldn't be a narrow addition to `apply_enters_battlefield_modifiers` (which only ever mutates
+  state/proposes events synchronously and has no way to pause the engine) — the pause has to live
+  one level up, in `ResolveStackTop` itself, and has to carry `events_so_far` forward through the
+  pause so those events aren't lost.
+- Key changes:
+  - `ReplacementPayload::EntersWithCountersDevour { per_creature: i32 }` — deliberately never
+    applied by `apply_enters_battlefield_modifiers` at all (unlike every sibling payload); it isn't
+    even in that function's own matching filter.
+  - `replacement::pending_devour_choice(state, script_runtime, object, from, controller) ->
+    Option<(i32, Vec<ObjectId>)>` — checked *before* `apply_enters_battlefield_modifiers` runs, only
+    at the one call site that can actually pause (`ResolveStackTop`'s resolving-spell path).
+    `PlayLand`/`Search` never call this at all — a land can never have Devour, and a Search-fetched
+    Devour creature not offering the choice is a named, narrow, deliberately unclosed gap (no card in
+    this engine's test corpus fetches one — same "no real producer reaches this" posture
+    `aura-attach-choice`'s dormant `AwaitingAttachChoice` already established). Candidates are every
+    creature the entrant's own controller controls (CR 701.17a: sacrificing is always the
+    controller's own choice), the entrant itself included (real Magic allows devouring the source;
+    untested as its own scenario here beyond confirming it's offered and legal to choose).
+  - `ProcessState`/`StepStatus::AwaitingDevourChoice` — same "player must answer before this
+    resolution can finish" shape every other choice-pause here uses; carries `stack_id`/
+    `events_so_far` so `submit_devour_choice` can resume the exact same resolution.
+  - `Engine::submit_devour_choice(sacrificed) -> Result<(), DevourChoiceError>` — validates, then
+    performs the sacrifices via `continue_scripted_zone_move` (reused as-is: CR 616.1's ordering
+    choice and dies-triggers all apply for free, same as a real `AbilityEffect::Sacrifice`), folding
+    `events_so_far` plus a `CounterAdded` (if `sacrificed` was nonempty) into that function's *new*
+    `trailing: Vec<GameEventKind>` parameter.
+  - `continue_scripted_zone_move`/`ReplacementResumeTarget::ScriptedZoneMove` both gained that
+    `trailing` field — events owed once the zone-move queue empties, threaded through even a nested
+    CR 616.1 pause raised mid-sacrifice, not just the non-pausing path. Every pre-existing caller
+    (`Destroy`/`Exile`/the plain `AbilityEffect::Sacrifice` path) passes `Vec::new()`, unaffected.
+- Unresolved: CR 702.82c's "Devour [quality] N" variant (sacrifice permanents of [quality] rather
+  than just creatures) — not modeled, `per_creature` always means "per creature." The
+  nested-pause interaction (a Devour sacrifice where two simultaneously-dying creatures also raise
+  their own competing CR 616.1 ordering choice, exercising `trailing` surviving *that* pause
+  specifically) isn't separately tested — the code path is structurally identical to the
+  pre-existing `NeedsOrderingChoice` arm (just carrying one more field), and the non-paused majority
+  path is covered directly. Amplify still needs its own slice — different candidate source (hand
+  cards sharing a creature type) and CR 702.38a's "can't reveal cards entering simultaneously"
+  carve-out, but can reuse this slice's pause/resume shape directly.
 
 ## Slice: protection-as-replacement (merged)
 

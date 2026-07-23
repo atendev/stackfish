@@ -517,6 +517,70 @@ pub fn apply_enters_battlefield_modifiers(
     counter_events
 }
 
+/// CR 702.82a (Devour): is `object` (already on the battlefield, `from`/
+/// `controller` describing how it got there — same call-site convention
+/// `apply_enters_battlefield_modifiers` uses) carrying a registered
+/// `EntersWithCountersDevour` effect that still needs its choice made?
+/// Checked *separately* from `apply_enters_battlefield_modifiers`'s own
+/// matching loop (which deliberately never touches this payload at all —
+/// see `EntersWithCountersDevour`'s own doc comment) since only the caller
+/// that can actually raise `ProcessState::AwaitingDevourChoice` should ever
+/// call this — `ResolveStackTop`, the one battlefield-entry producer that's
+/// a resolving spell. `PlayLand` (only ever moves lands, which can never
+/// have Devour) and `Search` (a real but rare producer — no card in this
+/// engine's test corpus fetches a Devour creature — narrowed out on
+/// purpose, same "no real producer reaches this" posture `aura-attach-
+/// choice`'s own dormant `AwaitingAttachChoice` already established) never
+/// call this at all, so a Devour effect registered by either path silently
+/// grants no counters (falls through `apply_enters_battlefield_modifiers`'s
+/// own `_ => continue` arm) rather than erroring.
+///
+/// Returns `Some((per_creature, candidates))` — `candidates` is every
+/// creature `controller` currently controls on the battlefield (CR 701.17a:
+/// sacrificing is always a permanent's own controller's choice, never an
+/// arbitrary creature regardless of who controls it), `object` included
+/// (real Magic allows devouring the source itself, and this engine doesn't
+/// special-case it out — if chosen, the `CounterAdded` this produces later
+/// just silently finds no object left to add to, same "skip rather than
+/// guess" stance every other post-departure counter/effect lookup in this
+/// codebase already takes). `None` if no such effect is registered, or the
+/// creature-controlling player controls zero creatures at all (CR 702.82a's
+/// "any number," including zero, needs no choice to make — 0 counters is
+/// the only possible outcome either way).
+pub fn pending_devour_choice(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    object: ObjectId,
+    from: ZoneKind,
+    controller: PlayerId,
+) -> Option<(i32, Vec<ObjectId>)> {
+    let candidate = GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
+    let per_creature = state.replacement_effects.iter().find_map(|r| match &r.spec {
+        ReplacementSpec::Primitive { payload: ReplacementPayload::EntersWithCountersDevour { per_creature }, .. }
+            if r.matches(&candidate, false, state, script_runtime) =>
+        {
+            Some(*per_creature)
+        }
+        _ => None,
+    })?;
+    let candidates: Vec<ObjectId> = state
+        .objects
+        .values()
+        .filter(|obj| {
+            obj.zone == ZoneKind::Battlefield
+                && obj.controller == controller
+                && crate::layers::effective_characteristics(state, script_runtime, obj.object_id)
+                    .card_types
+                    .contains(CardTypeSet::CREATURE)
+        })
+        .map(|obj| obj.object_id)
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    Some((per_creature, candidates))
+}
+
 /// CR 702.54a's condition: was any opponent of `controller` dealt damage
 /// this turn, by any source (combat or otherwise - real Bloodthirst
 /// rulings aren't restricted to combat damage). "This turn" is bounded by

@@ -962,6 +962,7 @@ fn validate_replacement_filter_payload_pairing(
                 | ReplacementPayload::EntersWithCounters { .. }
                 | ReplacementPayload::EntersWithCountersBloodthirst { .. }
                 | ReplacementPayload::EntersWithCountersSunburst
+                | ReplacementPayload::EntersWithCountersDevour { .. }
         )
     );
     if paired {
@@ -2688,6 +2689,16 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     // and amount are derived at apply time (see the variant's own doc
     // comment) instead of declared here.
     replacement_payloads.set("EntersWithCountersSunburst", ReplacementPayloadTag(ReplacementPayload::EntersWithCountersSunburst))?;
+    // CR 702.82a: `Game.ReplacementPayloads.EntersWithCountersDevour(perCreature)`
+    // - the choice of *which* creatures (if any) to sacrifice is handled
+    // entirely outside this payload (see its own doc comment) - all it
+    // carries is the fixed printed per-creature rate.
+    replacement_payloads.set(
+        "EntersWithCountersDevour",
+        lua.create_function(|_, per_creature: i32| {
+            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersDevour { per_creature }))
+        })?,
+    )?;
 
     // `Game.Consumption.*` - a ReplacementEffect's ConsumptionPolicy
     // (ReplacementEffectBuilder::SetConsumption).
