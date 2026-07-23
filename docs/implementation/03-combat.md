@@ -118,4 +118,15 @@
 - Unresolved:
   - CR 702.22c/m's supertype-quality form ("bands with other Legends," i.e. Legendary) - TODO, unmodeled, same class of gap Landwalk's own card-type/supertype-combination forms document.
   - CR 702.22b (losing the keyword loses bands-with-other too) - no effect in this engine removes a keyword yet, untestable, not built.
-  - CR 702.22j/k's *other* trigger condition - a blocking creature with bands-with-other[quality] alongside another matching-quality blocker flips the combat-damage split chooser **independent of any declared band at all** (a pure blocker-side check at the damage step, not band-formation). Materially separate mechanic from this slice's scope; deferred to its own follow-up, matching the project's own precedent of splitting `banding` and `banding-split-actor` into two slices.
+  - CR 702.22j/k's *other* trigger condition (closed by `phase5/bands-with-other-split-trigger`, below) - unchanged by this slice.
+
+## Slice: bands-with-other-split-trigger (merged)
+
+- Branch `phase5/bands-with-other-split-trigger`.
+- Scope: CR 702.22j/k's second trigger condition, named as a follow-up by `bands-with-other` above - independent of any declared band, if the creatures grouped by one block (an attacker's blockers, or a blocker's forced-onto attackers) contain a creature X with "bands with other [quality]" and another creature Y (Y != X) whose own subtypes include that quality, the combat-damage split chooser flips exactly the way a plain `BANDING` creature already flips it.
+- Verify: 2 new tests (`phase5_bands_with_other.rs`), full workspace suite green.
+- Key changes:
+  - `commands::AssignCombatDamage`'s `has_bands_with_other_pair(ids: &[ObjectId]) -> bool` closure - checks the X/Y condition over a given id list (an attacker's `blockers`, or a blocker's `attackers_for_blocker`), tries every quality any member names in turn, same "any one match is enough" posture `DeclareBands`'s own quality-band check (`bands-with-other`, above) already takes.
+  - Both existing chooser-flip sites get `|| has_bands_with_other_pair(...)` alongside their pre-existing `BANDING`-keyword check: the attacker-split site flips to the defending player, the blocker-split site flips to `state.active_player` (simplified from looking up a specific banding attacker's controller, since every attacker's controller is always the active player anyway).
+- Unresolved:
+  - CR 702.22c/m's supertype-quality form, CR 702.22b keyword-loss - unchanged, still open from the prior slice.

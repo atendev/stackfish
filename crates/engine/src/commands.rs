@@ -2496,16 +2496,40 @@ pub fn execute_command(
                 attackers_by_blocker.iter().filter(|(_, attackers)| attackers.len() >= 2).map(|(blocker, _)| *blocker),
             );
 
+            // CR 702.22j/k's second trigger condition: independent of
+            // banding entirely (and independent of any declared band - this
+            // is a pure grouping-by-block check at the damage step), the
+            // chooser also flips when `ids` contains a creature X with
+            // "bands with other [quality]" for some quality Q and another
+            // creature Y (Y != X) whose own subtypes include Q. Tries every
+            // quality X names in turn, same "any one match is enough"
+            // posture `commands::PlayerActionKind::DeclareBands`'s own
+            // quality-band check already takes.
+            let has_bands_with_other_pair = |ids: &[ObjectId]| -> bool {
+                ids.iter().any(|x| {
+                    let x_characteristics = crate::layers::effective_characteristics(state, script_runtime, *x);
+                    x_characteristics.bands_with_other_subtypes.iter().any(|quality| {
+                        ids.iter().any(|y| {
+                            y != x
+                                && crate::layers::effective_characteristics(state, script_runtime, *y)
+                                    .subtypes
+                                    .contains(quality)
+                        })
+                    })
+                })
+            };
+
             // CR 510.1c/d: a split is chosen by the object's own controller
             // by default - attacker splits by the attacker's controller,
             // blocker splits by the blocker's controller. CR 702.22j/k flip
-            // that per-id when a `BANDING` creature is on the *other* side
-            // of that particular block: an attacker blocked by a banding
-            // creature has its split chosen by the defending player instead
-            // (702.22j); a blocker blocking a banding creature has its
-            // split chosen by the active player instead (702.22k - this
-            // also covers the pre-existing band-forced-blocker case for
-            // real now, rather than by the old blanket-active-player
+            // that per-id when either trigger condition holds on the
+            // *other* side of that particular block: a plain `BANDING`
+            // creature there, or `has_bands_with_other_pair` above. An
+            // attacker blocked by either has its split chosen by the
+            // defending player instead (702.22j); a blocker blocking either
+            // has its split chosen by the active player instead (702.22k -
+            // this also covers the pre-existing band-forced-blocker case
+            // for real now, rather than by the old blanket-active-player
             // hardcode's accident: every band needs >=1 banding member, so
             // a band-forced blocker split was always going to resolve to
             // "active player" here anyway).
@@ -2522,7 +2546,8 @@ pub fn execute_command(
                 let actor = if let Some(blockers) = blockers_by_attacker.get(id) {
                     let banding_blocker = blockers
                         .iter()
-                        .any(|b| effective_keywords(state, script_runtime, *b).contains(KeywordSet::BANDING));
+                        .any(|b| effective_keywords(state, script_runtime, *b).contains(KeywordSet::BANDING))
+                        || has_bands_with_other_pair(blockers);
                     if banding_blocker {
                         attacker_defending_player(id)
                     } else {
@@ -2535,6 +2560,7 @@ pub fn execute_command(
                         .find(|a| effective_keywords(state, script_runtime, **a).contains(KeywordSet::BANDING));
                     match banding_attacker {
                         Some(attacker) => crate::layers::effective_controller(state, script_runtime, *attacker),
+                        None if has_bands_with_other_pair(attackers_for_blocker) => state.active_player,
                         None => crate::layers::effective_controller(state, script_runtime, *id),
                     }
                 };
