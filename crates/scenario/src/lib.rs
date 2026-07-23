@@ -1565,7 +1565,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             | StepStatus::AwaitingLegendRuleChoice { .. }
             | StepStatus::AwaitingCommanderReturnChoice { .. }
             | StepStatus::AwaitingAttachChoice { .. }
-            | StepStatus::AwaitingAuraEntryAttachChoice { .. }
+            | StepStatus::AwaitingEntryAttachChoice { .. }
             | StepStatus::AwaitingScriptChoice { .. }
             | StepStatus::AwaitingScryChoice { .. }
             | StepStatus::AwaitingSurveilChoice { .. }
