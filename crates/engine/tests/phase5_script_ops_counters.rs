@@ -170,7 +170,7 @@ fn both_counter_kinds_coexist_unannihilated_but_still_net_correctly() {
     let p1 = PlayerId(1);
     let target = ObjectId(0);
     let mut bear = card_object(target, creature_definition(1, "Bear"), p1, ZoneKind::Battlefield);
-    bear.counters.add(CounterKind::PlusOnePlusOne, 3);
+    bear.counters.add(CounterKind::PlusOnePlusOne, 3, SequenceNo(0));
     state.objects.insert(target, bear);
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
     let card = ObjectId(2);

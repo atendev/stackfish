@@ -383,7 +383,7 @@ fn indestructible_creature_still_dies_to_zero_toughness() {
     let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: Vec::new() , bands: Vec::new() });
     let creature = ObjectId(0);
     let mut object = permanent(creature, creature_definition("Golem", 1, 1, KeywordSet::INDESTRUCTIBLE), PlayerId(0), 0);
-    object.counters.add(CounterKind::MinusOneMinusOne, 1);
+    object.counters.add(CounterKind::MinusOneMinusOne, 1, SequenceNo(0));
     put_on_battlefield(&mut state, object);
 
     let mut engine = Engine::new(state);
@@ -497,9 +497,9 @@ fn net_with_counters_folds_plus_and_minus_counters() {
     let toughness = PTValue::Fixed(4);
     let mut counters = CounterSet::new();
     assert_eq!(toughness.net_with_counters(&counters), Some(4));
-    counters.add(CounterKind::MinusOneMinusOne, 3);
+    counters.add(CounterKind::MinusOneMinusOne, 3, SequenceNo(0));
     assert_eq!(toughness.net_with_counters(&counters), Some(1));
-    counters.add(CounterKind::PlusOnePlusOne, 2);
+    counters.add(CounterKind::PlusOnePlusOne, 2, SequenceNo(1));
     assert_eq!(toughness.net_with_counters(&counters), Some(3));
 }
 

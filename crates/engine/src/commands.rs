@@ -1173,8 +1173,9 @@ pub(crate) fn apply_damage_event(
             // CR 702.90b: Infect damage to a player becomes poison
             // counters, not life loss.
             if is_infect {
+                let timestamp = state.allocate_sequence_no();
                 if let Some(player) = state.player_mut(pid) {
-                    player.counters.add(CounterKind::Poison, amount as i32);
+                    player.counters.add(CounterKind::Poison, amount as i32, timestamp);
                 }
             } else if let Some(player) = state.player_mut(pid) {
                 player.lose_life(amount as i32);
@@ -1185,13 +1186,14 @@ pub(crate) fn apply_damage_event(
             // those marks loyalty/defense loss, not damage_marked -
             // GameObject has no loyalty/defense-damage path wired yet, so
             // only creature targets are functional this slice.
+            let timestamp = state.allocate_sequence_no();
             if let Some(object) = state.object_mut(id) {
                 if object.definition.card_types.contains(CardTypeSet::CREATURE) {
                     // CR 702.80a/702.90c: Wither/Infect damage to a
                     // creature becomes -1/-1 counters instead of marked
                     // damage.
                     if replaces_with_counters {
-                        object.counters.add(CounterKind::MinusOneMinusOne, amount as i32);
+                        object.counters.add(CounterKind::MinusOneMinusOne, amount as i32, timestamp);
                     } else {
                         object.damage_marked += amount;
                         if has_deathtouch && amount > 0 {

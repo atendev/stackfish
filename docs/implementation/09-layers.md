@@ -150,7 +150,48 @@
 - `effective_characteristics` now seeds layer 5 from `CardDefinition::colors()` instead of raw `color_indicator`.
 - 2 regression tests added.
 
+## Slice: layer7d-counter-interleaving (merged)
+
+- Branch `phase5/layer7d-counter-interleaving`.
+- Scope: CR 613.4c's literal text — `+1/+1`/`-1/-1` counters apply in layer 7c, timestamp-interleaved
+  against `ModifyPT`/`DoublePT` effects, not pre-netted into the layer 7a base the way this engine
+  used to. The old shape was a real bug, not just an approximation, caught by CR 613.5's own Gray
+  Ogre worked example: a counter added before a `SetPT` ("becomes 0/1") effect got baked into a base
+  that override then discarded outright, silently losing the counter — every `SetPT`-plus-counter
+  combination on the board was wrong before this slice, not just a narrow edge case.
+- Verify: 5 new tests (`phase5_layer7d_counter_interleaving.rs`, including CR 613.5's own worked
+  example reproduced exactly), full workspace suite green — zero pre-existing tests broke, confirming
+  the doc comment's own prior admission that "no test exercises" the interaction.
+- Key finding that reshaped the plan: `CounterSet`'s own backing field (`Vec<(CounterKind, i32)>`) is
+  *private* — nothing outside `types/counter.rs` ever constructs it directly (every real caller goes
+  through `CounterSet::new()`/`.add()`/`.count()`), so redesigning its internals to track one
+  timestamped batch per `add` call instead of one coalesced running total touched zero `GameObject`/
+  `PlayerState` construction sites — only `CounterSet::add`'s own 3 real call sites (plus 8 mechanical
+  test-file updates) needed a new `SequenceNo` parameter. A different shape entirely from the
+  `CardDefinition`-scale ripple problem past slices have flagged for *new struct fields*.
+- Key changes:
+  - `CounterSet.counters: Vec<(CounterKind, i32, SequenceNo)>` — one batch per `add` call.
+    `count(kind)` sums matching batches (unchanged behavior for every caller). New
+    `pub(crate) batches(kind) -> impl Iterator<Item = (i32, SequenceNo)>` for layer 7c to read back.
+  - `CounterSet::add` gained a `timestamp: SequenceNo` parameter — `commands::apply_damage_event`'s
+    two real sites (Infect poison, Wither/Infect `-1/-1`) and `CommitEvents`'s `CounterAdded` handler
+    each allocate a fresh one via `GameState::allocate_sequence_no` right at the point of adding.
+  - `layers::resolve_base_pt` no longer touches counters at all (CDA/printed base only) — `PTValue::
+    net_with_counters`/`net_counters` themselves are untouched and still used by `script.rs`'s
+    separately-scoped `card_summary_to_lua` (explicitly "not layer-resolved," a different, pre-existing
+    simplification this slice doesn't touch).
+  - `effective_characteristics`'s layer 7c loop merges `obj.counters.batches` for both P/T kinds
+    (`+1/+1` as positive deltas, `-1/-1` as negative) into the existing `applicable_effects_in_layer`
+    walk, comparing each batch's timestamp against each real effect's own `timestamp` field — a
+    counter has no CR 613.8a dependency of its own, so it's merged in by timestamp comparison against
+    the already dependency-resolved effect order, not re-sorted into it.
+- Unresolved:
+  - The narrow theoretical edge case where a counter's timestamp falls *between* a `DoublePT` and the
+    same-field `ModifyPT` it depends on, in a way dependency reordering has moved out of raw timestamp
+    order — not exercised by any real card, same "good enough" tolerance `order_by_dependency`'s own
+    dependency-loop fallback already accepts elsewhere.
+
 ## General layer notes
 
-- Layer order in `effective_characteristics`: 2 control, 4 type, 5 color, 6 abilities, 7a CDA, 7b set P/T, 7c modify P/T, 7d counters folded into base, 7e switch.
-- Dependency ordering only active in 7c due to `DoublePT`; other layers use timestamp order.
+- Layer order in `effective_characteristics`: 2 control, 4 type, 5 color, 6 abilities, 7a CDA, 7b set P/T, 7c modify P/T interleaved with counters (CR 613.4c, `phase5/layer7d-counter-interleaving`), 7e switch.
+- Dependency ordering only active in 7c due to `DoublePT`; other layers use timestamp order. Counters merge into 7c by timestamp comparison, not the dependency graph itself (they have no dependency of their own).
