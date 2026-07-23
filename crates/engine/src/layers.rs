@@ -1,12 +1,12 @@
 use crate::script::ScriptRuntime;
 use crate::types::ability::InterveningIfSpec;
-use crate::types::card::{net_counters, CardTypeSet, KeywordSet, PTValue, ScriptReference};
-use crate::types::counter::CounterSet;
+use crate::types::card::{CardTypeSet, KeywordSet, PTValue, ScriptReference};
+use crate::types::counter::CounterKind;
 use crate::types::effect::{
     AffectedFilter, ContinuousEffect, EffectPayload, EffectPrimitive, EffectiveCharacteristics, Layer,
 };
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, PlayerId};
+use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
 
 /// The continuous-effect layer engine's query (CR 613): computes `object`'s
@@ -20,24 +20,30 @@ use crate::types::object::GameObject;
 /// (`TypeChanging`), 5 (`ColorChanging`), 6 (`AbilityAdding`), 7a
 /// (`PowerToughnessCDA`), 7b (`PowerToughnessSetting`), 7c
 /// (`PowerToughnessModifying`), and 7e (`PowerToughnessSwitching`) are
-/// applied — see `Layer`'s own doc comment for why the rest (copy/control,
-/// plus 7d) aren't built yet. Layer 7d (counters) is folded in from
-/// `GameObject.counters` directly via `PTValue::net_with_counters`/
-/// `resolve_base_pt` before any continuous effect is applied, same as
-/// `sba.rs`'s pre-existing toughness check already did — this is a
-/// deliberate simplification, not CR 613.4's literal timestamp-interleaving
-/// of counters alongside other layer-7 effects (flagged, not silently wrong:
-/// it gives the same answer as long as nothing on the board needs counters
-/// and a `SetPT`/`ModifyPT` effect ordered relative to each other by
-/// timestamp — which no test exercises).
+/// applied — see `Layer`'s own doc comment for why the rest (copy/control)
+/// aren't built yet.
+///
+/// Layer 7d/CR 613.4c's `+1/+1`/`-1/-1` counters are folded into the same
+/// 7c pass as `ModifyPT`/`DoublePT`, interleaved by timestamp against them
+/// (`CounterSet::batches`) — matching the CR's own literal text ("Effects
+/// *and counters* that modify power and/or toughness ... are applied" in
+/// the same sublayer) rather than pre-netting counters into the layer 7a
+/// base the way an earlier version of this function did. That earlier
+/// shape was a real bug, not just an approximation: CR 613.5's own Gray
+/// Ogre example shows a `+1/+1` counter added *before* a `SetPT`
+/// ("becomes 0/1") effect must still contribute *after* it — pre-netting
+/// baked the counter into a base that `SetPT`'s override then discarded
+/// outright, silently losing it. `resolve_base_pt` no longer touches
+/// counters at all (CDA/printed base only); see the 7c loop below for
+/// where they're read back in.
 ///
 /// 7e is applied as its own pass *after* 7b/7c have fully resolved, not
 /// timestamp-interleaved with them — this is what makes CR 613.4d's own
 /// worked example (a modify effect at a later timestamp than a switch still
 /// contributes to the *pre-switch* sum) fall out correctly for free: every
-/// `ModifyPT` in 7c is summed into one number regardless of a 7e effect's
-/// relative timestamp, then 7e's swap(s) apply once each, in timestamp
-/// order, atop that already-settled result.
+/// `ModifyPT`/counter in 7c is summed into one number regardless of a 7e
+/// effect's relative timestamp, then 7e's swap(s) apply once each, in
+/// timestamp order, atop that already-settled result.
 ///
 /// Layer 7a (characteristic-defining power/toughness, CR 613.4a) is
 /// resolved via `resolve_base_pt` below, *before* 7b/7c apply — a `SetPT`
@@ -72,10 +78,8 @@ pub fn effective_characteristics(
     // 1 `ContinuousEffect` query like every layer below.
     let def = obj.copiable_override.as_ref().unwrap_or(&obj.definition);
 
-    let mut power =
-        resolve_base_pt(def.power.as_ref(), &obj.counters, state, script_runtime, object, obj.controller);
-    let mut toughness =
-        resolve_base_pt(def.toughness.as_ref(), &obj.counters, state, script_runtime, object, obj.controller);
+    let mut power = resolve_base_pt(def.power.as_ref(), state, script_runtime, object, obj.controller);
+    let mut toughness = resolve_base_pt(def.toughness.as_ref(), state, script_runtime, object, obj.controller);
     let mut keywords = def.keywords;
     let mut card_types = def.card_types;
     // CR 105.2a/202.2: color comes from color_indicator if set, otherwise
@@ -191,7 +195,34 @@ pub fn effective_characteristics(
     // 613.8a-dependent on any modify touching the same field - see
     // `applicable_effects_in_layer`'s ordering, which already places
     // `ModifyPT` before a dependent `DoublePT`).
-    for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessModifying) {
+    //
+    // CR 613.4c/121.3: `+1/+1`/`-1/-1` counters apply in this same sublayer,
+    // interleaved by timestamp against the real effects above rather than
+    // pre-netted into the layer 7a base (see this module's own doc comment
+    // for the CR 613.5 worked example this makes correct). A counter add
+    // has no CR 613.8a dependency of its own - only the real effects above
+    // can - so it's merged in purely by comparing timestamps against
+    // `applicable_effects_in_layer`'s already dependency-resolved order,
+    // not re-sorted into it.
+    let modify_effects = applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessModifying);
+    let mut counter_deltas: Vec<(SequenceNo, i32, i32)> = obj
+        .counters
+        .batches(&CounterKind::PlusOnePlusOne)
+        .map(|(amount, ts)| (ts, amount, amount))
+        .chain(obj.counters.batches(&CounterKind::MinusOneMinusOne).map(|(amount, ts)| (ts, -amount, -amount)))
+        .collect();
+    counter_deltas.sort_by_key(|(ts, _, _)| *ts);
+    let mut next_counter = 0;
+    let apply_counters_up_to = |power: &mut Option<i32>, toughness: &mut Option<i32>, next_counter: &mut usize, before: SequenceNo| {
+        while *next_counter < counter_deltas.len() && counter_deltas[*next_counter].0 < before {
+            let (_, dp, dt) = counter_deltas[*next_counter];
+            *power = power.map(|p| p + dp);
+            *toughness = toughness.map(|t| t + dt);
+            *next_counter += 1;
+        }
+    };
+    for effect in modify_effects {
+        apply_counters_up_to(&mut power, &mut toughness, &mut next_counter, effect.timestamp);
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
             Some(EffectPrimitive::ModifyPT { power: dp, toughness: dt }) => {
                 power = power.map(|p| p + dp);
@@ -208,6 +239,7 @@ pub fn effective_characteristics(
             _ => {}
         }
     }
+    apply_counters_up_to(&mut power, &mut toughness, &mut next_counter, SequenceNo(u64::MAX));
 
     // Layer 7e (CR 613.4d): swaps power/toughness, applied once per matching
     // effect in timestamp order after 7b/7c have fully settled (see this
@@ -438,21 +470,18 @@ fn resolve_primitive(
     }
 }
 
-/// CR 613.4a (layer 7a) + CR 121.3 (counters): resolves `value`'s base
-/// number, netted against `+1/+1`/`-1/-1` counters. A `Fixed` value (or a
-/// `CharacteristicDefining` with no resolvable script) delegates straight to
-/// `PTValue::net_with_counters`, unchanged from before this slice. A
-/// `CharacteristicDefining` with an `Inline` script gets that script
-/// invoked (`ScriptRuntime::invoke_cda`) for the base number, then netted
-/// against `counters` the same way a `Fixed` base already is (`net_counters` —
-/// shared formula, not reimplemented here). A script that errors, or a
-/// `ByKey` reference (not resolvable by this engine — see
-/// `ScriptRuntime::run_card_script`'s doc comment for the same stance),
-/// falls through to the `Fixed`/no-script arm's `None`, same "skip rather
-/// than guess" contract this whole query already holds.
+/// CR 613.4a (layer 7a): resolves `value`'s base number - CDA/printed only,
+/// no counter involvement (see this module's own doc comment for why
+/// counters moved to the 7c fold instead). A `Fixed` value resolves to
+/// itself; a `CharacteristicDefining` with an `Inline` script gets that
+/// script invoked (`ScriptRuntime::invoke_cda`) for the base number. A
+/// script that errors, or a `ByKey` reference (not resolvable by this
+/// engine — see `ScriptRuntime::run_card_script`'s doc comment for the same
+/// stance), or a `CharacteristicDefining` with no script at all, resolves to
+/// `None` - same "skip rather than guess" stance every other unresolvable
+/// value in this engine already takes.
 fn resolve_base_pt(
     value: Option<&PTValue>,
-    counters: &CounterSet,
     state: &GameState,
     script_runtime: &ScriptRuntime,
     source: ObjectId,
@@ -461,9 +490,7 @@ fn resolve_base_pt(
     if let Some(PTValue::CharacteristicDefining { script: Some(ScriptReference::Inline(source_code)), .. }) =
         value
     {
-        if let Ok(base) = script_runtime.invoke_cda(source_code, state, source, controller) {
-            return Some(net_counters(base, counters));
-        }
+        return script_runtime.invoke_cda(source_code, state, source, controller).ok();
     }
-    value.and_then(|v| v.net_with_counters(counters))
+    value.and_then(|v| v.as_fixed())
 }

@@ -232,7 +232,7 @@ fn cda_base_nets_against_plus_one_counters() {
     let p0 = PlayerId(0);
     let star = ObjectId(0);
     let mut object = cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE));
-    object.counters.add(CounterKind::PlusOnePlusOne, 2);
+    object.counters.add(CounterKind::PlusOnePlusOne, 2, SequenceNo(0));
     put_on_battlefield(&mut state, object);
 
     let script_runtime = ScriptRuntime::new();

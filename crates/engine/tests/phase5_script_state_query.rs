@@ -160,7 +160,7 @@ fn card_summaries_include_counters_but_not_layer_resolved_effective_pt() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let mut bear = creature(ObjectId(1), p0, 2, 2);
-    bear.counters.add(CounterKind::PlusOnePlusOne, 1);
+    bear.counters.add(CounterKind::PlusOnePlusOne, 1, SequenceNo(0));
     let bear_id = bear.object_id;
     put_in_zone(&mut state, ZoneKind::Battlefield, None, bear);
 

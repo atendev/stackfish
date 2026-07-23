@@ -3957,9 +3957,16 @@ impl Engine {
                     // changes from what ResolveStackTop proposed - still
                     // applied here rather than at push time, matching
                     // Damage's convention rather than GainLife's shortcut.
+                    // CR 613.4c/613.7: this counter batch's own timestamp -
+                    // allocated ahead of the ledger event's own sequence_no
+                    // below rather than reusing it, so a CounterAdded that
+                    // ends up filtered out of `checked` (shouldn't happen,
+                    // but keeps the two concerns independent) never leaves a
+                    // gap in the ledger's own numbering.
                     if let GameEventKind::CounterAdded { object, kind, amount } = &kind {
+                        let timestamp = self.state.allocate_sequence_no();
                         if let Some(obj) = self.state.object_mut(*object) {
-                            obj.counters.add(kind.clone(), *amount);
+                            obj.counters.add(kind.clone(), *amount, timestamp);
                         }
                     }
                     let event_id = self.state.allocate_event_id();

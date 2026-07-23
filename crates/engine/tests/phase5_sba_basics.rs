@@ -293,7 +293,7 @@ fn drawing_a_real_card_does_not_set_the_flag() {
 fn nine_poison_counters_is_untouched() {
     let mut state = base_state();
     let p0 = PlayerId(0);
-    state.player_mut(p0).unwrap().counters.add(CounterKind::Poison, 9);
+    state.player_mut(p0).unwrap().counters.add(CounterKind::Poison, 9, SequenceNo(0));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
@@ -305,7 +305,7 @@ fn nine_poison_counters_is_untouched() {
 fn ten_poison_counters_eliminates() {
     let mut state = base_state();
     let p0 = PlayerId(0);
-    state.player_mut(p0).unwrap().counters.add(CounterKind::Poison, 10);
+    state.player_mut(p0).unwrap().counters.add(CounterKind::Poison, 10, SequenceNo(0));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
