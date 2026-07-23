@@ -300,6 +300,13 @@ pub enum StepStatus {
     /// is only ever reached by directly constructing
     /// `ProcessState::AwaitingAttachChoice`.
     AwaitingAttachChoice { player: PlayerId, aura: ObjectId, candidates: Vec<ObjectId> },
+    /// CR 303.4f: `commands::legal_aura_entry_candidates` found 2+ legal
+    /// enchant targets for an Aura entering the battlefield via
+    /// `SearchDestination::Battlefield::enters_attached` — `player` must
+    /// choose which of `candidates` `aura` becomes attached to, then call
+    /// `submit_aura_entry_attach_choice`. Real (not dormant) — the search
+    /// pathway is a genuine producer.
+    AwaitingAuraEntryAttachChoice { player: PlayerId, aura: ObjectId, candidates: Vec<ObjectId> },
     /// Backlog item 9: a card script (via `Game.SelectTargets`) yielded
     /// mid-resolution, asking `player` to choose a real target matching
     /// `request` before the operation can finish — the caller should prompt
@@ -561,6 +568,34 @@ pub enum ProcessState {
     /// own doc comment), so `submit_attach_choice` resumes to the generic
     /// `PriorityWindow` once the chosen candidate is attached.
     AwaitingAttachChoice { aura: ObjectId, controller: PlayerId, candidates: Vec<ObjectId> },
+    /// CR 303.4f: paused mid-`submit_search_choice` because a found Aura
+    /// card entering the battlefield with `SearchDestination::Battlefield::
+    /// enters_attached` set found 2+ legal enchant candidates
+    /// (`commands::legal_aura_entry_candidates`) — `controller` must choose
+    /// which of `candidates` `aura` becomes attached to, then call
+    /// `submit_aura_entry_attach_choice`. Unlike `AwaitingAttachChoice`
+    /// above, this *does* have a real continuation to resume: `stack_id`/
+    /// `events_so_far`/`remaining`/`destination`/`shuffle_after` are exactly
+    /// what `submit_search_choice`'s own battlefield-entry loop had already
+    /// built before pausing on this card - `aura` itself has already been
+    /// moved onto the battlefield (unattached) by the time this pause is
+    /// raised, same "already a real permanent, then gets attached" order
+    /// the cast-time Aura-ETB-attach path (`ResolveStackTop`) already uses.
+    /// A separate variant from `AwaitingAttachChoice` rather than reusing it
+    /// — that one's `submit_attach_choice` deliberately has no continuation
+    /// (nothing produces it in real gameplay yet, per its own doc comment);
+    /// giving it one here would mean threading this search-specific
+    /// continuation through a pause type named for a different CR clause.
+    AwaitingAuraEntryAttachChoice {
+        aura: ObjectId,
+        controller: PlayerId,
+        candidates: Vec<ObjectId>,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+        remaining: std::collections::VecDeque<ObjectId>,
+        destination: SearchDestination,
+        shuffle_after: bool,
+    },
     /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
     /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —
     /// `thread`/`request` are the suspended coroutine's own handle and its
@@ -1600,24 +1635,60 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        for card in &chosen {
+        self.continue_search_battlefield_entry(
+            chosen.into(),
+            destination,
+            controller,
+            stack_id,
+            shuffle_after,
+            events_so_far,
+        );
+        Ok(())
+    }
+
+    /// The real body of `submit_search_choice`'s battlefield/hand-entry
+    /// loop, factored out so `submit_aura_entry_attach_choice` can resume it
+    /// after answering a CR 303.4f pause raised partway through. Processes
+    /// `remaining` one card at a time (`VecDeque::pop_front`, so a card
+    /// already processed before a pause is never revisited); if a
+    /// `SearchDestination::Battlefield { enters_attached: true, .. }` Aura
+    /// entry finds 2+ legal attach candidates
+    /// (`commands::legal_aura_entry_candidates`), this saves everything
+    /// still needed to pick back up (`remaining`, `destination`, the
+    /// accumulated `events_so_far`, ...) into
+    /// `ProcessState::AwaitingAuraEntryAttachChoice` and returns early -
+    /// `submit_aura_entry_attach_choice` calls back in with the same
+    /// `remaining` queue once the choice is answered. Reaching the end of
+    /// `remaining` with no pause finalizes exactly like the old inline loop
+    /// did: `shuffle_after`, then `StackObjectResolved`, then
+    /// `ReplacementCheck`.
+    fn continue_search_battlefield_entry(
+        &mut self,
+        mut remaining: std::collections::VecDeque<ObjectId>,
+        destination: SearchDestination,
+        controller: PlayerId,
+        stack_id: ObjectId,
+        shuffle_after: bool,
+        mut events_so_far: Vec<GameEventKind>,
+    ) {
+        while let Some(card) = remaining.pop_front() {
             let last_known_info =
-                self.state.object(*card).expect("validated against candidates above").clone();
+                self.state.object(card).expect("validated against candidates above").clone();
             let owner = last_known_info.owner;
-            let new_id = self.state.allocate_object_id();
-            let mut new_object = last_known_info.clone();
-            new_object.object_id = new_id;
-            new_object.lineage = ObjectLineage { previous: Some(*card) };
-            new_object.timestamp = self.state.allocate_sequence_no();
 
             match destination {
                 SearchDestination::Hand => {
+                    let new_id = self.state.allocate_object_id();
+                    let mut new_object = last_known_info.clone();
+                    new_object.object_id = new_id;
+                    new_object.lineage = ObjectLineage { previous: Some(card) };
+                    new_object.timestamp = self.state.allocate_sequence_no();
                     new_object.zone = ZoneKind::Hand;
                     self.state
                         .zone_mut(ZoneKind::Library, Some(owner))
                         .expect("library zone must exist")
-                        .remove(*card);
-                    let departed = commands::retire_object(&mut self.state, *card);
+                        .remove(card);
+                    let departed = commands::retire_object(&mut self.state, card);
                     self.departed_triggered_abilities.extend(departed);
                     self.state
                         .zone_mut(ZoneKind::Hand, Some(owner))
@@ -1631,22 +1702,59 @@ impl Engine {
                         last_known_info: Some(last_known_info),
                     });
                 }
-                SearchDestination::Battlefield { tapped } => {
+                SearchDestination::Battlefield { tapped, enters_attached } => {
+                    // CR 303.4f/g: computed *before* any state mutation, and
+                    // before this Aura's own new `ObjectId` even exists - a
+                    // not-yet-inserted Aura can never appear as a candidate
+                    // of its own scan (see `legal_aura_entry_candidates`'s
+                    // own doc comment for why that's the right call, not a
+                    // gap).
+                    let is_aura = enters_attached && commands::is_aura(&last_known_info.definition);
+                    // `card` (the pre-move library id) is passed as the
+                    // "source" for CR 115.4's "another target" exclusion -
+                    // harmless either way, since a library object is never
+                    // battlefield-zoned and so never a legal candidate in
+                    // the first place. `new_id` doesn't exist yet at this
+                    // point, so there's nothing more precise to pass.
+                    let attach_candidates = is_aura.then(|| {
+                        commands::legal_aura_entry_candidates(
+                            &self.state,
+                            &self.script_runtime,
+                            &last_known_info.definition,
+                            controller,
+                            card,
+                        )
+                    });
+                    if let Some(candidates) = &attach_candidates {
+                        if candidates.is_empty() {
+                            // CR 303.4g: no legal object to enchant, and the
+                            // current zone (library) isn't the stack - the
+                            // Aura remains right where it is. Nothing to
+                            // move; skip straight to the next card.
+                            continue;
+                        }
+                    }
+
+                    let new_id = self.state.allocate_object_id();
+                    let mut new_object = last_known_info.clone();
+                    new_object.object_id = new_id;
+                    new_object.lineage = ObjectLineage { previous: Some(card) };
+                    new_object.timestamp = self.state.allocate_sequence_no();
                     new_object.zone = ZoneKind::Battlefield;
                     new_object.tapped = tapped;
                     new_object.controlled_since_turn = self.state.turn_number;
                     self.state
                         .zone_mut(ZoneKind::Library, Some(owner))
                         .expect("library zone must exist")
-                        .remove(*card);
+                        .remove(card);
                     let definition_for_script = new_object.definition.clone();
-                    self.state.objects.remove(card);
+                    self.state.objects.remove(&card);
                     self.state
                         .zone_mut(ZoneKind::Battlefield, None)
                         .expect("battlefield zone must exist")
                         .push_bottom(new_id);
                     self.state.objects.insert(new_id, new_object);
-                    commands::remap_abilities(&mut self.state, *card, new_id);
+                    commands::remap_abilities(&mut self.state, card, new_id);
                     let _ = self.script_runtime.run_card_script(&mut self.state, &definition_for_script, new_id);
                     events_so_far.push(GameEventKind::ZoneChange {
                         object: new_id,
@@ -1669,6 +1777,36 @@ impl Engine {
                         ZoneKind::Library,
                     );
                     events_so_far.extend(counter_events);
+
+                    if let Some(candidates) = attach_candidates {
+                        match candidates.len() {
+                            0 => unreachable!("handled by the early `continue` above"),
+                            1 => {
+                                commands::attach_permanent(&mut self.state, new_id, candidates[0]);
+                                events_so_far
+                                    .push(GameEventKind::Attached { object: new_id, attached_to: candidates[0] });
+                            }
+                            _ => {
+                                // CR 303.4f: 2+ legal candidates - the
+                                // entering player chooses. `new_id` is
+                                // already a real battlefield Aura
+                                // (unattached) at this point, same "already
+                                // a permanent, then gets attached" order the
+                                // cast-time Aura-ETB-attach path uses.
+                                self.process_state = ProcessState::AwaitingAuraEntryAttachChoice {
+                                    aura: new_id,
+                                    controller,
+                                    candidates,
+                                    stack_id,
+                                    events_so_far,
+                                    remaining,
+                                    destination,
+                                    shuffle_after,
+                                };
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1680,6 +1818,30 @@ impl Engine {
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
         self.process_state =
             ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+    }
+
+    /// Answers a pending CR 303.4f Aura-entry attach choice raised by
+    /// `StepStatus::AwaitingAuraEntryAttachChoice` — `chosen` must be one of
+    /// that status's `candidates`. Unlike `submit_attach_choice`, this
+    /// resumes a real continuation: `continue_search_battlefield_entry`
+    /// picks back up with whatever cards were still left in the search that
+    /// raised this pause.
+    pub fn submit_aura_entry_attach_choice(&mut self, chosen: ObjectId) -> Result<(), AttachChoiceError> {
+        let ProcessState::AwaitingAuraEntryAttachChoice { candidates, .. } = &self.process_state else {
+            return Err(AttachChoiceError::NotAwaitingChoice);
+        };
+        if !candidates.contains(&chosen) {
+            return Err(AttachChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingAuraEntryAttachChoice {
+            aura, controller, stack_id, mut events_so_far, remaining, destination, shuffle_after, ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        commands::attach_permanent(&mut self.state, aura, chosen);
+        events_so_far.push(GameEventKind::Attached { object: aura, attached_to: chosen });
+        self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);
         Ok(())
     }
 
@@ -3680,6 +3842,23 @@ impl Engine {
                 let status =
                     StepStatus::AwaitingAttachChoice { player: controller, aura, candidates: candidates.clone() };
                 self.process_state = ProcessState::AwaitingAttachChoice { aura, controller, candidates };
+                status
+            }
+
+            ProcessState::AwaitingAuraEntryAttachChoice {
+                aura, controller, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+            } => {
+                // Nothing to do until submit_aura_entry_attach_choice
+                // answers - same "put the exact same state back" pattern
+                // every other choice-pause above already uses.
+                let status = StepStatus::AwaitingAuraEntryAttachChoice {
+                    player: controller,
+                    aura,
+                    candidates: candidates.clone(),
+                };
+                self.process_state = ProcessState::AwaitingAuraEntryAttachChoice {
+                    aura, controller, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                };
                 status
             }
 

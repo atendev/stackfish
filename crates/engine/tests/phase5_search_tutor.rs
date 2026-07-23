@@ -318,7 +318,7 @@ fn search_to_battlefield_tapped_sets_tapped_and_runs_etb_script() {
         card,
         card_object(
             card,
-            search_spell_definition(1, SearchDestination::Battlefield { tapped: true }, true),
+            search_spell_definition(1, SearchDestination::Battlefield { tapped: true, enters_attached: false }, true),
             p0,
             ZoneKind::Hand,
         ),
@@ -417,7 +417,7 @@ fn game_ops_search_lua_binding_decodes_correctly() {
         panic!("expected Some(AbilityEffect::Search {{ .. }}), got {effect:?}")
     };
     assert_eq!(count, 1);
-    assert!(matches!(destination, SearchDestination::Battlefield { tapped: true }));
+    assert!(matches!(destination, SearchDestination::Battlefield { tapped: true, .. }));
     assert!(!shuffle_after);
     assert_eq!(filter.card_types, Some(CardTypeSet::LAND));
     assert_eq!(filter.supertypes, Some(SupertypeSet::BASIC));
