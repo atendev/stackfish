@@ -1784,6 +1784,15 @@ impl ScriptRuntime {
     /// - `add_color = "WU"` -> `AddColor`
     /// - `switch_pt = true` -> `SwitchPT`
     /// - `remove_all_abilities = true` -> `RemoveAllAbilities`
+    /// - `double_pt = {power=.., toughness=..}` (bools) -> `DoublePT` — no
+    ///   `Game.Effects.DoublePT` tag factory exists (no card needs one yet,
+    ///   same "no real card" posture several other narrow gaps in this
+    ///   engine already accept), so this script-backed shape is currently
+    ///   the only way to author one from Lua. Added so a scripted effect can
+    ///   participate in `layers::depends_on`'s one real CR 613.8a dependency
+    ///   rule (`DoublePT` vs. `ModifyPT`/`DoublePT`) exactly like a
+    ///   `Game.Effects.ModifyPT`-authored primitive already does — see that
+    ///   function's own doc comment.
     ///
     /// An empty/unrecognized table, or a script that errors, resolves to
     /// `None` — same "skip rather than guess" stance every other
@@ -1843,6 +1852,11 @@ impl ScriptRuntime {
         }
         if let Some(true) = result.get::<_, Option<bool>>("remove_all_abilities").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
             return Ok(Some(EffectPrimitive::RemoveAllAbilities));
+        }
+        if let Some(t) = result.get::<_, Option<Table>>("double_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let power: bool = t.get("power").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let toughness: bool = t.get("toughness").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            return Ok(Some(EffectPrimitive::DoublePT { power, toughness }));
         }
         Ok(None)
     }

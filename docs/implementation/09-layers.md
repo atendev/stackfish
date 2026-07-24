@@ -305,6 +305,44 @@
   itself) isn't special-cased away, untested as its own scenario (same posture Devour's own
   self-sacrifice case takes).
 
+## Slice: script-effect-dependency (branch open)
+
+- Branch `phase5/script-effect-dependency`.
+- Scope: CR 613.6-8's one real gap left after `layer-engine-dependency` — `EffectPayload::Script`
+  effects were always treated as dependency-independent (`layers::depends_on` returned `false`
+  outright whenever either side was `Script`), so a Lua-scripted effect could never participate in
+  the one real CR 613.8a dependency rule this engine models (`DoublePT` vs. same-field
+  `ModifyPT`/`DoublePT`).
+- Key finding that shaped the plan: no card anywhere in this engine actually authors a `DoublePT`
+  effect from Lua — there wasn't even a `double_pt` key in `ScriptRuntime::invoke_continuous_effect`'s
+  seven-key decode table, and no `Game.Effects.DoublePT` tag factory either (Berserk, the real card
+  this primitive models, isn't implemented as a card script). Needed to add the decode key just to
+  construct a test scenario, not scope creep — the fix itself is otherwise a pure generalization of
+  existing machinery.
+- Verify: 4 new tests (`phase5_layer_engine_dependency.rs`: scripted-depends-on-primitive,
+  primitive-depends-on-scripted, a non-`DoublePT` scripted shape introduces no spurious dependency;
+  `phase5_continuous_effects_script.rs`: `double_pt` decode unit test), full workspace suite green
+  (`cargo test --workspace`), zero regressions.
+- Key changes:
+  - `ScriptRuntime::invoke_continuous_effect` gained an eighth recognized key,
+    `double_pt = {power=bool, toughness=bool}` -> `EffectPrimitive::DoublePT`.
+  - `layers::depends_on` no longer pattern-matches `EffectPayload::Primitive` directly — it resolves
+    both sides through the existing `layers::resolve_primitive` helper (already used by every
+    per-layer loop in `effective_characteristics`) first, then runs the exact same
+    `DoublePT`-vs-`ModifyPT`/`DoublePT` comparison against the resolved shapes. Works in both
+    directions (script depends on primitive, primitive depends on script, script depends on script)
+    since resolution happens before comparison either way.
+  - `layers::order_by_dependency` gained `state`/`script_runtime`/`controller` parameters purely to
+    thread through to `depends_on`'s new resolution step — `applicable_effects_in_layer` (the only
+    caller) already had all three in scope.
+- Unresolved: a script *dynamically* deciding whether it depends on another specific effect (as
+  opposed to always resolving to a fixed structural shape like `DoublePT`) would need the script
+  bridge to expose partial/in-progress layer state mid-computation, which `state_to_lua`'s snapshot
+  deliberately doesn't do — not needed by any real card, since CR 613.8a dependency is a structural
+  property of what an effect does, not something a card's own text ever asks a script to decide
+  case-by-case. Cross-layer dependency stays out of scope, same as `layer-engine-dependency` already
+  noted.
+
 ## General layer notes
 
 - Layer order in `effective_characteristics`: 2 control, 4 type, 5 color, 6 abilities, 7a CDA, 7b set P/T, 7c modify P/T interleaved with counters (CR 613.4c, `phase5/layer7d-counter-interleaving`), 7e switch.

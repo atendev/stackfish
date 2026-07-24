@@ -493,24 +493,30 @@ end)
 
 -- An effect whose shape is decided by a script instead of a Game.Effects.*
 -- tag - the "Lua asks, Rust decides" table convention Game.Ops.* operations
--- already use, generalized to seven recognized keys:
+-- already use, generalized to eight recognized keys:
 e:SetEffect(function(source, controller)
     return { modify_pt = { power = 1, toughness = 1 } }
     -- also recognized: set_pt = {power=,toughness=}, add_keyword = {"Flying",...},
     -- add_card_type = {"Creature",...}, add_color = "WU", switch_pt = true,
-    -- remove_all_abilities = true
+    -- remove_all_abilities = true, double_pt = {power=true/false,toughness=true/false}
 end)
 ```
 
 An affects-predicate is invoked once per candidate object (`ScriptRuntime::invoke_continuous_affects`)
 and must return a plain boolean. An effect-shape script is invoked once per query
-(`ScriptRuntime::invoke_continuous_effect`) and must return a table with exactly one of the seven
+(`ScriptRuntime::invoke_continuous_effect`) and must return a table with exactly one of the eight
 recognized keys above — an empty/unrecognized table, or a script that errors, resolves to "no
 effect this call," same "skip rather than guess" stance every other unresolvable script value in
 this engine already takes. Neither call passes `GameState` into Lua (same limitation
 `invoke_cda`/`invoke_condition`/`invoke_operation` already carry) — a script can only decide from
 `object`/`source`/`controller` identity or a constant, not real board state, until `Game.*`
-state-query bindings exist (still open, see `docs/implementation.md`'s slice backlog).
+state-query bindings exist (still open, see `docs/implementation.md`'s slice backlog). `double_pt`
+has no `Game.Effects.DoublePT` tag-factory counterpart (no card needs one yet, same "no real card"
+posture other narrow gaps in this engine already accept) — the script-backed form above is
+currently the only way to author one, added so a scripted effect can participate in
+`layers::depends_on`'s one real CR 613.8a dependency rule
+(`phase5/script-effect-dependency`) exactly like a `Game.Effects.ModifyPT`-authored primitive
+already could.
 
 `validate_layer_effect_pairing` can't check a script-backed effect's real shape at `:Register()`
 time (it's only known once the script actually runs) — a mismatch between the declared layer and
