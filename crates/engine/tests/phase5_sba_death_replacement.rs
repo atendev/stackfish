@@ -33,6 +33,7 @@ fn creature_definition(toughness: i32) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -110,6 +111,7 @@ fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     };
     card_object(id, definition, controller, ZoneKind::Battlefield)
 }

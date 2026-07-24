@@ -67,6 +67,7 @@ fn bear_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -90,6 +91,7 @@ fn salamander_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -116,6 +118,7 @@ fn doppelganger_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -139,6 +142,7 @@ fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinit
         alternative_costs: Vec::new(),
         effect: Some(effect),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

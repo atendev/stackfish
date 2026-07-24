@@ -49,6 +49,7 @@ fn creature_definition(name: &str, card_types: CardTypeSet) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -320,6 +321,7 @@ fn heal_spell_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::GainLife(10)),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -470,6 +472,7 @@ return s
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     };
     state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
 

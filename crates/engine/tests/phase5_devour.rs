@@ -65,6 +65,7 @@ fn creature_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDef
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -88,6 +89,7 @@ fn artifact_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDef
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

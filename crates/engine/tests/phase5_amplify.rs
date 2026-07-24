@@ -53,6 +53,7 @@ fn creature_definition(name: &str, mana_cost: ManaCost, subtypes: Vec<Subtype>, 
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

@@ -12,7 +12,7 @@ use crate::types::ability::{
     apply_text_box, AbilityEffect, AbilityKind, ConditionSpec, CopyExceptions, InterveningIfSpec, NamedToken,
     RegisteredAbility, SearchDestination, TokenSpec,
 };
-use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
+use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, Subtype, SupertypeSet};
 use crate::types::config::{GameConfig, GameSettings};
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{colors_spent, AdditionalCost, CostSpec, FilterController, FilterSpec, PaymentPlan};
@@ -967,6 +967,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
             alternative_costs: Vec::new(),
             effect: None,
             modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
         },
         TokenSpec::Named(NamedToken::Food) => CardDefinition {
             definition_id: 0,
@@ -987,6 +988,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
             alternative_costs: Vec::new(),
             effect: None,
             modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
         },
         TokenSpec::Creature(spec) => {
             let name = spec.name.clone().unwrap_or_else(|| spec.subtypes.join(" "));
@@ -1010,6 +1012,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
                 alternative_costs: Vec::new(),
                 effect: None,
                 modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
             }
         }
     }
@@ -3306,6 +3309,28 @@ impl Engine {
                     // slice.
                     _ => top.targets.clone(),
                 };
+                // CR 700.2d: for a Modal effect, legal_targets above is
+                // deliberately flattened (losing chunk boundaries, correct
+                // for a uniform-verb multi-word spell but wrong once each
+                // chunk belongs to a *different* mode's own effect) -
+                // precompute per-mode legal chunks here instead, right next
+                // to is_legal_now's other uses, so its borrow of
+                // &self.state ends here rather than having to extend all
+                // the way into the match block below (which mutates
+                // self.state per effect kind - see AbilityEffect::Modal's
+                // own arm there for why calling is_legal_now again from
+                // inside that match wouldn't borrow-check).
+                let modal_chunk_legals: Vec<Vec<Target>> = match &top.target_requirement {
+                    Some(TargetSpec::Multiple(reqs)) => commands::split_targets_by_requirement(reqs, &top.targets)
+                        .map(|chunks| {
+                            reqs.iter()
+                                .zip(chunks)
+                                .map(|(req, chunk)| chunk.iter().copied().filter(|t| is_legal_now(t, req)).collect())
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
+                };
                 let fizzles = match &top.target_requirement {
                     // Gated on whether any target was actually *chosen*
                     // (`top.targets`), not on the requirement's own `count`
@@ -3657,6 +3682,118 @@ impl Engine {
                     ) || is_instant_or_sorcery
                     {
                         match &top.effect {
+                            // CR 700.2d: 2+ chosen modes, combined - see
+                            // AbilityEffect::Modal's own doc comment for the
+                            // shape invariant this relies on (one entry per
+                            // chosen mode, top.target_requirement always
+                            // TargetSpec::Multiple with a matching per-mode
+                            // TargetRequirement, count: 0 synthesized for a
+                            // mode with no target_requirement of its own).
+                            // legal_targets above is deliberately flattened
+                            // (losing chunk boundaries - correct for a
+                            // uniform-verb multi-word spell, wrong here
+                            // where each chunk belongs to a *different*
+                            // effect), so this re-derives per-mode chunks
+                            // instead and re-filters each for current
+                            // legality (CR 608.2b), same is_legal_now
+                            // closure legal_targets itself uses. Narrowed to
+                            // the synchronous subset that never pauses
+                            // mid-resolution (GainLife/Damage/Counters/Pump/
+                            // GainControl/Shuffle) - commands::execute_command's
+                            // CastSpell arm already rejects combining any
+                            // other effect kind into a Modal at cast time,
+                            // so an unsupported kind reaching the fallback
+                            // arm below would mean that check has a gap;
+                            // skip rather than guess/panic, same stance
+                            // every other unreachable shape in this engine
+                            // already takes.
+                            Some(AbilityEffect::Modal(effects)) => {
+                                // modal_chunk_legals is precomputed above,
+                                // next to is_legal_now's other uses - see
+                                // its own doc comment for why it can't be
+                                // (re)computed from inside this arm.
+                                for (effect, legal) in effects.iter().zip(modal_chunk_legals.iter()) {
+                                    let Some(effect) = effect else { continue };
+                                    match effect {
+                                        AbilityEffect::GainLife(amount) => {
+                                            if let Some(player) = self.state.player_mut(top.controller) {
+                                                player.gain_life(*amount);
+                                            }
+                                        }
+                                        AbilityEffect::Damage(amount) => {
+                                            for target in legal {
+                                                events.push(GameEventKind::DamageDealt {
+                                                    source: top.source,
+                                                    target: *target,
+                                                    amount: *amount,
+                                                    is_combat_damage: false,
+                                                });
+                                            }
+                                        }
+                                        AbilityEffect::Counters { kind, amount } => {
+                                            for target in legal {
+                                                let Target::Object(id) = target else { continue };
+                                                events.push(GameEventKind::CounterAdded {
+                                                    object: *id,
+                                                    kind: kind.clone(),
+                                                    amount: *amount,
+                                                });
+                                            }
+                                        }
+                                        AbilityEffect::Pump { power, toughness, duration } => {
+                                            let timestamp = self.state.allocate_sequence_no();
+                                            for target in legal {
+                                                let Target::Object(id) = target else { continue };
+                                                self.state.continuous_effects.push(ContinuousEffect {
+                                                    source: *id,
+                                                    layer: Layer::PowerToughnessModifying,
+                                                    affected: AffectedFilter::Primitive(EffectFilter {
+                                                        controller: None,
+                                                        card_types: None,
+                                                        self_only: true,
+                                                    }),
+                                                    effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
+                                                        power: *power,
+                                                        toughness: *toughness,
+                                                    }),
+                                                    timestamp,
+                                                    duration: duration.clone(),
+                                                    condition: None,
+                                                });
+                                            }
+                                        }
+                                        AbilityEffect::GainControl(duration) => {
+                                            let timestamp = self.state.allocate_sequence_no();
+                                            let new_controller = top.controller;
+                                            for target in legal {
+                                                let Target::Object(id) = target else { continue };
+                                                self.state.continuous_effects.push(ContinuousEffect {
+                                                    source: *id,
+                                                    layer: Layer::ControlChangingEffects,
+                                                    affected: AffectedFilter::Primitive(EffectFilter {
+                                                        controller: None,
+                                                        card_types: None,
+                                                        self_only: true,
+                                                    }),
+                                                    effect: EffectPayload::Primitive(EffectPrimitive::GainControl(
+                                                        new_controller,
+                                                    )),
+                                                    timestamp,
+                                                    duration: duration.clone(),
+                                                    condition: None,
+                                                });
+                                            }
+                                        }
+                                        AbilityEffect::Shuffle => {
+                                            self.shuffle_library(top.controller);
+                                        }
+                                        // Unsupported within Modal (see this
+                                        // arm's own doc comment) - skip
+                                        // rather than guess.
+                                        _ => {}
+                                    }
+                                }
+                            }
                             Some(AbilityEffect::GainLife(amount)) => {
                                 if let Some(player) = self.state.player_mut(top.controller) {
                                     player.gain_life(*amount);
@@ -5763,7 +5900,7 @@ mod tests {
     // ---------------------------------------------------------------------
 
     fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::GameObject {
-        use crate::types::card::{CardTypeSet, KeywordSet, PTValue, ScriptReference, SupertypeSet};
+        use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
         use crate::types::object::VisibilityPolicy;
         crate::types::object::GameObject {
             object_id: id,
@@ -5787,6 +5924,7 @@ mod tests {
                 alternative_costs: Vec::new(),
                 effect: None,
                 modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
             },
             copiable_override: None,
             owner: controller,

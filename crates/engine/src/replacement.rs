@@ -780,7 +780,7 @@ pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, ScriptReference, SupertypeSet};
+    use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
     use crate::types::counter::CounterSet;
     use crate::types::cost::FilterController;
     use crate::types::effect::{EffectFilter, EventFilter, ReplacementEffect, ReplacementPayload, ReplacementSpec};
@@ -816,6 +816,7 @@ mod tests {
                 alternative_costs: Vec::new(),
                 effect: None,
                 modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
             },
             copiable_override: None,
             owner: controller,

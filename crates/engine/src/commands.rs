@@ -4,7 +4,7 @@ use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
 use crate::types::ability::RegisteredAbility;
-use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet};
+use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice};
 use crate::types::combat::CombatState;
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::cost::{self, AdditionalCost, AlternativeCost, CostPayment, CostSpec, FilterController};
@@ -605,6 +605,31 @@ pub(crate) fn split_targets_by_requirement<'a>(
     } else {
         None
     }
+}
+
+/// CR 700.2d: is `effect` one of the synchronous, never-pausing
+/// `AbilityEffect` kinds `ResolveStackTop`'s `AbilityEffect::Modal` arm knows
+/// how to resolve? Checked at cast time (`execute_command`'s `CastSpell` arm)
+/// so combining an unsupported mode is rejected immediately rather than
+/// silently doing nothing at resolution. Narrowed deliberately: every kind
+/// excluded here either pauses mid-resolution (`Destroy`/`Sacrifice`/`Exile`/
+/// `DrawCards`/`Search`/`BecomeCopy`/`CreateToken`) or has its own bespoke
+/// per-target-pairing shape (`ExchangeTextBoxes`/`Attach`) that a generic
+/// per-mode chunk loop can't drive - combining 2+ such modes into one
+/// resolution would need real coordination between multiple simultaneous
+/// pauses, out of scope for this slice. A single chosen mode (the pre-
+/// existing "Choose one —" case) is never checked against this at all - it
+/// uses its own effect bare, unwrapped from `Modal`, exactly as before.
+fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
+    matches!(
+        effect,
+        AbilityEffect::GainLife(_)
+            | AbilityEffect::Damage(_)
+            | AbilityEffect::Counters { .. }
+            | AbilityEffect::Pump { .. }
+            | AbilityEffect::GainControl(_)
+            | AbilityEffect::Shuffle
+    )
 }
 
 /// Looks up the `ability_index`th ability registered to `source` — any
@@ -1496,14 +1521,16 @@ pub fn execute_command(
                 ));
             }
 
-            // CR 700.2a: a modal card requires the caster to announce their
-            // mode choice here, before targets are chosen (601.2b comes
-            // before 601.2c) - narrowed to "choose exactly one" this slice
-            // (see CardDefinition::modes/SpellMode's own doc comments for
-            // what 700.2's remaining sub-rules are deferred). A non-modal
-            // card (definition.modes empty) is untouched: modes must be
-            // empty, and the card's own singular target_requirement/effect
-            // are used exactly as before this field existed.
+            // CR 700.2a/d: a modal card requires the caster to announce
+            // their mode choice(s) here, before targets are chosen (601.2b
+            // comes before 601.2c). A non-modal card (definition.modes
+            // empty) is untouched: modes must be empty, and the card's own
+            // singular target_requirement/effect are used exactly as before
+            // this field existed. `mode_choice` names how many of `modes`
+            // must be chosen (`ModeChoice::Exactly(1)` is the pre-existing
+            // "Choose one —" behavior). CR 700.2d's "same mode twice"
+            // exception (reminder-text-gated) stays unmodeled - a repeated
+            // index is always rejected.
             let (target_requirement, modal_effect): (Option<TargetSpec>, Option<AbilityEffect>) =
                 if object.definition.modes.is_empty() {
                     if !modes.is_empty() {
@@ -1513,19 +1540,102 @@ pub fn execute_command(
                     }
                     (object.definition.target_requirement.clone(), None)
                 } else {
-                    if modes.len() != 1 {
-                        return Err(CommandError::IllegalAction(
-                            "a modal spell requires choosing exactly one mode".to_string(),
-                        ));
+                    let (min, max) = match object.definition.mode_choice {
+                        ModeChoice::Exactly(n) => (n, n),
+                        // CR 700.2a: "choose a number of those options" -
+                        // never zero, even for an UpTo spell.
+                        ModeChoice::UpTo(n) => (1, n),
+                    };
+                    let chosen_count = modes.len() as u32;
+                    if chosen_count < min || chosen_count > max {
+                        return Err(CommandError::IllegalAction(format!(
+                            "this modal spell requires choosing between {min} and {max} mode(s), got {chosen_count}"
+                        )));
                     }
-                    let chosen = object
-                        .definition
-                        .modes
-                        .get(modes[0] as usize)
-                        .ok_or_else(|| {
+                    let mut seen_modes = HashSet::new();
+                    for &m in &modes {
+                        if !seen_modes.insert(m) {
+                            return Err(CommandError::IllegalAction(
+                                "the same mode can't be chosen more than once".to_string(),
+                            ));
+                        }
+                    }
+                    // CR 700.2's own convention (per Wizards' rulings on
+                    // e.g. Cryptic Command): chosen modes' effects happen in
+                    // the order printed on the card, not the order the
+                    // player listed them in `modes`.
+                    let mut chosen_indices = modes.clone();
+                    chosen_indices.sort_unstable();
+                    let mut chosen_modes = Vec::with_capacity(chosen_indices.len());
+                    for &idx in &chosen_indices {
+                        let mode = object.definition.modes.get(idx as usize).ok_or_else(|| {
                             CommandError::IllegalAction("no such mode on this card".to_string())
                         })?;
-                    (chosen.target_requirement.clone(), chosen.effect.clone())
+                        chosen_modes.push(mode);
+                    }
+                    if let [only] = chosen_modes.as_slice() {
+                        // Single mode chosen - unchanged pre-multi-mode
+                        // shape, no TargetSpec::Multiple/AbilityEffect::Modal
+                        // wrapping.
+                        (only.target_requirement.clone(), only.effect.clone())
+                    } else {
+                        // 2+ modes chosen: combine into one TargetSpec::
+                        // Multiple (one TargetRequirement per chosen mode, a
+                        // synthetic zero-count placeholder for a mode with
+                        // no target_requirement of its own, CR 700.2c) and
+                        // one AbilityEffect::Modal (one slot per chosen
+                        // mode, same order) - ResolveStackTop zips the two
+                        // back together at resolution time via
+                        // split_targets_by_requirement, the same helper
+                        // multi-target-word spells already use. A mode
+                        // whose own target_requirement is itself
+                        // TargetSpec::Multiple (a mode that independently
+                        // needs several differently-filtered targets) can't
+                        // be combined this way - rejected outright rather
+                        // than silently flattened, a named narrow gap.
+                        let mut reqs = Vec::with_capacity(chosen_modes.len());
+                        for mode in &chosen_modes {
+                            match &mode.target_requirement {
+                                None => reqs.push(TargetRequirement {
+                                    filter: TargetFilter::AnyTarget,
+                                    count: 0,
+                                    up_to: false,
+                                    at_least: false,
+                                    exclude_source: false,
+                                }),
+                                Some(TargetSpec::Primitive(req)) => reqs.push(req.clone()),
+                                Some(TargetSpec::Multiple(_)) => {
+                                    return Err(CommandError::IllegalAction(
+                                        "a mode with its own multi-target requirement can't be \
+                                         combined with other chosen modes"
+                                            .to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        // Always TargetSpec::Multiple, even if every chosen
+                        // mode's requirement is the synthetic zero-count
+                        // placeholder - ResolveStackTop's Modal handling
+                        // always re-derives per-mode target chunks from
+                        // this shape, so it must never collapse to `None`
+                        // the way a single chosen mode's bare `None` can.
+                        for mode in &chosen_modes {
+                            if let Some(effect) = &mode.effect {
+                                if !is_modal_resolvable(effect) {
+                                    return Err(CommandError::IllegalAction(
+                                        "this mode's effect can't be combined with other chosen \
+                                         modes yet - only GainLife/Damage/Counters/Pump/\
+                                         GainControl/Shuffle are supported inside a multi-mode cast"
+                                            .to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        let target_requirement = Some(TargetSpec::Multiple(reqs));
+                        let effects: Vec<Option<AbilityEffect>> =
+                            chosen_modes.iter().map(|m| m.effect.clone()).collect();
+                        (target_requirement, Some(AbilityEffect::Modal(effects)))
+                    }
                 };
 
             // CR 601.2c/601.2e: target count/filter/dedup validated below via
@@ -1911,7 +2021,13 @@ pub fn execute_command(
                 | Some(AbilityEffect::Search { .. })
                 | Some(AbilityEffect::BecomeCopy(_))
                 | Some(AbilityEffect::Attach)
-                | Some(AbilityEffect::ExchangeTextBoxes)) => {
+                | Some(AbilityEffect::ExchangeTextBoxes)
+                // CR 700.2b (a modal activated/triggered ability) is still
+                // unmodeled - RegisteredAbility has no modes field, so this
+                // variant can't actually originate from an ability today.
+                // Listed for exhaustiveness only, same "every variant named,
+                // no wildcard" convention this disjunction already follows.
+                | Some(AbilityEffect::Modal(_))) => {
                     validate_targets(
                         state,
                         script_runtime,

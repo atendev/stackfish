@@ -46,6 +46,7 @@ fn basic_land_definition(definition_id: u64, name: &str, subtype: &str) -> CardD
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -71,6 +72,7 @@ fn nonbasic_land_definition(definition_id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -109,6 +111,7 @@ fn search_spell_definition(
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Search { filter: basic_land_filter(), count, destination, shuffle_after }),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

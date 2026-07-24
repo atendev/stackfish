@@ -402,6 +402,25 @@ pub enum AbilityEffect {
     /// one needs - see `TargetSpec::Multiple`'s own doc comment on why
     /// role-differentiated multi-word effects need bespoke handling).
     ExchangeTextBoxes,
+    /// CR 700.2d — 2+ chosen modes of a modal spell/ability, combined.
+    /// `commands::execute_command`'s `CastSpell` arm builds this only when
+    /// `modes.len() >= 2`; a single chosen mode still uses that mode's own
+    /// `effect` bare (unwrapped), unchanged from pre-`phase5/modal-
+    /// multi-mode` behavior. One entry per chosen mode, in *card-print*
+    /// order (not the order the player listed them in `modes`) — matches
+    /// Wizards' own ruling that a modal spell's chosen effects happen in
+    /// the order printed on the card. `None` at a slot means that mode has
+    /// no effect of its own (e.g. purely a targeting restriction with no
+    /// resolution-time action) — contributes nothing when `ResolveStackTop`
+    /// walks this list, but its slot must still line up 1:1 with the
+    /// parallel per-mode target chunk `ResolveStackTop` re-derives from
+    /// `StackObject::target_requirement` (always `TargetSpec::Multiple`
+    /// when this variant is used, with one `TargetRequirement` per chosen
+    /// mode, `count: 0` synthesized for a mode with no `target_requirement`
+    /// of its own, so `commands::split_targets_by_requirement` always
+    /// produces exactly one chunk per entry here — see that call site's own
+    /// doc comment).
+    Modal(Vec<Option<AbilityEffect>>),
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
@@ -1173,7 +1192,7 @@ mod tests {
     // snapshot stands in for that.
     fn dummy_last_known_info(object_id: ObjectId) -> crate::types::object::GameObject {
         use crate::types::card::CardDefinition;
-        use crate::types::card::{CardTypeSet, KeywordSet, PTValue, ScriptReference, SupertypeSet};
+        use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
         use crate::types::counter::CounterSet;
         use crate::types::ids::ObjectLineage;
         use crate::types::mana::ManaCost;
@@ -1201,6 +1220,7 @@ mod tests {
                 alternative_costs: Vec::new(),
                 effect: None,
                 modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
             },
             copiable_override: None,
             owner: CONTROLLER,
@@ -1641,7 +1661,7 @@ mod tests {
     /// `CREATURE`.
     fn battlefield_object(id: ObjectId, controller: PlayerId, card_types: CardTypeSet) -> crate::types::object::GameObject {
         use crate::types::card::CardDefinition;
-        use crate::types::card::{KeywordSet, PTValue, ScriptReference, SupertypeSet};
+        use crate::types::card::{KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
         use crate::types::counter::CounterSet;
         use crate::types::ids::ObjectLineage;
         use crate::types::mana::ManaCost;
@@ -1669,6 +1689,7 @@ mod tests {
                 alternative_costs: Vec::new(),
                 effect: None,
                 modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
             },
             copiable_override: None,
             owner: controller,

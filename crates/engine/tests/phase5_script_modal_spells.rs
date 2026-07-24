@@ -1,9 +1,10 @@
 //! Phase 5 vertical slice: CR 700.2a modal spell mode-selection (backlog
 //! item 9a-i) — the controller chooses exactly one of a spell's modes as
 //! part of casting, before targets are chosen (601.2b precedes 601.2c).
-//! Narrowed to "choose exactly one" (the common "Choose one —" case);
-//! choosing two modes (700.2d), another player choosing (700.2e), and a
-//! mode carrying its own additional cost (700.2h) are all deferred — see
+//! This file covers only the "choose exactly one" (`ModeChoice::Exactly(1)`)
+//! case; choosing two or more modes (CR 700.2d) is real now too — see
+//! `phase5_modal_multi_mode.rs`. Another player choosing (700.2e) and a mode
+//! carrying its own additional cost (700.2h) are still deferred — see
 //! `CardDefinition::modes`'s own doc comment.
 //!
 //! Unlike `Game.SelectTargets`/`Game.MayChoose` (backlog items 9/9a, mid-
@@ -41,6 +42,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -83,6 +85,7 @@ fn modal_spell_definition() -> CardDefinition {
                 effect: Some(AbilityEffect::Damage(2)),
             },
         ],
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -113,6 +116,7 @@ fn shock_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Damage(2)),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

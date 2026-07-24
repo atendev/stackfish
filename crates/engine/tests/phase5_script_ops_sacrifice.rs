@@ -41,6 +41,7 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -76,6 +77,7 @@ fn sacrifice_spell_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Sacrifice),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

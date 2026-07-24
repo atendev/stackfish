@@ -70,6 +70,7 @@ fn cda_creature_definition(power_script: Option<&str>, toughness_script: Option<
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -97,6 +98,7 @@ fn creature_definition(power: i32, toughness: i32) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

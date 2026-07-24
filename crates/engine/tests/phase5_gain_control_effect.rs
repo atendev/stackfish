@@ -50,6 +50,7 @@ fn creature_definition(definition_id: u64, name: &str, power: i32, toughness: i3
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -79,6 +80,7 @@ fn threaten_definition(duration: EffectDuration) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::GainControl(duration)),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

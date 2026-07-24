@@ -30,6 +30,7 @@ fn card(name: &str, mana_cost: &str, oracle_text: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

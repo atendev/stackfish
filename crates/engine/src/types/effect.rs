@@ -1114,7 +1114,7 @@ pub struct EffectiveCharacteristics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::card::{CardDefinition, PTValue, ScriptReference, SupertypeSet as SupertypeSetT};
+    use crate::types::card::{CardDefinition, ModeChoice, PTValue, ScriptReference, SupertypeSet as SupertypeSetT};
     use crate::types::counter::CounterSet;
     use crate::types::game::{GameState, RngState};
     use crate::types::ids::PlayerId;
@@ -1146,6 +1146,7 @@ mod tests {
                 alternative_costs: Vec::new(),
                 effect: None,
                 modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
             },
             copiable_override: None,
             owner: controller,

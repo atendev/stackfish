@@ -53,6 +53,7 @@ fn creature_definition(id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -93,6 +94,7 @@ fn aura_definition(id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -123,6 +125,7 @@ fn search_spell_definition(destination: SearchDestination) -> CardDefinition {
             shuffle_after: true,
         }),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
