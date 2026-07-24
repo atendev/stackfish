@@ -3422,6 +3422,72 @@ impl Engine {
                             }
                         });
                         if let Some(destination) = destination {
+                            // CR 614's general "instead" framing: a
+                            // registered ReplaceZoneDestination effect can
+                            // redirect a would-be battlefield entry to a
+                            // different zone entirely (e.g. "if a creature
+                            // would enter the battlefield under your
+                            // control, exile it instead") - proposed and
+                            // checked *before* move_resolving_spell ever
+                            // places anything, mirroring
+                            // sba::resolve_deaths's own propose-then-commit
+                            // shape for the graveyard side. Only meaningful
+                            // for a would-be Battlefield destination - the
+                            // instant/sorcery "remains in its previous
+                            // zone" redirect above is CR 400.4a's own
+                            // unconditional rule, untouched by this.
+                            //
+                            // Narrow, named gap: only an *externally*
+                            // granted redirect effect can ever fire here -
+                            // the entering permanent's own self-registered
+                            // effects (if any) haven't been registered yet
+                            // at this point (run_card_script only runs
+                            // inside move_resolving_spell, below, once the
+                            // destination is already decided), so a card's
+                            // own "as this would enter, redirect it
+                            // instead" text isn't reachable via this path.
+                            let destination = if destination == ZoneKind::Battlefield {
+                                let proposed = GameEventKind::ZoneChange {
+                                    object: top.stack_id,
+                                    from: ZoneKind::Stack,
+                                    to: ZoneKind::Battlefield,
+                                    last_known_info: None,
+                                };
+                                match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+                                    ReplacementOutcome::Resolved(GameEventKind::ZoneChange { to, .. }) => to,
+                                    // Defensive - a WouldMoveZone candidate's
+                                    // own matching payloads only ever
+                                    // rewrite it back into a ZoneChange;
+                                    // falls back to the original destination
+                                    // rather than guessing at an
+                                    // unreachable shape.
+                                    ReplacementOutcome::Resolved(_) => destination,
+                                    // CR 616.1: two or more simultaneous
+                                    // "instead" redirects for the same
+                                    // entering permanent is a genuinely rare
+                                    // combination (two different sources
+                                    // each independently hating on the same
+                                    // entry at once) - narrowed to "no
+                                    // redirect happens" rather than a real
+                                    // player-choice pause, same posture this
+                                    // codebase already takes for comparably
+                                    // rare nested-pause interactions (e.g.
+                                    // pending_devour_choice's own
+                                    // sacrifice-triggers-another-pause gap).
+                                    // TODO: a real AwaitingReplacementChoice
+                                    // pause here, if a real card ever needs
+                                    // it - would need its own
+                                    // ReplacementResumeTarget variant plus
+                                    // extracting this whole Spell-resolution
+                                    // tail into a shared continuation, since
+                                    // nothing has been placed yet at this
+                                    // point for submit_replacement_choice to
+                                    // resume into.
+                                    ReplacementOutcome::NeedsOrderingChoice { .. } => destination,
+                                }
+                            } else {
+                                destination
+                            };
                             let run_script = destination == ZoneKind::Battlefield;
                             if let Some(event) =
                                 self.move_resolving_spell(top.stack_id, destination, run_script)

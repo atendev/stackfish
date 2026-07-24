@@ -423,3 +423,45 @@
   narrow "no real producer reaches this yet" posture `pending_devour_choice`'s own doc comment
   already takes for `Search`. CR 111.7 cessation (tokens vanishing on leaving the battlefield) is
   unrelated and stays its own pre-existing TODO.
+
+## Slice: etb-zone-redirect (merged)
+
+- Branch `phase5/etb-zone-redirect`.
+- Scope: CR 614's general "instead" framing, wired to battlefield entry for the first time —
+  `ReplacementPayload::ReplaceZoneDestination` and its `WouldMoveZone(_, Battlefield)` pairing already
+  existed and were already validated as legal at `:Register()` time, but nothing ever checked for one
+  at a real battlefield-entry producer. `ResolveStackTop`'s resolving-spell path is a permanent
+  eagerly deciding `destination = Battlefield` and placing itself there before a `ZoneChange` event is
+  even constructed (purely for logging) — a registered redirect had no chance to fire before this.
+- Key finding that shaped the plan: `sba::resolve_deaths` already solves the identical problem for the
+  graveyard side — propose the `ZoneChange` through `replacement::apply_replacements` *before* moving
+  anything, commit to whatever destination the (possibly rewritten) event says. This slice ports that
+  exact shape to the one battlefield-entry producer touched, rather than inventing a new mechanism.
+- Verify: 4 new tests (`phase5_etb_zone_redirect.rs`), full workspace suite green.
+- Key changes:
+  - `ResolveStackTop`'s permanent-destination branch: before calling `move_resolving_spell`, a
+    would-be `Battlefield` destination is proposed as a `WouldMoveZone` candidate and run through
+    `replacement::apply_replacements`. `Resolved`'s own (possibly rewritten) `to` becomes the real
+    destination; `move_resolving_spell` is unchanged and already handles an arbitrary destination
+    correctly (its own `destination_owner`/`run_script` logic was already generic).
+  - A redirected permanent never actually enters the battlefield — `run_script` is computed *after*
+    redirection (`destination == Battlefield`), so no self-registration, no summoning-sickness
+    bookkeeping, none of the "entering" semantics downstream (Aura auto-attach, Devour/Amplify/
+    `EntersAsCopy` pauses, `apply_enters_battlefield_modifiers`) ever run for it either, since all of
+    that is already gated on the event's own `to: Battlefield` shape.
+- Deliberately narrow, both named in code comments:
+  - Only an *externally* granted redirect effect can ever fire — the entering permanent's own
+    self-registered effects haven't been registered yet at this checkpoint (`run_card_script` only
+    runs inside `move_resolving_spell`, once the real destination is already decided), so a card's own
+    "as this would enter, redirect it instead" text isn't reachable via this path.
+  - CR 616.1's ordering choice for two *simultaneous* redirects targeting the same entering permanent
+    is narrowed to "no redirect happens" rather than a real player-choice pause — genuinely rare (two
+    different sources each independently hating on the same entry at once), same posture this
+    codebase already takes for comparably rare nested-pause interactions. A real fix would need its
+    own `ReplacementResumeTarget` variant plus extracting the whole Spell-resolution tail into a
+    shared continuation (nothing has been placed yet at this point for `submit_replacement_choice` to
+    resume into) — not built, named as a TODO in the code.
+  - `PlayLand`/`Search`'s own battlefield destinations don't get this check either, same narrowing
+    every prior mid-ETB slice (Devour/Amplify/`EntersAsCopy`) already took for the same reason: highest
+    real value at the resolving-spell call site, a redirected land or search-fetch is a much rarer gap
+    worth naming rather than building blind.
