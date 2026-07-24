@@ -1,4 +1,5 @@
 use crate::script::ScriptRuntime;
+use crate::types::ability::CopyExceptions;
 use crate::types::card::CardTypeSet;
 use crate::types::cost::FilterController;
 use crate::types::counter::CounterKind;
@@ -93,6 +94,19 @@ pub(crate) fn apply_one_replacement(
     let Some(idx) = state.replacement_effects.iter().position(|r| r.source == source) else {
         return event;
     };
+    apply_replacement_at_index(state, idx, event)
+}
+
+/// Index-based real body of `apply_one_replacement` above — operates
+/// directly on `state.replacement_effects[idx]` rather than re-deriving the
+/// index from a `source: ObjectId`, which is only safe when `source`
+/// uniquely identifies one registered effect. `apply_enters_battlefield_
+/// modifiers`'s own loop is the one caller that can't assume that (a single
+/// re-registered source can now carry more than one matching
+/// battlefield-entry-modifier payload at once — see
+/// `is_battlefield_entry_modifier`'s own doc comment for the bug this
+/// closes), so it tracks real indices itself instead.
+fn apply_replacement_at_index(state: &mut GameState, idx: usize, event: GameEventKind) -> GameEventKind {
     let rewritten = state.replacement_effects[idx].apply(event);
     match state.replacement_effects[idx].consumption {
         ConsumptionPolicy::OneShot => {
@@ -261,6 +275,48 @@ fn apply_token_zone_lock(state: &GameState, event: GameEventKind) -> GameEventKi
     GameEventKind::ZoneChange { object, from, to, last_known_info }
 }
 
+/// Is `spec` one of the "how a permanent enters" battlefield-entry-modifier
+/// payloads (`EntersTapped`, `EntersWithCounters` and its Bloodthirst/
+/// Sunburst/Devour/Amplify siblings, `EntersAsCopy`)? These are all
+/// deliberately excluded from `apply_replacements_from`'s own CR 616.1
+/// ordering-choice logic below — every one of them is either applied
+/// directly by `apply_enters_battlefield_modifiers` (which already
+/// documents *why* no ordering is needed: `EntersTapped` is idempotent,
+/// `EntersWithCounters`-family payloads are additive, so unlike a
+/// `ReplaceZoneDestination`-style rewrite, no ordering of multiple matches
+/// changes the final result) or by one of the dedicated `pending_*_choice`
+/// functions (Devour/Amplify/`EntersAsCopy`, which need their own real
+/// player choice, not a CR 616.1 ordering pick).
+///
+/// Bug this closes: `ReplacementEffect::matches` has no way to know a
+/// payload is meant to be handled exclusively by that other machinery — so
+/// once the entering object's own raw `ZoneChange` event reaches
+/// `ReplacementCheck`'s generic pass (as it always does, alongside whatever
+/// `apply_enters_battlefield_modifiers` already produced), it would
+/// independently re-match every one of these payloads *again*, and two or
+/// more matching the same event on the same source id — e.g. a single
+/// creature combining `EntersTapped` and `EntersWithCounters`, exactly CR
+/// 707.2's own Skyshroud Behemoth worked example — spuriously triggered a
+/// CR 616.1 ordering pause for two effects that were never supposed to be
+/// ordered against each other in the first place. Caught by a test giving a
+/// Clone-copied creature both at once (`phase5/clone-enters-as-copy`) — no
+/// prior test had ever combined the two on one permanent.
+fn is_battlefield_entry_modifier(spec: &ReplacementSpec) -> bool {
+    matches!(
+        spec,
+        ReplacementSpec::Primitive {
+            payload: ReplacementPayload::EntersTapped
+                | ReplacementPayload::EntersWithCounters { .. }
+                | ReplacementPayload::EntersWithCountersBloodthirst { .. }
+                | ReplacementPayload::EntersWithCountersSunburst
+                | ReplacementPayload::EntersWithCountersDevour { .. }
+                | ReplacementPayload::EntersWithCountersAmplify { .. }
+                | ReplacementPayload::EntersAsCopy(_),
+            ..
+        }
+    )
+}
+
 /// Rewrites/prevents `proposed` per CR 614/615/616, applying every matching
 /// `ReplacementEffect` in `state.replacement_effects` before the event is
 /// allowed to commit, re-checking after each rewrite in case the rewritten
@@ -319,7 +375,11 @@ pub(crate) fn apply_replacements_from(
         let mut matching: Vec<ObjectId> = state
             .replacement_effects
             .iter()
-            .filter(|r| !excluded.contains(&r.source) && r.matches(&event, is_destroy, state, script_runtime))
+            .filter(|r| {
+                !excluded.contains(&r.source)
+                    && !is_battlefield_entry_modifier(&r.spec)
+                    && r.matches(&event, is_destroy, state, script_runtime)
+            })
             .map(|r| r.source)
             .collect();
         if let Some(protected_id) = protection_candidate {
@@ -430,10 +490,16 @@ pub fn apply_enters_battlefield_modifiers(
     // both `Copy`, `last_known_info` is always `None` - this candidate is
     // never actually committed, only matched against).
     let candidate = || GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
-    let matching: Vec<ObjectId> = state
+    // Real indices, not just `source` ids - a single re-registered source
+    // can carry more than one matching payload at once (e.g. a Clone-copied
+    // creature with both `EntersTapped` and `EntersWithCounters`, CR 707.2's
+    // own Skyshroud Behemoth example), and `source` alone can't distinguish
+    // between them for the re-lookup below.
+    let matching: Vec<usize> = state
         .replacement_effects
         .iter()
-        .filter(|r| {
+        .enumerate()
+        .filter(|(_, r)| {
             matches!(
                 &r.spec,
                 ReplacementSpec::Primitive {
@@ -445,15 +511,14 @@ pub fn apply_enters_battlefield_modifiers(
                 }
             )
         })
-        .filter(|r| r.matches(&candidate(), false, state, script_runtime))
-        .map(|r| r.source)
+        .filter(|(_, r)| r.matches(&candidate(), false, state, script_runtime))
+        .map(|(i, _)| i)
         .collect();
 
     let mut counter_events = Vec::new();
-    for source in matching {
-        let Some(idx) = state.replacement_effects.iter().position(|r| r.source == source) else {
-            continue;
-        };
+    // Reverse order: a OneShot/LimitedUses(1) consumption's removal below
+    // never invalidates a not-yet-processed lower index this way.
+    for idx in matching.into_iter().rev() {
         let payload = match &state.replacement_effects[idx].spec {
             ReplacementSpec::Primitive { payload, .. } => payload.clone(),
             ReplacementSpec::Script(_) => continue,
@@ -509,10 +574,12 @@ pub fn apply_enters_battlefield_modifiers(
             _ => continue,
         }
         // CR 614.13/701.19b-style consumption bookkeeping (OneShot/
-        // LimitedUses removal, Repeatable untouched) - same helper the
-        // general apply_replacements_from loop uses; the rewritten event it
-        // returns is discarded, since neither payload here ever rewrites one.
-        apply_one_replacement(state, source, candidate());
+        // LimitedUses removal, Repeatable untouched) - index-based, not
+        // `apply_one_replacement`'s own source-based lookup (see this
+        // loop's own `matching: Vec<usize>` comment for why); the rewritten
+        // event it returns is discarded, since neither payload here ever
+        // rewrites one.
+        apply_replacement_at_index(state, idx, candidate());
     }
     counter_events
 }
@@ -636,6 +703,59 @@ pub fn pending_amplify_choice(
         return None;
     }
     Some((per_card, candidates))
+}
+
+/// CR 707.6/614.12a (Clone itself): is `object` (already on the battlefield,
+/// `from` describing how it got there — same call-site convention
+/// `pending_devour_choice`/`pending_amplify_choice` above use) carrying a
+/// registered `EntersAsCopy` effect that still needs its choice made? Same
+/// "checked separately from `apply_enters_battlefield_modifiers`, only the
+/// one call site that can actually pause should call this" posture as its
+/// siblings — see `EntersAsCopy`'s own doc comment.
+///
+/// No `controller` parameter, unlike its siblings — Clone's own wording is
+/// "any creature on the battlefield," unrestricted by who controls it
+/// (unlike Devour's "creatures you control" or Amplify's "cards from your
+/// hand"), so there's nothing to filter candidates by.
+///
+/// Returns `Some((exceptions, candidates))` — `candidates` is every
+/// creature currently on the battlefield, `object` itself included (not
+/// special-cased away, same "don't guess past an unlikely legal choice"
+/// stance `pending_devour_choice`'s own self-sacrifice case already takes,
+/// even though copying oneself is a real but pointless legal choice).
+/// `None` if no such effect is registered, or there are no creatures on the
+/// battlefield at all to choose from — CR 707.6's "may," including
+/// declining, needs no choice to make either way.
+pub fn pending_copy_choice(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    object: ObjectId,
+    from: ZoneKind,
+) -> Option<(CopyExceptions, Vec<ObjectId>)> {
+    let candidate = GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
+    let exceptions = state.replacement_effects.iter().find_map(|r| match &r.spec {
+        ReplacementSpec::Primitive { payload: ReplacementPayload::EntersAsCopy(exceptions), .. }
+            if r.matches(&candidate, false, state, script_runtime) =>
+        {
+            Some(exceptions.clone())
+        }
+        _ => None,
+    })?;
+    let candidates: Vec<ObjectId> = state
+        .objects
+        .values()
+        .filter(|obj| {
+            obj.zone == ZoneKind::Battlefield
+                && crate::layers::effective_characteristics(state, script_runtime, obj.object_id)
+                    .card_types
+                    .contains(CardTypeSet::CREATURE)
+        })
+        .map(|obj| obj.object_id)
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    Some((exceptions, candidates))
 }
 
 /// CR 702.54a's condition: was any opponent of `controller` dealt damage

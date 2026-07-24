@@ -249,6 +249,62 @@
     order — not exercised by any real card, same "good enough" tolerance `order_by_dependency`'s own
     dependency-loop fallback already accepts elsewhere.
 
+## Slice: clone-enters-as-copy (merged)
+
+- Branch `phase5/clone-enters-as-copy`.
+- Scope: CR 707.6/614.12a — "you may have this creature enter as a copy of any creature on the
+  battlefield" (Clone itself). The third real "become a copy" entry point, after `BecomeCopy` (an
+  existing permanent re-copying something) and `TokenSpec::CopyOf` (a token copying something) —
+  explicitly named as a gap since `copy-exceptions`/`layer-engine-copy`'s own notes ("no
+  ETB-replacement 'enters as copy' path (Clone itself)").
+- Verify: 9 new tests (`phase5_clone_enters_as_copy.rs`), full workspace suite green.
+- Key changes:
+  - `ReplacementPayload::EntersAsCopy(CopyExceptions)` — same "never applied by
+    `apply_enters_battlefield_modifiers`, needs a real mid-ETB pause" shape Devour/Amplify already
+    established.
+  - `replacement::pending_copy_choice(state, script_runtime, object, from) -> Option<(CopyExceptions,
+    Vec<ObjectId>)>` — candidates are every creature on the battlefield, any controller (Clone's own
+    unrestricted wording, unlike Devour's "creatures you control"/Amplify's "cards from your hand");
+    no `controller` parameter at all, since there's nothing to filter by.
+  - `ProcessState`/`StepStatus::AwaitingCopyChoice`, `Engine::submit_copy_choice(Option<ObjectId>)` —
+    `Option`, not `Vec`, since this is "which one, if any." A real choice reuses `BecomeCopy`'s own
+    machinery wholesale (`purge_granted_abilities` + fresh `run_card_script` against the chosen
+    creature's snapshot with `CopyExceptions` applied) and logs the same `GameEventKind::BecameCopy`
+    rather than a new event. Either way (copied or declined), the resume always runs
+    `apply_enters_battlefield_modifiers` afterward, with the entering spell's own real
+    `costs_paid`-derived `colors_spent` carried through the pause — this is what makes CR 707.2's own
+    Skyshroud Behemoth worked example real (a Clone copying a Fading + "enters tapped" creature enters
+    tapped with fade counters too).
+  - Checked in `ResolveStackTop` *before* the existing Devour/Amplify checks — becoming a copy is the
+    most identity-fundamental of the three mid-ETB choices. The post-choice resume deliberately doesn't
+    chain back into Devour's/Amplify's own pause checks (no real Clone-family card has either keyword).
+  - `Game.ReplacementPayloads.EntersAsCopy(opts?)` — same `CopyExceptions` decoder `Game.Ops.
+    BecomeCopy(opts?)` already uses.
+- **Bug found and fixed mid-slice** (not a pre-existing regression from this slice, but a
+  latent bug this slice's own test was the first to expose): a single permanent combining
+  `EntersTapped` and `EntersWithCounters` — CR 707.2's own worked example — broke two different ways:
+  1. The *generic* `apply_replacements_from`/`ReplacementCheck` pipeline independently re-matched
+     these battlefield-entry-modifier payloads against the same raw `ZoneChange` event
+     `apply_enters_battlefield_modifiers` had already handled, and two matches sharing one source
+     spuriously triggered a CR 616.1 ordering pause for two effects that were never supposed to be
+     ordered against each other (`apply_enters_battlefield_modifiers`'s own doc comment already says
+     so). Fixed with a new `is_battlefield_entry_modifier` filter excluding these payload shapes from
+     `apply_replacements_from`'s own `matching` computation entirely.
+  2. `apply_enters_battlefield_modifiers`'s own loop re-derived each matched effect's index by
+     `source: ObjectId` (`.position(|r| r.source == source)`), which silently assumed one source could
+     only ever have one matching effect — with two (both sharing the freshly-copied identity's source
+     id), the second lookup kept re-finding the *first* effect, so the second payload was silently
+     skipped. Fixed by collecting real `usize` indices up front and processing them in reverse order
+     (safe against a mid-loop `OneShot`/`LimitedUses(1)` removal), via a new index-based
+     `apply_replacement_at_index` that `apply_one_replacement` itself now wraps.
+  Neither bug was reachable before this slice — no prior test combined two battlefield-entry-modifier
+  payloads on one permanent, since only a copy-producing effect can put more than one such payload
+  under a single freshly-shared source id.
+- Unresolved: Search doesn't offer this choice either, same "no real producer reaches this yet"
+  posture `pending_devour_choice`'s own doc comment already takes. Self-copy (the entrant choosing
+  itself) isn't special-cased away, untested as its own scenario (same posture Devour's own
+  self-sacrifice case takes).
+
 ## General layer notes
 
 - Layer order in `effective_characteristics`: 2 control, 4 type, 5 color, 6 abilities, 7a CDA, 7b set P/T, 7c modify P/T interleaved with counters (CR 613.4c, `phase5/layer7d-counter-interleaving`), 7e switch.

@@ -9,8 +9,8 @@ use crate::sba::{self, SbaOutcome};
 use crate::script::{OperationOutcome, ScriptChoiceRequest, ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
 use crate::types::ability::{
-    apply_text_box, AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, NamedToken, RegisteredAbility,
-    SearchDestination, TokenSpec,
+    apply_text_box, AbilityEffect, AbilityKind, ConditionSpec, CopyExceptions, InterveningIfSpec, NamedToken,
+    RegisteredAbility, SearchDestination, TokenSpec,
 };
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
 use crate::types::config::{GameConfig, GameSettings};
@@ -103,6 +103,19 @@ pub enum AmplifyChoiceError {
     /// The same id appeared twice in `revealed` — each card can only be
     /// revealed once.
     DuplicateCandidate,
+}
+
+/// Why `submit_copy_choice` rejected an answer to a CR 707.6/614.12a "enter
+/// as a copy" choice (Clone itself). No `DuplicateCandidate` variant, unlike
+/// `DevourChoiceError`/`AmplifyChoiceError` — this is "which one, if any,"
+/// an `Option<ObjectId>`, not a multi-select `Vec` that duplicates could
+/// even appear in.
+#[derive(Debug)]
+pub enum CopyChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingCopyChoice`.
+    NotAwaitingChoice,
+    /// `Some(id)` wasn't one of the offered `candidates`.
+    InvalidCandidate,
 }
 
 /// Why `submit_commander_return_choice` rejected an answer to a CR 903.9a
@@ -351,6 +364,13 @@ pub enum StepStatus {
     /// `per_card` counters times however many were revealed; revealed cards
     /// stay in hand untouched.
     AwaitingAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
+    /// CR 707.6/614.12a (Clone itself): `replacement::pending_copy_choice`
+    /// found a registered `EntersAsCopy` effect on `object` (already a real
+    /// battlefield permanent by this point) with 1+ creatures on the
+    /// battlefield `player` could copy — `player` picks at most one of
+    /// `candidates` (or none, CR 707.6's "may") to become a copy of, then
+    /// calls `submit_copy_choice`.
+    AwaitingCopyChoice { player: PlayerId, object: ObjectId, candidates: Vec<ObjectId> },
     /// Backlog item 9: a card script (via `Game.SelectTargets`) yielded
     /// mid-resolution, asking `player` to choose a real target matching
     /// `request` before the operation can finish — the caller should prompt
@@ -690,6 +710,28 @@ pub enum ProcessState {
         candidates: Vec<ObjectId>,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
+    },
+    /// CR 707.6/614.12a (Clone itself): paused mid-`ResolveStackTop`, right
+    /// where `apply_enters_battlefield_modifiers` would otherwise run for
+    /// `object` — `replacement::pending_copy_choice` found a registered
+    /// `EntersAsCopy` effect on it with 1+ legal battlefield-creature
+    /// candidates. `stack_id`/`events_so_far` are exactly what this
+    /// resolution had already built before reaching this point, same
+    /// "not yet committed, still a local `Vec`" state its siblings above
+    /// carry. `exceptions` and `colors_spent` are carried through the pause
+    /// too — `exceptions` for `submit_copy_choice` to apply if a copy is
+    /// chosen, `colors_spent` (derived from the entering spell's own real
+    /// `costs_paid` at the point this pause is raised) so a copied Sunburst
+    /// creature still gets a real count once `apply_enters_battlefield_
+    /// modifiers` runs on resume.
+    AwaitingCopyChoice {
+        object: ObjectId,
+        controller: PlayerId,
+        exceptions: CopyExceptions,
+        candidates: Vec<ObjectId>,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+        colors_spent: ColorSet,
     },
     /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
     /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —
@@ -2041,6 +2083,74 @@ impl Engine {
         Ok(())
     }
 
+    /// Answers a pending CR 707.6/614.12a "enter as a copy" choice (Clone
+    /// itself) raised by `StepStatus::AwaitingCopyChoice` — `chosen` must be
+    /// `None` (CR 707.6's "may," declining) or `Some` of one of that
+    /// status's own `candidates`. If a copy is chosen, reuses
+    /// `AbilityEffect::BecomeCopy`'s own machinery wholesale: applies
+    /// `exceptions` to the chosen creature's current snapshot, purges
+    /// whatever `object` had self-registered under its pre-copy identity,
+    /// sets `copiable_override`, and re-runs `run_card_script` against the
+    /// new snapshot — then logs the same `GameEventKind::BecameCopy`
+    /// `BecomeCopy` does, since it's exactly the same fact. Either way
+    /// (copied or not), the resume then runs `apply_enters_battlefield_
+    /// modifiers` with the pause's own carried-through `colors_spent` -
+    /// this is what makes a copied Fading/EntersTapped/Sunburst creature's
+    /// own ETB modifiers apply for real, not just its copied keywords.
+    pub fn submit_copy_choice(&mut self, chosen: Option<ObjectId>) -> Result<(), CopyChoiceError> {
+        let ProcessState::AwaitingCopyChoice { candidates, .. } = &self.process_state else {
+            return Err(CopyChoiceError::NotAwaitingChoice);
+        };
+        if chosen.is_some_and(|id| !candidates.contains(&id)) {
+            return Err(CopyChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingCopyChoice { object, exceptions, stack_id, mut events_so_far, colors_spent, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        // CR 614.13/701.19b-style consumption bookkeeping - same helper
+        // apply_enters_battlefield_modifiers's own tail uses for every
+        // other EntersWithCounters* payload, called here instead since this
+        // payload is never routed through that function at all (see
+        // EntersAsCopy's own doc comment).
+        let candidate_event =
+            GameEventKind::ZoneChange { object, from: ZoneKind::Stack, to: ZoneKind::Battlefield, last_known_info: None };
+        replacement::apply_one_replacement(&mut self.state, object, candidate_event);
+        if let Some(copied) = chosen {
+            let snapshot = self.state.object(copied).map(|obj| {
+                obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
+            });
+            if let Some(mut snapshot) = snapshot {
+                exceptions.apply(&mut snapshot);
+                if let Some(obj) = self.state.object_mut(object) {
+                    obj.copiable_override = Some(snapshot.clone());
+                }
+                commands::purge_granted_abilities(&mut self.state, object);
+                // TODO: a script error here is silently dropped, same gap
+                // every other run_card_script call site in this file
+                // already flags.
+                let _ = self.script_runtime.run_card_script(&mut self.state, &snapshot, object);
+                events_so_far.push(GameEventKind::BecameCopy { object, copied });
+            }
+            // else: the chosen creature no longer resolves (departed
+            // between the pause and this answer) - skip rather than guess,
+            // same stance every other unresolvable-reference case in this
+            // codebase already takes; `object` simply stays itself.
+        }
+        let counter_events = replacement::apply_enters_battlefield_modifiers(
+            &mut self.state,
+            &self.script_runtime,
+            object,
+            ZoneKind::Stack,
+            colors_spent,
+        );
+        events_so_far.extend(counter_events);
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        Ok(())
+    }
+
     /// Answers a pending CR 603.3b intra-group ordering choice raised by
     /// `StepStatus::AwaitingTriggerOrderChoice` — `chosen_order` must be a
     /// reordering of that status's `group` (same triggers, player's chosen
@@ -3347,6 +3457,38 @@ impl Engine {
                                 // search-to-battlefield call sites below.
                                 if let GameEventKind::ZoneChange { object, to: ZoneKind::Battlefield, .. } = &event {
                                     let object_id = *object;
+                                    // CR 707.6/614.12a: checked before even
+                                    // Devour/Amplify below - becoming a copy
+                                    // is the most identity-fundamental of
+                                    // the three mid-ETB choices, and no real
+                                    // Clone-family card carries Devour/
+                                    // Amplify anyway (see EntersAsCopy's own
+                                    // doc comment for why the post-choice
+                                    // resume doesn't chain back into those
+                                    // two). Only this call site (a resolving
+                                    // spell) can raise this pause, same
+                                    // "PlayLand/Search never check this"
+                                    // posture pending_devour_choice already
+                                    // established - see pending_copy_choice's
+                                    // own doc comment.
+                                    if let Some((exceptions, candidates)) = replacement::pending_copy_choice(
+                                        &self.state,
+                                        &self.script_runtime,
+                                        object_id,
+                                        ZoneKind::Stack,
+                                    ) {
+                                        events.push(event);
+                                        self.process_state = ProcessState::AwaitingCopyChoice {
+                                            object: object_id,
+                                            controller: top.controller,
+                                            exceptions,
+                                            candidates,
+                                            stack_id: top.stack_id,
+                                            events_so_far: events,
+                                            colors_spent: colors_spent(&top.costs_paid),
+                                        };
+                                        return StepStatus::Progressed;
+                                    }
                                     // CR 702.82a: checked *before*
                                     // apply_enters_battlefield_modifiers -
                                     // only this call site (a resolving
@@ -4284,6 +4426,17 @@ impl Engine {
                 };
                 self.process_state =
                     ProcessState::AwaitingAmplifyChoice { object, controller, per_card, candidates, stack_id, events_so_far };
+                status
+            }
+
+            ProcessState::AwaitingCopyChoice { object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent } => {
+                // Nothing to do until submit_copy_choice answers - same
+                // "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingCopyChoice { player: controller, object, candidates: candidates.clone() };
+                self.process_state = ProcessState::AwaitingCopyChoice {
+                    object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent,
+                };
                 status
             }
 
