@@ -83,6 +83,18 @@ fn double(source: ObjectId, power: bool, toughness: bool, timestamp: u64) -> Con
     continuous_effect(source, EffectPrimitive::DoublePT { power, toughness }, timestamp)
 }
 
+fn scripted(source: ObjectId, handle: ScriptHandle, timestamp: u64) -> ContinuousEffect {
+    ContinuousEffect {
+        source,
+        layer: Layer::PowerToughnessModifying,
+        affected: AffectedFilter::Primitive(no_filter()),
+        effect: EffectPayload::Script(handle),
+        timestamp: SequenceNo(timestamp),
+        duration: EffectDuration::Permanent,
+        condition: None,
+    }
+}
+
 /// Regression: two independent `ModifyPT`s (no dependency possible between
 /// them) still just sum in the new ordering path, same as before this slice.
 #[test]
@@ -153,6 +165,86 @@ fn double_pt_scoped_to_one_field_leaves_the_other_alone() {
 
     assert_eq!(effective.power, Some(8));
     assert_eq!(effective.toughness, Some(4));
+}
+
+/// CR 613.8a (`phase5/script-effect-dependency`): a *scripted* `DoublePT`
+/// depends on a primitive `ModifyPT` in the same sublayer exactly like two
+/// primitives already do above - `depends_on` resolves the script through
+/// `layers::resolve_primitive` before comparing shapes, so the payload kind
+/// doesn't matter, only the resolved shape. Same 2/2 -> +2/+2 (dependency,
+/// not timestamp, forces this first) -> doubled = 8/8 as the all-primitive
+/// version.
+#[test]
+fn scripted_double_pt_waits_for_a_later_timestamp_modify_it_depends_on() {
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    let bear = ObjectId(0);
+    put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
+
+    let mut script_runtime = ScriptRuntime::new();
+    let handle = script_runtime
+        .load_function("return function(source, controller) return { double_pt = { power = true, toughness = true } } end")
+        .unwrap();
+    state.continuous_effects.push(scripted(bear, handle, 0));
+    state.continuous_effects.push(modify(bear, 2, 2, 1));
+
+    let effective = effective_characteristics(&state, &script_runtime, bear);
+
+    assert_eq!(effective.power, Some(8));
+    assert_eq!(effective.toughness, Some(8));
+}
+
+/// Same rule, the other direction: a *primitive* `DoublePT` depends on a
+/// *scripted* `ModifyPT` - confirms the fix isn't one-sided (only script
+/// depends on primitive), since `depends_on` resolves both sides uniformly.
+#[test]
+fn primitive_double_pt_waits_for_a_scripted_modify_it_depends_on() {
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    let bear = ObjectId(0);
+    put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
+
+    let mut script_runtime = ScriptRuntime::new();
+    let handle = script_runtime
+        .load_function("return function(source, controller) return { modify_pt = { power = 2, toughness = 2 } } end")
+        .unwrap();
+    state.continuous_effects.push(double(bear, true, true, 0));
+    state.continuous_effects.push(scripted(bear, handle, 1));
+
+    let effective = effective_characteristics(&state, &script_runtime, bear);
+
+    assert_eq!(effective.power, Some(8));
+    assert_eq!(effective.toughness, Some(8));
+}
+
+/// A scripted effect that resolves to a non-dependency-participating shape
+/// (`AddKeyword`, wrong layer aside - this only exercises `depends_on`'s own
+/// resolution, so the mismatched layer doesn't matter here) must not be
+/// treated as depending on, or depended on by, a same-layer `ModifyPT` -
+/// still falls back to plain timestamp order, same as any other independent
+/// pairing.
+#[test]
+fn scripted_non_double_pt_shape_introduces_no_spurious_dependency() {
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    let bear = ObjectId(0);
+    put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
+
+    let mut script_runtime = ScriptRuntime::new();
+    let handle = script_runtime
+        .load_function("return function(source, controller) return { switch_pt = true } end")
+        .unwrap();
+    // Later timestamp than the modify - if this were spuriously treated as
+    // dependent, ordering wouldn't change the result anyway (switch_pt is a
+    // no-op read here), so the real assertion is just that this resolves
+    // without hanging/panicking and the modify still applies normally.
+    state.continuous_effects.push(modify(bear, 1, 1, 0));
+    state.continuous_effects.push(scripted(bear, handle, 1));
+
+    let effective = effective_characteristics(&state, &script_runtime, bear);
+
+    assert_eq!(effective.power, Some(3));
+    assert_eq!(effective.toughness, Some(3));
 }
 
 /// CR 613.8b's last sentence: two `DoublePT`s mutually depend on each other

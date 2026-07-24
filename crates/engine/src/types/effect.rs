@@ -75,13 +75,21 @@ use crate::script::ScriptRuntime;
 /// `EffectPrimitive::DoublePT` vs. `ModifyPT`/`DoublePT` in layer 7c actually
 /// produces one — see `DoublePT`'s own doc comment for why no other
 /// primitive can), falling back to plain timestamp order for everything
-/// else and for dependency loops (CR 613.8b's last sentence). Two real
-/// gaps still open, not silently narrowed:
-/// - `EffectPayload::Script`/`AffectedFilter::Script` effects are always
-///   treated as independent (never depend on anything, nothing depends on
-///   them) — a script-declared dependency would need the script bridge to
-///   expose partial/in-progress layer state mid-computation, which
-///   `state_to_lua`'s snapshot deliberately doesn't do yet.
+/// else and for dependency loops (CR 613.8b's last sentence). `depends_on`
+/// resolves both sides through `layers::resolve_primitive` before comparing
+/// (`phase5/script-effect-dependency`), so an `EffectPayload::Script` effect
+/// that decodes to a `DoublePT`/`ModifyPT` shape participates in that same
+/// rule exactly like a `Primitive` effect already did, in either direction.
+/// One real gap still open, not silently narrowed:
+/// - This only closes the "resolves to a known dependency-participating
+///   shape" case. A script *dynamically deciding* whether it depends on
+///   another specific effect (as opposed to always resolving to a fixed
+///   shape like `DoublePT`) would need the script bridge to expose
+///   partial/in-progress layer state mid-computation, which `state_to_lua`'s
+///   snapshot deliberately doesn't do yet — no real card needs this, since
+///   CR 613.8a dependency is a structural property of what an effect *does*
+///   (reads a running value vs. sets a fixed one), not something a card's
+///   own text ever asks a script to decide case-by-case.
 /// - Cross-layer/cross-sublayer dependency isn't modeled — CR 613.8 is
 ///   explicitly same-layer/sublayer only, and cross-layer sequencing is
 ///   already handled by the fixed layer order in `effective_characteristics`,

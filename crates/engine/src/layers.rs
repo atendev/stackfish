@@ -384,7 +384,7 @@ fn applicable_effects_in_layer<'a>(
             }
         })
         .collect();
-    order_by_dependency(effects)
+    order_by_dependency(effects, state, script_runtime, object.controller)
 }
 
 /// CR 613.8's dependency system: within the single layer `applicable_effects_in_layer`
@@ -401,14 +401,25 @@ fn applicable_effects_in_layer<'a>(
 /// order plain timestamp sorting would, since every candidate is
 /// immediately "ready" (CR 613.8c's re-evaluation is architecturally free
 /// here too - this whole query, and this reorder, is recomputed from
-/// scratch on every call, never cached).
-fn order_by_dependency(mut remaining: Vec<&ContinuousEffect>) -> Vec<&ContinuousEffect> {
+/// scratch on every call, never cached). `state`/`script_runtime`/`controller`
+/// (the queried object's own controller, same value every other
+/// `resolve_primitive` call site in this file already passes) are threaded
+/// through to `depends_on` purely so it can resolve a `Script`-payload effect
+/// to its `EffectPrimitive` shape before comparing - see that function's own
+/// doc comment.
+fn order_by_dependency<'a>(
+    mut remaining: Vec<&'a ContinuousEffect>,
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    controller: PlayerId,
+) -> Vec<&'a ContinuousEffect> {
     let mut placed: Vec<&ContinuousEffect> = Vec::with_capacity(remaining.len());
 
     while !remaining.is_empty() {
         let ready: Vec<usize> = (0..remaining.len())
             .filter(|&i| {
-                (0..remaining.len()).all(|j| i == j || !depends_on(remaining[i], remaining[j]))
+                (0..remaining.len())
+                    .all(|j| i == j || !depends_on(remaining[i], remaining[j], state, script_runtime, controller))
             })
             .collect();
 
@@ -434,19 +445,37 @@ fn order_by_dependency(mut remaining: Vec<&ContinuousEffect>) -> Vec<&Continuous
 /// only needs the "applying the other would change what this one does"
 /// clause - the CDA carve-out (613.8a clause c) is moot here since a CDA
 /// (layer 7a) is resolved inline via `resolve_base_pt`, never stored as a
-/// `ContinuousEffect`. A `Script`-payload effect is always independent (see
-/// `Layer`'s doc comment) - only `Primitive` pairs can produce a real
-/// dependency yet.
-fn depends_on(effect: &ContinuousEffect, other: &ContinuousEffect) -> bool {
-    let (EffectPayload::Primitive(this), EffectPayload::Primitive(that)) = (&effect.effect, &other.effect) else {
+/// `ContinuousEffect`.
+///
+/// Resolves both sides through `resolve_primitive` first (the same helper
+/// every per-layer loop in `effective_characteristics` already uses) rather
+/// than pattern-matching `EffectPayload::Primitive` directly - this is what
+/// lets a `Script`-payload effect that decodes into a `DoublePT` shape
+/// participate in the one real dependency rule below exactly like a
+/// primitive `DoublePT` already does, in either direction (script depends on
+/// primitive, primitive depends on script, or script depends on script).
+/// A `Script` effect that errors, or resolves to any other shape, still
+/// reports no dependency - same "skip rather than guess" stance
+/// `resolve_primitive` itself already takes for an unresolvable value.
+fn depends_on(
+    effect: &ContinuousEffect,
+    other: &ContinuousEffect,
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    controller: PlayerId,
+) -> bool {
+    let (Some(this), Some(that)) = (
+        resolve_primitive(effect, state, script_runtime, controller),
+        resolve_primitive(other, state, script_runtime, controller),
+    ) else {
         return false;
     };
     match (this, that) {
-        (EffectPrimitive::DoublePT { power, toughness }, EffectPrimitive::ModifyPT { .. }) => *power || *toughness,
+        (EffectPrimitive::DoublePT { power, toughness }, EffectPrimitive::ModifyPT { .. }) => power || toughness,
         (
             EffectPrimitive::DoublePT { power: p1, toughness: t1 },
             EffectPrimitive::DoublePT { power: p2, toughness: t2 },
-        ) => (*p1 && *p2) || (*t1 && *t2),
+        ) => (p1 && p2) || (t1 && t2),
         _ => false,
     }
 }

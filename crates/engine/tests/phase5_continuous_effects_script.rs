@@ -134,6 +134,18 @@ fn effect_decodes_switch_pt() {
 }
 
 #[test]
+fn effect_decodes_double_pt() {
+    let mut runtime = ScriptRuntime::new();
+    let handle = runtime
+        .load_function("return function(source, controller) return { double_pt = { power = true, toughness = false } } end")
+        .unwrap();
+
+    let state = base_state();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0)).unwrap();
+    assert_eq!(decoded, Some(EffectPrimitive::DoublePT { power: true, toughness: false }));
+}
+
+#[test]
 fn effect_with_no_recognized_key_resolves_to_none() {
     let mut runtime = ScriptRuntime::new();
     let handle = runtime.load_function("return function(source, controller) return {} end").unwrap();
