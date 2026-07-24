@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -209,7 +210,7 @@ fn two_matching_wards_pause_the_draw_for_a_cr_616_1_choice() {
     assert_eq!(candidates.len(), 2);
     assert!(engine.state().object(card).is_some(), "nothing committed yet");
 
-    engine.submit_replacement_choice(ward_b).expect("ward_b is a real candidate");
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(ward_b)).expect("ward_b is a real candidate");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "draw should finish resolving after the choice, got {status:?}");
 

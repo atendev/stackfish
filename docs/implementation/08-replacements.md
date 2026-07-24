@@ -394,6 +394,36 @@
     *not* touched — CR 702.16c/d are hard restrictions, not replacement effects, so CR 616.1 never
     applied to them in the first place.
 
+## Slice: protection-replacement-collision-fix (merged)
+
+- Branch `phase5/protection-replacement-collision-fix`.
+- Scope: fixes the sentinel-collision limitation `protection-as-replacement` documented and locked
+  in with its own test — exactly the fix that slice's own doc comment already named as the way to
+  close it for real.
+- Verify: `phase5_protection_as_replacement.rs`'s old "locks in the bug" test replaced with 2 tests
+  proving the fix (a real 2-way pause now occurs, and each choice resolves cleanly), full workspace
+  suite green.
+- Key changes:
+  - `replacement::ReplacementCandidate { Registered(ObjectId), Protection(ObjectId) }` — a new enum
+    replacing the bare `ObjectId` both kinds of CR 616.1 candidate used to share. Threaded through
+    `ReplacementOutcome::NeedsOrderingChoice`'s `candidates`/`excluded`, `ProcessState`/
+    `StepStatus::AwaitingReplacementChoice`, and `Engine::submit_replacement_choice`'s public
+    signature.
+  - `apply_replacements_from`'s candidate-list builder no longer dedups a `Protection(id)` against
+    an already-present `Registered(id)` — they're distinct enum values now, so both are genuinely
+    offered when they both match the same event, closing the exact gap the old dedup (deliberately
+    added by `protection-as-replacement`, for the wrong reason — see that slice's own "bug caught
+    mid-slice" note) opened.
+  - `apply_one_replacement_or_protection`'s dispatch is now a direct `match` on the
+    `ReplacementCandidate` variant instead of an `ObjectId` lookup that assumed "found a registered
+    effect with this id" was authoritative — the actual bug, since that lookup was always true in
+    the collision case regardless of which candidate the player meant to choose.
+  - Ripple was broad-but-shallow: ~20 sites across `engine.rs`/`sba.rs` that just forward
+    `candidates`/`excluded` through unrelated pipeline stages needed no conceptual changes, only a
+    type that Rust's own compiler forced through; 9 test files' `submit_replacement_choice(id)` calls
+    needed wrapping in `ReplacementCandidate::Registered(id)`.
+- Unresolved: none — this was the one limitation the prior slice flagged as open for this feature.
+
 ## Slice: token-etb-modifiers (merged)
 
 - Branch `phase5/token-etb-modifiers`.

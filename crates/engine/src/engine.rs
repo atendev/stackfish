@@ -331,15 +331,16 @@ pub enum StepStatus {
     /// Needs a `PlayerAction` from `player` before it can continue — the
     /// caller should prompt and `submit_action`, then `step()` again.
     AwaitingAction { player: PlayerId },
-    /// CR 616.1: more than one `ReplacementEffect` matched the same event
-    /// mid-`ReplacementCheck` — the caller should prompt `player` to pick
-    /// one of `candidates` (each a `ReplacementEffect::source`) and call
-    /// `submit_replacement_choice`, then `step()` again. Distinct from
-    /// `AwaitingAction`: this isn't a `PlayerAction`/priority decision, it's
-    /// a sub-decision mid-pipeline that `submit_action` must keep rejecting
-    /// while it's pending (see `submit_action`'s `PriorityWindow`-only
-    /// check).
-    AwaitingReplacementChoice { player: PlayerId, candidates: Vec<ObjectId> },
+    /// CR 616.1: more than one replacement/prevention effect matched the
+    /// same event mid-`ReplacementCheck` — the caller should prompt `player`
+    /// to pick one of `candidates` (each a `replacement::ReplacementCandidate`
+    /// — a real registered effect or CR 702.16e protection, see that type's
+    /// own doc comment) and call `submit_replacement_choice`, then `step()`
+    /// again. Distinct from `AwaitingAction`: this isn't a `PlayerAction`/
+    /// priority decision, it's a sub-decision mid-pipeline that
+    /// `submit_action` must keep rejecting while it's pending (see
+    /// `submit_action`'s `PriorityWindow`-only check).
+    AwaitingReplacementChoice { player: PlayerId, candidates: Vec<replacement::ReplacementCandidate> },
     /// CR 704.5j: `player` controls 2+ legendary permanents sharing a name
     /// (`candidates`) and must choose which one to keep — the caller should
     /// prompt and call `submit_legend_rule_choice`, then `step()` again. Same
@@ -631,22 +632,23 @@ pub enum ProcessState {
     /// processing order.
     ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
     /// CR 616.1: paused because `pending_event` matched more than one
-    /// `ReplacementEffect` (`candidates`, identified by `source` `ObjectId`)
-    /// and `affected_player` must choose which applies first. `excluded` is
-    /// `replacement::ReplacementOutcome::NeedsOrderingChoice`'s own
-    /// per-event exclusion set (CR 616.1: an effect applies at most once to
-    /// a given event) — carried here so resuming doesn't forget which
-    /// effects already applied earlier in this same event's resolution.
-    /// `resume` says what to do once `submit_replacement_choice` answers —
-    /// this pause is reached from two different pipelines (a command's own
-    /// events via `ReplacementCheck`, or a dying creature's zone-change via
-    /// `sba::resolve_deaths`), and only `resume` distinguishes them; the
-    /// pause itself is identical either way.
+    /// replacement/prevention effect (`candidates`, each a `replacement::
+    /// ReplacementCandidate`) and `affected_player` must choose which
+    /// applies first. `excluded` is `replacement::ReplacementOutcome::
+    /// NeedsOrderingChoice`'s own per-event exclusion set (CR 616.1: an
+    /// effect applies at most once to a given event) — carried here so
+    /// resuming doesn't forget which effects already applied earlier in this
+    /// same event's resolution. `resume` says what to do once
+    /// `submit_replacement_choice` answers — this pause is reached from two
+    /// different pipelines (a command's own events via `ReplacementCheck`,
+    /// or a dying creature's zone-change via `sba::resolve_deaths`), and
+    /// only `resume` distinguishes them; the pause itself is identical
+    /// either way.
     AwaitingReplacementChoice {
         affected_player: PlayerId,
         pending_event: GameEventKind,
-        candidates: Vec<ObjectId>,
-        excluded: Vec<ObjectId>,
+        candidates: Vec<replacement::ReplacementCandidate>,
+        excluded: Vec<replacement::ReplacementCandidate>,
         resume: ReplacementResumeTarget,
     },
     /// CR 704.5j: paused because `sba::find_legend_rule_group` found `player`
@@ -1259,13 +1261,14 @@ impl Engine {
 
     /// Answers a pending CR 616.1 ordering choice raised by
     /// `StepStatus::AwaitingReplacementChoice` — `chosen` must be one of
-    /// that status's `candidates` (a `ReplacementEffect::source`).
-    /// Deliberately a separate entry point from `submit_action`: this isn't
-    /// a `PlayerAction`/priority decision, it's a sub-decision mid-pipeline,
+    /// that status's `candidates` (a `replacement::ReplacementCandidate` —
+    /// a real registered effect or CR 702.16e protection). Deliberately a
+    /// separate entry point from `submit_action`: this isn't a
+    /// `PlayerAction`/priority decision, it's a sub-decision mid-pipeline,
     /// so it can't go through `submit_action`'s `PriorityWindow`-only gate.
     pub fn submit_replacement_choice(
         &mut self,
-        chosen: ObjectId,
+        chosen: replacement::ReplacementCandidate,
     ) -> Result<(), ReplacementChoiceError> {
         let ProcessState::AwaitingReplacementChoice { candidates, .. } = &self.process_state
         else {
@@ -1286,11 +1289,11 @@ impl Engine {
         // another effect, including needing a further ordering choice of
         // its own) - carrying `excluded` forward rather than starting a
         // fresh exclusion set, so an effect already applied before this
-        // pause can't reapply to the same event after it. `chosen` may name
-        // a real registered effect or the CR 702.16e protection sentinel
-        // (the protected object's own id) - apply_one_replacement_or_
-        // protection dispatches either way, same as apply_replacements_
-        // from's own single-match branch.
+        // pause can't reapply to the same event after it. `chosen` names
+        // either a real registered effect or CR 702.16e protection -
+        // apply_one_replacement_or_protection dispatches on the
+        // `ReplacementCandidate` variant directly, same as
+        // apply_replacements_from's own single-match branch.
         let rewritten = replacement::apply_one_replacement_or_protection(&mut self.state, chosen, pending_event);
         excluded.push(chosen);
         // is_destroy is per-resume-target: a ReplacementCheck-originated
@@ -6170,7 +6173,7 @@ mod tests {
     #[test]
     fn submit_replacement_choice_rejects_invalid_candidate_and_not_awaiting() {
         let mut engine = Engine::new(minimal_state());
-        let err = engine.submit_replacement_choice(ObjectId(0)).unwrap_err();
+        let err = engine.submit_replacement_choice(replacement::ReplacementCandidate::Registered(ObjectId(0))).unwrap_err();
         assert!(matches!(err, ReplacementChoiceError::NotAwaitingChoice));
 
         engine.process_state = ProcessState::AwaitingReplacementChoice {
@@ -6181,11 +6184,16 @@ mod tests {
                 amount: 1,
                 is_combat_damage: false,
             },
-            candidates: vec![ObjectId(1), ObjectId(2)],
+            candidates: vec![
+                replacement::ReplacementCandidate::Registered(ObjectId(1)),
+                replacement::ReplacementCandidate::Registered(ObjectId(2)),
+            ],
             excluded: Vec::new(),
             resume: ReplacementResumeTarget::ReplacementCheck { remaining: VecDeque::new(), checked: Vec::new() },
         };
-        let err = engine.submit_replacement_choice(ObjectId(99)).unwrap_err();
+        let err = engine
+            .submit_replacement_choice(replacement::ReplacementCandidate::Registered(ObjectId(99)))
+            .unwrap_err();
         assert!(matches!(err, ReplacementChoiceError::InvalidCandidate));
         // A rejected answer must not have consumed the pending state.
         assert!(matches!(engine.process_state, ProcessState::AwaitingReplacementChoice { .. }));
@@ -6215,7 +6223,9 @@ mod tests {
         };
         assert_eq!(candidates.len(), 2);
 
-        engine.submit_replacement_choice(a).expect("a is a real candidate");
+        engine
+            .submit_replacement_choice(replacement::ReplacementCandidate::Registered(a))
+            .expect("a is a real candidate");
         // b still matches the (already-prevented) event since it isn't
         // excluded yet - this drains it too, then commits once nothing else
         // matches (CR 616.1: a is now excluded and can't reapply).

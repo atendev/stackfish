@@ -23,6 +23,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -182,8 +183,14 @@ fn protection_and_a_competing_redirect_both_matching_pauses_for_a_real_ordering_
         panic!("expected a CR 616.1 ordering-choice pause - protection and the redirect both match, got {status:?}");
     };
     assert_eq!(candidates.len(), 2, "protection's sentinel id and the redirect's real source must both be offered");
-    assert!(candidates.contains(&protected), "protection must be offered as a real candidate, not applied silently ahead of the choice");
-    assert!(candidates.contains(&redirector), "the registered redirect must still be offered too");
+    assert!(
+        candidates.contains(&ReplacementCandidate::Protection(protected)),
+        "protection must be offered as a real candidate, not applied silently ahead of the choice"
+    );
+    assert!(
+        candidates.contains(&ReplacementCandidate::Registered(redirector)),
+        "the registered redirect must still be offered too"
+    );
 }
 
 #[test]
@@ -192,7 +199,7 @@ fn choosing_protection_first_prevents_the_damage_entirely() {
     let mut engine = Engine::new(state);
     assign_combat_damage(&mut engine, PlayerId(0));
 
-    engine.submit_replacement_choice(protected).expect("protection is a real candidate");
+    engine.submit_replacement_choice(ReplacementCandidate::Protection(protected)).expect("protection is a real candidate");
     drain(&mut engine);
 
     assert_eq!(engine.state().object(protected).unwrap().damage_marked, 0, "protection zeroed it before the redirect ever got a nonzero amount to move");
@@ -205,7 +212,7 @@ fn choosing_the_redirect_first_sends_the_full_unprevented_damage_to_the_unprotec
     let mut engine = Engine::new(state);
     assign_combat_damage(&mut engine, PlayerId(0));
 
-    engine.submit_replacement_choice(redirector).expect("the redirect is a real candidate");
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(redirector)).expect("the redirect is a real candidate");
     drain(&mut engine);
 
     assert_eq!(
@@ -245,13 +252,16 @@ fn protection_alone_still_resolves_synchronously_with_no_pause() {
     assert_eq!(engine.state().object(protected).unwrap().damage_marked, 0, "protection still actually prevented the damage");
 }
 
-/// Documented limitation (`apply_one_replacement_or_protection`'s own doc
-/// comment): when the SAME permanent has both innate protection and its own
-/// registered replacement effect on itself, the sentinel id collides - the
-/// registered effect always wins the dispatch. Locking in the accepted
-/// behavior rather than leaving it silently unverified.
-#[test]
-fn a_permanent_with_both_protection_and_its_own_registered_effect_only_ever_resolves_the_registered_one() {
+/// Fixed collision (`ReplacementCandidate`'s own doc comment): when the SAME
+/// permanent has both innate protection and its own registered replacement
+/// effect on itself, both used to share the protected object's bare
+/// `ObjectId` as their "candidate," so `apply_replacements_from`'s dedup
+/// silently folded them into one entry and no ordering choice was ever
+/// offered - the registered effect always won by construction (its lookup
+/// ran first in the old dispatch). Now `Registered(protected)` and
+/// `Protection(protected)` are distinct `ReplacementCandidate` values, so a
+/// real CR 616.1 pause happens here for the first time.
+fn protected_with_own_registered_effect_state() -> (GameState, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
@@ -271,12 +281,43 @@ fn a_permanent_with_both_protection_and_its_own_registered_effect_only_ever_reso
         .expect("both abilities register cleanly");
     assert_eq!(state.replacement_effects.len(), 1, "only the registered PreventDamage effect lives in state.replacement_effects");
 
-    let mut engine = Engine::new(state);
-    let status = assign_combat_damage(&mut engine, p0);
+    (state, attacker, protected)
+}
 
-    // Only one real candidate (the registered effect) - protection's own
-    // sentinel id collides with it and is folded into the same single
-    // match, so no ordering pause is offered at all here.
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }));
-    assert_eq!(engine.state().object(protected).unwrap().damage_marked, 0, "damage is still prevented either way - both effects agree on the outcome here");
+#[test]
+fn a_permanent_with_both_protection_and_its_own_registered_effect_pauses_for_a_real_two_way_choice() {
+    let (state, _attacker, protected) = protected_with_own_registered_effect_state();
+    let mut engine = Engine::new(state);
+    let status = assign_combat_damage(&mut engine, PlayerId(0));
+
+    let StepStatus::AwaitingReplacementChoice { candidates, .. } = status else {
+        panic!("expected a real CR 616.1 ordering-choice pause - protection and the self-registered effect both match the same object, got {status:?}");
+    };
+    assert_eq!(candidates.len(), 2, "Registered(protected) and Protection(protected) are no longer the same candidate");
+    assert!(candidates.contains(&ReplacementCandidate::Registered(protected)));
+    assert!(candidates.contains(&ReplacementCandidate::Protection(protected)));
+}
+
+#[test]
+fn choosing_protection_first_for_the_collision_case_still_resolves_cleanly() {
+    let (state, _attacker, protected) = protected_with_own_registered_effect_state();
+    let mut engine = Engine::new(state);
+    assign_combat_damage(&mut engine, PlayerId(0));
+
+    engine.submit_replacement_choice(ReplacementCandidate::Protection(protected)).expect("protection is a real, distinct candidate");
+    drain(&mut engine);
+
+    assert_eq!(engine.state().object(protected).unwrap().damage_marked, 0, "both effects agree on the outcome here - damage is prevented either way");
+}
+
+#[test]
+fn choosing_the_registered_effect_first_for_the_collision_case_still_resolves_cleanly() {
+    let (state, _attacker, protected) = protected_with_own_registered_effect_state();
+    let mut engine = Engine::new(state);
+    assign_combat_damage(&mut engine, PlayerId(0));
+
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(protected)).expect("the registered effect is a real, distinct candidate");
+    drain(&mut engine);
+
+    assert_eq!(engine.state().object(protected).unwrap().damage_marked, 0, "both effects agree on the outcome here - damage is prevented either way");
 }

@@ -40,8 +40,8 @@ pub enum SbaOutcome {
     NeedsOrderingChoice {
         affected_player: PlayerId,
         pending_event: GameEventKind,
-        candidates: Vec<ObjectId>,
-        excluded: Vec<ObjectId>,
+        candidates: Vec<crate::replacement::ReplacementCandidate>,
+        excluded: Vec<crate::replacement::ReplacementCandidate>,
         /// Whether `pending_event` itself is genuine destruction (CR 614.8)
         /// — see `DyingCandidate`'s own doc comment. Carried alongside
         /// `pending_deaths` (each of *those* candidates has its own
@@ -815,8 +815,8 @@ pub(crate) enum DeathResolution {
     NeedsOrderingChoice {
         affected_player: PlayerId,
         pending_event: GameEventKind,
-        candidates: Vec<ObjectId>,
-        excluded: Vec<ObjectId>,
+        candidates: Vec<crate::replacement::ReplacementCandidate>,
+        excluded: Vec<crate::replacement::ReplacementCandidate>,
         /// Whether `pending_event` is genuine destruction - see
         /// `DyingCandidate`'s own doc comment. `pending_deaths`' own
         /// remaining entries each carry their own `is_destroy` already.
