@@ -3977,6 +3977,32 @@ impl Engine {
                             // (tokens leaving the battlefield should cease
                             // to exist) is not enforced — blocked on a
                             // zone-watch SBA hook (future slice).
+                            //
+                            // `apply_enters_battlefield_modifiers` is real
+                            // now too, the 4th of the four real to-
+                            // Battlefield producers (`PlayLand`, the
+                            // resolving-spell path above, `Search`) - closes
+                            // a real, previously-silent gap: EntersTapped/
+                            // EntersWithCounters/Bloodthirst/Sunburst all
+                            // already worked for every other permanent-entry
+                            // shape but never applied to a token, even one
+                            // externally granted "tokens you control enter
+                            // tapped"-style modifier (matched by controller,
+                            // not `self_only`, so a plain `Named`/`Creature`
+                            // token with no script of its own can still be
+                            // affected) or a `CopyOf` token whose freshly
+                            // re-run `run_card_script` self-registered one.
+                            // Devour/Amplify stay unwired here on purpose -
+                            // both need a genuine mid-ETB player pause this
+                            // function structurally can't raise (it only
+                            // ever mutates state/proposes events
+                            // synchronously) - same narrow "no real producer
+                            // reaches this yet" posture `pending_devour_
+                            // choice`'s own doc comment already takes for
+                            // `Search`. `colors_spent` is always
+                            // `ColorSet::empty()` - CR 702.44b, a token
+                            // creation is never a cast, same convention
+                            // `PlayLand`/`Search` already use for Sunburst.
                             Some(AbilityEffect::CreateToken { spec, count }) => {
                                 let controller = top.controller;
                                 let copy_snapshot = match spec {
@@ -4036,12 +4062,26 @@ impl Engine {
                                         // in this file already flags.
                                         let _ = self.script_runtime.run_card_script(&mut self.state, &token_def, token_id);
                                     }
+                                    // Checked after self-registration above
+                                    // so a `CopyOf` token's freshly re-run
+                                    // script is already in `state.
+                                    // replacement_effects` by this point,
+                                    // same ordering `PlayLand`/`Search`/the
+                                    // resolving-spell path all already use.
+                                    let counter_events = replacement::apply_enters_battlefield_modifiers(
+                                        &mut self.state,
+                                        &self.script_runtime,
+                                        token_id,
+                                        ZoneKind::Stack,
+                                        ColorSet::empty(),
+                                    );
                                     events.push(GameEventKind::ZoneChange {
                                         object: token_id,
                                         from: ZoneKind::Stack,
                                         to: ZoneKind::Battlefield,
                                         last_known_info: None,
                                     });
+                                    events.extend(counter_events);
                                 }
                             }
                             // CR 702.6a: Equip's own resolution - attaches

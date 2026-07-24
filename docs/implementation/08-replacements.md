@@ -170,7 +170,8 @@
     state-gated fixed `amount` and Sunburst's fully-derived kind/amount) is real.
   - CR 614.12a/b (choices required by an ETB modifier, payability ordering across simultaneous
     entries) — unmodeled.
-  - Token creation (`Game.Ops.CreateToken`) — a 4th real to-Battlefield producer, not wired.
+  - Token creation (`Game.Ops.CreateToken`) — a 4th real to-Battlefield producer, not wired. Closed
+    by `phase5/token-etb-modifiers` below.
   - General CR 616 propose/replace/commit for battlefield entry still doesn't exist beyond this
     narrow carve-out — `docs/lua_scripts.md`'s existing reachability note (battlefield-entry absent
     from the real-`WouldMoveZone`-producer list) stays true; a `ReplaceZoneDestination`-style
@@ -392,3 +393,33 @@
   - Targeting/blocking enforcement (`commands::target_is_legal`, `DeclareBlockers`) are correctly
     *not* touched — CR 702.16c/d are hard restrictions, not replacement effects, so CR 616.1 never
     applied to them in the first place.
+
+## Slice: token-etb-modifiers (merged)
+
+- Branch `phase5/token-etb-modifiers`.
+- Scope: wire `AbilityEffect::CreateToken`'s dispatch (`ResolveStackTop`) into
+  `replacement::apply_enters_battlefield_modifiers` — the 4th of the four real to-Battlefield
+  producers (`PlayLand`, the resolving-spell path, `Search`), closing a real, previously-silent gap:
+  `EntersTapped`/`EntersWithCounters`/Bloodthirst/Sunburst all already worked for every other
+  permanent-entry shape but were never applied to a token.
+- Verify: 4 new tests (`phase5_token_etb_modifiers.rs`), full workspace suite green.
+- Key finding: a plain `Named`/`Creature` token has no script of its own (`run_card_script` is only
+  ever called for `TokenSpec::CopyOf`), so this gap is exercised two real ways — an externally
+  registered, non-`self_only` replacement effect (e.g. "tokens you control enter tapped," filtered
+  by controller rather than by which object is entering) already sitting in
+  `state.replacement_effects`, or a `CopyOf` token whose copied source had a self-registered
+  modifier that `run_card_script` re-registers under the new token's id.
+- Key changes:
+  - One new call, `apply_enters_battlefield_modifiers(&mut self.state, &self.script_runtime,
+    token_id, ZoneKind::Stack, ColorSet::empty())`, per created token — placed after
+    `register_token_abilities`/the conditional `run_card_script` (CopyOf) so any self-registered
+    effect is already in `state.replacement_effects` by the time it's checked, same ordering the
+    other three call sites already use. `from: ZoneKind::Stack` matches the `ZoneChange` event this
+    call site already logs for the token; `colors_spent: ColorSet::empty()` matches the "not a cast"
+    convention `PlayLand`/`Search` already use for Sunburst.
+  - The returned `counter_events` are extended onto `events` alongside each token's own `ZoneChange`.
+- Unresolved: Devour/Amplify stay unwired on tokens — both need a genuine mid-ETB player pause this
+  function structurally can't raise (it only ever mutates state/proposes events synchronously), same
+  narrow "no real producer reaches this yet" posture `pending_devour_choice`'s own doc comment
+  already takes for `Search`. CR 111.7 cessation (tokens vanishing on leaving the battlefield) is
+  unrelated and stays its own pre-existing TODO.

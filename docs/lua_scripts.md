@@ -834,8 +834,12 @@ Not modeled this slice (real, named gaps, not silently guessed at):
   only the first registered instance is ever matched) are both unmodeled.
 - **CR 702.38a's "can't reveal cards entering the battlefield at the same time as this card"** is
   unmodeled — no producer in this engine ever enters multiple permanents from hand simultaneously.
-- **Token creation** (`Game.Ops.CreateToken`) — a real to-Battlefield producer, not wired to this
-  mechanism yet. Same shape as the other three, just not done this slice.
+- **Token creation** (`Game.Ops.CreateToken`) is wired to this mechanism now too
+  (`phase5/token-etb-modifiers`) — `EntersTapped`/`EntersWithCounters`/Bloodthirst/Sunburst all apply
+  to a newly created token, whether from an externally-granted controller-wide effect (a plain
+  `Named`/`Creature` token has no script of its own) or a `CopyOf` token's freshly re-registered
+  self-only effect. Devour/Amplify still don't offer their pause on token creation, same posture
+  `Search` already has for those two.
 - **General CR 616 propose/replace/commit for battlefield entry** — `PlayLand`/`CastSpell`
   resolution/search-to-battlefield still mutate eagerly rather than going through a real
   propose-then-replace-then-commit split; a `ReplaceZoneDestination`-style "this can't enter, goes
