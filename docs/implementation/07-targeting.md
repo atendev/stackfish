@@ -446,3 +446,29 @@
   rejected outright rather than silently flattened. CR 700.2d's "same mode twice" exception, CR
   700.2e (another player chooses), 700.2h (a mode's own additional cost), and 700.2i (pawprint
   budgets) all stay unmodeled, unchanged from before this slice.
+
+## Slice: targeting-multi-word-variable-count (merged)
+
+- Branch `phase5/targeting-multi-word-variable-count`.
+- Scope: CR 601.2c/608.2b — `up_to`/`at_least` combined with multiple target words, the combination
+  `multi-target-word-spells` itself named as unsupported ("no way to split a flat list unambiguously
+  by a variable-length entry").
+- Key finding that shaped the plan: the ambiguity only holds when *two or more* words are variable at
+  once (a shared remainder between them has no unique split). With at most one variable word, the
+  split is unambiguous regardless of where that word sits in card order: subtract every exact word's
+  own fixed count from the total submitted, and whatever's left is the one variable word's count.
+- Verify: 7 new tests (`phase5_multi_target_word_variable_count.rs` — variable word first, variable
+  word last, `up_to` exceeding its own bound rejected, `at_least` below its own bound rejected, `up_to`
+  legally claiming zero, two variable words still rejected as ambiguous), full workspace suite green
+  (142 test binaries, 0 failed). No struct changes.
+- Key changes:
+  - `commands::split_targets_by_requirement` gained a two-pass computation: reject outright if 2+
+    requirements are variable (unchanged ambiguity, still named); otherwise derive the one variable
+    requirement's count as `submitted.len() - sum(exact counts)`, validate it against that
+    requirement's own `up_to`/`at_least` bound, then chunk in original word order using each word's
+    own fixed count or the derived remainder for the one variable word. Transparently reaches every
+    existing caller unchanged (`validate_targets`'s `Multiple` arm, the CR 608.2b resolution recheck
+    in `engine.rs`, and `modal-multi-mode`'s own per-mode chunking) — none needed edits.
+- Unresolved: two or more variable words in one spell/ability stays a real, unmodeled ambiguity - no
+  smaller-footprint resolution exists without a `PlayerAction` shape that announces each variable
+  word's own chosen count separately, a larger change than this slice's own scope.
