@@ -340,7 +340,7 @@ fn become_copy_with_pt_exception_overrides_base_power_and_toughness() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty() };
+    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -366,7 +366,7 @@ fn become_copy_with_keyword_exception_adds_the_keyword() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let salamander = ObjectId(1);
-    let exceptions = CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::TRAMPLE };
+    let exceptions = CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::TRAMPLE, retain_name: false, retain_color: false };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -531,7 +531,7 @@ fn copy_token_with_pt_exception_overrides_base_power_and_toughness() {
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
 
-    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty() };
+    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false };
     let card = ObjectId(1);
     state.objects.insert(
         card,

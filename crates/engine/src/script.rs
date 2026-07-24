@@ -737,9 +737,12 @@ fn decode_landwalk_quality(opts: mlua::Table) -> Result<LandwalkQuality, ScriptE
 /// CR 707.9's copy-effect exceptions/modifications - shared by
 /// `Game.Ops.BecomeCopy(opts?)` and `Game.Tokens.CopyOf(objectId, opts?)`.
 /// `opts` is `{ power = N, toughness = N }` (707.9b, both fields required
-/// together - a P/T override wouldn't mean anything with only one) and/or
-/// `{ keywords = { "Flying", ... } }` (707.9a). `None`/omitted is a bare
-/// copy - `CopyExceptions::default()`.
+/// together - a P/T override wouldn't mean anything with only one), and/or
+/// `{ keywords = { "Flying", ... } }` (707.9a), and/or `{ retain_name = true
+/// }`/`{ retain_color = true }` (707.9c/d - the copy keeps its own original
+/// name/color instead of the copied source's; a no-op for `CopyOf`, which
+/// has no prior "own identity" to retain from - see `CopyExceptions::apply`'s
+/// own doc comment). `None`/omitted is a bare copy - `CopyExceptions::default()`.
 fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyExceptions, ScriptError> {
     let Some(opts) = opts else { return Ok(CopyExceptions::default()) };
     let power: Option<i32> = opts.get("power").ok().flatten();
@@ -759,7 +762,9 @@ fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyExceptions, S
             add_keywords |= parse_keyword_name(&pair.map_err(|e| ScriptError::LoadError(e.to_string()))?)?;
         }
     }
-    Ok(CopyExceptions { set_power_toughness, add_keywords })
+    let retain_name: bool = opts.get::<_, Option<bool>>("retain_name").ok().flatten().unwrap_or(false);
+    let retain_color: bool = opts.get::<_, Option<bool>>("retain_color").ok().flatten().unwrap_or(false);
+    Ok(CopyExceptions { set_power_toughness, add_keywords, retain_name, retain_color })
 }
 
 /// `TriggeredAbilityBuilder`'s `:SetLayer` decoder — only a `Game.Layers.*`

@@ -505,21 +505,38 @@ pub enum TokenSpec {
 ///   `keywords` field directly (union, same "in addition to" convention
 ///   `EffectPrimitive::AddKeyword` already uses for continuous effects).
 ///
+/// - 707.9c/d (some characteristics specifically *not* copied, original
+///   retained - the inverse of 9a/9b): `retain_name`/`retain_color`, e.g.
+///   "except it retains its own name" - the two most common real "retains
+///   original X" shapes (CR 707.9d itself singles out color for special
+///   handling, clearing any color indicator too). Narrower than the full
+///   CR 707.9c (any of the seven copiable characteristics) - no real card
+///   combination needs retained P/T/types/subtypes yet, same "no real card"
+///   posture `set_power_toughness`/`add_keywords` themselves were scoped
+///   with originally.
+///
 /// `Default`'s all-empty value is a bare copy - unaffected, same result as
 /// before this type existed. Not modeled, named rather than guessed at:
-/// 707.9c (some characteristics specifically *not* copied, original
-/// retained - the inverse of 9a/9b, no real card needed it yet), 707.9e/g
-/// (an exception tied to "was this the most recent copy effect applied" -
-/// this snapshot model has no such history to consult).
+/// 707.9e/g (an exception tied to "was this the most recent copy effect
+/// applied" - this snapshot model has no history to consult; would need a
+/// real `GameObject` schema addition - a copy generation/id - not just a new
+/// `CopyExceptions` field, a genuinely larger gap).
 #[derive(Clone, Debug)]
 pub struct CopyExceptions {
     pub set_power_toughness: Option<(i32, i32)>,
     pub add_keywords: KeywordSet,
+    pub retain_name: bool,
+    pub retain_color: bool,
 }
 
 impl Default for CopyExceptions {
     fn default() -> Self {
-        CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::empty() }
+        CopyExceptions {
+            set_power_toughness: None,
+            add_keywords: KeywordSet::empty(),
+            retain_name: false,
+            retain_color: false,
+        }
     }
 }
 
@@ -527,12 +544,32 @@ impl CopyExceptions {
     /// Applies these exceptions to `snapshot` in place, right before it's
     /// frozen - shared by `BecomeCopy` and `CreateToken`'s `CopyOf` arm so
     /// the two real copy-producing call sites can't drift.
-    pub fn apply(&self, snapshot: &mut crate::types::card::CardDefinition) {
+    ///
+    /// `original` is the copying object's own true, pre-copy
+    /// `CardDefinition` (`GameObject::definition`, never overwritten by any
+    /// copy machinery - distinct from `copiable_override`) - `None` only for
+    /// `TokenSpec::CopyOf`, where a freshly created token has no prior "own
+    /// identity" to retain from at all. `retain_name`/`retain_color` are a
+    /// deliberate, tested no-op in that case, not silently broken.
+    pub fn apply(&self, snapshot: &mut crate::types::card::CardDefinition, original: Option<&crate::types::card::CardDefinition>) {
         if let Some((power, toughness)) = self.set_power_toughness {
             snapshot.power = Some(crate::types::card::PTValue::Fixed(power));
             snapshot.toughness = Some(crate::types::card::PTValue::Fixed(toughness));
         }
         snapshot.keywords |= self.add_keywords;
+        if let Some(original) = original {
+            if self.retain_name {
+                snapshot.name = original.name.clone();
+            }
+            if self.retain_color {
+                // CR 707.9d: an explicit color indicator matching the
+                // original's own resolved color - "any color indicator of
+                // that object is also not copied" is satisfied by this
+                // being the *original's* indicator-or-mana-cost-derived
+                // color, not whatever the copied source's own indicator was.
+                snapshot.color_indicator = Some(original.colors());
+            }
+        }
     }
 }
 

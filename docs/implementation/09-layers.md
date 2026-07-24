@@ -343,6 +343,40 @@
   case-by-case. Cross-layer dependency stays out of scope, same as `layer-engine-dependency` already
   noted.
 
+## Slice: copy-retain-exceptions (merged)
+
+- Branch `phase5/copy-retain-exceptions`.
+- Scope: CR 707.9c/d — "some copy effects specifically state that they don't copy certain
+  characteristics and the affected objects instead retain their original values." The inverse of
+  `copy-exceptions`'s own `set_power_toughness`/`add_keywords` (which *provide new* values) —
+  narrowed to the two most common real "retains original X" shapes: name and color (CR 707.9d itself
+  singles out color for special handling, "any color indicator of that object is also not copied").
+- Verify: 6 new tests (`phase5_copy_retain_exceptions.rs`), full workspace suite green.
+- Key finding that made this cheap: `GameObject` already keeps both `definition` (the object's own
+  true, never-overwritten characteristics) and `copiable_override` (the frozen copy snapshot) —
+  `layers.rs` always reads override-or-`definition`. So the "original value to retain" was already
+  sitting right there at every copy call site; no new `GameObject` state needed.
+- Key changes:
+  - `CopyExceptions` gained `retain_name: bool`/`retain_color: bool` (`Default` extended to `false`
+    for both — small ripple, `Default` already existed, only 3 exhaustive test literals plus the one
+    production Lua-decode site needed the two new fields added).
+  - `CopyExceptions::apply` grew an `original: Option<&CardDefinition>` parameter — `Some(&obj.
+    definition)` at `BecomeCopy`/`submit_copy_choice` (the copying object's own true pre-copy
+    definition, captured before anything mutates), `None` at `TokenSpec::CopyOf`. `retain_color` sets
+    an explicit `color_indicator` on the snapshot matching the original's own resolved `colors()`,
+    not just a raw field copy — this is what satisfies CR 707.9d's own color-indicator clause.
+  - `Game.Ops.BecomeCopy(opts?)`/`Game.Tokens.CopyOf(objectId, opts?)`'s shared `decode_copy_exceptions`
+    recognizes `retain_name`/`retain_color` boolean keys alongside the existing ones.
+- Scoping notes: `TokenSpec::CopyOf` passing `None` means `retain_name`/`retain_color` are a
+  deliberate, tested no-op there — a freshly created token has no prior "own identity" to retain a
+  name/color from at all (a real, not just unbuilt, semantic gap: retaining implies there's something
+  to retain). Only name/color are supported, not the full CR 707.9c characteristic list (P/T, types,
+  subtypes, ...) — no real card combination needs more yet, same posture `set_power_toughness`/
+  `add_keywords` were originally scoped with.
+- Unresolved: CR 707.9e/g (unchanged — still needs a real `GameObject` schema addition, a copy
+  generation/history, not a `CopyExceptions` field; confirmed again while scoping this slice, not
+  just carried forward unexamined).
+
 ## General layer notes
 
 - Layer order in `effective_characteristics`: 2 control, 4 type, 5 color, 6 abilities, 7a CDA, 7b set P/T, 7c modify P/T interleaved with counters (CR 613.4c, `phase5/layer7d-counter-interleaving`), 7e switch.

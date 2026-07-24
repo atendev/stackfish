@@ -2244,11 +2244,15 @@ impl Engine {
             GameEventKind::ZoneChange { object, from: ZoneKind::Stack, to: ZoneKind::Battlefield, last_known_info: None };
         replacement::apply_one_replacement(&mut self.state, object, candidate_event);
         if let Some(copied) = chosen {
+            // CR 707.9c/d: `object` (entering as the copy) is the one whose
+            // own pre-copy definition retain_name/retain_color fall back to
+            // - captured before anything mutates.
+            let original_definition = self.state.object(object).map(|o| o.definition.clone());
             let snapshot = self.state.object(copied).map(|obj| {
                 obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
             });
             if let Some(mut snapshot) = snapshot {
-                exceptions.apply(&mut snapshot);
+                exceptions.apply(&mut snapshot, original_definition.as_ref());
                 if let Some(obj) = self.state.object_mut(object) {
                     obj.copiable_override = Some(snapshot.clone());
                 }
@@ -4340,12 +4344,17 @@ impl Engine {
                             // snapshot right after.
                             Some(AbilityEffect::BecomeCopy(exceptions)) => {
                                 if let Some(Target::Object(target_id)) = top.targets.first().copied() {
+                                    let source_id = top.source;
+                                    // CR 707.9c/d: the copying object's own
+                                    // true pre-copy definition, for
+                                    // retain_name/retain_color to fall back
+                                    // to - captured before anything mutates.
+                                    let original_definition = self.state.object(source_id).map(|o| o.definition.clone());
                                     let snapshot = self.state.object(target_id).map(|obj| {
                                         obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
                                     });
                                     if let Some(mut snapshot) = snapshot {
-                                        exceptions.apply(&mut snapshot);
-                                        let source_id = top.source;
+                                        exceptions.apply(&mut snapshot, original_definition.as_ref());
                                         let became_copy =
                                             self.state.objects.get_mut(&source_id).is_some_and(|source_obj| {
                                                 if source_obj.zone == ZoneKind::Battlefield {
@@ -4503,7 +4512,15 @@ impl Engine {
                                     TokenSpec::CopyOf(source_id, exceptions) => self.state.object(*source_id).map(|obj| {
                                         let mut snapshot =
                                             obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone());
-                                        exceptions.apply(&mut snapshot);
+                                        // CR 707.9c/d: no `original` here - a
+                                        // freshly created token has no prior
+                                        // "own identity" to retain a name/
+                                        // color from, unlike BecomeCopy/
+                                        // submit_copy_choice's own already-
+                                        // existing object. retain_name/
+                                        // retain_color are a deliberate,
+                                        // tested no-op for this producer.
+                                        exceptions.apply(&mut snapshot, None);
                                         snapshot
                                     }),
                                     _ => None,
