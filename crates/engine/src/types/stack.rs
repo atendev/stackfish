@@ -74,6 +74,26 @@ pub struct StackObject {
     /// resolution, exactly mirroring `target_requirement`'s own CR 608.2b
     /// recheck.
     pub intervening_if: Option<InterveningIfSpec>,
+    /// CR 700.2e: `Some` only for a modal spell whose `ModeChoice` is
+    /// `ExactlyChosenByOpponent`/`UpToChosenByOpponent` and whose mode hasn't
+    /// been chosen yet — `chosen_modes`/`target_requirement`/`effect` above
+    /// are still empty/`None` placeholders at push time. `ResolveStackTop`
+    /// checks this (peeking, without popping) before resolving anything and
+    /// pauses on `ProcessState::AwaitingModeChoice` instead —
+    /// `Engine::submit_mode_choice` patches `chosen_modes`/
+    /// `target_requirement`/`effect` in place and clears this back to `None`
+    /// once the real other-player choice arrives. `None` for every other
+    /// `StackObject` (the overwhelming majority — non-modal cards, and modal
+    /// cards using any of `ModeChoice`'s other variants, still resolve
+    /// their mode synchronously at cast time exactly as before this slice).
+    pub pending_mode_choice: Option<PendingModeChoice>,
+}
+
+/// See `StackObject::pending_mode_choice`'s own doc comment.
+pub struct PendingModeChoice {
+    pub chooser: PlayerId,
+    pub min: u32,
+    pub max: u32,
 }
 
 impl StackObject {
@@ -97,6 +117,7 @@ impl StackObject {
         operation: ScriptHandle,
         effect: Option<AbilityEffect>,
         intervening_if: Option<InterveningIfSpec>,
+        pending_mode_choice: Option<PendingModeChoice>,
     ) -> Self {
         StackObject {
             stack_id,
@@ -117,6 +138,7 @@ impl StackObject {
             operation,
             effect,
             intervening_if,
+            pending_mode_choice,
         }
     }
 }

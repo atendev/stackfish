@@ -295,9 +295,11 @@ pub struct CardDefinition {
     /// `commands::CastSpell`'s own doc comment for how 2+ chosen modes
     /// combine (CR 700.2d, `phase5/modal-multi-mode`).
     ///
-    /// TODO: CR 700.2e (another player chooses) and 700.2i (pawprint mode
-    /// budgets) are still unimplemented. CR 700.2h (a mode's own additional
-    /// cost) is real now too — see `SpellMode::additional_cost`.
+    /// TODO: CR 700.2i (pawprint mode budgets) is still unimplemented. CR
+    /// 700.2h (a mode's own additional cost) is real now too — see
+    /// `SpellMode::additional_cost`. CR 700.2e (another player chooses) is
+    /// real now too, narrowly — see `ModeChoice::ExactlyChosenByOpponent`'s
+    /// own doc comment.
     /// TODO: CR 700.2b (a modal *activated/triggered* ability, as opposed
     /// to a modal spell) is untouched — `RegisteredAbility` has no `modes`
     /// field of its own yet.
@@ -346,12 +348,34 @@ pub struct SpellMode {
 /// `ModeChoice::Exactly(1)` construction site) or on `CardDefinition` itself
 /// (~120 test files construct it as a bare struct literal with no `Default`
 /// impl — the same ripple class `phase5/modal-multi-mode` already hit once).
+///
+/// `ExactlyChosenByOpponent(n)`/`UpToChosenByOpponent(n)` are CR 700.2e's
+/// "some spells and abilities specify that a player other than their
+/// controller chooses a mode for it" exception. Same count semantics again,
+/// but the mode(s) aren't supplied by the caster's own `CastSpell` action at
+/// all — `commands::execute_command`'s `CastSpell` arm defers the choice to
+/// a new resolution-time pause (`ProcessState::AwaitingModeChoice`,
+/// `Engine::submit_mode_choice`) answered by the other player instead, since
+/// `PlayerActionKind::CastSpell` is a single-actor atomic command (87
+/// construction sites) that can't be restructured to accept a second
+/// player's input mid-action. Narrowed on purpose, checked at cast time:
+/// every mode on the card must have `target_requirement: None` and
+/// `additional_cost: None` (supporting either would mean deferring target
+/// selection and/or cost computation to the same late pause — real
+/// additional plumbing this slice doesn't build), and the game must have
+/// exactly two non-eliminated players (CR 700.2e's own "if there's more than
+/// one other player, the controller decides which" sub-clause needs a
+/// further choice mechanism no 3+-player test scaffolding exists for yet).
+/// Combining with `*Repeatable` isn't supported either — no real card needs
+/// both at once.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModeChoice {
     Exactly(u32),
     UpTo(u32),
     ExactlyRepeatable(u32),
     UpToRepeatable(u32),
+    ExactlyChosenByOpponent(u32),
+    UpToChosenByOpponent(u32),
 }
 
 impl CardDefinition {

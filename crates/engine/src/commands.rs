@@ -14,7 +14,7 @@ use crate::types::game::GameState;
 use crate::types::ids::{AbilityId, ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{ColorSet, ManaUnit};
 use crate::types::object::GameObject;
-use crate::types::stack::{StackEntryKind, StackObject};
+use crate::types::stack::{PendingModeChoice, StackEntryKind, StackObject};
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
@@ -656,7 +656,11 @@ pub(crate) fn split_targets_by_requirement<'a>(
 /// pauses, out of scope for this slice. A single chosen mode (the pre-
 /// existing "Choose one —" case) is never checked against this at all - it
 /// uses its own effect bare, unwrapped from `Modal`, exactly as before.
-fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
+///
+/// `pub(crate)` since CR 700.2e's `Engine::submit_mode_choice` (engine.rs)
+/// needs this same check once a deferred chosen-by-opponent choice finally
+/// names its modes, mirroring this function's own call site here.
+pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
     matches!(
         effect,
         AbilityEffect::GainLife(_)
@@ -1580,17 +1584,72 @@ pub fn execute_command(
             // must be paid") - falls out for free below since
             // `mode_additional_costs` is collected per chosen instance, not
             // deduped by mode index.
-            let (target_requirement, modal_effect, mode_additional_costs): (
+            let (target_requirement, modal_effect, mode_additional_costs, pending_mode_choice): (
                 Option<TargetSpec>,
                 Option<AbilityEffect>,
                 Vec<AdditionalCost>,
+                Option<PendingModeChoice>,
             ) = if object.definition.modes.is_empty() {
                     if !modes.is_empty() {
                         return Err(CommandError::IllegalAction(
                             "this card isn't modal - no modes to choose".to_string(),
                         ));
                     }
-                    (object.definition.target_requirement.clone(), None, Vec::new())
+                    (object.definition.target_requirement.clone(), None, Vec::new(), None)
+                } else if let ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) =
+                    object.definition.mode_choice
+                {
+                    // CR 700.2e: the other player chooses, not the caster -
+                    // see `ModeChoice`'s own doc comment for the full
+                    // narrowing this variant carries. The choice itself is
+                    // deferred to a resolution-time pause rather than
+                    // supplied here.
+                    if !modes.is_empty() {
+                        return Err(CommandError::IllegalAction(
+                            "this card's mode is chosen by another player, not the caster - submit \
+                             no modes when casting it"
+                                .to_string(),
+                        ));
+                    }
+                    if !targets.is_empty() {
+                        return Err(CommandError::IllegalAction(
+                            "this card's mode (and therefore its targets) isn't chosen yet"
+                                .to_string(),
+                        ));
+                    }
+                    if object
+                        .definition
+                        .modes
+                        .iter()
+                        .any(|m| m.target_requirement.is_some() || m.additional_cost.is_some())
+                    {
+                        return Err(CommandError::IllegalAction(
+                            "a chosen-by-opponent modal card's modes must have no target \
+                             requirement and no additional cost"
+                                .to_string(),
+                        ));
+                    }
+                    let others: Vec<PlayerId> =
+                        non_eliminated_players(state).into_iter().filter(|&p| p != command.actor).collect();
+                    let [chooser] = others.as_slice() else {
+                        return Err(CommandError::IllegalAction(
+                            "a chosen-by-opponent modal card needs exactly one other player in the \
+                             game - CR 700.2e's 3+ player 'controller decides who chooses' \
+                             sub-clause isn't supported yet"
+                                .to_string(),
+                        ));
+                    };
+                    let (min, max) = match object.definition.mode_choice {
+                        ModeChoice::ExactlyChosenByOpponent(n) => (n, n),
+                        ModeChoice::UpToChosenByOpponent(n) => (1, n),
+                        _ => unreachable!("matched above"),
+                    };
+                    (
+                        None,
+                        None,
+                        Vec::new(),
+                        Some(PendingModeChoice { chooser: *chooser, min, max }),
+                    )
                 } else {
                     let (min, max, repeatable) = match object.definition.mode_choice {
                         ModeChoice::Exactly(n) => (n, n, false),
@@ -1599,6 +1658,9 @@ pub fn execute_command(
                         ModeChoice::UpTo(n) => (1, n, false),
                         ModeChoice::ExactlyRepeatable(n) => (n, n, true),
                         ModeChoice::UpToRepeatable(n) => (1, n, true),
+                        ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) => {
+                            unreachable!("handled above")
+                        }
                     };
                     let chosen_count = modes.len() as u32;
                     if chosen_count < min || chosen_count > max {
@@ -1639,7 +1701,7 @@ pub fn execute_command(
                         // Single mode chosen - unchanged pre-multi-mode
                         // shape, no TargetSpec::Multiple/AbilityEffect::Modal
                         // wrapping.
-                        (only.target_requirement.clone(), only.effect.clone(), mode_additional_costs)
+                        (only.target_requirement.clone(), only.effect.clone(), mode_additional_costs, None)
                     } else {
                         // 2+ modes chosen: combine into one TargetSpec::
                         // Multiple (one TargetRequirement per chosen mode, a
@@ -1696,7 +1758,7 @@ pub fn execute_command(
                         let target_requirement = Some(TargetSpec::Multiple(reqs));
                         let effects: Vec<Option<AbilityEffect>> =
                             chosen_modes.iter().map(|m| m.effect.clone()).collect();
-                        (target_requirement, Some(AbilityEffect::Modal(effects)), mode_additional_costs)
+                        (target_requirement, Some(AbilityEffect::Modal(effects)), mode_additional_costs, None)
                     }
                 };
 
@@ -1883,6 +1945,7 @@ pub fn execute_command(
                 // CR 603.4's "if" clause is triggered-ability-only text - a
                 // spell never carries one.
                 None,
+                pending_mode_choice,
             ));
 
             return Ok(CommandOutcome {
@@ -2165,6 +2228,9 @@ pub fn execute_command(
                         non_mana_effect,
                         // CR 603.4's "if" clause is triggered-ability-only
                         // text - an activated ability never carries one.
+                        None,
+                        // CR 700.2e: only a modal spell can defer its mode
+                        // choice this way - an activated ability never does.
                         None,
                     ));
 
