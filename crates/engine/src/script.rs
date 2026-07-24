@@ -964,6 +964,7 @@ fn validate_replacement_filter_payload_pairing(
                 | ReplacementPayload::EntersWithCountersSunburst
                 | ReplacementPayload::EntersWithCountersDevour { .. }
                 | ReplacementPayload::EntersWithCountersAmplify { .. }
+                | ReplacementPayload::EntersAsCopy(_)
         )
     );
     if paired {
@@ -2717,6 +2718,20 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         "EntersWithCountersAmplify",
         lua.create_function(|_, per_card: i32| {
             Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersAmplify { per_card }))
+        })?,
+    )?;
+    // CR 707.6/614.12a: `Game.ReplacementPayloads.EntersAsCopy(opts?)`
+    // (Clone itself) - the choice of *which* creature (if any) to become is
+    // handled entirely outside this payload (see its own doc comment); this
+    // only carries `CopyExceptions`, same shape/decoder `Game.Ops.
+    // BecomeCopy(opts?)` already uses (`{ power = N, toughness = N }`
+    // and/or `{ keywords = { "Flying", ... } }`; omitted or `nil` is a bare
+    // copy).
+    replacement_payloads.set(
+        "EntersAsCopy",
+        lua.create_function(|_, opts: Option<Table>| {
+            let exceptions = decode_copy_exceptions(opts).map_err(to_lua_err)?;
+            Ok(ReplacementPayloadTag(ReplacementPayload::EntersAsCopy(exceptions)))
         })?,
     )?;
 

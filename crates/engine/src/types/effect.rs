@@ -2,7 +2,7 @@ use crate::{
     CardTypeSet, Subtype, SupertypeSet, ObjectId, PlayerId, SequenceNo, ColorSet, ManaCost,
     GameObject, GameState, GameEventKind, ScriptHandle, Target, ZoneKind,
 };
-use crate::types::ability::InterveningIfSpec;
+use crate::types::ability::{CopyExceptions, InterveningIfSpec};
 use crate::types::card::KeywordSet;
 use crate::types::cost::FilterController;
 use crate::types::counter::CounterKind;
@@ -707,6 +707,41 @@ pub enum ReplacementPayload {
     /// registered instance, same single-match shape `pending_devour_choice`
     /// already has.
     EntersWithCountersAmplify { per_card: i32 },
+    /// CR 707.6/614.12a (Clone itself): "you may have this creature enter
+    /// as a copy of any creature on the battlefield." Same category of gap
+    /// as `EntersWithCountersDevour`/`EntersWithCountersAmplify` above — a
+    /// genuine mid-ETB player choice (*which* creature, if any, to become),
+    /// so never applied by `replacement::apply_enters_battlefield_modifiers`
+    /// at all. Checked directly by `ResolveStackTop` via
+    /// `replacement::pending_copy_choice`, pausing on `ProcessState::
+    /// AwaitingCopyChoice` and resuming via `Engine::submit_copy_choice`.
+    ///
+    /// Unlike `EntersWithCountersDevour`/`Amplify`, a real choice here
+    /// reuses `AbilityEffect::BecomeCopy`'s own machinery wholesale
+    /// (`commands::purge_granted_abilities` + a fresh `run_card_script`
+    /// against the chosen creature's snapshot, with `CopyExceptions`
+    /// applied first — same field this variant carries) and logs the same
+    /// `GameEventKind::BecameCopy` `BecomeCopy` does, since "this object
+    /// became a copy of that one" is exactly the same fact either way, not
+    /// a new one. What's unique to this path: the resume always continues
+    /// into `apply_enters_battlefield_modifiers` afterward (copied or not),
+    /// with the entering object's own real `costs_paid`-derived
+    /// `colors_spent` carried through the pause — this is what makes the
+    /// comp rules' own worked examples real: a Clone copying a Fading +
+    /// "enters tapped" creature enters tapped with fade counters; a Clone
+    /// copying a Sunburst creature gets Sunburst's real colors-spent count.
+    ///
+    /// Narrowed on purpose: only `ResolveStackTop`'s resolving-spell path
+    /// checks this (`Search` doesn't either, same "no real producer reaches
+    /// this yet" posture `pending_devour_choice`'s own doc comment already
+    /// takes). The post-choice resume chains into
+    /// `apply_enters_battlefield_modifiers` only, not back into Devour's/
+    /// Amplify's own pause checks — no real Clone-family card has either of
+    /// those keywords, so this is a named, theoretical gap, not a real one.
+    /// Self-copy (choosing the entering object itself as the candidate)
+    /// isn't special-cased away, same stance `pending_devour_choice`'s own
+    /// self-sacrifice case already takes.
+    EntersAsCopy(CopyExceptions),
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this

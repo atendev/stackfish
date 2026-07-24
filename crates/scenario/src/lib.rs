@@ -1568,6 +1568,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             | StepStatus::AwaitingEntryAttachChoice { .. }
             | StepStatus::AwaitingDevourChoice { .. }
             | StepStatus::AwaitingAmplifyChoice { .. }
+            | StepStatus::AwaitingCopyChoice { .. }
             | StepStatus::AwaitingScriptChoice { .. }
             | StepStatus::AwaitingScryChoice { .. }
             | StepStatus::AwaitingSurveilChoice { .. }
