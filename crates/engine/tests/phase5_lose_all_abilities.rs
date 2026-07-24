@@ -325,6 +325,6 @@ fn effect_decodes_remove_all_abilities_from_a_script_backed_function() {
         .unwrap();
 
     let state = combat_state();
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0)).unwrap();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
     assert_eq!(decoded, Some(EffectPrimitive::RemoveAllAbilities));
 }

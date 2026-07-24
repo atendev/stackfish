@@ -439,6 +439,7 @@ e:SetAffected({
     controller = "you",           -- "you" | "opponent" | "any", optional (default: no filter)
     card_types = { "Creature" },  -- optional (default: no filter)
     self_only = true,             -- optional, default false - "just this effect's own source"
+    enchanted_only = true,        -- optional, default false - CR 303.4m, "whatever this is attached to"
 })
 ```
 
@@ -447,6 +448,14 @@ Omitting `:SetAffected()` entirely means no filter at all — the effect applies
 real error, same stance `TriggeredAbilityBuilder`'s `Register()` takes for a missing
 `:SetOperation()`. A card can call `Game.CreateStaticAbility(c)` more than once per
 `initial_effect` — each `:Register()` independently queues, same as multiple triggered abilities.
+
+`enchanted_only = true` (CR 303.4m, e.g. "Enchanted creature gets +1/+1") short-circuits to
+`AffectedFilter::EnchantedOnly` before `controller`/`card_types`/`self_only` are even read - it
+can't be combined with them (no real card needs "enchanted creature that's also a [type]" via this
+exact clause). Matches whatever object this effect's own source (the Aura, or any other permanent
+with an `attached_to`) is currently attached to - `GameObject.attached_to`, maintained by the attach
+machinery (CR 303.4d-h, Equip). Enchanting/equipping a *player* isn't modeled (`attached_to` is
+`ObjectId`-only), so this only ever matches a permanent.
 
 `:SetDuration(Game.Durations.*)` (CR 611.2a-style) makes the registered effect temporary instead
 of permanent — e.g. "artifacts you control gain flying until end of turn":
@@ -487,14 +496,14 @@ table/tag, same two-shapes pattern `:SetCondition`/`:SetOperation` already use:
 ```lua
 -- "Other creatures you control get +1/+1" via a script predicate instead of
 -- the {controller=.., card_types=..} table shape.
-e:SetAffected(function(object, source, controller)
+e:SetAffected(function(object, source, controller, state, enchanted)
     return object ~= source
 end)
 
 -- An effect whose shape is decided by a script instead of a Game.Effects.*
 -- tag - the "Lua asks, Rust decides" table convention Game.Ops.* operations
 -- already use, generalized to eight recognized keys:
-e:SetEffect(function(source, controller)
+e:SetEffect(function(source, controller, state, enchanted)
     return { modify_pt = { power = 1, toughness = 1 } }
     -- also recognized: set_pt = {power=,toughness=}, add_keyword = {"Flying",...},
     -- add_card_type = {"Creature",...}, add_color = "WU", switch_pt = true,
@@ -507,10 +516,15 @@ and must return a plain boolean. An effect-shape script is invoked once per quer
 (`ScriptRuntime::invoke_continuous_effect`) and must return a table with exactly one of the eight
 recognized keys above — an empty/unrecognized table, or a script that errors, resolves to "no
 effect this call," same "skip rather than guess" stance every other unresolvable script value in
-this engine already takes. Neither call passes `GameState` into Lua (same limitation
-`invoke_cda`/`invoke_condition`/`invoke_operation` already carry) — a script can only decide from
-`object`/`source`/`controller` identity or a constant, not real board state, until `Game.*`
-state-query bindings exist (still open, see `docs/implementation.md`'s slice backlog). `double_pt`
+this engine already takes. Both calls *do* pass a `state_to_lua` snapshot as a trailing argument
+(same hidden-information-safe `ScriptContext` convention `invoke_cda`/`invoke_condition`/
+`invoke_operation` already carry) — a script can read real (public) board state, not just
+`object`/`source`/`controller` identity. `enchanted` (CR 303.4m) is a further trailing argument —
+whatever object `source` is currently attached to, or `nil` if nothing — appended *after* `state` so
+an older script written against the pre-`enchanted` signature keeps working unmodified (Lua ignores
+a trailing argument a function doesn't declare a parameter for); `object == enchanted` is the
+scripted equivalent of `{ enchanted_only = true }` for a predicate that needs more than plain
+identity matching. `double_pt`
 has no `Game.Effects.DoublePT` tag-factory counterpart (no card needs one yet, same "no real card"
 posture other narrow gaps in this engine already accept) — the script-backed form above is
 currently the only way to author one, added so a scripted effect can participate in

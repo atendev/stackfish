@@ -377,10 +377,24 @@ fn applicable_effects_in_layer<'a>(
                 return false;
             }
             match &e.affected {
-                AffectedFilter::Primitive(_) => e.applies_to(object, source_obj),
-                AffectedFilter::Script(handle) => script_runtime
-                    .invoke_continuous_affects(*handle, state, object.object_id, e.source, source_obj.controller)
-                    .unwrap_or(false),
+                // CR 303.4m: EnchantedOnly's real body lives on
+                // `applies_to` itself (both `object`/`source_obj` are
+                // already full `&GameObject`s here, no extra lookup needed)
+                // - same treatment `Primitive` already gets.
+                AffectedFilter::Primitive(_) | AffectedFilter::EnchantedOnly => e.applies_to(object, source_obj),
+                AffectedFilter::Script(handle) => {
+                    let enchanted = source_obj.attached_to;
+                    script_runtime
+                        .invoke_continuous_affects(
+                            *handle,
+                            state,
+                            object.object_id,
+                            e.source,
+                            source_obj.controller,
+                            enchanted,
+                        )
+                        .unwrap_or(false)
+                }
             }
         })
         .collect();
@@ -502,7 +516,16 @@ fn resolve_primitive(
     match &effect.effect {
         EffectPayload::Primitive(p) => Some(p.clone()),
         EffectPayload::Script(handle) => {
-            script_runtime.invoke_continuous_effect(*handle, state, effect.source, controller).ok().flatten()
+            // CR 303.4m: the enchanted permanent's id (if `effect.source` is
+            // attached to anything), passed through so a script computing a
+            // dynamic value can reference it directly - same "Rust computes,
+            // Lua consumes an id" convention `source`/`controller` already
+            // establish.
+            let enchanted = state.object(effect.source).and_then(|o| o.attached_to);
+            script_runtime
+                .invoke_continuous_effect(*handle, state, effect.source, controller, enchanted)
+                .ok()
+                .flatten()
         }
     }
 }
