@@ -1072,6 +1072,10 @@ fn build_spell_modes(specs: &[SpellModeSpec]) -> Vec<SpellMode> {
         .map(|m| SpellMode {
             target_requirement: m.target_requirement.as_ref().map(build_target_requirement),
             effect: None,
+            // TODO: no TOML field for a mode's own additional cost yet -
+            // same pre-existing gap CardSpec itself has for the top-level
+            // card's own additional costs (no TOML representation at all).
+            additional_cost: None,
         })
         .collect()
 }

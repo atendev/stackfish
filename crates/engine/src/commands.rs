@@ -1557,7 +1557,7 @@ pub fn execute_command(
                 ));
             }
 
-            // CR 700.2a/d: a modal card requires the caster to announce
+            // CR 700.2a/d/h: a modal card requires the caster to announce
             // their mode choice(s) here, before targets are chosen (601.2b
             // comes before 601.2c). A non-modal card (definition.modes
             // empty) is untouched: modes must be empty, and the card's own
@@ -1566,15 +1566,24 @@ pub fn execute_command(
             // must be chosen (`ModeChoice::Exactly(1)` is the pre-existing
             // "Choose one —" behavior). CR 700.2d's "same mode twice"
             // exception (reminder-text-gated) stays unmodeled - a repeated
-            // index is always rejected.
-            let (target_requirement, modal_effect): (Option<TargetSpec>, Option<AbilityEffect>) =
-                if object.definition.modes.is_empty() {
+            // index is always rejected. `mode_additional_costs` collects
+            // every chosen mode's own `SpellMode::additional_cost` (CR
+            // 700.2h) - appended to the spell's overall `CostSpec.additional`
+            // once `cost` itself is computed below, so it's paid together
+            // with the mana cost through the same already-generic
+            // `PaymentPlan` machinery an activated ability's own additional
+            // costs already use.
+            let (target_requirement, modal_effect, mode_additional_costs): (
+                Option<TargetSpec>,
+                Option<AbilityEffect>,
+                Vec<AdditionalCost>,
+            ) = if object.definition.modes.is_empty() {
                     if !modes.is_empty() {
                         return Err(CommandError::IllegalAction(
                             "this card isn't modal - no modes to choose".to_string(),
                         ));
                     }
-                    (object.definition.target_requirement.clone(), None)
+                    (object.definition.target_requirement.clone(), None, Vec::new())
                 } else {
                     let (min, max) = match object.definition.mode_choice {
                         ModeChoice::Exactly(n) => (n, n),
@@ -1609,11 +1618,17 @@ pub fn execute_command(
                         })?;
                         chosen_modes.push(mode);
                     }
+                    // CR 700.2h: every chosen mode's own additional cost (if
+                    // any), collected regardless of whether one or several
+                    // modes were chosen - "if more than one such mode is
+                    // chosen, all additional costs must be paid."
+                    let mode_additional_costs: Vec<AdditionalCost> =
+                        chosen_modes.iter().filter_map(|m| m.additional_cost.clone()).collect();
                     if let [only] = chosen_modes.as_slice() {
                         // Single mode chosen - unchanged pre-multi-mode
                         // shape, no TargetSpec::Multiple/AbilityEffect::Modal
                         // wrapping.
-                        (only.target_requirement.clone(), only.effect.clone())
+                        (only.target_requirement.clone(), only.effect.clone(), mode_additional_costs)
                     } else {
                         // 2+ modes chosen: combine into one TargetSpec::
                         // Multiple (one TargetRequirement per chosen mode, a
@@ -1670,7 +1685,7 @@ pub fn execute_command(
                         let target_requirement = Some(TargetSpec::Multiple(reqs));
                         let effects: Vec<Option<AbilityEffect>> =
                             chosen_modes.iter().map(|m| m.effect.clone()).collect();
-                        (target_requirement, Some(AbilityEffect::Modal(effects)))
+                        (target_requirement, Some(AbilityEffect::Modal(effects)), mode_additional_costs)
                     }
                 };
 
@@ -1694,9 +1709,11 @@ pub fn execute_command(
             // CR 601.2f: total cost = the card's printed mana_cost, unless
             // an alternative cost was announced (CR 601.2b), in which case
             // it replaces the mana cost entirely - never mixed with it.
-            // No additional-cost support yet either way (see
-            // CostSpec::mana_only's own doc, and PaymentPlan::validate's
-            // "out of scope" list).
+            // `cost.additional` is populated below only from chosen modes'
+            // own CR 700.2h costs (`mode_additional_costs`, computed above)
+            // - a non-modal card's own top-level additional cost has no
+            // representation on `CardDefinition` at all yet (only
+            // `alternative_costs` exists), a separate, still-open gap.
             //
             // CR 107.3a/601.2b: an {X} cost and an announced x_value must
             // agree - both present or both absent - and once agreed, X is
@@ -1709,7 +1726,7 @@ pub fn execute_command(
             // missing. TODO: X combined with an alternative cost (e.g.
             // flashback on an X spell) isn't handled - x_value is simply
             // unchecked in that branch below.
-            let (cost, exile_on_leaving_stack) = match alternative {
+            let (mut cost, exile_on_leaving_stack) = match alternative {
                 Some(AlternativeCost::Replacement { cost, exile_on_leaving_stack, .. }) => {
                     (cost.clone(), *exile_on_leaving_stack)
                 }
@@ -1772,6 +1789,12 @@ pub fn execute_command(
                     (CostSpec::mana_only(resolved_mana_cost), false)
                 }
             };
+            // CR 700.2h: every chosen mode's own additional cost (collected
+            // above, regardless of whether an alternative or normal mana
+            // cost is being paid - CR 700.2h doesn't exclude either) is
+            // paid together with the rest of this cost, through the same
+            // already-generic PaymentPlan machinery.
+            cost.additional.extend(mode_additional_costs);
 
             // Snapshot before the move - CR 603.10's last_known_info (see
             // GameEventKind::ZoneChange's doc comment).

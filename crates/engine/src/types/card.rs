@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 
 use crate::types::ability::AbilityEffect;
+use crate::types::cost::AdditionalCost;
 use crate::types::counter::{CounterKind, CounterSet};
 use crate::types::mana::{ColorSet, ManaCost};
 
@@ -296,9 +297,10 @@ pub struct CardDefinition {
     /// TODO: CR 700.2d's "same mode twice" exception (reminder-text-gated,
     /// rare — only when a card explicitly says "you may choose the same
     /// mode more than once") stays unmodeled; a repeated index is always
-    /// rejected. TODO: CR 700.2e (another player chooses), 700.2h (a mode
-    /// carrying its own additional cost), and 700.2i (pawprint mode
-    /// budgets) are all unimplemented.
+    /// rejected. TODO: CR 700.2e (another player chooses) and 700.2i
+    /// (pawprint mode budgets) are still unimplemented. CR 700.2h (a mode's
+    /// own additional cost) is real now too — see `SpellMode::
+    /// additional_cost`.
     /// TODO: CR 700.2b (a modal *activated/triggered* ability, as opposed
     /// to a modal spell) is untouched — `RegisteredAbility` has no `modes`
     /// field of its own yet.
@@ -315,6 +317,18 @@ pub struct CardDefinition {
 pub struct SpellMode {
     pub target_requirement: Option<crate::types::target::TargetSpec>,
     pub effect: Option<AbilityEffect>,
+    /// CR 700.2h: "some modal spells have one or more modes with a cost
+    /// listed before the effect of that mode" — paid as part of the overall
+    /// cast, alongside the mana cost, only if this mode is chosen.
+    /// `commands::execute_command`'s `CastSpell` arm appends every chosen
+    /// mode's own `additional_cost` (if any) to the spell's `CostSpec.
+    /// additional`, reusing the exact same generic `AdditionalCost` payment
+    /// machinery an activated ability's own additional costs already go
+    /// through (`PaymentPlan::validate`/`Engine::submit_payment` don't
+    /// distinguish a spell's cost from an ability's) — no new payment code
+    /// needed, only new population of an existing, already-generic field.
+    /// `None` (the common case) for a mode with no cost of its own.
+    pub additional_cost: Option<AdditionalCost>,
 }
 
 /// CR 700.2's "Choose one —"/"Choose two —"/"Choose one or more —" instruction

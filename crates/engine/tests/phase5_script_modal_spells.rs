@@ -74,7 +74,7 @@ fn modal_spell_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: vec![
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)) },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None },
             SpellMode {
                 target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
                     filter: TargetFilter::AnyTarget,
@@ -83,6 +83,7 @@ fn modal_spell_definition() -> CardDefinition {
                     exclude_source: false,
                 })),
                 effect: Some(AbilityEffect::Damage(2)),
+                additional_cost: None,
             },
         ],
         mode_choice: ModeChoice::Exactly(1),
