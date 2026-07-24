@@ -257,6 +257,12 @@ pub struct CardSpec {
     /// `mode_count`". Ignored when `modes` is empty.
     #[serde(default)]
     pub mode_up_to: bool,
+    /// CR 700.2d's reminder-text-gated "you may choose the same mode more
+    /// than once" exception (e.g. Profane Command). Ignored when `modes` is
+    /// empty. Defaults to `false` so every scenario fixture written before
+    /// this field existed still parses unchanged.
+    #[serde(default)]
+    pub mode_repeatable: bool,
 }
 
 fn default_mode_count() -> u32 {
@@ -1080,13 +1086,15 @@ fn build_spell_modes(specs: &[SpellModeSpec]) -> Vec<SpellMode> {
         .collect()
 }
 
-/// `CardSpec.mode_count`/`mode_up_to` -> `ModeChoice` (CR 700.2d). Meaningless
-/// (but still read, for a consistent default) when `CardSpec.modes` is empty.
+/// `CardSpec.mode_count`/`mode_up_to`/`mode_repeatable` -> `ModeChoice` (CR
+/// 700.2d). Meaningless (but still read, for a consistent default) when
+/// `CardSpec.modes` is empty.
 fn build_mode_choice(spec: &CardSpec) -> ModeChoice {
-    if spec.mode_up_to {
-        ModeChoice::UpTo(spec.mode_count)
-    } else {
-        ModeChoice::Exactly(spec.mode_count)
+    match (spec.mode_up_to, spec.mode_repeatable) {
+        (false, false) => ModeChoice::Exactly(spec.mode_count),
+        (true, false) => ModeChoice::UpTo(spec.mode_count),
+        (false, true) => ModeChoice::ExactlyRepeatable(spec.mode_count),
+        (true, true) => ModeChoice::UpToRepeatable(spec.mode_count),
     }
 }
 

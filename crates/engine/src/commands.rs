@@ -1564,15 +1564,22 @@ pub fn execute_command(
             // singular target_requirement/effect are used exactly as before
             // this field existed. `mode_choice` names how many of `modes`
             // must be chosen (`ModeChoice::Exactly(1)` is the pre-existing
-            // "Choose one —" behavior). CR 700.2d's "same mode twice"
-            // exception (reminder-text-gated) stays unmodeled - a repeated
-            // index is always rejected. `mode_additional_costs` collects
+            // "Choose one —" behavior); its `*Repeatable` variants are CR
+            // 700.2d's reminder-text-gated "you may choose the same mode
+            // more than once" exception - a repeated index is rejected
+            // unless `repeatable` is set. `mode_additional_costs` collects
             // every chosen mode's own `SpellMode::additional_cost` (CR
             // 700.2h) - appended to the spell's overall `CostSpec.additional`
             // once `cost` itself is computed below, so it's paid together
             // with the mana cost through the same already-generic
             // `PaymentPlan` machinery an activated ability's own additional
-            // costs already use.
+            // costs already use. A repeated mode with its own additional
+            // cost pays that cost once per instance (CR 700.2d "treated as
+            // if that mode appeared that many times in sequence" + 700.2h
+            // "if more than one such mode is chosen, all additional costs
+            // must be paid") - falls out for free below since
+            // `mode_additional_costs` is collected per chosen instance, not
+            // deduped by mode index.
             let (target_requirement, modal_effect, mode_additional_costs): (
                 Option<TargetSpec>,
                 Option<AbilityEffect>,
@@ -1585,11 +1592,13 @@ pub fn execute_command(
                     }
                     (object.definition.target_requirement.clone(), None, Vec::new())
                 } else {
-                    let (min, max) = match object.definition.mode_choice {
-                        ModeChoice::Exactly(n) => (n, n),
+                    let (min, max, repeatable) = match object.definition.mode_choice {
+                        ModeChoice::Exactly(n) => (n, n, false),
                         // CR 700.2a: "choose a number of those options" -
                         // never zero, even for an UpTo spell.
-                        ModeChoice::UpTo(n) => (1, n),
+                        ModeChoice::UpTo(n) => (1, n, false),
+                        ModeChoice::ExactlyRepeatable(n) => (n, n, true),
+                        ModeChoice::UpToRepeatable(n) => (1, n, true),
                     };
                     let chosen_count = modes.len() as u32;
                     if chosen_count < min || chosen_count > max {
@@ -1597,12 +1606,14 @@ pub fn execute_command(
                             "this modal spell requires choosing between {min} and {max} mode(s), got {chosen_count}"
                         )));
                     }
-                    let mut seen_modes = HashSet::new();
-                    for &m in &modes {
-                        if !seen_modes.insert(m) {
-                            return Err(CommandError::IllegalAction(
-                                "the same mode can't be chosen more than once".to_string(),
-                            ));
+                    if !repeatable {
+                        let mut seen_modes = HashSet::new();
+                        for &m in &modes {
+                            if !seen_modes.insert(m) {
+                                return Err(CommandError::IllegalAction(
+                                    "the same mode can't be chosen more than once".to_string(),
+                                ));
+                            }
                         }
                     }
                     // CR 700.2's own convention (per Wizards' rulings on

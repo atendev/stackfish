@@ -362,25 +362,29 @@ becoming illegal before resolution) are exercised exhaustively in
 `crates/engine/tests/phase5_targeting_basics.rs` instead, not via TOML.
 
 **`modes` (CR 700.2, modal spells):** if non-empty, this card is modal — casting it requires
-`PlayerActionKind::CastSpell::modes` to supply `mode_count` valid, non-repeating indices into this
-list (`mode_count`/`mode_up_to` below name how many; `mode_count = 1` — the default — is CR 700.2a's
-"choose exactly one"). CR 700.2d's "same mode twice" exception (reminder-text-gated) stays
-unmodeled — a repeated index is always rejected. CR 700.2e (another player chooses), 700.2h (a
-mode's own additional cost), and 700.2i (pawprint budgets) are all still deferred. A single chosen
-mode's own `target_requirement`/effect are used instead of the card's top-level fields for the rest
-of casting/resolution (CR 700.2c: a mode with no `target_requirement` casts as though it required no
-targets at all, regardless of what other modes on the same card ask for); 2+ chosen modes combine
-their own `target_requirement`s into one multi-target cast and resolve in card-print order, narrowed
-to the synchronous `AbilityEffect` subset `commands::is_modal_resolvable` accepts (a mode using an
-unsupported kind can't be combined with another chosen mode — rejected at cast time). No TOML field
-for a mode's own effect exists (see below), so a scenario fixture can only exercise the "choose
-exactly one" (or "choose N, no effect the engine resolves") shape either way.
+`PlayerActionKind::CastSpell::modes` to supply `mode_count` valid indices into this list
+(`mode_count`/`mode_up_to`/`mode_repeatable` below name how many and whether repeats are allowed;
+`mode_count = 1` — the default — is CR 700.2a's "choose exactly one"). Indices must be distinct
+unless `mode_repeatable = true` (CR 700.2d's reminder-text-gated "you may choose the same mode more
+than once," e.g. Profane Command) — a repeated mode is treated as if it appeared that many times in
+sequence, each instance getting its own target slot and (if the mode carries one) its own additional
+cost. CR 700.2e (another player chooses) and 700.2i (pawprint budgets) are still deferred. A single
+chosen mode's own `target_requirement`/effect are used instead of the card's top-level fields for the
+rest of casting/resolution (CR 700.2c: a mode with no `target_requirement` casts as though it
+required no targets at all, regardless of what other modes on the same card ask for); 2+ chosen
+modes (including 2+ instances of one repeated mode) combine their own `target_requirement`s into one
+multi-target cast and resolve in card-print order, narrowed to the synchronous `AbilityEffect` subset
+`commands::is_modal_resolvable` accepts (a mode using an unsupported kind can't be combined with
+another chosen mode — rejected at cast time). No TOML field for a mode's own effect or CR 700.2h
+additional cost exists (see below), so a scenario fixture can only exercise the "choose exactly one"
+(or "choose N, no effect the engine resolves") shape either way.
 
 ```toml
 [cards]
 # ...
-mode_count = 2     # optional, default 1 - how many modes must be chosen
-mode_up_to = true  # optional, default false - "choose up to mode_count" instead of exactly
+mode_count = 2         # optional, default 1 - how many modes must be chosen
+mode_up_to = true      # optional, default false - "choose up to mode_count" instead of exactly
+mode_repeatable = true # optional, default false - CR 700.2d, allows repeated mode indices
 ```
 
 ```toml
