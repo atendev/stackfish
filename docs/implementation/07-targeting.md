@@ -444,8 +444,37 @@
   A mode whose own `target_requirement` is itself `TargetSpec::Multiple` (a mode independently
   needing several differently-filtered targets) can't be combined with other chosen modes either -
   rejected outright rather than silently flattened. CR 700.2d's "same mode twice" exception, CR
-  700.2e (another player chooses), 700.2h (a mode's own additional cost), and 700.2i (pawprint
-  budgets) all stay unmodeled, unchanged from before this slice.
+  700.2e (another player chooses), and 700.2i (pawprint budgets) stay unmodeled. CR 700.2h (a mode's
+  own additional cost) is real now too - see `modal-mode-additional-cost` below.
+
+## Slice: modal-mode-additional-cost (merged)
+
+- Branch `phase5/modal-mode-additional-cost`.
+- Scope: CR 700.2h — a modal spell mode with its own additional cost, paid alongside the mana cost
+  only if that mode is chosen.
+- Key finding that shrank the plan: `commands.rs`'s own comment claiming "no additional-cost support
+  yet either way" for `CastSpell` was stale. `PaymentPlan::validate`/`Engine::submit_payment`
+  (`types/cost.rs`/`engine.rs`) are already fully generic over `CostSpec.additional: Vec<AdditionalCost>`
+  — built for activated abilities, but never special-cased by caller. The real gap was narrower than
+  the comment suggested: `CastSpell` simply never *populated* `cost.additional` with anything. No
+  payment-engine changes were needed at all, only new population of an already-generic field.
+- Verify: 5 new tests (`phase5_modal_mode_additional_cost.rs` — a mode with no cost pays with an
+  empty plan, a mode with a cost requires paying it, an empty plan against a costed mode is rejected,
+  2+ chosen modes still only require the one costed mode's own payment, insufficient life to pay is
+  rejected, non-modal cards unaffected), full workspace suite green (143 test binaries, 0 failed).
+- Key changes:
+  - `SpellMode.additional_cost: Option<AdditionalCost>` — small ripple (6 struct-literal sites across
+    `types/card.rs`, two test files, and `scenario/src/lib.rs`'s own `build_spell_modes`, unlike
+    `CardDefinition`'s own much larger field-addition ripple `modal-multi-mode` already took on).
+  - `commands::execute_command`'s `CastSpell` arm collects every chosen mode's own `additional_cost`
+    (`mode_additional_costs: Vec<AdditionalCost>`, `filter_map`'d regardless of whether one or
+    several modes were chosen) alongside the existing `target_requirement`/`modal_effect`
+    computation, then appends it to `cost.additional` once `cost` itself is finalized — for both the
+    normal-mana-cost and alternative-cost branches, since CR 700.2h doesn't exclude either.
+- Unresolved: no scenario TOML field for a mode's own additional cost — same pre-existing gap
+  `CardSpec` itself has for a card's own top-level additional costs (no TOML representation at all
+  yet, only via direct struct literals in a Rust integration test). CR 700.2d's "same mode twice"
+  exception, CR 700.2e (another player chooses), and 700.2i (pawprint budgets) all stay unmodeled.
 
 ## Slice: targeting-multi-word-variable-count (merged)
 

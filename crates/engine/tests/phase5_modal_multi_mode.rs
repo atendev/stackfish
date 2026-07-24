@@ -87,8 +87,12 @@ fn choose_two_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: vec![
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)) },
-            SpellMode { target_requirement: Some(any_target_requirement()), effect: Some(AbilityEffect::Damage(2)) },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None },
+            SpellMode {
+                target_requirement: Some(any_target_requirement()),
+                effect: Some(AbilityEffect::Damage(2)),
+                additional_cost: None,
+            },
             SpellMode {
                 target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
                     filter: TargetFilter::Object {
@@ -107,6 +111,7 @@ fn choose_two_definition() -> CardDefinition {
                     exclude_source: false,
                 })),
                 effect: Some(AbilityEffect::Destroy),
+                additional_cost: None,
             },
         ],
         mode_choice: ModeChoice::Exactly(2),
