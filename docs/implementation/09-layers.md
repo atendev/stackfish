@@ -112,6 +112,64 @@
   - `EffectPrimitive` dropped `Copy` derive.
 - Unresolved:
   - General CR 612.2 text substitution, single-card rules (612.5-612.10).
+    CR 612.5 (Exchange of Words) is real now — see `exchange-of-words` below.
+    612.6 (Volrath's Shapeshifter, "full text" — name/mana cost/color/P&T
+    included, not just the text box) and 612.7 (Spy Kit, "all names of
+    nonlegendary creature cards") stay unmodeled — each is its own one-off
+    shape, not a shared mechanic the way a keyword ability is.
+
+## Slice: exchange-of-words (merged)
+
+- Branch `phase5/exchange-of-words`.
+- Scope: CR 612.5 — "exchange the text boxes of two objects." Picked as the
+  most tractable of the three single-card CR 612.5-612.7 rules: CR 612.1
+  scopes text-changing effects to "rules text ... and/or ... the type line,"
+  and 612.5 itself says only "text boxes" — name, mana cost, color, P/T, and
+  card types/supertypes/subtypes all stay exactly as printed on each
+  permanent. Explicitly not a CR 707 copy effect (separate rule family, no
+  `CopyExceptions` interaction).
+- Key finding that shaped the plan: a permanent's *functional* abilities
+  aren't layer-computed at all in this engine — `RegisteredAbility`/
+  `ContinuousEffect`/`ReplacementEffect` entries are one-time registrations
+  `run_card_script` drops into flat `GameState` lists at battlefield entry,
+  keyed only by `source: ObjectId`, never re-derived from `CardDefinition`.
+  `BecomeCopy` is the only existing precedent for changing what abilities a
+  *live* permanent has (`purge_granted_abilities` + re-run `run_card_script`
+  against a new snapshot) — this slice reuses that machinery, but
+  symmetrically (once per target) and scoped to only the text-box fields.
+- Verify: 4 new tests (`phase5_exchange_of_words.rs`), full workspace suite
+  green.
+- Key changes:
+  - `AbilityEffect::ExchangeTextBoxes` — no fields, same toggle shape as
+    `BecomeCopy`/`Attach`; the two targets live on the `StackObject`.
+  - `ability::apply_text_box(snapshot, other)` — overwrites just
+    `oracle_text`/`keywords`/`script_ref` on `snapshot` from `other`, unlike
+    `CopyExceptions`' full-copy-by-default shape.
+  - `ResolveStackTop`'s dispatch: captures both targets' current snapshot
+    (`copiable_override` if present, else `definition`) *before* mutating
+    either (order-of-operations hazard flagged in the code — mutating one
+    first would corrupt the source the other reads from), builds two
+    synthetic definitions, sets `copiable_override` on both, then
+    `purge_granted_abilities` + `run_card_script` for each against the
+    other's text box.
+  - Inherently pairwise, unlike a uniform multi-word spell (Plague Spores):
+    rechecks both targets directly against their own `TargetRequirement`
+    (a *fresh* `is_legal_now` closure, scoped to this match arm only — reusing
+    the outer one would extend its `&self.state` capture across every
+    `&mut self.state` use in every other match arm, since the borrow checker
+    can't see match arms are mutually exclusive at runtime) rather than
+    consuming the flattened `legal_targets` list, which loses positional
+    pairing. Anything short of two still-legal `Target::Object` targets is a
+    silent no-op — no partner to exchange with, not a one-sided change.
+  - `GameEventKind::TextBoxesExchanged { a, b }` — pure ledger record, same
+    "already mutated, log it" shape `BecameCopy` uses.
+  - `Game.Ops.ExchangeTextBoxes` — bare toggle value, no Lua constructor
+    function (same as `Game.Ops.Attach`).
+- Unresolved: no duration/reversion (permanent until another effect changes
+  it, matching `BecomeCopy`'s own precedent, not a new gap). `target_requirement`/
+  `effect`/`modes`/`alternative_costs` aren't part of the swap — those only
+  matter while a card is being cast as a spell, not to a live permanent's
+  ongoing behavior, so they're irrelevant post-resolution.
 
 ## Slice: copy-exceptions (merged)
 

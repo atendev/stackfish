@@ -1910,7 +1910,8 @@ pub fn execute_command(
                 | Some(AbilityEffect::Surveil(_))
                 | Some(AbilityEffect::Search { .. })
                 | Some(AbilityEffect::BecomeCopy(_))
-                | Some(AbilityEffect::Attach)) => {
+                | Some(AbilityEffect::Attach)
+                | Some(AbilityEffect::ExchangeTextBoxes)) => {
                     validate_targets(
                         state,
                         script_runtime,

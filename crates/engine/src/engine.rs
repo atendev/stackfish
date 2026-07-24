@@ -9,7 +9,7 @@ use crate::sba::{self, SbaOutcome};
 use crate::script::{OperationOutcome, ScriptChoiceRequest, ScriptError, ScriptRuntime};
 use crate::triggers::{self, PendingTrigger};
 use crate::types::ability::{
-    AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, NamedToken, RegisteredAbility,
+    apply_text_box, AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, NamedToken, RegisteredAbility,
     SearchDestination, TokenSpec,
 };
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
@@ -3884,6 +3884,84 @@ impl Engine {
                                 // - silent no-op, same stance every other
                                 // arm here takes for an unreachable target
                                 // shape.
+                            }
+                            // CR 612.5: inherently pairwise, unlike a
+                            // uniform multi-word spell (Plague Spores'
+                            // "destroy target creature and target land,"
+                            // where each surviving legal target is still
+                            // independently destroyed) - rechecks both
+                            // targets directly against their own
+                            // TargetRequirement rather than consuming the
+                            // flattened legal_targets list, which loses the
+                            // positional pairing this role-differentiated
+                            // effect needs (see ExchangeTextBoxes's own doc
+                            // comment). Anything short of two still-legal
+                            // Target::Object targets is a silent no-op - no
+                            // partner to exchange with.
+                            Some(AbilityEffect::ExchangeTextBoxes) => {
+                                // Not `is_legal_now` (the closure defined
+                                // above) - reusing it here would extend its
+                                // captured `&self.state` borrow across every
+                                // `&mut self.state` use in every other arm
+                                // of this same match, since the borrow
+                                // checker can't see that match arms are
+                                // mutually exclusive at runtime. Same
+                                // `target_is_legal` call, inlined instead.
+                                let is_legal_now = |t: &Target, req: &TargetRequirement| {
+                                    commands::target_is_legal(
+                                        &self.state,
+                                        &self.script_runtime,
+                                        *t,
+                                        &req.filter,
+                                        top.controller,
+                                        top.source,
+                                        req.exclude_source,
+                                    )
+                                };
+                                if let (Some(TargetSpec::Multiple(reqs)), [Target::Object(a_id), Target::Object(b_id)]) =
+                                    (&top.target_requirement, top.targets.as_slice())
+                                {
+                                    let (a_id, b_id) = (*a_id, *b_id);
+                                    if reqs.len() == 2
+                                        && is_legal_now(&Target::Object(a_id), &reqs[0])
+                                        && is_legal_now(&Target::Object(b_id), &reqs[1])
+                                    {
+                                        let a_snapshot = self.state.object(a_id).map(|obj| {
+                                            obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
+                                        });
+                                        let b_snapshot = self.state.object(b_id).map(|obj| {
+                                            obj.copiable_override.clone().unwrap_or_else(|| obj.definition.clone())
+                                        });
+                                        if let (Some(a_snapshot), Some(b_snapshot)) = (a_snapshot, b_snapshot) {
+                                            let mut a_new = a_snapshot.clone();
+                                            apply_text_box(&mut a_new, &b_snapshot);
+                                            let mut b_new = b_snapshot.clone();
+                                            apply_text_box(&mut b_new, &a_snapshot);
+
+                                            if let Some(obj) = self.state.object_mut(a_id) {
+                                                obj.copiable_override = Some(a_new.clone());
+                                            }
+                                            if let Some(obj) = self.state.object_mut(b_id) {
+                                                obj.copiable_override = Some(b_new.clone());
+                                            }
+                                            commands::purge_granted_abilities(&mut self.state, a_id);
+                                            commands::purge_granted_abilities(&mut self.state, b_id);
+                                            // TODO: a script error here is
+                                            // silently dropped, same gap
+                                            // every other run_card_script
+                                            // call site in this file already
+                                            // flags.
+                                            let _ = self.script_runtime.run_card_script(&mut self.state, &a_new, a_id);
+                                            let _ = self.script_runtime.run_card_script(&mut self.state, &b_new, b_id);
+
+                                            events.push(GameEventKind::TextBoxesExchanged { a: a_id, b: b_id });
+                                        }
+                                    }
+                                }
+                                // else: fewer than two Target::Object
+                                // targets, or the requirement isn't
+                                // Multiple([_, _]) - silent no-op, same
+                                // stance BecomeCopy's own arm takes above.
                             }
                             // CR 111: create one or more token permanents on
                             // the battlefield under the controller's control.

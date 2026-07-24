@@ -2466,6 +2466,12 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     // attach target is whatever the activated ability's own `:SetTarget`
     // resolved, not a value passed here.
     ops.set("Attach", OperationTag(AbilityEffect::Attach))?;
+    // `Game.Ops.ExchangeTextBoxes` (CR 612.5) - no arguments, same toggle
+    // shape as `Game.Ops.Attach`/`BecomeCopy`; the two targets are whatever
+    // the spell/ability's own `:SetTarget`/`target_requirement` resolved
+    // (a `TargetSpec::Multiple` of exactly two entries), not values passed
+    // here.
+    ops.set("ExchangeTextBoxes", OperationTag(AbilityEffect::ExchangeTextBoxes))?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;
