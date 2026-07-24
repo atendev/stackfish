@@ -41,6 +41,7 @@ fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinit
         alternative_costs: Vec::new(),
         effect: Some(effect),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -64,6 +65,7 @@ fn creature_definition(id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -87,6 +89,7 @@ fn land_definition(id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

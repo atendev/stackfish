@@ -43,6 +43,7 @@ fn creature_definition(id: u64, name: &str, extra_types: CardTypeSet) -> CardDef
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -66,6 +67,7 @@ fn land_definition(id: u64, name: &str, subtype: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -93,6 +95,7 @@ fn land_with(id: u64, name: &str, subtype: Option<&str>, supertypes: SupertypeSe
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

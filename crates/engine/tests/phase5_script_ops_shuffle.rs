@@ -41,6 +41,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -64,6 +65,7 @@ fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -88,6 +90,7 @@ fn shuffle_spell_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Shuffle),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -112,6 +115,7 @@ fn draw_spell_definition(definition_id: u64) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::DrawCards(1)),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

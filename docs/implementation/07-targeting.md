@@ -382,3 +382,67 @@
     `TargetSpec::Multiple`'s own doc comment for why).
   - No Lua builder path for constructing `TargetSpec::Multiple` — same "direct struct literal only"
     limit `alternative_costs`/`effect` have for TOML/script-built cards; not attempted this slice.
+
+## Slice: modal-multi-mode (merged)
+
+- Branch `phase5/modal-multi-mode`.
+- Scope: CR 700.2d — choosing two or more modes of a modal spell. `commands.rs`'s "choose exactly
+  one" validation (`modal-spell-toml`'s own note above) is now "choose however many
+  `CardDefinition.mode_choice` names."
+- Key finding that reshaped the plan: unlike `multi-target-word-spells` (which found a zero-
+  `CardDefinition`-ripple path via a new `TargetSpec` variant alone), this genuinely needed new
+  per-card data with nowhere smaller to live — a card has to declare its own mode-count requirement
+  somewhere. Confirmed with the user before proceeding: added `CardDefinition.mode_choice:
+  ModeChoice` despite this being exactly the "~403 struct-literal sites, no `Default` impl"
+  ripple class `multi-target-word-spells`'s own notes flagged as prohibitive and avoided — no
+  smaller-footprint design existed this time. Mitigated by fixing `testutil::minimal_card_definition`
+  first (the shared struct-update-syntax helper most tests already build on), which absorbed the
+  overwhelming majority of call sites for free; the remaining ~40 full-literal sites were fixed via
+  a compiler-error-driven loop (add the field, rebuild, patch every reported site, repeat until
+  clean) rather than a blind text search, since a same-text false positive
+  (`PlayerActionKind::CastSpell`'s own unrelated `modes: Vec<u32>` field) made blind regex genuinely
+  unsafe here.
+- Verify: 10 new tests (`phase5_modal_multi_mode.rs`), full workspace suite green
+  (`cargo test --workspace`, 141 test binaries, 0 failed).
+- Key changes:
+  - `ModeChoice { Exactly(u32), UpTo(u32) }` (`types/card.rs`) — `CardDefinition.mode_choice`,
+    ignored (but still required, no `Default` impl) when `modes` is empty.
+  - `commands::execute_command`'s `CastSpell` arm: validates `modes.len()` against `mode_choice`'s
+    min/max, rejects a repeated mode index (CR 700.2d's default case; the reminder-text-gated "may
+    choose the same mode more than once" exception stays unmodeled), sorts chosen indices into
+    card-print order (matching Wizards' own ruling that a modal spell's chosen effects happen in the
+    order printed on the card, not the order chosen). A single chosen mode is unchanged from before
+    this slice (bare `target_requirement`/`effect`, no wrapping). 2+ chosen modes combine into one
+    `TargetSpec::Multiple` (reusing `multi-target-word-spells`'s own machinery — one
+    `TargetRequirement` per chosen mode, a synthetic `count: 0` placeholder for a mode with no
+    `target_requirement` of its own, CR 700.2c) and one new `AbilityEffect::Modal(Vec<Option<
+    AbilityEffect>>)` (one slot per chosen mode, same card-print order, `None` for a mode with no
+    effect of its own).
+  - `commands::is_modal_resolvable` — cast-time gate rejecting a mode combination if any chosen
+    mode's effect isn't in the synchronous, never-pausing subset `ResolveStackTop`'s new `Modal` arm
+    actually knows how to resolve (`GainLife`/`Damage`/`Counters`/`Pump`/`GainControl`/`Shuffle`).
+    Every excluded kind (`Destroy`/`Sacrifice`/`Exile`/`DrawCards`/`Search`/`BecomeCopy`/
+    `CreateToken`/`Attach`/`ExchangeTextBoxes`) either pauses mid-resolution or has its own bespoke
+    per-target-pairing shape that a generic per-mode loop can't drive — combining 2+ such modes would
+    need real coordination between multiple simultaneous pauses, out of scope for this slice.
+  - `ResolveStackTop`'s new `Some(AbilityEffect::Modal(effects))` match arm: re-derives per-mode
+    target chunks from `top.target_requirement` (always `TargetSpec::Multiple` by construction when
+    `Modal` is used) via the existing `commands::split_targets_by_requirement`, since the pre-existing
+    `legal_targets` local is deliberately flattened (correct for a uniform-verb multi-word spell,
+    wrong once each chunk belongs to a *different* mode's own effect). The per-mode legality
+    filtering (`modal_chunk_legals`) is computed once, right next to `legal_targets` itself near the
+    top of `ResolveStackTop` — not inside the `Modal` arm — because the `is_legal_now` closure
+    borrows `&self.state`, which can't coexist with the `Modal` arm's own `self.state` mutations
+    (`player_mut`/`allocate_sequence_no`/`continuous_effects.push`) if the closure's last use were
+    inside that same arm; computing it up front keeps its borrow's lifetime exactly where it already
+    was before this slice.
+  - Scenario TOML: `CardSpec.mode_count`/`mode_up_to` (`#[serde(default = "default_mode_count")]`
+    defaulting to `1`/`false, so every pre-existing modal-spell fixture parses unchanged),
+    `build_mode_choice(&CardSpec) -> ModeChoice`, wired into all 3 `CardDefinition`-construction
+    sites `modal-spell-toml` already touched.
+- Unresolved: combining a mode using a paused/bespoke effect kind (see `is_modal_resolvable` above).
+  A mode whose own `target_requirement` is itself `TargetSpec::Multiple` (a mode independently
+  needing several differently-filtered targets) can't be combined with other chosen modes either -
+  rejected outright rather than silently flattened. CR 700.2d's "same mode twice" exception, CR
+  700.2e (another player chooses), 700.2h (a mode's own additional cost), and 700.2i (pawprint
+  budgets) all stay unmodeled, unchanged from before this slice.

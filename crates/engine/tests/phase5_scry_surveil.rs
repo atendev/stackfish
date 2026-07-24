@@ -44,6 +44,7 @@ fn library_card_definition(definition_id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -67,6 +68,7 @@ fn scry_spell_definition(n: u32) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Scry(n)),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -90,6 +92,7 @@ fn surveil_spell_definition(n: u32) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Surveil(n)),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

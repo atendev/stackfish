@@ -284,20 +284,30 @@ pub struct CardDefinition {
     pub effect: Option<AbilityEffect>,
     /// CR 700.2 modal spells — empty for the overwhelming majority of
     /// cards (non-modal), which use `target_requirement`/`effect` above
-    /// directly. Non-empty means "Choose one —"-style: the caster picks
-    /// exactly one entry (`PlayerActionKind::CastSpell::modes` must supply
-    /// exactly one valid index into this `Vec`), and that mode's own
+    /// directly. Non-empty means "Choose N —"-style (`mode_choice` below
+    /// says how many): the caster picks that many distinct entries
+    /// (`PlayerActionKind::CastSpell::modes` supplies that many valid,
+    /// non-repeating indices into this `Vec`), and each chosen mode's own
     /// `target_requirement`/`effect` are used for the rest of casting and
-    /// resolution instead of this struct's own singular fields.
+    /// resolution instead of this struct's own singular fields — see
+    /// `commands::CastSpell`'s own doc comment for how 2+ chosen modes
+    /// combine (CR 700.2d, `phase5/modal-multi-mode`).
     ///
-    /// TODO: CR 700.2d (choosing more than one mode, or the same mode
-    /// twice), 700.2e (another player chooses), 700.2h (a mode carrying its
-    /// own additional cost), and 700.2i (pawprint mode budgets) are all
-    /// unimplemented — this only ever accepts exactly one chosen index.
+    /// TODO: CR 700.2d's "same mode twice" exception (reminder-text-gated,
+    /// rare — only when a card explicitly says "you may choose the same
+    /// mode more than once") stays unmodeled; a repeated index is always
+    /// rejected. TODO: CR 700.2e (another player chooses), 700.2h (a mode
+    /// carrying its own additional cost), and 700.2i (pawprint mode
+    /// budgets) are all unimplemented.
     /// TODO: CR 700.2b (a modal *activated/triggered* ability, as opposed
     /// to a modal spell) is untouched — `RegisteredAbility` has no `modes`
     /// field of its own yet.
     pub modes: Vec<SpellMode>,
+    /// How many of `modes` above must be chosen — meaningless (but still
+    /// must be set; `CardDefinition` has no `Default` impl) when `modes` is
+    /// empty. `ModeChoice::Exactly(1)` is the pre-existing "Choose one —"
+    /// behavior every modal card used before `phase5/modal-multi-mode`.
+    pub mode_choice: ModeChoice,
 }
 
 /// One option of a CR 700.2 modal spell — see `CardDefinition::modes`.
@@ -305,6 +315,21 @@ pub struct CardDefinition {
 pub struct SpellMode {
     pub target_requirement: Option<crate::types::target::TargetSpec>,
     pub effect: Option<AbilityEffect>,
+}
+
+/// CR 700.2's "Choose one —"/"Choose two —"/"Choose one or more —" instruction
+/// preceding a modal spell/ability's bulleted mode list — see
+/// `CardDefinition::mode_choice`. `Exactly(n)`: the caster must choose
+/// exactly `n` distinct modes (`n == 1` is the common "Choose one —" case).
+/// `UpTo(n)`: the caster may choose any number from 1 to `n` distinct modes
+/// (e.g. "Choose one or both —" is `UpTo(2)`) — CR 700.2a still requires at
+/// least one mode be chosen either way ("choose a number of those options,"
+/// never zero); a spell with no legal mode at all simply can't be cast
+/// (601.2b), same as any other spell with no legal choice.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ModeChoice {
+    Exactly(u32),
+    UpTo(u32),
 }
 
 impl CardDefinition {

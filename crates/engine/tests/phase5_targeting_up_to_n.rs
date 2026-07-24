@@ -39,6 +39,7 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -68,6 +69,7 @@ fn volley_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Damage(1)),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

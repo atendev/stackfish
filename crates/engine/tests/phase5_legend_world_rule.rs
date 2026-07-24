@@ -54,6 +54,7 @@ fn permanent_definition(name: &str, supertypes: SupertypeSet, card_types: CardTy
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

@@ -744,7 +744,7 @@ impl PaymentPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::card::{CardDefinition, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
+    use crate::types::card::{CardDefinition, KeywordSet, ModeChoice, PTValue, ScriptReference, Subtype, SupertypeSet};
     use crate::types::counter::CounterSet;
     use crate::types::ids::SequenceNo;
     use crate::types::object::VisibilityPolicy;
@@ -772,6 +772,7 @@ mod tests {
                 alternative_costs: Vec::new(),
                 effect: None,
                 modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
             },
             copiable_override: None,
             owner: controller,

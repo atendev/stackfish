@@ -62,6 +62,7 @@ fn creature_definition(definition_id: u64, name: &str, power: i32, toughness: i3
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -98,6 +99,7 @@ fn bolt_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: Some(AbilityEffect::Damage(2)),
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

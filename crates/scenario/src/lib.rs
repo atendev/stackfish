@@ -246,6 +246,21 @@ pub struct CardSpec {
     /// actually consumes this at cast time — unchanged by this field.
     #[serde(default)]
     pub modes: Vec<SpellModeSpec>,
+    /// CR 700.2d — how many of `modes` above must be chosen. Ignored when
+    /// `modes` is empty. Defaults to `1` (the pre-existing "Choose one —"
+    /// behavior) so every scenario fixture written before
+    /// `phase5/modal-multi-mode` still parses unchanged.
+    #[serde(default = "default_mode_count")]
+    pub mode_count: u32,
+    /// CR 700.2d's "up to" shape (e.g. "Choose one or both —" is
+    /// `mode_count = 2, mode_up_to = true`) vs. the default "choose exactly
+    /// `mode_count`". Ignored when `modes` is empty.
+    #[serde(default)]
+    pub mode_up_to: bool,
+}
+
+fn default_mode_count() -> u32 {
+    1
 }
 
 /// One entry of `CardSpec.modes` (CR 700.2's "Choose one —" options).
@@ -1061,6 +1076,16 @@ fn build_spell_modes(specs: &[SpellModeSpec]) -> Vec<SpellMode> {
         .collect()
 }
 
+/// `CardSpec.mode_count`/`mode_up_to` -> `ModeChoice` (CR 700.2d). Meaningless
+/// (but still read, for a consistent default) when `CardSpec.modes` is empty.
+fn build_mode_choice(spec: &CardSpec) -> ModeChoice {
+    if spec.mode_up_to {
+        ModeChoice::UpTo(spec.mode_count)
+    } else {
+        ModeChoice::Exactly(spec.mode_count)
+    }
+}
+
 /// `assert_object_counters`/`assert_player_counters`'s `kind` field, by CR
 /// 122.3 name, into `CounterKind`.
 fn parse_counter_kind(name: &str) -> CounterKind {
@@ -1223,6 +1248,7 @@ pub fn build_initial_state(
             alternative_costs: Vec::new(),
             effect: None,
             modes: build_spell_modes(&spec.modes),
+            mode_choice: build_mode_choice(spec),
         };
 
         let owner = PlayerId(entry.player);
@@ -1762,6 +1788,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 // above.
                 effect: None,
                 modes: build_spell_modes(&spec.modes),
+                mode_choice: build_mode_choice(spec),
             }
         }).collect();
         // CR 903.6: minted after this player's library, matching
@@ -1794,6 +1821,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 alternative_costs: Vec::new(),
                 effect: None,
                 modes: build_spell_modes(&spec.modes),
+                mode_choice: build_mode_choice(spec),
             }
         }).collect();
         PlayerConfig { player_id: PlayerId(gp.id), library, commanders, life_override: gp.life_override }

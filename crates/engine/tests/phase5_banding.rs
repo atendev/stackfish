@@ -59,6 +59,7 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32, keywords
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 
@@ -82,6 +83,7 @@ fn planeswalker_definition(id: u64, name: &str) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

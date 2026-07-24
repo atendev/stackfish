@@ -34,6 +34,7 @@ fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     }
 }
 

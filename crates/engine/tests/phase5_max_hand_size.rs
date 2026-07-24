@@ -38,6 +38,7 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
         alternative_costs: Vec::new(),
         effect: None,
         modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
     };
     GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Hand) }
 }
