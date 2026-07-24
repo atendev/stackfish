@@ -286,21 +286,18 @@ pub struct CardDefinition {
     /// CR 700.2 modal spells — empty for the overwhelming majority of
     /// cards (non-modal), which use `target_requirement`/`effect` above
     /// directly. Non-empty means "Choose N —"-style (`mode_choice` below
-    /// says how many): the caster picks that many distinct entries
-    /// (`PlayerActionKind::CastSpell::modes` supplies that many valid,
-    /// non-repeating indices into this `Vec`), and each chosen mode's own
+    /// says how many): the caster picks that many entries
+    /// (`PlayerActionKind::CastSpell::modes` supplies that many valid
+    /// indices into this `Vec` — non-repeating unless `mode_choice` is one
+    /// of the `*Repeatable` variants, CR 700.2d), and each chosen mode's own
     /// `target_requirement`/`effect` are used for the rest of casting and
     /// resolution instead of this struct's own singular fields — see
     /// `commands::CastSpell`'s own doc comment for how 2+ chosen modes
     /// combine (CR 700.2d, `phase5/modal-multi-mode`).
     ///
-    /// TODO: CR 700.2d's "same mode twice" exception (reminder-text-gated,
-    /// rare — only when a card explicitly says "you may choose the same
-    /// mode more than once") stays unmodeled; a repeated index is always
-    /// rejected. TODO: CR 700.2e (another player chooses) and 700.2i
-    /// (pawprint mode budgets) are still unimplemented. CR 700.2h (a mode's
-    /// own additional cost) is real now too — see `SpellMode::
-    /// additional_cost`.
+    /// TODO: CR 700.2e (another player chooses) and 700.2i (pawprint mode
+    /// budgets) are still unimplemented. CR 700.2h (a mode's own additional
+    /// cost) is real now too — see `SpellMode::additional_cost`.
     /// TODO: CR 700.2b (a modal *activated/triggered* ability, as opposed
     /// to a modal spell) is untouched — `RegisteredAbility` has no `modes`
     /// field of its own yet.
@@ -340,10 +337,21 @@ pub struct SpellMode {
 /// least one mode be chosen either way ("choose a number of those options,"
 /// never zero); a spell with no legal mode at all simply can't be cast
 /// (601.2b), same as any other spell with no legal choice.
+///
+/// `ExactlyRepeatable(n)`/`UpToRepeatable(n)` are CR 700.2d's reminder-text-
+/// gated exception ("You may choose the same mode more than once," e.g.
+/// Profane Command) — same count semantics as `Exactly`/`UpTo`, but a
+/// repeated mode index is allowed rather than rejected. Added as new variants
+/// rather than a field on `Exactly`/`UpTo` (which would break every existing
+/// `ModeChoice::Exactly(1)` construction site) or on `CardDefinition` itself
+/// (~120 test files construct it as a bare struct literal with no `Default`
+/// impl — the same ripple class `phase5/modal-multi-mode` already hit once).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModeChoice {
     Exactly(u32),
     UpTo(u32),
+    ExactlyRepeatable(u32),
+    UpToRepeatable(u32),
 }
 
 impl CardDefinition {
