@@ -840,11 +840,17 @@ Not modeled this slice (real, named gaps, not silently guessed at):
   `Named`/`Creature` token has no script of its own) or a `CopyOf` token's freshly re-registered
   self-only effect. Devour/Amplify still don't offer their pause on token creation, same posture
   `Search` already has for those two.
-- **General CR 616 propose/replace/commit for battlefield entry** — `PlayLand`/`CastSpell`
-  resolution/search-to-battlefield still mutate eagerly rather than going through a real
-  propose-then-replace-then-commit split; a `ReplaceZoneDestination`-style "this can't enter, goes
-  to the graveyard instead" effect (Torpor Orb-adjacent) stays unreachable. This carve-out only
-  covers `EntersTapped`/`EntersWithCounters`/`EntersWithCountersBloodthirst` specifically.
+- **General CR 616 propose/replace/commit for battlefield entry** is real now too, narrowly
+  (`phase5/etb-zone-redirect`) — the `CastSpell` resolution path proposes a would-be `Battlefield`
+  destination through `replacement::apply_replacements` *before* placing anything, so a
+  `ReplaceZoneDestination`-style "this can't enter, goes elsewhere instead" effect really works there
+  now, mirroring `sba::resolve_deaths`'s own propose-then-commit shape for the graveyard side. Still
+  unreachable: only an *externally* granted redirect can fire (the entering permanent's own
+  self-registered effects haven't run yet at this checkpoint); `PlayLand`/search-to-battlefield don't
+  get this check at all, same narrowing every prior mid-ETB slice already took; two simultaneous
+  redirects for one entering permanent is narrowed to "no redirect happens" rather than a real CR
+  616.1 pause (no `ReplacementResumeTarget` built for it - would need the whole Spell-resolution tail
+  extracted into a shared continuation).
 
 Real, tested end to end: `crates/engine/tests/phase5_etb_replacement_modifiers.rs` (self and
 externally granted `EntersTapped` via `PlayLand`, self-registered `EntersWithCounters` via
