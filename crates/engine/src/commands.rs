@@ -574,31 +574,67 @@ fn validate_one_target_requirement(
     Ok(())
 }
 
-/// CR 601.2c: splits `targets` into one contiguous slice per entry of
-/// `reqs`, in order, each exactly `req.count` long. `None` (rather than a
-/// panic) if any entry isn't an exact count (`up_to`/`at_least`, unsupported
-/// combination - see `TargetSpec::Multiple`'s own doc comment), if `targets`
-/// is too short to cover every entry, or if there's a leftover remainder
-/// after every entry has claimed its chunk (a caller/count mismatch, same
-/// "reject rather than guess" stance every other validation failure here
-/// takes).
+/// CR 601.2c/608.2b: splits `targets` into one contiguous slice per entry of
+/// `reqs`, in order. Every entry with an exact count (`up_to`/`at_least`
+/// both `false`) always claims exactly `req.count`. At most one entry may be
+/// variable (`up_to` or `at_least`) - its own count isn't announced
+/// separately anywhere in this engine's `PlayerAction` shape (just one flat
+/// `targets: Vec<Target>`), so it's derived as "however many are left after
+/// every exact-count entry has claimed its own share": `submitted.len() -
+/// sum(exact counts)`, wherever the variable entry sits in word order (the
+/// derivation doesn't depend on position, only on the total). Two or more
+/// variable entries stay a real, unsupported ambiguity - given only a flat
+/// list, nothing says how a shared remainder splits between them (e.g. "up
+/// to two target creatures and up to two target players" with 2 targets
+/// submitted could mean 2+0, 1+1, or 0+2) - `None` rather than guessing.
+/// Also `None` if `targets` is too short to cover every exact entry, if the
+/// derived variable count falls outside that entry's own `up_to`/`at_least`
+/// bound, or if there's a leftover remainder after every entry has claimed
+/// its chunk (a caller/count mismatch, same "reject rather than guess"
+/// stance every other validation failure here takes).
 pub(crate) fn split_targets_by_requirement<'a>(
     reqs: &[TargetRequirement],
     targets: &'a [Target],
 ) -> Option<Vec<&'a [Target]>> {
-    let mut rest = targets;
-    let mut chunks = Vec::with_capacity(reqs.len());
-    for req in reqs {
-        if req.up_to || req.at_least {
+    let variable_index = {
+        let mut found = None;
+        for (i, req) in reqs.iter().enumerate() {
+            if req.up_to || req.at_least {
+                if found.is_some() {
+                    // A second variable entry - ambiguous, see this
+                    // function's own doc comment.
+                    return None;
+                }
+                found = Some(i);
+            }
+        }
+        found
+    };
+    let exact_total: usize =
+        reqs.iter().filter(|r| !(r.up_to || r.at_least)).map(|r| r.count as usize).sum();
+    if targets.len() < exact_total {
+        return None;
+    }
+    let remainder = targets.len() - exact_total;
+    if let Some(i) = variable_index {
+        let req = &reqs[i];
+        let bound_ok =
+            if req.up_to { remainder <= req.count as usize } else { remainder >= req.count as usize };
+        if !bound_ok {
             return None;
         }
-        let n = req.count as usize;
+    }
+
+    let mut rest = targets;
+    let mut chunks = Vec::with_capacity(reqs.len());
+    for (i, req) in reqs.iter().enumerate() {
+        let n = if Some(i) == variable_index { remainder } else { req.count as usize };
         if rest.len() < n {
             return None;
         }
-        let (chunk, remainder) = rest.split_at(n);
+        let (chunk, remaining) = rest.split_at(n);
         chunks.push(chunk);
-        rest = remainder;
+        rest = remaining;
     }
     if rest.is_empty() {
         Some(chunks)

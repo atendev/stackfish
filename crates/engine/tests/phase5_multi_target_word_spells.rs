@@ -4,10 +4,10 @@
 //! creature and target land. They can't be regenerated.").
 //!
 //! `TargetSpec::Multiple(Vec<TargetRequirement>)` - a flat submitted-targets
-//! list split into one chunk per requirement, in order, each requirement
-//! using an exact count (`up_to`/`at_least` combined with multiple words
-//! isn't modeled - no way to split a flat list unambiguously by a
-//! variable-length chunk). CR 115.3/601.2c dedup applies independently per
+//! list split into one chunk per requirement, in order. This file covers
+//! only the all-exact-count case; combining `up_to`/`at_least` with
+//! multiple words is real too now - see
+//! `phase5_multi_target_word_variable_count.rs`. CR 115.3/601.2c dedup applies independently per
 //! word, never across words - the same object can legally be chosen for two
 //! different words. CR 608.2b: the spell fizzles only if every target
 //! across every word is illegal; a `Destroy`-style uniform-verb effect needs
