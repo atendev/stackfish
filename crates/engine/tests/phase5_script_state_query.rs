@@ -174,7 +174,7 @@ fn card_summaries_include_counters_but_not_layer_resolved_effective_pt() {
     let handle = runtime.load_function(source).unwrap();
 
     assert!(
-        runtime.invoke_continuous_affects(handle, &state, bear_id, bear_id, p0).unwrap(),
+        runtime.invoke_continuous_affects(handle, &state, bear_id, bear_id, p0, None).unwrap(),
         "base 2/2 + a +1/+1 counter should read as 3/3 in the snapshot (CR 121.3), no layer engine involved"
     );
 }
@@ -198,13 +198,13 @@ fn continuous_affects_predicate_can_gate_on_a_players_life_total() {
     let handle = runtime.load_function(source).unwrap();
 
     assert!(
-        !runtime.invoke_continuous_affects(handle, &state, bear_id, bear_id, p0).unwrap(),
+        !runtime.invoke_continuous_affects(handle, &state, bear_id, bear_id, p0, None).unwrap(),
         "controller starts at 20 life, should not match yet"
     );
 
     state.player_mut(p0).unwrap().life = 5;
     assert!(
-        runtime.invoke_continuous_affects(handle, &state, bear_id, bear_id, p0).unwrap(),
+        runtime.invoke_continuous_affects(handle, &state, bear_id, bear_id, p0, None).unwrap(),
         "controller now at 5 life, should match"
     );
 }
@@ -223,11 +223,11 @@ fn continuous_effect_payload_can_read_state_to_decide_its_own_shape() {
         end";
     let handle = runtime.load_function(source).unwrap();
 
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), p0).unwrap();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), p0, None).unwrap();
     assert_eq!(decoded, None, "controller at full life - no boost");
 
     state.player_mut(p0).unwrap().life = 5;
-    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), p0).unwrap();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), p0, None).unwrap();
     assert_eq!(decoded, Some(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }));
 }
 

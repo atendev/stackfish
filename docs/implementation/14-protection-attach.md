@@ -177,6 +177,46 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
 - Unresolved: CR 801.9's range-of-influence carve-out (out of scope — this engine is 2-player only
   and models no ROI anywhere else either, not a new gap); CR 303.4i/k/m (Aura-specific, unchanged).
 
+## Slice: enchanted-reference (merged)
+
+- Branch `phase5/enchanted-reference`.
+- Scope: CR 303.4m — "an ability of a permanent that refers to the 'enchanted [object or player]'
+  refers to whatever object or player that permanent is attached to." `GameObject.attached_to`
+  already existed and was correctly maintained by the attach machinery, but nothing read it for
+  continuous-effect matching — only SBA (CR 704.5m/n) ever consulted it, so "Enchanted creature gets
+  +1/+1" had no real implementation path at all before this slice.
+- Verify: 8 new tests (`phase5_enchanted_reference.rs`), full workspace suite green.
+- Key changes:
+  - `AffectedFilter::EnchantedOnly` — a new fieldless variant (sibling to `Primitive`/`Script`), not a
+    field on `EffectFilter` (129 struct-literal construction sites with no `Default` impl — the same
+    ripple class the modal-spell slices already hit and avoided each time by adding new enum variants
+    instead). `ContinuousEffect::applies_to` resolves it directly as `source.attached_to ==
+    Some(object.object_id)` — both are already full `&GameObject`s at that call site, no `GameState`
+    lookup needed, unlike `layers::applicable_effects_in_layer`'s own `Script` arm.
+    `applicable_effects_in_layer`'s outer match grew one arm (`Primitive | EnchantedOnly` both call
+    `applies_to`).
+  - `ScriptRuntime::invoke_continuous_affects`/`invoke_continuous_effect` both gained a trailing
+    `enchanted: Option<ObjectId>` argument (nil in Lua when `None`), computed by the caller from the
+    effect's own `source.attached_to` — appended *after* the existing `state` snapshot argument so no
+    existing Lua closure signature breaks (Lua ignores a trailing arg a function doesn't declare).
+    Lets a scripted Aura reference the enchanted permanent's id for logic beyond a plain identity
+    match (e.g. a dynamic value keyed off it).
+  - `script::decode_affected_value` recognizes `{ enchanted_only = true }` from `:SetAffected`,
+    short-circuiting to `AffectedFilter::EnchantedOnly` before `controller`/`card_types`/`self_only`
+    are even read — same "no real card needs both" narrowing `self_only` itself already accepts.
+  - `card_summary_to_lua` now sets `attached_to`/`attachments` on every card summary in a `state_to_lua`
+    snapshot, for general board-state visibility from any script (not just continuous effects).
+- Scoping notes: fieldless by design — `EnchantedOnly` can't combine with `controller`/`card_types`
+  the way `Primitive` can, since no real "enchanted creature that's also a [type]"-filtered *affects*
+  clause exists to justify it. CR 303.4m for a permanent enchanting a *player* stays unmodeled — same
+  pre-existing `attached_to`-is-`ObjectId`-only gap `aura-attach-choice`/`aura-enters-attached` already
+  flagged, not touched here. A *replacement* effect's own "enchanted permanent" reference (e.g. Umbra
+  armor, CR 702.89a: "if enchanted permanent would be destroyed...") stays unmodeled too —
+  `ReplacementEffect.affected: EffectFilter` is a different, non-`AffectedFilter` type; out of scope
+  for this slice (continuous effects only).
+- Unresolved: CR 303.4i/k (unchanged, see above); player-side CR 303.4m; replacement-effect "enchanted
+  permanent" references.
+
 ## Equipment / Equip (CR 702.6)
 
 - `AbilityEffect::Attach` primitive; `ActivateAbility` enforces "only as sorcery" for `Attach`.

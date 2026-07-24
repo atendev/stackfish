@@ -832,6 +832,12 @@ fn decode_effect_value(
 /// function is registered and returned as `AffectedFilter::Script` (invoked
 /// later via `ScriptRuntime::invoke_continuous_affects`), same registration
 /// as every other function-fallback decoder in this file.
+///
+/// CR 303.4m: `{ enchanted_only = true }` short-circuits to
+/// `AffectedFilter::EnchantedOnly` before any of `controller`/`card_types`/
+/// `self_only` are even read — same "no real card needs both" narrowing
+/// `EnchantedOnly`'s own doc comment already states, so combining it with
+/// the other keys is simply ignored rather than rejected.
 fn decode_affected_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
@@ -839,6 +845,12 @@ fn decode_affected_value(
 ) -> Result<AffectedFilter, ScriptError> {
     match value {
         Value::Table(table) => {
+            let enchanted_only: Option<bool> =
+                table.get("enchanted_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            if enchanted_only.unwrap_or(false) {
+                return Ok(AffectedFilter::EnchantedOnly);
+            }
+
             let controller_name: Option<String> =
                 table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
@@ -1751,6 +1763,15 @@ impl ScriptRuntime {
     /// `Primitive`-only so `types/effect.rs` never needs to depend on
     /// `ScriptRuntime`, same separation `layers::resolve_base_pt` already
     /// keeps for CDA.
+    ///
+    /// CR 303.4m: `enchanted` (whatever `source` is currently attached to,
+    /// `None` if nothing) is passed as a trailing 5th arg — nil in Lua when
+    /// `None` — so a script can write `object == enchanted` directly instead
+    /// of re-deriving it from the `state` snapshot's own per-card
+    /// `attached_to` field. Appended *after* `state` rather than inserted
+    /// earlier in the list, so an existing script written against the old
+    /// 4-arg signature keeps working unmodified — Lua silently ignores a
+    /// trailing argument a function doesn't declare a parameter for.
     pub fn invoke_continuous_affects(
         &self,
         handle: ScriptHandle,
@@ -1758,11 +1779,12 @@ impl ScriptRuntime {
         object: ObjectId,
         source: ObjectId,
         controller: PlayerId,
+        enchanted: Option<ObjectId>,
     ) -> Result<bool, ScriptError> {
         let function = self.function(handle)?;
         let state_value = state_to_lua(&self.lua, state)?;
         function
-            .call::<_, bool>((object.0, source.0, controller.0, state_value))
+            .call::<_, bool>((object.0, source.0, controller.0, state_value, enchanted.map(|id| id.0)))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
@@ -1799,17 +1821,24 @@ impl ScriptRuntime {
     /// unresolvable value in this engine already takes; the caller
     /// (`layers::resolve_primitive`) doesn't distinguish "no effect this
     /// call" from "script errored," same as `invoke_cda`'s own caller.
+    ///
+    /// CR 303.4m: `enchanted` is passed as a trailing 4th arg, same
+    /// "appended after `state`, existing scripts unaffected" convention
+    /// `invoke_continuous_affects` above establishes — lets a dynamic value
+    /// computation (e.g. "equal to the enchanted creature's own power")
+    /// reference it directly.
     pub fn invoke_continuous_effect(
         &self,
         handle: ScriptHandle,
         state: &GameState,
         source: ObjectId,
         controller: PlayerId,
+        enchanted: Option<ObjectId>,
     ) -> Result<Option<EffectPrimitive>, ScriptError> {
         let function = self.function(handle)?;
         let state_value = state_to_lua(&self.lua, state)?;
         let result: Table = function
-            .call((source.0, controller.0, state_value))
+            .call((source.0, controller.0, state_value, enchanted.map(|id| id.0)))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
 
         if let Some(new_name) = result.get::<_, Option<String>>("set_name").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
@@ -3052,10 +3081,11 @@ fn zone_cards_to_lua<'lua>(
 /// One object's public-safe summary: id, name, base power/toughness (netted
 /// against `+1/+1`/`-1/-1` counters via `PTValue::net_with_counters` — public
 /// information, CR 121.3 — but not layer-resolved, see `state_to_lua`'s own
-/// doc comment for why), whether it's a creature, and controller. Narrower
-/// than the full `EffectiveCharacteristics` shape (no mana cost/colors/full
-/// type or keyword set) — named as a follow-up rather than guessed at; this
-/// slice's own tests only need power/toughness/creature-ness.
+/// doc comment for why), whether it's a creature, controller, and (CR 303.4m)
+/// attachment state. Narrower than the full `EffectiveCharacteristics` shape
+/// (no mana cost/colors/full type or keyword set) — named as a follow-up
+/// rather than guessed at; this slice's own tests only need power/toughness/
+/// creature-ness/attachment.
 fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'lua>, ScriptError> {
     let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     table.set("id", obj.object_id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
@@ -3068,6 +3098,18 @@ fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'
         .set("is_creature", obj.definition.card_types.contains(CardTypeSet::CREATURE))
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     table.set("controller", obj.controller.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    // CR 303.4m/703.4b: what this object is attached to (an Aura/Equipment/
+    // Fortification's own "enchanted"/"equipped" reference), and what's
+    // attached to it (e.g. an enchanted creature's own Auras) - both public
+    // information.
+    table
+        .set("attached_to", obj.attached_to.map(|id| id.0))
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let attachments = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    for (i, id) in obj.attachments.iter().enumerate() {
+        attachments.set((i + 1) as i64, id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    }
+    table.set("attachments", attachments).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     Ok(Value::Table(table))
 }
 

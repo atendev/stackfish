@@ -418,10 +418,28 @@ pub struct EffectFilter {
 /// A `ContinuousEffect`'s affected-object predicate — same `Primitive`/
 /// `Script` split as `EffectPayload` above, same "no card can construct
 /// `Script` yet, exists for shape stability" caveat.
+///
+/// `EnchantedOnly` is CR 303.4m's "an ability of a permanent that refers to
+/// the 'enchanted [object]'" — matches whatever object `ContinuousEffect::
+/// source` is currently attached to (`GameObject::attached_to`), i.e. the
+/// common real-card shape ("Enchanted creature gets +1/+1"). A new variant
+/// rather than a field on `EffectFilter` (129 struct-literal construction
+/// sites across the test suite with no `Default` impl — the same ripple
+/// class the modal-spell slices already hit and avoided each time) or a
+/// combination with `self_only` (a different, pre-existing concept: pinning
+/// to the effect's own source id, used for e.g. a target-pinned Pump effect
+/// — not the same thing as "whatever this is attached to"). Fieldless,
+/// deliberately: can't combine with `controller`/`card_types` the way
+/// `Primitive` can, since no real "enchanted creature that's also a
+/// [type]"-filtered *affects* clause exists to justify the combinatorics
+/// (same narrowing precedent `self_only` already sets). Player-side "enchant
+/// player" stays unmodeled — `attached_to` is `ObjectId`-only (see
+/// `docs/implementation/14-protection-attach.md`), a separate, larger gap.
 #[derive(Clone, Debug)]
 pub enum AffectedFilter {
     Primitive(EffectFilter),
     Script(ScriptHandle),
+    EnchantedOnly,
 }
 
 /// Not exhaustive in the original draft — MTG has more duration shapes than
@@ -473,13 +491,18 @@ impl ContinuousEffect {
     /// `AffectedFilter::Primitive` — zero further evaluation needed, `source`
     /// only used to resolve `self.source`'s current controller (for
     /// `FilterController::You`/`Opponent`) and identity (for `self_only`).
-    /// `Script` isn't evaluable yet (no card can construct one — see
-    /// `AffectedFilter`'s doc comment) — treated as "doesn't match" rather
-    /// than guessed, same stance `layers::effective_characteristics` takes
-    /// for an unresolvable CDA.
+    /// Also the real body for `EnchantedOnly` (CR 303.4m) — `source.
+    /// attached_to` is already a full field on the `&GameObject` passed in,
+    /// so no `GameState` lookup is needed here, unlike `layers::
+    /// applicable_effects_in_layer`'s own `Script` arm. `Script` isn't
+    /// evaluable yet (no card can construct one — see `AffectedFilter`'s
+    /// doc comment) — treated as "doesn't match" rather than guessed, same
+    /// stance `layers::effective_characteristics` takes for an unresolvable
+    /// CDA.
     pub fn applies_to(&self, object: &GameObject, source: &GameObject) -> bool {
         let filter = match &self.affected {
             AffectedFilter::Primitive(filter) => filter,
+            AffectedFilter::EnchantedOnly => return source.attached_to == Some(object.object_id),
             AffectedFilter::Script(_) => return false,
         };
         if filter.self_only && object.object_id != self.source {
