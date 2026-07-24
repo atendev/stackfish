@@ -131,6 +131,12 @@ pub enum GameEventKind {
     /// trigger condition" precedent `Scry`/`Surveil` already set for their
     /// own events.
     BecameCopy { object: ObjectId, copied: ObjectId },
+    /// CR 612.5 (layer 3): `a` and `b` exchanged text boxes -
+    /// `Engine`'s `AbilityEffect::ExchangeTextBoxes` resolution. Pure ledger
+    /// record, same "already mutated, log it" shape as `BecameCopy` above -
+    /// no "whenever text boxes are exchanged" trigger condition exists yet
+    /// to match this either.
+    TextBoxesExchanged { a: ObjectId, b: ObjectId },
     /// CR 614.8/701.19: a regeneration shield intercepted `object`'s
     /// destruction — emitted by `replacement::ReplacementEffect::apply`
     /// *instead of* the `ZoneChange` that was proposed, per CR 614.6 ("if an

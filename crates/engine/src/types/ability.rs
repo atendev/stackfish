@@ -364,6 +364,44 @@ pub enum AbilityEffect {
     /// practice. TODO(CR 702.6e): Equip planeswalker isn't modeled -
     /// planeswalkers are backlog item 16's own explicit non-goal.
     Attach,
+    /// The `Game.Ops.ExchangeTextBoxes` primitive (CR 612.5) — exchanges
+    /// the resolving `StackObject`'s first two chosen targets' "text boxes."
+    /// No fields — a toggle, same shape as `BecomeCopy`/`Attach`; the
+    /// targets live on the `StackObject`, not here.
+    ///
+    /// Deliberately *not* a `CopyExceptions`-shaped variant of `BecomeCopy`:
+    /// CR 612.1 scopes text-changing effects to "rules text ... and/or ...
+    /// the type line," and CR 612.5 itself says only "text boxes" - name,
+    /// mana cost, color, P/T, and card types/supertypes/subtypes all stay
+    /// exactly as printed on each permanent. Only `oracle_text`, `keywords`,
+    /// and `script_ref` (this engine's operative stand-in for "rules text" -
+    /// see `ResolveStackTop`'s dispatch for why) cross over. This is
+    /// explicitly not a CR 707 copy effect (CR 612 and CR 707 are separate
+    /// rule families) - no `CopyExceptions` interaction, no "copy of a
+    /// copy" concern.
+    ///
+    /// Same underlying machinery `BecomeCopy` established for changing a
+    /// *live* permanent's actual behavior (not just its displayed
+    /// characteristics): `commands::purge_granted_abilities` then a fresh
+    /// `run_card_script`, done symmetrically for both targets against a
+    /// synthetic definition (each target's own definition, with only the
+    /// three text-box fields swapped in from the other). Like `BecomeCopy`,
+    /// this is a one-time mutation with no duration/reversion - permanent
+    /// until another effect changes it, not a new gap.
+    ///
+    /// Unlike a uniform multi-word spell (e.g. Plague Spores' "destroy
+    /// target creature and target land," CR 608.2b's own worked example,
+    /// where each surviving legal target is still independently destroyed),
+    /// this is inherently pairwise - if either of the two targets is no
+    /// longer legal by the time this resolves, there's no partner to
+    /// exchange with, so the whole effect is a no-op rather than doing
+    /// something one-sided. `ResolveStackTop` rechecks both targets directly
+    /// against `top.target_requirement`'s two `TargetRequirement`s rather
+    /// than consuming the generic flattened `legal_targets` list (which
+    /// loses the positional pairing a role-differentiated effect like this
+    /// one needs - see `TargetSpec::Multiple`'s own doc comment on why
+    /// role-differentiated multi-word effects need bespoke handling).
+    ExchangeTextBoxes,
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
@@ -477,6 +515,19 @@ impl CopyExceptions {
         }
         snapshot.keywords |= self.add_keywords;
     }
+}
+
+/// CR 612.5's "text box" - `oracle_text`, `keywords`, and `script_ref` - the
+/// three `CardDefinition` fields that stand in for "rules text" in this
+/// engine (see `AbilityEffect::ExchangeTextBoxes`'s own doc comment for why
+/// exactly these three and not more). Overwrites `snapshot`'s in place with
+/// `other`'s; everything else on `snapshot` (name, mana cost, P/T, card
+/// types/subtypes/supertypes) is left untouched, unlike `CopyExceptions`'
+/// full-copy-by-default shape above.
+pub fn apply_text_box(snapshot: &mut crate::types::card::CardDefinition, other: &crate::types::card::CardDefinition) {
+    snapshot.oracle_text = other.oracle_text.clone();
+    snapshot.keywords = other.keywords;
+    snapshot.script_ref = other.script_ref.clone();
 }
 
 /// The two condition shapes `Game.Conditions.*` covers this slice — a
