@@ -36,6 +36,7 @@
 use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, two_player_state, zones};
 
@@ -325,8 +326,8 @@ fn destroy_spell_choosing_the_regeneration_shield_saves_the_creature() {
         panic!("expected the CR 616.1 pause, got {status:?}");
     };
 
-    engine.submit_replacement_choice(bear).expect("bear is the regeneration shield's own source, a real candidate");
-    assert!(candidates.contains(&bear));
+    assert!(candidates.contains(&ReplacementCandidate::Registered(bear)));
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(bear)).expect("bear is the regeneration shield's own source, a real candidate");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
@@ -365,7 +366,7 @@ fn destroy_spell_choosing_the_other_effect_first_lets_it_win_instead() {
     let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingReplacementChoice { .. }));
 
-    engine.submit_replacement_choice(shield_obj).expect("shield_obj is the exile-instead effect's own source, a real candidate");
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(shield_obj)).expect("shield_obj is the exile-instead effect's own source, a real candidate");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
@@ -424,7 +425,7 @@ fn destroy_two_target_spell_pauses_on_one_target_then_still_destroys_the_other_a
     // plain_bear hasn't been touched by the paused target's own choice yet.
     assert_eq!(engine.state().object(plain_bear).unwrap().zone, ZoneKind::Battlefield);
 
-    engine.submit_replacement_choice(bear).expect("a real candidate");
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(bear)).expect("a real candidate");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
@@ -473,7 +474,7 @@ fn sacrifice_spell_with_two_matching_effects_pauses_and_only_the_chosen_one_is_c
     };
     assert_eq!(candidates.len(), 2);
 
-    engine.submit_replacement_choice(bear).expect("bear (self_only) is a real candidate");
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(bear)).expect("bear (self_only) is a real candidate");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 

@@ -18,6 +18,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -318,8 +319,11 @@ fn engine_resumes_correctly_after_choosing_the_regeneration_shield_in_an_orderin
     };
     assert_eq!(player, p0);
 
-    let shield_source = candidates.into_iter().find(|&c| c == bear).expect("the regeneration shield's own source (bear, self_only) is a candidate");
-    engine.submit_replacement_choice(shield_source).expect("a real candidate must be accepted");
+    let shield_candidate = candidates
+        .into_iter()
+        .find(|&c| c == ReplacementCandidate::Registered(bear))
+        .expect("the regeneration shield's own source (bear, self_only) is a candidate");
+    engine.submit_replacement_choice(shield_candidate).expect("a real candidate must be accepted");
 
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "SBA settles, priority reopens: {status:?}");

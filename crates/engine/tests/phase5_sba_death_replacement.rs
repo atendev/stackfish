@@ -8,6 +8,7 @@
 //! phase5-fix-replacement-bypasses slice notes for the bug this closes.
 
 use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -204,9 +205,11 @@ fn engine_pauses_mid_sba_and_resumes_correctly_after_a_replacement_choice() {
     // Choose the Command-zone effect (ObjectId(2)) specifically, to
     // distinguish it from the Exile one (ObjectId(1)) in the assertions
     // below.
-    let command_zone_source =
-        candidates.into_iter().find(|&c| c == ObjectId(2)).expect("ObjectId(2) is one of the two candidates");
-    engine.submit_replacement_choice(command_zone_source).expect("a real candidate must be accepted");
+    let command_zone_candidate = candidates
+        .into_iter()
+        .find(|&c| c == ReplacementCandidate::Registered(ObjectId(2)))
+        .expect("ObjectId(2) is one of the two candidates");
+    engine.submit_replacement_choice(command_zone_candidate).expect("a real candidate must be accepted");
 
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "SBA settles, priority reopens for p1: {status:?}");

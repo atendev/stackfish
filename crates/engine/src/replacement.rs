@@ -10,6 +10,28 @@ use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
 
+/// One CR 616.1 ordering-choice candidate. Two kinds can match the same
+/// event: a real registered `ReplacementEffect` (`Registered`, identified by
+/// its own `source`), or CR 702.16e protection's damage prevention
+/// (`Protection`, identified by the *protected object's own id* — protection
+/// isn't a `state.replacement_effects` entry at all, see `protection_prevents`'s
+/// own doc comment). Previously both were represented as a bare `ObjectId`,
+/// which silently collided whenever a protected object also had its own
+/// registered effect with itself as `source` matching the same event —
+/// `apply_replacements_from`'s candidate-list builder would then treat them
+/// as "the same candidate" and never offer the real 2-way choice, and
+/// `apply_one_replacement_or_protection`'s dispatch always resolved the
+/// collision toward the registered effect. This enum makes the two kinds
+/// distinguishable through the whole pause/resume pipeline
+/// (`ReplacementOutcome::NeedsOrderingChoice`, `ProcessState`/
+/// `StepStatus::AwaitingReplacementChoice`, `Engine::submit_replacement_choice`)
+/// so they can never be silently conflated again.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReplacementCandidate {
+    Registered(ObjectId),
+    Protection(ObjectId),
+}
+
 /// What `apply_replacements` produced for one proposed event. Not just a
 /// `GameEventKind`: CR 616.1 has the *affected player* choose which
 /// replacement applies first when more than one matches the same event —
@@ -24,14 +46,11 @@ pub enum ReplacementOutcome {
     Resolved(GameEventKind),
     /// More than one replacement/prevention effect matches `event` and
     /// `affected_player` must choose which applies first (CR 616.1) before
-    /// resolution can continue. `candidates` identifies the matches by
-    /// `ObjectId` (no dedicated id type exists yet) — almost always a real
-    /// `ReplacementEffect::source`, but CR 702.16e protection's damage
-    /// prevention (`protection_prevents`) can also appear here, identified
-    /// by the *protected object's own id* rather than a registered effect's
-    /// source (see that function's own doc comment, and `apply_one_
-    /// replacement_or_protection`'s dispatch). The engine must surface this
-    /// as an actual pause — see `engine::ProcessState::
+    /// resolution can continue. `candidates` are `ReplacementCandidate`
+    /// values, not bare `ObjectId`s — see that type's own doc comment for
+    /// why (a registered effect and protection can share the same
+    /// identifying object id without being the same candidate). The engine
+    /// must surface this as an actual pause — see `engine::ProcessState::
     /// AwaitingReplacementChoice` — not fold it back into a synchronous
     /// transform. `excluded` carries forward every effect already applied to
     /// this same event earlier in this same resolution (see `apply_
@@ -41,8 +60,8 @@ pub enum ReplacementOutcome {
     NeedsOrderingChoice {
         affected_player: PlayerId,
         event: GameEventKind,
-        candidates: Vec<ObjectId>,
-        excluded: Vec<ObjectId>,
+        candidates: Vec<ReplacementCandidate>,
+        excluded: Vec<ReplacementCandidate>,
         /// Carried forward so a resumed `apply_replacements_from` call (once
         /// the player answers) rechecks the rewritten event with the same
         /// "is this genuinely a destroy" meaning it started with — see
@@ -124,49 +143,39 @@ fn apply_replacement_at_index(state: &mut GameState, idx: usize, event: GameEven
     rewritten
 }
 
-/// Dispatch for a chosen `ObjectId` out of `apply_replacements_from`'s
+/// Dispatch for a chosen `ReplacementCandidate` out of `apply_replacements_from`'s
 /// `matching` list (either the loop's own single-match branch, or a resumed
-/// `NeedsOrderingChoice` pause via `Engine::submit_replacement_choice`) —
-/// almost always a real registered `ReplacementEffect::source`, in which
-/// case this is exactly `apply_one_replacement`. The one exception: CR
+/// `NeedsOrderingChoice` pause via `Engine::submit_replacement_choice`) — a
+/// direct match on which kind was chosen, not an `ObjectId` lookup. CR
 /// 702.16e protection's damage prevention (`protection_prevents`) has no
 /// `state.replacement_effects` entry of its own to look up (it's a live
 /// characteristics query, not a registered effect — see that function's own
-/// doc comment for why), so when `chosen` doesn't name any registered
-/// effect, it must be the protection sentinel `protection_prevents` added to
-/// `matching` — the protected object's own id — and the damage is zeroed
-/// directly. Not rechecked against `protection_prevents` again here: exactly
-/// like `apply_one_replacement`'s own "trusts `matches` already confirmed
-/// this" contract, whoever built `matching` already established eligibility,
-/// and `Engine::submit_replacement_choice` independently validates `chosen`
-/// against `candidates` before this is ever called — a stale/invalid id
-/// can't reach this function at all.
+/// doc comment for why); `ReplacementCandidate::Protection` zeroes the
+/// damage directly instead. Not rechecked against `protection_prevents`
+/// again here: exactly like `apply_one_replacement`'s own "trusts `matches`
+/// already confirmed this" contract, whoever built `matching` already
+/// established eligibility, and `Engine::submit_replacement_choice`
+/// independently validates `chosen` against `candidates` before this is ever
+/// called — a stale/invalid candidate can't reach this function at all.
 ///
-/// Known limitation, not silently accepted: if the protected object also
-/// happens to have its *own* registered replacement effect with itself as
-/// `source` matching this same event (e.g. a self-registered regeneration
-/// shield on the same permanent), that effect's source collides with the
-/// protection sentinel — this dispatch always resolves the collision toward
-/// the registered effect, so protection can never be the one chosen for that
-/// specific id in that specific case. Narrow (needs both innate protection
-/// *and* a self-registered damage-replacement effect on the exact same
-/// permanent, matching the exact same event) and not fixed this slice —
-/// would need a real `ReplacementCandidate` enum (registered-vs-protection)
-/// instead of reusing `ObjectId` as a dual-purpose id to close for real.
+/// `Registered` and `Protection` naming the *same* underlying object id no
+/// longer collide (previously both were a bare `ObjectId`, and the
+/// registered effect always won the dispatch when they shared an id — see
+/// `ReplacementCandidate`'s own doc comment for the bug this fixes) — each
+/// is now its own distinct variant, matched independently.
 pub(crate) fn apply_one_replacement_or_protection(
     state: &mut GameState,
-    chosen: ObjectId,
+    chosen: ReplacementCandidate,
     event: GameEventKind,
 ) -> GameEventKind {
-    if state.replacement_effects.iter().any(|r| r.source == chosen) {
-        apply_one_replacement(state, chosen, event)
-    } else {
-        match event {
+    match chosen {
+        ReplacementCandidate::Registered(source) => apply_one_replacement(state, source, event),
+        ReplacementCandidate::Protection(_) => match event {
             GameEventKind::DamageDealt { source, target, is_combat_damage, .. } => {
                 GameEventKind::DamageDealt { source, target, amount: 0, is_combat_damage }
             }
             other => other,
-        }
+        },
     }
 }
 
@@ -352,7 +361,7 @@ pub(crate) fn apply_replacements_from(
     script_runtime: &ScriptRuntime,
     proposed: GameEventKind,
     is_destroy: bool,
-    mut excluded: Vec<ObjectId>,
+    mut excluded: Vec<ReplacementCandidate>,
 ) -> ReplacementOutcome {
     let mut event = proposed;
     loop {
@@ -363,37 +372,38 @@ pub(crate) fn apply_replacements_from(
 
         // CR 702.16a/616.1: protection's damage prevention now folds into
         // `matching` as a real candidate (identified by the protected
-        // object's own id) rather than applying unconditionally ahead of
-        // the loop - see `protection_prevents`'s own doc comment for why.
-        let protection_candidate =
-            protection_prevents(state, script_runtime, &event).filter(|id| !excluded.contains(id));
+        // object's own id, wrapped so it's distinguishable from a registered
+        // effect sharing the same id - see `ReplacementCandidate`'s own doc
+        // comment) rather than applying unconditionally ahead of the loop -
+        // see `protection_prevents`'s own doc comment for why.
+        let protection_candidate = protection_prevents(state, script_runtime, &event)
+            .map(ReplacementCandidate::Protection)
+            .filter(|c| !excluded.contains(c));
 
         if state.replacement_effects.is_empty() && protection_candidate.is_none() {
             // Genuinely nothing to match against - safe to resolve unchanged.
             return ReplacementOutcome::Resolved(event);
         }
-        let mut matching: Vec<ObjectId> = state
+        let mut matching: Vec<ReplacementCandidate> = state
             .replacement_effects
             .iter()
             .filter(|r| {
-                !excluded.contains(&r.source)
+                !excluded.contains(&ReplacementCandidate::Registered(r.source))
                     && !is_battlefield_entry_modifier(&r.spec)
                     && r.matches(&event, is_destroy, state, script_runtime)
             })
-            .map(|r| r.source)
+            .map(|r| ReplacementCandidate::Registered(r.source))
             .collect();
-        if let Some(protected_id) = protection_candidate {
-            // Sentinel collision (the protected object also has its own
-            // registered effect with itself as source, matching this same
-            // event - apply_one_replacement_or_protection's own doc comment
-            // names this limitation): don't push a second, duplicate entry
-            // for the same id - that would offer the player a bogus 2-way
-            // "choice" between two candidates that are actually the same
-            // object, rather than genuinely collapsing to the single real
-            // match the dispatch already resolves this case to.
-            if !matching.contains(&protected_id) {
-                matching.push(protected_id);
-            }
+        if let Some(candidate) = protection_candidate {
+            // `Registered(X)`/`Protection(X)` are distinct `ReplacementCandidate`
+            // values even when they share the same underlying object id, so
+            // this is always pushed as a genuine, separate candidate now -
+            // the fix for the collision `ReplacementCandidate`'s own doc
+            // comment names (previously this was skipped whenever `matching`
+            // already contained the bare `protected_id`, silently collapsing
+            // two different candidates into one and never offering the real
+            // CR 616.1 choice between them).
+            matching.push(candidate);
         }
 
         match matching.as_slice() {
@@ -1028,7 +1038,10 @@ mod tests {
         };
         assert_eq!(affected_player, PlayerId(0), "damage to a player - that player is affected");
         assert_eq!(candidates.len(), 2);
-        assert!(candidates.contains(&a) && candidates.contains(&b));
+        assert!(
+            candidates.contains(&ReplacementCandidate::Registered(a))
+                && candidates.contains(&ReplacementCandidate::Registered(b))
+        );
         // Neither effect was consumed - the choice hasn't been made yet.
         assert_eq!(state.replacement_effects.len(), 2);
     }
