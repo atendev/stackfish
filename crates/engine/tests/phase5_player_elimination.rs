@@ -315,6 +315,7 @@ fn an_eliminated_players_owned_spell_leaves_the_stack_even_if_controlled_by_some
         ScriptHandle(0),
         None,
         None,
+        None,
     ));
     state.player_mut(p0).unwrap().life = 0;
 
@@ -348,6 +349,7 @@ fn a_spell_merely_controlled_not_owned_by_an_eliminated_player_stays_on_the_stac
         ScriptHandle(0),
         None,
         None,
+        None,
     ));
     state.player_mut(p0).unwrap().life = 0;
 
@@ -377,6 +379,7 @@ fn an_eliminated_players_controlled_ability_leaves_the_stack_even_if_owned_by_so
         None,
         false,
         ScriptHandle(0),
+        None,
         None,
         None,
     ));

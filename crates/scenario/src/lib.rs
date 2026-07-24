@@ -1613,6 +1613,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             | StepStatus::AwaitingSearchChoice { .. }
             | StepStatus::AwaitingTriggerOrderChoice { .. }
             | StepStatus::AwaitingPayment { .. }
+            | StepStatus::AwaitingModeChoice { .. }
             | StepStatus::AwaitingDiscard { .. }
             | StepStatus::AwaitingMulliganDecision { .. }
             | StepStatus::AwaitingBottomCardChoice { .. }

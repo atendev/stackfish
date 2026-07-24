@@ -273,6 +273,7 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
         operation: ScriptHandle(0),
         effect: None,
         intervening_if: None,
+        pending_mode_choice: None,
     });
     let card = ObjectId(1);
     state.objects.insert(card, card_object(card, instant_definition(), p0, ZoneKind::Hand));

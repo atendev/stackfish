@@ -303,6 +303,7 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
         operation: ScriptHandle(0),
         effect: None,
         intervening_if: None,
+        pending_mode_choice: None,
     });
 
     let mut engine = Engine::new(state);

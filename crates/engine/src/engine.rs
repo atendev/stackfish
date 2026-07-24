@@ -28,7 +28,7 @@ use crate::types::mana::{ColorSet, ManaCost, ManaPool};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::{effective_max_hand_size, PlayerState};
 use crate::types::stack::{StackEntryKind, StackObject};
-use crate::types::target::{TargetRequirement, TargetSpec};
+use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
 
@@ -116,6 +116,27 @@ pub enum CopyChoiceError {
     NotAwaitingChoice,
     /// `Some(id)` wasn't one of the offered `candidates`.
     InvalidCandidate,
+}
+
+/// Why `submit_mode_choice` rejected an answer to a CR 700.2e "chosen by
+/// opponent" modal choice.
+#[derive(Debug)]
+pub enum ModeChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingModeChoice`.
+    NotAwaitingChoice,
+    /// `modes.len()` fell outside the announced `min..=max` range.
+    InvalidCount,
+    /// The same mode index appeared twice - CR 700.2e doesn't grant CR
+    /// 700.2d's "same mode twice" exception on its own; combining both stays
+    /// unmodeled (see `ModeChoice`'s own doc comment).
+    DuplicateMode,
+    /// One of `modes` wasn't a valid index into the card's own mode list.
+    NoSuchMode,
+    /// 2+ modes chosen, but combining them hit the same synchronous-effect-
+    /// kind narrowing `commands::is_modal_resolvable` already enforces for
+    /// the caster-chosen variants (`ModeChoice::Exactly`/`UpTo`/
+    /// `*Repeatable`).
+    UnsupportedModeCombination,
 }
 
 /// Why `submit_commander_return_choice` rejected an answer to a CR 903.9a
@@ -410,6 +431,17 @@ pub enum StepStatus {
     /// priority decision" rationale as `AwaitingReplacementChoice` — it has
     /// its own entry point rather than going through `submit_action`.
     AwaitingPayment { player: PlayerId, stack_id: ObjectId },
+    /// CR 700.2e: a modal spell (`stack_id`) whose `ModeChoice` defers the
+    /// mode choice to a player other than its controller
+    /// (`ExactlyChosenByOpponent`/`UpToChosenByOpponent`) reached resolution
+    /// with no mode chosen yet — `ResolveStackTop` peeked at the top of the
+    /// stack (without popping it) and found `StackObject::pending_mode_choice`
+    /// still `Some`. The caller should prompt `player` (the "other player"
+    /// CR 700.2e names, resolved at cast time) to choose between `min` and
+    /// `max` modes and call `submit_mode_choice`, then `step()` again. Same
+    /// "not a `PlayerAction`/priority decision" rationale as
+    /// `AwaitingReplacementChoice`.
+    AwaitingModeChoice { player: PlayerId, stack_id: ObjectId, min: u32, max: u32 },
     /// CR 514.1: `player`'s hand exceeds `max_hand_size` (normally 7) at the
     /// start of cleanup — the caller should prompt `player` to choose exactly
     /// `hand_size - max_hand_size` cards to discard and call `submit_discard`,
@@ -858,6 +890,14 @@ pub enum ProcessState {
     /// `commands::PendingPaymentRequest::source`'s doc comment) — needed by
     /// `PaymentPlan::validate` to check `AdditionalCost::TapSelf`.
     AwaitingPayment { stack_id: ObjectId, payer: PlayerId, cost: CostSpec, source: ObjectId },
+    /// CR 700.2e: paused because `ProcessState::ResolveStackTop` peeked at
+    /// the top of the stack (without popping it) and found a `StackObject`
+    /// whose `pending_mode_choice` is still `Some` — `chooser` must submit
+    /// between `min` and `max` mode indices via `Engine::submit_mode_choice`
+    /// before this spell can actually resolve. See `StackObject::
+    /// pending_mode_choice`'s own doc comment for how the pause is raised
+    /// and answered.
+    AwaitingModeChoice { stack_id: ObjectId, chooser: PlayerId, min: u32, max: u32 },
     /// CR 104.2a/104.4a: at most one non-eliminated player remains —
     /// `winner` is that player, or `None` if the last remaining players were
     /// eliminated simultaneously (a draw). Terminal: `step()` keeps
@@ -2086,6 +2126,89 @@ impl Engine {
         Ok(())
     }
 
+    /// Answers a pending CR 700.2e "chosen by opponent" modal choice raised
+    /// by `StepStatus::AwaitingModeChoice` — `modes` must have between `min`
+    /// and `max` entries (that status's own announced range), no duplicates,
+    /// each a valid index into the spell's own `CardDefinition.modes`. Builds
+    /// `target_requirement`/`effect` exactly the way `commands::
+    /// execute_command`'s `CastSpell` arm would have for the caster-chosen
+    /// variants (bare single-mode shape for one chosen mode, `TargetSpec::
+    /// Multiple`/`AbilityEffect::Modal` for 2+ — see that arm's own doc
+    /// comment), then patches the still-on-the-stack `StackObject` in place
+    /// and clears `pending_mode_choice` back to `None` so the very next
+    /// `step()` re-enters `ProcessState::ResolveStackTop` and actually
+    /// resolves it. Narrowed to the same target-less/cost-less mode shape
+    /// `ModeChoice::ExactlyChosenByOpponent`/`UpToChosenByOpponent` already
+    /// enforce at cast time, so unlike the caster-chosen path there's no
+    /// target validation to redo here.
+    pub fn submit_mode_choice(&mut self, modes: Vec<u32>) -> Result<(), ModeChoiceError> {
+        let ProcessState::AwaitingModeChoice { stack_id, min, max, .. } = &self.process_state else {
+            return Err(ModeChoiceError::NotAwaitingChoice);
+        };
+        let (stack_id, min, max) = (*stack_id, *min, *max);
+
+        let chosen_count = modes.len() as u32;
+        if chosen_count < min || chosen_count > max {
+            return Err(ModeChoiceError::InvalidCount);
+        }
+        let mut seen = std::collections::HashSet::new();
+        if !modes.iter().all(|m| seen.insert(*m)) {
+            return Err(ModeChoiceError::DuplicateMode);
+        }
+
+        let Some(definition) = self.state.object(stack_id).map(|o| o.definition.clone()) else {
+            return Err(ModeChoiceError::NoSuchMode);
+        };
+        let mut chosen_indices = modes;
+        chosen_indices.sort_unstable();
+        let mut chosen_modes = Vec::with_capacity(chosen_indices.len());
+        for &idx in &chosen_indices {
+            let Some(mode) = definition.modes.get(idx as usize) else {
+                return Err(ModeChoiceError::NoSuchMode);
+            };
+            chosen_modes.push(mode);
+        }
+
+        let (target_requirement, effect) = if let [only] = chosen_modes.as_slice() {
+            (only.target_requirement.clone(), only.effect.clone())
+        } else {
+            for mode in &chosen_modes {
+                if let Some(effect) = &mode.effect {
+                    if !commands::is_modal_resolvable(effect) {
+                        return Err(ModeChoiceError::UnsupportedModeCombination);
+                    }
+                }
+            }
+            // Every mode is target-less by this `ModeChoice` variant's own
+            // cast-time narrowing - a synthetic zero-count placeholder per
+            // chosen mode, same shape the caster-chosen multi-mode path
+            // uses for a target-less mode.
+            let reqs: Vec<TargetRequirement> = chosen_modes
+                .iter()
+                .map(|_| TargetRequirement {
+                    filter: TargetFilter::AnyTarget,
+                    count: 0,
+                    up_to: false,
+                    at_least: false,
+                    exclude_source: false,
+                })
+                .collect();
+            let effects: Vec<Option<AbilityEffect>> = chosen_modes.iter().map(|m| m.effect.clone()).collect();
+            (Some(TargetSpec::Multiple(reqs)), Some(AbilityEffect::Modal(effects)))
+        };
+
+        let Some(top) = self.state.stack.last_mut().filter(|o| o.stack_id == stack_id) else {
+            return Err(ModeChoiceError::NoSuchMode);
+        };
+        top.chosen_modes = chosen_indices;
+        top.target_requirement = target_requirement;
+        top.effect = effect;
+        top.pending_mode_choice = None;
+
+        self.process_state = ProcessState::ResolveStackTop;
+        Ok(())
+    }
+
     /// Answers a pending CR 707.6/614.12a "enter as a copy" choice (Clone
     /// itself) raised by `StepStatus::AwaitingCopyChoice` — `chosen` must be
     /// `None` (CR 707.6's "may," declining) or `Some` of one of that
@@ -3225,6 +3348,32 @@ impl Engine {
             }
 
             ProcessState::ResolveStackTop => {
+                // CR 700.2e: peek before popping - a modal spell whose mode
+                // is chosen by another player reaches this point with
+                // nothing resolvable yet (`chosen_modes`/`target_requirement`
+                // /`effect` are still empty/`None` placeholders). Pause here
+                // instead of popping it off the stack; `Engine::
+                // submit_mode_choice` patches it in place and re-enters this
+                // same `ProcessState` once the choice arrives, at which
+                // point `pending_mode_choice` is `None` and this check falls
+                // through exactly as before this slice.
+                if let Some(top) = self.state.stack.last() {
+                    if let Some(pending) = &top.pending_mode_choice {
+                        let status = StepStatus::AwaitingModeChoice {
+                            player: pending.chooser,
+                            stack_id: top.stack_id,
+                            min: pending.min,
+                            max: pending.max,
+                        };
+                        self.process_state = ProcessState::AwaitingModeChoice {
+                            stack_id: top.stack_id,
+                            chooser: pending.chooser,
+                            min: pending.min,
+                            max: pending.max,
+                        };
+                        return status;
+                    }
+                }
                 let Some(top) = self.state.stack.pop() else {
                     // Shouldn't happen - pipeline_exit only routes here when
                     // the all-pass check saw a non-empty stack. Defensive
@@ -4766,6 +4915,15 @@ impl Engine {
                 status
             }
 
+            ProcessState::AwaitingModeChoice { stack_id, chooser, min, max } => {
+                // Nothing to do until submit_mode_choice answers - same
+                // "put the exact same state back" shape as AwaitingPayment
+                // above.
+                let status = StepStatus::AwaitingModeChoice { player: chooser, stack_id, min, max };
+                self.process_state = ProcessState::AwaitingModeChoice { stack_id, chooser, min, max };
+                status
+            }
+
             ProcessState::SbaLoop => {
                 self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
                     SbaOutcome::Progressed(events, departed) => self.finish_sba_loop(events, departed),
@@ -4925,6 +5083,10 @@ impl Engine {
                             operation,
                             effect,
                             intervening_if,
+                            // CR 700.2e: only a modal spell can defer its
+                            // mode choice this way - a triggered ability
+                            // never does.
+                            None,
                         ));
                         let event_id = self.state.allocate_event_id();
                         let sequence_no = self.state.allocate_sequence_no();

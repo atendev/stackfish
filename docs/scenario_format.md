@@ -368,7 +368,10 @@ becoming illegal before resolution) are exercised exhaustively in
 unless `mode_repeatable = true` (CR 700.2d's reminder-text-gated "you may choose the same mode more
 than once," e.g. Profane Command) — a repeated mode is treated as if it appeared that many times in
 sequence, each instance getting its own target slot and (if the mode carries one) its own additional
-cost. CR 700.2e (another player chooses) and 700.2i (pawprint budgets) are still deferred. A single
+cost. CR 700.2e (another player chooses) is real in the engine (`ModeChoice::ExactlyChosenByOpponent`/
+`UpToChosenByOpponent`) but has no TOML field here — it needs a resolution-time pause
+(`Engine::submit_mode_choice`) a scenario fixture's synchronous `run_action`/`run_payment` driving loop
+has no entry point for yet. 700.2i (pawprint budgets) is still deferred entirely. A single
 chosen mode's own `target_requirement`/effect are used instead of the card's top-level fields for the
 rest of casting/resolution (CR 700.2c: a mode with no `target_requirement` casts as though it
 required no targets at all, regardless of what other modes on the same card ask for); 2+ chosen

@@ -168,6 +168,7 @@ fn play_land_rejects_nonempty_stack() {
         operation: ScriptHandle(0),
         effect: None,
         intervening_if: None,
+        pending_mode_choice: None,
     });
     state.objects.insert(card, card_object(card, land_definition(), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);

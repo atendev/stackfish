@@ -188,6 +188,7 @@ fn an_ability_targeting_its_own_source_fizzles_at_resolution_recheck() {
         ScriptHandle(0),
         Some(AbilityEffect::Damage(1)),
         None,
+        None,
     ));
 
     let mut engine = Engine::new(state);
