@@ -196,8 +196,22 @@ pub enum EffectPrimitive {
     DoublePT { power: bool, toughness: bool },
     /// Layer 6 (CR 613.1): grants the listed keyword(s) in addition to
     /// whatever the object already has. Union, never removes a keyword on
-    /// its own — see `RemoveAllAbilities` below for the strip shape.
+    /// its own — see `RemoveAllAbilities` below for the strip-everything
+    /// shape, or `RemoveKeyword` below for a scoped removal of just these.
     AddKeyword(KeywordSet),
+    /// Layer 6 (CR 613.1f): removes the listed keyword(s), and only these —
+    /// e.g. "Walls you control can attack as though they didn't have
+    /// defender" (Assault Formation) is `RemoveKeyword(DEFENDER)`. Unlike
+    /// `RemoveAllAbilities`, this never touches protection or any other
+    /// layer-6 field, and never clears keywords outside the listed set —
+    /// the narrower "loses these specific keywords" shape `RemoveAllAbilities`'s
+    /// own doc comment names as deliberately unbuilt there. Folds into
+    /// `layers.rs`'s layer-6 pass at this effect's own CR 613.7 timestamp
+    /// position, same as `AddKeyword` — a later-timestamp `AddKeyword`
+    /// re-adds whatever an earlier `RemoveKeyword` removed (and vice versa),
+    /// the identical "no special CR 613.8a dependency needed" reasoning
+    /// `RemoveAllAbilities` already documents for the same interaction.
+    RemoveKeyword(KeywordSet),
     /// Layer 6 (CR 613.1/702.16e): grants protection from the listed
     /// color(s) in addition to whatever the object already has protection
     /// from. Union, same shape as `AddKeyword` above — see `EffectiveCharacteristics::
@@ -338,8 +352,9 @@ pub enum EffectPrimitive {
     /// strip-all and an add-keyword/add-protection never depend on each
     /// other under CR 613.8a, same reasoning `SetPT`/`GainControl` already
     /// document for why *they* don't need one). No payload — it always
-    /// clears everything accumulated so far, there's no narrower "loses
-    /// these specific keywords" shape here.
+    /// clears everything accumulated so far; see `RemoveKeyword` above for
+    /// the narrower "loses these specific keywords (and nothing else)"
+    /// shape.
     ///
     /// Deliberately narrow: only strips these layer-engine fields,
     /// not the full picture of "abilities." A permanent's own custom

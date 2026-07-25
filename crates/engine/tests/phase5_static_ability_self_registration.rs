@@ -76,6 +76,29 @@ end
 return s
 "#;
 
+const REMOVE_DEFENDER: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.AbilityAdding)
+    e:SetEffect(Game.Effects.RemoveKeyword("Defender"))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+return s
+"#;
+
+const MISMATCHED_REMOVE_KEYWORD: &str = r#"
+local s = {}
+function s.initial_effect(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.TypeChanging)
+    e:SetEffect(Game.Effects.RemoveKeyword("Defender"))
+    e:Register()
+end
+return s
+"#;
+
 const TWO_STATIC_ABILITIES: &str = r#"
 local s = {}
 function s.initial_effect(c)
@@ -181,6 +204,39 @@ fn run_card_script_rejects_mismatched_layer_and_effect() {
     assert!(
         result.is_err(),
         "SetLayer(TypeChanging) + SetEffect(ModifyPT(..)) is a real mismatch, must be rejected"
+    );
+    assert!(state.continuous_effects.is_empty());
+}
+
+#[test]
+fn run_card_script_self_registers_a_remove_keyword_static_ability() {
+    let mut state = two_player_state();
+    let bear = ObjectId(0);
+    let definition = bear_definition(REMOVE_DEFENDER);
+    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+
+    let mut runtime = ScriptRuntime::new();
+    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+
+    assert_eq!(state.continuous_effects.len(), 1);
+    let effect = &state.continuous_effects[0];
+    assert_eq!(effect.layer, Layer::AbilityAdding);
+    assert!(matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::RemoveKeyword(set)) if set == KeywordSet::DEFENDER));
+}
+
+#[test]
+fn run_card_script_rejects_mismatched_layer_and_remove_keyword() {
+    let mut state = two_player_state();
+    let bear = ObjectId(0);
+    let definition = bear_definition(MISMATCHED_REMOVE_KEYWORD);
+    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+
+    let mut runtime = ScriptRuntime::new();
+    let result = runtime.run_card_script(&mut state, &definition, bear);
+
+    assert!(
+        result.is_err(),
+        "SetLayer(TypeChanging) + SetEffect(RemoveKeyword(..)) is a real mismatch, must be rejected"
     );
     assert!(state.continuous_effects.is_empty());
 }

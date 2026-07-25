@@ -119,12 +119,14 @@ pub fn effective_characteristics(
     // Layer 6 (CR 613.1f): additive (AddKeyword/AddProtectionColor/
     // AddProtectionCardType/AddProtectionSubtype/AddProtectionName/
     // AddProtectionEverything/AddProtectionPlayer) and removing
-    // (RemoveAllAbilities) effects fold in the same CR 613.7 timestamp order
-    // `applicable_effects_in_layer` already returns - a RemoveAllAbilities
-    // clears whatever's accumulated so far in all seven fields (protection
-    // is an ability too, CR 613.1f), but a later-timestamp add-shape still
-    // applies on top of that, same as a real strip-then-regrant interaction
-    // (see RemoveAllAbilities's own doc comment).
+    // (RemoveKeyword/RemoveAllAbilities) effects fold in the same CR 613.7
+    // timestamp order `applicable_effects_in_layer` already returns - a
+    // RemoveAllAbilities clears whatever's accumulated so far in all seven
+    // fields (protection is an ability too, CR 613.1f), a RemoveKeyword
+    // clears only its own named keyword(s), but either way a later-timestamp
+    // add-shape still applies on top of that, same as a real
+    // strip-then-regrant interaction (see RemoveAllAbilities's/
+    // RemoveKeyword's own doc comments).
     let mut protection_colors = crate::ColorSet::empty();
     let mut protection_card_types = CardTypeSet::empty();
     let mut protection_subtypes: Vec<crate::Subtype> = Vec::new();
@@ -137,6 +139,7 @@ pub fn effective_characteristics(
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
             Some(EffectPrimitive::AddKeyword(added)) => keywords |= added,
+            Some(EffectPrimitive::RemoveKeyword(removed)) => keywords &= !removed,
             Some(EffectPrimitive::AddProtectionColor(added)) => protection_colors |= added,
             Some(EffectPrimitive::AddProtectionCardType(added)) => protection_card_types |= added,
             Some(EffectPrimitive::AddProtectionSubtype(added)) => {

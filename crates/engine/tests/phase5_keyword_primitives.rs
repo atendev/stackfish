@@ -23,6 +23,8 @@ use std::collections::HashMap;
 
 use stackfish_engine::commands::CommandError as EngineCommandError;
 use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::layers::effective_characteristics;
+use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, two_player_state, zones};
 
@@ -277,6 +279,149 @@ fn defender_creature_cannot_attack() {
     let mut engine = Engine::new(state);
     let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+}
+
+// ---------------------------------------------------------------------
+// Haste/Defender/Vigilance granted or removed by a continuous effect (CR
+// 613.1f) - these three specifically used to read only the *printed*
+// keyword, ignoring any static ability; fixed to consult effective_keywords
+// like every other keyword check in this file already does.
+// ---------------------------------------------------------------------
+
+fn self_only_keyword_effect(source: ObjectId, effect: EffectPrimitive) -> ContinuousEffect {
+    ContinuousEffect {
+        source,
+        layer: Layer::AbilityAdding,
+        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        effect: EffectPayload::Primitive(effect),
+        timestamp: SequenceNo(0),
+        duration: EffectDuration::Permanent,
+        condition: None,
+    }
+}
+
+#[test]
+fn haste_granted_by_a_continuous_effect_bypasses_summoning_sickness() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let mut state = combat_state();
+    // controlled_since_turn == the current turn (1) - sick unless something
+    // overrides it. No printed Haste this time - only a granted one.
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Sprinter", 2, 2, KeywordSet::empty()), p0, 1));
+    state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::AddKeyword(KeywordSet::HASTE)));
+
+    let mut engine = Engine::new(state);
+    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "a continuous effect granting Haste must bypass summoning sickness too, got {status:?}"
+    );
+}
+
+#[test]
+fn defender_granted_by_a_continuous_effect_prevents_attacking() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Cursed Bear", 2, 2, KeywordSet::empty()), p0, 0));
+    state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::AddKeyword(KeywordSet::DEFENDER)));
+
+    let mut engine = Engine::new(state);
+    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    assert!(
+        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
+        "a continuous effect granting Defender must actually prevent attacking, got {status:?}"
+    );
+}
+
+#[test]
+fn vigilance_granted_by_a_continuous_effect_prevents_tapping() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Watcher", 2, 2, KeywordSet::empty()), p0, 0));
+    state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::AddKeyword(KeywordSet::VIGILANCE)));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    assert!(!engine.state().object(attacker).unwrap().tapped, "a continuous effect granting Vigilance must skip the tap too");
+}
+
+/// The Assault Formation shape: "Walls you control can attack as though
+/// they didn't have defender." A printed Defender wall, with a
+/// `RemoveKeyword(Defender)` static ability, can attack.
+#[test]
+fn remove_keyword_lets_a_printed_defender_creature_attack() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Wall", 0, 4, KeywordSet::DEFENDER), p0, 0));
+    state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::RemoveKeyword(KeywordSet::DEFENDER)));
+
+    let mut engine = Engine::new(state);
+    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "RemoveKeyword(Defender) must let this wall attack as though it didn't have defender, got {status:?}"
+    );
+}
+
+#[test]
+fn remove_keyword_only_strips_the_named_keyword() {
+    let bear = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(bear, creature_definition("Drake", 2, 2, KeywordSet::FLYING | KeywordSet::VIGILANCE), PlayerId(0), 0));
+    state.continuous_effects.push(self_only_keyword_effect(bear, EffectPrimitive::RemoveKeyword(KeywordSet::FLYING)));
+
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
+
+    assert!(!effective.keywords.contains(KeywordSet::FLYING), "Flying was named, must be stripped");
+    assert!(effective.keywords.contains(KeywordSet::VIGILANCE), "Vigilance wasn't named, unlike RemoveAllAbilities this must survive");
+}
+
+#[test]
+fn a_later_add_keyword_still_applies_after_an_earlier_remove_keyword() {
+    let bear = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(bear, creature_definition("Drake", 2, 2, KeywordSet::FLYING), PlayerId(0), 0));
+    state.continuous_effects.push(ContinuousEffect {
+        timestamp: SequenceNo(0),
+        ..self_only_keyword_effect(bear, EffectPrimitive::RemoveKeyword(KeywordSet::FLYING))
+    });
+    // Later timestamp - e.g. a second effect resolving after the removal -
+    // should still stick on top, same as RemoveAllAbilities's own
+    // strip-then-regrant interaction.
+    state.continuous_effects.push(ContinuousEffect {
+        timestamp: SequenceNo(1),
+        ..self_only_keyword_effect(bear, EffectPrimitive::AddKeyword(KeywordSet::FLYING))
+    });
+
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
+
+    assert!(effective.keywords.contains(KeywordSet::FLYING), "a later-timestamp grant still applies on top of an earlier removal");
+}
+
+#[test]
+fn a_later_remove_keyword_strips_an_earlier_add_keyword() {
+    let bear = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(bear, creature_definition("Drake", 2, 2, KeywordSet::empty()), PlayerId(0), 0));
+    state.continuous_effects.push(ContinuousEffect {
+        timestamp: SequenceNo(0),
+        ..self_only_keyword_effect(bear, EffectPrimitive::AddKeyword(KeywordSet::FLYING))
+    });
+    state.continuous_effects.push(ContinuousEffect {
+        timestamp: SequenceNo(1),
+        ..self_only_keyword_effect(bear, EffectPrimitive::RemoveKeyword(KeywordSet::FLYING))
+    });
+
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
+
+    assert!(!effective.keywords.contains(KeywordSet::FLYING), "a later-timestamp removal strips an earlier grant");
 }
 
 // ---------------------------------------------------------------------

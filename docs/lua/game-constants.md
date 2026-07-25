@@ -183,6 +183,7 @@ layer/effect pair is a real error.
 | `SetPT(power, toughness)` | integers | Overrides power/toughness outright. |
 | `ModifyPT(power, toughness)` | integers (can be negative) | Adds this delta to power/toughness. |
 | `AddKeyword(name)` | keyword name string | Grants a keyword ability. |
+| `RemoveKeyword(name)` | keyword name string | Removes just this keyword's effect — e.g. "Walls you control can attack as though they didn't have defender" is `RemoveKeyword("Defender")`. Doesn't touch protection or any other keyword, unlike `RemoveAllAbilities` below. |
 | `AddProtectionColor(letter)` | mana-color letter | CR 702.16, protection from that color. |
 | `AddProtectionCardType(name)` | card type name | Protection from that card type (e.g. "protection from artifacts"). |
 | `AddProtectionSubtype(name)` | subtype name | CR 702.16g, protection from that creature type. One call per subtype (write "protection from A and from B" as two separate registered effects). |
@@ -197,9 +198,53 @@ layer/effect pair is a real error.
 | `SwitchPT` | — | Swaps power and toughness. |
 | `RemoveAllAbilities` | — | CR 613.1f, strips every keyword and protection quality accumulated so far. A later effect with a higher timestamp that re-adds something still applies on top. |
 
+Every keyword granted or removed this way is actually respected wherever it matters — including Haste (bypasses summoning sickness), Defender (can't attack), and Vigilance (doesn't tap to attack).
+
 A custom function is also accepted in place of any `Game.Effects.*` value — see
 [static-abilities.md](static-abilities.md) for its call signature (it returns a table describing
 the effect shape instead of using a tag).
+
+### Supported keyword names (`AddKeyword`/`RemoveKeyword`)
+
+The complete list both `Game.Effects.AddKeyword(name)` and `Game.Effects.RemoveKeyword(name)`
+recognize — anything else is a load-time error, not a silent no-op:
+
+| Name | CR | Meaning |
+|---|---|---|
+| `"Flying"` | 702.9 | Evasion — blockable only by Flying/Reach. |
+| `"Reach"` | 702.17 | Can block a Flying creature (no evasion of its own). |
+| `"Menace"` | 702.111 | Can't be blocked except by two or more creatures. |
+| `"Vigilance"` | 702.20 | Doesn't tap to attack. |
+| `"Haste"` | 702.10 | Ignores summoning sickness (attacking and `{T}` activated abilities). |
+| `"Defender"` | 702.3 | Can't attack. |
+| `"Flash"` | 702.8 | Castable any time its controller could cast an instant. |
+| `"Deathtouch"` | 702.2 | Any nonzero damage from this source is lethal, regardless of amount. |
+| `"Indestructible"` | 702.12 | Ignores the lethal-damage state-based action (still affected by 0 toughness). |
+| `"Lifelink"` | 702.15 | Damage this source deals also gains its controller that much life. |
+| `"Wither"` | 702.80 | Damage this source deals to a creature is `-1/-1` counters instead of marked damage. |
+| `"Infect"` | 702.90 | Implies Wither's creature-damage behavior; damage to a player becomes poison counters instead of life loss. |
+| `"FirstStrike"` | 702.7 | Deals combat damage in the first-strike damage step. |
+| `"DoubleStrike"` | 702.7 | Deals combat damage in both the first-strike and regular damage steps. |
+| `"Trample"` | 702.19 | Excess combat damage beyond lethal can spill to the defending player. Trample-over-planeswalkers/battles (702.19c/e/f/g) isn't modeled — excess only ever spills to a player. |
+| `"Fear"` | 702.36 | Evasion — can't be blocked except by artifact and/or black creatures. |
+| `"Intimidate"` | 702.13 | Evasion — can't be blocked except by artifact creatures and/or creatures sharing a color with it. |
+| `"Shadow"` | 702.28 | Can only block/be blocked by other Shadow creatures. |
+| `"Horsemanship"` | 702.31 | Can't be blocked by creatures without Horsemanship. |
+| `"CantBeRegenerated"` | 701.19c | Not a true CR 702 keyword — an internal status flag ("this permanent can't have a regeneration shield created for it"), granted the same way as any other keyword. |
+
+**Not grantable via `AddKeyword`:** Banding (CR 702.22) exists as a real `KeywordSet` bit
+(`effective_keywords(...).contains(BANDING)` is checked at every real combat-declaration site), but
+nothing in this scripting API currently sets it — only `AddBandsWithOther` (the "bands with other
+[quality]" variant, listed in the table above) is reachable from Lua. Plain Banding is a real,
+named gap, not silently guessed at.
+
+Every keyword in the table above is fully enforced, not just stored — First Strike/Double Strike
+gate which combat damage step a creature deals damage in, Trample lets excess lethal damage spill
+to the defending player, and Fear/Intimidate/Shadow/Horsemanship are all checked as real blocking
+restrictions.
+
+`Hexproof`/`Shroud`/`Ward` aren't in the list at all — no `KeywordSet` bit exists for any of them
+yet.
 
 ## `Game.Durations.*`
 

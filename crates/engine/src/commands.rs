@@ -169,7 +169,7 @@ pub(crate) fn has_summoning_sickness(
     script_runtime: &ScriptRuntime,
     object: &GameObject,
 ) -> bool {
-    if object.definition.keywords.contains(KeywordSet::HASTE) {
+    if effective_keywords(state, script_runtime, object.object_id).contains(KeywordSet::HASTE) {
         return false;
     }
     let controller = crate::layers::effective_controller(state, script_runtime, object.object_id);
@@ -2395,8 +2395,11 @@ pub fn execute_command(
                         "a chosen attacker has summoning sickness".to_string(),
                     ));
                 }
-                // CR 302.6b/702.3b: a creature with defender can't attack.
-                if object.definition.keywords.contains(KeywordSet::DEFENDER) {
+                // CR 302.6b/702.3b: a creature with defender can't attack -
+                // effective_keywords so a granted/removed Defender (e.g.
+                // Assault Formation's RemoveKeyword(Defender)) is respected,
+                // not just the printed keyword.
+                if effective_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER) {
                     return Err(CommandError::IllegalAction(
                         "a chosen attacker has defender and can't attack".to_string(),
                     ));
@@ -2443,8 +2446,13 @@ pub fn execute_command(
             // doesn't tap it.
             let mut events = Vec::with_capacity(attackers.len() * 2);
             for (attacker, target) in &attackers {
+                // effective_keywords first (immutable borrow) so a granted
+                // Vigilance is respected too, not just the printed keyword -
+                // computed before the mutable borrow below, since the two
+                // can't overlap.
+                let has_vigilance = effective_keywords(state, script_runtime, *attacker).contains(KeywordSet::VIGILANCE);
                 let object = state.object_mut(*attacker).expect("validated above");
-                if !object.definition.keywords.contains(KeywordSet::VIGILANCE) {
+                if !has_vigilance {
                     object.tapped = true;
                     events.push(GameEventKind::Tapped { object: *attacker });
                 }
