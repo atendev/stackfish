@@ -31,6 +31,57 @@ effect.
 `Game.SelectTargets`/`:SetTarget` additionally accept a `type` key (`"object"`, `"player"`, or
 `"any"`, default `"object"`) to say what kind of thing is being targeted at all — see below.
 
+## A card's own base targeting (Enchant, etc.)
+
+The filter table above is also how a card declares *its own* target requirement — the thing that
+determines what's a legal target when the card itself is cast, before any ability is even in play.
+This is CR 601.2c's "target" on the spell itself: an Aura's "Enchant [quality]" line (CR 702.5a) is
+the most common case, but any targeted spell works the same way ("target creature" on a removal
+spell, etc.).
+
+Add an optional `s.target_requirement()` function to the card's script — a sibling to
+`s.initial_effect(c)`, not a replacement for it:
+
+```lua
+-- Enchant Wall
+local s = {}
+
+function s.target_requirement()
+    return { subtypes = { "Wall" }, count = 1 }
+end
+
+function s.initial_effect(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.PowerToughnessModifying)
+    e:SetEffect(Game.Effects.ModifyPT(1, 1))
+    e:SetAffected({ enchanted_only = true })
+    e:Register()
+end
+
+return s
+```
+
+Unlike `initial_effect(c)`, `target_requirement()` takes no arguments and runs once — when the
+card's own definition is built, not per copy as it enters play — since the restriction is fixed
+text that doesn't depend on game state or which object ends up carrying it. It returns the same
+flat filter table as everywhere else on this page, plus these siblings:
+
+```lua
+{
+    type = "object",        -- "object" | "player" | "any", default "object"
+    count = 1,               -- required
+    up_to = false,            -- CR 601.2c/115.6 "up to N"
+    at_least = false,          -- CR 601.2c/115.6 "N or more" - mutually exclusive with up_to
+    exclude_source = false,     -- CR 115.4 "another target"
+    -- ...plus card_types/subtypes/supertypes/controller/etc from the filter table above
+}
+```
+
+A card with no `target_requirement()` function needs no targets to cast — the same default as
+omitting `[cards.target_requirement]` in a TOML fixture. See
+[not-available-yet.md](not-available-yet.md) for what this can't express yet (a scripted
+predicate, as opposed to the flat filter shape).
+
 ## Scripted targeting predicates
 
 For a legality check the plain filter table can't express (e.g. "target creature with power 4 or

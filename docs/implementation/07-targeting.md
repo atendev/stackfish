@@ -501,3 +501,55 @@
 - Unresolved: two or more variable words in one spell/ability stays a real, unmodeled ambiguity - no
   smaller-footprint resolution exists without a `PlayerAction` shape that announces each variable
   word's own chosen count separately, a larger change than this slice's own scope.
+
+## Slice: script-target-requirement (merged)
+
+- Branch `phase5/script-target-requirement`.
+- Scope: CR 702.5a/303.4a - let a card's own script declare its base `target_requirement` (an
+  Aura's "Enchant [quality]" line, or any other targeted spell's targeting), instead of requiring
+  it as separate, hand-authored data outside the script (TOML today; the external card database
+  eventually). Prompted by the user correcting an earlier wrong claim of mine that `target_requirement`
+  is naturally "database metadata" - CR 702.5a says Enchant *is* a static ability, same status as
+  any other printed ability, so it belongs in the same place other abilities are declared.
+- Key finding that shaped the design: `initial_effect(c)` can't be the place this lives.
+  `run_card_script` only ever runs once a real `ObjectId` exists for a battlefield/token/copy entry
+  - but an Aura's target is chosen while it's still in hand, before it's ever a battlefield object,
+  so `initial_effect` would simply run too late. Also, `CardDefinition` is explicitly documented as
+  "immutable, shared... sourced from the external card database project - this engine consumes it,
+  does not author it," which the original "self-register it like an ability" framing would have
+  violated.
+- Design: an optional, argument-less `s.target_requirement()` function in the same script module as
+  `s.initial_effect(c)` - a sibling, not a replacement. Genuinely static (no `GameState`/`ObjectId`
+  needed, since an Enchant restriction doesn't vary by game state or which object ends up carrying
+  it), so it's called once per `CardDefinition` build via a new `ScriptRuntime::build_target_requirement`,
+  decoupled entirely from `run_card_script`'s per-object timing. Returns the same flat filter table
+  `Game.SelectTargets`/`ActivatedAbilityBuilder::SetTarget` already accept
+  (`decode_target_filter_table`, reused unchanged), plus `count`/`up_to`/`at_least`/`exclude_source`
+  as sibling keys (`decode_target_requirement_table`, new) - identical shape to the scenario crate's
+  own TOML `[cards.target_requirement]` table, just Lua-authored. A card with no
+  `target_requirement()` function returns `None`, same "requires no targets" default as before.
+- Verify: 5 new engine-level tests (`phase5_script_target_requirement.rs` - decode with/without the
+  function, missing-`count` load error, casting a script-declared "Enchant Wall"-style Aura at a
+  legal Wall creature attaches it, at an illegal creature is rejected) plus a new scenario TOML
+  fixture proving the scenario-crate wiring specifically (`card_types`-only filter, not
+  subtype-gated - see below), full workspace suite green, 0 failed.
+- Key changes:
+  - `ScriptRuntime::build_target_requirement(source: &str) -> Result<Option<TargetSpec>, ScriptError>`
+    (script.rs) and a thin `Engine::build_target_requirement` delegate (engine.rs).
+  - Scenario crate: new `PendingScriptTargetRequirement { object, source }`, collected by
+    `build_initial_state` only when `CardSpec.target_requirement` is unset *and* `CardSpec.script`
+    is set (an explicit TOML table always wins - zero behavior change for every pre-existing
+    fixture), same "no `Engine`/`ScriptRuntime` exists yet at that point" timing reason
+    `PendingTargetScript` already has. Patched in by a new `register_script_target_requirement`
+    once an `Engine` exists - overwrites the whole `target_requirement` field (not just a `.filter`
+    the way `register_target_script` patches a script-predicate placeholder), since there's no
+    TOML-declared shape to patch here at all. `build_new_game_engine`'s library/commander loops
+    call it inline instead (an `Engine` already exists there by the time cards are built).
+- Unresolved / named TODOs: only the flat filter-table shape is supported from
+  `target_requirement()`, not the scripted-predicate function form `:SetTarget` also accepts (no
+  real card needed it this slice; `docs/lua/not-available-yet.md` names it). `CardSpec` still has
+  no TOML field for a card's own subtypes at all (pre-existing, separately logged in
+  `99-backlog.md`'s Enchant/Equip note) - this slice's own scenario-TOML fixture proves the wiring
+  with a `card_types`-only filter rather than a real subtype-gated one for that reason, not because
+  subtype filters themselves don't work (they do - proven directly in the Rust-level test via a
+  hand-built `CardDefinition`, same as `phase5_aura_attach.rs`'s existing pattern).
