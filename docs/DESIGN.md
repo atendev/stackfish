@@ -137,10 +137,10 @@ adaptation doc, unchanged from the original plan:
       opponent's hand contents into a Lua callback that shouldn't see it).
 - [x] Player-input-mid-script: resolved for target selection (`Game.SelectTargets`) via real Lua
       coroutines (`Lua::create_thread`/`Thread::resume`, yield/resume spanning `Engine::step()`
-      calls) — see `docs/implementation.md`'s script-coroutines slice and `docs/lua_scripts.md`'s
-      "Asking the player for a target mid-resolution". Still open: modal spells, "may" abilities,
-      and selecting a *player* as the target (backlog items 9a/9b) — same mechanism, different
-      request shapes, not built yet.
+      calls) — see `docs/implementation/05-script-bridge.md`'s script-coroutines slice and
+      `docs/lua/targeting-and-choices.md`'s "Asking the player for a target mid-resolution". Still
+      open: modal spells (a different, non-script mechanism) — see
+      `docs/lua/not-available-yet.md`.
 - [ ] Snapshot/checkpoint strategy for the event ledger — replaying from event 0 every time you
       want state at event N works for v1, may need periodic snapshots later for performance. Not
       a v1 concern.

@@ -458,7 +458,7 @@ pub(crate) fn apply_replacements_from(
 /// Called only after `object` is already inserted into `state.objects` *and*
 /// its own `run_card_script` pass has run (so a self-registered effect is
 /// already sitting in `state.replacement_effects` by the time this runs —
-/// see `docs/lua_scripts.md`'s "Registration timing" note for why that
+/// see `docs/lua/card-script-basics.md`'s "Registration timing" note for why that
 /// ordering already holds at every real call site, without needing a
 /// propose-before-the-object-exists split the way `commit_zone_move`'s own
 /// callers need).

@@ -37,4 +37,4 @@ Look in the docs folder for the following information:
 - [mtg_adaptation_reference.md](/docs/mtg_adaptation_reference.md) | Reference guide for how some of the ygo-pro engine mechanics can translate over to mtg.
 - [comp_rules.md](/docs/comp_rules.md) | The entire comprehensive magic the gathering ruleset. Check this when wondering exactly how any rules interaction is supposed to work.
 - [scenario_format.md](/docs/scenario_format.md) | The TOML scenario/fixture schema used by tests and the CLI.
-- [lua_scripts.md](/docs/lua_scripts.md) | How card Lua scripts are written - condition/operation source strings, `Game.Conditions.*`/`Game.Ops.*` primitives vs custom functions, what's bound into the VM and what isn't yet.
+- [lua/index.md](/docs/lua/index.md) | Full Lua scripting API reference (card script structure, every `Game.*` table, one page per ability/effect kind) - start here for anything about writing card scripts.

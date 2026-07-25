@@ -173,7 +173,7 @@
   - Token creation (`Game.Ops.CreateToken`) — a 4th real to-Battlefield producer, not wired. Closed
     by `phase5/token-etb-modifiers` below.
   - General CR 616 propose/replace/commit for battlefield entry still doesn't exist beyond this
-    narrow carve-out — `docs/lua_scripts.md`'s existing reachability note (battlefield-entry absent
+    narrow carve-out — `docs/lua/replacement-effects.md`'s existing reachability note (battlefield-entry absent
     from the real-`WouldMoveZone`-producer list) stays true; a `ReplaceZoneDestination`-style
     "can't enter, goes to the graveyard instead" effect is still unreachable.
   - CR 122.6a (which player places ETB counters) always defaults to the object's controller — no

@@ -1213,6 +1213,110 @@ impl UserData for ActivatedAbilityBuilder {
     }
 }
 
+/// `Game.CreateManaAbility(c)`'s return value — CR 605's own dedicated
+/// sibling of `ActivatedAbilityBuilder`, not a mode of it, for two reasons:
+///
+/// 1. **No `:SetTarget` at all** (not "accepted but ignored") — CR 605.1a
+///    says a mana ability never has a target, so the method simply isn't on
+///    this builder's `UserData` impl; there's nothing to silently store and
+///    forget.
+/// 2. **`:SetOperation` only accepts `Game.Ops.AddMana`/`AddManaChoice`** —
+///    checked at `:Register()` time, not just documented convention. Nothing
+///    else (a custom function included) would actually resolve correctly:
+///    `commands.rs`'s `ActivateAbility` handler dispatches purely on the
+///    ability's resolved `effect` shape being `AddMana`/`AddManaChoice`
+///    specifically (that's how it tells a mana ability apart from an
+///    ordinary one at all) — any other operation shape would silently fall
+///    through to the normal stack-using activated-ability path instead,
+///    which is wrong for something registered as a mana ability. Rejecting
+///    it here means that mistake surfaces as a load-time error instead of a
+///    card that quietly behaves like a different kind of ability than its
+///    author intended.
+///
+/// `:AddCost` (same decoder `ActivatedAbilityBuilder` uses, so
+/// `Game.Costs.TapSelf`/`Sacrifice`/`Discard`/`TapPermanents`/`Life`/`Mana`
+/// all work here too) is genuinely optional in a way that changes behavior,
+/// not just cost content: omitting it entirely reproduces the original
+/// hardcoded-tap, no-payment-pause shape TOML's `mana_ability` field has
+/// always had (free, immediate — no `Engine::submit_payment` call needed).
+/// Calling `:AddCost` even once (e.g. just `Game.Costs.TapSelf`) opts into a
+/// real payment pause instead, same as any other ability's cost (CR
+/// 118.5a's "even a {0}/free cost needs an explicit acknowledgment" stance,
+/// applied here for the first time to a mana ability) — see
+/// `commands::PaymentResolution::ManaAbility` for how that pause still never
+/// reaches the stack (CR 605.3b) even though it now has a real cost.
+struct ManaAbilityBuilder {
+    source: ObjectId,
+    cost: CostSpec,
+    operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
+    registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for ManaAbilityBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("AddCost", |_, this, value: Value| {
+            match decode_cost_component_value(value).map_err(to_lua_err)? {
+                CostComponent::Additional(additional) => this.cost.additional.push(additional),
+                CostComponent::Mana(mana) => {
+                    if this.cost.mana.is_some() {
+                        return Err(mlua::Error::RuntimeError(
+                            "AddCost(Game.Costs.Mana(...)) called more than once - a mana \
+                             ability has only one mana-cost component"
+                                .to_string(),
+                        ));
+                    }
+                    this.cost.mana = Some(mana);
+                }
+            }
+            Ok(())
+        });
+        methods.add_method_mut("SetOperation", |lua, this, value: Value| {
+            let mut registry = this.registry.borrow_mut();
+            let decoded = decode_operation_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            drop(registry);
+            this.operation = Some(decoded);
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let (effect, operation) = this.operation.clone().ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetOperation() - a mana ability needs an operation"
+                        .to_string(),
+                )
+            })?;
+            if !matches!(effect, Some(AbilityEffect::AddMana(_)) | Some(AbilityEffect::AddManaChoice { .. })) {
+                return Err(mlua::Error::RuntimeError(
+                    "Game.CreateManaAbility only supports Game.Ops.AddMana/AddManaChoice \
+                     operations - use Game.CreateActivatedAbility for anything else"
+                        .to_string(),
+                ));
+            }
+            // Same "None means no cost at all" convention
+            // ActivatedAbilityBuilder::Register uses - here it additionally
+            // decides which of the two mana-ability resolution shapes this
+            // becomes (see this struct's own doc comment).
+            let cost = if this.cost.additional.is_empty() && this.cost.mana.is_none() {
+                None
+            } else {
+                Some(this.cost.clone())
+            };
+            let ability = RegisteredAbility {
+                id: AbilityId(0),
+                source: this.source,
+                kind: AbilityKind::Activated,
+                condition: None,
+                cost,
+                target: None,
+                operation,
+                effect,
+                intervening_if: None,
+            };
+            this.registry.borrow_mut().pending_triggered.push(ability);
+            Ok(())
+        });
+    }
+}
+
 /// `Game.CreateStaticAbility(c)`'s return value — mirrors
 /// `TriggeredAbilityBuilder` for CR 604/611 static abilities: `:SetLayer`
 /// accepts a `Game.Layers.*` tag only (no `Script` fallback — a `Layer` has
@@ -1596,8 +1700,8 @@ impl ScriptRuntime {
     }
 
     /// Loads `definition.script_ref`'s source, evaluates it to a Lua table
-    /// with a callable `initial_effect` field (the ygopro-style
-    /// `s.initial_effect(c)` module convention — see `docs/lua_scripts.md`),
+    /// with a callable `initial_effect` field (the
+    /// `s.initial_effect(c)` module convention — see `docs/lua/card-script-basics.md`),
     /// and calls it with `source.0`. Whatever the script's `initial_effect`
     /// `:Register()`ed onto the shared registry's pending queues during the
     /// call is drained right after — `pending_triggered` into
@@ -2852,6 +2956,18 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         })?
     };
 
+    let create_mana_ability = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(ManaAbilityBuilder {
+                source: ObjectId(source),
+                cost: CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() },
+                operation: None,
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
     let create_cost_modifier = {
         let registry = Rc::clone(&registry);
         lua.create_function(move |_, source: u64| {
@@ -2949,6 +3065,7 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     game.set("CreateStaticAbility", create_static_ability)?;
     game.set("CreateReplacementEffect", create_replacement_effect)?;
     game.set("CreateActivatedAbility", create_activated_ability)?;
+    game.set("CreateManaAbility", create_mana_ability)?;
     game.set("CreateCostModifier", create_cost_modifier)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;

@@ -113,3 +113,22 @@
 - `ScriptRuntime` uses `mlua` vendored Lua 5.4.
 - `ScriptHandle` opaque; registry stores `RegistryKey` for functions and suspended coroutine threads.
 - Design principle: "Lua asks, Rust decides" — scripts return intent tables; Rust validates and applies.
+
+## Adding a new `Game.Ops.*` primitive
+
+To add e.g. `Game.Ops.DrawCards(n)`:
+
+1. Add a variant to `AbilityEffect` (`types/ability.rs`), e.g. `DrawCards(i32)`.
+2. Register a factory function on the `Game.Ops` table in `script.rs`'s `bind_game_globals`,
+   mirroring `GainLife`'s `lua.create_function(|_, amount: i32| Ok(OperationTag(...)))`.
+3. Add the matching apply arm in `ScriptRuntime::invoke_operation` (the custom-function/table-key
+   path) *and* wherever the primitive's `Some(AbilityEffect::...)` fast path is dispatched
+   (`engine.rs`'s `ResolveStackTop`) — both paths need to produce the same observable effect,
+   since either one might be what a given ability ends up using.
+
+Adding a new `Game.Conditions.*` primitive follows the same shape: a new `ConditionPrimitive`
+variant, a Lua table entry in `bind_game_globals`, and the matching arm in
+`ConditionPrimitive::matches`.
+
+The card-author-facing reference for the resulting API lives in [docs/lua/](../lua/index.md), not
+here — update the relevant page there once the primitive is real and tested.

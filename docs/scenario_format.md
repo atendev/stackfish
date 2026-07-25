@@ -176,10 +176,11 @@ script = "..."                 # optional full self-registering Lua source, defa
 `activate_ability` with `ability_index = 0`. Each entry is one literal unit added (same letters as
 `mana.units`, see below) — `["G"]` models `{T}: Add {G}`; `["G", "G"]` would model adding two green
 in one activation. Only one mana ability per card this way, and the tap cost is implicit/hardcoded
-(this is the only cost shape mana abilities support right now — see `commands.rs`'s
-`ActivateAbility` arm). A card with no `mana_ability` entries can still be referenced by an
-`activate_ability` action, but it has no registered abilities, so `ability_index = 0` will be
-rejected ("no such ability on source").
+— this TOML field can never express any other cost shape. A card with no `mana_ability` entries can
+still be referenced by an `activate_ability` action, but it has no registered abilities, so
+`ability_index = 0` will be rejected ("no such ability on source"). A card's own Lua `script` can
+self-register a real mana ability too, including one with a cost beyond a bare tap (a Treasure/
+Lotus-Petal-style sacrifice, say) — see [docs/lua/mana-abilities.md](lua/mana-abilities.md).
 
 A `{2}{G}{G}` cost is `generic_cost = 2, colors = ["G", "G"]` — two list entries for the two green
 pips, not `["G"]` with an implied count. `submit_payment`'s `mana.units` field (see that action's
@@ -224,7 +225,7 @@ single-ability-per-card simplification `mana_ability` uses.
 
 Each field's source string can be either a `Game.Conditions.*`/`Game.Ops.*` one-liner (resolved
 once at load time, no Lua VM calls afterward) or a full custom Lua function, invoked for real
-every time. **See `docs/lua_scripts.md` for the full authoring reference** — recognized
+every time. **See [docs/lua/index.md](lua/index.md) for the full authoring reference** — recognized
 primitives, the custom-function calling convention, what event data a condition can see, and
 what isn't wired up yet. Short example (an ETB "gain 1 life" trigger, primitive form):
 
@@ -241,7 +242,7 @@ module convention, calling `Game.CreateTriggeredAbility(c)` itself — instead o
 building a `RegisteredAbility` by hand. Sets `CardDefinition::script_ref` directly; no
 post-construction `Engine` step needed, since the real engine pipeline (`PlayLand`/
 `ResolveStackTop`) runs it automatically once the card actually reaches the battlefield. **See
-`docs/lua_scripts.md` for the full authoring reference.** Example (same ETB "gain 1 life" ability
+[docs/lua/index.md](lua/index.md) for the full authoring reference.** Example (same ETB "gain 1 life" ability
 as above, self-registered instead of harness-wired):
 
 ```toml
@@ -258,12 +259,13 @@ return s
 ```
 
 `Game.CreateStaticAbility(c)` self-registers a real `ContinuousEffect` the same way (CR 604/611)
-— see `docs/lua_scripts.md`'s "Self-registering a static ability" section and
+— see [docs/lua/static-abilities.md](lua/static-abilities.md) and
 `crates/engine/tests/scenarios/phase5_static_ability_self_registration.toml` for a worked example
-(an anthem land whose own script buffs "creatures you control" the moment it's played). Still
-narrow beyond that — no targeting on either builder, no `Game.CreateActivatedAbility`. Nothing
-stops a card from setting both `script` and `trigger_condition`/`trigger_operation` at once, but
-that's not a supported combination — pick one per card.
+(an anthem land whose own script buffs "creatures you control" the moment it's played).
+`Game.CreateActivatedAbility(c)`/`Game.CreateReplacementEffect(c)`/`Game.CreateCostModifier(c)` are
+real too — see [docs/lua/index.md](lua/index.md) for the full set. Nothing stops a card from
+setting both `script` and `trigger_condition`/`trigger_operation` at once, but that's not a
+supported combination — pick one per card.
 
 **`continuous_effect` (CR 613, layer engine):** if set, every instance of this card gets one static
 `ContinuousEffect` set up automatically, built directly as a Rust struct — a convenience field for

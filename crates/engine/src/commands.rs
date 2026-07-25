@@ -104,6 +104,31 @@ pub struct PendingPaymentRequest {
     /// `stack_id` — harmless as a placeholder since a spell's `CostSpec`
     /// never contains `TapSelf`.
     pub source: ObjectId,
+    /// What to do once this cost fully commits — see `PaymentResolution`'s
+    /// own doc comment. Almost always `StackObject` (a real `StackObject`
+    /// is already sitting on `state.stack` at `stack_id`, waiting for normal
+    /// stack resolution) — `ManaAbility` is the one exception (CR
+    /// 605.1a/605.3b: a mana ability with a real cost still needs an
+    /// explicit payment step, same as any other ability, but never reaches
+    /// the stack at all).
+    pub on_paid: PaymentResolution,
+}
+
+/// See `PendingPaymentRequest::on_paid`'s doc comment. `stack_id` on the
+/// enclosing `PendingPaymentRequest` is only a real, resolvable `StackObject`
+/// id for the `StackObject` case — for `ManaAbility` it's an opaque handle
+/// (freshly allocated, CR 400.7-style) that nothing on `state.stack` will
+/// ever match, since a mana ability with a real cost still pauses for
+/// payment exactly like any other ability, but nothing is ever pushed onto
+/// the stack for it to resolve later.
+pub enum PaymentResolution {
+    StackObject,
+    /// CR 605's mana units to add once this cost commits — already fully
+    /// resolved (a fixed `AddMana` list, or an `AddManaChoice`'s
+    /// `chosen_colors` already validated and converted) at command-execution
+    /// time, same as the free (no-cost) mana-ability path already did before
+    /// this existed; paying a cost doesn't change *which* mana comes out.
+    ManaAbility { controller: PlayerId, units: Vec<ManaUnit> },
 }
 
 /// CR 117.1a's "sorcery speed" window — `player` may take an action that
@@ -1973,6 +1998,7 @@ pub fn execute_command(
                     // Placeholder - a spell's CostSpec never contains
                     // AdditionalCost::TapSelf, so this is never consulted.
                     source: new_id,
+                    on_paid: PaymentResolution::StackObject,
                 }),
                 battlefield_entries: Vec::new(),
             });
@@ -2058,22 +2084,6 @@ pub fn execute_command(
                             "a mana ability cannot have targets".to_string(),
                         ));
                     }
-                    let source_object = state.object(source).ok_or(CommandError::InvalidTarget)?;
-                    if source_object.tapped {
-                        return Err(CommandError::IllegalAction(
-                            "source is already tapped".to_string(),
-                        ));
-                    }
-                    // CR 302.6: summoning sickness only restricts a
-                    // creature's {T}/{Q} abilities - non-creature permanents
-                    // (lands, artifacts, ...) ignore it entirely.
-                    if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
-                        && has_summoning_sickness(state, script_runtime, source_object)
-                    {
-                        return Err(CommandError::IllegalAction(
-                            "source has summoning sickness".to_string(),
-                        ));
-                    }
 
                     let units: Vec<ManaUnit> = match effect {
                         AbilityEffect::AddMana(units) => units,
@@ -2098,27 +2108,107 @@ pub fn execute_command(
                         _ => unreachable!("matched only AddMana/AddManaChoice above"),
                     };
 
-                    state.object_mut(source).ok_or(CommandError::InvalidTarget)?.tapped = true;
-                    let pool = &mut state
-                        .player_mut(command.actor)
-                        .ok_or_else(|| {
-                            CommandError::IllegalAction("actor has no player state".to_string())
-                        })?
-                        .mana_pool;
-                    for unit in &units {
-                        pool.add_unit(*unit);
+                    // A mana ability built with no `Game.Costs.*` component at
+                    // all (`cost: None` - the only shape `mana_ability` TOML
+                    // can ever produce) keeps its original hardcoded-tap,
+                    // no-payment-pause behavior unchanged below. A mana
+                    // ability with a *real* cost (`Game.CreateManaAbility`'s
+                    // own `:AddCost`, e.g. a Treasure/Lotus-Petal-style
+                    // sacrifice, or an explicit `Game.Costs.TapSelf`) still
+                    // never reaches the stack (CR 605.3b), but does need a
+                    // real payment step first, same as any other ability (CR
+                    // 602.2f-h/118.5a) - see `PaymentResolution::ManaAbility`.
+                    let has_real_cost = cost
+                        .as_ref()
+                        .is_some_and(|c| c.mana.is_some() || !c.additional.is_empty());
+
+                    if !has_real_cost {
+                        let source_object = state.object(source).ok_or(CommandError::InvalidTarget)?;
+                        if source_object.tapped {
+                            return Err(CommandError::IllegalAction(
+                                "source is already tapped".to_string(),
+                            ));
+                        }
+                        // CR 302.6: summoning sickness only restricts a
+                        // creature's {T}/{Q} abilities - non-creature
+                        // permanents (lands, artifacts, ...) ignore it
+                        // entirely.
+                        if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
+                            && has_summoning_sickness(state, script_runtime, source_object)
+                        {
+                            return Err(CommandError::IllegalAction(
+                                "source has summoning sickness".to_string(),
+                            ));
+                        }
+
+                        state.object_mut(source).ok_or(CommandError::InvalidTarget)?.tapped = true;
+                        let pool = &mut state
+                            .player_mut(command.actor)
+                            .ok_or_else(|| {
+                                CommandError::IllegalAction("actor has no player state".to_string())
+                            })?
+                            .mana_pool;
+                        for unit in &units {
+                            pool.add_unit(*unit);
+                        }
+
+                        // CR 605.3b: a mana ability resolves immediately as
+                        // part of activation - it never uses the stack.
+                        return Ok(CommandOutcome {
+                            events: vec![
+                                GameEventKind::Tapped { object: source },
+                                GameEventKind::ManaAdded { player: command.actor, units },
+                            ],
+                            broke_pass_chain: true,
+                            priority_handoff: PriorityHandoff::Unchanged,
+                            requires_payment: None,
+                            battlefield_entries: Vec::new(),
+                        });
                     }
 
-                    // CR 605.3b: a mana ability resolves immediately as part
-                    // of activation - it never uses the stack.
+                    let cost = cost.expect("has_real_cost already confirmed Some");
+
+                    // CR 602.5a/302.6: same TapSelf pre-check the non-mana
+                    // branch below takes, when this mana ability's own cost
+                    // happens to include one - the actual tap still only
+                    // commits once Engine::submit_payment does, same as any
+                    // other AdditionalCost::TapSelf.
+                    if cost.additional.iter().any(|c| matches!(c, AdditionalCost::TapSelf)) {
+                        let source_object =
+                            state.object(source).ok_or(CommandError::InvalidTarget)?;
+                        if source_object.tapped {
+                            return Err(CommandError::IllegalAction(
+                                "source is already tapped".to_string(),
+                            ));
+                        }
+                        if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
+                            && has_summoning_sickness(state, script_runtime, source_object)
+                        {
+                            return Err(CommandError::IllegalAction(
+                                "source has summoning sickness".to_string(),
+                            ));
+                        }
+                    }
+
+                    // No StackObject is ever pushed for a mana ability (CR
+                    // 605.1a/605.3b) - `stack_id` here is only an opaque
+                    // handle for this payment pause to be identified by
+                    // (`Engine::unwind_payment` already tolerates a `stack_id`
+                    // matching nothing on `state.stack`), never a real
+                    // resolvable stack entry.
+                    let stack_id = state.allocate_object_id();
+
                     return Ok(CommandOutcome {
-                        events: vec![
-                            GameEventKind::Tapped { object: source },
-                            GameEventKind::ManaAdded { player: command.actor, units },
-                        ],
+                        events: Vec::new(),
                         broke_pass_chain: true,
                         priority_handoff: PriorityHandoff::Unchanged,
-                        requires_payment: None,
+                        requires_payment: Some(PendingPaymentRequest {
+                            stack_id,
+                            payer: command.actor,
+                            cost,
+                            source,
+                            on_paid: PaymentResolution::ManaAbility { controller: command.actor, units },
+                        }),
                         battlefield_entries: Vec::new(),
                     });
                 }
@@ -2247,6 +2337,7 @@ pub fn execute_command(
                             payer: command.actor,
                             cost,
                             source,
+                            on_paid: PaymentResolution::StackObject,
                         }),
                         battlefield_entries: Vec::new(),
                     });
