@@ -36,7 +36,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, t
 
 const STATIC_EQUIP: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local a = Game.CreateActivatedAbility(c)
     a:SetTarget({ type = "object", card_types = { "Creature" }, controller = "you" })
     a:SetOperation(Game.Ops.Attach)

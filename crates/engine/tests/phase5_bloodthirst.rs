@@ -171,7 +171,7 @@ fn bloodthirst_condition_resets_across_a_turn_boundary() {
 
 const BLOODTHIRST_TWO: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersWithCountersBloodthirst("PlusOnePlusOne", 2))

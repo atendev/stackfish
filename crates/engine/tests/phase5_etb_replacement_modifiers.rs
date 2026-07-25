@@ -21,7 +21,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, t
 
 const ENTERS_TAPPED: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)
@@ -33,7 +33,7 @@ return s
 
 const ENTERS_WITH_TWO_PLUS_ONE_COUNTERS: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersWithCounters("PlusOnePlusOne", 2))
@@ -49,7 +49,7 @@ return s
 /// `:SetAffected` filter already is.
 const OPPONENTS_LANDS_ENTER_TAPPED: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)
@@ -65,7 +65,7 @@ return s
 /// an effect that can never match anything.
 const MISMATCHED_ENTERS_TAPPED_FILTER: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)

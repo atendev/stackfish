@@ -209,7 +209,7 @@ pub struct CardSpec {
     /// already uses for activated abilities.
     #[serde(default)]
     pub trigger_operation: Option<String>,
-    /// A full self-registering card script — the `s.initial_effect(c)`
+    /// A full self-registering card script — the `s.register_abilities(c)`
     /// module convention (see `docs/lua/card-script-basics.md`), calling
     /// `Game.CreateTriggeredAbility(c)` itself rather than the harness
     /// building a `RegisteredAbility` by hand. Sets `CardDefinition::
@@ -426,6 +426,22 @@ pub struct PendingTargetScript {
 /// explicit TOML `target_requirement` always wins, unchanged for every
 /// pre-existing fixture.
 pub struct PendingScriptTargetRequirement {
+    pub object: ObjectId,
+    pub source: String,
+}
+
+/// One card instance whose `CardDefinition.effect` (CR 608.2m, a plain
+/// spell's own resolution effect) is left for its own script to declare via
+/// the optional `s.operation()` function, collected by `build_initial_state`
+/// for the same reason `PendingScriptTargetRequirement` is - no `Engine`/
+/// `ScriptRuntime` exists yet at that point. Unlike `target_requirement`,
+/// `CardSpec` has no TOML field for a card's own effect at all (see its own
+/// doc comment - direct Rust struct literal only, until now), so there's no
+/// "does the TOML side already have one" gate to check - every card with a
+/// `script` set gets one of these, and `register_script_operation` simply
+/// leaves `effect: None` unchanged if that script has no `operation()`
+/// function of its own.
+pub struct PendingScriptOperation {
     pub object: ObjectId,
     pub source: String,
 }
@@ -1191,6 +1207,7 @@ pub fn build_initial_state(
     Vec<PendingTriggerScript>,
     Vec<PendingTargetScript>,
     Vec<PendingScriptTargetRequirement>,
+    Vec<PendingScriptOperation>,
 ) {
     let mut next_object_id: u64 = 0;
     // Seeds `AbilityId`s for any `mana_ability` built below - draws from a
@@ -1208,6 +1225,7 @@ pub fn build_initial_state(
     let mut trigger_scripts: Vec<PendingTriggerScript> = Vec::new();
     let mut target_scripts: Vec<PendingTargetScript> = Vec::new();
     let mut script_target_requirements: Vec<PendingScriptTargetRequirement> = Vec::new();
+    let mut script_operations: Vec<PendingScriptOperation> = Vec::new();
 
     let mut players = Vec::new();
     let mut turn_order = Vec::new();
@@ -1361,6 +1379,12 @@ pub fn build_initial_state(
                     .push(PendingScriptTargetRequirement { object: object_id, source: source.clone() });
             }
         }
+        // CardSpec has no TOML field for a card's own effect at all (unlike
+        // target_requirement above) - so there's no "does TOML already have
+        // one" gate here, every scripted card gets a chance to declare one.
+        if let Some(source) = &spec.script {
+            script_operations.push(PendingScriptOperation { object: object_id, source: source.clone() });
+        }
         if let Some(effect_spec) = &spec.continuous_effect {
             continuous_effects.push(build_continuous_effect(object_id, effect_spec));
         }
@@ -1411,7 +1435,7 @@ pub fn build_initial_state(
         commander_return_offered: std::collections::HashSet::new(),
     };
 
-    (state, card_ids, trigger_scripts, target_scripts, script_target_requirements)
+    (state, card_ids, trigger_scripts, target_scripts, script_target_requirements, script_operations)
 }
 
 /// Loads `condition_src`/`operation_src` into `engine`'s script runtime and
@@ -1497,6 +1521,32 @@ fn register_script_target_requirement(engine: &mut Engine, object: ObjectId, sou
         .unwrap_or_else(|| panic!("script target_requirement registration: object {object:?} not found"))
         .definition
         .target_requirement = requirement;
+}
+
+/// Loads `source`'s optional `s.operation()` function into `engine`'s script
+/// runtime (`Engine::build_operation`) and sets `object`'s
+/// `CardDefinition.effect` to whatever it declares - `None` (unchanged) if
+/// `source` doesn't define one. A `Game.Ops.*` primitive tag decodes
+/// straight to that `AbilityEffect` variant, same Rust-native fast path a
+/// direct struct literal would set by hand; a custom function decodes to
+/// `AbilityEffect::Script(handle)` instead, so `commands::execute_command`'s
+/// `CastSpell` arm can unpack the real handle onto the `StackObject` at cast
+/// time (see that variant's own doc comment).
+fn register_script_operation(engine: &mut Engine, object: ObjectId, source: &str) {
+    let Some((primitive, handle)) = engine
+        .build_operation(source)
+        .unwrap_or_else(|e| panic!("script operation() failed to load: {e:?}"))
+    else {
+        return;
+    };
+    let effect = primitive.or(Some(AbilityEffect::Script(handle)));
+    engine
+        .state_mut()
+        .objects
+        .get_mut(&object)
+        .unwrap_or_else(|| panic!("script operation registration: object {object:?} not found"))
+        .definition
+        .effect = effect;
 }
 
 // ---------------------------------------------------------------------
@@ -1954,6 +2004,9 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                     register_script_target_requirement(&mut engine, card_ids[key], source);
                 }
             }
+            if let Some(source) = &spec.script {
+                register_script_operation(&mut engine, card_ids[key], source);
+            }
         }
     }
     (engine, card_ids)
@@ -2222,7 +2275,7 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
     let (mut engine, mut card_ids) = if let Some(game) = &file.game {
         build_new_game_engine(file, game)
     } else {
-        let (state, card_ids, trigger_scripts, target_scripts, script_target_requirements) =
+        let (state, card_ids, trigger_scripts, target_scripts, script_target_requirements, script_operations) =
             build_initial_state(file);
         let mut engine = Engine::new(state);
         for pending in trigger_scripts {
@@ -2238,6 +2291,9 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
         }
         for pending in script_target_requirements {
             register_script_target_requirement(&mut engine, pending.object, &pending.source);
+        }
+        for pending in script_operations {
+            register_script_operation(&mut engine, pending.object, &pending.source);
         }
         (engine, card_ids)
     };

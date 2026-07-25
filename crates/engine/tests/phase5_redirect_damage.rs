@@ -21,7 +21,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, z
 
 const REDIRECT_DAMAGE_TO_SELF: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.RedirectDamageToSource)
@@ -33,7 +33,7 @@ return s
 
 const MISMATCHED_WOULD_DIE_REDIRECT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldDie)
     e:SetPayload(Game.ReplacementPayloads.RedirectDamageToSource)

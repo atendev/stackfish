@@ -127,7 +127,7 @@ fn pass_to_cleanup_discard(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> S
 
 const DISCARDED_CARD_GOES_TO_EXILE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Hand", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))

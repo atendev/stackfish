@@ -40,7 +40,7 @@ the most common case, but any targeted spell works the same way ("target creatur
 spell, etc.).
 
 Add an optional `s.target_requirement()` function to the card's script — a sibling to
-`s.initial_effect(c)`, not a replacement for it:
+`s.register_abilities(c)`, not a replacement for it:
 
 ```lua
 -- Enchant Wall
@@ -50,7 +50,7 @@ function s.target_requirement()
     return { subtypes = { "Wall" }, count = 1 }
 end
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
@@ -61,7 +61,7 @@ end
 return s
 ```
 
-Unlike `initial_effect(c)`, `target_requirement()` takes no arguments and runs once — when the
+Unlike `register_abilities(c)`, `target_requirement()` takes no arguments and runs once — when the
 card's own definition is built, not per copy as it enters play — since the restriction is fixed
 text that doesn't depend on game state or which object ends up carrying it. It returns the same
 flat filter table as everywhere else on this page, plus these siblings:

@@ -266,7 +266,7 @@ fn without_the_strip_the_same_printed_flying_attacker_still_enforces_legality() 
 
 const STRIPS_ITSELF: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.RemoveAllAbilities)

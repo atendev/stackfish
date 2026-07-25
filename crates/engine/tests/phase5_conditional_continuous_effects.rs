@@ -212,7 +212,7 @@ fn lua_controls_at_least_primitive_round_trips_through_set_condition() {
     let source = ObjectId(0);
     let script = r#"
         local s = {}
-        function s.initial_effect(c)
+        function s.register_abilities(c)
             local e = Game.CreateStaticAbility(c)
             e:SetLayer(Game.Layers.PowerToughnessModifying)
             e:SetEffect(Game.Effects.ModifyPT(1, 1))
@@ -244,7 +244,7 @@ fn lua_set_condition_accepts_a_custom_function_as_a_script_backed_condition() {
     // same InterveningIfSpec::Script path CR 603.4's SetInterveningIf already exercises.
     let script = r#"
         local s = {}
-        function s.initial_effect(c)
+        function s.register_abilities(c)
             local e = Game.CreateStaticAbility(c)
             e:SetLayer(Game.Layers.PowerToughnessModifying)
             e:SetEffect(Game.Effects.ModifyPT(1, 1))

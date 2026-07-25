@@ -10,7 +10,7 @@
 //! compare the source's own characteristics against the protected object -
 //! it compares the source's *controller* against a reference player. This
 //! engine has no multiplayer arbitrary-player-targeting yet (backlog item
-//! 11) and a card script's `initial_effect(c)` is never handed a raw
+//! 11) and a card script's `register_abilities(c)` is never handed a raw
 //! `PlayerId` at registration time, so `AddProtectionPlayer` carries a
 //! `FilterController` (`You`/`Opponent`) - the same relative-player
 //! vocabulary `:SetAffected({controller=...})` already exposes to Lua -
@@ -32,7 +32,7 @@ use stackfish_testutil::{card_object as permanent, drain, hand_battlefield_grave
 
 const STATIC_PROTECTION_FROM_OPPONENT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddProtectionPlayer("opponent"))

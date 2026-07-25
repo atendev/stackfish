@@ -185,7 +185,7 @@ fn effect_erroring_script_is_an_error_not_a_panic() {
 
 const SCRIPT_AFFECTS_SELF_ONLY: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
@@ -197,7 +197,7 @@ return s
 
 const SCRIPT_EFFECT_MODIFY_PT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(function(source, controller) return { modify_pt = { power = 1, toughness = 1 } } end)

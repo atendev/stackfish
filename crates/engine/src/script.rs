@@ -264,7 +264,7 @@ struct ScriptRegistry {
     /// hatch for stashing a Lua value independent of that borrow.
     scripts: HashMap<ScriptHandle, RegistryKey>,
     next_handle: u64,
-    /// Abilities a currently-running `initial_effect` has `:Register()`ed,
+    /// Abilities a currently-running `register_abilities` has `:Register()`ed,
     /// waiting to be drained into `GameState.abilities` once the whole card
     /// script call returns (`ScriptRuntime::run_card_script`). Lua never
     /// gets a `GameState` reference at all — this is what `:Register()`
@@ -1701,9 +1701,9 @@ impl ScriptRuntime {
     }
 
     /// Loads `definition.script_ref`'s source, evaluates it to a Lua table
-    /// with a callable `initial_effect` field (the
-    /// `s.initial_effect(c)` module convention — see `docs/lua/card-script-basics.md`),
-    /// and calls it with `source.0`. Whatever the script's `initial_effect`
+    /// with a callable `register_abilities` field (the
+    /// `s.register_abilities(c)` module convention — see `docs/lua/card-script-basics.md`),
+    /// and calls it with `source.0`. Whatever the script's `register_abilities`
     /// `:Register()`ed onto the shared registry's pending queues during the
     /// call is drained right after — `pending_triggered` into
     /// `state.abilities`, `pending_static` into `state.continuous_effects`
@@ -1744,10 +1744,10 @@ impl ScriptRuntime {
 
         let module: Table =
             self.lua.load(source_code).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let initial_effect: Function = module
-            .get("initial_effect")
-            .map_err(|e| ScriptError::LoadError(format!("card script has no initial_effect: {e}")))?;
-        initial_effect
+        let register_abilities: Function = module
+            .get("register_abilities")
+            .map_err(|e| ScriptError::LoadError(format!("card script has no register_abilities: {e}")))?;
+        register_abilities
             .call::<_, ()>(source.0)
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
 
@@ -1794,7 +1794,7 @@ impl ScriptRuntime {
     /// CR 702.5a/303.4a: a card's own base target requirement (an Aura's
     /// "Enchant [quality]" line, or any other targeted spell's targeting) as
     /// declared by its own script, via the optional `s.target_requirement()`
-    /// module convention — a sibling to `s.initial_effect(c)`, not a
+    /// module convention — a sibling to `s.register_abilities(c)`, not a
     /// replacement. Called once per `CardDefinition` build, not per object
     /// per zone-entry the way `run_card_script` is: unlike an Aura's granted
     /// abilities (which only matter once it's attached to something), its
@@ -1828,6 +1828,73 @@ impl ScriptRuntime {
             function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         let requirement = decode_target_requirement_table(table)?;
         Ok(Some(TargetSpec::Primitive(requirement)))
+    }
+
+    /// CR 608.2m: a plain spell's own resolution effect (Armageddon's
+    /// "Destroy all lands," Shock's "deals 2 damage to any target," ...) as
+    /// declared by its own script, via the optional `s.operation()` module
+    /// convention — another sibling to `s.register_abilities(c)`/
+    /// `s.target_requirement()`, not a replacement for either. A plain
+    /// spell has no ability wrapper at all, and `register_abilities(c)`
+    /// only ever runs once the card becomes a *battlefield* object (see
+    /// that function's own doc comment) — an instant/sorcery that resolves
+    /// straight to the graveyard never reaches that point, so its own
+    /// effect can't be declared there either. Same timing fix
+    /// `build_target_requirement` already applies: called once per
+    /// `CardDefinition` build, no `GameState`/`ObjectId` needed.
+    ///
+    /// `operation()` takes no arguments and returns the same `Game.Ops.*`
+    /// tag or custom-function shape `TriggeredAbilityBuilder::SetOperation`/
+    /// `ActivatedAbilityBuilder::SetOperation` already accept — reuses
+    /// `decode_operation_value` unchanged, so no new Lua-facing vocabulary
+    /// exists just for spells. A card with no `operation` function at all
+    /// (the overwhelming majority — anything that becomes a permanent, or a
+    /// targeted/no-effect instant/sorcery not yet built this way) returns
+    /// `Ok(None)`, same "this spell's effect can only be carried out via
+    /// the script bridge... not yet possible" default `CardDefinition::
+    /// effect`'s own doc comment already documents (now closed for the one
+    /// case this method covers).
+    ///
+    /// Deliberately does *not* add a sibling `operation: ScriptHandle` field
+    /// to `CardDefinition` to carry the custom-function-fallback handle
+    /// (unlike `RegisteredAbility`, which has both `effect` and `operation`
+    /// side by side) — `CardDefinition` has no `Default` impl and ~400
+    /// existing struct-literal construction sites across the codebase,
+    /// a ripple a previous slice explicitly flagged as prohibitive and only
+    /// paid once, with sign-off, when unavoidable (`CardDefinition::
+    /// mode_choice`). Instead, a custom-function result is packed into the
+    /// *existing* `effect: Option<AbilityEffect>` field via the new
+    /// `AbilityEffect::Script(ScriptHandle)` variant (see its own doc
+    /// comment) — `commands::execute_command`'s `CastSpell` arm unpacks it
+    /// back into `StackObject`'s separate `operation`/`effect` fields at
+    /// push time, so `ResolveStackTop` never has to know the difference.
+    ///
+    /// **Caller trap:** a custom-function result's `ScriptHandle` is only
+    /// ever valid against *this* `ScriptRuntime` instance's own registry —
+    /// it means nothing to a different `ScriptRuntime` (e.g. a fresh one a
+    /// just-constructed `Engine` creates internally). A caller building a
+    /// `CardDefinition` ahead of time with a throwaway runtime and then
+    /// handing it to `Engine::new` will see the custom function silently
+    /// never run (`ResolveStackTop`'s own `Err(_) => {}` arm swallows the
+    /// resulting "unknown ScriptHandle" error - a pre-existing, separately
+    /// tracked gap, not new here). Call this through the same `Engine`
+    /// whose game will actually resolve the spell instead — see
+    /// `register_script_operation` (scenario crate) for the real pattern:
+    /// construct first with `effect: None`, then patch it in via `Engine::
+    /// build_operation` afterward.
+    pub fn build_operation(
+        &self,
+        source: &str,
+    ) -> Result<Option<(Option<AbilityEffect>, ScriptHandle)>, ScriptError> {
+        let module: Table =
+            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> =
+            module.get("operation").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else { return Ok(None) };
+        let value: Value = function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let mut registry = self.registry.borrow_mut();
+        let decoded = decode_operation_value(&self.lua, &mut registry, value)?;
+        Ok(Some(decoded))
     }
 
     /// Real body: builds a minimal Lua argument set from `ctx` and calls the

@@ -212,7 +212,7 @@ fn either_of_two_equip_abilities_may_be_activated_keeping_its_own_restriction() 
 
 const TWO_EQUIP_ABILITIES: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local a = Game.CreateActivatedAbility(c)
     a:SetTarget({ type = "object", card_types = { "Creature" }, controller = "you" })
     a:SetOperation(Game.Ops.Attach)

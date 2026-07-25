@@ -158,7 +158,7 @@ fn pending_copy_choice_is_none_without_a_registered_effect() {
 
 const CLONE_SCRIPT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersAsCopy())
@@ -199,7 +199,7 @@ fn set_payload_enters_as_copy_registers_correctly() {
 /// tapped."
 const BEHEMOTH_SCRIPT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local tapped = Game.CreateReplacementEffect(c)
     tapped:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     tapped:SetPayload(Game.ReplacementPayloads.EntersTapped)

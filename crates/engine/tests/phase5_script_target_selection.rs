@@ -31,7 +31,7 @@ use stackfish_testutil::{card_object, drain, single_player_state};
 /// ran with it, without needing a new effect-shape key just for this test.
 const SELF_REGISTERING_SELECT_TARGET_THEN_GAIN_LIFE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ card_types = { "Creature" } })
@@ -51,7 +51,7 @@ return s
 /// effect-shape key needed for it.
 const SELF_REGISTERING_SELECT_PLAYER_THEN_GAIN_LIFE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ type = "player" })
@@ -67,7 +67,7 @@ return s
 
 const SELF_REGISTERING_SELECT_ANY_THEN_GAIN_LIFE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ type = "any" })
@@ -83,7 +83,7 @@ return s
 
 const SELF_REGISTERING_NEVER_YIELDS: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         return { gain_life = 1 }

@@ -145,7 +145,7 @@ fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
 
 const SACRIFICED_CREATURE_GOES_TO_EXILE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
@@ -157,7 +157,7 @@ return s
 
 const DISCARDED_CARD_GOES_TO_EXILE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Hand", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
@@ -249,7 +249,7 @@ fn a_sacrifice_cost_payment_without_a_matching_replacement_lands_in_the_graveyar
     };
     const LAND_ONLY_WARD: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Graveyard"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))

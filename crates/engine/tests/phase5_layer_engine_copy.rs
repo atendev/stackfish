@@ -39,7 +39,7 @@ use stackfish_testutil::{card_object, drain, two_player_state as base_two_player
 
 const SELF_REGISTER_UNCONDITIONAL: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetOperation(Game.Ops.GainLife(1))
     e:Register()

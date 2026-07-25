@@ -2,11 +2,11 @@
 //! 702.5a/303.4a's "Enchant [quality]", or any other targeted spell's
 //! targeting) declared by its own script, via the optional
 //! `s.target_requirement()` module convention - a sibling to
-//! `s.initial_effect(c)`, not a replacement.
+//! `s.register_abilities(c)`, not a replacement.
 //!
 //! `s.target_requirement()` takes no arguments and is called once per
 //! `CardDefinition` build (`ScriptRuntime::build_target_requirement`), not
-//! per object per zone-entry the way `run_card_script`/`initial_effect(c)`
+//! per object per zone-entry the way `run_card_script`/`register_abilities(c)`
 //! is - an Aura's own Enchant restriction is fixed text needed *before* it's
 //! ever cast (while still in hand), so it can't wait for
 //! `run_card_script`'s battlefield-entry timing. Returns the same flat
@@ -30,7 +30,7 @@ fn a_card_with_no_target_requirement_function_returns_none() {
     let runtime = ScriptRuntime::new();
     let source = r#"
         local s = {}
-        function s.initial_effect(c) end
+        function s.register_abilities(c) end
         return s
     "#;
     let requirement = runtime.build_target_requirement(source).expect("script should load");
@@ -88,7 +88,7 @@ function s.target_requirement()
     return { subtypes = { "Wall" }, count = 1 }
 end
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))

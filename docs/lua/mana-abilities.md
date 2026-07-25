@@ -13,7 +13,7 @@ real mana ability.
 -- {T}: Add {C}.
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:SetOperation(Game.Ops.AddMana("C"))
     e:Register()

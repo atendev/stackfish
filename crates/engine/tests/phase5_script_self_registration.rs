@@ -1,5 +1,5 @@
 //! Phase 5 vertical slice: real card-script self-registration. A card's own
-//! Lua `initial_effect(c)` can now call `Game.CreateTriggeredAbility(c)` to
+//! Lua `register_abilities(c)` can now call `Game.CreateTriggeredAbility(c)` to
 //! register its own triggered ability - mirroring ygopro's
 //! `Effect.CreateEffect(c)`/`e1:SetCondition(...)`/`c:RegisterEffect(e1)`
 //! convention (see `docs/ygo_pro_reference.md`) - instead of the
@@ -29,7 +29,7 @@ use stackfish_testutil::{
 
 const SELF_REGISTER_GAIN_LIFE_PRIMITIVE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Enters)
     e:SetOperation(Game.Ops.GainLife(1))
@@ -40,7 +40,7 @@ return s
 
 const SELF_REGISTER_GAIN_LIFE_CUSTOM: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(function(source, controller, event)
         return event ~= nil
@@ -58,7 +58,7 @@ return s
 
 const SELF_REGISTER_UNCONDITIONAL: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetOperation(Game.Ops.GainLife(1))
     e:Register()
@@ -68,7 +68,7 @@ return s
 
 const SELF_REGISTER_NO_OPERATION: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Enters)
     e:Register()
@@ -78,7 +78,7 @@ return s
 
 const SELF_REGISTER_TWO_ABILITIES: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e1 = Game.CreateTriggeredAbility(c)
     e1:SetCondition(Game.Conditions.Enters)
     e1:SetOperation(Game.Ops.GainLife(1))
@@ -194,7 +194,7 @@ fn run_card_script_register_without_set_operation_is_an_error() {
 }
 
 #[test]
-fn run_card_script_can_register_multiple_abilities_from_one_initial_effect() {
+fn run_card_script_can_register_multiple_abilities_from_one_script_call() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(SELF_REGISTER_TWO_ABILITIES);
@@ -249,7 +249,7 @@ fn dying_creatures_registered_ability_is_purged_by_sba() {
 
 // ---------------------------------------------------------------------
 // End-to-end: real Engine pipeline, cast/play a self-registering card, watch
-// its own initial_effect's ability fire for real.
+// its own register_abilities's ability fire for real.
 // ---------------------------------------------------------------------
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {

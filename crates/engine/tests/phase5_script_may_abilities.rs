@@ -27,7 +27,7 @@ use stackfish_testutil::{card_object, drain, single_player_state};
 /// took, without needing a new effect-shape key just for this test.
 const SELF_REGISTERING_MAY_CHOOSE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         if Game.MayChoose() then
@@ -42,7 +42,7 @@ return s
 
 const SELF_REGISTERING_NEVER_YIELDS: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         return { gain_life = 1 }
@@ -203,7 +203,7 @@ fn submit_script_may_choice_rejects_a_pending_select_target_request() {
     // a SelectTarget request pending, answered via the wrong method.
     let script = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(function(source, controller)
         local target = Game.SelectTargets({ type = "player" })

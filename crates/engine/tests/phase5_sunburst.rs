@@ -210,7 +210,7 @@ fn non_cast_entry_paths_always_pass_an_empty_color_set() {
 
 const SUNBURST: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersWithCountersSunburst)

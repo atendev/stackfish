@@ -108,7 +108,7 @@ fn tokens_you_control_enter_with_counters(source: ObjectId, amount: i32) -> Repl
 
 const SELF_REGISTER_ENTERS_TAPPED: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
     e:SetPayload(Game.ReplacementPayloads.EntersTapped)

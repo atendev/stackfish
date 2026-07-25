@@ -511,15 +511,15 @@
   eventually). Prompted by the user correcting an earlier wrong claim of mine that `target_requirement`
   is naturally "database metadata" - CR 702.5a says Enchant *is* a static ability, same status as
   any other printed ability, so it belongs in the same place other abilities are declared.
-- Key finding that shaped the design: `initial_effect(c)` can't be the place this lives.
+- Key finding that shaped the design: `register_abilities(c)` can't be the place this lives.
   `run_card_script` only ever runs once a real `ObjectId` exists for a battlefield/token/copy entry
   - but an Aura's target is chosen while it's still in hand, before it's ever a battlefield object,
-  so `initial_effect` would simply run too late. Also, `CardDefinition` is explicitly documented as
+  so `register_abilities` would simply run too late. Also, `CardDefinition` is explicitly documented as
   "immutable, shared... sourced from the external card database project - this engine consumes it,
   does not author it," which the original "self-register it like an ability" framing would have
   violated.
 - Design: an optional, argument-less `s.target_requirement()` function in the same script module as
-  `s.initial_effect(c)` - a sibling, not a replacement. Genuinely static (no `GameState`/`ObjectId`
+  `s.register_abilities(c)` - a sibling, not a replacement. Genuinely static (no `GameState`/`ObjectId`
   needed, since an Enchant restriction doesn't vary by game state or which object ends up carrying
   it), so it's called once per `CardDefinition` build via a new `ScriptRuntime::build_target_requirement`,
   decoupled entirely from `run_card_script`'s per-object timing. Returns the same flat filter table

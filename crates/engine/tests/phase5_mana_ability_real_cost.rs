@@ -1,5 +1,5 @@
 //! Phase 5 vertical slice: `Game.CreateManaAbility` (CR 605) - a card's own
-//! Lua `initial_effect(c)` can now self-register a real mana ability, the
+//! Lua `register_abilities(c)` can now self-register a real mana ability, the
 //! dedicated sibling `Game.CreateActivatedAbility` was never safe to reuse
 //! for this (see this builder's own doc comment in script.rs for why: no
 //! `:SetTarget` at all, and `:SetOperation` only accepts `Game.Ops.AddMana`/
@@ -23,7 +23,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, s
 
 const NO_COST_ADD_MANA: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:SetOperation(Game.Ops.AddMana("C"))
     e:Register()
@@ -33,7 +33,7 @@ return s
 
 const TAP_SELF_COST_ADD_MANA: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:AddCost(Game.Costs.TapSelf)
     e:SetOperation(Game.Ops.AddMana("C"))
@@ -44,7 +44,7 @@ return s
 
 const SACRIFICE_COST_ADD_MANA_CHOICE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:AddCost(Game.Costs.Sacrifice({ card_types = { "Artifact" } }))
     e:SetOperation(Game.Ops.AddManaChoice(1, "WUBRG"))
@@ -55,7 +55,7 @@ return s
 
 const NO_SET_OPERATION: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:Register()
 end
@@ -64,7 +64,7 @@ return s
 
 const NON_MANA_OPERATION: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:SetOperation(Game.Ops.GainLife(1))
     e:Register()
@@ -74,7 +74,7 @@ return s
 
 const ADD_MANA_CHOICE_NO_COST: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:SetOperation(Game.Ops.AddManaChoice(1, "WU"))
     e:Register()
@@ -84,7 +84,7 @@ return s
 
 const SET_TARGET_DOES_NOT_EXIST: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateManaAbility(c)
     e:SetTarget({ type = "object" })
     e:SetOperation(Game.Ops.AddMana("C"))

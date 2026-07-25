@@ -18,7 +18,7 @@ use stackfish_testutil::{card_object, hand_battlefield_graveyard_zones, zones, t
 
 const PREVENT_DAMAGE_TO_YOU_ONE_SHOT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.PreventDamage)
@@ -31,7 +31,7 @@ return s
 
 const EXILE_INSTEAD_OF_DYING: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldDie)
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
@@ -43,7 +43,7 @@ return s
 
 const MISMATCHED_FILTER_PAYLOAD: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))
@@ -54,7 +54,7 @@ return s
 
 const LIMITED_USES_SHIELD: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.PreventDamage)
@@ -67,7 +67,7 @@ return s
 
 const REGENERATE_DEFAULTS_UNCHANGED: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetAffected({ self_only = true })
     e:Register()
