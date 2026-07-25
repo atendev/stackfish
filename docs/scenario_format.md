@@ -7,8 +7,9 @@
 A scenario is a TOML file describing a game setup and a sequence of actions to run against it,
 plus assertions to check afterward. Used by:
 
-- `cargo test --workspace` — runs every `.toml` file in `crates/engine/tests/scenarios/`
-  automatically (see `crates/engine/tests/scenarios.rs`).
+- `cargo test --workspace` — runs every `.toml` file under `crates/engine/tests/scenarios/`
+  automatically, including subdirectories like `phase5/` and `card_tests/` (see
+  `crates/engine/tests/scenarios.rs`).
 - `cargo run -p stackfish-cli -- path/to/scenario.toml` — runs one scenario file and prints a
   report. Use this for one-off manual or AI-driven testing.
 
@@ -160,6 +161,8 @@ name = "Test Bear"
 generic_cost = 1             # u32, default 0 - the whole generic component as one number
 colors = ["G"]                # one entry PER PIP (repeats included), default []
 types = ["Creature"]          # required - see Card types below
+supertypes = ["Legendary"]     # optional, default [] - see Card types below
+subtypes = ["Human", "Wizard"] # optional, default [] - see Card types below
 power = 2                     # optional i32
 toughness = 2                  # optional i32
 power_script = "..."           # optional Lua source, default none - see Characteristic-defining below
@@ -426,9 +429,40 @@ struct literals in a Rust integration test, e.g.
 TOML → `CardDefinition.modes` → `CastSpell` mode-selection pipeline, one cast per mode.
 
 **Card types** (`types`, at least one required): `Artifact`, `Creature`, `Enchantment`,
-`Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`. Supertypes (`Legendary` etc) and
-subtypes (`Human`, `Aura`, etc) aren't settable from a scenario file yet — add fields to
-`CardSpec` if a test needs them.
+`Instant`, `Land`, `Sorcery`, `Kindred`, `Planeswalker`, `Battle`.
+
+**`supertypes` (CR 205.4a):** optional, default `[]`. One or more of `Basic`, `Legendary`, `Snow`,
+`World` — same fixed vocabulary and panic-on-unknown-name behavior as `types` above.
+
+```toml
+[[cards]]
+key = "general"
+name = "Test General"
+types = ["Creature"]
+supertypes = ["Legendary"]
+power = 3
+toughness = 3
+```
+
+**`subtypes` (CR 205.4b):** optional, default `[]` — e.g. `["Human", "Wizard"]` for a creature,
+`["Aura"]` for an enchantment. Unlike `types`/`supertypes`, there's no fixed list to validate
+against (CR's subtype space is large and open-ended, new creature types are added over time) —
+any string is accepted as-is.
+
+```toml
+[[cards]]
+key = "wall"
+name = "Test Wall"
+types = ["Creature"]
+subtypes = ["Wall"]
+power = 0
+toughness = 4
+```
+
+Both are distinct from `TargetRequirementSpec.supertypes`/`.subtypes` (under `target_requirement`
+above) — those restrict what a spell/ability is legal to *target* (e.g. "target Human creature"),
+not what a card itself *is*. A card needs `subtypes = ["Human"]` here to actually match a target
+requirement's `subtypes = ["Human"]` filter.
 
 ## `[[setup]]`
 

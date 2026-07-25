@@ -165,6 +165,19 @@ pub struct CardSpec {
     #[serde(default)]
     pub colors: Vec<String>,
     pub types: Vec<String>,
+    /// CR 205.4a — this card's own printed supertypes (e.g. `["Legendary"]`).
+    /// Distinct from `TargetRequirementSpec.supertypes`, which restricts what
+    /// a spell/ability is legal to target, not what a card itself is.
+    #[serde(default)]
+    pub supertypes: Vec<String>,
+    /// CR 205.4b — this card's own printed subtypes (e.g. `["Human", "Wizard"]`
+    /// for a creature, `["Aura"]` for an enchantment). Unvalidated against any
+    /// fixed list (see `Subtype`'s own doc comment — the subtype space is
+    /// open-ended), unlike `types`/`supertypes` above which panic on an
+    /// unrecognized name. Distinct from `TargetRequirementSpec.subtypes`,
+    /// same rationale as `supertypes` above.
+    #[serde(default)]
+    pub subtypes: Vec<String>,
     pub power: Option<i32>,
     pub toughness: Option<i32>,
     /// CR 604.3/208.2a: if set, this card's power is characteristic-defining
@@ -1289,9 +1302,9 @@ pub fn build_initial_state(
             name: spec.name.clone(),
             mana_cost: ManaCost { symbols },
             color_indicator: None,
-            supertypes: SupertypeSet::empty(),
+            supertypes: parse_supertypes(&spec.supertypes),
             card_types: parse_card_types(&spec.types),
-            subtypes: Vec::new(),
+            subtypes: spec.subtypes.iter().cloned().map(Subtype).collect(),
             oracle_text: String::new(),
             power: build_pt(spec.power, &spec.power_script),
             toughness: build_pt(spec.toughness, &spec.toughness_script),
@@ -1886,9 +1899,9 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 name: spec.name.clone(),
                 mana_cost: ManaCost { symbols },
                 color_indicator: None,
-                supertypes: SupertypeSet::empty(),
+                supertypes: parse_supertypes(&spec.supertypes),
                 card_types: parse_card_types(&spec.types),
-                subtypes: Vec::new(),
+                subtypes: spec.subtypes.iter().cloned().map(Subtype).collect(),
                 oracle_text: String::new(),
                 power: build_pt(spec.power, &spec.power_script),
                 toughness: build_pt(spec.toughness, &spec.toughness_script),
@@ -1928,9 +1941,9 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 name: spec.name.clone(),
                 mana_cost: ManaCost { symbols },
                 color_indicator: None,
-                supertypes: SupertypeSet::empty(),
+                supertypes: parse_supertypes(&spec.supertypes),
                 card_types: parse_card_types(&spec.types),
-                subtypes: Vec::new(),
+                subtypes: spec.subtypes.iter().cloned().map(Subtype).collect(),
                 oracle_text: String::new(),
                 power: build_pt(spec.power, &spec.power_script),
                 toughness: build_pt(spec.toughness, &spec.toughness_script),

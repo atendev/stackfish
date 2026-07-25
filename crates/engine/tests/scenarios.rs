@@ -1,31 +1,32 @@
-//! Runs every scenario file in `tests/scenarios/*.toml` and fails the test
-//! if any assertion produced a wrong answer. Actions that hit `todo!()`
-//! (expected pre-Phase 7) are reported but don't fail the test — see
-//! `stackfish_scenario::ScenarioReport::has_hard_failures`.
-//!
-//! This is the Phase 4 baseline: with zero implementation done yet, this
-//! test passes because `tests/scenarios/basic_setup.toml` only exercises
-//! setup + assertions (no actions), which doesn't touch any `todo!()` code
-//! path at all. `pass_priority.toml` exercises the action path and is
-//! expected to report "not implemented" until Phase 5/7 - that's a pass
-//! here, not a failure, by design.
+//! Runs every scenario file under `tests/scenarios/` (any depth) and fails
+//! the test if any assertion produced a wrong answer. See
+//! `docs/scenario_format.md` for the TOML schema and
+//! `stackfish_scenario::ScenarioReport::has_hard_failures` for what counts
+//! as a hard failure vs. an expected `not yet implemented`.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn collect_toml_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display())) {
+        let path = entry.expect("readable directory entry").path();
+        if path.is_dir() {
+            collect_toml_files(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+            out.push(path);
+        }
+    }
+}
 
 #[test]
 fn all_scenarios_have_no_hard_failures() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/scenarios");
-    let mut ran_any = false;
+    let mut scenario_files = Vec::new();
+    collect_toml_files(&dir, &mut scenario_files);
 
-    for entry in fs::read_dir(&dir).expect("tests/scenarios directory should exist") {
-        let entry = entry.expect("readable directory entry");
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-            continue;
-        }
-        ran_any = true;
+    assert!(!scenario_files.is_empty(), "expected at least one scenario file under {}", dir.display());
 
+    for path in scenario_files {
         let report = stackfish_scenario::run_path(&path);
         assert!(
             !report.has_hard_failures(),
@@ -33,6 +34,4 @@ fn all_scenarios_have_no_hard_failures() {
             path.display()
         );
     }
-
-    assert!(ran_any, "expected at least one scenario file in {}", dir.display());
 }
