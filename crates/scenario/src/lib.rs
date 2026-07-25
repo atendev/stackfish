@@ -210,7 +210,7 @@ pub struct CardSpec {
     #[serde(default)]
     pub trigger_operation: Option<String>,
     /// A full self-registering card script — the `s.initial_effect(c)`
-    /// module convention (see `docs/lua_scripts.md`), calling
+    /// module convention (see `docs/lua/card-script-basics.md`), calling
     /// `Game.CreateTriggeredAbility(c)` itself rather than the harness
     /// building a `RegisteredAbility` by hand. Sets `CardDefinition::
     /// script_ref` to `ScriptReference::Inline(script)` directly - unlike
