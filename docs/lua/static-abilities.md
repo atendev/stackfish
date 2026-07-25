@@ -100,6 +100,7 @@ keys:
 | `set_pt` | `{ power = N, toughness = N }` | `Game.Effects.SetPT` |
 | `modify_pt` | `{ power = N, toughness = N }` | `Game.Effects.ModifyPT` |
 | `add_keyword` | `{ "Flying", ... }` | `Game.Effects.AddKeyword` |
+| `remove_keyword` | `{ "Defender", ... }` | `Game.Effects.RemoveKeyword` |
 | `add_card_type` | `{ "Creature", ... }` | `Game.Effects.AddCardType` |
 | `add_color` | a color-letter string, e.g. `"WU"` | `Game.Effects.AddColor` |
 | `switch_pt` | `true` | `Game.Effects.SwitchPT` |

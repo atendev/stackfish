@@ -124,6 +124,18 @@ fn effect_decodes_add_keyword() {
 }
 
 #[test]
+fn effect_decodes_remove_keyword() {
+    let mut runtime = ScriptRuntime::new();
+    let handle = runtime
+        .load_function("return function(source, controller) return { remove_keyword = { \"Defender\" } } end")
+        .unwrap();
+
+    let state = base_state();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
+    assert_eq!(decoded, Some(EffectPrimitive::RemoveKeyword(KeywordSet::DEFENDER)));
+}
+
+#[test]
 fn effect_decodes_switch_pt() {
     let mut runtime = ScriptRuntime::new();
     let handle =

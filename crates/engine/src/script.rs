@@ -922,6 +922,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::TypeChanging, EffectPrimitive::AddCardType(_))
             | (Layer::ColorChanging, EffectPrimitive::AddColor(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
+            | (Layer::AbilityAdding, EffectPrimitive::RemoveKeyword(_))
             | (Layer::AbilityAdding, EffectPrimitive::RemoveAllAbilities)
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionColor(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionCardType(_))
@@ -1972,6 +1973,15 @@ impl ScriptRuntime {
             }
             return Ok(Some(EffectPrimitive::AddKeyword(set)));
         }
+        if let Some(t) = result.get::<_, Option<Table>>("remove_keyword").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let mut set = KeywordSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let Ok(kw) = parse_keyword_name(&name) else { return Ok(None) };
+                set |= kw;
+            }
+            return Ok(Some(EffectPrimitive::RemoveKeyword(set)));
+        }
         if let Some(t) = result.get::<_, Option<Table>>("add_card_type").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
             let mut set = CardTypeSet::empty();
             for entry in t.sequence_values::<String>() {
@@ -2710,6 +2720,13 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
         lua.create_function(|_, name: String| {
             let set = parse_keyword_name(&name).map_err(to_lua_err)?;
             Ok(EffectPrimitiveTag(EffectPrimitive::AddKeyword(set)))
+        })?,
+    )?;
+    effects.set(
+        "RemoveKeyword",
+        lua.create_function(|_, name: String| {
+            let set = parse_keyword_name(&name).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::RemoveKeyword(set)))
         })?,
     )?;
     effects.set(

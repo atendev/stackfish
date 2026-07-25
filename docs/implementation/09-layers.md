@@ -377,6 +377,45 @@
   generation/history, not a `CopyExceptions` field; confirmed again while scoping this slice, not
   just carried forward unexamined).
 
+## Slice: keyword-layer-fix-and-remove-keyword (merged)
+
+- Branch `phase5/keyword-layer-fix-and-remove-keyword`.
+- Scope: two things found together while scoping "can attack as though it didn't have defender"
+  (Assault Formation): (1) `commands.rs`'s Haste/Defender/Vigilance checks (`has_summoning_sickness`,
+  the attack-declaration Defender check, the Vigilance tap-check) read the creature's *printed*
+  `CardDefinition.keywords` directly instead of layer-resolved `effective_keywords` — an undocumented
+  oversight, confirmed by git history: all three were written before `effective_keywords` even
+  existed, and no later slice (`first-strike`, `combat-evasion-keywords`, `landwalk`, `banding`, ...)
+  ever came back to migrate them, unlike every other keyword check in the file, which already reads
+  `effective_keywords`. (2) `EffectPrimitive::RemoveKeyword(KeywordSet)` — a scoped removal shape
+  `RemoveAllAbilities`'s own doc comment had already named as deliberately unbuilt ("there's no
+  narrower 'loses these specific keywords' shape here").
+- Verify: 10 new tests (continuous-effect-granted Haste/Defender/Vigilance actually respected by
+  combat; `RemoveKeyword` letting a printed-Defender creature attack; `RemoveKeyword` only stripping
+  the named keyword, not others; timestamp-ordering in both directions against `AddKeyword`;
+  `:Register()` pairing rejection; script-backed `remove_keyword` decode), full workspace suite green
+  (148 test-result blocks, 0 failed).
+- Key changes:
+  - `commands::has_summoning_sickness`/the Defender check/the Vigilance tap-check all now call
+    `effective_keywords(state, script_runtime, id)` instead of reading `object.definition.keywords`
+    directly. The Vigilance site needed a small reorder (compute `effective_keywords` before taking
+    `state.object_mut`, since the two borrows can't overlap).
+  - `EffectPrimitive::RemoveKeyword(KeywordSet)` (`types/effect.rs`) — layer 6, pairs with
+    `AbilityAdding` same as `AddKeyword`. `layers.rs`'s layer-6 fold: `keywords &= !removed`, folded
+    in at this effect's own CR 613.7 timestamp position right next to `AddKeyword`'s `keywords |=
+    added` — a later-timestamp `AddKeyword` still re-adds whatever an earlier `RemoveKeyword` took
+    away (and vice versa), no special CR 613.8a dependency needed, same reasoning `RemoveAllAbilities`
+    already documents for the identical interaction.
+  - `Game.Effects.RemoveKeyword(name)` (script.rs) — same `parse_keyword_name` decoder `AddKeyword`
+    uses; added to `validate_layer_effect_pairing`'s pairing table; `remove_keyword` added as a
+    ninth recognized key on the script-backed custom-function effect-shape form
+    (`invoke_continuous_effect`), mirroring `add_keyword`'s decode exactly.
+  - Docs: `docs/lua/game-constants.md` gained a `RemoveKeyword` row plus the full supported-keyword-
+    name table (with CR citations, verified against the actual enforcement code rather than assumed);
+    `docs/lua/static-abilities.md`'s script-backed effect-shape table gained `remove_keyword`.
+- Unresolved: none new — Banding remains the one real `KeywordSet` bit with no Lua grant path at all
+  (unchanged by this slice, already named in `docs/lua/game-constants.md`).
+
 ## General layer notes
 
 - Layer order in `effective_characteristics`: 2 control, 4 type, 5 color, 6 abilities, 7a CDA, 7b set P/T, 7c modify P/T interleaved with counters (CR 613.4c, `phase5/layer7d-counter-interleaving`), 7e switch.
