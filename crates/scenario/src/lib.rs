@@ -412,6 +412,24 @@ pub struct PendingTargetScript {
     pub script: String,
 }
 
+/// One card instance whose `target_requirement` is left for its own script
+/// to declare (CR 702.5a/303.4a — an Aura's "Enchant [quality]" line, etc.),
+/// collected by `build_initial_state` for the same reason `PendingTargetScript`
+/// is: no `Engine`/`ScriptRuntime` exists yet at that point. Distinct from
+/// `PendingTargetScript` — that one patches a TOML-declared `filter =
+/// "script"` predicate's placeholder handle; this one has no TOML
+/// `target_requirement` at all, and instead calls the card's own `script`
+/// source's optional `s.target_requirement()` function (`Engine::
+/// build_target_requirement`) to fill the whole field in, once an `Engine`
+/// exists (see `register_script_target_requirement`). Only collected when
+/// `CardSpec.target_requirement` is unset and `CardSpec.script` is set — an
+/// explicit TOML `target_requirement` always wins, unchanged for every
+/// pre-existing fixture.
+pub struct PendingScriptTargetRequirement {
+    pub object: ObjectId,
+    pub source: String,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct SetupEntry {
     pub player: u32,
@@ -1167,7 +1185,13 @@ fn zone_owner_for(kind: ZoneKind, player: PlayerId) -> Option<PlayerId> {
 /// assertions can refer to setup cards by their TOML key.
 pub fn build_initial_state(
     file: &ScenarioFile,
-) -> (GameState, HashMap<String, ObjectId>, Vec<PendingTriggerScript>, Vec<PendingTargetScript>) {
+) -> (
+    GameState,
+    HashMap<String, ObjectId>,
+    Vec<PendingTriggerScript>,
+    Vec<PendingTargetScript>,
+    Vec<PendingScriptTargetRequirement>,
+) {
     let mut next_object_id: u64 = 0;
     // Seeds `AbilityId`s for any `mana_ability` built below - draws from a
     // local counter rather than hardcoding a placeholder (unlike
@@ -1183,6 +1207,7 @@ pub fn build_initial_state(
     let mut card_ids: HashMap<String, ObjectId> = HashMap::new();
     let mut trigger_scripts: Vec<PendingTriggerScript> = Vec::new();
     let mut target_scripts: Vec<PendingTargetScript> = Vec::new();
+    let mut script_target_requirements: Vec<PendingScriptTargetRequirement> = Vec::new();
 
     let mut players = Vec::new();
     let mut turn_order = Vec::new();
@@ -1326,6 +1351,16 @@ pub fn build_initial_state(
         if let Some(script) = spec.target_requirement.as_ref().and_then(|r| r.script.as_ref()) {
             target_scripts.push(PendingTargetScript { object: object_id, script: script.clone() });
         }
+        // No TOML target_requirement at all - let the card's own script
+        // declare one (`s.target_requirement()`) if it has one. An explicit
+        // TOML `target_requirement` (including the `filter = "script"` case
+        // just above) always wins; this only fills the gap when it's unset.
+        if spec.target_requirement.is_none() {
+            if let Some(source) = &spec.script {
+                script_target_requirements
+                    .push(PendingScriptTargetRequirement { object: object_id, source: source.clone() });
+            }
+        }
         if let Some(effect_spec) = &spec.continuous_effect {
             continuous_effects.push(build_continuous_effect(object_id, effect_spec));
         }
@@ -1376,7 +1411,7 @@ pub fn build_initial_state(
         commander_return_offered: std::collections::HashSet::new(),
     };
 
-    (state, card_ids, trigger_scripts, target_scripts)
+    (state, card_ids, trigger_scripts, target_scripts, script_target_requirements)
 }
 
 /// Loads `condition_src`/`operation_src` into `engine`'s script runtime and
@@ -1439,6 +1474,29 @@ fn register_target_script(engine: &mut Engine, object: ObjectId, source: &str) {
              the script placeholder: {other:?}"
         ),
     }
+}
+
+/// Loads `source`'s optional `s.target_requirement()` function into `engine`'s
+/// script runtime (`Engine::build_target_requirement`) and sets `object`'s
+/// `CardDefinition.target_requirement` to whatever it returns — `None` if
+/// `source` doesn't define one, same "no targets required" default a TOML
+/// fixture with no `[cards.target_requirement]` table already has. Unlike
+/// `register_target_script`, this overwrites the whole field rather than
+/// patching a placeholder's `filter` in place, since there's no pre-existing
+/// TOML shape to patch — see `PendingScriptTargetRequirement`'s own doc
+/// comment for why this is only ever called when the TOML side left the
+/// field unset.
+fn register_script_target_requirement(engine: &mut Engine, object: ObjectId, source: &str) {
+    let requirement = engine
+        .build_target_requirement(source)
+        .unwrap_or_else(|e| panic!("script target_requirement() failed to load: {e:?}"));
+    engine
+        .state_mut()
+        .objects
+        .get_mut(&object)
+        .unwrap_or_else(|| panic!("script target_requirement registration: object {object:?} not found"))
+        .definition
+        .target_requirement = requirement;
 }
 
 // ---------------------------------------------------------------------
@@ -1891,6 +1949,11 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
             if let Some(script) = spec.target_requirement.as_ref().and_then(|r| r.script.as_ref()) {
                 register_target_script(&mut engine, card_ids[key], script);
             }
+            if spec.target_requirement.is_none() {
+                if let Some(source) = &spec.script {
+                    register_script_target_requirement(&mut engine, card_ids[key], source);
+                }
+            }
         }
     }
     (engine, card_ids)
@@ -2159,7 +2222,8 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
     let (mut engine, mut card_ids) = if let Some(game) = &file.game {
         build_new_game_engine(file, game)
     } else {
-        let (state, card_ids, trigger_scripts, target_scripts) = build_initial_state(file);
+        let (state, card_ids, trigger_scripts, target_scripts, script_target_requirements) =
+            build_initial_state(file);
         let mut engine = Engine::new(state);
         for pending in trigger_scripts {
             register_trigger_ability(
@@ -2171,6 +2235,9 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
         }
         for pending in target_scripts {
             register_target_script(&mut engine, pending.object, &pending.script);
+        }
+        for pending in script_target_requirements {
+            register_script_target_requirement(&mut engine, pending.object, &pending.source);
         }
         (engine, card_ids)
     };

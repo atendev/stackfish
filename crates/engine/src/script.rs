@@ -1791,6 +1791,45 @@ impl ScriptRuntime {
         Ok(())
     }
 
+    /// CR 702.5a/303.4a: a card's own base target requirement (an Aura's
+    /// "Enchant [quality]" line, or any other targeted spell's targeting) as
+    /// declared by its own script, via the optional `s.target_requirement()`
+    /// module convention — a sibling to `s.initial_effect(c)`, not a
+    /// replacement. Called once per `CardDefinition` build, not per object
+    /// per zone-entry the way `run_card_script` is: unlike an Aura's granted
+    /// abilities (which only matter once it's attached to something), its
+    /// own Enchant restriction is fixed text needed *before* it's ever cast
+    /// — while it's still sitting in hand — so it can't wait for
+    /// `run_card_script`'s battlefield/token/copy-entry timing. No
+    /// `GameState`/`ObjectId` involved for the same reason: the restriction
+    /// doesn't vary by which specific object ends up carrying it.
+    ///
+    /// `target_requirement()` takes no arguments and returns the same flat
+    /// filter table `Game.SelectTargets`/`ActivatedAbilityBuilder::SetTarget`
+    /// already accept (`decode_target_filter_table`), plus `count`/`up_to`/
+    /// `at_least`/`exclude_source` as sibling keys — identical shape to the
+    /// scenario crate's own TOML `[cards.target_requirement]` table
+    /// (`TargetRequirementSpec`), just Lua-authored. A card with no
+    /// `target_requirement` function at all (the overwhelming majority)
+    /// returns `Ok(None)` — same "requires no targets" default
+    /// `CardDefinition::target_requirement`'s own doc comment already
+    /// documents.
+    ///
+    /// `&self`, not `&mut self`, and re-evaluates `source` fresh rather than
+    /// caching — same reasoning `run_card_script`'s own doc comment gives for
+    /// its identical choice.
+    pub fn build_target_requirement(&self, source: &str) -> Result<Option<TargetSpec>, ScriptError> {
+        let module: Table =
+            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> =
+            module.get("target_requirement").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else { return Ok(None) };
+        let table: Table =
+            function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let requirement = decode_target_requirement_table(table)?;
+        Ok(Some(TargetSpec::Primitive(requirement)))
+    }
+
     /// Real body: builds a minimal Lua argument set from `ctx` and calls the
     /// loaded function, expecting a bool back. Only `GameEventKind::ZoneChange`
     /// is bridged into a Lua-visible shape this slice (`event_to_lua`, below) —
@@ -2367,6 +2406,31 @@ fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError>
             "unknown Game.SelectTargets filter type '{other}' - expected object/player/any"
         ))),
     }
+}
+
+/// `ScriptRuntime::build_target_requirement`'s return-table decoder — the
+/// `count`/`up_to`/`at_least`/`exclude_source` siblings `TargetRequirement`
+/// needs beyond a bare `TargetFilter`, same field names/defaults the
+/// scenario crate's `TargetRequirementSpec` TOML shape already uses. The
+/// filter portion of the same table is handed to `decode_target_filter_table`
+/// unchanged — that function only reads the keys it recognizes
+/// (`type`/`card_types`/`subtypes`/...), so the count/mode keys read here
+/// don't need to be stripped out first.
+fn decode_target_requirement_table(table: Table) -> Result<TargetRequirement, ScriptError> {
+    let count: u32 = table.get("count").map_err(|e| {
+        ScriptError::LoadError(format!("target_requirement() table missing required 'count': {e}"))
+    })?;
+    let up_to: bool = table.get::<_, Option<bool>>("up_to").map_err(|e| ScriptError::LoadError(e.to_string()))?.unwrap_or(false);
+    let at_least: bool = table
+        .get::<_, Option<bool>>("at_least")
+        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+        .unwrap_or(false);
+    let exclude_source: bool = table
+        .get::<_, Option<bool>>("exclude_source")
+        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+        .unwrap_or(false);
+    let filter = decode_target_filter_table(table)?;
+    Ok(TargetRequirement { filter, count, up_to, at_least, exclude_source })
 }
 
 /// `ActivatedAbilityBuilder::SetTarget`'s argument decoder — a `Value`

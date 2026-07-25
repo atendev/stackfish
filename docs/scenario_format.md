@@ -329,6 +329,12 @@ spell requires targets matching `filter` — `CastSpell` validates count/filter/
 spell is allowed onto the stack (CR 601.2e), and `ResolveStackTop` rechecks legality against
 current game state at resolution (CR 608.2b) — if every target is now illegal, the spell fizzles
 (doesn't resolve, removed from the stack, owner's graveyard) instead of running its effect.
+
+If this table is left unset *and* `script` is set, the card's own script can declare it instead —
+an optional `s.target_requirement()` function returning the same shape this table has (see
+[docs/lua/targeting-and-choices.md](lua/targeting-and-choices.md#a-cards-own-base-targeting-enchant-etc)).
+An explicit `[cards.target_requirement]` table here always wins over the script when both are
+present — every pre-existing fixture keeps working unchanged.
 `count`'s meaning depends on `up_to`/`at_least` (mutually exclusive, see `TargetRequirement`'s own
 doc comment for the full three-way shape): exact by default, 0-to-`count` if `up_to` is set (CR
 601.2c/115.6, "up to N"), `count`-or-more with no upper bound if `at_least` is set ("N or more";

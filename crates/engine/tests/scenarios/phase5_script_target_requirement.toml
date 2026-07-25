@@ -1,0 +1,146 @@
+# Script-declared target_requirement (CR 702.5a/303.4a): a card's own
+# `s.target_requirement()` function fills in CardDefinition.target_requirement
+# when the TOML [cards.target_requirement] table is left unset - proving the
+# scenario-crate wiring end to end (PendingScriptTargetRequirement /
+# register_script_target_requirement), not just the engine-side
+# ScriptRuntime::build_target_requirement decode (already covered directly in
+# crates/engine/tests/phase5_script_target_requirement.rs).
+#
+# Uses a plain "target creature" restriction rather than a subtype-gated one
+# (e.g. a real "Enchant Wall") - CardSpec has no TOML field for a card's own
+# subtypes yet (scenario_format.md's own note), so a scenario fixture can't
+# mark this card "Aura" or a creature "Wall" regardless of this slice. That's
+# a separate, pre-existing gap, not something this slice needs to close - the
+# thing being proven here is purely "the script's target_requirement()
+# return value reaches CastSpell's real validation," which a card_types-only
+# filter demonstrates just as well.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "creature"
+name = "Test Creature"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "land"
+name = "Test Land"
+types = ["Land"]
+
+# Two separate card keys sharing the same script text - each gets its own
+# freshly-built CardDefinition (register_script_target_requirement has no
+# cross-instance caching), same "duplicate card_ids key would only track the
+# last instance" reason phase5_spell_target_script.toml's own bolt_a/bolt_b
+# split already documents.
+[[cards]]
+key = "aura_a"
+name = "Test Script Enchantment A"
+types = ["Enchantment"]
+script = """
+local s = {}
+function s.target_requirement()
+    return { card_types = { "Creature" }, count = 1 }
+end
+function s.initial_effect(c)
+end
+return s
+"""
+
+[[cards]]
+key = "aura_b"
+name = "Test Script Enchantment B"
+types = ["Enchantment"]
+script = """
+local s = {}
+function s.target_requirement()
+    return { card_types = { "Creature" }, count = 1 }
+end
+function s.initial_effect(c)
+end
+return s
+"""
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "creature"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "land"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "aura_a"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "aura_b"
+
+# A distinct card key from the battlefield "land" above - card_ids tracks
+# only the last [[setup]] instance per key (same caveat scenario_format.md's
+# library-key docs note), and the battlefield land is the one "land" needs to
+# keep pointing at for the illegal-target step below.
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+
+# Legal candidate (a Creature) - the script's target_requirement() accepts
+# it, the spell resolves normally.
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "aura_a"
+targets = ["creature"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+# no mana_cost - still needs an explicit empty plan (CR 118.5a).
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "aura_a"
+equals = "battlefield"
+
+# Illegal candidate (a Land, not a Creature) - the same script's
+# target_requirement() rejects it, CastSpell is refused entirely before
+# anything is mutated, so aura_b never leaves hand.
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "aura_b"
+targets = ["land"]
+
+[[steps]]
+type = "assert_object_zone"
+card = "aura_b"
+equals = "hand"

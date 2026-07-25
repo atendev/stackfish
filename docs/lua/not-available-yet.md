@@ -18,9 +18,6 @@ name.
   custom function; there's no way to write an arbitrary custom-function cost.
 - **Triggered abilities can't have a target yet**, even though the underlying data model has a
   slot for one. See [triggered-abilities.md](triggered-abilities.md#whats-not-available-on-this-builder).
-- **No target-filter builder for a spell's own base targeting** (only an *activated ability*'s
-  `:SetTarget` exists) — a spell's own inherent target requirement isn't something a card script
-  sets up via this API yet.
 - **{X} costs, alternative costs (flashback-style), and hybrid/Phyrexian/snow mana payment** are
   pre-existing gaps in cost-paying generally, not specific to anything in this API.
 - **Only zone changes are visible to a condition.** A condition wanting to check a damage event,
@@ -33,6 +30,12 @@ name.
   card definition directly, outside this scripting API.
 - **`Game.Costs.Other`** (an unstructured, free-text additional cost) doesn't exist — every cost
   has to be one of the structured shapes in [game-constants.md](game-constants.md#gamecosts).
+- **`s.target_requirement()`'s scripted-predicate form.** A spell's own base targeting (see
+  [targeting-and-choices.md](targeting-and-choices.md#a-cards-own-base-targeting-enchant-etc))
+  only accepts the flat filter-table shape — no `function(object, source, controller, state) ->
+  bool` fallback yet, unlike `:SetTarget`'s identical-looking table. Not needed for a plain
+  quality restriction like "Enchant Wall"; would matter for something like "Enchant creature with
+  power 4 or greater."
 - **Devour/Amplify quality restrictions.** "Devour [quality] N" (sacrificing only permanents of a
   named quality, not just any creature) and a single creature having multiple independent Amplify
   instances aren't modeled — see [game-constants.md](game-constants.md#gamereplacementpayloads).
