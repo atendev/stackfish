@@ -1,0 +1,45 @@
+seed = 42
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "creature"
+name = "Test Creature"
+types = ["Creature"]
+subtypes = ["Wall"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "animate_wall"
+name = "Animate Wall"
+types = ["Enchantment"]
+script = """
+local s = {}
+
+function s.target_requirements(c)
+    return {
+        card_types = {"Creature"},
+        subtypes = {"Wall"},
+        count = 1,
+    }
+end
+
+function s.register_abilities(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.AbilityAdding)
+
+    -- Grant creature the ability to attack as though it didn't have defender
+    e:SetEffect(Game.Effects.AddKeyword("DefenderCanAttack"))
+    e:SetAffected({enchanted_only = true})
+    e:Register()
+end
+
+return s
+"""
