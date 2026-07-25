@@ -93,8 +93,9 @@ A custom function is also accepted anywhere a `Game.InterveningIf.*` value is �
 ## `Game.Ops.*`
 
 Used with `:SetOperation` on a [triggered](triggered-abilities.md) or
-[activated](activated-abilities.md) ability. Describes what the ability actually does when it
-resolves.
+[activated](activated-abilities.md) ability, or with a plain spell's own
+[`s.operation()`](card-script-basics.md#the-two-functions-that-arent-battlefield-timed). Describes
+what the ability/spell actually does when it resolves.
 
 | Name | Args | Meaning |
 |---|---|---|
@@ -103,6 +104,7 @@ resolves.
 | `GainLife(amount)` | integer | CR 119, controller gains exactly `amount` life. Also the one key a custom operation function's returned table can use (`{ gain_life = amount }`) — see [card-script-basics.md](card-script-basics.md#writing-an-operation). |
 | `Damage(amount)` | integer (unsigned) | CR 608.2m, deals exactly `amount` damage to the ability's target. Goes through the normal damage pipeline, so prevention/replacement effects and Lifelink/Wither/Infect/Deathtouch all apply normally. Single fixed target only — no "divide among any number of targets" or "each opponent" shape yet. |
 | `Destroy` | — | CR 701.8, destroys the ability's target. Indestructible targets are unaffected. |
+| `DestroyAll(filter)` | `filter`: a table with `card_types`/`controller`/`self_only` — the same shape [`:SetAffected`](static-abilities.md#filter-table) uses. | CR 701.8/601.2c, destroys every battlefield permanent matching `filter`, unconditionally — no targets at all (e.g. Armageddon: `Game.Ops.DestroyAll({ card_types = { "Land" } })`). Indestructible permanents are unaffected, same as `Destroy`. `subtypes`/exclusion keys aren't supported in `filter` yet — a plain type/controller restriction is all this covers so far. |
 | `Sacrifice` | — | CR 701.17, sacrifices the ability's target (must be something the caster/controller controls). Unlike `Destroy`, indestructibility doesn't stop this. Not to be confused with `Game.Costs.Sacrifice` — that's a *cost* (pick any matching permanent you control, no targeting), this is a resolution effect against a chosen target. |
 | `Exile` | — | CR 701.18, exiles the ability's target. Ignores indestructibility. Battlefield targets only for now (exiling a card from a graveyard isn't wired up yet). |
 | `Counters(kind, amount)` | `kind`: counter kind name, e.g. `"PlusOnePlusOne"`, `"MinusOneMinusOne"`, `"Loyalty"`, `"Poison"`, `"Energy"`, `"Experience"`, `"Charge"`; any other string becomes a custom counter kind with that name. `amount`: integer. | CR 122.1a, puts `amount` counters of `kind` on the ability's target. Object targets only — no player-facing counters (Energy/Experience on a player) yet. |

@@ -18,8 +18,9 @@ use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::cost::{colors_spent, AdditionalCost, CostSpec, FilterController, FilterSpec, PaymentPlan};
 use crate::types::counter::{CounterKind, CounterSet};
 use crate::types::effect::{
-    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
-    EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
+    matches_effect_filter, AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration,
+    EffectFilter, EffectPayload, EffectPrimitive, EventFilter, Layer, ReplacementEffect,
+    ReplacementPayload, ReplacementSpec,
 };
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::{GameState, RngState};
@@ -4121,6 +4122,43 @@ impl Engine {
                                         _ => None,
                                     })
                                     .collect();
+                                self.process_state = self.continue_scripted_zone_move(
+                                    ScriptedZoneMoveKind::Destroy,
+                                    targets,
+                                    top.stack_id,
+                                    Vec::new(),
+                                );
+                                return StepStatus::Progressed;
+                            }
+                            // CR 701.8/601.2c: "destroy all X" doesn't target
+                            // at all - every battlefield object matching
+                            // `filter` (relative to this effect's own
+                            // source/controller, same as a continuous
+                            // effect's own affected-set check) is collected
+                            // directly, no `legal_targets`/`target_requirement`
+                            // involved. Handed to the exact same
+                            // `continue_scripted_zone_move(Destroy, ...)`
+                            // pipeline the single-target `Destroy` arm just
+                            // above uses, so CR 702.12b indestructibility, CR
+                            // 616.1 ordering-choice pauses, and the CR 614.13
+                            // `WouldDie` replacement check all apply
+                            // identically - no new destruction logic here.
+                            Some(AbilityEffect::DestroyAll(filter)) => {
+                                let targets: VecDeque<ObjectId> = self
+                                    .state
+                                    .zone(ZoneKind::Battlefield, None)
+                                    .map(|zone| {
+                                        zone.contents
+                                            .iter()
+                                            .copied()
+                                            .filter(|id| {
+                                                self.state.object(*id).is_some_and(|object| {
+                                                    matches_effect_filter(filter, object, top.source, top.controller)
+                                                })
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
                                 self.process_state = self.continue_scripted_zone_move(
                                     ScriptedZoneMoveKind::Destroy,
                                     targets,

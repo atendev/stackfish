@@ -125,3 +125,45 @@
   - `ProcessState::AwaitingSearchChoice`; `Engine::submit_search_choice`.
 - Unresolved:
   - Mandatory quantity with no quality filter; reveal; top-N redirection; multiplayer APNAP; graveyard/exile destinations.
+
+## Slice: mass-destroy-effect (merged)
+
+- Branch `phase5/mass-destroy-effect`.
+- Scope: CR 701.8/601.2c mass destruction - "destroy all X," which doesn't target at all (unlike
+  `AbilityEffect::Destroy`, which only ever destroys the resolving spell/ability's own already-
+  chosen target). Closes the gap `phase5/register-abilities-and-script-operation`'s own Armageddon
+  example named as still-missing (`s.operation()` gave a plain spell a script-declared effect at
+  all, but no primitive existed yet for "destroy every matching permanent").
+- Key finding that shaped the design: the actual destruction logic (CR 702.12b indestructibility,
+  CR 616.1 ordering-choice pauses, the CR 614.13 `WouldDie` replacement check) already lives
+  entirely in a shared pipeline - `Destroy`'s own `ResolveStackTop` arm doesn't implement any of it
+  inline, it just collects target ids and calls `self.continue_scripted_zone_move(
+  ScriptedZoneMoveKind::Destroy, ids, ...)`. The new `DestroyAll` arm only needed to collect ids
+  differently (every matching battlefield object instead of chosen targets) and hand the same list
+  to the same function - no new destruction logic anywhere. The one genuinely new piece was filter
+  matching, and that already existed too, just embedded inside `ContinuousEffect::applies_to` -
+  extracted into a free `matches_effect_filter(filter, object, source_id, source_controller)`
+  function so both call sites share it instead of duplicating the controller/card_types checks.
+- Verify: 3 new engine-level tests (`phase5_mass_destroy_effect.rs` - decode, a mixed battlefield
+  proving indestructible/non-land are spared, a `controller = "you"` variant proving only the
+  caster's own permanents die) plus a new scenario TOML fixture running a complete, real
+  Armageddon script end to end, full workspace suite green.
+- Key changes:
+  - `types/effect.rs`: `matches_effect_filter` extracted from `ContinuousEffect::applies_to`
+    (`pub(crate)`, zero behavior change for the existing caller).
+  - `types/ability.rs`: `AbilityEffect::DestroyAll(EffectFilter)` - reuses the exact
+    `controller`/`card_types`/`self_only` shape `Game.CreateStaticAbility`'s own `:SetAffected`
+    already uses, rather than inventing a second filter vocabulary.
+  - `engine.rs`: new `ResolveStackTop` arm - collects every `ZoneKind::Battlefield` object matching
+    the filter (relative to `top.source`/`top.controller`) into a `VecDeque<ObjectId>`, then calls
+    the same `continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, ...)` the single-target
+    `Destroy` arm already uses.
+  - `commands.rs`: `DestroyAll` added to `ActivateAbility`'s real usable-effects list (not an
+    exhaustiveness-only arm - nothing stops an activated ability from saying "destroy all Walls"
+    either, even though no real card built this engine needs that yet).
+  - `script.rs`: `decode_effect_filter_table` extracted from `decode_affected_value` (same reuse
+    shape as `matches_effect_filter`) and reused by the new `Game.Ops.DestroyAll(filter)` factory.
+- Unresolved: `EffectFilter` has no `subtypes`/exclusion keys - "destroy all Zombies"/"destroy all
+  nonland permanents" aren't expressible yet, only a plain type/controller restriction. Not added
+  to `is_modal_resolvable`'s whitelist - no real modal card needs "destroy all X" as one mode yet
+  (already silently no-ops there via the existing wildcard, not a new gap).

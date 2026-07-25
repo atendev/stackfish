@@ -220,12 +220,11 @@ already describes, just called with no arguments instead of resolved from a `:Se
 argument:
 
 ```lua
--- Armageddon-shaped, once Game.Ops.DestroyAll exists: today, a plain
--- no-target effect like GainLife already works this way.
+-- Armageddon: Destroy all lands.
 local s = {}
 
 function s.operation()
-    return Game.Ops.GainLife(3)
+    return Game.Ops.DestroyAll({ card_types = { "Land" } })
 end
 
 return s

@@ -1,5 +1,6 @@
 use crate::types::card::{CardTypeSet, KeywordSet, SupertypeSet};
 use crate::types::cost::{CostSpec, FilterSpec};
+use crate::types::effect::EffectFilter;
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
@@ -76,6 +77,25 @@ pub enum AbilityEffect {
     /// replacement-checked event, not a replacement effect itself. No
     /// fields — a toggle, not a value, same shape as `SwitchPT`.
     Destroy,
+    /// The `Game.Ops.DestroyAll(filter)` primitive (CR 701.8, CR 601.2c's
+    /// "all"-effects-don't-target) — destroys every battlefield permanent
+    /// matching `filter` unconditionally, e.g. Armageddon's "Destroy all
+    /// lands." Same `EffectFilter` shape (`controller`/`card_types`/
+    /// `self_only`) `Game.CreateStaticAbility`'s own `:SetAffected` already
+    /// uses — reuses `types::effect::matches_effect_filter` (extracted from
+    /// `ContinuousEffect::applies_to` for exactly this reuse) rather than a
+    /// second copy of the same controller/card_types matching logic.
+    /// `ResolveStackTop` collects every matching battlefield object and
+    /// hands the list to the same `continue_scripted_zone_move(
+    /// ScriptedZoneMoveKind::Destroy, ...)` pipeline `Destroy` above already
+    /// delegates to — CR 702.12b indestructibility, CR 616.1 ordering-choice
+    /// pauses, and the CR 614.13 `WouldDie` replacement check all fall out
+    /// for free, no new destruction logic needed. `subtypes`/`excluded_*`
+    /// aren't part of `EffectFilter` yet, so "destroy all Zombies"/"destroy
+    /// all nonland permanents" aren't expressible this way yet — narrower
+    /// than `TargetFilter::Object`, named as a follow-up if a real card
+    /// needs it.
+    DestroyAll(EffectFilter),
     /// The `Game.Ops.Counters(kind, n)` primitive — puts `amount` counters
     /// of `kind` on the resolving `StackObject`'s first chosen target (CR
     /// 122.1a). Like `Damage`, not `Destroy`: `GameEventKind::CounterAdded`

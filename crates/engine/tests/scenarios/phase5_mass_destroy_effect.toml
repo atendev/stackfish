@@ -1,0 +1,110 @@
+# Mass destruction (CR 701.8/601.2c): a script-declared Armageddon,
+# combining s.operation() (phase5/register-abilities-and-script-operation)
+# with the new Game.Ops.DestroyAll primitive - proving the whole real card
+# end to end, through the scenario crate's own wiring.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "land_a"
+name = "Test Land A"
+types = ["Land"]
+
+[[cards]]
+key = "land_b"
+name = "Test Land B"
+types = ["Land"]
+
+[[cards]]
+key = "creature"
+name = "Test Creature"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "armageddon"
+name = "Test Armageddon"
+types = ["Sorcery"]
+script = """
+local s = {}
+function s.operation()
+    return Game.Ops.DestroyAll({ card_types = { "Land" } })
+end
+function s.register_abilities(c)
+end
+return s
+"""
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "land_a"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "land_b"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "creature"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "armageddon"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "armageddon"
+targets = []
+
+[[steps]]
+type = "submit_payment"
+player = 0
+# no mana_cost - still needs an explicit empty plan (CR 118.5a).
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "land_a"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "land_b"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "creature"
+equals = "battlefield"
