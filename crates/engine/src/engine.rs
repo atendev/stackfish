@@ -1216,6 +1216,17 @@ impl Engine {
         self.script_runtime.build_target_requirement(source)
     }
 
+    /// A plain spell's own resolution effect (Armageddon's "Destroy all
+    /// lands," etc.), as declared by its script's optional `operation()`
+    /// function — see `ScriptRuntime::build_operation`'s own doc comment for
+    /// the full convention.
+    pub fn build_operation(
+        &self,
+        source: &str,
+    ) -> Result<Option<(Option<AbilityEffect>, ScriptHandle)>, ScriptError> {
+        self.script_runtime.build_operation(source)
+    }
+
     /// Diagnostic for tests/replay tooling: whether `pipeline_context` is
     /// currently set. Should be `false` whenever `process_state` is
     /// `PriorityWindow` - `end_pipeline_run` is the only place that clears
@@ -4681,6 +4692,14 @@ impl Engine {
                             // StackObject of any kind should ever carry either
                             // variant. Defensive no-op rather than a panic.
                             Some(AbilityEffect::AddMana(_)) | Some(AbilityEffect::AddManaChoice { .. }) => {}
+                            // `CastSpell` always unpacks this into
+                            // `operation`/`effect: None` at push time (see
+                            // `AbilityEffect::Script`'s own doc comment) - no
+                            // `StackObject` should ever actually carry this
+                            // variant on its `effect` field. Defensive
+                            // no-op, same stance `AddMana`/`AddManaChoice`
+                            // just above take for their own unreachable case.
+                            Some(AbilityEffect::Script(_)) => {}
                             None => {
                                 // TODO: a script error here is silently
                                 // dropped - no path from ResolveStackTop

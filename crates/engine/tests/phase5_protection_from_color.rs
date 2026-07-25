@@ -27,7 +27,7 @@ use stackfish_testutil::{card_object as permanent, drain, hand_battlefield_grave
 
 const STATIC_PROTECTION_FROM_RED: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddProtectionColor("R"))

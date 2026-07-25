@@ -12,7 +12,7 @@ power = 2
 toughness = 2
 script = """
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Enters)
     e:SetOperation(Game.Ops.GainLife(1))

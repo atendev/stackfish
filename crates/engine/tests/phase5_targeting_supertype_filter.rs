@@ -95,7 +95,7 @@ fn legend_bolt_definition() -> CardDefinition {
 
 const STATIC_EQUIP_LEGENDARY: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local a = Game.CreateActivatedAbility(c)
     a:SetTarget({ type = "object", card_types = { "Creature" }, supertypes = { "Legendary" }, controller = "you" })
     a:SetOperation(Game.Ops.Attach)

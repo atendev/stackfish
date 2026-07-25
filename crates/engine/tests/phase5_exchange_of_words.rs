@@ -33,7 +33,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, t
 
 const SELF_REGISTER_GAIN_LIFE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetOperation(Game.Ops.GainLife(1))
     e:Register()

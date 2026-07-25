@@ -1,5 +1,5 @@
 //! Phase 5 vertical slice: `Game.CreateActivatedAbility` (CR 602) - a card's
-//! own Lua `initial_effect(c)` can now build a real `RegisteredAbility` with
+//! own Lua `register_abilities(c)` can now build a real `RegisteredAbility` with
 //! `AbilityKind::Activated` and a general `CostSpec`, mirroring
 //! `Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`'s builder/
 //! queued-registration mechanism exactly (`ActivatedAbilityBuilder` alongside
@@ -21,7 +21,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, t
 
 const SELF_TAP_GAIN_LIFE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.TapSelf)
     e:SetOperation(Game.Ops.GainLife(1))
@@ -32,7 +32,7 @@ return s
 
 const NO_SET_OPERATION: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.TapSelf)
     e:Register()
@@ -42,7 +42,7 @@ return s
 
 const NO_COST_AT_ALL: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetOperation(Game.Ops.GainLife(1))
     e:Register()
@@ -52,7 +52,7 @@ return s
 
 const COMBINED_COST: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.TapSelf)
     e:AddCost(Game.Costs.Sacrifice({ card_types = { "Creature" } }))
@@ -64,7 +64,7 @@ return s
 
 const MANA_COST: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.Mana("{1}{R}"))
     e:AddCost(Game.Costs.TapSelf)
@@ -76,7 +76,7 @@ return s
 
 const MANA_COST_SET_TWICE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.Mana("{1}{R}"))
     e:AddCost(Game.Costs.Mana("{G}"))
@@ -88,7 +88,7 @@ return s
 
 const MALFORMED_MANA_COST: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.Mana("{Q}"))
     e:SetOperation(Game.Ops.GainLife(1))

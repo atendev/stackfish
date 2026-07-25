@@ -30,7 +30,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, p
 /// only against a player at 10 or less life.
 const SCRIPTED_LOW_LIFE_TARGET: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetTarget({ type = "player", filter = function(player, source, controller, state)
         return state.life[player] ~= nil and state.life[player] <= 10

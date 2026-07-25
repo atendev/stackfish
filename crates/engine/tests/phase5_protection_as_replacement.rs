@@ -30,7 +30,7 @@ use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two
 
 const STATIC_PROTECTION_FROM_RED: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddProtectionColor("R"))
@@ -42,7 +42,7 @@ return s
 
 const REDIRECT_DAMAGE_TO_SELF: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.DamageDealt)
     e:SetPayload(Game.ReplacementPayloads.RedirectDamageToSource)
@@ -57,7 +57,7 @@ return s
 /// (`apply_one_replacement_or_protection`'s own doc comment).
 const STATIC_PROTECTION_FROM_RED_AND_PREVENTS_ALL_DAMAGE_TO_SELF: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.AddProtectionColor("R"))

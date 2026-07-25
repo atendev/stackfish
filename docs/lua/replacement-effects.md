@@ -13,7 +13,7 @@ shield):
 -- This creature regenerates.
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetAffected({ self_only = true })
     e:Register()

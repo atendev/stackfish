@@ -11,7 +11,7 @@ e:SetOperation(Game.Ops.GainLife(1))
 e:Register()
 ```
 
-See [card-script-basics.md](card-script-basics.md) for the surrounding `initial_effect(c)`
+See [card-script-basics.md](card-script-basics.md) for the surrounding `register_abilities(c)`
 structure and the condition/operation concept in general.
 
 ## Methods
@@ -59,7 +59,7 @@ called.
 Call `Game.CreateTriggeredAbility(c)` again — each `:Register()` is independent:
 
 ```lua
-function s.initial_effect(c)
+function s.register_abilities(c)
     local etb = Game.CreateTriggeredAbility(c)
     etb:SetCondition(Game.Conditions.Enters)
     etb:SetOperation(Game.Ops.GainLife(1))

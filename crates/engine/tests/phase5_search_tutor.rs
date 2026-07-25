@@ -39,7 +39,7 @@ fn basic_land_definition(definition_id: u64, name: &str, subtype: &str) -> CardD
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::Inline(
-            "return { initial_effect = function(source) end }".to_string(),
+            "return { register_abilities = function(source) end }".to_string(),
         ),
         keywords: KeywordSet::empty(),
         target_requirement: None,
@@ -65,7 +65,7 @@ fn nonbasic_land_definition(definition_id: u64, name: &str) -> CardDefinition {
         loyalty: None,
         defense: None,
         script_ref: ScriptReference::Inline(
-            "return { initial_effect = function(source) end }".to_string(),
+            "return { register_abilities = function(source) end }".to_string(),
         ),
         keywords: KeywordSet::empty(),
         target_requirement: None,

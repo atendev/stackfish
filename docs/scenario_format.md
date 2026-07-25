@@ -237,7 +237,7 @@ trigger_operation = "return Game.Ops.GainLife(1)"
 This shape is deliberately narrow — no targeting, no continuous effects, and registration is done
 by the harness rather than the card's own script. See `script` below for real self-registration.
 
-**`script` (CR 603, real self-registration):** a full card script — the `s.initial_effect(c)`
+**`script` (CR 603, real self-registration):** a full card script — the `s.register_abilities(c)`
 module convention, calling `Game.CreateTriggeredAbility(c)` itself — instead of the harness
 building a `RegisteredAbility` by hand. Sets `CardDefinition::script_ref` directly; no
 post-construction `Engine` step needed, since the real engine pipeline (`PlayLand`/
@@ -248,7 +248,7 @@ as above, self-registered instead of harness-wired):
 ```toml
 script = """
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Enters)
     e:SetOperation(Game.Ops.GainLife(1))
@@ -266,6 +266,15 @@ return s
 real too — see [docs/lua/index.md](lua/index.md) for the full set. Nothing stops a card from
 setting both `script` and `trigger_condition`/`trigger_operation` at once, but that's not a
 supported combination — pick one per card.
+
+Two more optional functions in the same script, each called once when the `CardDefinition` itself
+is built rather than per battlefield entry: `s.target_requirement()` fills in
+`target_requirement` when the TOML table above is left unset (see that field's own doc, above);
+`s.operation()` fills in `CardDefinition.effect` — a plain spell's own resolution effect (CR
+608.2m), which has no TOML representation at all otherwise (direct Rust struct literal only,
+same pre-existing gap `alternative_costs` has). See
+[docs/lua/card-script-basics.md](lua/card-script-basics.md#the-two-functions-that-arent-battlefield-timed)
+for the full convention.
 
 **`continuous_effect` (CR 613, layer engine):** if set, every instance of this card gets one static
 `ContinuousEffect` set up automatically, built directly as a Rust struct — a convenience field for

@@ -10,7 +10,7 @@ assuming a signature you don't see documented is just "missing from the docs."
 ## Start here
 
 - **[Card script basics](card-script-basics.md)** — how a card's Lua actually runs: the
-  `initial_effect(c)` structure, the condition/operation split, primitives vs. custom functions,
+  `register_abilities(c)` structure, the condition/operation split, primitives vs. custom functions,
   and how a card's registrations reset when it changes zones. Read this first.
 - **[Game constants reference](game-constants.md)** — every `Game.Conditions.*`, `Game.InterveningIf.*`,
   `Game.Ops.*`, `Game.Costs.*`, `Game.Layers.*`, `Game.Effects.*`, `Game.Durations.*`,
@@ -20,7 +20,7 @@ assuming a signature you don't see documented is just "missing from the docs."
 
 ## Registering an ability (one page per kind)
 
-A card's `initial_effect(c)` can call any of the `Game.Create*` constructors below any number of
+A card's `register_abilities(c)` can call any of the `Game.Create*` constructors below any number of
 times — each ability/effect you build and `:Register()` is independent, so one card can register
 several abilities.
 

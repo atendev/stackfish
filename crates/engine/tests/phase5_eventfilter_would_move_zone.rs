@@ -28,7 +28,7 @@ use stackfish_testutil::{card_object, drain, two_player_state as base_two_player
 
 const EXILE_INSTEAD_GOES_TO_GRAVEYARD: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Exile"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Graveyard"))
@@ -40,7 +40,7 @@ return s
 
 const MISMATCHED_WOULD_MOVE_ZONE_PREVENT_DAMAGE: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Battlefield", "Exile"))
     e:SetPayload(Game.ReplacementPayloads.PreventDamage)

@@ -440,7 +440,7 @@ fn script_intervening_if_rechecked_fresh_at_resolution_fizzles() {
 fn set_intervening_if_accepts_a_function_and_self_registers() {
     const SELF_REGISTER_WITH_SCRIPT_INTERVENING_IF: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Upkeep)
     e:SetInterveningIf(function(source, controller, snapshot)

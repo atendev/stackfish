@@ -1,0 +1,76 @@
+# Script-declared operation (CR 608.2m): a card's own `s.operation()`
+# function fills in CardDefinition.effect - proving the scenario-crate wiring
+# end to end (PendingScriptOperation / register_script_operation), not just
+# the engine-side ScriptRuntime::build_operation decode (already covered
+# directly in crates/engine/tests/phase5_script_operation.rs). CardSpec has
+# no TOML field for a card's own effect at all, so this is the only way a
+# scenario fixture can give a plain sorcery/instant a real resolution effect.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "gain_three"
+name = "Test Gain Three Life"
+types = ["Sorcery"]
+script = """
+local s = {}
+function s.operation()
+    return Game.Ops.GainLife(3)
+end
+function s.register_abilities(c)
+end
+return s
+"""
+
+[[cards]]
+key = "filler"
+name = "Filler Land"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "gain_three"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "gain_three"
+targets = []
+
+[[steps]]
+type = "submit_payment"
+player = 0
+# no mana_cost - still needs an explicit empty plan (CR 118.5a).
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "gain_three"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_life"
+player = 0
+equals = 23

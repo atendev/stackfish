@@ -1,5 +1,5 @@
 //! Phase 5 vertical slice: static ability self-registration (CR 604/611). A
-//! card's own Lua `initial_effect(c)` can now call `Game.CreateStaticAbility(c)`
+//! card's own Lua `register_abilities(c)` can now call `Game.CreateStaticAbility(c)`
 //! to attach a real `ContinuousEffect` to `GameState.continuous_effects` -
 //! mirrors `Game.CreateTriggeredAbility`'s builder/queued-registration
 //! mechanism exactly (`StaticAbilityBuilder` alongside
@@ -23,7 +23,7 @@ use stackfish_testutil::{
 
 const SELF_BUFF: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
@@ -35,7 +35,7 @@ return s
 
 const ANTHEM_YOUR_CREATURES: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
@@ -47,7 +47,7 @@ return s
 
 const NO_SET_LAYER: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
     e:Register()
@@ -57,7 +57,7 @@ return s
 
 const NO_SET_EFFECT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:Register()
@@ -67,7 +67,7 @@ return s
 
 const MISMATCHED_LAYER_EFFECT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.TypeChanging)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))
@@ -78,7 +78,7 @@ return s
 
 const REMOVE_DEFENDER: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.AbilityAdding)
     e:SetEffect(Game.Effects.RemoveKeyword("Defender"))
@@ -90,7 +90,7 @@ return s
 
 const MISMATCHED_REMOVE_KEYWORD: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.TypeChanging)
     e:SetEffect(Game.Effects.RemoveKeyword("Defender"))
@@ -101,7 +101,7 @@ return s
 
 const TWO_STATIC_ABILITIES: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e1 = Game.CreateStaticAbility(c)
     e1:SetLayer(Game.Layers.PowerToughnessModifying)
     e1:SetEffect(Game.Effects.ModifyPT(1, 0))
@@ -242,7 +242,7 @@ fn run_card_script_rejects_mismatched_layer_and_remove_keyword() {
 }
 
 #[test]
-fn run_card_script_can_register_multiple_static_abilities_from_one_initial_effect() {
+fn run_card_script_can_register_multiple_static_abilities_from_one_script_call() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let definition = bear_definition(TWO_STATIC_ABILITIES);

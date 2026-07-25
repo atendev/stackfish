@@ -275,7 +275,7 @@ pub enum EffectPrimitive {
     /// ({controller=...})`/`EffectFilter.controller` already expose to Lua,
     /// rather than a raw `PlayerId` — this engine has no multiplayer
     /// arbitrary-player-targeting yet (backlog item 11), and a card script's
-    /// `initial_effect(c)` is never handed a `PlayerId` at registration time
+    /// `register_abilities(c)` is never handed a `PlayerId` at registration time
     /// to name one with anyway. Resolved relative to the *protected
     /// object's own* controller at each enforcement site (not the
     /// continuous effect's source — the two coincide for every `self_only`

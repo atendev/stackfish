@@ -35,7 +35,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, t
 /// not what the operation does with a legal target once chosen.
 const SCRIPTED_POWER_FOUR_TARGET: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:SetTarget(function(object, source, controller, state)
         for _, card in ipairs(state.battlefield) do

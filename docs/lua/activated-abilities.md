@@ -8,7 +8,7 @@ CR 602 — "Cost: Effect." Built with `Game.CreateActivatedAbility(c)`.
 -- {T}: Gain 1 life.
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.TapSelf)
     e:SetOperation(Game.Ops.GainLife(1))
@@ -71,7 +71,7 @@ Activate only as a sorcery":
 -- Equip {1}
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateActivatedAbility(c)
     e:AddCost(Game.Costs.Mana("{1}"))
     e:SetTarget({ type = "object", card_types = { "Creature" }, controller = "you" })

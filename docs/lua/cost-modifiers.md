@@ -9,7 +9,7 @@ CR 601.2f — "Spells you cast cost {N} more/less to cast," or similar. Built wi
 -- Spells you cast cost {1} less to cast.
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateCostModifier(c)
     e:SetFilter({ controller = "you" })
     e:SetAmount(-1)

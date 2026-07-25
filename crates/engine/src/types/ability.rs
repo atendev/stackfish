@@ -421,6 +421,28 @@ pub enum AbilityEffect {
     /// produces exactly one chunk per entry here — see that call site's own
     /// doc comment).
     Modal(Vec<Option<AbilityEffect>>),
+    /// A plain spell's own resolution effect (CR 608.2m), declared by its
+    /// script's optional `s.operation()` function (a sibling to
+    /// `s.register_abilities(c)`, not a replacement) when that function
+    /// returns a custom Lua function rather than a `Game.Ops.*` primitive
+    /// tag — the same "primitive fast path vs. script fallback" shape
+    /// `RegisteredAbility::effect`/`::operation` already use for triggered/
+    /// activated abilities, folded into this single field since
+    /// `CardDefinition` has no sibling `operation: ScriptHandle` field of
+    /// its own (deliberately not added — see `ScriptRuntime::
+    /// build_operation`'s own doc comment for why a new `CardDefinition`
+    /// field was avoided).
+    ///
+    /// Never actually reaches `ResolveStackTop`'s or `ActivateAbility`'s own
+    /// `AbilityEffect` dispatch — `commands::execute_command`'s `CastSpell`
+    /// arm unpacks this into `StackObject`'s separate `operation`/`effect`
+    /// fields at push time (`Script(handle)` -> `operation: handle, effect:
+    /// None`), the same shape those two dispatches already treat `None` as
+    /// "invoke `operation` for real." Listed on both anyway for
+    /// exhaustiveness only, same "every variant named, no wildcard"
+    /// convention `Modal` above already established for a similarly
+    /// can't-actually-originate-there case.
+    Script(ScriptHandle),
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
@@ -1017,7 +1039,7 @@ pub enum InterveningIfSpec {
     Script(ScriptHandle),
 }
 
-/// A card's registered ability, as set up by its script's `initial_effect`-
+/// A card's registered ability, as set up by its script's `register_abilities`-
 /// equivalent (`Game.RegisterTriggeredAbility` etc — see `script_api.rs`).
 /// Lives in `GameState.abilities` as a flat list (same pattern as
 /// `continuous_effects`/`replacement_effects`), not nested under

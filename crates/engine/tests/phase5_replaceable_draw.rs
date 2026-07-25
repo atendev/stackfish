@@ -101,7 +101,7 @@ fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
 
 const DRAW_GOES_TO_EXILE_INSTEAD: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetFilter(Game.EventFilters.WouldMoveZone("Library", "Hand"))
     e:SetPayload(Game.ReplacementPayloads.ReplaceZoneDestination("Exile"))

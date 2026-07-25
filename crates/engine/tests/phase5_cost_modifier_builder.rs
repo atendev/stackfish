@@ -1,5 +1,5 @@
 //! Phase 5 vertical slice: `Game.CreateCostModifier` (CR 601.2f). A card's
-//! own Lua `initial_effect(c)` can now call `Game.CreateCostModifier(c)` to
+//! own Lua `register_abilities(c)` can now call `Game.CreateCostModifier(c)` to
 //! register a real `CostModifier` onto `GameState.cost_modifiers` - mirrors
 //! `Game.CreateStaticAbility`/`Game.CreateReplacementEffect`'s own
 //! queue-and-drain builder shape exactly (`CostModifierBuilder` in
@@ -26,7 +26,7 @@ use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, t
 
 const CREATURES_COST_ONE_LESS: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local m = Game.CreateCostModifier(c)
     m:SetFilter({ card_types = { "Creature" } })
     m:SetAmount(-1)
@@ -37,7 +37,7 @@ return s
 
 const NO_SET_FILTER: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local m = Game.CreateCostModifier(c)
     m:SetAmount(-1)
     m:Register()
@@ -47,7 +47,7 @@ return s
 
 const NO_SET_AMOUNT: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local m = Game.CreateCostModifier(c)
     m:SetFilter({ card_types = { "Creature" } })
     m:Register()

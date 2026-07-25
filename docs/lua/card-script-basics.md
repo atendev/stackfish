@@ -4,26 +4,29 @@
 
 ## Card script structure
 
-A card's script is a Lua module that returns a table with one function, `initial_effect`:
+A card's script is a Lua module that returns a table. `register_abilities` is the one every card
+with any ability at all needs — see [Registration timing](#registration-timing) below for the two
+optional siblings (`target_requirement`, `operation`) a card only needs if it's an Aura-style
+targeted permanent or a plain instant/sorcery, respectively.
 
 ```lua
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     -- c is this card's own object id
 end
 
 return s
 ```
 
-`initial_effect(c)` is called with the card's own object id every time the card becomes a new
+`register_abilities(c)` is called with the card's own object id every time the card becomes a new
 object on the battlefield (see [Registration timing](#registration-timing) below). Inside it, you
 build and register one or more abilities/effects using the `Game.Create*` constructors — see
 [index.md](index.md#registering-an-ability-one-page-per-kind) for the full list. A single card can
 register more than one ability by calling a constructor more than once:
 
 ```lua
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e1 = Game.CreateTriggeredAbility(c)
     e1:SetCondition(Game.Conditions.Enters)
     e1:SetOperation(Game.Ops.GainLife(1))
@@ -146,7 +149,7 @@ An ETB "gain 1 life" creature:
 
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(Game.Conditions.Enters)
     e:SetOperation(Game.Ops.GainLife(1))
@@ -162,7 +165,7 @@ observable behavior:
 ```lua
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateTriggeredAbility(c)
     e:SetCondition(function(source, controller, event)
         return event ~= nil and event.kind == "zone_change"
@@ -191,6 +194,64 @@ Abilities keyed off a zone *other than* the battlefield (a cast trigger, a grave
 like flashback) aren't covered by this — self-registration only runs at the two "entering the
 battlefield" points above. This applies uniformly to every registration kind (triggered, static,
 activated, replacement, cost modifier) — not just triggered abilities.
+
+### The two functions that *aren't* battlefield-timed
+
+`register_abilities(c)` can't help a card whose own base shape is needed *before* it's ever on the
+battlefield — an Aura's target has to be legal at cast time, and a plain instant/sorcery that
+resolves straight to the graveyard never becomes a battlefield object at all. Two optional sibling
+functions cover those cases instead, each called once when the card's `CardDefinition` itself is
+built rather than per battlefield entry — no `GameState`/`ObjectId` involved, since neither varies
+by which specific object ends up carrying it:
+
+| Function | For | Docs |
+|---|---|---|
+| `target_requirement()` | An Aura's "Enchant [quality]" line, or any other spell's own base targeting (CR 601.2c/702.5a) | [targeting-and-choices.md](targeting-and-choices.md#a-cards-own-base-targeting-enchant-etc) |
+| `operation()` | A plain spell's own resolution effect (CR 608.2m) — Armageddon's "Destroy all lands," Shock's "deals 2 damage to any target" | below |
+
+Both are genuinely optional — the overwhelming majority of cards need neither (a creature with
+only triggered/static abilities has no base target and no spell-level effect of its own to
+declare).
+
+#### Writing `operation()`
+
+Same primitive-vs-custom-function shape [writing an operation](#writing-an-operation) above
+already describes, just called with no arguments instead of resolved from a `:SetOperation(...)`
+argument:
+
+```lua
+-- Armageddon-shaped, once Game.Ops.DestroyAll exists: today, a plain
+-- no-target effect like GainLife already works this way.
+local s = {}
+
+function s.operation()
+    return Game.Ops.GainLife(3)
+end
+
+return s
+```
+
+A targeted spell combines both new functions — `target_requirement()` for what's legal to target,
+`operation()` for what happens to it:
+
+```lua
+-- Test Bolt: deals 2 damage to any target.
+local s = {}
+
+function s.target_requirement()
+    return { type = "any", count = 1 }
+end
+
+function s.operation()
+    return Game.Ops.Damage(2)
+end
+
+return s
+```
+
+A card with no `operation()` function at all keeps the pre-existing default: its effect can only
+be a Rust-native primitive supplied some other way (direct construction today; TOML has no field
+for this either — see [scenario_format.md](../scenario_format.md)).
 
 ## Hidden information
 

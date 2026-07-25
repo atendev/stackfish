@@ -26,7 +26,7 @@ use stackfish_testutil::{card_object, hand_battlefield_graveyard_zones, two_play
 
 const STATIC_REGENERATE_SELF: &str = r#"
 local s = {}
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateReplacementEffect(c)
     e:SetAffected({ self_only = true })
     e:Register()

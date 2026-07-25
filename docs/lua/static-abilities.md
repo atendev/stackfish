@@ -9,7 +9,7 @@ creature has protection from red." Built with `Game.CreateStaticAbility(c)`.
 -- Anthem: creatures you control get +1/+1.
 local s = {}
 
-function s.initial_effect(c)
+function s.register_abilities(c)
     local e = Game.CreateStaticAbility(c)
     e:SetLayer(Game.Layers.PowerToughnessModifying)
     e:SetEffect(Game.Effects.ModifyPT(1, 1))

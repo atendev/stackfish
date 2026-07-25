@@ -1944,14 +1944,25 @@ pub fn execute_command(
                 modal_effect
             };
 
-            // TODO(script bridge): `operation` should be the card's
-            // registered cast/resolution callback (looked up via its
-            // ScriptReference) - no such lookup exists yet, same gap as
-            // every other ScriptHandle placeholder in this codebase.
-            // ScriptHandle(0) here is a stand-in with nothing real bound to
-            // it - only `effect`'s Rust-native fast path (above) can
-            // actually resolve a spell effect until the script bridge fills
-            // this in for real.
+            // A script-declared custom-function operation (`s.operation()`
+            // returning a Lua function rather than a `Game.Ops.*` tag) is
+            // packed onto `CardDefinition.effect` as `AbilityEffect::
+            // Script(handle)` - see that variant's own doc comment for why
+            // `CardDefinition` has no separate `operation: ScriptHandle`
+            // field to carry it natively. Unpacked here into StackObject's
+            // real two-field shape (`operation`/`effect`) so
+            // `ResolveStackTop` never has to know the difference from a
+            // triggered/activated ability's own script fallback - `None` on
+            // `effect` is what makes it invoke `operation` for real. Every
+            // other shape (a `Game.Ops.*` primitive, or no script-declared
+            // operation at all) keeps the pre-existing `ScriptHandle(0)`
+            // placeholder - "nothing real bound to it," only `effect`'s
+            // Rust-native fast path can resolve those.
+            let (operation, effect) = match effect {
+                Some(AbilityEffect::Script(handle)) => (handle, None),
+                other => (ScriptHandle(0), other),
+            };
+
             state.stack.push(StackObject::new(
                 new_id,
                 StackEntryKind::Spell,
@@ -1965,7 +1976,7 @@ pub fn execute_command(
                 target_requirement,
                 x_value,
                 exile_on_leaving_stack,
-                ScriptHandle(0),
+                operation,
                 effect,
                 // CR 603.4's "if" clause is triggered-ability-only text - a
                 // spell never carries one.
@@ -2250,7 +2261,13 @@ pub fn execute_command(
                 // variant can't actually originate from an ability today.
                 // Listed for exhaustiveness only, same "every variant named,
                 // no wildcard" convention this disjunction already follows.
-                | Some(AbilityEffect::Modal(_))) => {
+                | Some(AbilityEffect::Modal(_))
+                // AbilityEffect::Script only ever comes from a plain spell's
+                // CardDefinition.effect (CastSpell unpacks it before push -
+                // see that variant's own doc comment) - an ability's effect
+                // can't be this shape. Listed for exhaustiveness only, same
+                // reason as Modal just above.
+                | Some(AbilityEffect::Script(_))) => {
                     validate_targets(
                         state,
                         script_runtime,
