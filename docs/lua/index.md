@@ -29,6 +29,7 @@ several abilities.
 | [Triggered abilities](triggered-abilities.md) | `Game.CreateTriggeredAbility(c)` | "When/Whenever/At..." abilities | CR 603 |
 | [Static abilities](static-abilities.md) | `Game.CreateStaticAbility(c)` | Always-on continuous effects | CR 604/611/613 |
 | [Activated abilities](activated-abilities.md) | `Game.CreateActivatedAbility(c)` | "Cost: Effect" abilities | CR 602 |
+| [Mana abilities](mana-abilities.md) | `Game.CreateManaAbility(c)` | "{T}: Add {C}"-style abilities | CR 605 |
 | [Replacement effects](replacement-effects.md) | `Game.CreateReplacementEffect(c)` | "If this would X, Y instead" effects | CR 614/615/616 |
 | [Cost modifiers](cost-modifiers.md) | `Game.CreateCostModifier(c)` | "Spells you cast cost {N} more/less" | CR 601.2f |
 

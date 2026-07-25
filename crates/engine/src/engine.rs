@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use crate::commands::{self, CommandError, PendingPaymentRequest, PriorityHandoff};
+use crate::commands::{self, CommandError, PaymentResolution, PendingPaymentRequest, PriorityHandoff};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement::{self, ReplacementOutcome};
 use crate::sba::{self, SbaOutcome};
@@ -560,7 +560,17 @@ pub enum ReplacementResumeTarget {
     /// `CostPaid` event once every zone-moving payment's been processed
     /// (`stack_id`'s `costs_paid` was already set before this pause could
     /// first fire, so it doesn't need to be threaded through here too).
-    CostZoneMove { remaining: VecDeque<PendingZoneMove>, payer: PlayerId, stack_id: ObjectId },
+    /// `on_paid` carries `PendingPaymentRequest::on_paid` through the pause
+    /// unchanged - a cost-bearing mana ability (`PaymentResolution::
+    /// ManaAbility`) sacrificing itself as part of its own cost, say, still
+    /// needs to know to add its mana once every zone move (including any
+    /// nested CR 616.1 choice this pause itself represents) finally settles.
+    CostZoneMove {
+        remaining: VecDeque<PendingZoneMove>,
+        payer: PlayerId,
+        stack_id: ObjectId,
+        on_paid: PaymentResolution,
+    },
     /// Reached from `Engine::continue_discard_moves` (`Engine::
     /// submit_discard`'s own CR 514.1 cleanup hand-size discard). Same
     /// shape `CostZoneMove` has - `remaining` is the rest of this
@@ -891,7 +901,13 @@ pub enum ProcessState {
     /// object whose activation/cast this cost belongs to (see
     /// `commands::PendingPaymentRequest::source`'s doc comment) — needed by
     /// `PaymentPlan::validate` to check `AdditionalCost::TapSelf`.
-    AwaitingPayment { stack_id: ObjectId, payer: PlayerId, cost: CostSpec, source: ObjectId },
+    AwaitingPayment {
+        stack_id: ObjectId,
+        payer: PlayerId,
+        cost: CostSpec,
+        source: ObjectId,
+        on_paid: PaymentResolution,
+    },
     /// CR 700.2e: paused because `ProcessState::ResolveStackTop` peeked at
     /// the top of the stack (without popping it) and found a `StackObject`
     /// whose `pending_mode_choice` is still `Some` — `chooser` must submit
@@ -1365,12 +1381,12 @@ impl Engine {
                     }
                 }
             },
-            ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id } => match outcome {
+            ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
                     self.state.ledger.push(committed);
-                    self.continue_cost_zone_moves(remaining, payer, stack_id)
+                    self.continue_cost_zone_moves(remaining, payer, stack_id, on_paid)
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                     ProcessState::AwaitingReplacementChoice {
@@ -1378,7 +1394,7 @@ impl Engine {
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id },
+                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid },
                     }
                 }
             },
@@ -2337,7 +2353,7 @@ impl Engine {
         if !valid {
             return Err(PaymentError::InvalidPlan);
         }
-        let ProcessState::AwaitingPayment { stack_id, .. } =
+        let ProcessState::AwaitingPayment { stack_id, on_paid, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
@@ -2378,7 +2394,7 @@ impl Engine {
         // before the pause happened. continue_cost_zone_moves logs CostPaid
         // itself once every zone-moving payment (if any) has committed, and
         // returns SbaLoop the same way this used to unconditionally.
-        self.process_state = self.continue_cost_zone_moves(pending_zone_moves, payer, stack_id);
+        self.process_state = self.continue_cost_zone_moves(pending_zone_moves, payer, stack_id, on_paid);
         Ok(())
     }
 
@@ -2395,7 +2411,10 @@ impl Engine {
     /// doc comment already gives).
     ///
     /// Once the queue empties (including the trivial case of no zone-moving
-    /// payments at all), logs the final `CostPaid` event and returns
+    /// payments at all), applies `on_paid` (see `PaymentResolution`'s own doc
+    /// comment - a cost-bearing mana ability's units are added to its
+    /// controller's pool here, since no `StackObject` exists for it to
+    /// resolve later), logs the final `CostPaid` event, and returns
     /// `ProcessState::SbaLoop` - exactly what `submit_payment` used to do
     /// unconditionally before this split existed.
     fn continue_cost_zone_moves(
@@ -2403,6 +2422,7 @@ impl Engine {
         mut remaining: VecDeque<PendingZoneMove>,
         payer: PlayerId,
         stack_id: ObjectId,
+        on_paid: PaymentResolution,
     ) -> ProcessState {
         while let Some(pending) = remaining.pop_front() {
             let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from) else {
@@ -2426,10 +2446,31 @@ impl Engine {
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id },
+                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid },
                     };
                 }
             }
+        }
+        // CR 605.1a/605.3b: a cost-bearing mana ability never reaches the
+        // stack - once its (possibly sacrifice/discard-involving) cost has
+        // fully committed above, its mana is added directly here instead of
+        // waiting for a StackObject that was never pushed.
+        if let PaymentResolution::ManaAbility { controller, units } = &on_paid {
+            let Some(player) = self.state.player_mut(*controller) else {
+                unreachable!("a mana ability's own controller always has player state");
+            };
+            for unit in units {
+                player.mana_pool.add_unit(*unit);
+            }
+            let event_id = self.state.allocate_event_id();
+            let sequence_no = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no,
+                kind: GameEventKind::ManaAdded { player: *controller, units: units.clone() },
+                caused_by_command: None,
+                parent_event: None,
+            });
         }
         let event_id = self.state.allocate_event_id();
         let sequence_no = self.state.allocate_sequence_no();
@@ -4917,21 +4958,21 @@ impl Engine {
                 // never set pending_payment, so they fall straight through
                 // to SbaLoop exactly as before this slice.
                 self.process_state = match self.pending_payment.take() {
-                    Some(PendingPaymentRequest { stack_id, payer, cost, source }) => {
-                        ProcessState::AwaitingPayment { stack_id, payer, cost, source }
+                    Some(PendingPaymentRequest { stack_id, payer, cost, source, on_paid }) => {
+                        ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid }
                     }
                     None => ProcessState::SbaLoop,
                 };
                 StepStatus::Progressed
             }
 
-            ProcessState::AwaitingPayment { stack_id, payer, cost, source } => {
+            ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid } => {
                 // Nothing to do until submit_payment answers - put the
                 // exact same state back and tell the caller who needs to be
                 // prompted, mirroring AwaitingReplacementChoice/
                 // AwaitTriggerOrderChoice.
                 let status = StepStatus::AwaitingPayment { player: payer, stack_id };
-                self.process_state = ProcessState::AwaitingPayment { stack_id, payer, cost, source };
+                self.process_state = ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid };
                 status
             }
 

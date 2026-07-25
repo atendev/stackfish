@@ -10,9 +10,8 @@ name.
   its returned table. Every other effect shape (`damage`, `counters`, `draw_cards`, ...) is only
   reachable through the `Game.Ops.*` tag form for now. See
   [card-script-basics.md](card-script-basics.md#writing-an-operation).
-- **A mana ability isn't written this way.** `{T}: Add {G}.`-style abilities that produce mana
-  without using the stack are wired up through a separate, simpler declaration, not
-  `Game.CreateActivatedAbility`.
+- **"Spend this mana only to..." restricted mana** (e.g. Chrome Mox) isn't modeled — see
+  [mana-abilities.md](mana-abilities.md).
 - **No lookup-by-key script resolution.** A card's script always has to be the literal Lua source,
   not a key into an external registry.
 - **No script-backed costs.** `Game.Costs.*` covers every structured cost shape without needing a

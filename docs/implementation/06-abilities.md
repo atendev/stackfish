@@ -197,3 +197,68 @@
 - Unresolved: none new — this closes the builder gap outright at `CostModifier`'s existing scope
   (spells only, flat generic amount, no CR 118.7 colored-pip modeling — all pre-existing
   boundaries, untouched by this slice).
+
+## Slice: mana-ability-real-cost (merged)
+
+- Branch `phase5/mana-ability-real-cost`.
+- Scope: `Game.CreateManaAbility(c)` (CR 605) — a card's own Lua script can now self-register a
+  real mana ability, plus the actual gap that motivated it: a mana ability with a cost beyond
+  "tap this permanent" (Treasure/Lotus-Petal-style `Sacrifice`, or an explicit `Game.Costs.TapSelf`)
+  is now representable at all — previously `mana_ability` TOML's `cost: None` was the *only* shape
+  a mana ability could ever have, and `ActivateAbility`'s mana-effect branch never consulted a
+  `CostSpec` at all (confirmed by direct reading before scoping: the tap was a bare
+  `object.tapped = true` mutation, completely outside `PaymentPlan`/`AdditionalCost`).
+- Requirements report given in chat before implementation, including an explicit scope fork (tap-
+  only vs. real-cost support) surfaced to the user via question rather than assumed — user chose
+  real-cost support.
+- Verify: 9 new tests (`phase5_mana_ability_real_cost.rs`: 6 unit-level registration/rejection
+  tests + 3 end-to-end `Engine`-driven tests — no-cost/instant, explicit `TapSelf`/real payment
+  pause, and a Treasure/Lotus-Petal-style `Sacrifice`-cost mana ability that sacrifices itself),
+  full workspace suite green (148 total test-result blocks, 0 failed).
+- Key changes:
+  - `commands::PaymentResolution { StackObject, ManaAbility { controller, units } }` (new enum) —
+    what a `PendingPaymentRequest`/`ProcessState::AwaitingPayment` pause does once its cost fully
+    commits. `StackObject` is the pre-existing behavior (a real `StackObject` already sits on
+    `state.stack`, resolved later by `ResolveStackTop`); `ManaAbility` is new — nothing is ever
+    pushed onto the stack for it (CR 605.1a/605.3b), so its already-resolved `Vec<ManaUnit>` is
+    applied directly once payment settles.
+  - `PendingPaymentRequest.on_paid: PaymentResolution` (new field) — threaded through
+    `ProcessState::AwaitingPayment`, `ReplacementResumeTarget::CostZoneMove`,
+    `Engine::submit_payment`, and `Engine::continue_cost_zone_moves` (now takes `on_paid` and
+    applies the mana + logs `ManaAdded` at its own tail, right alongside the existing `CostPaid`
+    log). The two pre-existing construction sites (`CastSpell`, non-mana `ActivateAbility`) both
+    pass `PaymentResolution::StackObject` — behaviorally unchanged.
+  - `commands.rs`'s `ActivateAbility` mana-effect arm now branches on whether the ability's own
+    `cost` is trivial (`None`/empty — the only shape TOML's `mana_ability` field can produce,
+    unchanged hardcoded-tap/no-pause behavior) or real (any `Game.Costs.*` component) — the latter
+    pre-checks `TapSelf`/summoning-sickness the same way the non-mana branch already does, then
+    pauses via `PendingPaymentRequest { on_paid: PaymentResolution::ManaAbility { .. }, .. }`
+    with **no `StackObject` ever pushed** (`stack_id` is a freshly allocated opaque handle,
+    tolerated by `Engine::unwind_payment`'s existing "no such stack object, just no-op" fallback).
+  - `ManaAbilityBuilder` (script.rs) — a dedicated sibling of `ActivatedAbilityBuilder`, not a mode
+    of it: no `:SetTarget` method at all (CR 605.1a, prevented by construction rather than
+    accepted-and-ignored), and `:SetOperation`/`:Register()` reject anything whose effect doesn't
+    resolve to `AddMana`/`AddManaChoice` specifically (a custom function included) — since
+    `commands.rs`'s dispatch is purely effect-shape-driven, anything else would silently fall
+    through to the ordinary stack-using activated-ability path instead, exactly the footgun this
+    slice closes. `:AddCost` reuses `decode_cost_component_value` verbatim (same decoder
+    `ActivatedAbilityBuilder` uses) — omitting it entirely keeps the original free/instant shape;
+    calling it even once (e.g. bare `Game.Costs.TapSelf`) opts into a real payment pause, same
+    "even a free cost needs an explicit acknowledgment" stance CR 118.5a already established for
+    every other ability in this engine.
+  - `Game.CreateManaAbility` registered in `bind_game_globals` alongside the other four
+    `Game.Create*` builders.
+  - Docs: new `docs/lua/mana-abilities.md`; `docs/lua/index.md`/`not-available-yet.md` updated.
+- Deviations: none from the requirements report's design (the "smallest correct change" identified
+  during scoping — reusing `PaymentPlan`/`commit_payment`/`continue_cost_zone_moves` entirely
+  unmodified except for the new `on_paid` field — turned out to compile and pass on the first
+  attempt).
+- Unresolved:
+  - "Spend this mana only to cast an artifact spell"-style restricted mana (CR 605's own worked
+    examples, e.g. Chrome Mox) — `ManaPool`/`ManaUnit` track no spend-restriction at all; a
+    pre-existing gap, not touched by this slice.
+  - A mana ability's cost is still validated/paid exactly like any other ability's — no special
+    "this must specifically sacrifice itself" enforcement exists for a self-referential Sacrifice
+    cost (the payer could sacrifice any other object matching the filter instead) — a pre-existing
+    `AdditionalCost::Sacrifice` limitation (no cost shape means "must be the source"), not new to
+    mana abilities and not addressed here.

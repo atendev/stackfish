@@ -176,10 +176,11 @@ script = "..."                 # optional full self-registering Lua source, defa
 `activate_ability` with `ability_index = 0`. Each entry is one literal unit added (same letters as
 `mana.units`, see below) — `["G"]` models `{T}: Add {G}`; `["G", "G"]` would model adding two green
 in one activation. Only one mana ability per card this way, and the tap cost is implicit/hardcoded
-(this is the only cost shape mana abilities support right now — see `commands.rs`'s
-`ActivateAbility` arm). A card with no `mana_ability` entries can still be referenced by an
-`activate_ability` action, but it has no registered abilities, so `ability_index = 0` will be
-rejected ("no such ability on source").
+— this TOML field can never express any other cost shape. A card with no `mana_ability` entries can
+still be referenced by an `activate_ability` action, but it has no registered abilities, so
+`ability_index = 0` will be rejected ("no such ability on source"). A card's own Lua `script` can
+self-register a real mana ability too, including one with a cost beyond a bare tap (a Treasure/
+Lotus-Petal-style sacrifice, say) — see [docs/lua/mana-abilities.md](lua/mana-abilities.md).
 
 A `{2}{G}{G}` cost is `generic_cost = 2, colors = ["G", "G"]` — two list entries for the two green
 pips, not `["G"]` with an implied count. `submit_payment`'s `mana.units` field (see that action's
