@@ -2241,6 +2241,11 @@ pub fn execute_command(
                 | Some(AbilityEffect::GainLife(_))
                 | Some(AbilityEffect::Damage(_))
                 | Some(AbilityEffect::Destroy)
+                // CR 701.8/601.2c: no different from any other untargeted
+                // effect shape at this level - "destroy all X" needs no
+                // targets validated (target_requirement is None for it),
+                // same as Shuffle just below.
+                | Some(AbilityEffect::DestroyAll(_))
                 | Some(AbilityEffect::Sacrifice)
                 | Some(AbilityEffect::Exile)
                 | Some(AbilityEffect::Counters { .. })

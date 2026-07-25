@@ -44,3 +44,7 @@ name.
 - **Protection from an attached Aura/Equipment.** CR 702.16b — attaching works, but doesn't grant
   protection on its own yet.
 - **Enchanting/equipping a player** isn't modeled — attachment only ever targets a permanent.
+- **`Game.Ops.DestroyAll`'s filter has no `subtypes`/exclusion keys.** Only `card_types`/
+  `controller`/`self_only` — "destroy all Zombies" or "destroy all nonland permanents" aren't
+  expressible via mass destruction yet, only a plain type/controller restriction like Armageddon's
+  "destroy all lands." See [game-constants.md](game-constants.md#gameops).

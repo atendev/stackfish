@@ -501,9 +501,45 @@ pub struct ContinuousEffect {
     pub condition: Option<InterveningIfSpec>,
 }
 
+/// Whether `object` matches `filter`, relative to `source_id`/
+/// `source_controller` (an effect's own source and that source's
+/// controller — `filter.self_only`/`filter.controller` are both resolved
+/// against these, never a separately-supplied player). Extracted from
+/// `ContinuousEffect::applies_to`'s own body so `AbilityEffect::DestroyAll`
+/// (CR 701.8's "destroy all lands," etc. — no `ContinuousEffect` involved at
+/// all, just a resolving spell/ability's own `source`/`controller`) can
+/// reuse the identical controller/card_types matching logic instead of
+/// duplicating it.
+pub(crate) fn matches_effect_filter(
+    filter: &EffectFilter,
+    object: &GameObject,
+    source_id: ObjectId,
+    source_controller: PlayerId,
+) -> bool {
+    if filter.self_only && object.object_id != source_id {
+        return false;
+    }
+    if let Some(controller_filter) = filter.controller {
+        let matches_controller = match controller_filter {
+            FilterController::You => object.controller == source_controller,
+            FilterController::Opponent => object.controller != source_controller,
+            FilterController::Any => true,
+        };
+        if !matches_controller {
+            return false;
+        }
+    }
+    if let Some(types) = filter.card_types {
+        if !object.definition.card_types.intersects(types) {
+            return false;
+        }
+    }
+    true
+}
+
 impl ContinuousEffect {
     /// Whether `object` is in this effect's affected set. Real body for
-    /// `AffectedFilter::Primitive` — zero further evaluation needed, `source`
+    /// `AffectedFilter::Primitive` is `matches_effect_filter` above — `source`
     /// only used to resolve `self.source`'s current controller (for
     /// `FilterController::You`/`Opponent`) and identity (for `self_only`).
     /// Also the real body for `EnchantedOnly` (CR 303.4m) — `source.
@@ -515,30 +551,13 @@ impl ContinuousEffect {
     /// stance `layers::effective_characteristics` takes for an unresolvable
     /// CDA.
     pub fn applies_to(&self, object: &GameObject, source: &GameObject) -> bool {
-        let filter = match &self.affected {
-            AffectedFilter::Primitive(filter) => filter,
-            AffectedFilter::EnchantedOnly => return source.attached_to == Some(object.object_id),
-            AffectedFilter::Script(_) => return false,
-        };
-        if filter.self_only && object.object_id != self.source {
-            return false;
-        }
-        if let Some(controller_filter) = filter.controller {
-            let matches_controller = match controller_filter {
-                FilterController::You => object.controller == source.controller,
-                FilterController::Opponent => object.controller != source.controller,
-                FilterController::Any => true,
-            };
-            if !matches_controller {
-                return false;
+        match &self.affected {
+            AffectedFilter::Primitive(filter) => {
+                matches_effect_filter(filter, object, self.source, source.controller)
             }
+            AffectedFilter::EnchantedOnly => source.attached_to == Some(object.object_id),
+            AffectedFilter::Script(_) => false,
         }
-        if let Some(types) = filter.card_types {
-            if !object.definition.card_types.intersects(types) {
-                return false;
-            }
-        }
-        true
     }
 }
 

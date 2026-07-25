@@ -843,6 +843,37 @@ fn decode_effect_value(
 /// `self_only` are even read — same "no real card needs both" narrowing
 /// `EnchantedOnly`'s own doc comment already states, so combining it with
 /// the other keys is simply ignored rather than rejected.
+/// The `controller`/`card_types`/`self_only` portion of `:SetAffected`'s
+/// filter table, decoded straight to a bare `EffectFilter` - shared by
+/// `decode_affected_value` (below, for `AffectedFilter::Primitive`) and
+/// `Game.Ops.DestroyAll`'s own filter argument, which needs the identical
+/// shape but has no `enchanted_only`/function-predicate cases to consider
+/// (CR 701.8's "destroy all X" is never phrased as "enchanted X").
+fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, ScriptError> {
+    let controller_name: Option<String> =
+        table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+
+    let card_types_table: Option<Table> =
+        table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let card_types = match card_types_table {
+        Some(t) => {
+            let mut set = CardTypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                set |= parse_card_type_name(&name)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+
+    let self_only: Option<bool> =
+        table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+
+    Ok(EffectFilter { controller, card_types, self_only: self_only.unwrap_or(false) })
+}
+
 fn decode_affected_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
@@ -856,32 +887,7 @@ fn decode_affected_value(
                 return Ok(AffectedFilter::EnchantedOnly);
             }
 
-            let controller_name: Option<String> =
-                table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
-
-            let card_types_table: Option<Table> =
-                table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-            let card_types = match card_types_table {
-                Some(t) => {
-                    let mut set = CardTypeSet::empty();
-                    for entry in t.sequence_values::<String>() {
-                        let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
-                        set |= parse_card_type_name(&name)?;
-                    }
-                    Some(set)
-                }
-                None => None,
-            };
-
-            let self_only: Option<bool> =
-                table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
-
-            Ok(AffectedFilter::Primitive(EffectFilter {
-                controller,
-                card_types,
-                self_only: self_only.unwrap_or(false),
-            }))
+            Ok(AffectedFilter::Primitive(decode_effect_filter_table(&table)?))
         }
         Value::Function(function) => {
             let key = lua
@@ -2656,6 +2662,11 @@ fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>) -> mlua::
     let damage = lua.create_function(|_, amount: u32| Ok(OperationTag(AbilityEffect::Damage(amount))))?;
     ops.set("Damage", damage)?;
     ops.set("Destroy", OperationTag(AbilityEffect::Destroy))?;
+    let destroy_all = lua.create_function(|_, table: Table| {
+        let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::DestroyAll(filter)))
+    })?;
+    ops.set("DestroyAll", destroy_all)?;
     ops.set("Sacrifice", OperationTag(AbilityEffect::Sacrifice))?;
     ops.set("Exile", OperationTag(AbilityEffect::Exile))?;
     let counters = lua.create_function(|_, (kind, amount): (String, i32)| {
