@@ -1,13 +1,14 @@
 use super::*;
 use super::triggers_pipeline::is_permutation;
+use crate::replacement;
 use crate::triggers::PendingTrigger;
 use crate::types::counter::CounterSet;
 use crate::types::effect::ConsumptionPolicy;
-use crate::types::ids::{AbilityId, Target};
+use crate::types::ids::{AbilityId, ObjectId, PlayerId, Target};
 use crate::types::mana::ManaPool;
 use crate::types::player::PlayerState;
 use crate::types::turn::Step;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 fn minimal_state() -> GameState {
     let p0 = PlayerId(0);
