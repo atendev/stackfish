@@ -185,3 +185,42 @@ fn game_ops_add_mana_choice_decodes_count_and_colors() {
         Some(AbilityEffect::AddManaChoice { count: 1, choices }) if choices == ColorSet::all()
     ));
 }
+
+// ---------------------------------------------------------------------
+// Game.Ops.AddRestrictedMana - CR 106.11, "spend this mana only to cast
+// [card type] spells" (phase5/restricted-mana).
+// ---------------------------------------------------------------------
+
+#[test]
+fn game_ops_add_restricted_mana_decodes_a_fixed_colored_unit() {
+    let mut runtime = ScriptRuntime::new();
+    let (effect, _) = runtime.load_operation("return Game.Ops.AddRestrictedMana(\"G\", \"Artifact\")").unwrap();
+    assert!(matches!(
+        effect,
+        Some(AbilityEffect::AddMana(units))
+            if units == vec![ManaUnit::RestrictedColored(Color::Green, CardTypeSet::ARTIFACT)]
+    ));
+}
+
+#[test]
+fn game_ops_add_restricted_mana_decodes_a_repeated_colorless_unit() {
+    let mut runtime = ScriptRuntime::new();
+    let (effect, _) = runtime.load_operation("return Game.Ops.AddRestrictedMana(\"C\", \"Artifact\", 3)").unwrap();
+    assert!(matches!(
+        effect,
+        Some(AbilityEffect::AddMana(units))
+            if units == vec![ManaUnit::RestrictedColorless(CardTypeSet::ARTIFACT); 3]
+    ));
+}
+
+#[test]
+fn game_ops_add_restricted_mana_rejects_an_unknown_card_type() {
+    let mut runtime = ScriptRuntime::new();
+    assert!(runtime.load_operation("return Game.Ops.AddRestrictedMana(\"C\", \"NotAType\")").is_err());
+}
+
+#[test]
+fn game_ops_add_restricted_mana_rejects_an_unknown_letter() {
+    let mut runtime = ScriptRuntime::new();
+    assert!(runtime.load_operation("return Game.Ops.AddRestrictedMana(\"X\", \"Artifact\")").is_err());
+}

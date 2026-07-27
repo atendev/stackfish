@@ -430,6 +430,14 @@ fn assign_branches(
 /// `atom_branches`, but over literal `ManaUnit`s rather than cost-shape
 /// symbols (there's no "generic unit"; every unit spent is some specific
 /// color or colorless, snow-tagged or not).
+///
+/// A restricted unit (CR 106.11) folds into its base color/colorless bucket
+/// same as an ordinary one - the restriction narrows *what it can pay for*,
+/// not what pip shape it looks like, so it's correct for `validate`'s CR
+/// 118.13a shape check (`mana_payment_satisfies`). `validate` calls this
+/// function a second time on a *restricted-filtered* slice for the separate
+/// pool-affordability check, where that distinction does matter - see its
+/// own doc comment.
 fn spent_tally(units: &[ManaUnit]) -> ([u32; 5], u32, [u32; 5], u32) {
     let mut colored = [0u32; 5];
     let mut colorless = 0u32;
@@ -447,6 +455,8 @@ fn spent_tally(units: &[ManaUnit]) -> ([u32; 5], u32, [u32; 5], u32) {
                 colorless += 1;
                 snow_colorless += 1;
             }
+            ManaUnit::RestrictedColored(c, _) => colored[color_index(*c)] += 1,
+            ManaUnit::RestrictedColorless(_) => colorless += 1,
         }
     }
     (colored, colorless, snow_colored, snow_colorless)
@@ -491,6 +501,19 @@ pub(crate) fn spend(units: &[ManaUnit], pool: &mut ManaPool) {
                 pool.colorless -= 1;
                 pool.snow_colorless -= 1;
             }
+            // CR 106.11: a restricted unit isn't in the plain aggregate
+            // counts above at all - remove one matching entry from the
+            // pool's own side-channel instead. `validate` already confirmed
+            // a match exists, same "trusts validate, doesn't recheck"
+            // contract this function's own doc comment already states.
+            unit @ (ManaUnit::RestrictedColored(..) | ManaUnit::RestrictedColorless(..)) => {
+                let idx = pool
+                    .restricted
+                    .iter()
+                    .position(|candidate| candidate == unit)
+                    .expect("validate() already confirmed this restricted unit is available");
+                pool.restricted.remove(idx);
+            }
         }
     }
 }
@@ -524,14 +547,14 @@ pub fn colors_spent(payments: &[CostPayment]) -> ColorSet {
         let CostPayment::Mana { units, .. } = payment else { continue };
         for unit in units {
             let bit = match unit {
-                ManaUnit::Colored(c) | ManaUnit::SnowColored(c) => match c {
+                ManaUnit::Colored(c) | ManaUnit::SnowColored(c) | ManaUnit::RestrictedColored(c, _) => match c {
                     Color::White => ColorSet::WHITE,
                     Color::Blue => ColorSet::BLUE,
                     Color::Black => ColorSet::BLACK,
                     Color::Red => ColorSet::RED,
                     Color::Green => ColorSet::GREEN,
                 },
-                ManaUnit::Colorless | ManaUnit::SnowColorless => continue,
+                ManaUnit::Colorless | ManaUnit::SnowColorless | ManaUnit::RestrictedColorless(_) => continue,
             };
             set |= bit;
         }
@@ -619,6 +642,10 @@ impl PaymentPlan {
                 let Some(CostPayment::Mana { units, phyrexian_life }) = payments.next() else {
                     return false;
                 };
+                // CR 118.13a shape check: a restricted unit folds into its
+                // base color/colorless bucket here (see `spent_tally`'s own
+                // doc comment) - the restriction doesn't change what pip
+                // shape it can satisfy, only what it's eligible to fund.
                 let (spent_colored, spent_colorless, spent_snow_colored, spent_snow_colorless) =
                     spent_tally(units);
                 let spent = SpentPool {
@@ -638,11 +665,24 @@ impl PaymentPlan {
                     return false;
                 }
                 let pool = &player.mana_pool;
+
+                // Pool-affordability, ordinary mana: restricted units never
+                // land in the plain aggregate fields (`ManaPool::add_unit`
+                // routes them into `pool.restricted` instead), so this
+                // re-tallies only the non-restricted declared units against
+                // those fields - checked separately from the shape tally
+                // above, which needed restricted units folded in.
+                let (plain_units, restricted_units): (Vec<ManaUnit>, Vec<ManaUnit>) = units
+                    .iter()
+                    .copied()
+                    .partition(|u| !matches!(u, ManaUnit::RestrictedColored(..) | ManaUnit::RestrictedColorless(..)));
+                let (plain_colored, plain_colorless, plain_snow_colored, plain_snow_colorless) =
+                    spent_tally(&plain_units);
                 let pool_colored = [pool.white, pool.blue, pool.black, pool.red, pool.green];
-                if spent_colored.iter().zip(pool_colored).any(|(spent, have)| *spent > have) {
+                if plain_colored.iter().zip(pool_colored).any(|(spent, have)| *spent > have) {
                     return false;
                 }
-                if spent_colorless > pool.colorless {
+                if plain_colorless > pool.colorless {
                     return false;
                 }
                 // The snow-tagged units declared can't exceed how much of
@@ -651,11 +691,42 @@ impl PaymentPlan {
                 // snow-sourced (CR 107.4h).
                 let pool_snow_colored =
                     [pool.snow_white, pool.snow_blue, pool.snow_black, pool.snow_red, pool.snow_green];
-                if spent_snow_colored.iter().zip(pool_snow_colored).any(|(spent, have)| *spent > have) {
+                if plain_snow_colored.iter().zip(pool_snow_colored).any(|(spent, have)| *spent > have) {
                     return false;
                 }
-                if spent_snow_colorless > pool.snow_colorless {
+                if plain_snow_colorless > pool.snow_colorless {
                     return false;
+                }
+
+                // CR 106.11 restricted mana: each declared restricted unit
+                // must (a) actually be sitting in the pool's own
+                // `restricted` side-channel - checked as a multiset, one
+                // pool entry consumed per declared unit so two declared
+                // copies of the same restricted unit can't both be
+                // satisfied by a single pool entry - and (b) be eligible
+                // for what this cost is paying for. This engine only models
+                // the "spend only to cast a [card type] spell" shape, so
+                // eligibility is: `source`'s own `GameObject` is sitting in
+                // the `Stack` zone (the same signal `PendingPaymentRequest::
+                // source`'s doc comment already uses to mean "this is a
+                // spell being cast, not an ability") and its card types
+                // intersect the restriction.
+                let mut remaining_restricted = pool.restricted.clone();
+                for unit in &restricted_units {
+                    let Some(idx) = remaining_restricted.iter().position(|candidate| candidate == unit) else {
+                        return false;
+                    };
+                    remaining_restricted.remove(idx);
+                    let types = match unit {
+                        ManaUnit::RestrictedColored(_, types) | ManaUnit::RestrictedColorless(types) => *types,
+                        _ => unreachable!("partitioned into restricted_units above"),
+                    };
+                    let eligible = state
+                        .object(source)
+                        .is_some_and(|o| o.zone == ZoneKind::Stack && o.definition.card_types.intersects(types));
+                    if !eligible {
+                        return false;
+                    }
                 }
             }
             // required.is_empty(): CR 118.5a's explicit-acknowledgment

@@ -10,8 +10,10 @@ name.
   its returned table. Every other effect shape (`damage`, `counters`, `draw_cards`, ...) is only
   reachable through the `Game.Ops.*` tag form for now. See
   [card-script-basics.md](card-script-basics.md#writing-an-operation).
-- **"Spend this mana only to..." restricted mana** (e.g. Chrome Mox) isn't modeled — see
-  [mana-abilities.md](mana-abilities.md).
+- **Restricted mana beyond a card-type filter** — `Game.Ops.AddRestrictedMana` covers CR 106.11's
+  "spend this mana only to cast [card type] spells" (Mishra's Workshop) only. Object-specific
+  restrictions ("only to cast the exiled card") and ability-activation restrictions aren't modeled —
+  see [mana-abilities.md](mana-abilities.md#restricted-mana).
 - **No lookup-by-key script resolution.** A card's script always has to be the literal Lua source,
   not a key into an external registry.
 - **No script-backed costs.** `Game.Costs.*` covers every structured cost shape without needing a

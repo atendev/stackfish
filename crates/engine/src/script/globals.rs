@@ -18,7 +18,7 @@ use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, EffectDuration, EffectFilter, EffectPrimitive, Layer, ReplacementPayload,
 };
 use crate::types::ids::ObjectId;
-use crate::types::mana::ManaCost;
+use crate::types::mana::{ManaCost, ManaUnit};
 
 use super::builders::{
     ActivatedAbilityBuilder, CostModifierBuilder, ManaAbilityBuilder, ReplacementEffectBuilder, StaticAbilityBuilder,
@@ -127,6 +127,25 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::AddMana(vec![unit; count.unwrap_or(1) as usize])))
     })?;
     ops.set("AddMana", add_mana)?;
+    // CR 106.11: `Game.Ops.AddRestrictedMana(letter, cardType, count?)` -
+    // same single-symbol vocabulary as `AddMana`, but every produced unit
+    // is tagged so `PaymentPlan::validate` only accepts it toward casting a
+    // spell of `cardType` (Mishra's Workshop: "Spend this mana only to cast
+    // artifact spells"). Narrowed to a single card-type filter - no
+    // object-specific ("only to cast the exiled card") or ability-
+    // activation restriction shape exists yet, named in this slice's own
+    // backlog note rather than guessed at.
+    let add_restricted_mana = lua.create_function(|_, (letter, card_type, count): (String, String, Option<u32>)| {
+        let unit = parse_mana_unit_letter(&letter).map_err(to_lua_err)?;
+        let types = parse_card_type_name(&card_type).map_err(to_lua_err)?;
+        let restricted = match unit {
+            ManaUnit::Colored(c) => ManaUnit::RestrictedColored(c, types),
+            ManaUnit::Colorless => ManaUnit::RestrictedColorless(types),
+            _ => unreachable!("parse_mana_unit_letter only ever returns Colored/Colorless"),
+        };
+        Ok(OperationTag(AbilityEffect::AddMana(vec![restricted; count.unwrap_or(1) as usize])))
+    })?;
+    ops.set("AddRestrictedMana", add_restricted_mana)?;
     // CR 605's "add mana of any color" shape -
     // `Game.Ops.AddManaChoice(count, colors)`: `count` is how many
     // independently-chosen mana this ability produces, `colors` is a WUBRG

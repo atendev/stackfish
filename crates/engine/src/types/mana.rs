@@ -1,5 +1,7 @@
 use bitflags::bitflags;
 
+use crate::types::card::CardTypeSet;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Color {
     White,
@@ -351,6 +353,14 @@ pub struct ManaPool {
     pub snow_red: u32,
     pub snow_green: u32,
     pub snow_colorless: u32,
+    /// CR 106.11 restricted mana (`ManaUnit::RestrictedColored`/
+    /// `RestrictedColorless`) — a raw multiset, not aggregated into buckets
+    /// like the fields above. Restricted mana is rare enough in practice
+    /// that a flat `Vec` (checked by equality, one entry consumed per unit
+    /// spent) is simpler than inventing a second bucketing scheme keyed by
+    /// restriction shape — see `cost::spend`/`PaymentPlan::validate` for how
+    /// it's consumed.
+    pub restricted: Vec<ManaUnit>,
 }
 
 /// One literal unit of floating mana, as it actually exists in a `ManaPool`
@@ -368,12 +378,26 @@ pub struct ManaPool {
 /// sites building plain non-snow units don't need touching. A snow unit is
 /// still exactly that color for every other purpose (colored pips, generic)
 /// — the tag only matters for paying a `{S}` symbol.
+///
+/// `RestrictedColored`/`RestrictedColorless` are CR 106.11's "spend this
+/// mana only to..." restriction, narrowed to the single most common real
+/// shape — a card-type filter on what the mana can be spent to *cast*
+/// (Mishra's Workshop: "Spend this mana only to cast artifact spells").
+/// Same "separate parameterized variant, not a field on the plain ones"
+/// precedent as the snow pair — the restriction rides along as data on the
+/// unit itself rather than a side lookup table, since `CardTypeSet` is
+/// already a small `Copy` bitset. Unlike every other `ManaUnit` variant,
+/// these can't live in `ManaPool`'s flat per-color counters at all (that
+/// representation can't tell a restricted unit apart from an ordinary one
+/// of the same color) — see `ManaPool::restricted`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ManaUnit {
     Colored(Color),
     Colorless,
     SnowColored(Color),
     SnowColorless,
+    RestrictedColored(Color, CardTypeSet),
+    RestrictedColorless(CardTypeSet),
 }
 
 impl ManaPool {
@@ -414,6 +438,12 @@ impl ManaPool {
             ManaUnit::SnowColorless => {
                 self.colorless += 1;
                 self.snow_colorless += 1;
+            }
+            // CR 106.11: a restricted unit never joins the plain aggregate
+            // counts above (those represent freely-spendable mana only) -
+            // it lands in its own side-channel instead.
+            unit @ (ManaUnit::RestrictedColored(..) | ManaUnit::RestrictedColorless(..)) => {
+                self.restricted.push(unit);
             }
         }
     }

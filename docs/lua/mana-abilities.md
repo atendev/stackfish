@@ -88,9 +88,26 @@ Same as any other `AddManaChoice` operation — the caller supplies the chosen c
 activating the ability, not when building it. See [game-constants.md](game-constants.md#gameops)
 for `Game.Ops.AddMana`/`AddManaChoice`'s exact argument shapes.
 
+## Restricted mana
+
+CR 106.11's "spend this mana only to cast [card type] spells" (Mishra's Workshop: "Add {C}{C}{C}.
+Spend this mana only to cast artifact spells.") — use `Game.Ops.AddRestrictedMana(letter, cardType,
+count?)` in place of `Game.Ops.AddMana`:
+
+```lua
+local e = Game.CreateManaAbility(c)
+e:SetOperation(Game.Ops.AddRestrictedMana("C", "Artifact", 3))
+e:Register()
+```
+
+The payment engine only accepts a restricted unit toward casting a spell of the named card type —
+never toward an activated ability's cost, even one belonging to a permanent of that same card type.
+
 ## What's not covered
 
-- **"Spend this mana only to..." restricted mana** (e.g. Chrome Mox) isn't modeled — mana added
-  this way is ordinary, unrestricted mana once it's in the pool.
+- **Object-specific restrictions** ("only to cast the exiled card") aren't modeled — only a
+  card-type filter.
+- **Ability-activation restrictions** (vs. casting a spell) aren't modeled — restricted mana is
+  spell-cast-only.
 - **A mana ability that requires a target** doesn't exist in real Magic either (CR 605.1a), so
   this isn't a gap — it's the rule.

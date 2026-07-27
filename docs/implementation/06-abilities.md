@@ -69,7 +69,8 @@
   - `Game.Ops.AddMana(letter, count?)` and `Game.Ops.AddManaChoice(count, colors)`.
   - `mana::parse_color_letter` made public for scenario TOML.
 - Unresolved:
-  - Mixed-color single call, snow, restricted mana, paired triggered abilities.
+  - Mixed-color single call, snow, paired triggered abilities. Restricted mana closed by
+    `phase5/restricted-mana`, below.
 
 ## Slice: static-ability-self-registration (merged)
 
@@ -255,10 +256,55 @@
   attempt).
 - Unresolved:
   - "Spend this mana only to cast an artifact spell"-style restricted mana (CR 605's own worked
-    examples, e.g. Chrome Mox) — `ManaPool`/`ManaUnit` track no spend-restriction at all; a
-    pre-existing gap, not touched by this slice.
+    examples, e.g. Chrome Mox) — closed by `phase5/restricted-mana`, below.
   - A mana ability's cost is still validated/paid exactly like any other ability's — no special
     "this must specifically sacrifice itself" enforcement exists for a self-referential Sacrifice
     cost (the payer could sacrifice any other object matching the filter instead) — a pre-existing
     `AdditionalCost::Sacrifice` limitation (no cost shape means "must be the source"), not new to
     mana abilities and not addressed here.
+
+## Slice: restricted-mana (merged)
+
+- Branch `phase5/restricted-mana`.
+- Scope: CR 106.11 "spend this mana only to..." restricted mana, narrowed to the single most common
+  real shape — a card-type filter on what the mana can be spent to *cast* (Mishra's Workshop:
+  "Add {C}{C}{C}. Spend this mana only to cast artifact spells."). Named as an open gap by both
+  `mana-add-choice` and `mana-ability-real-cost` above.
+- Real design tension surfaced before implementation, confirmed with the user rather than assumed:
+  `ManaPool` is a flat aggregate (`white: u32`, etc, plus `snow_*` subcounts) with no concept of
+  individual mana units — it can't tell a restricted unit apart from an ordinary one of the same
+  color once added. Closing this gap needed `ManaPool` to gain a genuinely new side-channel, not a
+  narrow sibling-shaped addition like most other slices in this backlog.
+- Verify: 9 new tests (5 in `phase5_restricted_mana.rs` covering `PaymentPlan::validate`/`spend`
+  end-to-end through `Engine::submit_payment`, 4 in `phase5_mana_add_choice.rs` covering the Lua
+  binding's decode), full workspace suite green, zero new warnings.
+- Key changes:
+  - `ManaUnit::RestrictedColored(Color, CardTypeSet)` / `RestrictedColorless(CardTypeSet)` — new
+    variants carrying the restriction inline, same "separate parameterized variant, not a field on
+    the plain ones" precedent `SnowColored`/`SnowColorless` already set.
+  - `ManaPool.restricted: Vec<ManaUnit>` — a raw multiset side-channel, separate from the plain
+    aggregate fields (restricted mana is rare enough that a flat `Vec`, checked by equality, is
+    simpler than a second bucketing scheme). `ManaPool::add_unit` routes the two new variants here
+    instead of the aggregate counts.
+  - `cost::spend` removes one matching entry from `pool.restricted` for a restricted unit instead of
+    decrementing a counter.
+  - `cost::spent_tally` folds a restricted unit into its base color/colorless bucket — correct for
+    the pre-existing CR 118.13a shape check (`mana_payment_satisfies`), which doesn't care about the
+    restriction, only what pip shape a unit can satisfy.
+  - `PaymentPlan::validate` partitions declared units into plain vs. restricted: plain units check
+    against the aggregate fields exactly as before (restricted units excluded, so they can't inflate
+    that check); restricted units are checked as a multiset against `pool.restricted`, plus an
+    eligibility check — `source`'s own `GameObject` must be sitting in the `Stack` zone (the same
+    signal `PendingPaymentRequest::source`'s doc comment already uses for "this is a spell being
+    cast, not an ability") and its card types must intersect the restriction. This is what makes an
+    activated ability's cost ineligible even when its own permanent is the right card type.
+  - `Game.Ops.AddRestrictedMana(letter, cardType, count?)` — Lua binding, sibling to `AddMana`,
+    reusing `parse_mana_unit_letter`/`parse_card_type_name`.
+- Deviations: none from the requirements report's design.
+- Unresolved, named not silently dropped:
+  - Object-specific restrictions ("only to cast the exiled card") — no such reference exists in this
+    engine's mana-ability shape.
+  - Ability-activation restrictions (vs. casting a spell) — CR 106.11 covers both in the abstract,
+    but no real card needing it was used to scope this slice.
+  - Any restriction shape beyond a single card-type filter (e.g. "only to cast blue spells" by
+    color, or "only to activate abilities").
