@@ -143,9 +143,11 @@ pub(crate) fn is_fortification(definition: &CardDefinition) -> bool {
 /// has been chosen yet, so this scans every object in `state` rather than
 /// rechecking one. Reuses `target_is_legal` (same filter/legality logic the
 /// cast-time path already consults) once per candidate; player candidates
-/// (CR 303.4b) are out of scope, same posture `phase5/aura-attach-choice`
-/// already took for the identical reason (this engine has no support for an
-/// Aura enchanting a player at all yet). `aura_source` both supplies CR
+/// (CR 303.4b) stay out of scope for *this* entry path specifically
+/// (entering already-attached via Search/token, not casting) -
+/// `phase5/aura-enchants-a-player` only closed the cast-and-resolve path
+/// (`ResolveStackTop`), a deliberately narrower cut, named there.
+/// `aura_source` both supplies CR
 /// 115.4's "another target" check (`exclude_source`) and is excluded from
 /// the scan implicitly by `aura_source` not yet existing in `state.objects`
 /// at the point this is called (see `SearchDestination::Battlefield`'s call
@@ -252,11 +254,31 @@ pub(crate) fn attach_permanent(state: &mut GameState, attaching_id: ObjectId, ta
     }
     if let Some(attaching) = state.object_mut(attaching_id) {
         attaching.attached_to = Some(target_id);
+        attaching.attached_to_player = None;
     }
     if let Some(target) = state.object_mut(target_id) {
         if !target.attachments.contains(&attaching_id) {
             target.attachments.push(attaching_id);
         }
+    }
+}
+
+/// CR 303.4b's "or player" half of `attach_permanent` above — an Aura
+/// enchanting a player instead of an object. No `attachments`-style
+/// bidirectional list on `PlayerState`: nothing in this engine needs to
+/// enumerate "every Aura attached to this player" yet (CR 303.4m's
+/// "enchanted player" reference for continuous/replacement effects is a
+/// separate, larger, deliberately deferred gap — this engine's continuous
+/// effects only ever affect objects, not player-level static abilities), so
+/// a reverse index would be pure unused plumbing. Only ever called for an
+/// Aura (`commands::is_aura`) — Equipment/Fortification can never attach to
+/// a player (CR 301.5a/301.6), so there's no re-target-away-from-a-player
+/// case to handle here the way `attach_permanent`'s own reattach logic
+/// does.
+pub(crate) fn attach_permanent_to_player(state: &mut GameState, attaching_id: ObjectId, player: PlayerId) {
+    if let Some(attaching) = state.object_mut(attaching_id) {
+        attaching.attached_to_player = Some(player);
+        attaching.attached_to = None;
     }
 }
 
@@ -297,11 +319,12 @@ pub enum AttachProposal {
 /// construction" precedent `ProcessState::AwaitingAttachChoice` documents at
 /// its own definition.
 ///
-/// Player candidates (CR 303.4b: an Aura can also enchant a player) are out
-/// of scope - `attached_to`/`attach_permanent` are `ObjectId`-only, since
-/// this engine has no support at all yet for an Aura enchanting a player, a
-/// separate and larger pre-existing gap. `candidates` here is therefore
-/// object ids only.
+/// Player candidates (CR 303.4b: an Aura can also enchant a player) stay out
+/// of scope for *this* dormant multi-candidate choice specifically (real
+/// support for enchanting a player at all is `phase5/aura-enchants-a-player`
+/// - see `attach_permanent_to_player`) - no effect in this engine ever
+/// produces a mix of object *and* player candidates for one Aura, so
+/// `candidates` here is still object ids only, same as before.
 pub fn propose_attach(candidates: &[ObjectId]) -> AttachProposal {
     match candidates {
         [] => AttachProposal::None,

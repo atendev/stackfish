@@ -22,6 +22,9 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
 ## Aura attach (CR 303.4)
 
 - `GameObject.attached_to`/`attachments` bidirectional; `commands::attach_permanent` is the sole writer.
+  CR 303.4b's "or player" half is real now too (`phase5/aura-enchants-a-player`, see that slice's own
+  note below) — `GameObject.attached_to_player: Option<PlayerId>`, a sibling field, mutually
+  exclusive with `attached_to`.
 - `ResolveStackTop` attaches an Aura on battlefield entry to its first (only) legal target.
 - `sba::collect_illegally_attached_auras` feeds `resolve_deaths` (non-destroy) when target is gone/illegal/protected.
 - `retire_object` purges the departed object's id from its parent's `attachments`.
@@ -77,11 +80,12 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
     there's no real pipeline stage to hand back to since nothing produces this pause yet).
   - `crates/scenario/src/lib.rs`'s `drain` match gained the new `StepStatus` arm (mechanical,
     compiler-forced by the new non-exhaustive variant).
-- Scoping notes: player candidates (CR 303.4b: an Aura can enchant a player too) are out of scope -
-  `attached_to`/`attach_permanent` are `ObjectId`-only, since this engine has no support at all yet
-  for an Aura enchanting a player (a separate, larger, pre-existing gap, not touched here).
+- Scoping notes: player candidates (CR 303.4b: an Aura can enchant a player too) were out of scope
+  at the time - `attached_to`/`attach_permanent` were `ObjectId`-only. Enchanting a player at all is
+  real now (`phase5/aura-enchants-a-player`, below); this specific multi-candidate *choice* function
+  is still object-only, since no producer generates a mixed object/player candidate set either.
 - Unresolved: CR 303.4f/g/h/i, CR 303.4k, CR 303.4m (see the note above, unchanged by this slice);
-  player-candidate attach choice (blocked on the pre-existing Aura-enchants-a-player gap).
+  player-candidate attach choice (still dormant, same reasoning as the object case).
 
 ## Slice: aura-enters-attached (merged)
 
@@ -208,14 +212,75 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
     snapshot, for general board-state visibility from any script (not just continuous effects).
 - Scoping notes: fieldless by design — `EnchantedOnly` can't combine with `controller`/`card_types`
   the way `Primitive` can, since no real "enchanted creature that's also a [type]"-filtered *affects*
-  clause exists to justify it. CR 303.4m for a permanent enchanting a *player* stays unmodeled — same
-  pre-existing `attached_to`-is-`ObjectId`-only gap `aura-attach-choice`/`aura-enters-attached` already
-  flagged, not touched here. A *replacement* effect's own "enchanted permanent" reference (e.g. Umbra
-  armor, CR 702.89a: "if enchanted permanent would be destroyed...") stays unmodeled too —
+  clause exists to justify it. CR 303.4m for a permanent enchanting a *player* stays unmodeled even
+  after `phase5/aura-enchants-a-player` made enchanting a player possible at all — this engine's
+  continuous-effect machinery (`AffectedFilter`/`ContinuousEffect::applies_to`) only ever affects
+  objects, not player-level static abilities, a separate and larger gap that slice deliberately
+  deferred rather than touched. A *replacement* effect's own "enchanted permanent" reference (e.g.
+  Umbra armor, CR 702.89a: "if enchanted permanent would be destroyed...") stays unmodeled too —
   `ReplacementEffect.affected: EffectFilter` is a different, non-`AffectedFilter` type; out of scope
   for this slice (continuous effects only).
 - Unresolved: CR 303.4i/k (unchanged, see above); player-side CR 303.4m; replacement-effect "enchanted
   permanent" references.
+
+## Slice: aura-enchants-a-player (merged)
+
+- Branch `phase5/aura-enchants-a-player`.
+- Scope: CR 303.4b's "or player" half of Aura attachment — the pre-existing gap named by
+  `aura-attach-choice`, `aura-enters-attached`, and `enchanted-reference` above, all of which
+  deferred it as "a separate, larger, pre-existing gap."
+- Real finding that scoped this slice: casting an Aura *at* a player already technically passed
+  cast-time legality (`TargetFilter::Player` was already fully generic, checked by
+  `commands::target_is_legal` regardless of caller), but `ResolveStackTop`'s attach branch only ever
+  matched `Target::Object` — a chosen `Target::Player` silently fell through, the Aura entered the
+  battlefield completely unattached, and the pre-existing CR 704.5m SBA check (`attached_to: None`
+  is illegal) killed it the very next pass. So "Enchant player" was a card that resolved and
+  instantly died for no visible reason, not a card that couldn't be cast at all.
+- Design confirmed with the user before implementing (a bigger surface than a narrow sibling
+  addition, so scoped explicitly rather than assumed): `GameObject.attached_to_player:
+  Option<PlayerId>` as a new sibling field, not a widened `attached_to: Option<Target>` — the latter
+  would force every existing object-attach call site (`attach_permanent`, every SBA/layer/
+  replacement check already reading `attached_to` as a plain `ObjectId`) to handle a case that can
+  never apply to them, for zero benefit. Same "additive sibling, not a widened payload" precedent
+  this backlog's own `ManaUnit`/`EffectPrimitive` variants already established.
+- Verify: 6 new tests (`phase5_aura_enchants_a_player.rs`: casting at a player attaches it and logs
+  `AttachedToPlayer`; a healthy player-attached Aura is unaffected by SBA; one dies via SBA if its
+  player becomes eliminated; the pre-existing "attached to nothing" SBA check still fires with the
+  new field present; a scripted player-filter re-check makes it fall off/stay attached correctly),
+  full workspace suite green, zero new warnings.
+- Key changes:
+  - `GameObject.attached_to_player: Option<PlayerId>` — new field, ~8 non-test construction sites
+    updated (mechanical, compiler-forced) plus 2 test files.
+  - `commands::attach_permanent_to_player(state, attaching_id, player)` — CR 303.4b's sibling to
+    `attach_permanent`, no bidirectional `PlayerState`-side list (nothing needs to enumerate "every
+    Aura attached to this player" yet — see `enchanted-reference`'s own note on why CR 303.4m for
+    players is deferred separately).
+  - `GameEventKind::AttachedToPlayer { object, player }` — new variant, sibling to `Attached`; both
+    are pure log entries (not `CommitEvents`-dispatched), so this was low-ripple.
+  - `ResolveStackTop`'s Aura-attach branch (`resolve/permanent_entry.rs`) now matches `Target::Player`
+    alongside `Target::Object`, dispatching to the new attach function/event.
+  - `sba::collect_illegally_attached_auras` extended: illegal if *neither* `attached_to` nor
+    `attached_to_player` is set (previously just `attached_to.is_none()`), or if the attached player
+    has left the game (`PlayerState.eliminated` — `target_is_legal`'s own `Player` arm only checks
+    the player still *exists* in `state.players`, which stays true after elimination, so this needed
+    an explicit check `target_is_legal` alone couldn't provide), or no longer matches the Aura's own
+    `target_requirement` filter (reusing `target_is_legal` with `Target::Player`, same re-check shape
+    the object case already had).
+  - `card_summary_to_lua` gained `attached_to_player` alongside the existing `attached_to`.
+- Deliberately deferred, named not silently dropped: CR 303.4f/g (entering already-attached via
+  Search/token, not casting) for a player target — `legal_aura_entry_candidates` still only scans
+  object candidates; CR 303.4d's multi-candidate choice mixing object and player candidates — still
+  dormant, object-only; CR 303.4m's "enchanted player" reference for continuous/replacement effects
+  — this engine's continuous-effect machinery only ever affects objects, a separate and larger gap
+  (see `enchanted-reference`'s own updated note above).
+- Real bug hit and fixed during this slice's own test-writing (not a repeat find, a second real
+  instance of the same class `phase5/script-target-requirement-predicate` already logged): building
+  a `CardDefinition`'s scripted `TargetFilter::PlayerScript` handle from one `ScriptRuntime` and then
+  calling `check_state_based_actions` with a *different* one made the predicate always silently
+  evaluate to "illegal" (`.unwrap_or(false)` swallowing the resulting "unknown script handle" error).
+  Fixed by threading one shared `ScriptRuntime` through both the definition builder and the SBA call
+  in the test. `99-backlog.md`'s "Mistakes caught" note was generalized to flag this as a recurring
+  trap, not a one-off.
 
 ## Equipment / Equip (CR 702.6)
 

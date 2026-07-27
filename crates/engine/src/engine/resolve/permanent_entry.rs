@@ -246,12 +246,22 @@ impl Engine {
                     events.push(event);
                 }
                 if let Some(aura_id) = new_battlefield_aura {
-                    if let Some(Target::Object(target_id)) = legal_targets.first().copied() {
-                        commands::attach_permanent(&mut self.state, aura_id, target_id);
-                        events.push(GameEventKind::Attached {
-                            object: aura_id,
-                            attached_to: target_id,
-                        });
+                    match legal_targets.first().copied() {
+                        Some(Target::Object(target_id)) => {
+                            commands::attach_permanent(&mut self.state, aura_id, target_id);
+                            events.push(GameEventKind::Attached {
+                                object: aura_id,
+                                attached_to: target_id,
+                            });
+                        }
+                        // CR 303.4b: an Aura can enchant a player instead of
+                        // an object - phase5/aura-enchants-a-player's own
+                        // resolution half.
+                        Some(Target::Player(player)) => {
+                            commands::attach_permanent_to_player(&mut self.state, aura_id, player);
+                            events.push(GameEventKind::AttachedToPlayer { object: aura_id, player });
+                        }
+                        None => {}
                     }
                 }
             }

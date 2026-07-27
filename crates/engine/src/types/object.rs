@@ -81,6 +81,19 @@ pub struct GameObject {
     pub counters: CounterSet,
     pub attachments: Vec<ObjectId>,
     pub attached_to: Option<ObjectId>,
+    /// CR 303.4b's "or player" half of `attached_to` — an Aura can enchant
+    /// a player instead of an object (an Equipment/Fortification never can,
+    /// CR 301.5a/301.6). A sibling field rather than widening `attached_to`
+    /// to `Option<Target>`: that would force every existing object-attach
+    /// call site (`commands::attach_permanent`, every SBA/layer/replacement
+    /// check already reading `attached_to` as a plain `ObjectId`) to handle
+    /// a case that can never apply to them, for zero benefit — same
+    /// "additive sibling, not a widened payload" precedent `ManaUnit`'s
+    /// `RestrictedColored`/`SnowColored` variants already established.
+    /// Mutually exclusive with `attached_to` by construction — nothing ever
+    /// sets both; `commands::attach_permanent`/`attach_permanent_to_player`
+    /// are the only writers of either.
+    pub attached_to_player: Option<PlayerId>,
     /// For layer/dependency timestamp ordering (CR 613). Deliberately
     /// separate from `controlled_since_turn` below — that field answers a
     /// different question (summoning sickness), and conflating the two

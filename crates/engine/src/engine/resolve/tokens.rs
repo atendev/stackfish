@@ -103,7 +103,7 @@ impl Engine {
                 deathtouched: false,
                 counters: CounterSet::new(),
                 attachments: Vec::new(),
-                attached_to: None,
+                attached_to: None, attached_to_player: None,
                 timestamp: ts,
                 controlled_since_turn: self.state.turn_number,
                 is_token: true,

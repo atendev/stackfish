@@ -562,14 +562,14 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
 }
 
 /// CR 704.5m/303.4c: every battlefield Aura (`commands::is_aura`) that's
-/// either not attached to anything, or whose `attached_to` no longer names
-/// a legal target - `CardDefinition.target_requirement`'s own filter
-/// re-checked fresh via `commands::target_is_legal`, the same function CR
-/// 608.2b's own resolution-time recheck already uses, so a target that
-/// left the battlefield, changed characteristics, *or gained protection
-/// from this very Aura since it attached* (closing the one piece of CR
-/// 702.16's Enchant "DEBT" restriction the protection slices couldn't -
-/// see `EffectiveCharacteristics::protection_colors`'s own doc comment)
+/// either not attached to anything (object or player), or whose attachment
+/// no longer names a legal target - `CardDefinition.target_requirement`'s
+/// own filter re-checked fresh via `commands::target_is_legal`, the same
+/// function CR 608.2b's own resolution-time recheck already uses, so a
+/// target that left the battlefield, changed characteristics, *or gained
+/// protection from this very Aura since it attached* (closing the one piece
+/// of CR 702.16's Enchant "DEBT" restriction the protection slices couldn't
+/// - see `EffectiveCharacteristics::protection_colors`'s own doc comment)
 /// all correctly make the Aura fall off. `caster`/`source` are threaded
 /// through as the Aura's own current controller/object id, same meaning
 /// those parameters had at cast time - `target_is_legal`'s protection check
@@ -578,12 +578,21 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
 /// source, not the caster), exactly what CR 702.16's Enchant restriction
 /// needs.
 ///
+/// CR 303.4c's player half (`phase5/aura-enchants-a-player`): an Aura
+/// attached to a player is illegal if that player has left the game
+/// (`PlayerState.eliminated` - `target_is_legal`'s own `TargetFilter::
+/// Player` arm only checks the player still *exists* in `state.players`,
+/// which stays true after elimination, so this needs an explicit check
+/// `target_is_legal` alone can't provide) or no longer matches the Aura's
+/// own filter, same re-check shape as the object case.
+///
 /// An Aura with no `target_requirement` at all (shouldn't happen for a
 /// real Aura - CR 303.4a requires one - but no fixture is stopped from
 /// building one without) falls back to a bare existence check on
-/// `attached_to`'s target, same "don't crash on a malformed fixture, just
-/// don't over-claim legality" stance every other missing-filter case in
-/// this codebase takes.
+/// `attached_to`'s target (or, for the player half, just the elimination
+/// check - a player always "exists" in `state.players` once seated), same
+/// "don't crash on a malformed fixture, just don't over-claim legality"
+/// stance every other missing-filter case in this codebase takes.
 ///
 /// CR 304.3's "based on the state as of the check" timing falls out for
 /// free from running this *before* `resolve_deaths` mutates anything this
@@ -597,9 +606,9 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
         .values()
         .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_aura(&o.definition))
         .filter_map(|o| {
-            let illegal = match o.attached_to {
-                None => true,
-                Some(target_id) => match &o.definition.target_requirement {
+            let illegal = match (o.attached_to, o.attached_to_player) {
+                (None, None) => true,
+                (Some(target_id), None) => match &o.definition.target_requirement {
                     Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::target_is_legal(
                         state,
                         script_runtime,
@@ -611,6 +620,26 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
                     ),
                     _ => state.object(target_id).is_none(),
                 },
+                (None, Some(player)) => {
+                    let eliminated = state.player(player).map(|p| p.eliminated).unwrap_or(true);
+                    eliminated
+                        || match &o.definition.target_requirement {
+                            Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::target_is_legal(
+                                state,
+                                script_runtime,
+                                crate::types::ids::Target::Player(player),
+                                &req.filter,
+                                o.controller,
+                                o.object_id,
+                                req.exclude_source,
+                            ),
+                            _ => false,
+                        }
+                }
+                // Both set at once should never happen (attach_permanent/
+                // attach_permanent_to_player each clear the other) - treat
+                // defensively as illegal rather than picking one arbitrarily.
+                (Some(_), Some(_)) => true,
             };
             illegal.then_some(DyingCandidate { id: o.object_id, is_destroy: false })
         })

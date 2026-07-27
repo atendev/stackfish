@@ -169,6 +169,13 @@ fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'
     table
         .set("attached_to", obj.attached_to.map(|id| id.0))
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    // CR 303.4b/m (phase5/aura-enchants-a-player): the player half of
+    // `attached_to` above, when this object enchants a player instead of
+    // an object - mutually exclusive with `attached_to`, same as the two
+    // Rust-side fields themselves.
+    table
+        .set("attached_to_player", obj.attached_to_player.map(|id| id.0))
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     let attachments = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     for (i, id) in obj.attachments.iter().enumerate() {
         attachments.set((i + 1) as i64, id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;

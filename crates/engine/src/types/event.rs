@@ -173,6 +173,12 @@ pub enum GameEventKind {
     /// exists to trigger off this yet — same "ships before its own trigger
     /// condition" precedent `BecameCopy`/`Regenerated` already set.
     Attached { object: ObjectId, attached_to: ObjectId },
+    /// CR 303.4b's "or player" half of `Attached` above — `object` (an
+    /// Aura, `commands::is_aura`; Equipment/Fortification can never enchant
+    /// a player, CR 301.5a/301.6) became attached to `player` instead of an
+    /// object. Same "pure mutation, own event" shape, produced alongside
+    /// `commands::attach_permanent_to_player`.
+    AttachedToPlayer { object: ObjectId, player: PlayerId },
     /// CR 704.5n: `object` (an Equipment or Fortification, `commands::
     /// is_equipment`) was attached to `was_attached_to`, which is now an
     /// illegal permanent to be equipped by it - it becomes unattached and

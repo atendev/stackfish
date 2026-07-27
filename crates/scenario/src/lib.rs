@@ -1342,7 +1342,7 @@ pub fn build_initial_state(
             deathtouched: false,
             counters: CounterSet::new(),
             attachments: Vec::new(),
-            attached_to: None,
+            attached_to: None, attached_to_player: None,
             timestamp: SequenceNo(0),
             controlled_since_turn: entry.controlled_since_turn,
             is_token: false,
