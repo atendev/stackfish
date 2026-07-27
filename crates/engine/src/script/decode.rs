@@ -763,12 +763,29 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
 /// `ScriptRuntime::build_target_requirement`'s return-table decoder — the
 /// `count`/`up_to`/`at_least`/`exclude_source` siblings `TargetRequirement`
 /// needs beyond a bare `TargetFilter`, same field names/defaults the
-/// scenario crate's `TargetRequirementSpec` TOML shape already uses. The
-/// filter portion of the same table is handed to `decode_target_filter_table`
-/// unchanged — that function only reads the keys it recognizes
-/// (`type`/`card_types`/`subtypes`/...), so the count/mode keys read here
-/// don't need to be stripped out first.
-pub(crate) fn decode_target_requirement_table(table: Table) -> Result<TargetRequirement, ScriptError> {
+/// scenario crate's `TargetRequirementSpec` TOML shape already uses.
+///
+/// The filter portion supports two shapes, checked via an explicit `filter`
+/// key: if present, its value is handed to `decode_target_filter_value` —
+/// the same table-or-function-or-`{type="player",filter=fn}` decoder
+/// `ActivatedAbilityBuilder::SetTarget` already uses, so a card's own base
+/// target requirement can be a scripted predicate too (e.g. "Enchant
+/// creature with power 4 or greater," not expressible as a flat option-bag
+/// table) — see `TargetFilter::Script`'s own doc comment, already read
+/// generically off any `CardDefinition.target_requirement` regardless of
+/// where it came from, so no engine-side change was needed for this, only
+/// this decode entry point. If `filter` is absent, this falls back to the
+/// original flat shape unchanged: the *same* table (not a nested one) is
+/// handed to `decode_target_filter_table`, which only reads the keys it
+/// recognizes (`type`/`card_types`/`subtypes`/...), so the count/mode keys
+/// read here don't need to be stripped out first — every pre-existing
+/// script/TOML fixture that never sets a `filter` key keeps working exactly
+/// as before.
+pub(crate) fn decode_target_requirement_table(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    table: Table,
+) -> Result<TargetRequirement, ScriptError> {
     let count: u32 = table.get("count").map_err(|e| {
         ScriptError::LoadError(format!("target_requirement() table missing required 'count': {e}"))
     })?;
@@ -781,7 +798,12 @@ pub(crate) fn decode_target_requirement_table(table: Table) -> Result<TargetRequ
         .get::<_, Option<bool>>("exclude_source")
         .map_err(|e| ScriptError::LoadError(e.to_string()))?
         .unwrap_or(false);
-    let filter = decode_target_filter_table(table)?;
+    let filter_value: Option<Value> =
+        table.get("filter").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let filter = match filter_value {
+        Some(value) => decode_target_filter_value(lua, registry, value)?,
+        None => decode_target_filter_table(table)?,
+    };
     Ok(TargetRequirement { filter, count, up_to, at_least, exclude_source })
 }
 

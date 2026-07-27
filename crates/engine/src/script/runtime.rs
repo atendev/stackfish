@@ -208,18 +208,25 @@ impl ScriptRuntime {
     ///
     /// `target_requirement()` takes no arguments and returns the same flat
     /// filter table `Game.SelectTargets`/`ActivatedAbilityBuilder::SetTarget`
-    /// already accept (`decode_target_filter_table`), plus `count`/`up_to`/
-    /// `at_least`/`exclude_source` as sibling keys — identical shape to the
-    /// scenario crate's own TOML `[cards.target_requirement]` table
-    /// (`TargetRequirementSpec`), just Lua-authored. A card with no
-    /// `target_requirement` function at all (the overwhelming majority)
-    /// returns `Ok(None)` — same "requires no targets" default
-    /// `CardDefinition::target_requirement`'s own doc comment already
-    /// documents.
+    /// already accept (`decode_target_filter_table`) — or, for a legality
+    /// shape the flat table can't express, a `filter` key holding a
+    /// scripted-predicate function (or `{type="player", filter=fn}`), same
+    /// as `:SetTarget` accepts (`decode_target_filter_value`, see
+    /// `decode_target_requirement_table`'s own doc comment) — plus
+    /// `count`/`up_to`/`at_least`/`exclude_source` as sibling keys —
+    /// identical shape to the scenario crate's own TOML
+    /// `[cards.target_requirement]` table (`TargetRequirementSpec`), just
+    /// Lua-authored. A card with no `target_requirement` function at all
+    /// (the overwhelming majority) returns `Ok(None)` — same "requires no
+    /// targets" default `CardDefinition::target_requirement`'s own doc
+    /// comment already documents.
     ///
     /// `&self`, not `&mut self`, and re-evaluates `source` fresh rather than
     /// caching — same reasoning `run_card_script`'s own doc comment gives for
-    /// its identical choice.
+    /// its identical choice. Registering a scripted predicate's function
+    /// still only needs `&self` despite mutating the script registry — same
+    /// `Rc<RefCell<ScriptRegistry>>` interior mutability every other builder
+    /// method already relies on.
     pub fn build_target_requirement(&self, source: &str) -> Result<Option<TargetSpec>, ScriptError> {
         let module: Table =
             self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
@@ -228,7 +235,8 @@ impl ScriptRuntime {
         let Some(function) = function else { return Ok(None) };
         let table: Table =
             function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        let requirement = decode_target_requirement_table(table)?;
+        let mut registry = self.registry.borrow_mut();
+        let requirement = decode_target_requirement_table(&self.lua, &mut registry, table)?;
         Ok(Some(TargetSpec::Primitive(requirement)))
     }
 

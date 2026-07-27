@@ -78,9 +78,28 @@ flat filter table as everywhere else on this page, plus these siblings:
 ```
 
 A card with no `target_requirement()` function needs no targets to cast — the same default as
-omitting `[cards.target_requirement]` in a TOML fixture. See
-[not-available-yet.md](not-available-yet.md) for what this can't express yet (a scripted
-predicate, as opposed to the flat filter shape).
+omitting `[cards.target_requirement]` in a TOML fixture.
+
+For a legality check the flat filter shape can't express, set `filter` to a function (or the
+player-target `{type="player", filter=fn}` form) instead of relying on the inline keys above — same
+scripted-predicate shapes `:SetTarget` accepts, see
+[Scripted targeting predicates](#scripted-targeting-predicates) below:
+
+```lua
+-- Enchant creature with power 4 or greater
+function s.target_requirement()
+    return { count = 1, filter = function(object, source, controller, state)
+        for _, card in ipairs(state.battlefield) do
+            if card.id == object then
+                return card.power ~= nil and card.power >= 4
+            end
+        end
+        return false
+    end }
+end
+```
+
+`count`/`up_to`/`at_least`/`exclude_source` still sit alongside `filter` as sibling keys either way.
 
 ## Scripted targeting predicates
 

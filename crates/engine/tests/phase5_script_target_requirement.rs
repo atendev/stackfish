@@ -14,6 +14,16 @@
 //! already accept, plus `count`/`up_to`/`at_least`/`exclude_source` as
 //! sibling keys - identical shape to the scenario crate's own TOML
 //! `[cards.target_requirement]` table, just Lua-authored.
+//!
+//! `phase5/script-target-requirement-predicate`: a `filter` key can hold a
+//! scripted-predicate function instead (or `{type="player", filter=fn}`) -
+//! the same table-or-function decoder `ActivatedAbilityBuilder::SetTarget`
+//! already uses (`decode_target_filter_value`), for a legality shape the
+//! flat option-bag table can't express (e.g. "Enchant creature with power 4
+//! or greater," `phase5_scripted_target_filter.rs`'s own worked example).
+//! `TargetFilter::Script`/`PlayerScript` were already read generically off
+//! any `CardDefinition.target_requirement` before this slice - only
+//! `target_requirement()`'s own decode entry point needed the change.
 
 use stackfish_engine::commands::CommandError;
 use stackfish_engine::engine::{Engine, StepStatus};
@@ -59,6 +69,68 @@ fn target_requirement_function_decodes_a_subtype_filter_with_count() {
         }
         other => panic!("expected an Object filter with subtypes=[Wall], got {other:?}"),
     }
+}
+
+/// `phase5/script-target-requirement-predicate`: a `filter` key holding a
+/// function is a scripted-predicate legality check (same shape `:SetTarget`
+/// already accepts), not the flat option-bag table - closes the TODO this
+/// slice's own doc comment above used to name.
+#[test]
+fn target_requirement_function_decodes_a_scripted_predicate_filter() {
+    let runtime = ScriptRuntime::new();
+    let source = r#"
+        local s = {}
+        function s.target_requirement()
+            return { count = 1, filter = function(candidate, source, controller, state) return true end }
+        end
+        return s
+    "#;
+    let requirement =
+        runtime.build_target_requirement(source).expect("script should load").expect("declares a requirement");
+    let TargetSpec::Primitive(req) = requirement else { panic!("expected Primitive") };
+    assert_eq!(req.count, 1);
+    assert!(matches!(req.filter, TargetFilter::Script(_)), "expected a scripted predicate, got {:?}", req.filter);
+}
+
+/// The player-target scripted-predicate form (`{type="player", filter=fn}`)
+/// works from `target_requirement()` too - same decoder `:SetTarget` uses.
+#[test]
+fn target_requirement_function_decodes_a_player_scripted_predicate_filter() {
+    let runtime = ScriptRuntime::new();
+    let source = r#"
+        local s = {}
+        function s.target_requirement()
+            return { count = 1, filter = { type = "player", filter = function(player, source, controller, state) return true end } }
+        end
+        return s
+    "#;
+    let requirement =
+        runtime.build_target_requirement(source).expect("script should load").expect("declares a requirement");
+    let TargetSpec::Primitive(req) = requirement else { panic!("expected Primitive") };
+    assert!(
+        matches!(req.filter, TargetFilter::PlayerScript(_)),
+        "expected a player scripted predicate, got {:?}",
+        req.filter
+    );
+}
+
+/// A `target_requirement()` with no `filter` key at all still decodes the
+/// original flat option-bag shape unchanged - the new `filter`-key check
+/// doesn't disturb the pre-existing common case.
+#[test]
+fn target_requirement_function_without_a_filter_key_still_decodes_the_flat_shape() {
+    let runtime = ScriptRuntime::new();
+    let source = r#"
+        local s = {}
+        function s.target_requirement()
+            return { subtypes = { "Wall" }, count = 1 }
+        end
+        return s
+    "#;
+    let requirement =
+        runtime.build_target_requirement(source).expect("script should load").expect("declares a requirement");
+    let TargetSpec::Primitive(req) = requirement else { panic!("expected Primitive") };
+    assert!(matches!(req.filter, TargetFilter::Object { subtypes: Some(_), .. }));
 }
 
 #[test]
@@ -226,5 +298,137 @@ fn casting_the_script_declared_aura_at_a_non_wall_creature_is_rejected() {
     assert!(
         matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
         "a plain Bear (no Wall subtype) should fail the script-declared Enchant Wall restriction, got {status:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// End-to-end: casting a script-declared Aura whose Enchant restriction is
+// a scripted predicate, not a flat filter table ("Enchant creature with
+// power 4 or greater" - phase5_scripted_target_filter.rs's own worked
+// example, reused here for target_requirement() instead of :SetTarget).
+// ---------------------------------------------------------------------
+
+const ENCHANT_POWER_FOUR_SCRIPT: &str = r#"
+local s = {}
+
+function s.target_requirement()
+    return { count = 1, filter = function(object, source, controller, state)
+        for _, card in ipairs(state.battlefield) do
+            if card.id == object then
+                return card.power ~= nil and card.power >= 4
+            end
+        end
+        return false
+    end }
+end
+
+return s
+"#;
+
+fn creature_definition_pt(definition_id: u64, name: &str, power: i32, toughness: i32) -> CardDefinition {
+    CardDefinition {
+        definition_id,
+        name: name.to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::CREATURE,
+        subtypes: Vec::new(),
+        oracle_text: String::new(),
+        power: Some(PTValue::Fixed(power)),
+        toughness: Some(PTValue::Fixed(toughness)),
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::ByKey("creature".to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: None,
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+    }
+}
+
+/// The Aura's own `CardDefinition`, with `target_requirement` left `None` -
+/// a scripted predicate carries a real `ScriptHandle`, valid only against
+/// whichever `ScriptRuntime` decoded it (the exact caller trap
+/// `docs/implementation/05-script-bridge.md` already names for a
+/// custom-function handle), so it can't be pre-built with a throwaway
+/// `ScriptRuntime` the way `enchant_wall_definition`'s flat-table shape
+/// safely is above. Each test builds it from the real `Engine`'s own
+/// runtime instead, via `Engine::build_target_requirement`, then patches it
+/// onto the already-inserted object - the same placeholder-then-patch
+/// timing the scenario crate's own `register_target_script` established.
+fn enchant_power_four_definition() -> CardDefinition {
+    CardDefinition {
+        definition_id: 31,
+        name: "Test Enchant Power Four".to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::ENCHANTMENT,
+        subtypes: vec![Subtype("Aura".to_string())],
+        oracle_text: "Enchant creature with power 4 or greater".to_string(),
+        power: None,
+        toughness: None,
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::Inline(ENCHANT_POWER_FOUR_SCRIPT.to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: None,
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+    }
+}
+
+fn patch_in_power_four_target_requirement(engine: &mut Engine, card: ObjectId) {
+    let target_requirement = engine
+        .build_target_requirement(ENCHANT_POWER_FOUR_SCRIPT)
+        .expect("script should load")
+        .expect("script declares a target_requirement");
+    engine.state_mut().object_mut(card).unwrap().definition.target_requirement = Some(target_requirement);
+}
+
+#[test]
+fn casting_the_scripted_predicate_aura_at_a_power_four_creature_is_legal() {
+    let mut state = two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let big_creature = ObjectId(0);
+    state.objects.insert(big_creature, card_object(big_creature, creature_definition_pt(1, "Big Creature", 4, 4), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(big_creature);
+    let card = ObjectId(2);
+    state.objects.insert(card, card_object(card, enchant_power_four_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    patch_in_power_four_target_requirement(&mut engine, card);
+    cast_spell(&mut engine, p0, card, vec![Target::Object(big_creature)]);
+    let status = pay_free_and_drain(&mut engine);
+    assert!(!matches!(status, StepStatus::Error(_)), "casting at a power-4 creature should be legal, got {status:?}");
+}
+
+#[test]
+fn casting_the_scripted_predicate_aura_at_a_small_creature_is_rejected() {
+    let mut state = two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let small_creature = ObjectId(0);
+    state.objects.insert(small_creature, card_object(small_creature, creature_definition_pt(1, "Small Creature", 2, 2), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(small_creature);
+    let card = ObjectId(2);
+    state.objects.insert(card, card_object(card, enchant_power_four_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    patch_in_power_four_target_requirement(&mut engine, card);
+    cast_spell(&mut engine, p0, card, vec![Target::Object(small_creature)]);
+    let status = drain(&mut engine);
+
+    assert!(
+        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
+        "a power-2 creature should fail the scripted power-4-or-greater predicate, got {status:?}"
     );
 }

@@ -413,9 +413,14 @@ impl Engine {
     /// A card's own base target requirement (an Aura's "Enchant [quality]"
     /// line, etc.), as declared by its script's optional `target_requirement()`
     /// function — see `ScriptRuntime::build_target_requirement`'s own doc
-    /// comment for the full convention. `&self`, not `&mut self`: unlike
-    /// `load_script`/`load_condition`/`load_operation`, this doesn't touch
-    /// the script registry at all.
+    /// comment for the full convention, including the scripted-predicate
+    /// `filter` form. `&self`, not `&mut self`, despite that form needing to
+    /// register a function in the script registry — same `Rc<RefCell<
+    /// ScriptRegistry>>` interior mutability every other builder method
+    /// already relies on. Whatever `ScriptHandle` this returns is only ever
+    /// valid against *this* `Engine`'s own `script_runtime` — the same
+    /// caller trap `docs/implementation/05-script-bridge.md` already names
+    /// for a custom-function handle in general.
     pub fn build_target_requirement(
         &self,
         source: &str,

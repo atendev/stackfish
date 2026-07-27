@@ -545,11 +545,54 @@
     the way `register_target_script` patches a script-predicate placeholder), since there's no
     TOML-declared shape to patch here at all. `build_new_game_engine`'s library/commander loops
     call it inline instead (an `Engine` already exists there by the time cards are built).
-- Unresolved / named TODOs: only the flat filter-table shape is supported from
-  `target_requirement()`, not the scripted-predicate function form `:SetTarget` also accepts (no
-  real card needed it this slice; `docs/lua/not-available-yet.md` names it). `CardSpec` still has
-  no TOML field for a card's own subtypes at all (pre-existing, separately logged in
-  `99-backlog.md`'s Enchant/Equip note) - this slice's own scenario-TOML fixture proves the wiring
-  with a `card_types`-only filter rather than a real subtype-gated one for that reason, not because
-  subtype filters themselves don't work (they do - proven directly in the Rust-level test via a
-  hand-built `CardDefinition`, same as `phase5_aura_attach.rs`'s existing pattern).
+- Unresolved / named TODOs: only the flat filter-table shape was supported from
+  `target_requirement()` at the time (no real card needed the scripted-predicate form this slice;
+  `docs/lua/not-available-yet.md` named it) - closed by `phase5/script-target-requirement-predicate`,
+  below. `CardSpec` still has no TOML field for a card's own subtypes at all (pre-existing, separately
+  logged in `99-backlog.md`'s Enchant/Equip note) - this slice's own scenario-TOML fixture proves the
+  wiring with a `card_types`-only filter rather than a real subtype-gated one for that reason, not
+  because subtype filters themselves don't work (they do - proven directly in the Rust-level test via
+  a hand-built `CardDefinition`, same as `phase5_aura_attach.rs`'s existing pattern).
+
+## Slice: script-target-requirement-predicate (merged)
+
+- Branch `phase5/script-target-requirement-predicate`.
+- Scope: closes `script-target-requirement`'s own named TODO above - `s.target_requirement()` can now
+  express a scripted legality predicate (e.g. "Enchant creature with power 4 or greater"), not just
+  the flat option-bag table.
+- Key finding: no engine-side change was needed at all - `TargetFilter::Script`/`PlayerScript` and
+  their evaluation (`commands::target_is_legal`, `ScriptRuntime::invoke_target_legal`/
+  `invoke_player_target_legal`) already read generically off any `CardDefinition.target_requirement`,
+  regardless of where it came from. The only real gap was `target_requirement()`'s own decode entry
+  point (`decode_target_requirement_table`), which unconditionally called the table-only
+  `decode_target_filter_table` and never looked for a function.
+- Verify: 6 new tests (`phase5_script_target_requirement.rs`: 3 decode-level - a `filter` key holding
+  a function decodes to `TargetFilter::Script`, a `{type="player", filter=fn}` sub-table decodes to
+  `PlayerScript`, a table with no `filter` key still decodes the original flat shape unchanged - plus
+  2 end-to-end casting tests reusing `phase5_scripted_target_filter.rs`'s own "power 4 or greater"
+  worked example, and 1 doc-comment/import adjustment test unaffected), full workspace suite green.
+- Key changes:
+  - `decode_target_requirement_table` (script/decode.rs) checks the returned table for an explicit
+    `filter` key first: if present, hands its value to `decode_target_filter_value` (the same
+    table-or-function-or-`{type="player",filter=fn}` decoder `ActivatedAbilityBuilder::SetTarget`
+    already uses); if absent, falls back to the original `decode_target_filter_table(table)` call on
+    the same table unchanged - every pre-existing script/TOML fixture that never sets `filter` keeps
+    working exactly as before.
+  - Signature change: `decode_target_requirement_table` now takes `&Lua`/`&mut ScriptRegistry` (needed
+    to register a scripted predicate's function), sourced in `ScriptRuntime::build_target_requirement`
+    from its own private `self.lua`/`self.registry` fields - `self.registry.borrow_mut()` through the
+    existing `Rc<RefCell<ScriptRegistry>>` interior mutability every other builder method already
+    relies on, so `build_target_requirement`'s own public signature (still `&self`) is unchanged.
+  - `Engine::build_target_requirement`'s doc comment (which claimed "this doesn't touch the script
+    registry at all") was stale as of this slice and corrected, along with a note that any
+    `ScriptHandle` it returns is only valid against that same `Engine`'s own `script_runtime` - the
+    same cross-runtime caller trap `docs/implementation/05-script-bridge.md` already names for a
+    custom-function handle in general. Caught the hard way: the first draft of this slice's own
+    end-to-end test built the scripted `target_requirement` with a throwaway `ScriptRuntime::new()`
+    and fed the result into a separately-constructed `Engine::new(state)` (safe for the pre-existing
+    flat-table tests, which carry no `ScriptHandle` at all) - every cast was silently rejected
+    (`invoke_target_legal`'s `.unwrap_or(false)` swallowed the resulting "unknown script handle"
+    error). Fixed by building the requirement from the real `Engine`'s own runtime
+    (`Engine::build_target_requirement`) and patching it onto the already-inserted card object, the
+    same placeholder-then-patch timing the scenario crate's own `register_target_script` established.
+- Unresolved: none new for this shape.
