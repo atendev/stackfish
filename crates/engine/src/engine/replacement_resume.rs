@@ -1,0 +1,737 @@
+//! CR 616.1 replacement-ordering-choice answers, CR 704.5j/903.9a SBA-driven
+//! choice answers, the `SbaLoop`/`CleanupSbaCheck` pipeline stages, and the
+//! scripted zone-move/draw resume helpers they all share — split out of
+//! `engine.rs`.
+
+use std::collections::VecDeque;
+
+use crate::commands;
+use crate::engine_context::PipelineExit;
+use crate::replacement::{self, ReplacementOutcome};
+use crate::sba::{self, SbaOutcome};
+use crate::types::ability::RegisteredAbility;
+use crate::types::card::KeywordSet;
+use crate::types::event::{GameEvent, GameEventKind};
+use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
+use crate::types::zone::ZoneKind;
+
+use super::{
+    CommanderReturnChoiceError, Engine, LegendRuleChoiceError, ProcessState, ReplacementChoiceError,
+    ReplacementResumeTarget, SbaResumeThen, ScriptedZoneMoveKind, StepStatus,
+};
+
+impl Engine {
+    /// Answers a pending CR 616.1 ordering choice raised by
+    /// `StepStatus::AwaitingReplacementChoice` — `chosen` must be one of
+    /// that status's `candidates` (a `replacement::ReplacementCandidate` —
+    /// a real registered effect or CR 702.16e protection). Deliberately a
+    /// separate entry point from `submit_action`: this isn't a
+    /// `PlayerAction`/priority decision, it's a sub-decision mid-pipeline,
+    /// so it can't go through `submit_action`'s `PriorityWindow`-only gate.
+    pub fn submit_replacement_choice(
+        &mut self,
+        chosen: replacement::ReplacementCandidate,
+    ) -> Result<(), ReplacementChoiceError> {
+        let ProcessState::AwaitingReplacementChoice { candidates, .. } = &self.process_state
+        else {
+            return Err(ReplacementChoiceError::NotAwaitingChoice);
+        };
+        if !candidates.contains(&chosen) {
+            return Err(ReplacementChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingReplacementChoice { pending_event, mut excluded, resume, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        // Apply the chosen effect, exclude it from matching this same event
+        // again (CR 616.1), then re-run resolution on the result (CR 616's
+        // stabilization requirement - the rewritten form may match yet
+        // another effect, including needing a further ordering choice of
+        // its own) - carrying `excluded` forward rather than starting a
+        // fresh exclusion set, so an effect already applied before this
+        // pause can't reapply to the same event after it. `chosen` names
+        // either a real registered effect or CR 702.16e protection -
+        // apply_one_replacement_or_protection dispatches on the
+        // `ReplacementCandidate` variant directly, same as
+        // apply_replacements_from's own single-match branch.
+        let rewritten = replacement::apply_one_replacement_or_protection(&mut self.state, chosen, pending_event);
+        excluded.push(chosen);
+        // is_destroy is per-resume-target: a ReplacementCheck-originated
+        // event is never a destroy proposal (see replacement.rs's own doc
+        // comment on why); an SbaDeath resume carries its own paused-event
+        // tag forward (sba::DyingCandidate's own doc comment).
+        let is_destroy = match &resume {
+            ReplacementResumeTarget::ReplacementCheck { .. } => false,
+            ReplacementResumeTarget::SbaDeath { is_destroy, .. } => *is_destroy,
+            ReplacementResumeTarget::ScriptedZoneMove { kind, .. } => *kind == ScriptedZoneMoveKind::Destroy,
+            // CR 614.8: a Sacrifice/Discard cost payment is never genuine
+            // destruction (Sacrifice/Discard are each their own zone-change
+            // verb) - a regeneration shield never intercepts one.
+            ReplacementResumeTarget::CostZoneMove { .. } => false,
+            // CR 614.8: cleanup discard isn't destruction either.
+            ReplacementResumeTarget::CleanupDiscard { .. } => false,
+            // CR 614.8: drawing a card isn't destruction either.
+            ReplacementResumeTarget::Draw { .. } => false,
+            // CR 614.8: a scripted DrawCards(n) ability is also just a draw,
+            // not destruction.
+            ReplacementResumeTarget::ScriptedDraw { .. } => false,
+        };
+        let outcome =
+            replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, is_destroy, excluded);
+
+        self.process_state = match resume {
+            ReplacementResumeTarget::ReplacementCheck { remaining, mut checked } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    checked.push(event);
+                    ProcessState::ReplacementCheck { remaining, checked }
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::ReplacementCheck { remaining, checked },
+                    }
+                }
+            },
+            ReplacementResumeTarget::SbaDeath { pending_deaths, then, .. } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = sba::commit_death_or_regeneration(&mut self.state, event);
+                    self.resume_sba_death(pending_deaths, vec![committed], departed, then)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::SbaDeath { pending_deaths, is_destroy, then },
+                    }
+                }
+            },
+            ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    self.commit_scripted_zone_move(kind, event);
+                    self.continue_scripted_zone_move(kind, remaining, stack_id, trailing)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing },
+                    }
+                }
+            },
+            ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                    self.continue_cost_zone_moves(remaining, payer, stack_id, on_paid)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid },
+                    }
+                }
+            },
+            ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                    self.continue_discard_moves(remaining, since_ledger)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger },
+                    }
+                }
+            },
+            ReplacementResumeTarget::Draw { tail_events, since_ledger } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                    self.enter_priority_via_replacement_check(tail_events, since_ledger)
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::Draw { tail_events, since_ledger },
+                    }
+                }
+            },
+            ReplacementResumeTarget::ScriptedDraw { remaining, player, stack_id, events_so_far } => {
+                match outcome {
+                    ReplacementOutcome::Resolved(event) => {
+                        let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                        self.departed_triggered_abilities.extend(departed);
+                        self.state.ledger.push(committed);
+                        self.continue_draw_cards(remaining, player, stack_id, events_so_far)
+                    }
+                    ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                        ProcessState::AwaitingReplacementChoice {
+                            affected_player,
+                            pending_event: event,
+                            candidates,
+                            excluded,
+                            resume: ReplacementResumeTarget::ScriptedDraw {
+                                remaining,
+                                player,
+                                stack_id,
+                                events_so_far,
+                            },
+                        }
+                    }
+                }
+            }
+        };
+        Ok(())
+    }
+
+    /// Answers a pending CR 704.5j legend-rule choice raised by
+    /// `StepStatus::AwaitingLegendRuleChoice` — `kept` must be one of that
+    /// status's `candidates` (the legendary permanent this player keeps).
+    /// Deliberately a separate entry point from `submit_action`, same reason
+    /// `submit_replacement_choice` is.
+    ///
+    /// Every other candidate is put into `pending_deaths` and resolved via
+    /// the same `resume_sba_death` helper `submit_replacement_choice` already
+    /// uses for `ReplacementResumeTarget::SbaDeath` — the losers' actual
+    /// destruction is ordinary SBA-driven death (real replacement checking,
+    /// CR 400.7 new object id, `retire_object`), not bespoke logic. A
+    /// replacement effect on one of the losers (e.g. "if this would die,
+    /// exile it instead") correctly re-pauses on `AwaitingReplacementChoice`
+    /// via that same helper, rather than being silently skipped.
+    pub fn submit_legend_rule_choice(&mut self, kept: ObjectId) -> Result<(), LegendRuleChoiceError> {
+        let ProcessState::AwaitingLegendRuleChoice { candidates, .. } = &self.process_state else {
+            return Err(LegendRuleChoiceError::NotAwaitingChoice);
+        };
+        if !candidates.contains(&kept) {
+            return Err(LegendRuleChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingLegendRuleChoice { candidates, then, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        // CR 704.5j is "put into its owner's graveyard," not "destroy" -
+        // never interceptable by a regeneration shield, same as 704.5f/k
+        // (see sba::DyingCandidate's own doc comment).
+        let losers: VecDeque<sba::DyingCandidate> = candidates
+            .into_iter()
+            .filter(|id| *id != kept)
+            .map(|id| sba::DyingCandidate { id, is_destroy: false })
+            .collect();
+        self.process_state = self.resume_sba_death(losers, Vec::new(), Vec::new(), then);
+        Ok(())
+    }
+
+    /// Answers a pending CR 903.9a commander-return choice raised by
+    /// `StepStatus::AwaitingCommanderReturnChoice`. `returned = true`
+    /// performs the zone move (`sba::move_commander_to_command_zone`);
+    /// `false` declines, leaving the card exactly where it is. Either way,
+    /// the commander is marked in `GameState::commander_return_offered` so
+    /// this exact arrival isn't re-asked about on a later pass.
+    ///
+    /// Deliberately a separate entry point from `submit_action`, same
+    /// reason `submit_legend_rule_choice` is. Doesn't route through
+    /// `resume_sba_death`/`resolve_deaths` like that method does — there's
+    /// no "death" here to replacement-check, just a direct zone move (see
+    /// `move_commander_to_command_zone`'s own doc comment for why that move
+    /// itself skips CR 614-616 replacement checking).
+    pub fn submit_commander_return_choice(
+        &mut self,
+        returned: bool,
+    ) -> Result<(), CommanderReturnChoiceError> {
+        if !matches!(self.process_state, ProcessState::AwaitingCommanderReturnChoice { .. }) {
+            return Err(CommanderReturnChoiceError::NotAwaitingChoice);
+        }
+        let ProcessState::AwaitingCommanderReturnChoice { commander, then, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        self.state.commander_return_offered.insert(commander);
+        let mut events = Vec::new();
+        if returned {
+            if let Some(event) = sba::move_commander_to_command_zone(&mut self.state, commander) {
+                events.push(event);
+            }
+        }
+
+        self.process_state = match then {
+            SbaResumeThen::SbaLoop => self.finish_sba_loop(events, Vec::new()),
+            SbaResumeThen::CleanupSbaCheck { since_ledger } => {
+                self.finish_cleanup_sba_check(events, Vec::new(), since_ledger)
+            }
+        };
+        Ok(())
+    }
+
+    /// `ProcessState::SbaLoop` — CR 704.3's fixed-point loop: runs one SBA
+    /// pass and either re-enters `SbaLoop` (something happened) or moves on
+    /// to `CollectTriggers` (nothing did), via `finish_sba_loop`. Pauses on
+    /// `AwaitingReplacementChoice`/`AwaitingLegendRuleChoice`/
+    /// `AwaitingCommanderReturnChoice` if this pass needs one.
+    pub(super) fn resolve_sba_loop_state(&mut self) -> StepStatus {
+        self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
+            SbaOutcome::Progressed(events, departed) => self.finish_sba_loop(events, departed),
+            SbaOutcome::NeedsOrderingChoice {
+                affected_player,
+                pending_event,
+                candidates,
+                excluded,
+                is_destroy,
+                pending_deaths,
+                resolved_so_far,
+            } => {
+                // Unaffected by the pause below (player-loss events,
+                // plus any deaths already resolved earlier in this
+                // same pass) - commit them now rather than holding
+                // them hostage to a choice about a different death.
+                self.state.ledger.extend(resolved_so_far);
+                ProcessState::AwaitingReplacementChoice {
+                    affected_player,
+                    pending_event,
+                    candidates,
+                    excluded,
+                    resume: ReplacementResumeTarget::SbaDeath {
+                        pending_deaths,
+                        is_destroy,
+                        then: SbaResumeThen::SbaLoop,
+                    },
+                }
+            }
+            SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far } => {
+                // Unaffected by the pause below, same reasoning as
+                // NeedsOrderingChoice's own resolved_so_far above.
+                self.state.ledger.extend(resolved_so_far);
+                ProcessState::AwaitingLegendRuleChoice { player, candidates, then: SbaResumeThen::SbaLoop }
+            }
+            SbaOutcome::NeedsCommanderReturnChoice { player, commander, resolved_so_far } => {
+                self.state.ledger.extend(resolved_so_far);
+                ProcessState::AwaitingCommanderReturnChoice {
+                    player,
+                    commander,
+                    then: SbaResumeThen::SbaLoop,
+                }
+            }
+        };
+        StepStatus::Progressed
+    }
+
+    /// `ProcessState::CleanupSbaCheck` — CR 514.3's cleanup-step SBA pass,
+    /// same shape as `resolve_sba_loop_state` but finishing through
+    /// `finish_cleanup_sba_check` (routes to `PipelineExit::CleanupCheck`
+    /// instead of re-entering the loop) and tagging every pause's `then`
+    /// with this pass's own `since_ledger`.
+    pub(super) fn resolve_cleanup_sba_check_state(&mut self) -> StepStatus {
+        let since_ledger = self.state.ledger.len();
+        self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
+            SbaOutcome::Progressed(events, departed) => {
+                self.finish_cleanup_sba_check(events, departed, since_ledger)
+            }
+            SbaOutcome::NeedsOrderingChoice {
+                affected_player,
+                pending_event,
+                candidates,
+                excluded,
+                is_destroy,
+                pending_deaths,
+                resolved_so_far,
+            } => {
+                self.state.ledger.extend(resolved_so_far);
+                ProcessState::AwaitingReplacementChoice {
+                    affected_player,
+                    pending_event,
+                    candidates,
+                    excluded,
+                    resume: ReplacementResumeTarget::SbaDeath {
+                        pending_deaths,
+                        is_destroy,
+                        then: SbaResumeThen::CleanupSbaCheck { since_ledger },
+                    },
+                }
+            }
+            SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far } => {
+                self.state.ledger.extend(resolved_so_far);
+                ProcessState::AwaitingLegendRuleChoice {
+                    player,
+                    candidates,
+                    then: SbaResumeThen::CleanupSbaCheck { since_ledger },
+                }
+            }
+            SbaOutcome::NeedsCommanderReturnChoice { player, commander, resolved_so_far } => {
+                self.state.ledger.extend(resolved_so_far);
+                ProcessState::AwaitingCommanderReturnChoice {
+                    player,
+                    commander,
+                    then: SbaResumeThen::CleanupSbaCheck { since_ledger },
+                }
+            }
+        };
+        StepStatus::Progressed
+    }
+
+    /// `SbaLoop`'s own "what happens once this pass's events are known"
+    /// transition — pulled out so a resumed CR 616.1 pause
+    /// (`resume_sba_death`) and a fresh pass (`SbaLoop`'s own arm) agree on
+    /// it instead of duplicating the branch.
+    fn finish_sba_loop(&mut self, events: Vec<GameEvent>, departed: Vec<RegisteredAbility>) -> ProcessState {
+        // Accumulate across every SbaLoop pass in this pipeline run (CR
+        // 704.3's fixed point may take several passes, each killing more
+        // creatures) - cleared by end_pipeline_run once CollectTriggers/
+        // PutTriggersApnap have both had a chance to consult it.
+        self.departed_triggered_abilities.extend(departed);
+        let next = if events.is_empty() {
+            let since = self.pipeline_context.as_ref().map(|ctx| ctx.since_ledger).unwrap_or(0);
+            ProcessState::CollectTriggers { since }
+        } else {
+            self.state.ledger.extend(events);
+            // Re-enter SbaLoop next step() - CR 704.3's fixed point, not a
+            // single pass.
+            ProcessState::SbaLoop
+        };
+        self.game_over_check(next)
+    }
+
+    /// CR 104.2a/104.4a: overrides `next` with `GameOver` if at most one
+    /// player remains in a game that started with more than one — checked
+    /// after every SBA pass commits its events, since `sba::
+    /// apply_player_loss` (the only place `PlayerState.eliminated` flips)
+    /// always runs inside one of those passes. `winner` is the sole
+    /// remainder, or `None` if the last players standing were eliminated
+    /// simultaneously (a draw).
+    ///
+    /// The `turn_order.len() < 2` guard matters: a single-player test
+    /// fixture (many exist, unrelated to this feature) has exactly one
+    /// never-eliminated player, which would otherwise read as "game over"
+    /// after the very first SBA pass — CR 104.2a presupposes opponents to
+    /// win against, so there's nothing to end here.
+    fn game_over_check(&self, next: ProcessState) -> ProcessState {
+        if self.state.turn_order.len() < 2 {
+            return next;
+        }
+        let remaining = commands::non_eliminated_players(&self.state);
+        if remaining.len() <= 1 {
+            ProcessState::GameOver { winner: remaining.first().copied() }
+        } else {
+            next
+        }
+    }
+
+    /// `CleanupSbaCheck`'s own "what happens once this pass's events (and
+    /// any dying-creature choice) are known" transition — pulled out for the
+    /// same reason `finish_sba_loop` is, and shared the same way between a
+    /// fresh pass (the `CleanupSbaCheck` arm) and one resumed after a paused
+    /// CR 616.1/704.5j choice (`resume_sba_death`).
+    ///
+    /// Stashes `departed` (CR 603.10 dies-trigger abilities) into
+    /// `departed_triggered_abilities` and routes through the real
+    /// `CollectTriggers`/`PutTriggersApnap` stages via
+    /// `PipelineExit::CleanupCheck` instead of deciding priority-vs-advance
+    /// right here — this cleanup path used to bypass `CollectTriggers`
+    /// entirely (backlog item 7a's cleanup half), silently dropping any
+    /// trigger a cleanup-step SBA raised. `since_ledger` (captured before
+    /// this pass began) is what `PipelineExit::CleanupCheck` later compares
+    /// the ledger against to decide CR 514.3's priority-vs-advance question.
+    ///
+    /// TODO: CR 514.3 says another cleanup step begins after a priority
+    /// window opens here and its stack empties - currently
+    /// advance_turn_step's (Ending, Cleanup) arm rotates the turn instead,
+    /// skipping re-running discard/effect-expiry. Correct once a case
+    /// actually reaches this branch.
+    fn finish_cleanup_sba_check(
+        &mut self,
+        events: Vec<GameEvent>,
+        departed: Vec<RegisteredAbility>,
+        since_ledger: usize,
+    ) -> ProcessState {
+        self.departed_triggered_abilities.extend(departed);
+        self.state.ledger.extend(events);
+        self.pipeline_exit = PipelineExit::CleanupCheck { since_ledger };
+        self.game_over_check(ProcessState::CollectTriggers { since: since_ledger })
+    }
+
+    /// Continues `sba::resolve_deaths` after a paused CR 616.1 ordering
+    /// choice was answered for one dying creature — `already_resolved` is
+    /// that creature's own just-committed death event; `pending_deaths` is
+    /// the rest of this SBA pass's dying-creature list. Finishes into
+    /// whichever state originally started this pass (`then`), via
+    /// `finish_sba_loop`/`finish_cleanup_sba_check`, so a resumed pause and
+    /// a fresh pass reach the exact same "nothing more to do" transition.
+    /// Commits one scripted zone-move target's already-replacement-checked
+    /// `final_event` — `Destroy`/`Sacrifice` reuse the same
+    /// `commit_death_or_regeneration`/`commit_death` helpers every SBA-driven
+    /// death already goes through; `Exile` is inlined (unchanged from the
+    /// pre-`ScriptedZoneMove` Exile arm's own body) since its destination is
+    /// the shared Exile zone (`owner: None`), not a per-player zone
+    /// `commit_death`'s `zone_mut(to, Some(owner))` call assumes.
+    fn commit_scripted_zone_move(&mut self, kind: ScriptedZoneMoveKind, final_event: GameEventKind) {
+        match kind {
+            ScriptedZoneMoveKind::Destroy => {
+                let (event, departed) = sba::commit_death_or_regeneration(&mut self.state, final_event);
+                self.departed_triggered_abilities.extend(departed);
+                self.state.ledger.push(event);
+            }
+            ScriptedZoneMoveKind::Sacrifice => {
+                let (event, departed) = sba::commit_death(&mut self.state, final_event);
+                self.departed_triggered_abilities.extend(departed);
+                self.state.ledger.push(event);
+            }
+            ScriptedZoneMoveKind::Exile => {
+                let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = final_event else {
+                    unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
+                };
+                let last_known_info = last_known_info.expect(
+                    "continue_scripted_zone_move always proposes with last_known_info populated",
+                );
+                let owner = last_known_info.owner;
+                let new_id = self.state.allocate_object_id();
+                let mut new_object = last_known_info.clone();
+                new_object.object_id = new_id;
+                new_object.lineage = ObjectLineage { previous: Some(old_id) };
+                new_object.zone = to;
+                new_object.timestamp = self.state.allocate_sequence_no();
+
+                if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
+                    zone.remove(old_id);
+                }
+                let departed = commands::retire_object(&mut self.state, old_id);
+                self.departed_triggered_abilities.extend(departed);
+                // Exile is a shared zone (owner = None); per-player
+                // graveyard/hand need Some(owner) - this lookup must use
+                // None or the object silently disappears.
+                let exile_owner = match to {
+                    ZoneKind::Exile => None,
+                    _ => Some(owner),
+                };
+                if let Some(zone) = self.state.zone_mut(to, exile_owner) {
+                    zone.push_bottom(new_id);
+                }
+                self.state.objects.insert(new_id, new_object);
+
+                let event_id = self.state.allocate_event_id();
+                let sequence_no = self.state.allocate_sequence_no();
+                let committed = GameEvent {
+                    event_id,
+                    sequence_no,
+                    kind: GameEventKind::ZoneChange {
+                        object: new_id,
+                        from: ZoneKind::Battlefield,
+                        to,
+                        last_known_info: Some(last_known_info),
+                    },
+                    caused_by_command: None,
+                    parent_event: None,
+                };
+                self.state.ledger.push(committed);
+            }
+        }
+    }
+
+    /// Drains `remaining` scripted zone-move targets one at a time — CR
+    /// 616.1's ordering-choice pause can be raised by any of them, not just
+    /// the first, since each target independently proposes+replacement-
+    /// checks+commits its own `ZoneChange` (`commit_scripted_zone_move`).
+    /// Returns the same `ReplacementCheck { remaining: [..trailing, StackObjectResolved] }`
+    /// transition the pre-`ScriptedZoneMove` non-pausing path already used
+    /// once the queue empties, or pauses immediately on
+    /// `AwaitingReplacementChoice` the instant one target needs an ordering
+    /// choice, carrying the rest of the queue in `ReplacementResumeTarget::
+    /// ScriptedZoneMove` for `submit_replacement_choice` to continue later.
+    /// `trailing` (CR 702.82a, Devour): extra not-yet-committed events owed
+    /// once the queue empties — empty for every caller except
+    /// `submit_devour_choice`, which still needs `events_so_far` (this
+    /// resolution's own pre-choice progress) and a `CounterAdded` to reach
+    /// `ReplacementCheck` too, not just the sacrifices this function itself
+    /// drives.
+    ///
+    /// `pub(in crate::engine)`: `choice_answers.rs`'s `submit_devour_choice`
+    /// also calls this, and a later pass will call it from
+    /// `engine/resolve/destruction.rs` once `ResolveStackTop` itself moves
+    /// out of `mod.rs` — making it accessible now avoids needing to touch
+    /// this file again for that.
+    pub(in crate::engine) fn continue_scripted_zone_move(
+        &mut self,
+        kind: ScriptedZoneMoveKind,
+        mut remaining: VecDeque<ObjectId>,
+        stack_id: ObjectId,
+        trailing: Vec<GameEventKind>,
+    ) -> ProcessState {
+        while let Some(id) = remaining.pop_front() {
+            let Some(last_known_info) =
+                self.state.object(id).filter(|obj| obj.zone == ZoneKind::Battlefield).cloned()
+            else {
+                // Target already left the battlefield (or never resolved) -
+                // nothing to move, same "skip rather than guess" stance
+                // every other arm here takes.
+                continue;
+            };
+            if kind == ScriptedZoneMoveKind::Destroy {
+                // CR 702.12b: an indestructible permanent can't be destroyed
+                // at all - not a replacement effect, checked up front.
+                let indestructible =
+                    commands::effective_keywords(&self.state, &self.script_runtime, id)
+                        .contains(KeywordSet::INDESTRUCTIBLE);
+                if indestructible {
+                    continue;
+                }
+            }
+            let to = if kind == ScriptedZoneMoveKind::Exile { ZoneKind::Exile } else { ZoneKind::Graveyard };
+            let proposed = GameEventKind::ZoneChange {
+                object: id,
+                from: ZoneKind::Battlefield,
+                to,
+                last_known_info: Some(last_known_info),
+            };
+            // CR 614.8: only Destroy is genuine destruction - a regeneration
+            // shield can intercept it and only it (Sacrifice/Exile are each
+            // their own real zone-change verb, neither is destruction).
+            let is_destroy = kind == ScriptedZoneMoveKind::Destroy;
+            match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, is_destroy) {
+                ReplacementOutcome::Resolved(final_event) => {
+                    self.commit_scripted_zone_move(kind, final_event);
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    return ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing },
+                    };
+                }
+            }
+        }
+        let mut final_events: VecDeque<GameEventKind> = trailing.into();
+        final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
+        ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() }
+    }
+
+    /// CR 120.3/121/616.1: drains `remaining` scripted draws one at a time,
+    /// each proposed via `commands::propose_draw`, replacement-checked, and
+    /// committed inline. A CR 616.1 ordering choice pauses on any individual
+    /// draw, carrying the rest of the count in `ReplacementResumeTarget::
+    /// ScriptedDraw` so `submit_replacement_choice` can resume. The draw
+    /// events themselves are pushed directly to the ledger (not queued in
+    /// `events_so_far`) so they are never re-checked a second time against a
+    /// fresh, empty `excluded` set; `events_so_far` carries only the rest of
+    /// this resolution's already-produced events (e.g. an instant/sorcery
+    /// spell's Stack->Graveyard move) so they still reach the normal
+    /// `ReplacementCheck`->`CommitEvents` pipeline once the draws finish.
+    ///
+    /// `pub(in crate::engine)`: `mod.rs`'s still-inlined `ResolveStackTop`
+    /// arm (`AbilityEffect::DrawCards`) also calls this directly.
+    pub(in crate::engine) fn continue_draw_cards(
+        &mut self,
+        mut remaining: u32,
+        player: PlayerId,
+        stack_id: ObjectId,
+        mut events_so_far: Vec<GameEventKind>,
+    ) -> ProcessState {
+        while remaining > 0 {
+            remaining -= 1;
+            let Some(proposed) = commands::propose_draw(&mut self.state, player) else {
+                break;
+            };
+            match replacement::apply_replacements(
+                &mut self.state,
+                &self.script_runtime,
+                proposed,
+                false,
+            ) {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                }
+                ReplacementOutcome::NeedsOrderingChoice {
+                    affected_player,
+                    event,
+                    candidates,
+                    excluded,
+                    ..
+                } => {
+                    return ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::ScriptedDraw {
+                            remaining,
+                            player,
+                            stack_id,
+                            events_so_far,
+                        },
+                    };
+                }
+            }
+        }
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        ProcessState::ReplacementCheck {
+            remaining: events_so_far.into(),
+            checked: Vec::new(),
+        }
+    }
+
+    fn resume_sba_death(
+        &mut self,
+        pending_deaths: VecDeque<sba::DyingCandidate>,
+        mut already_resolved: Vec<GameEvent>,
+        mut already_departed: Vec<RegisteredAbility>,
+        then: SbaResumeThen,
+    ) -> ProcessState {
+        match sba::resolve_deaths(&mut self.state, &self.script_runtime, pending_deaths) {
+            sba::DeathResolution::Done(mut events, mut departed) => {
+                already_resolved.append(&mut events);
+                already_departed.append(&mut departed);
+                match then {
+                    SbaResumeThen::SbaLoop => self.finish_sba_loop(already_resolved, already_departed),
+                    SbaResumeThen::CleanupSbaCheck { since_ledger } => {
+                        self.finish_cleanup_sba_check(already_resolved, already_departed, since_ledger)
+                    }
+                }
+            }
+            sba::DeathResolution::NeedsOrderingChoice {
+                affected_player,
+                pending_event,
+                candidates,
+                excluded,
+                is_destroy,
+                pending_deaths,
+            } => {
+                // already_resolved (this pass's progress so far) commits now
+                // - it's unaffected by this further pause.
+                self.state.ledger.extend(already_resolved);
+                ProcessState::AwaitingReplacementChoice {
+                    affected_player,
+                    pending_event,
+                    candidates,
+                    excluded,
+                    resume: ReplacementResumeTarget::SbaDeath { pending_deaths, is_destroy, then },
+                }
+            }
+        }
+    }
+}
