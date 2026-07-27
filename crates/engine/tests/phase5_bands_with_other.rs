@@ -23,10 +23,14 @@
 //! `commands::AssignCombatDamage`'s `has_bands_with_other_pair` helper,
 //! checked alongside the pre-existing `BANDING`-keyword check.
 //!
-//! Deliberately narrow, matching Landwalk's own precedent: only
-//! single-subtype ("quality") matching is modeled. CR 702.22c/m's
-//! supertype-quality form ("bands with other Legends," i.e. Legendary) is
-//! TODO, unmodeled.
+//! CR 702.22c/m's supertype-quality form ("bands with other Legends," i.e.
+//! Legendary) is real now too (`phase5/bands-with-other-supertype`) -
+//! `EffectPrimitive::AddBandsWithOtherSupertype(SupertypeSet)`,
+//! `EffectiveCharacteristics::bands_with_other_supertypes`, checked
+//! alongside the subtype form in both `DeclareBands` and the damage-split
+//! chooser flip - same "any one match is enough" posture, a separate
+//! primitive rather than widening `AddBandsWithOther` (a bare `Subtype` vs a
+//! whole `SupertypeSet` aren't the same payload shape).
 
 use std::collections::HashMap;
 
@@ -70,6 +74,10 @@ fn creature_definition_pt(
     }
 }
 
+fn legendary_creature_definition_pt(id: u64, name: &str, power: i32, toughness: i32) -> CardDefinition {
+    CardDefinition { supertypes: SupertypeSet::LEGENDARY, ..creature_definition_pt(id, name, &[], KeywordSet::empty(), power, toughness) }
+}
+
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
     card_object(id, definition, owner, ZoneKind::Battlefield)
 }
@@ -90,6 +98,21 @@ fn bands_with_other(source: ObjectId, quality: &str) -> ContinuousEffect {
         layer: Layer::AbilityAdding,
         affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddBandsWithOther(Subtype(quality.to_string()))),
+        timestamp: SequenceNo(0),
+        duration: EffectDuration::Permanent,
+        condition: None,
+    }
+}
+
+/// Directly-constructed "bands with other [quality]" grant, supertype form -
+/// same standing-in-for-Lua-wiring convention `bands_with_other` above
+/// already establishes.
+fn bands_with_other_supertype(source: ObjectId, quality: SupertypeSet) -> ContinuousEffect {
+    ContinuousEffect {
+        source,
+        layer: Layer::AbilityAdding,
+        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        effect: EffectPayload::Primitive(EffectPrimitive::AddBandsWithOtherSupertype(quality)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
         condition: None,
@@ -329,4 +352,74 @@ fn double_blocked_attacker_with_no_quality_pair_still_defaults_to_active_player(
 
     assert_illegal(assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(elf_lord, 2), (bear, 2)])]));
     assert_accepted(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(elf_lord, 2), (bear, 2)])]));
+}
+
+// ---------------------------------------------------------------------
+// CR 702.22c/m's supertype form: "bands with other Legends" (Legendary)
+// ---------------------------------------------------------------------
+
+#[test]
+fn supertype_quality_band_legal_with_no_banding_member_at_all() {
+    let p0 = PlayerId(0);
+    let legend_lord = ObjectId(0);
+    let legend = ObjectId(1);
+
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(legend_lord, legendary_creature_definition_pt(1, "Legend Lord", 2, 2), p0));
+    put_on_battlefield(&mut state, permanent(legend, legendary_creature_definition_pt(2, "Legend", 2, 2), p0));
+    state.continuous_effects.push(bands_with_other_supertype(legend_lord, SupertypeSet::LEGENDARY));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(&mut engine, p0, vec![(legend_lord, Target::Player(PlayerId(1))), (legend, Target::Player(PlayerId(1)))]);
+    // Neither creature has plain Banding - only the supertype-quality path
+    // can make this legal, and it does (legend_lord has bands-with-other
+    // Legends, legend is Legendary).
+    assert_legal_band(declare_bands(&mut engine, p0, vec![vec![legend_lord, legend]]));
+}
+
+#[test]
+fn supertype_quality_band_rejects_a_bandmate_missing_the_quality() {
+    let p0 = PlayerId(0);
+    let legend_lord = ObjectId(0);
+    let bear = ObjectId(1);
+
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(legend_lord, legendary_creature_definition_pt(1, "Legend Lord", 2, 2), p0));
+    put_on_battlefield(&mut state, permanent(bear, creature_definition(2, "Bear", &["Bear"], KeywordSet::empty()), p0));
+    state.continuous_effects.push(bands_with_other_supertype(legend_lord, SupertypeSet::LEGENDARY));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(&mut engine, p0, vec![(legend_lord, Target::Player(PlayerId(1))), (bear, Target::Player(PlayerId(1)))]);
+    // bear isn't Legendary - doesn't satisfy legend_lord's named quality,
+    // and neither creature has plain Banding either.
+    assert_illegal(declare_bands(&mut engine, p0, vec![vec![legend_lord, bear]]));
+}
+
+#[test]
+fn attacker_double_blocked_by_a_bands_with_other_supertype_pair_needs_the_defending_players_choice() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let legend_lord = ObjectId(1);
+    let legend = ObjectId(2);
+
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition_pt(1, "Attacker", &[], KeywordSet::empty(), 4, 4), p0));
+    put_on_battlefield(&mut state, permanent(legend_lord, legendary_creature_definition_pt(2, "Legend Lord", 1, 5), p1));
+    put_on_battlefield(&mut state, permanent(legend, legendary_creature_definition_pt(3, "Legend", 1, 5), p1));
+    // Neither blocker has plain Banding - only the supertype-quality pair
+    // (legend_lord's bands-with-other Legends + legend's own Legendary
+    // supertype) can flip the chooser.
+    state.continuous_effects.push(bands_with_other_supertype(legend_lord, SupertypeSet::LEGENDARY));
+
+    let mut engine = Engine::new(state);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    pass_to_step(&mut engine, Step::DeclareBlockers);
+    declare_blockers(&mut engine, p1, vec![(legend_lord, attacker), (legend, attacker)]);
+    pass_to_step(&mut engine, Step::CombatDamage);
+
+    // The active player no longer gets to choose this split - the
+    // attacker's blockers contain a bands-with-other/supertype-quality pair.
+    assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(legend_lord, 2), (legend, 2)])]));
+    assert_accepted(assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(legend_lord, 2), (legend, 2)])]));
 }

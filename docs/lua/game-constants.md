@@ -163,7 +163,7 @@ effect applies in. Bare values only:
 | `TextChanging` | 3 | `SetName` |
 | `TypeChanging` | 4 | `AddCardType` |
 | `ColorChanging` | 5 | `AddColor` |
-| `AbilityAdding` | 6 | `AddKeyword`, every `AddProtection*`, `AddLandwalk*`, `AddBandsWithOther`, `RemoveAllAbilities` |
+| `AbilityAdding` | 6 | `AddKeyword`, every `AddProtection*`, `AddLandwalk*`, `AddBandsWithOther`, `AddBandsWithOtherSupertype`, `RemoveAllAbilities` |
 | `PowerToughnessSetting` | 7b | `SetPT` |
 | `PowerToughnessModifying` | 7c | `ModifyPT` |
 | `PowerToughnessSwitching` | 7e | `SwitchPT` |
@@ -195,6 +195,7 @@ layer/effect pair is a real error.
 | `AddLandwalkSubtype(name)` | land subtype, e.g. `"Island"` | CR 702.14, plain landwalk (covers the 5 basic landwalks). |
 | `AddLandwalkQuality(opts)` | table — see [static-abilities.md](static-abilities.md) | CR 702.14a's combination forms ("nonbasic landwalk," "snow swampwalk," etc.) |
 | `AddBandsWithOther(subtype)` | subtype name | CR 702.22b/c, "bands with other [subtype]." |
+| `AddBandsWithOtherSupertype(name)` | supertype name (`"Basic"`/`"Legendary"`/`"Snow"`/`"World"`) | CR 702.22c/m, the historic "bands with other Legends" wording — supertype form of the above. |
 | `AddCardType(name)` | card type name | Adds a card type (additive only — can't remove one). |
 | `AddColor(letter)` | mana-color letter | Adds a color (additive only). |
 | `SwitchPT` | — | Swaps power and toughness. |
@@ -236,9 +237,9 @@ recognize — anything else is a load-time error, not a silent no-op:
 
 **Not grantable via `AddKeyword`:** Banding (CR 702.22) exists as a real `KeywordSet` bit
 (`effective_keywords(...).contains(BANDING)` is checked at every real combat-declaration site), but
-nothing in this scripting API currently sets it — only `AddBandsWithOther` (the "bands with other
-[quality]" variant, listed in the table above) is reachable from Lua. Plain Banding is a real,
-named gap, not silently guessed at.
+nothing in this scripting API currently sets it — only `AddBandsWithOther`/`AddBandsWithOtherSupertype`
+(the "bands with other [quality]" variants, listed in the table above) are reachable from Lua. Plain
+Banding is a real, named gap, not silently guessed at.
 
 Every keyword in the table above is fully enforced, not just stored — First Strike/Double Strike
 gate which combat damage step a creature deals damage in, Trample lets excess lethal damage spill

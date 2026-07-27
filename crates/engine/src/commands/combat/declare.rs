@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::script::ScriptRuntime;
 use crate::types::card::CardTypeSet;
 use crate::types::card::KeywordSet;
+use crate::types::card::SupertypeSet;
 use crate::types::combat::CombatState;
 use crate::types::cost::FilterController;
 use crate::types::event::GameEventKind;
@@ -190,7 +191,9 @@ pub(in crate::commands) fn execute_declare_bands(
         // is known (a member's own quality can qualify a bandmate
         // that comes later in the list).
         let mut member_subtypes: Vec<Vec<crate::Subtype>> = Vec::new();
+        let mut member_supertypes: Vec<SupertypeSet> = Vec::new();
         let mut member_bands_with_other: Vec<Vec<crate::Subtype>> = Vec::new();
+        let mut member_bands_with_other_supertypes: Vec<SupertypeSet> = Vec::new();
         for member in band {
             let (_, member_target) = combat.attackers.iter().find(|(id, _)| id == member).ok_or_else(|| {
                 CommandError::IllegalAction(
@@ -227,7 +230,9 @@ pub(in crate::commands) fn execute_declare_bands(
             let characteristics =
                 crate::layers::effective_characteristics(state, script_runtime, *member);
             member_subtypes.push(characteristics.subtypes);
+            member_supertypes.push(characteristics.supertypes);
             member_bands_with_other.push(characteristics.bands_with_other_subtypes);
+            member_bands_with_other_supertypes.push(characteristics.bands_with_other_supertypes);
         }
 
         // CR 702.22c, first path: one or more attacking creatures
@@ -247,7 +252,17 @@ pub(in crate::commands) fn execute_declare_bands(
                     .all(|(j, subtypes)| j == i || subtypes.contains(quality))
             })
         });
-        if !plain_banding_shape && !quality_shape {
+        // CR 702.22c/m's supertype form ("bands with other Legends," i.e.
+        // Legendary): same "any one named quality makes every other member
+        // match" shape as the subtype form above, checked against each
+        // member's own `supertypes` bitset instead of a `Vec<Subtype>`.
+        let supertype_quality_shape =
+            member_bands_with_other_supertypes.iter().enumerate().any(|(i, qualities)| {
+                qualities.iter().any(|quality| {
+                    member_supertypes.iter().enumerate().all(|(j, supertypes)| j == i || supertypes.contains(quality))
+                })
+            });
+        if !plain_banding_shape && !quality_shape && !supertype_quality_shape {
             return Err(CommandError::IllegalAction(
                 "a band needs either at least one attacking creature with banding (and \
                  at most one without), or a creature with \"bands with other [quality]\" \

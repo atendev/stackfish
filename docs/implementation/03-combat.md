@@ -128,7 +128,7 @@
   - `DeclareBands` now accepts a band matching *either* of CR 702.22c's two sentences: the pre-existing plain form (>=1 `BANDING` member, <=1 non-banding member), or the new quality form (>=1 member with `bands_with_other_subtypes` containing quality Q, every *other* member's own `subtypes` include Q - no banding-keyword requirement, no cap on member count). Tries every quality named by any member in turn; legal if any one of them makes every other member match.
   - Quality = creature subtype only, same narrowing precedent Landwalk set (single-subtype matching only).
 - Unresolved:
-  - CR 702.22c/m's supertype-quality form ("bands with other Legends," i.e. Legendary) - TODO, unmodeled, same class of gap Landwalk's own card-type/supertype-combination forms document.
+  - CR 702.22c/m's supertype-quality form ("bands with other Legends," i.e. Legendary) - closed by `phase5/bands-with-other-supertype`, below.
   - CR 702.22b (losing the keyword loses bands-with-other too) - no effect in this engine removes a keyword yet, untestable, not built.
   - CR 702.22j/k's *other* trigger condition (closed by `phase5/bands-with-other-split-trigger`, below) - unchanged by this slice.
 
@@ -141,4 +141,14 @@
   - `commands::AssignCombatDamage`'s `has_bands_with_other_pair(ids: &[ObjectId]) -> bool` closure - checks the X/Y condition over a given id list (an attacker's `blockers`, or a blocker's `attackers_for_blocker`), tries every quality any member names in turn, same "any one match is enough" posture `DeclareBands`'s own quality-band check (`bands-with-other`, above) already takes.
   - Both existing chooser-flip sites get `|| has_bands_with_other_pair(...)` alongside their pre-existing `BANDING`-keyword check: the attacker-split site flips to the defending player, the blocker-split site flips to `state.active_player` (simplified from looking up a specific banding attacker's controller, since every attacker's controller is always the active player anyway).
 - Unresolved:
-  - CR 702.22c/m's supertype-quality form, CR 702.22b keyword-loss - unchanged, still open from the prior slice.
+  - CR 702.22c/m's supertype-quality form (closed by `phase5/bands-with-other-supertype`, below), CR 702.22b keyword-loss - unchanged, still open from the prior slice.
+
+## Slice: bands-with-other-supertype (merged)
+
+- Branch `phase5/bands-with-other-supertype`.
+- Scope: CR 702.22c/m's supertype form ("bands with other Legends," i.e. Legendary) - the last open gap named by both slices above, closed for the historic Legends-block wording.
+- Verify: 4 new tests (`phase5_bands_with_other.rs`), full workspace suite green.
+- Key changes:
+  - `EffectPrimitive::AddBandsWithOtherSupertype(SupertypeSet)` (layer 6) / `EffectiveCharacteristics::bands_with_other_supertypes: SupertypeSet` / `Game.Effects.AddBandsWithOtherSupertype(name)` - a separate primitive from `AddBandsWithOther` rather than widening its payload (a bare `Subtype` vs a whole `SupertypeSet` aren't the same shape), same subtype/quality-combination split `AddLandwalkSubtype`/`AddLandwalkQuality` already established. OR-accumulated as a bitset (unlike `bands_with_other_subtypes`'s `Vec`), since supertypes are already a bitset everywhere else.
+  - `DeclareBands`'s quality check and `has_bands_with_other_pair` (the CR 702.22j/k chooser-flip helper) both gained a second pass checking this field against each member's own `supertypes` bitset, alongside the pre-existing subtype pass - same "any one match is enough" posture.
+- Unresolved: none for this narrow form - CR 702.22b keyword-loss stays open, same as the two prior slices.

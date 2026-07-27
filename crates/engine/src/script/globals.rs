@@ -28,7 +28,7 @@ use super::decode::{
     decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table, decode_filter_table,
     decode_landwalk_quality, decode_subtypes, parse_card_type_name, parse_color_letter, parse_color_string,
     parse_counter_kind_name, parse_filter_controller_name, parse_keyword_name, parse_mana_unit_letter,
-    parse_zone_kind_name,
+    parse_supertype_name, parse_zone_kind_name,
 };
 use super::tags::{
     ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DurationTag, EffectPrimitiveTag, EventFilterKind,
@@ -397,6 +397,13 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     effects.set(
         "AddBandsWithOther",
         lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddBandsWithOther(Subtype(name)))))?,
+    )?;
+    effects.set(
+        "AddBandsWithOtherSupertype",
+        lua.create_function(|_, name: String| {
+            let set = parse_supertype_name(&name).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddBandsWithOtherSupertype(set)))
+        })?,
     )?;
     effects.set(
         "AddCardType",

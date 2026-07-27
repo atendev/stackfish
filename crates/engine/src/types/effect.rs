@@ -329,11 +329,21 @@ pub enum EffectPrimitive {
     /// bands_with_other_subtypes` to accept a band whose members share this
     /// quality, instead of `DeclareBlockers` reading the defending player's
     /// battlefield the way landwalk does. Only single-subtype ("quality")
-    /// matching is modeled — CR 702.22c/m's supertype form ("bands with
-    /// other Legends," i.e. Legendary) is TODO, unmodeled, same class of
-    /// narrowing `AddLandwalkSubtype`'s own doc comment already takes for
-    /// card-type/supertype-combination forms.
+    /// matching is modeled here — the supertype form ("bands with other
+    /// Legends," i.e. Legendary) is the separate `AddBandsWithOtherSupertype`
+    /// primitive below, same subtype/quality-combination split
+    /// `AddLandwalkSubtype`/`AddLandwalkQuality` already take (a bare
+    /// `Subtype` vs a whole `SupertypeSet` aren't the same payload shape).
     AddBandsWithOther(Subtype),
+    /// Layer 6 (CR 613.1/702.22c/m, "bands with other [quality]," supertype
+    /// form): the historic Legends-block wording ("Bands with other
+    /// Legends," i.e. any Legendary creature) — same grant as
+    /// `AddBandsWithOther`, but the quality is a supertype
+    /// (`crate::types::card::SupertypeSet`) rather than a `Subtype`.
+    /// `commands::PlayerActionKind::DeclareBands` and `commands::combat::
+    /// damage`'s chooser-flip check both extend their existing subtype-quality
+    /// check with this one, same "any one match is enough" posture.
+    AddBandsWithOtherSupertype(crate::types::card::SupertypeSet),
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
     /// abilities"): resets the running `keywords`, `protection_colors`,
     /// `protection_card_types`, `protection_subtypes`, `protection_names`,
@@ -1161,6 +1171,13 @@ pub struct EffectiveCharacteristics {
     /// battlefield — unlike landwalk, both sides of the check are combatants
     /// in the same declared band.
     pub bands_with_other_subtypes: Vec<Subtype>,
+    /// CR 702.22b/c/m's supertype form ("bands with other Legends," i.e.
+    /// Legendary): every applicable layer 6
+    /// `EffectPrimitive::AddBandsWithOtherSupertype`, OR-accumulated (a
+    /// bitset like `SupertypeSet` itself, unlike `bands_with_other_subtypes`'
+    /// `Vec`). Same empty-base/always-effect-granted posture, checked
+    /// alongside `bands_with_other_subtypes` rather than merged into it.
+    pub bands_with_other_supertypes: crate::types::card::SupertypeSet,
     /// `None` for non-creatures (mirrors `CardDefinition`).
     pub power: Option<i32>,
     pub toughness: Option<i32>,

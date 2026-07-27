@@ -136,6 +136,7 @@ pub fn effective_characteristics(
     let mut landwalk_subtypes: Vec<crate::Subtype> = Vec::new();
     let mut landwalk_qualities: Vec<crate::types::effect::LandwalkQuality> = Vec::new();
     let mut bands_with_other_subtypes: Vec<crate::Subtype> = Vec::new();
+    let mut bands_with_other_supertypes = crate::types::card::SupertypeSet::empty();
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::AbilityAdding) {
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
             Some(EffectPrimitive::AddKeyword(added)) => keywords |= added,
@@ -173,6 +174,9 @@ pub fn effective_characteristics(
                     bands_with_other_subtypes.push(added);
                 }
             }
+            Some(EffectPrimitive::AddBandsWithOtherSupertype(added)) => {
+                bands_with_other_supertypes |= added;
+            }
             Some(EffectPrimitive::RemoveAllAbilities) => {
                 keywords = KeywordSet::empty();
                 protection_colors = crate::ColorSet::empty();
@@ -184,6 +188,7 @@ pub fn effective_characteristics(
                 landwalk_subtypes = Vec::new();
                 landwalk_qualities = Vec::new();
                 bands_with_other_subtypes = Vec::new();
+                bands_with_other_supertypes = crate::types::card::SupertypeSet::empty();
             }
             _ => {}
         }
@@ -283,6 +288,7 @@ pub fn effective_characteristics(
         landwalk_subtypes,
         landwalk_qualities,
         bands_with_other_subtypes,
+        bands_with_other_supertypes,
         power,
         toughness,
         loyalty: def.loyalty.as_ref().and_then(|l| l.as_fixed()),

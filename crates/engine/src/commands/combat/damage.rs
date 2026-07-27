@@ -155,14 +155,26 @@ pub(in crate::commands) fn execute_assign_combat_damage(
     let has_bands_with_other_pair = |ids: &[ObjectId]| -> bool {
         ids.iter().any(|x| {
             let x_characteristics = crate::layers::effective_characteristics(state, script_runtime, *x);
-            x_characteristics.bands_with_other_subtypes.iter().any(|quality| {
+            let subtype_match = x_characteristics.bands_with_other_subtypes.iter().any(|quality| {
                 ids.iter().any(|y| {
                     y != x
                         && crate::layers::effective_characteristics(state, script_runtime, *y)
                             .subtypes
                             .contains(quality)
                 })
-            })
+            });
+            // CR 702.22c/j/k's supertype form ("bands with other Legends"):
+            // same pairwise check, against each candidate's `supertypes`
+            // bitset instead of a `Vec<Subtype>`.
+            let supertype_match = x_characteristics.bands_with_other_supertypes.iter().any(|quality| {
+                ids.iter().any(|y| {
+                    y != x
+                        && crate::layers::effective_characteristics(state, script_runtime, *y)
+                            .supertypes
+                            .contains(quality)
+                })
+            });
+            subtype_match || supertype_match
         })
     };
 

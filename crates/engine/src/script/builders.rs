@@ -65,6 +65,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionPlayer(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddLandwalkSubtype(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddBandsWithOther(_))
+            | (Layer::AbilityAdding, EffectPrimitive::AddBandsWithOtherSupertype(_))
             | (Layer::PowerToughnessSetting, EffectPrimitive::SetPT { .. })
             | (Layer::PowerToughnessModifying, EffectPrimitive::ModifyPT { .. })
             | (Layer::PowerToughnessSwitching, EffectPrimitive::SwitchPT)
