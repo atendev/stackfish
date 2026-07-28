@@ -98,7 +98,7 @@ fn no_maximum_hand_size_modifier_suppresses_the_cleanup_discard() {
     state.hand_size_modifiers.push(HandSizeModifier {
         source,
         controller: p0,
-        affected: FilterController::You,
+        affected: HandSizeAffected::Filter(FilterController::You),
         effect: HandSizeEffect::NoMaximum,
         timestamp: SequenceNo(0),
     });
@@ -124,7 +124,7 @@ fn set_to_modifier_changes_the_discard_threshold() {
     state.hand_size_modifiers.push(HandSizeModifier {
         source,
         controller: p0,
-        affected: FilterController::You,
+        affected: HandSizeAffected::Filter(FilterController::You),
         effect: HandSizeEffect::SetTo(10),
         timestamp: SequenceNo(0),
     });
@@ -152,14 +152,14 @@ fn two_conflicting_modifiers_resolve_by_latest_timestamp() {
     state.hand_size_modifiers.push(HandSizeModifier {
         source,
         controller: p0,
-        affected: FilterController::You,
+        affected: HandSizeAffected::Filter(FilterController::You),
         effect: HandSizeEffect::SetTo(10),
         timestamp: SequenceNo(0),
     });
     state.hand_size_modifiers.push(HandSizeModifier {
         source,
         controller: p0,
-        affected: FilterController::You,
+        affected: HandSizeAffected::Filter(FilterController::You),
         effect: HandSizeEffect::NoMaximum,
         timestamp: SequenceNo(1),
     });
@@ -186,7 +186,7 @@ fn opponent_scoped_modifier_does_not_affect_its_own_controller() {
     state.hand_size_modifiers.push(HandSizeModifier {
         source,
         controller: p0,
-        affected: FilterController::Opponent,
+        affected: HandSizeAffected::Filter(FilterController::Opponent),
         effect: HandSizeEffect::NoMaximum,
         timestamp: SequenceNo(0),
     });

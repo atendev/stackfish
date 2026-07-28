@@ -200,7 +200,7 @@ impl Engine {
             .unwrap_or(0);
         // CR 402.2: `None` means "no maximum hand size" - skip the discard
         // check entirely, same as if hand_size could never exceed it.
-        let Some(max_hand_size) = effective_max_hand_size(&self.state.hand_size_modifiers, active, 7) else {
+        let Some(max_hand_size) = effective_max_hand_size(&self.state, &self.state.hand_size_modifiers, active, 7) else {
             self.process_state = ProcessState::CleanupSbaCheck;
             return StepStatus::Progressed;
         };
@@ -557,7 +557,7 @@ impl Engine {
             .zone(ZoneKind::Hand, Some(player))
             .map(|z| z.contents.len())
             .unwrap_or(0);
-        let max_hand_size = effective_max_hand_size(&self.state.hand_size_modifiers, player, 7)
+        let max_hand_size = effective_max_hand_size(&self.state, &self.state.hand_size_modifiers, player, 7)
             .unwrap_or(u32::MAX) as usize;
         let status = StepStatus::AwaitingDiscard { player, hand_size, max_hand_size };
         self.process_state = ProcessState::AwaitingDiscard { player, excess };

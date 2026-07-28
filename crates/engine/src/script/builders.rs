@@ -17,6 +17,7 @@ use crate::types::effect::{
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
+use crate::types::player::HandSizeModifier;
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
@@ -26,8 +27,8 @@ use super::decode::{
     parse_card_type_name, parse_filter_controller_name,
 };
 use super::tags::{
-    ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind, EventFilterKindTag, InterveningIfTag,
-    RedirectDamageToSourceTag, ReplacementPayloadTag,
+    ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind, EventFilterKindTag,
+    HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, RedirectDamageToSourceTag, ReplacementPayloadTag,
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
@@ -751,6 +752,63 @@ impl UserData for CostModifierBuilder {
                 controller: PlayerId(0),
                 filter,
                 amount,
+            });
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreateHandSizeModifier(c)`'s return value (CR 402.2) — mirrors
+/// `CostModifierBuilder` exactly, same queue-and-drain shape, same
+/// placeholder-`controller`-patched-at-drain-time convention. The only real
+/// difference is `:SetAffected` takes a `Game.HandSizeAffected.*` tagged
+/// value instead of a filter table — `HandSizeAffected` is a small closed
+/// enum (`Filter(FilterController)`/`EnchantedPlayer`, CR 303.4m,
+/// `phase5/enchanted-player-hand-size`), not an open filter shape with
+/// combinable keys the way `EffectFilter`/`FilterSpec` are, so a tagged
+/// value (same idea `EventFilterKindTag`/`ReplacementPayloadTag` already
+/// use) fits better than a table decoder.
+pub(crate) struct HandSizeModifierBuilder {
+    pub(crate) source: ObjectId,
+    pub(crate) affected: Option<crate::types::player::HandSizeAffected>,
+    pub(crate) effect: Option<crate::types::player::HandSizeEffect>,
+    pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for HandSizeModifierBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
+            this.affected = Some(value.borrow::<HandSizeAffectedTag>()?.0);
+            Ok(())
+        });
+        methods.add_method_mut("SetEffect", |_, this, value: mlua::AnyUserData| {
+            this.effect = Some(value.borrow::<HandSizeEffectTag>()?.0);
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let affected = this.affected.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetAffected() - a hand size modifier needs to know \
+                     which player(s) it affects"
+                        .to_string(),
+                )
+            })?;
+            let effect = this.effect.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetEffect() - a hand size modifier needs an effect"
+                        .to_string(),
+                )
+            })?;
+            this.registry.borrow_mut().pending_hand_size_modifiers.push(HandSizeModifier {
+                source: this.source,
+                // Placeholder - run_card_script's drain step stamps the real
+                // value (see this struct's own doc comment).
+                controller: PlayerId(0),
+                affected,
+                effect,
+                // Placeholder - run_card_script's drain step stamps the real
+                // value, same reason StaticAbilityBuilder's own timestamp is.
+                timestamp: SequenceNo(0),
             });
             Ok(())
         });

@@ -1,5 +1,6 @@
 use crate::types::cost::FilterController;
 use crate::types::counter::CounterSet;
+use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
 use crate::types::mana::ManaPool;
 
@@ -99,6 +100,28 @@ pub enum HandSizeEffect {
     SetTo(u32),
 }
 
+/// CR 402.2/303.4m: which player(s) a `HandSizeModifier` affects — either
+/// the same `FilterController` (you/opponent/any) perspective `CostModifier`
+/// already uses, or `EnchantedPlayer`, resolved fresh against `source`'s own
+/// live `attached_to_player` every time (CR 303.4m: "an ability of a
+/// permanent that refers to the 'enchanted player' refers to whatever player
+/// that permanent is attached to"). A sibling variant, not a widened
+/// `FilterController` itself — `FilterController` is CR 108.4's own "you"/
+/// "opponent"/"any" vocabulary, unrelated to attachment, and this engine's
+/// established precedent (`AffectedFilter::EnchantedOnly`, `phase5/enchanted-
+/// reference`) already treats "enchanted" as a separate concept from a
+/// controller-relative filter rather than folding it into one. Mirrors
+/// `AffectedFilter::EnchantedOnly`'s own `source.attached_to == Some(object.
+/// object_id)` check exactly, just the player-attach sibling field
+/// (`attached_to_player`) and resolved via `GameState` lookup rather than an
+/// already-borrowed `&GameObject`, since `effective_max_hand_size` only ever
+/// had a bare `PlayerId` to check against before this variant existed.
+#[derive(Clone, Copy, Debug)]
+pub enum HandSizeAffected {
+    Filter(FilterController),
+    EnchantedPlayer,
+}
+
 /// CR 402.2: a static "you/each player/your opponents have no maximum hand
 /// size"-style effect — deliberately **not** a `ContinuousEffect`/CR 613
 /// layer, same reasoning `cost.rs`'s `CostModifier` already established for
@@ -107,15 +130,11 @@ pub enum HandSizeEffect {
 /// `affected` mirror `CostModifier`'s own `controller`/`filter.controller`
 /// split exactly — whose "you"/"opponent" perspective this modifier's text
 /// is written from, and which player(s) it actually affects.
-///
-/// TODO: no `Game.CreateHandSizeModifier`-style Lua builder yet — same
-/// "direct Rust struct-literal fixtures only" bootstrap stance `CostModifier`
-/// itself took before any script builder existed for it.
 #[derive(Clone, Debug)]
 pub struct HandSizeModifier {
     pub source: ObjectId,
     pub controller: PlayerId,
-    pub affected: FilterController,
+    pub affected: HandSizeAffected,
     pub effect: HandSizeEffect,
     /// CR 613.7-style "latest wins" tiebreak between two conflicting
     /// modifiers that both apply to the same player — hand size isn't a CR
@@ -131,14 +150,19 @@ pub struct HandSizeModifier {
 /// latest `timestamp` wins outright (see `HandSizeModifier::timestamp`'s own
 /// doc comment). `base` is normally 7 (CR 402.2) — the caller's problem, not
 /// this function's, same "base value supplied by the caller" split
-/// `cost::apply_cost_modifiers` already uses for `ManaCost`.
-pub fn effective_max_hand_size(modifiers: &[HandSizeModifier], player: PlayerId, base: u32) -> Option<u32> {
+/// `cost::apply_cost_modifiers` already uses for `ManaCost`. `state` is only
+/// needed to resolve `HandSizeAffected::EnchantedPlayer` (`phase5/enchanted-
+/// player-hand-size`) — every other `affected` shape ignores it.
+pub fn effective_max_hand_size(state: &GameState, modifiers: &[HandSizeModifier], player: PlayerId, base: u32) -> Option<u32> {
     let winner = modifiers
         .iter()
         .filter(|m| match m.affected {
-            FilterController::You => player == m.controller,
-            FilterController::Opponent => player != m.controller,
-            FilterController::Any => true,
+            HandSizeAffected::Filter(FilterController::You) => player == m.controller,
+            HandSizeAffected::Filter(FilterController::Opponent) => player != m.controller,
+            HandSizeAffected::Filter(FilterController::Any) => true,
+            HandSizeAffected::EnchantedPlayer => {
+                state.object(m.source).is_some_and(|o| o.attached_to_player == Some(player))
+            }
         })
         .max_by_key(|m| m.timestamp.0);
     match winner {
