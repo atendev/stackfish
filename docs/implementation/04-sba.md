@@ -177,3 +177,53 @@
   or "can't draw more than one card"-style effect will each need their own bespoke mechanism and
   enforcement point, same as this one needed its own — genuinely two different card-text shapes with
   two different enforcement points, confirmed during scoping research not to share a common query.
+
+## Slice: hand-reveal-modifier (merged)
+
+- Branch `phase5/hand-reveal-modifier`.
+- Scope: CR 701.20a/701.18c "plays with hand revealed"-style effects (Telepathy's own worked example
+  under CR 701.20c: "Your opponents play with their hands revealed") — the second player-level
+  continuous-effect shape `phase5/enchanted-player-hand-size`'s own explicit non-goal named as a
+  separate future case.
+- Key finding that reshaped the plan from a straightforward `HandSizeModifier` sibling into a
+  deliberately narrower, mechanism-only cut, confirmed with the user before building: unlike hand size
+  (a real, already-working, already-tested enforcement path at `Engine::begin_cleanup_step`), hand
+  reveal has **no existing consumer to hook into at all**. `GameObject.visibility`/`VisibilityPolicy::
+  is_visible_to` is itself still `todo!()` with zero callers anywhere in the crate, and
+  `script::encode::state_to_lua`/`card_summary_to_lua` don't parameterize by viewer at all — they
+  structurally never encode hand *contents* for any player, revealed or not (only a `hand_count`), so
+  there's nothing today for "revealed" to change from that consumer's own perspective. A real
+  enforcement point would mean standing up a per-viewer state-snapshot boundary this engine doesn't
+  have for *any* purpose yet (not specific to this feature) — bigger, and arguably a separate
+  architectural question. Also checked CR wording precisely before building (a prior slice's own
+  card-text mistake made this worth double-checking): there is no dedicated numbered CR rule for
+  "plays with hand revealed" — it's the Telepathy worked example under the general CR 701.20 reveal
+  action, distinguished from "look" (CR 701.20e, scry/surveil's own shape) by never being scoped to
+  one specific viewer ("show that card to *all* players").
+- Key changes:
+  - `HandRevealAffected { Filter(FilterController), EnchantedPlayer }` — mirrors `HandSizeAffected`'s
+    exact shape, deliberately a separate sibling type rather than shared (only the second occurrence
+    of the identical shape; worth extracting if a third mechanism ever needs it).
+  - `HandRevealModifier { source, controller, affected, timestamp }` — no `effect` field the way
+    `HandSizeModifier` has `HandSizeEffect`: CR 701.20a's "reveal" has no magnitude, existence of an
+    applicable modifier alone means "revealed."
+  - `is_hand_revealed(state, modifiers, player) -> bool` — plain boolean OR across every applicable
+    modifier, unlike `effective_max_hand_size`'s "latest timestamp wins" override resolution (CR
+    701.20c: "a card that is currently revealed may be revealed again" — two reveal sources never
+    conflict, so there's nothing to override). No `viewer` parameter, confirming the CR-precision
+    point above.
+  - `GameState.hand_reveal_modifiers: Vec<HandRevealModifier>` — new field; much smaller real ripple
+    than `hand_size_modifiers`' own historical "~85 struct literals" note (above) — only 9 real
+    construction sites needed the new field, since `testutil::two_player_state`/`single_player_state`
+    already consolidate almost every test fixture's own `GameState` construction behind struct-update
+    syntax, which doesn't require every field.
+  - `Game.CreateHandRevealModifier(c)` — new `HandRevealModifierBuilder`, mirrors
+    `HandSizeModifierBuilder` minus `:SetEffect` (nothing to set).
+- Verify: 5 new tests (`phase5_hand_reveal_modifier.rs`) — script self-registration mechanics, a direct
+  `is_hand_revealed` check for both `Filter`/`EnchantedPlayer` forms, a re-resolution test (reveal
+  stops once the Aura is no longer attached), and a two-independent-sources test confirming reveal's
+  OR semantics never conflict the way hand size's override can. Full workspace suite green.
+- Deliberately, explicitly **not** built: any wiring into `VisibilityPolicy`/`is_visible_to` or
+  `state_to_lua`/`card_summary_to_lua` — same "real but currently unreachable, named not hidden"
+  stance `VisibilityPolicy` itself already takes. Confirmed with the user as the right cut before
+  starting, given no enforcement consumer exists to build toward yet.

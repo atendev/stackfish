@@ -207,6 +207,7 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         replacement_effects: Vec::new(),
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
+        hand_reveal_modifiers: Vec::new(),
         abilities,
         ledger: Vec::new(),
         rng: RngState { seed: 1, draws_consumed: 0 },
