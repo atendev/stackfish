@@ -258,14 +258,20 @@ fn equipment_with_two_legal_creatures_pauses_and_resumes_the_search_afterward() 
     };
     assert_eq!(player, p0);
     let mut sorted = candidates.clone();
-    sorted.sort_by_key(|id| id.0);
-    let mut expected = vec![bear_a, bear_b];
-    expected.sort_by_key(|id| id.0);
+    sorted.sort_by_key(|t| match t {
+        Target::Object(id) => id.0,
+        Target::Player(p) => p.0 as u64,
+    });
+    let mut expected = vec![Target::Object(bear_a), Target::Object(bear_b)];
+    expected.sort_by_key(|t| match t {
+        Target::Object(id) => id.0,
+        Target::Player(p) => p.0 as u64,
+    });
     assert_eq!(sorted, expected, "both bears are legal equip targets");
     assert_eq!(engine.state().object(paused_sword).unwrap().zone, ZoneKind::Battlefield);
     assert_eq!(engine.state().object(paused_sword).unwrap().attached_to, None);
 
-    engine.submit_entry_attach_choice(bear_b).expect("bear_b is an offered candidate");
+    engine.submit_entry_attach_choice(Target::Object(bear_b)).expect("bear_b is an offered candidate");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "the search's remaining work (shuffle, resolve) should finish, got {status:?}");
 

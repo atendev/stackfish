@@ -282,6 +282,53 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
   in the test. `99-backlog.md`'s "Mistakes caught" note was generalized to flag this as a recurring
   trap, not a one-off.
 
+## Slice: aura-enters-attached-player (merged)
+
+- Branch `phase5/aura-enters-attached-player`.
+- Scope: CR 303.4f/g's "or player" half for the search-entry path — the exact gap
+  `aura-enchants-a-player` named as deliberately deferred above (that slice only closed the
+  cast-and-resolve path, not `SearchDestination::Battlefield::enters_attached`).
+- Real finding: `commands::target_is_legal` was already fully generic over `Target::Object`/
+  `Target::Player` for every relevant `TargetFilter` variant (`Player`, `PlayerScript`, `AnyTarget`)
+  before this slice — the gap was entirely upstream, in three places that were object-shaped by
+  construction: `legal_aura_entry_candidates`'s own scan (only walked `state.objects`, never
+  `state.players`) and return type (`Vec<ObjectId>`), `ProcessState`/`StepStatus::
+  AwaitingEntryAttachChoice`'s `candidates` field, and `Engine::submit_entry_attach_choice`'s
+  `chosen` parameter.
+- Verify: 4 new tests (`phase5_aura_enters_attached_player.rs`), full workspace suite green (all
+  pre-existing `phase5_aura_enters_attached.rs`/`phase5_attach_entry_equipment_fortification.rs`
+  tests updated for the new `Target`-shaped candidate type and still pass unchanged in behavior).
+- Key changes:
+  - `legal_aura_entry_candidates` (`commands/attach.rs`) now chains a `state.players` scan
+    (`commands::non_eliminated_players`, wrapped as `Target::Player`) after the existing
+    `state.objects` scan (`Target::Object`), both filtered through the same `target_is_legal` call —
+    no new legality logic, just a second source of candidates. Return type widened to `Vec<Target>`.
+  - `legal_entry_attach_candidates`'s `Option<Vec<ObjectId>>` widened to `Option<Vec<Target>>` to
+    match — the Equipment/Fortification arm still only ever produces `Target::Object` (CR 301.5a/
+    301.6 forbid attaching either to a player), unaffected in practice.
+  - `ProcessState`/`StepStatus::AwaitingEntryAttachChoice`'s `candidates: Vec<ObjectId>` widened to
+    `Vec<Target>` in both the internal (continuation-carrying) and public (caller-facing) variants.
+  - `Engine::submit_entry_attach_choice`'s `chosen: ObjectId` parameter widened to `chosen: Target`;
+    its body now matches `Target::Object`/`Target::Player` and dispatches to `attach_permanent`/
+    `attach_permanent_to_player` (+ `Attached`/`AttachedToPlayer` event) respectively — the same
+    two-armed shape `ResolveStackTop`'s cast-time attach branch already established.
+    `continue_search_battlefield_entry`'s own 1-candidate immediate-attach arm got the identical
+    two-armed match.
+  - `commands::attach_permanent_to_player` and `commands::target_is_legal` needed **no changes** —
+    both were already complete/correct, just never reached from this call site before.
+- A `TargetFilter::Player` has no controller-restriction field (no engine-side "you"/"opponent"
+  model for it), so it unconditionally offers *every* player including the searching player's own
+  controller — never exactly one candidate in a 2-player game. The "1 candidate, auto-attach"
+  test needed a scripted `PlayerScript` opponent-only predicate to force that shape; a plain
+  `TargetFilter::Player` in a 2-player game is actually the "2 candidates, pauses" case.
+- Deliberately deferred, restated as non-goals rather than silently dropped: mixed object-and-player
+  candidates in one Aura's choice (this engine's `TargetFilter` has no "object or player" variant,
+  so no producer can create a mixed set); token creation's own CR 303.4f/g support (`AbilityEffect::
+  CreateToken`/`resolve/tokens.rs` never touches `SearchDestination`/`legal_entry_attach_candidates`
+  at all, for object or player targets alike — a pre-existing, separate gap, unaffected either way);
+  CR 303.4m's "enchanted player" reference for continuous effects (unchanged, see
+  `enchanted-reference`'s own note above).
+
 ## Equipment / Equip (CR 702.6)
 
 - `AbilityEffect::Attach` primitive; `ActivateAbility` enforces "only as sorcery" for `Attach`.
