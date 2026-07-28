@@ -13,6 +13,7 @@ use crate::types::cost::CostModifier;
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
+use crate::types::player::HandSizeModifier;
 use crate::types::target::TargetSpec;
 
 use super::decode::{
@@ -190,6 +191,21 @@ impl ScriptRuntime {
             );
         }
         state.cost_modifiers.append(&mut cost_modifiers);
+
+        let mut hand_size_modifiers: Vec<HandSizeModifier> =
+            self.registry.borrow_mut().pending_hand_size_modifiers.drain(..).collect();
+        for modifier in &mut hand_size_modifiers {
+            // Real controller and timestamp (HandSizeModifierBuilder's own
+            // doc comment) - the builder itself has no &GameState to read
+            // this source's live controller from, or allocate a real
+            // sequence number, inside a Lua callback.
+            modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
+                "HandSizeModifier's source must already exist in GameState by drain time - \
+                 Game.CreateHandSizeModifier was called with a bogus source id",
+            );
+            modifier.timestamp = state.allocate_sequence_no();
+        }
+        state.hand_size_modifiers.append(&mut hand_size_modifiers);
         Ok(())
     }
 

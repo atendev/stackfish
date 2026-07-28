@@ -19,10 +19,11 @@ use crate::types::effect::{
 };
 use crate::types::ids::ObjectId;
 use crate::types::mana::{ManaCost, ManaUnit};
+use crate::types::player::{HandSizeAffected, HandSizeEffect};
 
 use super::builders::{
-    ActivatedAbilityBuilder, CostModifierBuilder, ManaAbilityBuilder, ReplacementEffectBuilder, StaticAbilityBuilder,
-    TriggeredAbilityBuilder,
+    ActivatedAbilityBuilder, CostModifierBuilder, HandSizeModifierBuilder, ManaAbilityBuilder,
+    ReplacementEffectBuilder, StaticAbilityBuilder, TriggeredAbilityBuilder,
 };
 use super::decode::{
     decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table, decode_filter_table,
@@ -32,8 +33,8 @@ use super::decode::{
 };
 use super::tags::{
     ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DurationTag, EffectPrimitiveTag, EventFilterKind,
-    EventFilterKindTag, InterveningIfTag, LayerTag, OncePerTurnTag, OperationTag, RedirectDamageToSourceTag,
-    ReplacementPayloadTag, TokenTag,
+    EventFilterKindTag, HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag,
+    OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, TokenTag,
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
@@ -663,6 +664,37 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
 
+    let create_hand_size_modifier = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(HandSizeModifierBuilder {
+                source: ObjectId(source),
+                affected: None,
+                effect: None,
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
+    // `Game.HandSizeAffected.*` - which player(s) a `Game.CreateHandSizeModifier`
+    // builder's effect applies to (`HandSizeModifierBuilder::SetAffected`).
+    // `EnchantedPlayer` (CR 303.4m) is `HandSizeAffected`'s own second
+    // variant, not a `FilterController` - see that enum's own doc comment.
+    let hand_size_affected = lua.create_table()?;
+    hand_size_affected.set("You", HandSizeAffectedTag(HandSizeAffected::Filter(FilterController::You)))?;
+    hand_size_affected.set("Opponent", HandSizeAffectedTag(HandSizeAffected::Filter(FilterController::Opponent)))?;
+    hand_size_affected.set("Any", HandSizeAffectedTag(HandSizeAffected::Filter(FilterController::Any)))?;
+    hand_size_affected.set("EnchantedPlayer", HandSizeAffectedTag(HandSizeAffected::EnchantedPlayer))?;
+
+    // `Game.HandSizeEffects.*` - what a `Game.CreateHandSizeModifier` builder's
+    // effect actually does (`HandSizeModifierBuilder::SetEffect`).
+    let hand_size_effects = lua.create_table()?;
+    hand_size_effects.set("NoMaximum", HandSizeEffectTag(HandSizeEffect::NoMaximum))?;
+    hand_size_effects.set(
+        "SetTo",
+        lua.create_function(|_, n: u32| Ok(HandSizeEffectTag(HandSizeEffect::SetTo(n))))?,
+    )?;
+
     let tokens = lua.create_table()?;
     tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
     tokens.set("Food", TokenTag(TokenSpec::Named(NamedToken::Food)))?;
@@ -750,6 +782,9 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     game.set("CreateActivatedAbility", create_activated_ability)?;
     game.set("CreateManaAbility", create_mana_ability)?;
     game.set("CreateCostModifier", create_cost_modifier)?;
+    game.set("CreateHandSizeModifier", create_hand_size_modifier)?;
+    game.set("HandSizeAffected", hand_size_affected)?;
+    game.set("HandSizeEffects", hand_size_effects)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;
     lua.globals().set("Game", game)

@@ -134,4 +134,46 @@
 - Deviations:
   - ~85 `GameState` struct literals needed new field.
 - Unresolved:
-  - No Lua builder for hand-size modifiers.
+  - No Lua builder for hand-size modifiers (closed by `phase5/enchanted-player-hand-size`, see below).
+
+## Slice: enchanted-player-hand-size (merged)
+
+- Branch `phase5/enchanted-player-hand-size`.
+- Scope: CR 303.4m's "enchanted player" reference for continuous effects — deliberately narrowed, per
+  discussion with the user, to a *first cut* proving the resolution pattern against one real,
+  already-working consumer rather than inventing a general "continuous effects affecting a player"
+  subsystem in one sitting. This gap had been named and deferred across three separate merged slices
+  (`phase5/enchanted-reference`, `phase5/aura-enchants-a-player`, `phase5/aura-enters-attached-player`)
+  without ever being scoped or estimated — research confirmed there was no existing mechanism to
+  extend at all: `layers::effective_characteristics`/`ContinuousEffect`/`AffectedFilter` are 100%
+  object-only, and the two existing player-directed modifier mechanisms (`hand_size_modifiers`,
+  `cost_modifiers`) are narrow, bespoke, single-purpose flat lists, not a general query.
+- Key finding that shaped the plan: `HandSizeModifier`/CR 402.2 already has a real, working, tested
+  enforcement path (`Engine::begin_cleanup_step`'s discard check) and was *also* separately missing a
+  Lua construction path (`phase5/max-hand-size`'s own "Unresolved" note, above) — reusing it as the
+  proof vehicle meant no new enforcement point needed inventing, and closed that separate TODO as a
+  side effect.
+- Key changes:
+  - `HandSizeAffected { Filter(FilterController), EnchantedPlayer }` — `HandSizeModifier.affected`
+    widened from a bare `FilterController` to this sibling enum (low ripple: zero real non-test
+    producers existed before this slice). `EnchantedPlayer` mirrors `AffectedFilter::EnchantedOnly`'s
+    own `source.attached_to == Some(object.object_id)` check exactly, just the player-attach sibling
+    field (`attached_to_player`).
+  - `effective_max_hand_size` gained a `state: &GameState` parameter to resolve `EnchantedPlayer` (2
+    call sites in `turn.rs`, both already had `&self.state` in scope).
+  - `Game.CreateHandSizeModifier(c)` — new `HandSizeModifierBuilder`, mirrors `Game.CreateCostModifier`'s
+    queue-and-drain shape exactly: `:SetAffected(Game.HandSizeAffected.You/Opponent/Any/EnchantedPlayer)`,
+    `:SetEffect(Game.HandSizeEffects.NoMaximum`/`.SetTo(n))`, `:Register()` queues with a placeholder
+    `controller`/`timestamp`, both resolved at `run_card_script`'s drain step (identical pattern
+    `CostModifierBuilder` already established).
+- Verify: 4 new tests (`phase5_hand_size_modifier_enchanted_player.rs`) — script self-registration
+  mechanics, an end-to-end cleanup-discard enforcement test, a control case confirming the modifier
+  doesn't leak onto a player the source isn't attached to, and a re-resolution test confirming the
+  restriction stops applying once the Aura is no longer attached to that player. Full workspace suite
+  green.
+- Explicit non-goal, named not silently dropped: no general `AffectedFilter`-for-players primitive —
+  this proves the *pattern* (resolve via `attached_to_player`) on one concrete mechanism, not a
+  reusable query every future player-level effect can plug into. A future "plays with hand revealed"-
+  or "can't draw more than one card"-style effect will each need their own bespoke mechanism and
+  enforcement point, same as this one needed its own — genuinely two different card-text shapes with
+  two different enforcement points, confirmed during scoping research not to share a common query.

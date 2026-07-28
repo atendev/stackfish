@@ -10,6 +10,7 @@ use crate::types::ability::{AbilityEffect, ConditionPrimitive, InterveningIfPrim
 use crate::types::cost::AdditionalCost;
 use crate::types::effect::{ConsumptionPolicy, EffectDuration, EffectPrimitive, Layer, ReplacementPayload};
 use crate::types::mana::ManaCost;
+use crate::types::player::{HandSizeAffected, HandSizeEffect};
 use crate::types::zone::ZoneKind;
 
 /// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
@@ -151,6 +152,22 @@ impl UserData for EventFilterKindTag {}
 #[derive(Clone)]
 pub(crate) struct ReplacementPayloadTag(pub(crate) ReplacementPayload);
 impl UserData for ReplacementPayloadTag {}
+
+/// Same idea, for `Game.HandSizeAffected.*` — e.g. `Game.HandSizeAffected.You`/
+/// `.EnchantedPlayer` are plain tagged values, the argument to
+/// `HandSizeModifierBuilder::SetAffected`. `EnchantedPlayer` (CR 303.4m,
+/// `phase5/enchanted-player-hand-size`) is `HandSizeAffected`'s own second
+/// variant, not a `FilterController` — see that enum's own doc comment.
+#[derive(Clone, Copy)]
+pub(crate) struct HandSizeAffectedTag(pub(crate) HandSizeAffected);
+impl UserData for HandSizeAffectedTag {}
+
+/// Same idea, for `Game.HandSizeEffects.*` — e.g. `Game.HandSizeEffects.
+/// NoMaximum`/`.SetTo(n)` are tagged values, the argument to
+/// `HandSizeModifierBuilder::SetEffect`.
+#[derive(Clone, Copy)]
+pub(crate) struct HandSizeEffectTag(pub(crate) HandSizeEffect);
+impl UserData for HandSizeEffectTag {}
 
 /// `Game.ReplacementPayloads.RedirectDamageToSource` — a sentinel, not a
 /// `ReplacementPayloadTag`, because `RedirectDamage(Target)` needs a real

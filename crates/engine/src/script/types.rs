@@ -13,6 +13,7 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
+use crate::types::player::HandSizeModifier;
 use crate::types::target::TargetFilter;
 
 #[derive(Debug)]
@@ -123,6 +124,12 @@ pub(crate) struct ScriptRegistry {
     /// callback, same reason `pending_static`'s `timestamp` is a placeholder
     /// too. The drain step resolves the real value there instead.
     pub(crate) pending_cost_modifiers: Vec<CostModifier>,
+    /// Same idea as `pending_cost_modifiers`, for `Game.CreateHandSizeModifier`'s
+    /// builder (CR 402.2) — drained into `GameState.hand_size_modifiers` by
+    /// `run_card_script`. `controller` on each queued `HandSizeModifier` is a
+    /// placeholder (`PlayerId(0)`) until drain time, same reason and same
+    /// fix as `pending_cost_modifiers`'s own placeholder `controller`.
+    pub(crate) pending_hand_size_modifiers: Vec<HandSizeModifier>,
     /// Backlog item 9: a coroutine `Thread` suspended mid-`invoke_operation`
     /// at a `Game.SelectTargets` call, keyed by the same opaque
     /// `ScriptHandle` space `scripts` uses (shares `next_handle`, kept in a
