@@ -495,3 +495,53 @@
     every prior mid-ETB slice (Devour/Amplify/`EntersAsCopy`) already took for the same reason: highest
     real value at the resolving-spell call site, a redirected land or search-fetch is a much rarer gap
     worth naming rather than building blind.
+
+## Slice: umbra-armor (merged)
+
+- Branch `phase5/umbra-armor`.
+- Scope: CR 702.89a (Umbra armor) — "if enchanted permanent would be destroyed, instead remove all
+  damage marked on it and destroy this Aura." A replacement effect's own "enchanted permanent"
+  reference — the sibling `phase5/enchanted-reference` (CR 303.4m for *continuous* effects,
+  `AffectedFilter::EnchantedOnly`) explicitly named as out of scope: `ReplacementEffect` has no
+  `affected` field of its own at all — `EffectFilter` is nested two levels deep
+  (`ReplacementSpec::Primitive.filter → EventFilter::WouldDie.affected → EffectFilter`), a different,
+  non-`AffectedFilter` type from the continuous-effect path.
+- Real correction made while scoping: the recommended card-shape ("remove a shield counter") was
+  wrong — that's CR 122.1c, an unrelated generic counter mechanic, not Umbra Armor at all. Real CR
+  702.89a is two distinct effects on two different objects (damage-clear on the enchanted permanent,
+  destroy the Aura itself), not a counter decrement — this changed the slice from "extend a filter" to
+  "extend a filter + model a genuine two-object replacement outcome."
+- Key changes:
+  - `EventFilter::WouldDieEnchanted` — fieldless, sibling to `EventFilter::WouldDie { affected:
+    EffectFilter }` rather than a new field on it (23 existing `WouldDie` construction sites, no
+    `Default` impl — same ripple class `AffectedFilter::EnchantedOnly` itself already avoided).
+    Resolved directly in `ReplacementEffect::matches`: `is_destroy && state.object(self.source)
+    .and_then(|o| o.attached_to) == Some(*object)` — mirrors `AffectedFilter::EnchantedOnly`'s own
+    `source.attached_to == Some(object.object_id)` check exactly, just via a `GameState` lookup
+    (`ReplacementEffect::matches`'s calling convention has ids, not already-borrowed `&GameObject`s).
+  - `ReplacementPayload::UmbraArmor` — rewrites the matched event into a new `GameEventKind::
+    UmbraArmorConsumed { enchanted, aura }`, same "nothing to rewrite the *moving* object into, the
+    permanent doesn't change zones" shape `Regenerate`/`Regenerated` already established.
+  - `sba::commit_death_or_regeneration` widened from returning one `(GameEvent, Vec<RegisteredAbility>)`
+    to `Vec<(GameEvent, Vec<RegisteredAbility>)>` — the real novel piece of scope. `UmbraArmorConsumed`
+    resolves to *two* real committed events (the enchanted permanent's own log entry, plus the Aura's
+    own genuine `ZoneChange`, committed via a direct nested `commit_death` call, CR 616 replacement
+    recursion deliberately skipped — same narrow stance `submit_commander_return_choice`'s own doc
+    comment already takes for an analogous situation). Checked the ripple before widening: only 3 call
+    sites (`sba::resolve_deaths`, `Engine`'s SBA-resume branch, `commit_scripted_zone_move`'s `Destroy`
+    arm), each already just looping and appending — a small, deliberate widening, not the wider ripple
+    class this backlog usually flags before doing this.
+  - `Game.EventFilters.WouldDieEnchanted`/`Game.ReplacementPayloads.UmbraArmor` — new `EventFilterKind`
+    variant (fieldless, `ReplacementEffectBuilder::Register` ignores `:SetAffected`'s `this.affected`
+    entirely for this shape, same "no combining with a controller/card_types filter" stance the Rust
+    type itself takes) and `ReplacementPayloadTag`, wired through `validate_replacement_filter_payload_
+    pairing` the same way every other filter/payload pairing already is.
+- Verify: 4 new tests (`phase5_umbra_armor.rs`) — direct `ReplacementEffect::matches` unit checks
+  (matches the enchanted creature's own destroy, not a different creature's, not a non-destroy death),
+  an end-to-end `check_state_based_actions` run (creature survives undamaged, Aura genuinely destroyed
+  under a new id), a no-Umbra-Armor control case, and a `Game.CreateReplacementEffect` self-registration
+  test. Full workspace suite green.
+- Unresolved: CR 702.89b's "multiple Umbra Armors treated separately" isn't specifically tested (each
+  instance is already its own independently-matched/consumed `ReplacementEffect`, no shared-state bug
+  introduced, just unexercised); no general "replacement effect referencing the enchanted permanent"
+  beyond this one concrete shape.

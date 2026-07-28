@@ -476,6 +476,11 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
             Ok(EventFilterKindTag(EventFilterKind::WouldMoveZone { from, to }))
         })?,
     )?;
+    // CR 702.89a (Umbra armor): "if enchanted permanent would be destroyed" -
+    // pairs only with Game.ReplacementPayloads.UmbraArmor. :SetAffected is a
+    // no-op for this shape (the affected object is always this effect's own
+    // attached_to, not a controller/card_types/self_only filter).
+    event_filters.set("WouldDieEnchanted", EventFilterKindTag(EventFilterKind::WouldDieEnchanted))?;
 
     // `Game.ReplacementPayloads.*` - what a ReplacementEffect rewrites the
     // matched event into (ReplacementEffectBuilder::SetPayload).
@@ -484,6 +489,9 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     let replacement_payloads = lua.create_table()?;
     replacement_payloads.set("PreventDamage", ReplacementPayloadTag(ReplacementPayload::PreventDamage))?;
     replacement_payloads.set("Regenerate", ReplacementPayloadTag(ReplacementPayload::Regenerate))?;
+    // CR 702.89a (Umbra armor) - pairs only with
+    // Game.EventFilters.WouldDieEnchanted.
+    replacement_payloads.set("UmbraArmor", ReplacementPayloadTag(ReplacementPayload::UmbraArmor))?;
     replacement_payloads.set("RedirectDamageToSource", RedirectDamageToSourceTag)?;
     replacement_payloads.set(
         "ReplaceZoneDestination",
