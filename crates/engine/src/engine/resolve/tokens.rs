@@ -5,6 +5,7 @@
 
 use std::ops::ControlFlow;
 
+use crate::commands;
 use crate::replacement;
 use crate::types::ability::{AbilityEffect, AbilityKind, NamedToken, RegisteredAbility, TokenSpec};
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, Subtype, SupertypeSet};
@@ -12,13 +13,13 @@ use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec}
 use crate::types::counter::CounterSet;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle};
+use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{ColorSet, ManaCost};
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
-use super::super::{Engine, StepStatus};
+use super::super::{Engine, ProcessState, StepStatus};
 
 impl Engine {
     /// CR 111: create one or more token permanents on the battlefield under
@@ -49,12 +50,17 @@ impl Engine {
     /// `Search`. `colors_spent` is always `ColorSet::empty()` - CR 702.44b,
     /// a token creation is never a cast, same convention `PlayLand`/`Search`
     /// already use for Sunburst.
+    ///
+    /// CR 303.4f/301.5e/301.6 pre-attached entry is real now too
+    /// (`phase5/token-enters-attached`) - see `continue_create_token`'s own
+    /// doc comment for the real body; this function just precomputes the
+    /// `CopyOf` snapshot once (unchanged from before) and hands off to it.
     pub(super) fn resolve_create_token_effect(
         &mut self,
         top: &StackObject,
         spec: &TokenSpec,
         count: u32,
-        mut events: Vec<GameEventKind>,
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let controller = top.controller;
         let copy_snapshot = match spec {
@@ -73,8 +79,47 @@ impl Engine {
             }),
             _ => None,
         };
-        for _ in 0..count {
-            let token_def = match (&copy_snapshot, spec) {
+        self.continue_create_token(spec, &copy_snapshot, count, controller, top.stack_id, events)
+    }
+
+    /// The resumable loop body `resolve_create_token_effect`'s own `for _ in
+    /// 0..count` loop was factored into, so a mid-loop CR 303.4f/301.5e/
+    /// 301.6 attach-choice pause can resume it - the same "loop body
+    /// factored out of the fresh-entry effect resolver, called by both the
+    /// fresh start and the resume path" shape `continue_search_battlefield_
+    /// entry` already established relative to `resolve_search_effect`/
+    /// `submit_search_choice`. Two callers: `resolve_create_token_effect`
+    /// (fresh, `remaining == count`) and `Engine::submit_token_attach_choice`
+    /// (resume, `remaining` is however many tokens this `CreateToken` still
+    /// owes after the one just attached).
+    ///
+    /// Per-token order: resolve `token_def`, allocate `token_id` (cheap, no
+    /// side effects - `state.objects` isn't touched yet), then run the
+    /// attach-candidate scan *before* building/inserting the `GameObject` at
+    /// all. This is the one real divergence from `continue_search_
+    /// battlefield_entry`'s own order (which scans using a *pre-move*
+    /// stand-in id, since Search doesn't allocate its permanent's real id
+    /// until after the scan) - token creation can allocate its real,
+    /// final id up front and scan with it directly, since
+    /// `legal_aura_entry_candidates`'s own "can't be a candidate of itself"
+    /// guarantee only depends on the id not yet existing in `state.objects`,
+    /// not on it being freshly allocated. This ordering is what makes CR
+    /// 303.4g's token-specific second sentence ("if the Aura is a token, it
+    /// isn't created") cheap to honor exactly: a 0-candidate Aura just
+    /// `continue`s before ever building/inserting anything, rather than
+    /// needing to build-then-undo the way a check-after-insert order would.
+    pub(in crate::engine) fn continue_create_token(
+        &mut self,
+        spec: &TokenSpec,
+        copy_snapshot: &Option<CardDefinition>,
+        mut remaining: u32,
+        controller: PlayerId,
+        stack_id: ObjectId,
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        while remaining > 0 {
+            remaining -= 1;
+            let token_def = match (copy_snapshot, spec) {
                 (Some(def), _) => def.clone(),
                 (None, TokenSpec::CopyOf(_, _)) => {
                     // Source no longer resolves - skip rather
@@ -86,6 +131,27 @@ impl Engine {
                 (None, _) => build_token_definition(spec),
             };
             let token_id = self.state.allocate_object_id();
+            // CR 303.4f/301.5e/301.6: scanned before the token exists in
+            // `state.objects` at all, same "can't be a candidate of
+            // itself" guarantee `legal_aura_entry_candidates`'s own doc
+            // comment already establishes - see this method's own doc
+            // comment for why token creation can use the real final id
+            // here instead of a stand-in the way Search needs to.
+            let attach_candidates =
+                commands::legal_entry_attach_candidates(&self.state, &self.script_runtime, &token_def, controller, token_id);
+            if let Some(candidates) = &attach_candidates {
+                // CR 303.4g's token-specific second sentence: an Aura
+                // token with no legal object/player isn't created at
+                // all - skip straight to the next requested token,
+                // nothing to build or insert. Equipment/Fortification
+                // with zero legal candidates instead still gets created,
+                // unattached (CR 301.5e/301.6) - that case falls through
+                // to the normal build/insert below, handled by the `0
+                // =>` arm further down.
+                if candidates.is_empty() && commands::is_aura(&token_def) {
+                    continue;
+                }
+            }
             let ts = self.state.allocate_sequence_no();
             let token_obj = GameObject {
                 object_id: token_id,
@@ -141,6 +207,47 @@ impl Engine {
                 last_known_info: None,
             });
             events.extend(counter_events);
+
+            if let Some(candidates) = attach_candidates {
+                match candidates.len() {
+                    // CR 301.5e/301.6: no legal object/player to attach
+                    // to - the Equipment/Fortification (an Aura never
+                    // reaches here with an empty list, see the early
+                    // `continue` above) just enters unattached. Nothing
+                    // more to do.
+                    0 => {}
+                    1 => match candidates[0] {
+                        Target::Object(target_id) => {
+                            commands::attach_permanent(&mut self.state, token_id, target_id);
+                            events.push(GameEventKind::Attached { object: token_id, attached_to: target_id });
+                        }
+                        Target::Player(player) => {
+                            commands::attach_permanent_to_player(&mut self.state, token_id, player);
+                            events.push(GameEventKind::AttachedToPlayer { object: token_id, player });
+                        }
+                    },
+                    _ => {
+                        // CR 303.4f: 2+ legal candidates - the
+                        // controller chooses. `token_id` is already a
+                        // real battlefield permanent (unattached) at
+                        // this point, same "already a permanent, then
+                        // gets attached" order the cast-time
+                        // Aura-ETB-attach path and Search's own
+                        // `continue_search_battlefield_entry` both use.
+                        self.process_state = ProcessState::AwaitingTokenAttachChoice {
+                            attaching: token_id,
+                            controller,
+                            candidates,
+                            stack_id,
+                            events_so_far: events,
+                            remaining_count: remaining,
+                            spec: spec.clone(),
+                            copy_snapshot: copy_snapshot.clone(),
+                        };
+                        return ControlFlow::Break(StepStatus::Progressed);
+                    }
+                }
+            }
         }
         ControlFlow::Continue(events)
     }

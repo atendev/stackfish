@@ -11,7 +11,8 @@ use crate::replacement;
 use crate::sba;
 use crate::script::ScriptChoiceRequest;
 use crate::triggers::PendingTrigger;
-use crate::types::ability::{CopyExceptions, SearchDestination};
+use crate::types::ability::{CopyExceptions, SearchDestination, TokenSpec};
+use crate::types::card::CardDefinition;
 use crate::types::command::PlayerAction;
 use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
@@ -71,6 +72,19 @@ pub enum StepStatus {
     /// Fortification candidates are always `Target::Object` in practice (CR
     /// 301.5a/301.6 forbid attaching either to a player), same as before.
     AwaitingEntryAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<Target> },
+    /// CR 303.4f/301.5e/301.6, extended to token creation
+    /// (`phase5/token-enters-attached`): `commands::legal_entry_attach_
+    /// candidates` found 2+ legal attach targets for a freshly created
+    /// token that's an Aura/Equipment/Fortification (realistically only
+    /// reachable via `TokenSpec::CopyOf` — a plain `Named`/`Creature` token
+    /// spec can never resolve to one) — `player` must choose which of
+    /// `candidates` `attaching` (already a real battlefield token by this
+    /// point) becomes attached to, then call `submit_token_attach_choice`.
+    /// A separate variant from `AwaitingEntryAttachChoice` rather than a
+    /// shared one — that pause's own resume always re-enters Search's
+    /// `VecDeque<ObjectId>`-based library loop, which token creation's own
+    /// `count`-driven loop has no equivalent of.
+    AwaitingTokenAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<Target> },
     /// CR 702.82a (Devour): `replacement::pending_devour_choice` found a
     /// registered Devour effect on `object` (already a real battlefield
     /// permanent by this point) with 1+ creatures `player` controls to
@@ -417,6 +431,29 @@ pub enum ProcessState {
         remaining: std::collections::VecDeque<ObjectId>,
         destination: SearchDestination,
         shuffle_after: bool,
+    },
+    /// CR 303.4f/301.5e/301.6, extended to token creation
+    /// (`phase5/token-enters-attached`): paused mid-`continue_create_token`
+    /// (the resumable loop body `resolve_create_token_effect`'s own
+    /// `for`-style loop was factored into) — `commands::legal_entry_attach_
+    /// candidates` found 2+ legal attach targets for `attaching` (already a
+    /// real battlefield token, unattached, by this point). `spec`/
+    /// `copy_snapshot` are exactly what `continue_create_token` needs to
+    /// keep building any further tokens still owed by the original
+    /// `count`; `remaining_count` is how many of those are left *after*
+    /// `attaching` itself (which `submit_token_attach_choice` finishes).
+    /// No `remaining: VecDeque<ObjectId>`/`destination`/`shuffle_after`
+    /// unlike `AwaitingEntryAttachChoice` above — token creation has no
+    /// library queue or shuffle step to resume, just a plain count.
+    AwaitingTokenAttachChoice {
+        attaching: ObjectId,
+        controller: PlayerId,
+        candidates: Vec<Target>,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+        remaining_count: u32,
+        spec: TokenSpec,
+        copy_snapshot: Option<CardDefinition>,
     },
     /// CR 702.82a (Devour): paused mid-`ResolveStackTop`, right where
     /// `apply_enters_battlefield_modifiers` would otherwise run for `object`

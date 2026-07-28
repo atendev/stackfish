@@ -45,6 +45,59 @@ impl Engine {
         Ok(())
     }
 
+    /// Answers a pending CR 303.4f/301.5e/301.6 token-creation entry attach
+    /// choice raised by `StepStatus::AwaitingTokenAttachChoice`
+    /// (`phase5/token-enters-attached`) — `chosen` must be one of that
+    /// status's `candidates`. Unlike `submit_attach_choice`, this resumes a
+    /// real continuation: `continue_create_token` picks back up with
+    /// whatever tokens this `CreateToken` effect still owes
+    /// (`remaining_count`). Mirrors `submit_entry_attach_choice`'s own
+    /// object/player dispatch exactly, but the tail differs: since this
+    /// pause is reached mid-`ResolveStackTop` (not via a separate library
+    /// pre-phase the way Search's own pause is), finishing the resumed loop
+    /// without a further pause means *this* method - not `resolve_stack_
+    /// top`'s own shared tail, which never runs for a resumed pause - must
+    /// push `StackObjectResolved` and transition to `ReplacementCheck`
+    /// itself, the same "bypassing the normal `ControlFlow::Continue`
+    /// caller" tail shape `submit_amplify_choice` already establishes for
+    /// the identical reason.
+    pub fn submit_token_attach_choice(&mut self, chosen: Target) -> Result<(), AttachChoiceError> {
+        let ProcessState::AwaitingTokenAttachChoice { candidates, .. } = &self.process_state else {
+            return Err(AttachChoiceError::NotAwaitingChoice);
+        };
+        if !candidates.contains(&chosen) {
+            return Err(AttachChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingTokenAttachChoice {
+            attaching, controller, stack_id, mut events_so_far, remaining_count, spec, copy_snapshot, ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        match chosen {
+            Target::Object(target_id) => {
+                commands::attach_permanent(&mut self.state, attaching, target_id);
+                events_so_far.push(GameEventKind::Attached { object: attaching, attached_to: target_id });
+            }
+            Target::Player(player) => {
+                commands::attach_permanent_to_player(&mut self.state, attaching, player);
+                events_so_far.push(GameEventKind::AttachedToPlayer { object: attaching, player });
+            }
+        }
+        match self.continue_create_token(&spec, &copy_snapshot, remaining_count, controller, stack_id, events_so_far) {
+            std::ops::ControlFlow::Continue(mut events) => {
+                events.push(GameEventKind::StackObjectResolved { stack_id });
+                self.process_state = ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
+            }
+            // A further token still owed by this effect also hit 2+
+            // candidates - continue_create_token already set
+            // self.process_state to the next AwaitingTokenAttachChoice
+            // pause itself, nothing more to do here.
+            std::ops::ControlFlow::Break(_) => {}
+        }
+        Ok(())
+    }
+
     /// Answers a pending backlog-item-9 `Game.SelectTargets` pause raised by
     /// `StepStatus::AwaitingScriptChoice` — `chosen` must satisfy the
     /// request's own `TargetFilter` (checked via the same `target_is_legal`

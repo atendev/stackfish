@@ -565,6 +565,23 @@ impl Engine {
                 status
             }
 
+            ProcessState::AwaitingTokenAttachChoice {
+                attaching, controller, candidates, stack_id, events_so_far, remaining_count, spec, copy_snapshot,
+            } => {
+                // Nothing to do until submit_token_attach_choice answers -
+                // same "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingTokenAttachChoice {
+                    player: controller,
+                    attaching,
+                    candidates: candidates.clone(),
+                };
+                self.process_state = ProcessState::AwaitingTokenAttachChoice {
+                    attaching, controller, candidates, stack_id, events_so_far, remaining_count, spec, copy_snapshot,
+                };
+                status
+            }
+
             ProcessState::AwaitingDevourChoice { object, controller, per_creature, candidates, stack_id, events_so_far } => {
                 // Nothing to do until submit_devour_choice answers - same
                 // "put the exact same state back" pattern every other

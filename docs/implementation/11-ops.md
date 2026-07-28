@@ -167,3 +167,70 @@
   nonland permanents" aren't expressible yet, only a plain type/controller restriction. Not added
   to `is_modal_resolvable`'s whitelist - no real modal card needs "destroy all X" as one mode yet
   (already silently no-ops there via the existing wildcard, not a new gap).
+
+## Slice: token-enters-attached (merged)
+
+- Branch `phase5/token-enters-attached`.
+- Scope: CR 303.4f/g/301.5e/301.6 pre-attached battlefield entry, extended to token creation
+  (`AbilityEffect::CreateToken`) - the one real non-casting, non-Search battlefield-entry producer
+  that had no attach machinery at all (`resolve_create_token_effect` always hard-coded
+  `attached_to`/`attached_to_player: None`, never paused). Closes a gap named twice already, in
+  `phase5/aura-enchants-a-player` and `phase5/aura-enters-attached-player`'s own backlog notes.
+  Only `TokenSpec::CopyOf` can realistically produce an Aura/Equipment/Fortification token (`Named`/
+  `Creature` specs always include `CREATURE`) - real cards: Estrid, the Masked / Bruna, the Fading
+  Light.
+- Design call made without a new opt-in field (unlike `SearchDestination::Battlefield::
+  enters_attached`): the attach-candidate dispatch always runs, gated purely by `commands::
+  is_aura`/`is_equipment`/`is_fortification` on the token's own resolved `CardDefinition`. CR 303.4f
+  has no "effect must specify" carve-out in its own text, and this keeps every pre-existing
+  `CreateToken` call site (none of which ever produces an Aura/Equipment-shaped token) completely
+  untouched - zero ripple, confirmed via a full-repo grep before implementing.
+- Real finding: `commands::legal_entry_attach_candidates`/`legal_aura_entry_candidates`/
+  `attach_permanent`/`attach_permanent_to_player`/`target_is_legal` needed **no changes** - already
+  fully `Target`-generic (post `phase5/aura-enters-attached-player`) and directly callable. Token
+  creation is actually simpler than Search here: the token's real final `ObjectId` is already
+  allocated before `state.objects` insertion (`tokens.rs`), so the candidate scan can use it
+  directly as `source` with no placeholder-id indirection (unlike Search, which scans with the
+  pre-move library id since its permanent's real id doesn't exist yet at scan time).
+- Key changes:
+  - `ProcessState`/`StepStatus::AwaitingTokenAttachChoice` - a new sibling to `AwaitingEntryAttachChoice`,
+    not a shared variant: that pause's own resume always re-enters Search's `VecDeque<ObjectId>`-based
+    library loop, which token creation's `count`-driven loop has no equivalent of. Carries `spec`/
+    `copy_snapshot`/`remaining_count` instead of `remaining`/`destination`/`shuffle_after`.
+  - `resolve_create_token_effect`'s old `for _ in 0..count` loop became `continue_create_token`
+    (`pub(in crate::engine)`, `engine/resolve/tokens.rs`), taking `remaining: u32` instead - the same
+    "loop body factored out of the fresh-entry effect resolver, called by both the fresh start and
+    the resume path" shape `continue_search_battlefield_entry` already established. Per-token order:
+    resolve `token_def`, allocate `token_id`, run the attach-candidate scan *before* building/
+    inserting the `GameObject` at all (the one real ordering divergence from Search) - this is what
+    makes CR 303.4g's token-specific second sentence ("if the Aura is a token, it isn't created")
+    cheap to honor exactly: a 0-candidate Aura just `continue`s before anything is built or inserted,
+    rather than needing to build-then-undo.
+  - `Engine::submit_token_attach_choice(chosen: Target)` (`choice_answers.rs`) - same object/player
+    two-armed `attach_permanent`/`attach_permanent_to_player` dispatch `submit_entry_attach_choice`
+    already established, but its tail differs: since this pause is reached mid-`ResolveStackTop` (not
+    via a separate library pre-phase), *this* method must push `StackObjectResolved`/transition to
+    `ReplacementCheck` itself when the resumed loop finishes without a further pause - the same
+    "bypassing the normal `ControlFlow::Continue` caller" tail shape `submit_amplify_choice` already
+    established, for the identical reason.
+  - `crates/scenario/src/lib.rs`'s `StepOutcome` dispatch gained the new `StepStatus` variant to its
+    existing generic "any unhandled pause returns `Ran`" arm (mechanical, one line).
+- Verify: 7 new tests (`phase5_token_enters_attached.rs`): 1-candidate auto-attach, 2-candidate
+  pause/resume, wrong-candidate-shape rejection, 0-candidate Aura not-created, 0-candidate Equipment
+  still-created-unattached, a `count: 2` case where both tokens independently pause and attach to
+  different targets (validates the resumable-loop design, the one genuinely new mechanism this slice
+  built), and a player-target case. Full workspace suite green.
+- A real modeling discovery made while writing the 0-candidate Aura test, not an implementation bug:
+  a *live, on-battlefield* Aura currently offering zero legal targets is a structural impossibility in
+  this engine (and in real Magic) - if it currently has zero legal targets, its own existing
+  attachment must already be illegal per that identical filter, and CR 704.5m's state-based action
+  would already have destroyed it before any copy effect could ever see it. The test's `CopyOf`
+  source therefore sits in the graveyard, not the battlefield (`sba::collect_illegally_attached_
+  auras`/`legal_entry_attach_candidates` both only ever consider `ZoneKind::Battlefield` objects, so
+  a graveyard Aura is exempt from CR 704.5m entirely) - not a workaround, a more accurate fixture
+  (mirrors Bruna, the Fading Light's own reanimation-adjacent shape).
+- Unresolved: mixed object-and-player candidates in one choice (no `TargetFilter` variant expresses
+  "object or player," so no producer - Search's or this one - can create a mixed set); CR 303.4i
+  (explicit illegal target) - still genuinely unreached, no `CreateToken`/`Search` shape in this
+  engine can specify a target at all; CR 303.4m enchanted-player continuous effects - unrelated,
+  unchanged.
