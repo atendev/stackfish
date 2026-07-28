@@ -891,9 +891,10 @@ pub(crate) fn resolve_deaths(
         };
         match replacement::apply_replacements(state, script_runtime, proposed, is_destroy) {
             ReplacementOutcome::Resolved(final_event) => {
-                let (event, mut abilities) = commit_death_or_regeneration(state, final_event);
-                resolved.push(event);
-                departed_triggered.append(&mut abilities);
+                for (event, mut abilities) in commit_death_or_regeneration(state, final_event) {
+                    resolved.push(event);
+                    departed_triggered.append(&mut abilities);
+                }
             }
             ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                 // Pre-existing gap, not introduced by this slice: `resolved`
@@ -1032,19 +1033,76 @@ pub(crate) fn commit_regeneration(state: &mut GameState, object: ObjectId) -> (G
     (event, Vec::new())
 }
 
+/// CR 702.89a (Umbra armor): performs the actual two-object side effect
+/// `ReplacementEffect::apply` rewrote the enchanted permanent's own would-be
+/// destruction into - clears damage marked on `enchanted` (the same damage
+/// clear `commit_regeneration` already does, without the tap/combat-removal,
+/// which CR 702.89a's own text doesn't call for), then destroys `aura`
+/// itself via the same real `commit_death` every other permanent's own
+/// departure already uses - a genuine CR 400.7 new-id zone move, not a
+/// rewritten event, since the Aura really does leave the battlefield.
+/// Deliberately bypasses a second CR 616 replacement check on the Aura's own
+/// departure - same narrow "don't recurse into another replacement pass"
+/// stance `submit_commander_return_choice`'s own doc comment already takes
+/// for an analogous situation (a real simplification, named rather than
+/// silently glossed). Two real committed events come out of resolving one
+/// replacement (the enchanted permanent's own log entry, plus the Aura's own
+/// real `ZoneChange`) - this is why `commit_death_or_regeneration` below
+/// returns a `Vec` rather than a single pair.
+fn commit_umbra_armor(state: &mut GameState, enchanted: ObjectId, aura: ObjectId) -> Vec<(GameEvent, Vec<RegisteredAbility>)> {
+    if let Some(obj) = state.object_mut(enchanted) {
+        obj.damage_marked = 0;
+    }
+    let event_id = state.allocate_event_id();
+    let sequence_no = state.allocate_sequence_no();
+    let consumed_event = GameEvent {
+        event_id,
+        sequence_no,
+        kind: GameEventKind::UmbraArmorConsumed { enchanted, aura },
+        caused_by_command: None,
+        parent_event: None,
+    };
+    let mut committed = vec![(consumed_event, Vec::new())];
+    // `aura` may already be gone (e.g. two Umbra Armors on the same
+    // creature both matching the same destroy attempt in one pass, or the
+    // Aura itself already departed some other way this pass) - skip rather
+    // than panic, same defensive stance `commit_death`'s own callers take
+    // for a participant that stopped resolving mid-pipeline.
+    if let Some(aura_obj) = state.object(aura).cloned() {
+        let proposed = GameEventKind::ZoneChange {
+            object: aura,
+            from: ZoneKind::Battlefield,
+            to: ZoneKind::Graveyard,
+            last_known_info: Some(aura_obj),
+        };
+        committed.push(commit_death(state, proposed));
+    }
+    committed
+}
+
 /// Dispatches a replacement-checked destroy proposal's final resolved event
 /// to the right committer - `commit_death` for an ordinary (possibly zone-
 /// substituted) `ZoneChange`, `commit_regeneration` for a regeneration
-/// shield's `Regenerated`. The one place every real caller (`resolve_deaths`
+/// shield's `Regenerated`, `commit_umbra_armor` for CR 702.89a's own
+/// `UmbraArmorConsumed`. The one place every real caller (`resolve_deaths`
 /// below, and `Engine::submit_replacement_choice`'s SBA-resume branch) needs
 /// to make this choice, kept here rather than duplicated at each call site.
+///
+/// Returns a `Vec` rather than a single pair - unlike `Regenerated`, an
+/// `UmbraArmorConsumed` resolution commits *two* real events (the enchanted
+/// permanent's own log entry, plus the destroyed Aura's own genuine
+/// `ZoneChange`) from one resolved replacement. Every real caller already
+/// just loops and appends, so this was a small ripple (3 call sites) rather
+/// than the wider ripple class this backlog usually flags before widening a
+/// shared return type.
 pub(crate) fn commit_death_or_regeneration(
     state: &mut GameState,
     event: GameEventKind,
-) -> (GameEvent, Vec<RegisteredAbility>) {
+) -> Vec<(GameEvent, Vec<RegisteredAbility>)> {
     match event {
-        GameEventKind::Regenerated { object } => commit_regeneration(state, object),
-        other => commit_death(state, other),
+        GameEventKind::Regenerated { object } => vec![commit_regeneration(state, object)],
+        GameEventKind::UmbraArmorConsumed { enchanted, aura } => commit_umbra_armor(state, enchanted, aura),
+        other => vec![commit_death(state, other)],
     }
 }
 

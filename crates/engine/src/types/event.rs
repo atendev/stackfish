@@ -190,6 +190,20 @@ pub enum GameEventKind {
     /// event" shape `Regenerated`/`Attached` already established.
     /// `sba::commit_unattach` is this event's only producer.
     Unattached { object: ObjectId, was_attached_to: ObjectId },
+    /// CR 702.89a (Umbra armor): `aura`'s own umbra armor intercepted
+    /// `enchanted`'s destruction — emitted by `replacement::ReplacementEffect
+    /// ::apply` *instead of* the `ZoneChange` that was proposed for
+    /// `enchanted`, same CR 614.6 "a modified event occurs instead"
+    /// substitution `Regenerated` already established. Not a `ZoneChange`
+    /// for `enchanted`: like regeneration, it never leaves the battlefield,
+    /// no new `ObjectId` minted for it. Unlike `Regenerated`, this event
+    /// alone doesn't cover every real side effect — `aura` itself is
+    /// genuinely destroyed as a consequence (a real, separate `ZoneChange`
+    /// event, `commands::retire_object` and all), which is why
+    /// `sba::commit_umbra_armor` (this event's only producer/committer)
+    /// returns more than one committed event for a single resolved
+    /// replacement — see that function's own doc comment.
+    UmbraArmorConsumed { enchanted: ObjectId, aura: ObjectId },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

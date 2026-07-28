@@ -636,6 +636,17 @@ pub enum EventFilter {
     /// same "proven via direct construction, ready the moment a real producer
     /// exists" stance `phase5/token-zone-lock`'s own CR 111.8 check already took.
     WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind>, affected: EffectFilter },
+    /// CR 702.89a (Umbra armor): "if enchanted permanent would be destroyed."
+    /// Same `Battlefield` -> `Graveyard` shape `WouldDie` matches, but the
+    /// affected object is always the replacement effect's own source's
+    /// `attached_to` target rather than a `controller`/`card_types`/
+    /// `self_only` filter — fieldless, sibling to `WouldDie` rather than a
+    /// new field on it (23 existing `WouldDie` construction sites, no
+    /// `Default` impl — same ripple class `AffectedFilter::EnchantedOnly`
+    /// itself already avoided for the continuous-effect sibling of this same
+    /// concept, `phase5/enchanted-reference`). Only pairs with
+    /// `ReplacementPayload::UmbraArmor`.
+    WouldDieEnchanted,
 }
 
 /// A `ReplacementEffect`'s actual rewrite (CR 614.1: the event doesn't
@@ -817,6 +828,18 @@ pub enum ReplacementPayload {
     /// isn't special-cased away, same stance `pending_devour_choice`'s own
     /// self-sacrifice case already takes.
     EntersAsCopy(CopyExceptions),
+    /// CR 702.89a (Umbra armor): "instead remove all damage marked on
+    /// [enchanted permanent] and destroy this Aura." Only pairs with
+    /// `EventFilter::WouldDieEnchanted`. Rewrites the enchanted permanent's
+    /// own proposed destroy into `GameEventKind::UmbraArmorConsumed` — same
+    /// "nothing to rewrite the *moving* object into, the permanent doesn't
+    /// change zones at all" shape `Regenerate`/`Regenerated` already
+    /// established (CR 702.89a prevents the destruction entirely, it doesn't
+    /// redirect it). Unlike `Regenerate`, a *second* object (the Aura
+    /// itself) also has to leave the battlefield as a real consequence —
+    /// see `sba::commit_umbra_armor`'s own doc comment for why that widened
+    /// `sba::commit_death_or_regeneration`'s return type to a `Vec`.
+    UmbraArmor,
 }
 
 /// Same `Primitive`/`Script` split every other filter-shaped type in this
@@ -918,6 +941,14 @@ impl ReplacementEffect {
                 event_target_matches(affected, Target::Object(*object), state, script_runtime, self.source)
             }
             (
+                EventFilter::WouldDieEnchanted,
+                GameEventKind::ZoneChange { object, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, .. },
+            ) => {
+                // CR 702.89a only fires on genuine destruction, same
+                // is_destroy gate Regenerate's own WouldDie arm checks.
+                is_destroy && state.object(self.source).and_then(|o| o.attached_to) == Some(*object)
+            }
+            (
                 EventFilter::WouldMoveZone { from, to, affected },
                 GameEventKind::ZoneChange { object, from: event_from, to: event_to, .. },
             ) => {
@@ -950,6 +981,9 @@ impl ReplacementEffect {
             ) => GameEventKind::ZoneChange { object, from, to: *new_zone, last_known_info },
             (ReplacementPayload::Regenerate, GameEventKind::ZoneChange { object, .. }) => {
                 GameEventKind::Regenerated { object }
+            }
+            (ReplacementPayload::UmbraArmor, GameEventKind::ZoneChange { object, .. }) => {
+                GameEventKind::UmbraArmorConsumed { enchanted: object, aura: self.source }
             }
             (_, other) => other,
         }

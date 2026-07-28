@@ -106,6 +106,7 @@ fn validate_replacement_filter_payload_pairing(
             | (EventFilterKind::WouldDie, ReplacementPayload::ReplaceZoneDestination(_))
             | (EventFilterKind::WouldDie, ReplacementPayload::Regenerate)
             | (EventFilterKind::WouldMoveZone { .. }, ReplacementPayload::ReplaceZoneDestination(_))
+            | (EventFilterKind::WouldDieEnchanted, ReplacementPayload::UmbraArmor)
     ) || matches!(
         (kind, payload),
         (
@@ -680,6 +681,7 @@ impl UserData for ReplacementEffectBuilder {
                 EventFilterKind::WouldMoveZone { from, to } => {
                     EventFilter::WouldMoveZone { from, to, affected: this.affected }
                 }
+                EventFilterKind::WouldDieEnchanted => EventFilter::WouldDieEnchanted,
             };
             validate_replacement_filter_payload_pairing(this.event_kind, &this.payload).map_err(to_lua_err)?;
             let replacement_effect = ReplacementEffect {

@@ -99,8 +99,10 @@ impl Engine {
             },
             ReplacementResumeTarget::SbaDeath { pending_deaths, then, .. } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
-                    let (committed, departed) = sba::commit_death_or_regeneration(&mut self.state, event);
-                    self.resume_sba_death(pending_deaths, vec![committed], departed, then)
+                    let committed_pairs = sba::commit_death_or_regeneration(&mut self.state, event);
+                    let (committed, departed_lists): (Vec<_>, Vec<_>) = committed_pairs.into_iter().unzip();
+                    let departed: Vec<_> = departed_lists.into_iter().flatten().collect();
+                    self.resume_sba_death(pending_deaths, committed, departed, then)
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                     ProcessState::AwaitingReplacementChoice {
@@ -490,9 +492,10 @@ impl Engine {
     fn commit_scripted_zone_move(&mut self, kind: ScriptedZoneMoveKind, final_event: GameEventKind) {
         match kind {
             ScriptedZoneMoveKind::Destroy => {
-                let (event, departed) = sba::commit_death_or_regeneration(&mut self.state, final_event);
-                self.departed_triggered_abilities.extend(departed);
-                self.state.ledger.push(event);
+                for (event, departed) in sba::commit_death_or_regeneration(&mut self.state, final_event) {
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(event);
+                }
             }
             ScriptedZoneMoveKind::Sacrifice => {
                 let (event, departed) = sba::commit_death(&mut self.state, final_event);

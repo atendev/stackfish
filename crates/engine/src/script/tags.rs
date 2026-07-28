@@ -124,6 +124,13 @@ pub(crate) enum EventFilterKind {
     DamageDealt,
     WouldDie,
     WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind> },
+    /// CR 702.89a (Umbra armor) — see `EventFilter::WouldDieEnchanted`'s own
+    /// doc comment. Fieldless like `WouldDie`, since `:SetAffected` plays no
+    /// role for this shape at all (the affected object is always the
+    /// registering effect's own `attached_to`, never a `controller`/
+    /// `card_types`/`self_only` filter) — `ReplacementEffectBuilder::
+    /// Register` ignores `this.affected` entirely for this variant.
+    WouldDieEnchanted,
 }
 
 /// Same idea, for `Game.EventFilters.*` — e.g. `Game.EventFilters.DamageDealt`
