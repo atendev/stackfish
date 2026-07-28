@@ -173,3 +173,73 @@ pub fn effective_max_hand_size(state: &GameState, modifiers: &[HandSizeModifier]
         None => Some(base),
     }
 }
+
+/// CR 701.20/701.18c/303.4m: which player(s) a `HandRevealModifier` affects —
+/// same two-shape split `HandSizeAffected` already established
+/// (`FilterController`'s you/opponent/any, or `EnchantedPlayer` resolved
+/// fresh against `source`'s own live `attached_to_player`). A genuinely
+/// separate sibling type, not shared with `HandSizeAffected` despite the
+/// identical shape — this is only the *second* mechanism needing it
+/// (`hand_size_modifiers`/`cost_modifiers` are the other two player-directed
+/// modifier mechanisms, neither the same domain), and sharing a type across
+/// two unrelated CR concepts on their second occurrence would be premature;
+/// worth extracting into one shared `PlayerFilter`-style type if a third
+/// mechanism ever needs the identical shape.
+#[derive(Clone, Copy, Debug)]
+pub enum HandRevealAffected {
+    Filter(FilterController),
+    EnchantedPlayer,
+}
+
+/// CR 701.20a/701.18c: a static "plays with hand revealed"-style effect
+/// (Telepathy's own worked example under CR 701.20c: "Your opponents play
+/// with their hands revealed") — deliberately **not** a `ContinuousEffect`/CR
+/// 613 layer, same reasoning `HandSizeModifier` already established (this
+/// isn't a characteristic query). No `effect` field the way `HandSizeModifier`
+/// has `HandSizeEffect` — CR 701.20a's "reveal" has no magnitude, existence
+/// of an applicable modifier alone means "revealed."
+///
+/// `phase5/hand-reveal-modifier`: deliberately a mechanism only, not wired to
+/// any real enforcement — this engine has no consumer that could act on it
+/// yet. `GameObject.visibility`/`VisibilityPolicy::is_visible_to` is the
+/// obvious candidate but is itself still `todo!()` with zero callers, and
+/// `script::encode::state_to_lua`/`card_summary_to_lua` don't parameterize by
+/// viewer at all — they structurally never encode hand *contents* for any
+/// player, revealed or not (only a `hand_count`), so there's nothing today
+/// for "revealed" to change from that consumer's perspective. Same "real but
+/// currently unreachable, named not hidden" stance `VisibilityPolicy` itself
+/// already takes — proven here only via `is_hand_revealed`'s own direct unit
+/// tests, not an end-to-end gameplay consumer.
+#[derive(Clone, Debug)]
+pub struct HandRevealModifier {
+    pub source: ObjectId,
+    pub controller: PlayerId,
+    pub affected: HandRevealAffected,
+    /// Same CR 613.7-style ordering convention `HandSizeModifier::timestamp`
+    /// carries, kept for consistency even though `is_hand_revealed`'s own OR
+    /// semantics (see its own doc comment) never actually need to break a
+    /// tie by it - nothing about "revealed" conflicts the way a hand-size
+    /// `SetTo`/`NoMaximum` override can.
+    pub timestamp: SequenceNo,
+}
+
+/// CR 701.20a: whether `player`'s hand is currently revealed to all players,
+/// given whatever `HandRevealModifier`s currently apply. Plain boolean OR
+/// across every applicable modifier — unlike `effective_max_hand_size`'s
+/// "latest timestamp wins" override resolution, reveal has no magnitude to
+/// conflict over (CR 701.20c: "a card that is currently revealed may be
+/// revealed again" - two reveal sources simply both hold, neither overrides
+/// the other). No `viewer` parameter, unlike a "look at" effect (CR 701.20e,
+/// scry/surveil's own shape) - CR 701.20a's "show that card to *all*
+/// players" means reveal is never scoped to one specific viewer, the actual
+/// textual distinction between "reveal" and "look."
+pub fn is_hand_revealed(state: &GameState, modifiers: &[HandRevealModifier], player: PlayerId) -> bool {
+    modifiers.iter().any(|m| match m.affected {
+        HandRevealAffected::Filter(FilterController::You) => player == m.controller,
+        HandRevealAffected::Filter(FilterController::Opponent) => player != m.controller,
+        HandRevealAffected::Filter(FilterController::Any) => true,
+        HandRevealAffected::EnchantedPlayer => {
+            state.object(m.source).is_some_and(|o| o.attached_to_player == Some(player))
+        }
+    })
+}

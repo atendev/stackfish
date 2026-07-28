@@ -7,7 +7,7 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::ids::{AbilityId, EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
-use crate::types::player::{HandSizeModifier, PlayerState};
+use crate::types::player::{HandRevealModifier, HandSizeModifier, PlayerState};
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
@@ -82,6 +82,13 @@ pub struct GameState {
     /// `cost_modifiers` above already established; see `HandSizeModifier`'s
     /// own doc comment (types/player.rs).
     pub hand_size_modifiers: Vec<HandSizeModifier>,
+    /// CR 701.20a/701.18c "plays with hand revealed"-style effects — same
+    /// "distinct mechanism from the CR 613 layer system" reasoning
+    /// `hand_size_modifiers` above already established; see
+    /// `HandRevealModifier`'s own doc comment (types/player.rs).
+    /// `phase5/hand-reveal-modifier`: a mechanism only, no real enforcement
+    /// consumer exists yet (see that struct's own doc comment).
+    pub hand_reveal_modifiers: Vec<HandRevealModifier>,
     /// Every card's registered triggered/activated/static abilities, flat —
     /// same reasoning as `continuous_effects`/`replacement_effects` above.
     pub abilities: Vec<RegisteredAbility>,
@@ -237,6 +244,7 @@ mod tests {
             replacement_effects: Vec::new(),
             cost_modifiers: Vec::new(),
             hand_size_modifiers: Vec::new(),
+            hand_reveal_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState { seed: 1, draws_consumed: 0 },

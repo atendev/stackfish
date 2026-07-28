@@ -17,7 +17,7 @@ use crate::types::effect::{
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
-use crate::types::player::HandSizeModifier;
+use crate::types::player::{HandRevealModifier, HandSizeModifier};
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
@@ -28,7 +28,8 @@ use super::decode::{
 };
 use super::tags::{
     ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind, EventFilterKindTag,
-    HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, RedirectDamageToSourceTag, ReplacementPayloadTag,
+    HandRevealAffectedTag, HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, RedirectDamageToSourceTag,
+    ReplacementPayloadTag,
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
@@ -806,6 +807,47 @@ impl UserData for HandSizeModifierBuilder {
                 controller: PlayerId(0),
                 affected,
                 effect,
+                // Placeholder - run_card_script's drain step stamps the real
+                // value, same reason StaticAbilityBuilder's own timestamp is.
+                timestamp: SequenceNo(0),
+            });
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreateHandRevealModifier(c)`'s return value (CR 701.20a/303.4m) —
+/// mirrors `HandSizeModifierBuilder` exactly, minus `:SetEffect` (`Game.
+/// HandRevealModifier` has no `effect` field to set - see that struct's own
+/// doc comment for why). `phase5/hand-reveal-modifier`: a mechanism-only
+/// slice - no real enforcement consumer exists yet for what this builder
+/// registers (see `HandRevealModifier`'s own doc comment).
+pub(crate) struct HandRevealModifierBuilder {
+    pub(crate) source: ObjectId,
+    pub(crate) affected: Option<crate::types::player::HandRevealAffected>,
+    pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for HandRevealModifierBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
+            this.affected = Some(value.borrow::<HandRevealAffectedTag>()?.0);
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let affected = this.affected.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetAffected() - a hand reveal modifier needs to know \
+                     which player(s) it affects"
+                        .to_string(),
+                )
+            })?;
+            this.registry.borrow_mut().pending_hand_reveal_modifiers.push(HandRevealModifier {
+                source: this.source,
+                // Placeholder - run_card_script's drain step stamps the real
+                // value (see this struct's own doc comment).
+                controller: PlayerId(0),
+                affected,
                 // Placeholder - run_card_script's drain step stamps the real
                 // value, same reason StaticAbilityBuilder's own timestamp is.
                 timestamp: SequenceNo(0),

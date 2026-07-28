@@ -19,11 +19,11 @@ use crate::types::effect::{
 };
 use crate::types::ids::ObjectId;
 use crate::types::mana::{ManaCost, ManaUnit};
-use crate::types::player::{HandSizeAffected, HandSizeEffect};
+use crate::types::player::{HandRevealAffected, HandSizeAffected, HandSizeEffect};
 
 use super::builders::{
-    ActivatedAbilityBuilder, CostModifierBuilder, HandSizeModifierBuilder, ManaAbilityBuilder,
-    ReplacementEffectBuilder, StaticAbilityBuilder, TriggeredAbilityBuilder,
+    ActivatedAbilityBuilder, CostModifierBuilder, HandRevealModifierBuilder, HandSizeModifierBuilder,
+    ManaAbilityBuilder, ReplacementEffectBuilder, StaticAbilityBuilder, TriggeredAbilityBuilder,
 };
 use super::decode::{
     decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table, decode_filter_table,
@@ -33,8 +33,8 @@ use super::decode::{
 };
 use super::tags::{
     ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DurationTag, EffectPrimitiveTag, EventFilterKind,
-    EventFilterKindTag, HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag,
-    OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, TokenTag,
+    EventFilterKindTag, HandRevealAffectedTag, HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LayerTag,
+    OncePerTurnTag, OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, TokenTag,
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
@@ -695,6 +695,25 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         lua.create_function(|_, n: u32| Ok(HandSizeEffectTag(HandSizeEffect::SetTo(n))))?,
     )?;
 
+    let create_hand_reveal_modifier = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(HandRevealModifierBuilder { source: ObjectId(source), affected: None, registry: Rc::clone(&registry) })
+        })?
+    };
+
+    // `Game.HandRevealAffected.*` - which player(s) a `Game.
+    // CreateHandRevealModifier` builder applies to
+    // (`HandRevealModifierBuilder::SetAffected`). Same shape as
+    // `Game.HandSizeAffected.*` above, kept as a separate table - see
+    // `HandRevealAffected`'s own doc comment for why the Rust type isn't
+    // shared either.
+    let hand_reveal_affected = lua.create_table()?;
+    hand_reveal_affected.set("You", HandRevealAffectedTag(HandRevealAffected::Filter(FilterController::You)))?;
+    hand_reveal_affected.set("Opponent", HandRevealAffectedTag(HandRevealAffected::Filter(FilterController::Opponent)))?;
+    hand_reveal_affected.set("Any", HandRevealAffectedTag(HandRevealAffected::Filter(FilterController::Any)))?;
+    hand_reveal_affected.set("EnchantedPlayer", HandRevealAffectedTag(HandRevealAffected::EnchantedPlayer))?;
+
     let tokens = lua.create_table()?;
     tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
     tokens.set("Food", TokenTag(TokenSpec::Named(NamedToken::Food)))?;
@@ -785,6 +804,8 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     game.set("CreateHandSizeModifier", create_hand_size_modifier)?;
     game.set("HandSizeAffected", hand_size_affected)?;
     game.set("HandSizeEffects", hand_size_effects)?;
+    game.set("CreateHandRevealModifier", create_hand_reveal_modifier)?;
+    game.set("HandRevealAffected", hand_reveal_affected)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;
     lua.globals().set("Game", game)

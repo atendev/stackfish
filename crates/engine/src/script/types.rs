@@ -13,7 +13,7 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::player::HandSizeModifier;
+use crate::types::player::{HandRevealModifier, HandSizeModifier};
 use crate::types::target::TargetFilter;
 
 #[derive(Debug)]
@@ -130,6 +130,11 @@ pub(crate) struct ScriptRegistry {
     /// placeholder (`PlayerId(0)`) until drain time, same reason and same
     /// fix as `pending_cost_modifiers`'s own placeholder `controller`.
     pub(crate) pending_hand_size_modifiers: Vec<HandSizeModifier>,
+    /// Same idea as `pending_hand_size_modifiers`, for `Game.
+    /// CreateHandRevealModifier`'s builder (CR 701.20a/303.4m) — drained
+    /// into `GameState.hand_reveal_modifiers` by `run_card_script`. Same
+    /// placeholder-`controller`/`timestamp` pattern.
+    pub(crate) pending_hand_reveal_modifiers: Vec<HandRevealModifier>,
     /// Backlog item 9: a coroutine `Thread` suspended mid-`invoke_operation`
     /// at a `Game.SelectTargets` call, keyed by the same opaque
     /// `ScriptHandle` space `scripts` uses (shares `next_handle`, kept in a
