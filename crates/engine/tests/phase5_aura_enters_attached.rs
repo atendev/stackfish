@@ -16,11 +16,13 @@
 //!
 //! - 1 legal candidate: attaches immediately, no pause.
 //! - 2+ legal candidates (CR 303.4f, "that player chooses"): a real (not
-//!   dormant) `ProcessState::AwaitingAuraEntryAttachChoice` pause -
-//!   `submit_aura_entry_attach_choice` resumes the search's own remaining
+//!   dormant) `ProcessState::AwaitingEntryAttachChoice` pause -
+//!   `submit_entry_attach_choice` resumes the search's own remaining
 //!   work (more chosen cards, `shuffle_after`, `StackObjectResolved`)
 //!   afterward, unlike the pre-existing (still dormant)
-//!   `AwaitingAttachChoice`/`submit_attach_choice`.
+//!   `AwaitingAttachChoice`/`submit_attach_choice`. Player candidates (CR
+//!   303.4b) are covered separately, in
+//!   `phase5_aura_enters_attached_player.rs`.
 //! - 0 legal candidates (CR 303.4g, current zone is the library, not the
 //!   stack): the Aura stays in the library - the search simply doesn't move
 //!   it.
@@ -236,9 +238,15 @@ fn aura_with_two_legal_candidates_pauses_and_resumes_the_search_afterward() {
     };
     assert_eq!(player, p0);
     let mut sorted = candidates.clone();
-    sorted.sort_by_key(|id| id.0);
-    let mut expected = vec![bear_a, bear_b];
-    expected.sort_by_key(|id| id.0);
+    sorted.sort_by_key(|t| match t {
+        Target::Object(id) => id.0,
+        Target::Player(p) => p.0 as u64,
+    });
+    let mut expected = vec![Target::Object(bear_a), Target::Object(bear_b)];
+    expected.sort_by_key(|t| match t {
+        Target::Object(id) => id.0,
+        Target::Player(p) => p.0 as u64,
+    });
     assert_eq!(sorted, expected, "both bears are legal enchant targets");
     // The aura is already a real battlefield permanent (unattached) by the
     // time this pause is raised - same order the cast-time Aura-ETB-attach
@@ -246,7 +254,7 @@ fn aura_with_two_legal_candidates_pauses_and_resumes_the_search_afterward() {
     assert_eq!(engine.state().object(paused_aura).unwrap().zone, ZoneKind::Battlefield);
     assert_eq!(engine.state().object(paused_aura).unwrap().attached_to, None);
 
-    engine.submit_entry_attach_choice(bear_b).expect("bear_b is an offered candidate");
+    engine.submit_entry_attach_choice(Target::Object(bear_b)).expect("bear_b is an offered candidate");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "the search's remaining work (shuffle, resolve) should finish, got {status:?}");
 
@@ -292,7 +300,7 @@ fn aura_entry_attach_choice_rejects_a_candidate_not_offered() {
     drain(&mut engine);
 
     // No creature with this id exists anywhere - never a legal candidate.
-    let err = engine.submit_entry_attach_choice(ObjectId(999)).unwrap_err();
+    let err = engine.submit_entry_attach_choice(Target::Object(ObjectId(999))).unwrap_err();
     assert!(matches!(err, AttachChoiceError::InvalidCandidate));
 }
 

@@ -15,7 +15,7 @@ use crate::types::ability::{CopyExceptions, SearchDestination};
 use crate::types::command::PlayerAction;
 use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
-use crate::types::ids::{ObjectId, PlayerId, ScriptHandle};
+use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
 
@@ -65,8 +65,12 @@ pub enum StepStatus {
     /// `SearchDestination::Battlefield::enters_attached` — `player` must
     /// choose which of `candidates` `attaching` becomes attached to, then
     /// call `submit_entry_attach_choice`. Real (not dormant) — the search
-    /// pathway is a genuine producer.
-    AwaitingEntryAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<ObjectId> },
+    /// pathway is a genuine producer. `candidates` is `Target`-shaped (not
+    /// `ObjectId`) since `phase5/aura-enters-attached-player` — an Aura's
+    /// own enchant ability can name a player (CR 303.4f/b); Equipment/
+    /// Fortification candidates are always `Target::Object` in practice (CR
+    /// 301.5a/301.6 forbid attaching either to a player), same as before.
+    AwaitingEntryAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<Target> },
     /// CR 702.82a (Devour): `replacement::pending_devour_choice` found a
     /// registered Devour effect on `object` (already a real battlefield
     /// permanent by this point) with 1+ creatures `player` controls to
@@ -401,10 +405,13 @@ pub enum ProcessState {
     /// Equipment/Fortification joined it (`phase5/attach-entry-equipment-
     /// fortification`) — keeping the old Aura-specific name would have
     /// misled the next reader into thinking it was still Aura-only.
+    /// `candidates` is `Target`-shaped since `phase5/aura-enters-attached-
+    /// player` (an Aura's own candidates can be players, CR 303.4f/b) —
+    /// Equipment/Fortification candidates are always `Target::Object`.
     AwaitingEntryAttachChoice {
         attaching: ObjectId,
         controller: PlayerId,
-        candidates: Vec<ObjectId>,
+        candidates: Vec<Target>,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
         remaining: std::collections::VecDeque<ObjectId>,

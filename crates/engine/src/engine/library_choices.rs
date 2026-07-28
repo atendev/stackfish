@@ -9,7 +9,7 @@ use crate::commands;
 use crate::replacement;
 use crate::types::ability::SearchDestination;
 use crate::types::event::GameEventKind;
-use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
+use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, Target};
 use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
 
@@ -344,11 +344,17 @@ impl Engine {
                             // early `continue` above) just enters unattached.
                             // Nothing more to do.
                             0 => {}
-                            1 => {
-                                commands::attach_permanent(&mut self.state, new_id, candidates[0]);
-                                events_so_far
-                                    .push(GameEventKind::Attached { object: new_id, attached_to: candidates[0] });
-                            }
+                            1 => match candidates[0] {
+                                Target::Object(target_id) => {
+                                    commands::attach_permanent(&mut self.state, new_id, target_id);
+                                    events_so_far
+                                        .push(GameEventKind::Attached { object: new_id, attached_to: target_id });
+                                }
+                                Target::Player(player) => {
+                                    commands::attach_permanent_to_player(&mut self.state, new_id, player);
+                                    events_so_far.push(GameEventKind::AttachedToPlayer { object: new_id, player });
+                                }
+                            },
                             _ => {
                                 // CR 303.4f: 2+ legal candidates - the
                                 // entering player chooses. `new_id` is
@@ -388,8 +394,12 @@ impl Engine {
     /// that status's `candidates`. Unlike `submit_attach_choice`, this
     /// resumes a real continuation: `continue_search_battlefield_entry`
     /// picks back up with whatever cards were still left in the search that
-    /// raised this pause.
-    pub fn submit_entry_attach_choice(&mut self, chosen: ObjectId) -> Result<(), AttachChoiceError> {
+    /// raised this pause. `chosen` is `Target`-shaped since
+    /// `phase5/aura-enters-attached-player` — an Aura's own candidates can
+    /// be players (CR 303.4f/b); dispatches to `attach_permanent`/
+    /// `attach_permanent_to_player` the same way `ResolveStackTop`'s own
+    /// cast-time attach branch already does.
+    pub fn submit_entry_attach_choice(&mut self, chosen: Target) -> Result<(), AttachChoiceError> {
         let ProcessState::AwaitingEntryAttachChoice { candidates, .. } = &self.process_state else {
             return Err(AttachChoiceError::NotAwaitingChoice);
         };
@@ -402,8 +412,16 @@ impl Engine {
         else {
             unreachable!("checked above");
         };
-        commands::attach_permanent(&mut self.state, attaching, chosen);
-        events_so_far.push(GameEventKind::Attached { object: attaching, attached_to: chosen });
+        match chosen {
+            Target::Object(target_id) => {
+                commands::attach_permanent(&mut self.state, attaching, target_id);
+                events_so_far.push(GameEventKind::Attached { object: attaching, attached_to: target_id });
+            }
+            Target::Player(player) => {
+                commands::attach_permanent_to_player(&mut self.state, attaching, player);
+                events_so_far.push(GameEventKind::AttachedToPlayer { object: attaching, player });
+            }
+        }
         self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);
         Ok(())
     }
