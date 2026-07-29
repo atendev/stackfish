@@ -48,7 +48,22 @@ pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind)
 /// (see `Engine::continue_draw_cards`). Takes `&mut GameState` rather than
 /// `propose_zone_move`'s `&GameState` for exactly this one side effect -
 /// nothing else about this function mutates state.
+///
+/// CR 121.2b: this is the one choke point both `Engine::continue_draw_cards`
+/// (effect-driven draws) and the turn-based `Step::Draw` handling already
+/// share, so a "can't draw more than N cards each turn" check belongs here,
+/// not duplicated at each caller. Returning `None` once `player`'s own
+/// `DrawLimitModifier` limit is already met reuses the exact same "no draw
+/// happens" path the empty-library case below already takes - `continue_
+/// draw_cards`'s per-card loop already treats that as license to stop, which
+/// is exactly CR 121.2b's "instructions to draw multiple cards may still be
+/// partially carried out."
 pub(crate) fn propose_draw(state: &mut GameState, player: PlayerId) -> Option<GameEventKind> {
+    if let Some(limit) = crate::types::player::effective_draw_limit(&state.draw_limit_modifiers, player) {
+        if crate::types::player::cards_drawn_this_turn(state, player) >= limit {
+            return None;
+        }
+    }
     let card = state.zone(ZoneKind::Library, Some(player)).and_then(|library| library.contents.front().copied());
     let Some(card) = card else {
         if let Some(p) = state.player_mut(player) {

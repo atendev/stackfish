@@ -17,7 +17,7 @@ use crate::types::effect::{
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
-use crate::types::player::{HandRevealModifier, HandSizeModifier};
+use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier};
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
@@ -27,7 +27,7 @@ use super::decode::{
     parse_card_type_name, parse_filter_controller_name,
 };
 use super::tags::{
-    ConsumptionPolicyTag, CostComponent, DurationTag, EventFilterKind, EventFilterKindTag,
+    ConsumptionPolicyTag, CostComponent, DrawLimitAffectedTag, DurationTag, EventFilterKind, EventFilterKindTag,
     HandRevealAffectedTag, HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, RedirectDamageToSourceTag,
     ReplacementPayloadTag,
 };
@@ -848,6 +848,60 @@ impl UserData for HandRevealModifierBuilder {
                 // value (see this struct's own doc comment).
                 controller: PlayerId(0),
                 affected,
+                // Placeholder - run_card_script's drain step stamps the real
+                // value, same reason StaticAbilityBuilder's own timestamp is.
+                timestamp: SequenceNo(0),
+            });
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreateDrawLimitModifier(c)`'s return value (CR 121.2b) — mirrors
+/// `HandSizeModifierBuilder`'s exact shape (`:SetAffected` + a magnitude
+/// setter, `:Register()`), same queue-and-drain, placeholder-`controller`/
+/// `timestamp`-patched-at-drain-time convention. `:SetLimit` is this
+/// builder's `HandSizeEffect`-equivalent magnitude - a plain `u32` rather
+/// than a tagged value, since `DrawLimitModifier::limit` has no polarity to
+/// distinguish (unlike `HandSizeEffect::NoMaximum`/`SetTo(n)`).
+pub(crate) struct DrawLimitModifierBuilder {
+    pub(crate) source: ObjectId,
+    pub(crate) affected: Option<crate::types::player::DrawLimitAffected>,
+    pub(crate) limit: Option<u32>,
+    pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for DrawLimitModifierBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
+            this.affected = Some(value.borrow::<DrawLimitAffectedTag>()?.0);
+            Ok(())
+        });
+        methods.add_method_mut("SetLimit", |_, this, limit: u32| {
+            this.limit = Some(limit);
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let affected = this.affected.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetAffected() - a draw limit modifier needs to know \
+                     which player(s) it affects"
+                        .to_string(),
+                )
+            })?;
+            let limit = this.limit.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetLimit() - a draw limit modifier needs a limit"
+                        .to_string(),
+                )
+            })?;
+            this.registry.borrow_mut().pending_draw_limit_modifiers.push(DrawLimitModifier {
+                source: this.source,
+                // Placeholder - run_card_script's drain step stamps the real
+                // value (see this struct's own doc comment).
+                controller: PlayerId(0),
+                affected,
+                limit,
                 // Placeholder - run_card_script's drain step stamps the real
                 // value, same reason StaticAbilityBuilder's own timestamp is.
                 timestamp: SequenceNo(0),

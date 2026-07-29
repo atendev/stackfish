@@ -13,7 +13,7 @@ use crate::types::cost::CostModifier;
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::player::{HandRevealModifier, HandSizeModifier};
+use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier};
 use crate::types::target::TargetSpec;
 
 use super::decode::{
@@ -219,6 +219,19 @@ impl ScriptRuntime {
             modifier.timestamp = state.allocate_sequence_no();
         }
         state.hand_reveal_modifiers.append(&mut hand_reveal_modifiers);
+
+        let mut draw_limit_modifiers: Vec<DrawLimitModifier> =
+            self.registry.borrow_mut().pending_draw_limit_modifiers.drain(..).collect();
+        for modifier in &mut draw_limit_modifiers {
+            // Real controller and timestamp, same reason and same fix as
+            // hand_size_modifiers's own placeholders above.
+            modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
+                "DrawLimitModifier's source must already exist in GameState by drain time - \
+                 Game.CreateDrawLimitModifier was called with a bogus source id",
+            );
+            modifier.timestamp = state.allocate_sequence_no();
+        }
+        state.draw_limit_modifiers.append(&mut draw_limit_modifiers);
         Ok(())
     }
 
