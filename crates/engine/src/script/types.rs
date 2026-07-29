@@ -13,7 +13,7 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::player::{HandRevealModifier, HandSizeModifier};
+use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier};
 use crate::types::target::TargetFilter;
 
 #[derive(Debug)]
@@ -135,6 +135,11 @@ pub(crate) struct ScriptRegistry {
     /// into `GameState.hand_reveal_modifiers` by `run_card_script`. Same
     /// placeholder-`controller`/`timestamp` pattern.
     pub(crate) pending_hand_reveal_modifiers: Vec<HandRevealModifier>,
+    /// Same idea as `pending_hand_reveal_modifiers`, for `Game.
+    /// CreateDrawLimitModifier`'s builder (CR 121.2b) — drained into
+    /// `GameState.draw_limit_modifiers` by `run_card_script`. Same
+    /// placeholder-`controller`/`timestamp` pattern.
+    pub(crate) pending_draw_limit_modifiers: Vec<DrawLimitModifier>,
     /// Backlog item 9: a coroutine `Thread` suspended mid-`invoke_operation`
     /// at a `Game.SelectTargets` call, keyed by the same opaque
     /// `ScriptHandle` space `scripts` uses (shares `next_handle`, kept in a

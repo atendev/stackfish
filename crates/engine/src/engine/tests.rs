@@ -44,6 +44,7 @@ fn minimal_state() -> GameState {
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
         hand_reveal_modifiers: Vec::new(),
+        draw_limit_modifiers: Vec::new(),
         abilities: Vec::new(),
         ledger: Vec::new(),
         rng: crate::types::game::RngState { seed: 1, draws_consumed: 0 },

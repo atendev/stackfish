@@ -10,7 +10,7 @@ use crate::types::ability::{AbilityEffect, ConditionPrimitive, InterveningIfPrim
 use crate::types::cost::AdditionalCost;
 use crate::types::effect::{ConsumptionPolicy, EffectDuration, EffectPrimitive, Layer, ReplacementPayload};
 use crate::types::mana::ManaCost;
-use crate::types::player::{HandRevealAffected, HandSizeAffected, HandSizeEffect};
+use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect};
 use crate::types::zone::ZoneKind;
 
 /// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
@@ -177,6 +177,14 @@ impl UserData for HandSizeEffectTag {}
 #[derive(Clone, Copy)]
 pub(crate) struct HandRevealAffectedTag(pub(crate) HandRevealAffected);
 impl UserData for HandRevealAffectedTag {}
+
+/// Same idea, for `Game.DrawLimitAffected.*` — e.g. `Game.DrawLimitAffected.
+/// You`/`.Opponent`/`.Any` are plain tagged values, the argument to
+/// `DrawLimitModifierBuilder::SetAffected`. No `EnchantedPlayer` variant —
+/// see `DrawLimitAffected`'s own doc comment for why.
+#[derive(Clone, Copy)]
+pub(crate) struct DrawLimitAffectedTag(pub(crate) DrawLimitAffected);
+impl UserData for DrawLimitAffectedTag {}
 
 /// `Game.ReplacementPayloads.RedirectDamageToSource` — a sentinel, not a
 /// `ReplacementPayloadTag`, because `RedirectDamage(Target)` needs a real

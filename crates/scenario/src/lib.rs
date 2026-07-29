@@ -1438,6 +1438,7 @@ pub fn build_initial_state(
         cost_modifiers: Vec::new(),
         hand_size_modifiers: Vec::new(),
         hand_reveal_modifiers: Vec::new(),
+        draw_limit_modifiers: Vec::new(),
         abilities,
         ledger: Vec::new(),
         rng: RngState { seed: file.seed.expect("`seed` is required when `[game]` is not set"), draws_consumed: 0 },

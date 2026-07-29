@@ -7,7 +7,7 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::ids::{AbilityId, EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
-use crate::types::player::{HandRevealModifier, HandSizeModifier, PlayerState};
+use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, PlayerState};
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
@@ -89,6 +89,11 @@ pub struct GameState {
     /// `phase5/hand-reveal-modifier`: a mechanism only, no real enforcement
     /// consumer exists yet (see that struct's own doc comment).
     pub hand_reveal_modifiers: Vec<HandRevealModifier>,
+    /// CR 121.2b "player can't draw more than one card each turn"-style
+    /// effects — same "distinct mechanism from the CR 613 layer system"
+    /// reasoning `hand_size_modifiers`/`hand_reveal_modifiers` above already
+    /// established; see `DrawLimitModifier`'s own doc comment (types/player.rs).
+    pub draw_limit_modifiers: Vec<DrawLimitModifier>,
     /// Every card's registered triggered/activated/static abilities, flat —
     /// same reasoning as `continuous_effects`/`replacement_effects` above.
     pub abilities: Vec<RegisteredAbility>,
@@ -245,6 +250,7 @@ mod tests {
             cost_modifiers: Vec::new(),
             hand_size_modifiers: Vec::new(),
             hand_reveal_modifiers: Vec::new(),
+            draw_limit_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState { seed: 1, draws_consumed: 0 },

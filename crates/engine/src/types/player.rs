@@ -1,8 +1,10 @@
 use crate::types::cost::FilterController;
 use crate::types::counter::CounterSet;
+use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
 use crate::types::mana::ManaPool;
+use crate::types::zone::ZoneKind;
 
 /// Emblems live in a player's command zone (CR 114.1) but aren't cards from
 /// the external database — no `CardDefinition`, no mana cost/types, never
@@ -242,4 +244,82 @@ pub fn is_hand_revealed(state: &GameState, modifiers: &[HandRevealModifier], pla
             state.object(m.source).is_some_and(|o| o.attached_to_player == Some(player))
         }
     })
+}
+
+/// CR 121.2b: which player(s) a `DrawLimitModifier` affects. Narrowed to
+/// `Filter(FilterController)` only, unlike `HandSizeAffected`/
+/// `HandRevealAffected`'s two-shape split - no known real card needs an
+/// `EnchantedPlayer` form of this effect (both those siblings had a real
+/// worked example driving that variant; this one doesn't), so it's left out
+/// rather than spec-built ahead of a real case. Add it the same way
+/// `HandRevealAffected` mirrored `HandSizeAffected` if one ever turns up.
+#[derive(Clone, Copy, Debug)]
+pub enum DrawLimitAffected {
+    Filter(FilterController),
+}
+
+/// CR 121.2b: a static "player can't draw more than one card each turn"-
+/// style effect - the third player-level continuous effect in this cluster,
+/// same "distinct mechanism from the CR 613 layer system" reasoning
+/// `HandSizeModifier`/`HandRevealModifier` already established (this isn't a
+/// characteristic query either). Unlike `HandRevealModifier`, this one has a
+/// real enforcement consumer from the start: `commands::propose_draw`, the
+/// one choke point both `Engine::continue_draw_cards` and the turn-based
+/// `Step::Draw` handling already share.
+#[derive(Clone, Debug)]
+pub struct DrawLimitModifier {
+    pub source: ObjectId,
+    pub controller: PlayerId,
+    pub affected: DrawLimitAffected,
+    /// CR 121.2b's own text is always "more than one," but this is a plain
+    /// magnitude rather than a hardcoded `1` - costs nothing extra and
+    /// matches `HandSizeEffect::SetTo(u32)`'s own precedent of not
+    /// hardcoding the one real number every printed card happens to use.
+    pub limit: u32,
+    /// Same CR 613.7-style "latest wins" tiebreak `HandSizeModifier::
+    /// timestamp` documents - two conflicting limits on the same player
+    /// (rare, but no rules reason to forbid it) resolve the same way.
+    pub timestamp: SequenceNo,
+}
+
+/// CR 121.2b: `player`'s current per-turn draw limit, given whatever
+/// `DrawLimitModifier`s currently apply - `None` means no limit. Mirrors
+/// `effective_max_hand_size`'s own "latest timestamp wins outright, no
+/// stacking" resolution exactly.
+pub fn effective_draw_limit(modifiers: &[DrawLimitModifier], player: PlayerId) -> Option<u32> {
+    modifiers
+        .iter()
+        .filter(|m| match m.affected {
+            DrawLimitAffected::Filter(FilterController::You) => player == m.controller,
+            DrawLimitAffected::Filter(FilterController::Opponent) => player != m.controller,
+            DrawLimitAffected::Filter(FilterController::Any) => true,
+        })
+        .max_by_key(|m| m.timestamp.0)
+        .map(|m| m.limit)
+}
+
+/// CR 121.2b's own "this turn" scope: how many cards `player` has drawn so
+/// far in the current turn - bounded by the most recent `GameEventKind::
+/// TurnStarted` in `state.ledger`, same append-only-ledger-scan convention
+/// `replacement::opponent_damaged_this_turn` already established for CR
+/// 702.54a Bloodthirst (no `TurnStarted` yet scans from the beginning
+/// instead of treating the count as unknowable). Counts `ZoneChange { from:
+/// Library, to: Hand, .. }` events whose `last_known_info.owner` is
+/// `player` - a draw always moves a card from a player's own library to
+/// their own hand, so ownership (not `state.objects` liveness, which the
+/// card may have already left by now) is the correct, always-available
+/// signal.
+pub fn cards_drawn_this_turn(state: &GameState, player: PlayerId) -> u32 {
+    let turn_start = state.ledger.iter().rposition(|e| matches!(e.kind, GameEventKind::TurnStarted { .. }));
+    let scan_from = turn_start.map(|i| i + 1).unwrap_or(0);
+    state.ledger[scan_from..]
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.kind,
+                GameEventKind::ZoneChange { from: ZoneKind::Library, to: ZoneKind::Hand, last_known_info: Some(info), .. }
+                    if info.owner == player
+            )
+        })
+        .count() as u32
 }
