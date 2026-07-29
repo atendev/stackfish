@@ -77,6 +77,22 @@ pub enum AbilityEffect {
     /// replacement-checked event, not a replacement effect itself. No
     /// fields — a toggle, not a value, same shape as `SwitchPT`.
     Destroy,
+    /// CR 509.1h: "target attacking creature becomes blocked" — blocked by
+    /// no specific creature (CR 510.1c: deals no combat damage unless it has
+    /// trample), mutated directly into `CombatState.effect_blocked` via
+    /// `commands::mark_effect_blocked` — no event kind exists for this, same
+    /// "already happened, no `CommitEvents` needed" convention `Pump`/
+    /// `GainControl` already use for their own direct `GameState` mutation.
+    /// CR 702.22i rides along for free: `mark_effect_blocked` itself
+    /// propagates to every other living member of the target's own band.
+    /// No fields — a toggle, not a value, same shape as `Destroy`. Narrowed:
+    /// `target_requirement` can only express "target creature," not "target
+    /// *attacking* creature" (no `TargetFilter` predicate for combat state
+    /// exists, and the Lua state snapshot doesn't expose combat data either)
+    /// — targeting a non-attacking creature is a silent no-op at resolution
+    /// (checked inside `mark_effect_blocked` itself) rather than a real CR
+    /// 608.2b illegal-target fizzle.
+    BecomeBlocked,
     /// The `Game.Ops.DestroyAll(filter)` primitive (CR 701.8, CR 601.2c's
     /// "all"-effects-don't-target) — destroys every battlefield permanent
     /// matching `filter` unconditionally, e.g. Armageddon's "Destroy all

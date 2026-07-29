@@ -74,7 +74,7 @@ fn unblocked_attacker_deals_damage_to_original_target() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state =
-        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new() });
+        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new() });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
 
     let mut engine = Engine::new(state);
@@ -105,7 +105,7 @@ fn single_blocker_deals_damage_both_directions() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 5), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));
@@ -130,7 +130,7 @@ fn single_blocker_lethal_both_ways_kills_both_creatures_same_step() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 2), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 2), p1));
@@ -157,7 +157,7 @@ fn double_blocked_attacker_accepts_a_legal_split() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker_a, attacker), (blocker_b, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 5, 10), p0));
     put_on_battlefield(&mut state, permanent(blocker_a, creature_definition("Wall1", 1, 10), p1));
@@ -188,7 +188,7 @@ fn double_blocked_attacker_rejects_an_illegal_split_sum() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker_a, attacker), (blocker_b, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 5, 10), p0));
     put_on_battlefield(&mut state, permanent(blocker_a, creature_definition("Wall1", 1, 10), p1));
@@ -216,7 +216,7 @@ fn double_blocked_attacker_rejects_a_missing_split() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker_a, attacker), (blocker_b, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 5, 10), p0));
     put_on_battlefield(&mut state, permanent(blocker_a, creature_definition("Wall1", 1, 10), p1));
@@ -238,7 +238,7 @@ fn single_blocked_attacker_rejects_a_redundant_split_entry() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 5), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));
@@ -260,7 +260,7 @@ fn zero_power_attacker_assigns_no_damage() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state =
-        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new() });
+        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new() });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Sprout", 0, 1), p0));
 
     let mut engine = Engine::new(state);
@@ -283,7 +283,7 @@ fn zero_power_attacker_assigns_no_damage() {
 fn damage_marked_is_cleared_entering_cleanup() {
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
-    let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: Vec::new() , bands: Vec::new() });
+    let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: Vec::new() , bands: Vec::new(), effect_blocked: Vec::new() });
     // Non-lethal marked damage (toughness 5, damage 1) - survives to Cleanup
     // so this test isolates the reset itself, not 704.5g.
     let mut object = permanent(creature, creature_definition("Bear", 3, 5), p0);

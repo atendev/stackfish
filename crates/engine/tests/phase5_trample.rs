@@ -116,7 +116,7 @@ fn unblocked_trampler_is_a_plain_full_power_hit() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
 
@@ -140,7 +140,7 @@ fn single_blocker_trample_now_requires_a_chosen_split() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
@@ -163,7 +163,7 @@ fn single_blocker_trample_splits_lethal_and_excess_to_the_player() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
@@ -185,7 +185,7 @@ fn trample_cannot_send_excess_until_the_blocker_gets_lethal() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
@@ -208,7 +208,7 @@ fn trample_may_assign_everything_to_the_blocker_leaving_nothing_for_the_player()
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
@@ -235,7 +235,7 @@ fn multi_blocker_trample_distributes_lethal_then_spills_the_remainder() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker_1, attacker), (blocker_2, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 7, 7, KeywordSet::TRAMPLE), p0));
     put_on_battlefield(&mut state, permanent(blocker_1, creature_definition("Wall1", 0, 2, KeywordSet::empty()), p1));
@@ -263,7 +263,7 @@ fn deathtouch_trample_only_needs_one_damage_to_call_a_blocker_lethal() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(
         &mut state,
@@ -295,7 +295,7 @@ fn blocked_attacker_with_no_living_blockers_deals_no_damage_without_trample() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(long_dead_blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3, KeywordSet::empty()), p0));
 
@@ -322,7 +322,7 @@ fn blocked_trampler_with_no_living_blockers_deals_full_power_per_702_19d() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(long_dead_blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
 

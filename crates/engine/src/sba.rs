@@ -1020,6 +1020,7 @@ pub(crate) fn commit_regeneration(state: &mut GameState, object: ObjectId) -> (G
     if let Some(combat) = state.combat.as_mut() {
         combat.attackers.retain(|(id, _)| *id != object);
         combat.blocks.retain(|(blocker, attacker)| *blocker != object && *attacker != object);
+        combat.effect_blocked.retain(|id| *id != object);
     }
     let event_id = state.allocate_event_id();
     let sequence_no = state.allocate_sequence_no();

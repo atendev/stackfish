@@ -143,7 +143,7 @@ pub(in crate::commands) fn execute_declare_attackers(
         attackers,
         blocks: Vec::new(),
         declared_defenders: Vec::new(),
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
 
     return Ok(CommandOutcome {
@@ -603,4 +603,41 @@ pub(in crate::commands) fn execute_declare_blockers(
         requires_payment: None,
         battlefield_entries: Vec::new(),
     });
+}
+
+/// CR 509.1h/702.22i: makes `target` become blocked via an effect (`Ability
+/// Effect::BecomeBlocked` — not a declared blocker), by recording it in
+/// `CombatState.effect_blocked` rather than `blocks` (there's no real
+/// blocker to pair it with). No-op if `target` isn't currently an attacker
+/// at all (see `AbilityEffect::BecomeBlocked`'s own doc comment for why
+/// this can't be caught earlier, at target-legality time) or if there's no
+/// combat happening. CR 603.2e: "becomes" blocked only fires on a real
+/// state change, so an attacker already blocked — whether by a declared
+/// blocker or an earlier effect — is left untouched, not re-added.
+///
+/// CR 702.22i: unlike CR 702.22h's declared-blocker propagation (which
+/// gives every band member the *same* blocker), this only propagates the
+/// blocked *state* — every other living, still-attacking member of
+/// `target`'s own band independently becomes blocked by no one, exactly
+/// like `target` itself.
+pub(crate) fn mark_effect_blocked(state: &mut GameState, target: ObjectId) {
+    let Some(combat) = state.combat.as_mut() else { return };
+    if !combat.attackers.iter().any(|(id, _)| *id == target) {
+        return;
+    }
+    mark_one_effect_blocked(combat, target);
+    let Some(band) = combat.bands.iter().find(|band| band.contains(&target)).cloned() else { return };
+    for member in band {
+        if member == target || !combat.attackers.iter().any(|(id, _)| *id == member) {
+            continue;
+        }
+        mark_one_effect_blocked(combat, member);
+    }
+}
+
+fn mark_one_effect_blocked(combat: &mut CombatState, attacker: ObjectId) {
+    let already = combat.blocks.iter().any(|(_, a)| *a == attacker) || combat.effect_blocked.contains(&attacker);
+    if !already {
+        combat.effect_blocked.push(attacker);
+    }
 }

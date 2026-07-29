@@ -252,6 +252,7 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::GainLife(_))
         | Some(AbilityEffect::Damage(_))
         | Some(AbilityEffect::Destroy)
+        | Some(AbilityEffect::BecomeBlocked)
         // CR 701.8/601.2c: no different from any other untargeted
         // effect shape at this level - "destroy all X" needs no
         // targets validated (target_requirement is None for it),
