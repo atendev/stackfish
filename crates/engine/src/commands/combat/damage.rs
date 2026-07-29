@@ -94,9 +94,17 @@ pub(in crate::commands) fn execute_assign_combat_damage(
     // existing bug: an attacker whose blockers all died before this
     // step fell into the same "no entry" case as a never-blocked
     // attacker and incorrectly dealt full damage to the defending
-    // player regardless of trample.
-    let declared_blocked_attackers: HashSet<ObjectId> =
-        combat.blocks.iter().map(|(_, attacker)| *attacker).collect();
+    // player regardless of trample. `combat.effect_blocked` (CR
+    // 509.1h/702.22i: became blocked via an effect, never had a real
+    // blocker to begin with) joins the same set for the exact same
+    // reason - zero blockers, living or otherwise, still means no
+    // combat damage unless trample.
+    let declared_blocked_attackers: HashSet<ObjectId> = combat
+        .blocks
+        .iter()
+        .map(|(_, attacker)| *attacker)
+        .chain(combat.effect_blocked.iter().copied())
+        .collect();
 
     // CR 510.1c: a real split only exists for an attacker with 2+
     // living blockers, or exactly 1 living blocker if it has trample

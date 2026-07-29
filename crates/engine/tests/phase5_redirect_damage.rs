@@ -173,7 +173,7 @@ fn lua_registered_redirect_damage_sends_combat_damage_to_shield_instead_of_playe
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature_definition("Bear", 3, 3), p0));
     let shield_definition = creature_definition("Pariah", 0, 4, REDIRECT_DAMAGE_TO_SELF);

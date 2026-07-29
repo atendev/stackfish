@@ -253,7 +253,7 @@ fn combat_damage_from_a_matching_color_is_prevented_by_protection() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Bear", 3, 3, Some(ColorSet::RED)), p0, ZoneKind::Battlefield));
     put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Ward", 0, 5, None), p1, ZoneKind::Battlefield));
@@ -276,7 +276,7 @@ fn combat_damage_from_a_different_color_still_lands() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Bear", 3, 3, Some(ColorSet::GREEN)), p0, ZoneKind::Battlefield));
     put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Ward", 0, 5, None), p1, ZoneKind::Battlefield));

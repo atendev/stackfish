@@ -448,6 +448,12 @@ impl Engine {
             // SBA-driven death - the remaining independent
             // targets in this same op resume afterward.
             Some(AbilityEffect::Destroy) => self.resolve_destroy_effect(top, legal_targets),
+            // CR 509.1h/702.22i: direct CombatState mutation via
+            // commands::mark_effect_blocked, same "already
+            // happened, no CommitEvents needed" convention Pump/
+            // GainControl already use - see AbilityEffect::
+            // BecomeBlocked's own doc comment for the full shape.
+            Some(AbilityEffect::BecomeBlocked) => self.resolve_become_blocked_effect(legal_targets, events),
             // CR 701.8/601.2c: "destroy all X" doesn't target
             // at all - every battlefield object matching
             // `filter` (relative to this effect's own

@@ -385,7 +385,7 @@ fn declare_blockers_rejects_wrong_step() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: Vec::new(),
-        bands: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(),
     });
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
 

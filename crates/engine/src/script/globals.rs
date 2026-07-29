@@ -172,6 +172,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     })?;
     ops.set("Damage", damage)?;
     ops.set("Destroy", OperationTag(AbilityEffect::Destroy))?;
+    ops.set("BecomeBlocked", OperationTag(AbilityEffect::BecomeBlocked))?;
     let destroy_all = lua.create_function(|_, table: Table| {
         let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
         Ok(OperationTag(AbilityEffect::DestroyAll(filter)))

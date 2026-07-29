@@ -193,6 +193,24 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
+    /// CR 509.1h/702.22i: every legal target independently becomes blocked
+    /// via `commands::mark_effect_blocked` — see that function's own doc
+    /// comment for the CR 702.22i band-propagation and CR 603.2e idempotency
+    /// details. A `Target::Player` (shouldn't be reachable — this effect's
+    /// `target_requirement` only ever asks for a creature) is skipped, same
+    /// "silent no-op" stance every other arm here takes.
+    pub(super) fn resolve_become_blocked_effect(
+        &mut self,
+        legal_targets: &[Target],
+        events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        for target in legal_targets {
+            let Target::Object(id) = target else { continue };
+            commands::mark_effect_blocked(&mut self.state, *id);
+        }
+        ControlFlow::Continue(events)
+    }
+
     pub(super) fn resolve_gain_control_effect(
         &mut self,
         top: &StackObject,

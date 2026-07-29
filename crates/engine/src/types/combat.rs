@@ -29,4 +29,19 @@ pub struct CombatState {
     /// [quality]" variant isn't modeled (see `KeywordSet::BANDING`'s own
     /// doc comment).
     pub bands: Vec<Vec<ObjectId>>,
+    /// CR 509.1h: attackers made blocked by an effect ("target attacking
+    /// creature becomes blocked") rather than a declared blocker - blocked
+    /// by no specific creature. `blocks` (above) can't represent this: it's
+    /// a flat list of real `(blocker, attacker)` pairs, with no way to say
+    /// "blocked, but by nothing." Consulted alongside `blocks` everywhere
+    /// "is this attacker blocked" is decided (currently just `damage.rs`'s
+    /// `declared_blocked_attackers`) - CR 510.1c already means a blocked
+    /// attacker with zero *living* blockers deals no combat damage (unless
+    /// trample), the exact same rule this reuses, just reached with zero
+    /// blockers from the start rather than every real one having died.
+    /// Populated by `commands::combat::mark_effect_blocked` (CR 702.22i:
+    /// also propagates to every other living member of `target`'s own
+    /// band). Cleared per-object by the same regeneration/combat-removal
+    /// path that already prunes `attackers`/`blocks`.
+    pub effect_blocked: Vec<ObjectId>,
 }
