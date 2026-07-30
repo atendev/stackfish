@@ -25,12 +25,22 @@
 //! yet at the point this check happens (its own `run_card_script` only
 //! happens once the real destination is already decided), so a card's own
 //! "as this would enter, redirect it instead" text isn't reachable this way.
-//! CR 616.1's ordering choice for two *simultaneous* redirects is narrowed
-//! to "no redirect happens" rather than a real player-choice pause - a
-//! genuinely rare combination, same posture this codebase already takes for
-//! comparably rare nested-pause interactions.
+//!
+//! CR 616.1's ordering choice for two *simultaneous* redirects is real now
+//! too (`phase5/etb-redirect-ordering-choice`) - two different sources each
+//! independently redirecting the same would-be battlefield entry pauses on a
+//! genuine `AwaitingReplacementChoice` instead of silently doing nothing.
+//! Nothing has been placed anywhere yet at this pause point (unlike every
+//! other replacement collision this engine already handles), so the whole
+//! not-yet-resolved `StackObject` rides along in a new
+//! `ReplacementResumeTarget::PermanentEntry` - `resolve_permanent_entry`'s
+//! own tail (`move_resolving_spell`, Aura-attach, Copy/Devour/Amplify pause
+//! checks) was pulled out into a shared `continue_permanent_entry`
+//! continuation so both the fresh path and this resumed path reach the exact
+//! same "spell actually enters the battlefield" logic.
 
 use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
 
@@ -72,6 +82,14 @@ fn creature_definition(name: &str, script: &str) -> CardDefinition {
 /// exile it instead" - a hate-bear-style externally granted redirect,
 /// relative to `source`'s own controller.
 fn hateful_ward(source: ObjectId, consumption: ConsumptionPolicy) -> ReplacementEffect {
+    hateful_ward_to(source, consumption, ZoneKind::Exile)
+}
+
+/// Same as `hateful_ward`, but redirecting to an arbitrary `destination` -
+/// used to build two simultaneously-matching wards (one to Exile, one to
+/// Graveyard) that disagree on where the entering creature ends up, so a CR
+/// 616.1 ordering choice between them has an observable difference.
+fn hateful_ward_to(source: ObjectId, consumption: ConsumptionPolicy, destination: ZoneKind) -> ReplacementEffect {
     ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
@@ -86,7 +104,7 @@ fn hateful_ward(source: ObjectId, consumption: ConsumptionPolicy) -> Replacement
                     self_only: false,
                 },
             },
-            payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
+            payload: ReplacementPayload::ReplaceZoneDestination(destination),
         },
         consumption,
     }
@@ -235,4 +253,74 @@ fn a_one_shot_redirect_only_fires_once() {
     pass_both_and_drain(&mut engine, p0, p1);
     let bf: Vec<ObjectId> = engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.iter().copied().collect();
     assert!(bf.iter().any(|&id| engine.state().object(id).unwrap().definition.name == "Second Creature"), "the second creature entered normally - the ward was already spent");
+}
+
+/// CR 616.1: two different sources each independently redirecting the same
+/// would-be battlefield entry (one to Exile, one to Graveyard) pauses on a
+/// real ordering choice instead of silently applying neither.
+#[test]
+fn two_simultaneous_redirects_pause_for_a_cr_616_1_ordering_choice() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let exile_ward = ObjectId(0);
+    let graveyard_ward = ObjectId(1);
+    let card = ObjectId(2);
+    let mut state = two_player_state();
+    put_on_battlefield(&mut state, card_object(exile_ward, creature_definition("Exile Ward", ""), p1, ZoneKind::Battlefield));
+    put_on_battlefield(&mut state, card_object(graveyard_ward, creature_definition("Graveyard Ward", ""), p1, ZoneKind::Battlefield));
+    state.replacement_effects.push(hateful_ward_to(exile_ward, ConsumptionPolicy::Repeatable, ZoneKind::Exile));
+    state.replacement_effects.push(hateful_ward_to(graveyard_ward, ConsumptionPolicy::Repeatable, ZoneKind::Graveyard));
+    state.objects.insert(card, card_object(card, creature_definition("Test Creature", ""), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+
+    let StepStatus::AwaitingReplacementChoice { player, candidates } = status else {
+        panic!("expected a CR 616.1 ordering choice between the two wards, got {status:?}");
+    };
+    assert_eq!(player, p0, "the entering creature's own controller chooses the order (CR 616.1), not the wards' controller");
+    assert_eq!(candidates.len(), 2, "both wards matched the same would-be battlefield entry");
+    assert!(candidates.contains(&ReplacementCandidate::Registered(exile_ward)));
+    assert!(candidates.contains(&ReplacementCandidate::Registered(graveyard_ward)));
+
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(exile_ward)).expect("exile_ward is a real candidate");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "resolution finishes cleanly, got {status:?}");
+
+    let bf: Vec<ObjectId> = engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.iter().copied().collect();
+    assert_eq!(bf.len(), 2, "only the two wards are on the battlefield - the redirected creature landed in neither");
+    assert_eq!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.len(), 1, "the chosen (exile) redirect applied");
+    assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 0, "the un-chosen (graveyard) redirect never applied - its own filter no longer matches a ZoneChange already rewritten to Exile");
+}
+
+/// Same setup as above, but choosing the *other* candidate - proves the
+/// outcome genuinely depends on the choice, not a hardcoded winner.
+#[test]
+fn choosing_the_other_candidate_redirects_to_graveyard_instead() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let exile_ward = ObjectId(0);
+    let graveyard_ward = ObjectId(1);
+    let card = ObjectId(2);
+    let mut state = two_player_state();
+    put_on_battlefield(&mut state, card_object(exile_ward, creature_definition("Exile Ward", ""), p1, ZoneKind::Battlefield));
+    put_on_battlefield(&mut state, card_object(graveyard_ward, creature_definition("Graveyard Ward", ""), p1, ZoneKind::Battlefield));
+    state.replacement_effects.push(hateful_ward_to(exile_ward, ConsumptionPolicy::Repeatable, ZoneKind::Exile));
+    state.replacement_effects.push(hateful_ward_to(graveyard_ward, ConsumptionPolicy::Repeatable, ZoneKind::Graveyard));
+    state.objects.insert(card, card_object(card, creature_definition("Test Creature", ""), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    engine.submit_replacement_choice(ReplacementCandidate::Registered(graveyard_ward)).expect("graveyard_ward is a real candidate");
+    drain(&mut engine);
+
+    assert_eq!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.len(), 0, "the un-chosen (exile) redirect never applied");
+    assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 1, "the chosen (graveyard) redirect applied instead");
 }

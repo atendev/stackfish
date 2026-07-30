@@ -4,6 +4,7 @@
 //! `engine.rs`.
 
 use std::collections::VecDeque;
+use std::ops::ControlFlow;
 
 use crate::commands;
 use crate::engine_context::PipelineExit;
@@ -77,6 +78,12 @@ impl Engine {
             // CR 614.8: a scripted DrawCards(n) ability is also just a draw,
             // not destruction.
             ReplacementResumeTarget::ScriptedDraw { .. } => false,
+            // CR 614.8: a would-be Battlefield destination redirect is a
+            // ZoneChange proposal, never a destroy proposal - same reasoning
+            // as ReplacementCheck above (this is that exact same kind of
+            // proposal, just paused one level earlier, before
+            // move_resolving_spell ever runs).
+            ReplacementResumeTarget::PermanentEntry { .. } => false,
         };
         let outcome =
             replacement::apply_replacements_from(&mut self.state, &self.script_runtime, rewritten, is_destroy, excluded);
@@ -204,6 +211,34 @@ impl Engine {
                     }
                 }
             }
+            ReplacementResumeTarget::PermanentEntry { top, legal_targets, events } => match outcome {
+                ReplacementOutcome::Resolved(GameEventKind::ZoneChange { to, .. }) => {
+                    match self.continue_permanent_entry(top, &legal_targets, events, to) {
+                        ControlFlow::Break(process_state) => process_state,
+                        ControlFlow::Continue((top, mut events)) => {
+                            events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
+                            ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() }
+                        }
+                    }
+                }
+                // Defensive - same "a WouldMoveZone candidate's own matching
+                // payloads only ever rewrite it back into a ZoneChange"
+                // reasoning resolve_permanent_entry's own fresh-path check
+                // already documents; unreachable in practice.
+                ReplacementOutcome::Resolved(_) => ProcessState::ReplacementCheck {
+                    remaining: VecDeque::from([GameEventKind::StackObjectResolved { stack_id: top.stack_id }]),
+                    checked: Vec::new(),
+                },
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::PermanentEntry { top, legal_targets, events },
+                    }
+                }
+            },
         };
         Ok(())
     }

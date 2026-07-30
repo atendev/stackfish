@@ -524,6 +524,53 @@
     real value at the resolving-spell call site, a redirected land or search-fetch is a much rarer gap
     worth naming rather than building blind.
 
+## Slice: etb-redirect-ordering-choice (merged)
+
+- Branch `phase5/etb-redirect-ordering-choice`.
+- Scope: closes the one TODO `etb-zone-redirect` left in place — CR 616.1's ordering choice for two
+  or more registered `ReplaceZoneDestination` effects simultaneously matching the same would-be
+  Battlefield destination. Previously `NeedsOrderingChoice` on that one check just fell back to "no
+  redirect happens," silently wrong; now it's a real `AwaitingReplacementChoice` pause like every
+  other replacement collision.
+- Key finding that shaped the plan: every other `ReplacementResumeTarget` variant only ever needs to
+  remember a handful of scalar ids, because by the time any of those pauses can fire, whatever they're
+  resuming has already been committed to a real zone (an SBA death, a scripted zone move, a cost
+  payment, ...). This one is different — the redirect check happens *before* `move_resolving_spell`
+  ever places anything, so nothing exists yet for a resume to look up by id. The whole not-yet-placed
+  `StackObject` has to ride through the pause itself.
+- Key changes:
+  - New `ReplacementResumeTarget::PermanentEntry { top: StackObject, legal_targets: Vec<Target>, events: Vec<GameEventKind> }`
+    (`process_state.rs`) — carries the entire owned `StackObject`, not just an id.
+  - `permanent_entry.rs`'s `resolve_permanent_entry` split into two: the redirect-proposal check
+    itself (now pausing for real on `NeedsOrderingChoice` instead of falling back), and a new
+    `continue_permanent_entry` — the rest of CR 608.2m entry (`move_resolving_spell`, CR 303.4b
+    Aura-attach, the CR 707.6/702.82a/702.38a Copy/Devour/Amplify mid-ETB pause checks,
+    `apply_enters_battlefield_modifiers`) — extracted verbatim as a shared continuation callable from
+    both the fresh synchronous path and `submit_replacement_choice`'s resumed path. `top` is owned
+    (not borrowed) by both functions now, and `continue_permanent_entry` returns
+    `ControlFlow<ProcessState, (StackObject, Vec<GameEventKind>)>` rather than `ControlFlow<StepStatus, _>` —
+    a further mid-ETB pause inside it needs to hand back a `ProcessState` value that both callers can
+    install their own way (`resolve_permanent_entry` converts it to a real `StepStatus` for `step()`;
+    `submit_replacement_choice`'s `resume: match { ... }` arms already evaluate directly to a
+    `ProcessState`), rather than only one of the two callers being able to use it.
+  - `submit_replacement_choice` gained a `PermanentEntry` arm: applies the chosen redirect, re-checks
+    the rewritten event (CR 616's stabilization), then either calls `continue_permanent_entry` with the
+    settled destination (three-plus-way ties, and any further mid-ETB pause it raises, both fall out of
+    this for free — no new code needed) or pauses again on a further `NeedsOrderingChoice` if the
+    rewritten event still matches 2+ effects.
+  - `mod.rs`'s `resolve_stack_top`: `top` is now `mut`, moved into `resolve_permanent_entry` and
+    rebound from its `Continue((top, events))` return - the only caller-visible ripple from `top`
+    becoming owned instead of borrowed.
+- Verify: 2 new tests (`phase5_etb_zone_redirect.rs`) — two independently-sourced wards (one
+  redirecting to Exile, one to Graveyard) pause on a genuine 2-candidate `AwaitingReplacementChoice`;
+  choosing either one applies that redirect and not the other (proving the outcome is a real choice,
+  not a hardcoded winner) — the un-chosen ward's own filter (`to: Some(Battlefield)`) simply no longer
+  matches the already-rewritten event, so CR 616's stabilization needs no special-casing here. Full
+  workspace suite green (160 test-result blocks).
+- Out of scope, unaffected by this slice: the entering permanent's own self-registered redirect effects
+  still can't fire here (unchanged, pre-existing narrowing - `run_card_script` still only runs inside
+  `move_resolving_spell`, after this check); `PlayLand`/`Search` still don't get this check at all.
+
 ## Slice: umbra-armor (merged)
 
 - Branch `phase5/umbra-armor`.
