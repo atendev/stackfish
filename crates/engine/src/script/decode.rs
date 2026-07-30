@@ -271,6 +271,21 @@ pub(crate) fn parse_color_letter(letter: &str) -> Result<ColorSet, ScriptError> 
     })
 }
 
+/// Same letters as `parse_color_letter` above, but returning a single
+/// `Color` rather than a `ColorSet` — needed by `CostModifierTarget::Colored`
+/// (`phase5/cost-modifier-colored-pip`), which names exactly one color, not
+/// a combinable set.
+pub(crate) fn parse_single_color_letter(letter: &str) -> Result<Color, ScriptError> {
+    Ok(match letter {
+        "W" => Color::White,
+        "U" => Color::Blue,
+        "B" => Color::Black,
+        "R" => Color::Red,
+        "G" => Color::Green,
+        other => return Err(ScriptError::LoadError(format!("unknown color '{other}'"))),
+    })
+}
+
 /// `ReplacementPayloads.ReplaceZoneDestination(name)`'s argument decoder —
 /// same match-on-string-with-a-real-error pattern every other `parse_*_name`
 /// helper here uses. No such parser existed in `script.rs` before this slice

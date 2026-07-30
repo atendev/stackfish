@@ -35,6 +35,20 @@ end
 return s
 "#;
 
+/// `phase5/cost-modifier-colored-pip`: `:SetAmount(amount, color)`'s second
+/// argument targets a specific colored pip (CR 118.7b/c) instead of the
+/// generic component.
+const CREATURES_COST_W_LESS: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local m = Game.CreateCostModifier(c)
+    m:SetFilter({ card_types = { "Creature" } })
+    m:SetAmount(-1, "W")
+    m:Register()
+end
+return s
+"#;
+
 const NO_SET_FILTER: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -103,6 +117,30 @@ fn bear_definition() -> CardDefinition {
     }
 }
 
+fn white_bear_definition() -> CardDefinition {
+    CardDefinition {
+        definition_id: 3,
+        name: "Test White Bear".to_string(),
+        mana_cost: ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White))] },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::CREATURE,
+        subtypes: Vec::new(),
+        oracle_text: String::new(),
+        power: Some(PTValue::Fixed(2)),
+        toughness: Some(PTValue::Fixed(2)),
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::ByKey("white_bear".to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: None,
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+    }
+}
+
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -138,6 +176,22 @@ fn run_card_script_self_registers_a_cost_modifier() {
     assert_eq!(modifier.controller, PlayerId(0), "resolved from the source's own live controller at drain time");
     assert_eq!(modifier.amount, -1);
     assert!(matches!(modifier.filter.card_types, Some(types) if types == CardTypeSet::CREATURE));
+}
+
+#[test]
+fn run_card_script_self_registers_a_colored_cost_modifier() {
+    let mut state = two_player_state();
+    let land = ObjectId(0);
+    let definition = land_definition(CREATURES_COST_W_LESS);
+    state.objects.insert(land, card_object(land, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+
+    let mut runtime = ScriptRuntime::new();
+    runtime.run_card_script(&mut state, &definition, land).expect("script self-registers cleanly");
+
+    assert_eq!(state.cost_modifiers.len(), 1);
+    let modifier = &state.cost_modifiers[0];
+    assert_eq!(modifier.amount, -1);
+    assert_eq!(modifier.target, CostModifierTarget::Colored(Color::White));
 }
 
 #[test]
@@ -226,4 +280,59 @@ fn play_land_self_registered_cost_modifier_reduces_a_matching_spells_cost_end_to
         .filter(|o| o.zone == ZoneKind::Battlefield && o.definition.card_types.contains(CardTypeSet::CREATURE))
         .count();
     assert_eq!(creatures_on_battlefield, 1, "bear resolved and entered the battlefield");
+}
+
+#[test]
+fn play_land_self_registered_colored_cost_modifier_reduces_a_matching_spells_cost_end_to_end() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let land = ObjectId(0);
+    let bear = ObjectId(1);
+    let mut state = two_player_state();
+    state.objects.insert(land, card_object(land, land_definition(CREATURES_COST_W_LESS), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(land);
+    state.objects.insert(bear, card_object(bear, white_bear_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(bear);
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: land } })
+        .expect("p0 holds priority, land is in hand");
+    drain(&mut engine);
+    assert_eq!(engine.state().cost_modifiers.len(), 1, "the land's self-registered cost modifier is live");
+
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::CastSpell {
+                card: bear,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+            },
+        })
+        .expect("p0 holds priority, bear is in hand");
+    let status = drain(&mut engine);
+
+    // The white bear's printed cost is {W} - CR 118.7 (not a generic
+    // reduction): an empty payment plan pays it, proving the {W} pip itself
+    // disappeared rather than a nonexistent generic component.
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the (reduced) cast cost, got {status:?}");
+    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("colored cost modifier reduced {W} to {0} - empty plan pays it");
+    drain(&mut engine);
+
+    pass(&mut engine, p0);
+    drain(&mut engine);
+    pass(&mut engine, p1);
+    drain(&mut engine);
+
+    assert!(engine.state().stack.is_empty());
+    let creatures_on_battlefield = engine
+        .state()
+        .objects
+        .values()
+        .filter(|o| o.zone == ZoneKind::Battlefield && o.definition.card_types.contains(CardTypeSet::CREATURE))
+        .count();
+    assert_eq!(creatures_on_battlefield, 1, "the white bear resolved and entered the battlefield");
 }
