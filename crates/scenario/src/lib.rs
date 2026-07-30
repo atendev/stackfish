@@ -1761,6 +1761,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             | StepStatus::AwaitingSurveilChoice { .. }
             | StepStatus::AwaitingSearchChoice { .. }
             | StepStatus::AwaitingTriggerOrderChoice { .. }
+            | StepStatus::AwaitingTriggerTargets { .. }
             | StepStatus::AwaitingPayment { .. }
             | StepStatus::AwaitingModeChoice { .. }
             | StepStatus::AwaitingDiscard { .. }

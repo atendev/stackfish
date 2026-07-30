@@ -15,7 +15,7 @@ use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
-use super::CommandError;
+use super::{non_eliminated_players, CommandError};
 
 /// CR 117.1a's "sorcery speed" window — `player` may take an action that
 /// requires it (playing a land, casting a sorcery, most activated
@@ -384,6 +384,50 @@ pub(crate) fn target_is_legal(
             script_runtime.invoke_player_target_legal(*handle, state, pid, source, caster).unwrap_or(false)
         }
     }
+}
+
+/// CR 603.3d: every currently-legal candidate for `requirement`, scanned
+/// fresh - the same "walk every object/player, filter through
+/// `target_is_legal`" shape `attach::legal_aura_entry_candidates` already
+/// established, generalized off any `TargetRequirement` instead of just an
+/// Aura's own `target_requirement`. Used by `engine::triggers_pipeline`'s CR
+/// 603.3d pause, which has no player-submitted `targets` to validate at all
+/// (nothing initiated the trigger the way a cast/activation does) - it has
+/// to present real candidates instead of guessing blind.
+pub(crate) fn legal_target_candidates(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    requirement: &TargetRequirement,
+    caster: PlayerId,
+    source: ObjectId,
+) -> Vec<Target> {
+    let object_candidates = state.objects.values().map(|obj| Target::Object(obj.object_id));
+    let player_candidates = non_eliminated_players(state).into_iter().map(Target::Player);
+    object_candidates
+        .chain(player_candidates)
+        .filter(|&target| {
+            target_is_legal(state, script_runtime, target, &requirement.filter, caster, source, requirement.exclude_source)
+        })
+        .collect()
+}
+
+/// Single-`TargetRequirement` validation for a caller outside `commands`
+/// that has no `TargetSpec` wrapper to hand `validate_targets` -
+/// `engine::triggers_pipeline`'s own CR 603.3d pause is the first: a
+/// triggered ability's target is chosen through its own dedicated
+/// pause/resume pair (`Engine::submit_trigger_targets`), not
+/// `CastSpell`/`ActivateAbility`'s `targets` field, but still needs the
+/// exact same count/dedup/legality checks `validate_one_target_requirement`
+/// already enforces for those.
+pub(crate) fn validate_single_target_requirement(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    requirement: &TargetRequirement,
+    targets: &[Target],
+    caster: PlayerId,
+    source: ObjectId,
+) -> Result<(), CommandError> {
+    validate_one_target_requirement(state, script_runtime, requirement, targets, caster, source)
 }
 
 /// CR 601.2c/601.2e (spells) and CR 602.2b (activated abilities): validates

@@ -184,6 +184,18 @@ pub enum TriggerOrderError {
     NotAPermutation,
 }
 
+/// Why `submit_trigger_targets` rejected an answer to a CR 603.3d
+/// triggered-ability target choice.
+#[derive(Debug)]
+pub enum TriggerTargetsError {
+    /// Engine isn't sitting in `ProcessState::AwaitingTriggerTargets`.
+    NotAwaitingChoice,
+    /// `chosen` failed `commands::validate_single_target_requirement` -
+    /// wrong count, a duplicate, or an id/player not among the offered
+    /// `candidates`.
+    InvalidTargets,
+}
+
 /// Why `submit_payment` rejected an answer to a CR 601.2f-h
 /// `ProcessState::AwaitingPayment` pause.
 #[derive(Debug)]
@@ -702,6 +714,19 @@ impl Engine {
                     StepStatus::AwaitingTriggerOrderChoice { player, group: group.clone() };
                 self.process_state =
                     ProcessState::AwaitTriggerOrderChoice { player, group, ordered, pending_groups };
+                status
+            }
+
+            ProcessState::AwaitingTriggerTargets { trigger, requirement, candidates, remaining } => {
+                // Nothing to do until submit_trigger_targets answers - same
+                // "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingTriggerTargets {
+                    player: trigger.controller,
+                    requirement: requirement.clone(),
+                    candidates: candidates.clone(),
+                };
+                self.process_state = ProcessState::AwaitingTriggerTargets { trigger, requirement, candidates, remaining };
                 status
             }
 
