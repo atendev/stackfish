@@ -298,6 +298,10 @@ colors = ["R"]                       # color_changing only, default [] - same le
                                       # additive only (grants in addition to existing colors)
 filter_controller = "you"            # "you" | "opponent" | "any", optional, default: no controller filter
 filter_card_types = ["Creature"]     # optional, default [] (no card-type filter)
+filter_subtypes = ["Wall"]           # optional, default [] - CR 205.4b, matches "or" across the list
+filter_excluded_subtypes = ["Wall"]  # optional, default [] - CR 601.2c/115/205.4b's negated form
+filter_supertypes = ["Legendary"]    # optional, default [] - CR 205.4a
+filter_excluded_supertypes = ["Legendary"]  # optional, default [] - CR 601.2c/115/205.4a's negated form
 filter_self_only = false             # optional, default false - "just this effect's own source"
 ```
 

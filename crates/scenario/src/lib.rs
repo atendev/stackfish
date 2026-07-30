@@ -326,6 +326,22 @@ pub struct ContinuousEffectSpec {
     pub filter_controller: Option<String>,
     #[serde(default)]
     pub filter_card_types: Vec<String>,
+    /// CR 205.4b — e.g. `["Wall"]` for "Walls get -1/-0". Matches as an
+    /// "or" across the list, same convention `TargetRequirementSpec.subtypes`
+    /// already documents.
+    #[serde(default)]
+    pub filter_subtypes: Vec<String>,
+    /// CR 601.2c/115/205.4b's negated form — e.g. `["Wall"]` for "creatures
+    /// that aren't Walls get +1/+1".
+    #[serde(default)]
+    pub filter_excluded_subtypes: Vec<String>,
+    /// CR 205.4a — e.g. `["Legendary"]` for "legendary creatures get +1/+1".
+    #[serde(default)]
+    pub filter_supertypes: Vec<String>,
+    /// CR 601.2c/115/205.4a's negated form — e.g. `["Legendary"]` for
+    /// "nonlegendary creatures get -1/-1".
+    #[serde(default)]
+    pub filter_excluded_supertypes: Vec<String>,
     #[serde(default)]
     pub filter_self_only: bool,
     /// CR 611.2c: if set (alongside `condition_count`), this effect only
@@ -1044,15 +1060,13 @@ fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> Con
     let filter = EffectFilter {
         controller: spec.filter_controller.as_deref().map(parse_filter_controller),
         card_types: (!spec.filter_card_types.is_empty()).then(|| parse_card_types(&spec.filter_card_types)),
-        // TODO: no `ContinuousEffectSpec.filter_subtypes`/`filter_excluded_subtypes`/
-        // `filter_supertypes`/`filter_excluded_supertypes` TOML field exists yet -
-        // a scenario fixture can't express "Walls get -1/-0" or "legendary
-        // permanents get +1/+1" via continuous_effect, only via a hand-authored
-        // Lua script.
-        subtypes: None,
-        excluded_subtypes: None,
-        supertypes: None,
-        excluded_supertypes: None,
+        subtypes: (!spec.filter_subtypes.is_empty())
+            .then(|| spec.filter_subtypes.iter().cloned().map(Subtype).collect()),
+        excluded_subtypes: (!spec.filter_excluded_subtypes.is_empty())
+            .then(|| spec.filter_excluded_subtypes.iter().cloned().map(Subtype).collect()),
+        supertypes: (!spec.filter_supertypes.is_empty()).then(|| parse_supertypes(&spec.filter_supertypes)),
+        excluded_supertypes: (!spec.filter_excluded_supertypes.is_empty())
+            .then(|| parse_supertypes(&spec.filter_excluded_supertypes)),
         self_only: spec.filter_self_only,
     };
     // CR 611.2c: `condition_count` present means this effect is

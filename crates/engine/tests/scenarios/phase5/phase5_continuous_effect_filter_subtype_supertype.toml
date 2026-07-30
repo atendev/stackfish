@@ -1,0 +1,100 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "anti_wall"
+name = "Test Anti-Wall Enchantment"
+types = ["Enchantment"]
+
+# CR 205.4b: -0/-1 to Walls only - ContinuousEffectSpec.filter_subtypes.
+[cards.continuous_effect]
+layer = "power_toughness_modifying"
+power = 0
+toughness = -1
+filter_subtypes = ["Wall"]
+
+[[cards]]
+key = "anti_legend"
+name = "Test Anti-Legend Enchantment"
+types = ["Enchantment"]
+
+# CR 205.4a: -0/-1 to legendary creatures only - ContinuousEffectSpec.filter_supertypes.
+[cards.continuous_effect]
+layer = "power_toughness_modifying"
+power = 0
+toughness = -1
+filter_supertypes = ["Legendary"]
+
+[[cards]]
+key = "wall"
+name = "Test Wall"
+types = ["Creature"]
+subtypes = ["Wall"]
+power = 0
+toughness = 1
+
+[[cards]]
+key = "legend"
+name = "Test Legend"
+types = ["Creature"]
+supertypes = ["Legendary"]
+power = 1
+toughness = 1
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "anti_wall"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "anti_legend"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "wall"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "legend"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "wall"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "legend"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
