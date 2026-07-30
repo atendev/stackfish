@@ -605,6 +605,39 @@ pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, 
         None => None,
     };
 
+    // CR 205.4a: "destroy all legendary permanents," same shape/table key
+    // `decode_filter_table`'s `TargetFilter::Object` branch already uses for
+    // its own `supertypes` key.
+    let supertypes_table: Option<Table> =
+        table.get("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let supertypes = match supertypes_table {
+        Some(t) => {
+            let mut set = SupertypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                set |= parse_supertype_name(&name)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+
+    // CR 601.2c/115/205.4a's negated form - "destroy all nonbasic lands,"
+    // same shape/table key `supertypes` just above uses.
+    let excluded_supertypes_table: Option<Table> =
+        table.get("excluded_supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let excluded_supertypes = match excluded_supertypes_table {
+        Some(t) => {
+            let mut set = SupertypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                set |= parse_supertype_name(&name)?;
+            }
+            Some(set)
+        }
+        None => None,
+    };
+
     let self_only: Option<bool> =
         table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
 
@@ -613,6 +646,8 @@ pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, 
         card_types,
         subtypes,
         excluded_subtypes,
+        supertypes,
+        excluded_supertypes,
         self_only: self_only.unwrap_or(false),
     })
 }

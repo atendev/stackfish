@@ -913,7 +913,7 @@ mod tests {
     }
 
     fn no_filter() -> EffectFilter {
-        EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, }
+        EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
     }
 
     #[test]

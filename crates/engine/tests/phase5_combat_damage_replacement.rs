@@ -87,7 +87,7 @@ fn prevent_damage_effect_stops_combat_damage_from_landing() {
         source: shield_source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::PreventDamage,
         },
@@ -130,7 +130,7 @@ fn redirect_damage_effect_changes_who_actually_loses_life() {
         source: redirect_source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::RedirectDamage(Target::Player(p0)),
         },

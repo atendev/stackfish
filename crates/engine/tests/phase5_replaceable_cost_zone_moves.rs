@@ -292,7 +292,7 @@ fn two_matching_wards_pause_for_a_cr_616_1_ordering_choice() {
             filter: EventFilter::WouldMoveZone {
                 from: Some(ZoneKind::Battlefield),
                 to: Some(ZoneKind::Graveyard),
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         },

@@ -83,7 +83,7 @@ fn tokens_you_control_enter_tapped(source: ObjectId) -> ReplacementEffect {
             filter: EventFilter::WouldMoveZone {
                 from: None,
                 to: Some(ZoneKind::Battlefield),
-                affected: EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::EntersTapped,
         },
@@ -98,7 +98,7 @@ fn tokens_you_control_enter_with_counters(source: ObjectId, amount: i32) -> Repl
             filter: EventFilter::WouldMoveZone {
                 from: None,
                 to: Some(ZoneKind::Battlefield),
-                affected: EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::EntersWithCounters { kind: CounterKind::PlusOnePlusOne, amount },
         },
@@ -223,7 +223,7 @@ fn a_copyof_token_applies_its_freshly_reregistered_self_only_effect() {
     state.replacement_effects.push(ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
-            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, } },
+            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             payload: ReplacementPayload::EntersTapped,
         },
         consumption: ConsumptionPolicy::Repeatable,

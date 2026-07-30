@@ -296,3 +296,46 @@
   legendary permanents") - out of scope for this slice, next follow-up if a real card needs it.
   Scenario TOML `continuous_effect` fixtures still can't express a subtype filter (see the TODO
   left in `crates/scenario/src/lib.rs` above).
+
+## Slice: effect-filter-supertypes (merged)
+
+- Branch `phase5/effect-filter-supertypes`.
+- Scope: closes the `effect-filter-subtypes` slice's own named follow-up - `EffectFilter` had no
+  `supertypes`/`excluded_supertypes` keys, so "destroy all legendary permanents" (CR 701.8/205.4a)
+  wasn't expressible. `EffectFilter` gains `supertypes: Option<SupertypeSet>`/`excluded_supertypes:
+  Option<SupertypeSet>` - a bitset like `card_types`, not a `Vec` like `subtypes` (`CardDefinition.
+  supertypes`/`TargetFilter::Object::supertypes` are both already bitsets, so no new type shape was
+  needed). Checked in both `matches_effect_filter` and `event_target_matches` from the start this
+  time - the prior slice's own backlog note named these as two separate hand-written
+  implementations that don't share code, so both got the check together rather than one now and one
+  discovered later by a failing test.
+- Real finding, a second instance of the exact mistake the prior slice's own backlog note warned
+  about: the mass find-and-patch script (`perl -pi`, one substitution per matched line, checked
+  `unless /supertypes/` on that same line only) doesn't understand Rust syntax, so it also matched
+  `TargetFilter::Object` struct literals - a *different* type that happens to share the exact field
+  names `subtypes`/`excluded_subtypes`/`supertypes`/`excluded_supertypes` with `EffectFilter`, and
+  already had real `supertypes`/`excluded_supertypes` fields from a much earlier slice. Since those
+  pre-existing fields lived on a later line than `excluded_subtypes: None,` (not caught by the
+  same-line `unless` check), the blanket insertion created genuine duplicate-field `E0062` errors in
+  every `TargetFilter::Object` literal it touched - 15+ files, only surfaced once `cargo build --tests
+  -p stackfish-engine` was run to force each integration test binary to compile independently (a
+  `cargo build --workspace --tests` invocation stops attempting further targets once an earlier
+  package fails, so most of these were invisible until that narrower command ran). Fixed with a
+  second, context-aware pass: only strip the inline-inserted fields where a genuine duplicate
+  followed within the next few lines (i.e. only the `TargetFilter::Object` sites), leaving every real
+  `EffectFilter` insertion (which has no such duplicate) untouched. Two of these bad insertions had
+  been made *manually* rather than by the mass script (`script/globals.rs`'s two builder defaults,
+  `scenario/src/lib.rs`'s `build_continuous_effect`) - the same blanket regex pass re-matched those
+  files too and duplicated what had already been added by hand, same root cause either way: a
+  same-line-only "already has this field" check can't see a field the literal will have three lines
+  down.
+- Verify: unit test on `matches_effect_filter` itself (supertypes/excluded_supertypes,
+  `types/effect.rs`); a `Game.Ops.DestroyAll` decode test plus an end-to-end "destroy all legendary
+  permanents" test sparing a non-legendary creature (`phase5_mass_destroy_effect.rs`); 2 new tests in
+  `phase5_etb_replacement_modifiers.rs` (a supertype-filtered externally-granted `EntersTapped`
+  affecting a matching legendary land and sparing a non-legendary one) exercising
+  `event_target_matches`'s supertype check directly, closing the exact gap the prior slice's tests
+  only caught after the fact. Full workspace suite green (160 test-result blocks, zero failures).
+- Unresolved: same as the prior slice - scenario TOML `continuous_effect` fixtures still can't
+  express a supertype filter either (the same TODO in `crates/scenario/src/lib.rs` now also names
+  `filter_supertypes`/`filter_excluded_supertypes`).

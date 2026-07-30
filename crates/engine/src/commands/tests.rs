@@ -83,7 +83,7 @@ fn dummy_continuous_effect(source: ObjectId) -> ContinuousEffect {
         affected: AffectedFilter::Primitive(EffectFilter { 
             controller: None,
             card_types: None,
-            self_only: true, subtypes: None, excluded_subtypes: None, }),
+            self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -101,7 +101,7 @@ fn dummy_replacement_effect(source: ObjectId) -> ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::Regenerate,
         },

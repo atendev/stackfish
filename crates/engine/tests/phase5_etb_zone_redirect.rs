@@ -82,7 +82,7 @@ fn hateful_ward(source: ObjectId, consumption: ConsumptionPolicy) -> Replacement
                     controller: Some(FilterController::Opponent),
                     card_types: Some(CardTypeSet::CREATURE),
                     subtypes: None,
-                    excluded_subtypes: None,
+                    excluded_subtypes: None, supertypes: None, excluded_supertypes: None,
                     self_only: false,
                 },
             },

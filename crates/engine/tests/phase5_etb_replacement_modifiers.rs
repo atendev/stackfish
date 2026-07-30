@@ -76,6 +76,23 @@ end
 return s
 "#;
 
+/// `phase5/effect-filter-supertypes`: same shape as `OPPONENTS_SWAMPS_ENTER_TAPPED`
+/// above, but narrowed by supertype instead - proves `event_target_matches`
+/// (the layers-aware near-duplicate of `matches_effect_filter` used for this
+/// `WouldMoveZone` replacement path) reads `supertypes` correctly too, not
+/// just `card_types`/`subtypes`.
+const OPPONENTS_LEGENDARY_LANDS_ENTER_TAPPED: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
+    e:SetPayload(Game.ReplacementPayloads.EntersTapped)
+    e:SetAffected({ controller = "opponent", supertypes = { "Legendary" } })
+    e:Register()
+end
+return s
+"#;
+
 /// CR 603.6d/614.1c only mean something for a move landing on the
 /// battlefield - `to = "Graveyard"` must be rejected at `:Register()` time
 /// (`validate_replacement_filter_payload_pairing`), not silently accepted as
@@ -119,6 +136,13 @@ fn subtyped_land_definition(name: &str, subtypes: Vec<Subtype>) -> CardDefinitio
     let mut definition = land_definition(name, "");
     definition.script_ref = ScriptReference::ByKey(name.to_string());
     definition.subtypes = subtypes;
+    definition
+}
+
+fn supertyped_land_definition(name: &str, supertypes: SupertypeSet) -> CardDefinition {
+    let mut definition = land_definition(name, "");
+    definition.script_ref = ScriptReference::ByKey(name.to_string());
+    definition.supertypes = supertypes;
     definition
 }
 
@@ -382,6 +406,70 @@ fn externally_granted_enters_tapped_leaves_a_non_matching_subtype_alone() {
     );
 }
 
+#[test]
+fn externally_granted_enters_tapped_only_affects_the_matching_supertype() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let granter = ObjectId(0);
+    let granter_definition =
+        creature_definition("Supertype Tangle Wire Wannabe", OPPONENTS_LEGENDARY_LANDS_ENTER_TAPPED);
+    state.objects.insert(granter, card_object(granter, granter_definition.clone(), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(granter);
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &granter_definition, granter)
+        .expect("granter script self-registers cleanly");
+
+    let legendary_land = ObjectId(1);
+    state.objects.insert(
+        legendary_land,
+        card_object(legendary_land, supertyped_land_definition("Legendary Land", SupertypeSet::LEGENDARY), p0, ZoneKind::Hand),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(legendary_land);
+
+    let mut engine = Engine::new(state);
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: legendary_land } }).unwrap();
+    drain(&mut engine);
+
+    let (new_id, ..) = last_zone_change(&engine);
+    assert!(
+        engine.state().object(new_id).unwrap().tapped,
+        "p0's legendary land must enter tapped - matches the supertype filter"
+    );
+}
+
+#[test]
+fn externally_granted_enters_tapped_leaves_a_non_matching_supertype_alone() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let granter = ObjectId(0);
+    let granter_definition =
+        creature_definition("Supertype Tangle Wire Wannabe", OPPONENTS_LEGENDARY_LANDS_ENTER_TAPPED);
+    state.objects.insert(granter, card_object(granter, granter_definition.clone(), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(granter);
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &granter_definition, granter)
+        .expect("granter script self-registers cleanly");
+
+    let plain_land = ObjectId(1);
+    state.objects.insert(
+        plain_land,
+        card_object(plain_land, supertyped_land_definition("Plain Nonlegendary Land", SupertypeSet::empty()), p0, ZoneKind::Hand),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(plain_land);
+
+    let mut engine = Engine::new(state);
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: plain_land } }).unwrap();
+    drain(&mut engine);
+
+    let (new_id, ..) = last_zone_change(&engine);
+    assert!(
+        !engine.state().object(new_id).unwrap().tapped,
+        "p0's plain land must enter untapped - doesn't match the Legendary-only supertype filter"
+    );
+}
+
 // ---------------------------------------------------------------------
 // End to end: CastSpell resolution (move_resolving_spell).
 // ---------------------------------------------------------------------
@@ -449,7 +537,7 @@ fn limited_uses_enters_with_counters_is_consumed_after_first_entry() {
     state.replacement_effects.push(ReplacementEffect {
         source: granter,
         spec: ReplacementSpec::Primitive {
-            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             payload: ReplacementPayload::EntersWithCounters { kind: CounterKind::PlusOnePlusOne, amount: 1 },
         },
         consumption: ConsumptionPolicy::LimitedUses(1),
@@ -486,7 +574,7 @@ fn repeatable_enters_tapped_applies_to_every_entry() {
     state.replacement_effects.push(ReplacementEffect {
         source: granter,
         spec: ReplacementSpec::Primitive {
-            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             payload: ReplacementPayload::EntersTapped,
         },
         consumption: ConsumptionPolicy::Repeatable,
