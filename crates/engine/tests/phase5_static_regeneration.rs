@@ -105,7 +105,7 @@ fn static_regeneration_shield_survives_being_used_and_saves_target_twice() {
         source: creature,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter { controller: None, card_types: None, self_only: true },
+                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, },
             },
             payload: ReplacementPayload::Regenerate,
         },
@@ -161,7 +161,7 @@ fn static_regeneration_shield_does_not_save_a_target_that_later_cant_be_regenera
         source: creature,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter { controller: None, card_types: None, self_only: true },
+                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, },
             },
             payload: ReplacementPayload::Regenerate,
         },
@@ -176,7 +176,7 @@ fn static_regeneration_shield_does_not_save_a_target_that_later_cant_be_regenera
     state.continuous_effects.push(ContinuousEffect {
         source: creature,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddKeyword(KeywordSet::CANT_BE_REGENERATED)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

@@ -260,7 +260,7 @@ fn until_end_of_turn_continuous_effects_drained_at_cleanup() {
     state.continuous_effects.push(ContinuousEffect {
         source: ObjectId(1),
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: false }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::UntilEndOfTurn,
@@ -269,7 +269,7 @@ fn until_end_of_turn_continuous_effects_drained_at_cleanup() {
     state.continuous_effects.push(ContinuousEffect {
         source: ObjectId(2),
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: false }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
         timestamp: SequenceNo(1),
         duration: EffectDuration::Permanent,
@@ -300,7 +300,7 @@ fn permanent_effects_survive_cleanup() {
     state.continuous_effects.push(ContinuousEffect {
         source: ObjectId(1),
         layer: Layer::ColorChanging,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: false }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

@@ -119,7 +119,7 @@ fn protection_from_progenitus(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionName("Progenitus".to_string())),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -424,7 +424,7 @@ fn remove_all_abilities_also_strips_a_granted_protection_name() {
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionName("Progenitus".to_string())),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -433,7 +433,7 @@ fn remove_all_abilities_also_strips_a_granted_protection_name() {
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::RemoveAllAbilities),
         timestamp: SequenceNo(1),
         duration: EffectDuration::Permanent,

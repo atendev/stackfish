@@ -1044,6 +1044,11 @@ fn build_continuous_effect(source: ObjectId, spec: &ContinuousEffectSpec) -> Con
     let filter = EffectFilter {
         controller: spec.filter_controller.as_deref().map(parse_filter_controller),
         card_types: (!spec.filter_card_types.is_empty()).then(|| parse_card_types(&spec.filter_card_types)),
+        // TODO: no `ContinuousEffectSpec.filter_subtypes`/`filter_excluded_subtypes`
+        // TOML field exists yet - a scenario fixture can't express "Walls get
+        // -1/-0" via continuous_effect, only via a hand-authored Lua script.
+        subtypes: None,
+        excluded_subtypes: None,
         self_only: spec.filter_self_only,
     };
     // CR 611.2c: `condition_count` present means this effect is

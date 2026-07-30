@@ -74,11 +74,13 @@ impl Engine {
                         self.state.continuous_effects.push(ContinuousEffect {
                             source: *id,
                             layer: Layer::PowerToughnessModifying,
-                            affected: AffectedFilter::Primitive(EffectFilter {
+                            affected: AffectedFilter::Primitive(EffectFilter { 
                                 controller: None,
                                 card_types: None,
+                                subtypes: None,
+                                excluded_subtypes: None,
                                 self_only: true,
-                            }),
+                             }),
                             effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT {
                                 power: *power,
                                 toughness: *toughness,
@@ -97,11 +99,13 @@ impl Engine {
                         self.state.continuous_effects.push(ContinuousEffect {
                             source: *id,
                             layer: Layer::ControlChangingEffects,
-                            affected: AffectedFilter::Primitive(EffectFilter {
+                            affected: AffectedFilter::Primitive(EffectFilter { 
                                 controller: None,
                                 card_types: None,
+                                subtypes: None,
+                                excluded_subtypes: None,
                                 self_only: true,
-                            }),
+                             }),
                             effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
                             timestamp,
                             duration: duration.clone(),
@@ -179,11 +183,13 @@ impl Engine {
             self.state.continuous_effects.push(ContinuousEffect {
                 source: *id,
                 layer: Layer::PowerToughnessModifying,
-                affected: AffectedFilter::Primitive(EffectFilter {
+                affected: AffectedFilter::Primitive(EffectFilter { 
                     controller: None,
                     card_types: None,
+                    subtypes: None,
+                    excluded_subtypes: None,
                     self_only: true,
-                }),
+                 }),
                 effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power, toughness }),
                 timestamp,
                 duration: duration.clone(),
@@ -225,11 +231,13 @@ impl Engine {
             self.state.continuous_effects.push(ContinuousEffect {
                 source: *id,
                 layer: Layer::ControlChangingEffects,
-                affected: AffectedFilter::Primitive(EffectFilter {
+                affected: AffectedFilter::Primitive(EffectFilter { 
                     controller: None,
                     card_types: None,
+                    subtypes: None,
+                    excluded_subtypes: None,
                     self_only: true,
-                }),
+                 }),
                 effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
                 timestamp,
                 duration: duration.clone(),
@@ -255,7 +263,7 @@ impl Engine {
                 source: *id,
                 spec: ReplacementSpec::Primitive {
                     filter: EventFilter::WouldDie {
-                        affected: EffectFilter { controller: None, card_types: None, self_only: true },
+                        affected: EffectFilter {  controller: None, card_types: None, subtypes: None, excluded_subtypes: None, self_only: true  },
                     },
                     payload: ReplacementPayload::Regenerate,
                 },

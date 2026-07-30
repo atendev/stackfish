@@ -77,7 +77,7 @@ fn continuous_effect(
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter { controller: None, card_types: None, self_only: false }
+    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }
 }
 
 fn switch_effect(source: ObjectId, timestamp: u64) -> ContinuousEffect {
@@ -172,7 +172,7 @@ fn effect_filter_still_scopes_a_switch_effect() {
         source,
         Layer::PowerToughnessSwitching,
         EffectPrimitive::SwitchPT,
-        EffectFilter { controller: Some(FilterController::You), card_types: None, self_only: false },
+        EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, },
         0,
     ));
 

@@ -120,7 +120,7 @@ fn protection_from_green(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionColor(ColorSet::GREEN)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -404,7 +404,7 @@ fn an_aura_that_becomes_a_creature_unattaches_then_dies_in_the_same_pass() {
     state.continuous_effects.push(ContinuousEffect {
         source: aura,
         layer: Layer::TypeChanging,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddCardType(CardTypeSet::CREATURE)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

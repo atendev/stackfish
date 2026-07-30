@@ -109,7 +109,7 @@ fn assign_combat_damage(
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter { controller: None, card_types: None, self_only: false }
+    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }
 }
 
 // ---------------------------------------------------------------------

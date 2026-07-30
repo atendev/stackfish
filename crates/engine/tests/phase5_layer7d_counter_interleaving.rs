@@ -66,7 +66,7 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter { controller: None, card_types: None, self_only: false }
+    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }
 }
 
 fn continuous_effect(source: ObjectId, layer: Layer, effect: EffectPrimitive, timestamp: u64) -> ContinuousEffect {

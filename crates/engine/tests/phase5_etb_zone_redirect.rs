@@ -81,6 +81,8 @@ fn hateful_ward(source: ObjectId, consumption: ConsumptionPolicy) -> Replacement
                 affected: EffectFilter {
                     controller: Some(FilterController::Opponent),
                     card_types: Some(CardTypeSet::CREATURE),
+                    subtypes: None,
+                    excluded_subtypes: None,
                     self_only: false,
                 },
             },

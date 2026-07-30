@@ -607,6 +607,8 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 affected: AffectedFilter::Primitive(EffectFilter {
                     controller: None,
                     card_types: None,
+                    subtypes: None,
+                    excluded_subtypes: None,
                     self_only: false,
                 }),
                 condition: None,
@@ -621,7 +623,13 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         lua.create_function(move |_, source: u64| {
             Ok(ReplacementEffectBuilder {
                 source: ObjectId(source),
-                affected: EffectFilter { controller: None, card_types: None, self_only: false },
+                affected: EffectFilter {
+                    controller: None,
+                    card_types: None,
+                    subtypes: None,
+                    excluded_subtypes: None,
+                    self_only: false,
+                },
                 event_kind: EventFilterKind::WouldDie,
                 payload: ReplacementPayload::Regenerate,
                 consumption: ConsumptionPolicy::Repeatable,

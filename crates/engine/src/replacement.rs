@@ -913,7 +913,7 @@ mod tests {
     }
 
     fn no_filter() -> EffectFilter {
-        EffectFilter { card_types: None, controller: None, self_only: false }
+        EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, }
     }
 
     #[test]
@@ -934,7 +934,7 @@ mod tests {
             source: effect_source,
             spec: ReplacementSpec::Primitive {
                 filter: EventFilter::DamageDealt {
-                    affected: EffectFilter { card_types: Some(CardTypeSet::CREATURE), ..no_filter() },
+                    affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), ..no_filter() },
                 },
                 payload: ReplacementPayload::PreventDamage,
             },
@@ -1065,7 +1065,7 @@ mod tests {
             source: source_a,
             spec: ReplacementSpec::Primitive {
                 filter: EventFilter::DamageDealt {
-                    affected: EffectFilter { controller: Some(FilterController::You), ..no_filter() },
+                    affected: EffectFilter {  controller: Some(FilterController::You), ..no_filter() },
                 },
                 payload: ReplacementPayload::RedirectDamage(Target::Player(p0)),
             },
@@ -1075,7 +1075,7 @@ mod tests {
             source: source_b,
             spec: ReplacementSpec::Primitive {
                 filter: EventFilter::DamageDealt {
-                    affected: EffectFilter { controller: Some(FilterController::You), ..no_filter() },
+                    affected: EffectFilter {  controller: Some(FilterController::You), ..no_filter() },
                 },
                 payload: ReplacementPayload::PreventDamage,
             },

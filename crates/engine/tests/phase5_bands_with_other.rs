@@ -96,7 +96,7 @@ fn bands_with_other(source: ObjectId, quality: &str) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddBandsWithOther(Subtype(quality.to_string()))),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -111,7 +111,7 @@ fn bands_with_other_supertype(source: ObjectId, quality: SupertypeSet) -> Contin
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddBandsWithOtherSupertype(quality)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

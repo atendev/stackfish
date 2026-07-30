@@ -72,7 +72,7 @@ fn bloodthirst_effect(source: ObjectId, amount: i32) -> ReplacementEffect {
             filter: EventFilter::WouldMoveZone {
                 from: None,
                 to: Some(ZoneKind::Battlefield),
-                affected: EffectFilter { controller: None, card_types: None, self_only: true },
+                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, },
             },
             payload: ReplacementPayload::EntersWithCountersBloodthirst { kind: CounterKind::PlusOnePlusOne, amount },
         },
