@@ -717,16 +717,16 @@ impl Engine {
                 status
             }
 
-            ProcessState::AwaitingTriggerTargets { trigger, requirement, candidates, remaining } => {
+            ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining } => {
                 // Nothing to do until submit_trigger_targets answers - same
                 // "put the exact same state back" pattern every other
                 // choice-pause above already uses.
                 let status = StepStatus::AwaitingTriggerTargets {
                     player: trigger.controller,
-                    requirement: requirement.clone(),
+                    spec: spec.clone(),
                     candidates: candidates.clone(),
                 };
-                self.process_state = ProcessState::AwaitingTriggerTargets { trigger, requirement, candidates, remaining };
+                self.process_state = ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining };
                 status
             }
 

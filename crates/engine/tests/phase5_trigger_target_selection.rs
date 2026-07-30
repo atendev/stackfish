@@ -1,20 +1,23 @@
 //! Phase 5 vertical slice: CR 603.3d, a triggered ability that requires a
-//! target now genuinely pauses for its controller to choose one before
-//! going on the stack, instead of always being pushed with an empty
-//! `targets: Vec::new()` and fizzling at the CR 608.2b recheck.
-//! `triggers_pipeline.rs`'s own final push loop
+//! target (or targets - CR 601.2c's multi-word "destroy target creature and
+//! target land" form works here too now) genuinely pauses for its
+//! controller to choose before going on the stack, instead of always being
+//! pushed with an empty `targets: Vec::new()` and fizzling at the CR 608.2b
+//! recheck. `triggers_pipeline.rs`'s own final push loop
 //! (`resolve_put_triggers_apnap_state`) is resumable now
 //! (`Engine::push_ordered_triggers`), pausing on
 //! `ProcessState`/`StepStatus::AwaitingTriggerTargets` the moment a
-//! `TargetSpec::Primitive`-shaped trigger has real candidates to choose
-//! from, and skipping the push entirely (CR 603.3d's own "the ability is
-//! simply removed from the stack") when it doesn't.
+//! triggered ability with a real `TargetSpec` (single- or multi-word) has
+//! every word's own minimum met by real candidates, and skipping the push
+//! entirely (CR 603.3d's own "the ability is simply removed from the
+//! stack") when even one word can't be - the same all-or-nothing stance CR
+//! 601.2c/e already takes for a spell.
 //!
-//! Narrowed to `TargetSpec::Primitive` - every real triggered ability this
-//! engine has ever modeled (Wall of Omens' plain `GainLife`, Vesuvan
-//! Doppelganger's own granted upkeep ability) is this shape;
-//! `TargetSpec::Multiple` on a trigger stays a named gap, same
-//! empty-targets fallback as before this slice.
+//! `phase5/trigger-target-selection` (the previous slice) started narrowed
+//! to `TargetSpec::Primitive`; `phase5/trigger-multi-target` (this one)
+//! closed that gap by generalizing the pause to any `TargetSpec` and
+//! reusing `commands::validate_targets`/`split_targets_by_requirement`
+//! wholesale rather than re-deriving the per-word split logic.
 
 use stackfish_engine::engine::{Engine, StepStatus, TriggerTargetsError};
 use stackfish_engine::*;
@@ -94,6 +97,84 @@ fn destroy_target_creature_trigger(source: ObjectId, exclude_source: bool) -> Re
     }
 }
 
+fn land_definition(name: &str) -> CardDefinition {
+    CardDefinition {
+        definition_id: 2,
+        name: name.to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::LAND,
+        subtypes: Vec::new(),
+        oracle_text: String::new(),
+        power: None,
+        toughness: None,
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::Inline(String::new()),
+        keywords: KeywordSet::empty(),
+        target_requirement: None,
+        alternative_costs: Vec::new(),
+        effect: None,
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+    }
+}
+
+fn creature_target_word() -> TargetRequirement {
+    TargetRequirement {
+        filter: TargetFilter::Object {
+            card_types: Some(CardTypeSet::CREATURE),
+            excluded_card_types: None,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+            controller: None,
+            zone: None,
+        },
+        count: 1,
+        up_to: false,
+        at_least: false,
+        exclude_source: true,
+    }
+}
+
+fn land_target_word() -> TargetRequirement {
+    TargetRequirement {
+        filter: TargetFilter::Object {
+            card_types: Some(CardTypeSet::LAND),
+            excluded_card_types: None,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
+            controller: None,
+            zone: None,
+        },
+        count: 1,
+        up_to: false,
+        at_least: false,
+        exclude_source: false,
+    }
+}
+
+/// CR 601.2c's own worked example shape, on a trigger instead of a spell:
+/// "destroy target creature and target land."
+fn destroy_creature_and_land_trigger(source: ObjectId) -> RegisteredAbility {
+    RegisteredAbility {
+        id: AbilityId(0),
+        source,
+        kind: AbilityKind::Triggered,
+        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
+        cost: None,
+        target: Some(TargetSpec::Multiple(vec![creature_target_word(), land_target_word()])),
+        operation: ScriptHandle(0),
+        effect: Some(AbilityEffect::Destroy),
+        intervening_if: None,
+    }
+}
+
 #[test]
 fn triggered_ability_pauses_for_a_real_target_choice_and_resolves_against_it() {
     let p0 = PlayerId(0);
@@ -109,12 +190,14 @@ fn triggered_ability_pauses_for_a_real_target_choice_and_resolves_against_it() {
 
     let mut engine = Engine::new(state);
     let status = pass_both(&mut engine, p0, p1);
-    let StepStatus::AwaitingTriggerTargets { player, requirement, candidates } = status else {
+    let StepStatus::AwaitingTriggerTargets { player, spec, candidates } = status else {
         panic!("expected a CR 603.3d target-choice pause, got {status:?}")
     };
     assert_eq!(player, p0, "the trigger's own controller chooses");
+    let TargetSpec::Primitive(requirement) = &spec else { panic!("expected a single-word spec, got {spec:?}") };
     assert_eq!(requirement.count, 1);
-    let mut sorted = candidates.clone();
+    assert_eq!(candidates.len(), 1, "one target word, one candidate list");
+    let mut sorted = candidates[0].clone();
     sorted.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(_) => u64::MAX,
@@ -242,7 +325,7 @@ fn vesuvans_granted_upkeep_ability_now_really_fires_and_becomes_a_copy() {
         panic!("expected the real upkeep trigger to pause for a target, got {status:?}")
     };
     assert_eq!(player, p0);
-    assert!(candidates.contains(&Target::Object(salamander)));
+    assert!(candidates[0].contains(&Target::Object(salamander)));
 
     engine.submit_trigger_targets(vec![Target::Object(salamander)]).expect("Salamander was offered");
     drain(&mut engine);
@@ -258,4 +341,67 @@ fn vesuvans_granted_upkeep_ability_now_really_fires_and_becomes_a_copy() {
     let linked: Vec<_> =
         engine.state().abilities.iter().filter(|a| a.source == doppel && a.kind == AbilityKind::Triggered).collect();
     assert_eq!(linked.len(), 1, "re-granted after the copy, not lost");
+}
+
+/// CR 601.2c's multi-word form works on a trigger too now - "destroy target
+/// creature and target land" pauses once, offering one candidate list per
+/// word, and a single flat answer resolves both.
+#[test]
+fn triggered_ability_with_multiple_target_words_pauses_once_and_resolves_both() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let reaper = ObjectId(0);
+    let bear = ObjectId(1);
+    let swamp = ObjectId(2);
+    let mut state = two_player_state();
+    state.objects.insert(reaper, card_object(reaper, creature_definition("Reaper"), p0, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(reaper);
+    state.objects.insert(bear, card_object(bear, creature_definition("Bear"), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    state.objects.insert(swamp, card_object(swamp, land_definition("Swamp"), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(swamp);
+    state.abilities.push(destroy_creature_and_land_trigger(reaper));
+
+    let mut engine = Engine::new(state);
+    let status = pass_both(&mut engine, p0, p1);
+    let StepStatus::AwaitingTriggerTargets { player, spec, candidates } = status else {
+        panic!("expected a CR 603.3d target-choice pause, got {status:?}")
+    };
+    assert_eq!(player, p0);
+    assert!(matches!(spec, TargetSpec::Multiple(ref reqs) if reqs.len() == 2));
+    assert_eq!(candidates.len(), 2, "one candidate list per target word");
+    assert_eq!(candidates[0], vec![Target::Object(bear)], "creature word - Reaper excludes itself, so only Bear qualifies");
+    assert_eq!(candidates[1], vec![Target::Object(swamp)], "land word");
+
+    engine.submit_trigger_targets(vec![Target::Object(bear), Target::Object(swamp)]).expect("both words satisfied");
+    drain(&mut engine);
+    let status = pass_both(&mut engine, p0, p1);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "resolution finishes cleanly, got {status:?}");
+    assert!(engine.state().object(bear).is_none() || engine.state().object(bear).unwrap().zone != ZoneKind::Battlefield, "Bear was destroyed");
+    assert!(engine.state().object(swamp).is_none() || engine.state().object(swamp).unwrap().zone != ZoneKind::Battlefield, "Swamp was destroyed");
+}
+
+/// CR 601.2c/e's all-or-nothing stance: one target word coming up with zero
+/// legal candidates voids the whole trigger, not just that word - here the
+/// land word has nothing to target, so the creature word never gets a
+/// chance either.
+#[test]
+fn triggered_ability_with_multiple_target_words_and_one_unsatisfiable_is_removed_entirely() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let reaper = ObjectId(0);
+    let bear = ObjectId(1);
+    let mut state = two_player_state();
+    state.objects.insert(reaper, card_object(reaper, creature_definition("Reaper"), p0, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(reaper);
+    state.objects.insert(bear, card_object(bear, creature_definition("Bear"), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
+    // No land anywhere - the land word's own minimum can never be met.
+    state.abilities.push(destroy_creature_and_land_trigger(reaper));
+
+    let mut engine = Engine::new(state);
+    let status = pass_both(&mut engine, p0, p1);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "no pause - straight through, got {status:?}");
+    assert!(engine.state().stack.is_empty(), "CR 603.3d: the land word has no legal target, so the whole ability is removed from the stack");
+    assert!(engine.state().object(bear).is_some(), "Bear survives - the creature word never even got asked");
 }

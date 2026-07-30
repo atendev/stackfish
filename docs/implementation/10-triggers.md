@@ -198,6 +198,44 @@
 - Unresolved: `TargetSpec::Multiple` on a trigger. Modal triggered abilities (CR 603.3c). The
   departed-source dies-trigger gap already named above.
 
+## Slice: trigger-multi-target (branch open)
+
+- Branch `phase5/trigger-multi-target`.
+- Scope: `trigger-target-selection`'s own named narrowing - CR 601.2c's multi-word target form
+  ("destroy target creature and target land") on a triggered ability. The previous slice's pause
+  carried a single `TargetRequirement`; this one generalizes it to a full `TargetSpec`
+  (`Primitive`/`Multiple`), reusing the exact `commands::validate_targets`/
+  `split_targets_by_requirement` machinery `CastSpell`/`ActivateAbility` already validate their own
+  submitted targets through, rather than re-deriving per-word splitting for triggers.
+- Key changes:
+  - `commands::legal_target_candidates_for_spec(state, script_runtime, spec, caster, source) ->
+    Vec<Vec<Target>>` (legality.rs) - one legal-candidate list per target word, mapping
+    `legal_target_candidates` over `TargetSpec`'s one or many `TargetRequirement`s.
+  - `commands::target_spec_minimums(spec) -> Vec<u32>` - one minimum-candidate-count per word (`0`
+    for `up_to`, `count` otherwise), paired positionally with the candidates list above.
+  - `commands::validate_targets` widened from `pub(in crate::commands)` to `pub(crate)` -
+    `engine::triggers_pipeline` is outside the `commands` module tree and needed it directly; the
+    narrower `validate_single_target_requirement` wrapper the previous slice added is deleted as
+    redundant (this function already handles the single-word case identically, dispatching through
+    its own `TargetSpec::Primitive` arm).
+  - `ProcessState`/`StepStatus::AwaitingTriggerTargets`'s `requirement: TargetRequirement`/
+    `candidates: Vec<Target>` became `spec: TargetSpec`/`candidates: Vec<Vec<Target>>` - a shape
+    change to a variant introduced last slice, not a new one; `push_ordered_triggers`'s own
+    satisfiability check now zips `candidates`/`target_spec_minimums(&spec)` per word instead of a
+    single scalar comparison. `submit_trigger_targets` accepts one flat `Vec<Target>` (same contract
+    as before) and hands it straight to `validate_targets`, which already knows how to split it per
+    word for a `Multiple` spec.
+- Deliberately unchanged: CR 603.3c (modal triggered abilities) - a different rule, still unmodeled.
+  The all-or-nothing stance (one word with zero legal candidates voids the *whole* trigger, matching
+  CR 601.2c/e for spells) was already implicit in `validate_targets`'s own existing behavior, just
+  newly exercised by a trigger for the first time.
+- Verify: 2 new tests in `phase5_trigger_target_selection.rs`
+  (`triggered_ability_with_multiple_target_words_pauses_once_and_resolves_both`/
+  `triggered_ability_with_multiple_target_words_and_one_unsatisfiable_is_removed_entirely`), plus the
+  5 tests from the previous slice updated for the new pause shape (mechanical - field rename plus
+  indexing into the now-nested `candidates`). Full workspace suite green.
+- Unresolved: CR 603.3c (modal triggered abilities). Nothing else new named by this slice.
+
 ## General trigger notes
 
 - Trigger ordering: `group_apnap` groups by controller in APNAP order; intra-group ordering pauses via `AwaitTriggerOrderChoice`.

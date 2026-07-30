@@ -411,23 +411,43 @@ pub(crate) fn legal_target_candidates(
         .collect()
 }
 
-/// Single-`TargetRequirement` validation for a caller outside `commands`
-/// that has no `TargetSpec` wrapper to hand `validate_targets` -
-/// `engine::triggers_pipeline`'s own CR 603.3d pause is the first: a
-/// triggered ability's target is chosen through its own dedicated
-/// pause/resume pair (`Engine::submit_trigger_targets`), not
-/// `CastSpell`/`ActivateAbility`'s `targets` field, but still needs the
-/// exact same count/dedup/legality checks `validate_one_target_requirement`
-/// already enforces for those.
-pub(crate) fn validate_single_target_requirement(
+/// CR 603.3d, generalized to a full `TargetSpec` (one candidate list per
+/// target word - `Vec<Vec<Target>>`, length 1 for `Primitive`): every
+/// currently-legal candidate for each word in `spec`, via
+/// `legal_target_candidates` per word. `engine::triggers_pipeline`'s own CR
+/// 603.3d pause uses this (rather than the single-`TargetRequirement`
+/// version) since a triggered ability's own `target` field is a full
+/// `TargetSpec` just like a spell/activated ability's, and CR 601.2c/603.3d
+/// (via 601.2c-d) already establish "a word with zero legal candidates for
+/// its own minimum makes the whole cast/trigger illegal" for the
+/// multi-word case too, not just the single-word one.
+pub(crate) fn legal_target_candidates_for_spec(
     state: &GameState,
     script_runtime: &ScriptRuntime,
-    requirement: &TargetRequirement,
-    targets: &[Target],
+    spec: &TargetSpec,
     caster: PlayerId,
     source: ObjectId,
-) -> Result<(), CommandError> {
-    validate_one_target_requirement(state, script_runtime, requirement, targets, caster, source)
+) -> Vec<Vec<Target>> {
+    let requirements: Vec<&TargetRequirement> = match spec {
+        TargetSpec::Primitive(req) => vec![req],
+        TargetSpec::Multiple(reqs) => reqs.iter().collect(),
+    };
+    requirements.into_iter().map(|req| legal_target_candidates(state, script_runtime, req, caster, source)).collect()
+}
+
+/// One minimum-legal-candidate-count per word in `spec` (`0` for `up_to`,
+/// `count` otherwise - `at_least`'s own lower bound is still just `count`,
+/// same as `up_to`/exact) - paired positionally with
+/// `legal_target_candidates_for_spec`'s own per-word output so
+/// `engine::triggers_pipeline::push_ordered_triggers` can check "does every
+/// word have enough real candidates" before deciding to pause at all versus
+/// applying CR 603.3d's "the ability is simply removed from the stack."
+pub(crate) fn target_spec_minimums(spec: &TargetSpec) -> Vec<u32> {
+    let requirements: Vec<&TargetRequirement> = match spec {
+        TargetSpec::Primitive(req) => vec![req],
+        TargetSpec::Multiple(reqs) => reqs.iter().collect(),
+    };
+    requirements.into_iter().map(|req| if req.up_to { 0 } else { req.count }).collect()
 }
 
 /// CR 601.2c/601.2e (spells) and CR 602.2b (activated abilities): validates
@@ -448,7 +468,14 @@ pub(crate) fn validate_single_target_requirement(
 /// own doc for the full three-way shape.
 /// TODO(CR 601.2d): no division/distribution step for effects that split
 /// among several targets.
-pub(in crate::commands) fn validate_targets(
+///
+/// `pub(crate)`, not `pub(in crate::commands)`: `engine::triggers_pipeline`'s
+/// own CR 603.3d pause (`Engine::submit_trigger_targets`) needs this too, and
+/// is outside the `commands` module tree - a triggered ability's target
+/// choice has no `CastSpell`/`ActivateAbility`-style player-submitted
+/// `targets` to validate at the point it's initiated, so it validates here
+/// instead, at answer time.
+pub(crate) fn validate_targets(
     state: &GameState,
     script_runtime: &ScriptRuntime,
     requirement: Option<&TargetSpec>,
