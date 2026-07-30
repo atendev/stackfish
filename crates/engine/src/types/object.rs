@@ -124,6 +124,33 @@ pub struct GameObject {
     /// this `false` instead, since neither is ever a commander.
     pub is_commander: bool,
     pub visibility: VisibilityPolicy,
+    /// CR 707.9e/g: how many times this specific object (same `object_id`)
+    /// has become a copy of something — bumped by `resolve_become_copy_effect`
+    /// (CR 707.2's `BecomeCopy`) and `submit_copy_choice` (CR 707.6's
+    /// `EntersAsCopy`) each time either applies, right alongside the
+    /// `copiable_override` write itself. Starts at `0` for every object that
+    /// has never been a copy (the overwhelming majority) and for a freshly
+    /// minted `TokenSpec::CopyOf` token — a brand-new `object_id` has no
+    /// prior "own identity" to have copied *from* yet, so its first copy
+    /// application isn't a *second* one.
+    ///
+    /// Exists to answer CR 707.9e/g's shared question — "has *another* copy
+    /// effect applied to this object since a given earlier one did?" — for
+    /// an exception/linked-ability granted by that earlier copy effect that
+    /// needs to stop applying once superseded. `GameState::
+    /// linked_ability_generation` tags an `AbilityId` with the
+    /// `copy_generation` it was granted under; `triggers::collect_triggers`
+    /// checks a tagged ability's own source object's *current`
+    /// `copy_generation` against that tag before it's allowed to match at
+    /// all (CR 707.9g). Real, tested enforcement — no producer sets that tag
+    /// yet, since `CopyExceptions` doesn't have a "this copy effect also
+    /// grants a whole new ability" shape (only characteristic-modification
+    /// exceptions exist so far) - same "real mechanism, no producer wired in
+    /// yet" posture `HandRevealModifier`'s own doc comment already takes.
+    /// CR 707.9e's "additional effect" exception variant is structurally the
+    /// same question against the same counter, just with no consumer at all
+    /// in this engine (no "additional effect" copy exception exists either).
+    pub copy_generation: u32,
 }
 
 impl GameObject {

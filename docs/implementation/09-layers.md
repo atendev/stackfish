@@ -377,6 +377,69 @@
   generation/history, not a `CopyExceptions` field; confirmed again while scoping this slice, not
   just carried forward unexamined).
 
+## Slice: copy-generation (merged)
+
+- Branch `phase5/copy-generation`.
+- Scope: the schema prerequisite CR 707.9e/g's own unresolved note (above) named three times over —
+  "has *another* copy effect applied to this object since a given earlier one did?" CR 707.9e (an
+  "additional effect" exception stops applying once superseded) and CR 707.9g (a linked triggered
+  ability stops triggering once superseded) both ask the identical question against the identical
+  counter; this slice builds the counter and the one real consumer this engine has a hook for
+  (triggered-ability matching), and stops there.
+- Key finding that shaped (and narrowed) the plan: neither CR 707.9e nor 707.9g has a producer in this
+  engine yet — `CopyExceptions` only has characteristic-modification shapes (`set_power_toughness`/
+  `add_keywords`/`retain_name`/`retain_color`), never "this copy effect also grants a whole new
+  ability" (the real shape Vesuvan Doppelganger's own "except it has [ability]" clause needs). Building
+  that producer too would mean inventing a second, unrelated new mechanism (synthesizing a fresh
+  `RegisteredAbility` mid-copy) in the same slice — confirmed with the user first that the
+  infrastructure alone (real, directly tested) is the right scope, same "real mechanism, no producer
+  wired in yet" posture `HandRevealModifier`'s own doc comment already established for an analogous
+  gap.
+- Key changes:
+  - `GameObject.copy_generation: u32` — how many times this specific object has become a copy. Starts
+    at `0`; a freshly minted `TokenSpec::CopyOf` token also starts at `0` (a brand-new `object_id` has
+    no prior identity to have copied *from* yet, so its first copy application isn't a second one).
+    Bumped at both real copy-application sites, right alongside the `copiable_override` write itself:
+    `resolve_become_copy_effect` (`misc_effects.rs`, CR 707.2) and `submit_copy_choice` (CR 707.6). ~39
+    `GameObject` struct-literal construction sites needed the new field (compiler-driven, mechanical) —
+    smaller than it first looked, since `GameObject::new` is an unused `todo!()` stub and the
+    overwhelming majority of real construction funnels through `testutil::card_object`, one choke
+    point.
+  - `GameState.linked_ability_generation: HashMap<AbilityId, u32>` — a side-channel tag (not a new
+    `RegisteredAbility` field; that type has 100+ construction sites and no `Default` impl, the same
+    "field would ripple everywhere, mostly meaninglessly" reasoning `ManaPool.restricted`'s own side-
+    channel already used) mapping a triggered ability to the `copy_generation` its source was at when
+    a copy effect granted it.
+  - `triggers::collect_triggers`: right after resolving an ability's live `source_object`, a tagged
+    ability (`linked_ability_generation.get(&ability.id)` is `Some`) is skipped entirely unless the
+    source's *current* `copy_generation` still equals the tagged value — CR 707.9g's actual text, "the
+    ability doesn't trigger," falls out as a plain `continue` rather than a special "trigger but no-op"
+    path. An untagged ability (the overwhelming majority) is completely unaffected, checked first.
+- Verify: `become_copy_bumps_copy_generation` (`phase5_layer_engine_copy.rs`) drives two real,
+  independent `BecomeCopy` activations on the same object and confirms the counter reaches `1` then
+  `2`; a `copy_generation` assertion added to the existing `EntersAsCopy` choose/decline tests
+  (`phase5_clone_enters_as_copy.rs`) confirms choosing bumps it and declining doesn't. Three new direct
+  tests of `collect_triggers`'s own consult (`phase5_copy_generation.rs`, no real producer to drive
+  them end-to-end yet, same posture `is_hand_revealed`'s own tests already take) — a tagged ability
+  matches while its source is still at the granted generation, stops matching the instant the source's
+  generation moves past it, and an untagged ability is unaffected by its source's generation regardless
+  of value. Full workspace suite green (161 test-result blocks — a new test binary, not a regression).
+- Mistake caught while writing the first end-to-end `BecomeCopy`-twice test: reusing this file's own
+  `bear_definition()` (an unconditional self-registered `GainLife` trigger, used throughout this file's
+  *other* tests) as the first copy target left that trigger sitting on the stack, unresolved, after the
+  copy resolved — `activate_pay_and_resolve`'s single `PassPriority` call resolves the `BecomeCopy`
+  activation itself, not a *second*, newly-registered triggered ability the copy just granted. Every
+  other test in this file only ever does one `BecomeCopy` and never inspects `process_state` afterward,
+  so the same latent gap never surfaced before. Fixed by copying a scriptless creature instead — no
+  real fix needed in engine code, just a test-fixture choice; logged so a future "activate BecomeCopy
+  twice in one test" attempt doesn't rediscover the same trap.
+- Unresolved, deliberately: no producer exists for either CR 707.9e or CR 707.9g in this engine — the
+  mechanism this slice built is real and directly tested, but nothing yet grants an ability or an
+  "additional effect" as part of a copy application. Building one (a new `CopyExceptions` shape,
+  synthesizing a fresh `RegisteredAbility` mid-`BecomeCopy`/`EntersAsCopy`) is its own separate,
+  larger slice — the natural next step once (or if) a Vesuvan Doppelganger-style card is actually
+  wanted.
+
 ## Slice: keyword-layer-fix-and-remove-keyword (merged)
 
 - Branch `phase5/keyword-layer-fix-and-remove-keyword`.

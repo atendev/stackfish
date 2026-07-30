@@ -857,6 +857,7 @@ mod tests {
             is_commander: false,
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            copy_generation: 0,
         }
     }
 
@@ -920,6 +921,7 @@ mod tests {
             pending_step_skips: Vec::new(),
             once_per_turn_triggered: std::collections::HashSet::new(),
             commander_return_offered: std::collections::HashSet::new(),
+            linked_ability_generation: std::collections::HashMap::new(),
         }
     }
 

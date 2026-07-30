@@ -415,6 +415,9 @@ impl Engine {
                 exceptions.apply(&mut snapshot, original_definition.as_ref());
                 if let Some(obj) = self.state.object_mut(object) {
                     obj.copiable_override = Some(snapshot.clone());
+                    // CR 707.9e/g: a real, distinct copy application - see
+                    // GameObject::copy_generation's own doc comment.
+                    obj.copy_generation += 1;
                 }
                 commands::purge_granted_abilities(&mut self.state, object);
                 // TODO: a script error here is silently dropped, same gap

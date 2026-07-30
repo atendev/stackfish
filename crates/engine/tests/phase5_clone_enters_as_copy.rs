@@ -280,6 +280,10 @@ fn choosing_to_copy_a_fading_and_tapped_creature_applies_both_on_top_of_the_copy
         2,
         "the copy's own Fading-equivalent EntersWithCounters applied too"
     );
+    assert_eq!(
+        engine.state().object(object).unwrap().copy_generation, 1,
+        "CR 707.9e/g: EntersAsCopy is a real, distinct copy application"
+    );
 }
 
 #[test]
@@ -308,6 +312,7 @@ fn choosing_not_to_copy_leaves_the_entrant_as_itself() {
     assert_eq!(now.name, "Clone", "declining leaves the entrant as its own printed self");
     assert!(!engine.state().object(object).unwrap().tapped);
     assert_eq!(engine.state().object(object).unwrap().counters.count(&CounterKind::Charge), 0);
+    assert_eq!(engine.state().object(object).unwrap().copy_generation, 0, "declining is not a copy application");
 }
 
 #[test]

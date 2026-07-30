@@ -74,6 +74,9 @@ impl Engine {
                 let became_copy = self.state.objects.get_mut(&source_id).is_some_and(|source_obj| {
                     if source_obj.zone == ZoneKind::Battlefield {
                         source_obj.copiable_override = Some(snapshot.clone());
+                        // CR 707.9e/g: a real, distinct copy application -
+                        // see GameObject::copy_generation's own doc comment.
+                        source_obj.copy_generation += 1;
                         true
                     } else {
                         false

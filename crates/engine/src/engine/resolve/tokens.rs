@@ -175,6 +175,7 @@ impl Engine {
                 is_token: true,
                 is_commander: false,
                 visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+                copy_generation: 0,
             };
             if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
                 zone.push_bottom(token_id);

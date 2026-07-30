@@ -85,6 +85,7 @@ impl Engine {
                     is_token: false,
                     is_commander: false,
                     visibility: VisibilityPolicy { public: false, visible_to: Vec::new() },
+                    copy_generation: 0,
                 };
                 lib_zone.contents.push_back(obj_id);
                 objects.insert(obj_id, obj);
@@ -126,6 +127,7 @@ impl Engine {
                     // CR 408: the command zone's contents are public, same
                     // default as the battlefield/graveyard/exile.
                     visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+                    copy_generation: 0,
                 };
                 command_zone.contents.push_back(obj_id);
                 objects.insert(obj_id, obj);
@@ -167,6 +169,7 @@ impl Engine {
             pending_step_skips: Vec::new(),
             once_per_turn_triggered: std::collections::HashSet::new(),
             commander_return_offered: std::collections::HashSet::new(),
+            linked_ability_generation: std::collections::HashMap::new(),
         };
 
         Engine {
