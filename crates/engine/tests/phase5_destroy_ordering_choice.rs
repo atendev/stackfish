@@ -98,7 +98,7 @@ fn regenerate_shield(source: ObjectId, consumption: ConsumptionPolicy) -> Replac
         source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: true, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::Regenerate,
         },
@@ -122,7 +122,7 @@ fn exile_instead_effect(source: ObjectId, self_only: bool, consumption: Consumpt
                 affected: EffectFilter { 
                     card_types: Some(CardTypeSet::CREATURE),
                     controller: Some(FilterController::You),
-                    self_only, subtypes: None, excluded_subtypes: None, },
+                    self_only, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         },

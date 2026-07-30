@@ -47,7 +47,7 @@ fn would_die_exile_effect(source: ObjectId, consumption: ConsumptionPolicy) -> R
         source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         },
@@ -63,7 +63,7 @@ fn would_die_command_zone_effect(source: ObjectId) -> ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::WouldDie {
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Command),
         },

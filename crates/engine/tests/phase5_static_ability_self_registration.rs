@@ -276,7 +276,7 @@ fn dying_creatures_registered_static_ability_is_purged_by_sba() {
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

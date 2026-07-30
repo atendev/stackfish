@@ -134,7 +134,7 @@ fn protection_from_zombies(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionSubtype(Subtype("Zombie".to_string()))),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -146,7 +146,7 @@ fn protection_from_arcane(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionSubtype(Subtype("Arcane".to_string()))),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -457,7 +457,7 @@ fn remove_all_abilities_also_strips_a_granted_protection_subtype() {
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionSubtype(Subtype("Zombie".to_string()))),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -466,7 +466,7 @@ fn remove_all_abilities_also_strips_a_granted_protection_subtype() {
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::RemoveAllAbilities),
         timestamp: SequenceNo(1),
         duration: EffectDuration::Permanent,

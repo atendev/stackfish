@@ -448,6 +448,14 @@ pub struct EffectFilter {
     /// "creatures that aren't Walls get -1/-0." Same raw-field caveat as
     /// `subtypes` above.
     pub excluded_subtypes: Option<Vec<Subtype>>,
+    /// CR 205.4a: "destroy all legendary permanents" - a bitset like
+    /// `card_types` (not a `Vec` like `subtypes` above), since
+    /// `CardDefinition.supertypes`/`TargetFilter::Object::supertypes` are
+    /// both already bitsets. Same raw-field caveat as `subtypes`.
+    pub supertypes: Option<SupertypeSet>,
+    /// CR 601.2c/115/205.4a's negated form - "destroy all nonbasic lands."
+    /// Same raw-field caveat as `subtypes`.
+    pub excluded_supertypes: Option<SupertypeSet>,
     /// "Just this permanent" (e.g. an Aura's own "enchanted creature gets
     /// +2/+2", where the affected object *is* the effect's own attachment
     /// target — modeled here as "the effect's source" for a first cut, since
@@ -566,6 +574,16 @@ pub(crate) fn matches_effect_filter(
     }
     if let Some(subtypes) = &filter.excluded_subtypes {
         if subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
+            return false;
+        }
+    }
+    if let Some(types) = filter.supertypes {
+        if !object.definition.supertypes.intersects(types) {
+            return false;
+        }
+    }
+    if let Some(types) = filter.excluded_supertypes {
+        if object.definition.supertypes.intersects(types) {
             return false;
         }
     }
@@ -1070,16 +1088,21 @@ fn event_target_matches(
     let source_controller = crate::layers::effective_controller(state, script_runtime, effect_source);
     match target {
         Target::Player(pid) => {
-            if filter.card_types.is_some() || filter.subtypes.is_some() || filter.self_only {
-                // A player has no card types/subtypes and can't be "this
-                // effect's own source" - all real, if unusual, non-matches
-                // rather than something to guess past. `excluded_subtypes` is
-                // not included here: a player trivially has none of the
-                // listed subtypes, so a negated filter is vacuously
-                // satisfied rather than a non-match, same "positive filter
-                // rejects, negated filter passes" asymmetry `card_types`
-                // (positive-only on `EffectFilter`, no `excluded_card_types`
-                // field here) already implies.
+            if filter.card_types.is_some()
+                || filter.subtypes.is_some()
+                || filter.supertypes.is_some()
+                || filter.self_only
+            {
+                // A player has no card types/subtypes/supertypes and can't be
+                // "this effect's own source" - all real, if unusual, non-
+                // matches rather than something to guess past.
+                // `excluded_subtypes`/`excluded_supertypes` are not included
+                // here: a player trivially has none of the listed subtypes/
+                // supertypes, so a negated filter is vacuously satisfied
+                // rather than a non-match, same "positive filter rejects,
+                // negated filter passes" asymmetry `card_types` (positive-
+                // only on `EffectFilter`, no `excluded_card_types` field here)
+                // already implies.
                 return false;
             }
             match filter.controller {
@@ -1122,6 +1145,16 @@ fn event_target_matches(
             }
             if let Some(subtypes) = &filter.excluded_subtypes {
                 if subtypes.iter().any(|s| object.definition.subtypes.contains(s)) {
+                    return false;
+                }
+            }
+            if let Some(types) = filter.supertypes {
+                if !object.definition.supertypes.intersects(types) {
+                    return false;
+                }
+            }
+            if let Some(types) = filter.excluded_supertypes {
+                if object.definition.supertypes.intersects(types) {
                     return false;
                 }
             }
@@ -1407,7 +1440,7 @@ mod tests {
         let effect = replacement(
             effect_source,
             EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: Some(CardTypeSet::CREATURE), controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             ReplacementPayload::PreventDamage,
         );
@@ -1435,7 +1468,7 @@ mod tests {
         let effect = replacement(
             effect_source,
             EventFilter::DamageDealt {
-                affected: EffectFilter {  card_types: None, controller: Some(FilterController::You), self_only: false, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: None, controller: Some(FilterController::You), self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             ReplacementPayload::PreventDamage,
         );
@@ -1460,7 +1493,7 @@ mod tests {
         let effect = replacement(
             this,
             EventFilter::WouldDie {
-                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         );
@@ -1500,7 +1533,7 @@ mod tests {
             EventFilter::WouldMoveZone {
                 from: None,
                 to: None,
-                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         );
@@ -1522,7 +1555,7 @@ mod tests {
             EventFilter::WouldMoveZone {
                 from: Some(ZoneKind::Battlefield),
                 to: None,
-                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         );
@@ -1546,7 +1579,7 @@ mod tests {
             EventFilter::WouldMoveZone {
                 from: Some(ZoneKind::Battlefield),
                 to: Some(ZoneKind::Exile),
-                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  card_types: None, controller: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Graveyard),
         );
@@ -1562,7 +1595,7 @@ mod tests {
     fn apply_prevent_damage_zeroes_amount_and_keeps_source_and_target() {
         let effect = replacement(
             ObjectId(0),
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             ReplacementPayload::PreventDamage,
         );
         let source = ObjectId(1);
@@ -1580,7 +1613,7 @@ mod tests {
         let new_target = Target::Player(PlayerId(1));
         let effect = replacement(
             ObjectId(0),
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             ReplacementPayload::RedirectDamage(new_target),
         );
         let source = ObjectId(1);
@@ -1607,7 +1640,7 @@ mod tests {
         ]);
         let effect = replacement(
             effect_source,
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             ReplacementPayload::RedirectDamage(Target::Object(redirect_dest)),
         );
         let event =
@@ -1623,7 +1656,7 @@ mod tests {
         let state = state_with(vec![object(effect_source, p0, CardTypeSet::ARTIFACT, ZoneKind::Battlefield)]);
         let effect = replacement(
             effect_source,
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             ReplacementPayload::RedirectDamage(Target::Object(gone)),
         );
         let event =
@@ -1645,7 +1678,7 @@ mod tests {
         ]);
         let effect = replacement(
             effect_source,
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             ReplacementPayload::RedirectDamage(Target::Object(land)),
         );
         let event =
@@ -1665,7 +1698,7 @@ mod tests {
         state.player_mut(p1).unwrap().eliminated = true;
         let effect = replacement(
             effect_source,
-            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            EventFilter::DamageDealt { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             ReplacementPayload::RedirectDamage(Target::Player(p1)),
         );
         let event =
@@ -1680,7 +1713,7 @@ mod tests {
     fn apply_replace_zone_destination_changes_to_only() {
         let effect = replacement(
             ObjectId(0),
-            EventFilter::WouldDie { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            EventFilter::WouldDie { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         );
         let object_id = ObjectId(1);
@@ -1704,7 +1737,7 @@ mod tests {
         // literals could still build one; apply() must not panic.
         let effect = replacement(
             ObjectId(0),
-            EventFilter::WouldDie { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
+            EventFilter::WouldDie { affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, } },
             ReplacementPayload::PreventDamage,
         );
         let object_id = ObjectId(1);
@@ -1735,6 +1768,8 @@ mod tests {
             card_types: None,
             subtypes: Some(vec![Subtype("Zombie".to_string())]),
             excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: None,
             self_only: false,
         };
         assert!(matches_effect_filter(&subtypes_filter, &zombie, source, p0));
@@ -1745,9 +1780,44 @@ mod tests {
             card_types: None,
             subtypes: None,
             excluded_subtypes: Some(vec![Subtype("Wall".to_string())]),
+            supertypes: None,
+            excluded_supertypes: None,
             self_only: false,
         };
         assert!(matches_effect_filter(&excluded_filter, &zombie, source, p0));
         assert!(!matches_effect_filter(&excluded_filter, &wall, source, p0));
+    }
+
+    #[test]
+    fn matches_effect_filter_checks_supertypes_and_excluded_supertypes() {
+        let p0 = PlayerId(0);
+        let source = ObjectId(0);
+        let mut legendary = object(ObjectId(1), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+        legendary.definition.supertypes = SupertypeSetT::LEGENDARY;
+        let plain = object(ObjectId(2), p0, CardTypeSet::CREATURE, ZoneKind::Battlefield);
+
+        let supertypes_filter = EffectFilter {
+            controller: None,
+            card_types: None,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: Some(SupertypeSetT::LEGENDARY),
+            excluded_supertypes: None,
+            self_only: false,
+        };
+        assert!(matches_effect_filter(&supertypes_filter, &legendary, source, p0));
+        assert!(!matches_effect_filter(&supertypes_filter, &plain, source, p0));
+
+        let excluded_filter = EffectFilter {
+            controller: None,
+            card_types: None,
+            subtypes: None,
+            excluded_subtypes: None,
+            supertypes: None,
+            excluded_supertypes: Some(SupertypeSetT::LEGENDARY),
+            self_only: false,
+        };
+        assert!(matches_effect_filter(&excluded_filter, &plain, source, p0));
+        assert!(!matches_effect_filter(&excluded_filter, &legendary, source, p0));
     }
 }

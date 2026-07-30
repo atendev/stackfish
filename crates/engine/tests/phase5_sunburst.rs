@@ -83,7 +83,7 @@ fn sunburst_effect(source: ObjectId) -> ReplacementEffect {
             filter: EventFilter::WouldMoveZone {
                 from: None,
                 to: Some(ZoneKind::Battlefield),
-                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, },
+                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
             payload: ReplacementPayload::EntersWithCountersSunburst,
         },

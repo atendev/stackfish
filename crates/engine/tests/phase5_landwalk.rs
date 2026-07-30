@@ -105,7 +105,7 @@ fn landwalk_quality(source: ObjectId, quality: LandwalkQuality) -> ContinuousEff
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddLandwalkQuality(quality)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -132,7 +132,7 @@ fn islandwalk(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddLandwalkSubtype(Subtype("Island".to_string()))),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

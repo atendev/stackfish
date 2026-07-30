@@ -69,7 +69,7 @@ fn permanent(id: ObjectId, owner: PlayerId, name: &str, supertypes: SupertypeSet
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }
+    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
 }
 
 fn set_name(source: ObjectId, new_name: &str, filter: EffectFilter, timestamp: u64) -> ContinuousEffect {
@@ -135,7 +135,7 @@ fn effect_filter_still_scopes_a_set_name_effect() {
     state.continuous_effects.push(set_name(
         source,
         "Renamed",
-        EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, },
+        EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
         1,
     ));
 

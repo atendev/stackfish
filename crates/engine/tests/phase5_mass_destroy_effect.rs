@@ -2,9 +2,11 @@
 //! X," which doesn't target at all (unlike `AbilityEffect::Destroy`, which
 //! only ever destroys the resolving spell/ability's own already-chosen
 //! target). `AbilityEffect::DestroyAll(EffectFilter)` reuses the exact
-//! `EffectFilter` shape (`controller`/`card_types`/`self_only`, and now
-//! `subtypes`/`excluded_subtypes` too - `phase5/effect-filter-subtypes`,
-//! CR 205.4b - "destroy all Zombies") `Game.CreateStaticAbility`'s own
+//! `EffectFilter` shape (`controller`/`card_types`/`self_only`, plus
+//! `subtypes`/`excluded_subtypes` - `phase5/effect-filter-subtypes`, CR
+//! 205.4b - "destroy all Zombies" - and `supertypes`/`excluded_supertypes` -
+//! `phase5/effect-filter-supertypes`, CR 205.4a - "destroy all legendary
+//! permanents") `Game.CreateStaticAbility`'s own
 //! `:SetAffected` already uses, and the
 //! same `continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, ...)`
 //! pipeline the single-target `Destroy` effect already delegates to - CR
@@ -72,6 +74,27 @@ fn destroy_all_decodes_a_subtypes_and_excluded_subtypes_filter() {
     }
 }
 
+#[test]
+fn destroy_all_decodes_a_supertypes_and_excluded_supertypes_filter() {
+    let runtime = ScriptRuntime::new();
+    let source = r#"
+        local s = {}
+        function s.operation()
+            return Game.Ops.DestroyAll({ supertypes = { "Legendary" }, excluded_supertypes = { "Snow" } })
+        end
+        return s
+    "#;
+    let (effect, _handle) =
+        runtime.build_operation(source).expect("script should load").expect("declares an operation");
+    match effect {
+        Some(AbilityEffect::DestroyAll(filter)) => {
+            assert_eq!(filter.supertypes, Some(SupertypeSet::LEGENDARY));
+            assert_eq!(filter.excluded_supertypes, Some(SupertypeSet::SNOW));
+        }
+        other => panic!("expected DestroyAll, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------
 // End-to-end: a script-declared Armageddon
 // ---------------------------------------------------------------------
@@ -96,6 +119,14 @@ const DESTROY_ALL_ZOMBIES_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
     return Game.Ops.DestroyAll({ subtypes = { "Zombie" } })
+end
+return s
+"#;
+
+const DESTROY_ALL_LEGENDARY_PERMANENTS_SCRIPT: &str = r#"
+local s = {}
+function s.operation()
+    return Game.Ops.DestroyAll({ supertypes = { "Legendary" } })
 end
 return s
 "#;
@@ -159,12 +190,21 @@ fn creature_definition(definition_id: u64) -> CardDefinition {
 }
 
 fn subtyped_creature_definition(definition_id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefinition {
+    supertyped_creature_definition(definition_id, name, subtypes, SupertypeSet::empty())
+}
+
+fn supertyped_creature_definition(
+    definition_id: u64,
+    name: &str,
+    subtypes: Vec<Subtype>,
+    supertypes: SupertypeSet,
+) -> CardDefinition {
     CardDefinition {
         definition_id,
         name: name.to_string(),
         mana_cost: ManaCost { symbols: Vec::new() },
         color_indicator: None,
-        supertypes: SupertypeSet::empty(),
+        supertypes,
         card_types: CardTypeSet::CREATURE,
         subtypes,
         oracle_text: String::new(),
@@ -296,4 +336,32 @@ fn destroy_all_zombies_only_kills_creatures_with_the_subtype() {
 
     assert!(!is_on_battlefield(&engine, "Test Zombie"), "a Zombie should have been destroyed");
     assert!(is_on_battlefield(&engine, "Test Creature"), "a non-Zombie creature should be untouched");
+}
+
+#[test]
+fn destroy_all_legendary_permanents_only_kills_the_matching_supertype() {
+    let mut state = two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    put_on_battlefield(
+        &mut state,
+        ObjectId(0),
+        supertyped_creature_definition(1, "Test Legend", Vec::new(), SupertypeSet::LEGENDARY),
+        p0,
+    );
+    put_on_battlefield(&mut state, ObjectId(1), creature_definition(2), p1);
+    let card = ObjectId(4);
+    state.objects.insert(
+        card,
+        card_object(card, armageddon_definition(5, DESTROY_ALL_LEGENDARY_PERMANENTS_SCRIPT), p0, ZoneKind::Hand),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    assert!(!is_on_battlefield(&engine, "Test Legend"), "a legendary permanent should have been destroyed");
+    assert!(is_on_battlefield(&engine, "Test Creature"), "a non-legendary creature should be untouched");
 }

@@ -64,7 +64,7 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }
+    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
 }
 
 fn gain_control(source: ObjectId, new_controller: PlayerId, filter: EffectFilter, timestamp: u64) -> ContinuousEffect {
@@ -135,7 +135,7 @@ fn effect_filter_still_scopes_a_gain_control_effect() {
     state.continuous_effects.push(gain_control(
         source,
         p0,
-        EffectFilter {  controller: Some(FilterController::Opponent), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, },
+        EffectFilter {  controller: Some(FilterController::Opponent), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
         0,
     ));
 
