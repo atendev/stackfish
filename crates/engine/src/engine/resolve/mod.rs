@@ -91,7 +91,7 @@ impl Engine {
                 return status;
             }
         }
-        let Some(top) = self.state.stack.pop() else {
+        let Some(mut top) = self.state.stack.pop() else {
             // Shouldn't happen - pipeline_exit only routes here when
             // the all-pass check saw a non-empty stack. Defensive
             // fallback rather than a panic, since nothing downstream
@@ -294,9 +294,12 @@ impl Engine {
                 });
 
             if matches!(top.kind, StackEntryKind::Spell) {
-                match self.resolve_permanent_entry(&top, &legal_targets, events) {
+                match self.resolve_permanent_entry(top, &legal_targets, events) {
                     ControlFlow::Break(status) => return status,
-                    ControlFlow::Continue(resumed) => events = resumed,
+                    ControlFlow::Continue((resumed_top, resumed_events)) => {
+                        top = resumed_top;
+                        events = resumed_events;
+                    }
                 }
             }
             // else: defensive - the spell's GameObject should

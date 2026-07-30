@@ -18,6 +18,7 @@ use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ColorSet;
+use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
 /// What happened on one `step()` call, and what the engine needs next.
@@ -327,6 +328,23 @@ pub enum ReplacementResumeTarget {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
+    /// CR 614/616.1: reached from `permanent_entry::resolve_permanent_entry`'s
+    /// own would-be-Battlefield redirect proposal — two or more registered
+    /// `ReplaceZoneDestination` effects both matching the same entering
+    /// permanent's destination. Unlike every other resume target above,
+    /// nothing has been placed on the battlefield (or anywhere else) yet at
+    /// this pause point — the popped `StackObject` (`top`) hasn't even had
+    /// its zone move committed, so the *entire* object, not just a scalar id,
+    /// has to be carried through the pause. `legal_targets` is `top`'s own
+    /// CR 608.2b-rechecked target list (needed for the CR 303.4b Aura-attach
+    /// step once the destination is finally settled); `events` is whatever
+    /// this resolution had already accumulated before the redirect proposal
+    /// (empty for every real caller today, carried anyway so the shape
+    /// matches every other resume target's own "this run's progress so far"
+    /// field). Resumed by `Engine::continue_permanent_entry`, the same
+    /// continuation the non-paused path already calls once its own
+    /// destination is decided synchronously.
+    PermanentEntry { top: StackObject, legal_targets: Vec<Target>, events: Vec<GameEventKind> },
 }
 
 /// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
