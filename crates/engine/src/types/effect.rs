@@ -806,10 +806,16 @@ pub enum ReplacementPayload {
     /// a land can never have Devour, and a Search-fetched Devour creature
     /// choosing not to offer this choice is a named, narrow gap (see
     /// `pending_devour_choice`'s own doc comment). CR 702.82c's
-    /// "Devour [quality] N" variant (sacrifice permanents with quality
-    /// [quality] rather than just creatures) isn't modeled — `per_creature`
-    /// always means "per creature," full stop.
-    EntersWithCountersDevour { per_creature: i32 },
+    /// "Devour [quality] N" variant is real now too (`phase5/devour-quality`)
+    /// — `quality`, checked in `pending_devour_choice` against
+    /// `layers::effective_characteristics(...).subtypes` (the *effective*
+    /// view, not a raw field — safe here since this function is a one-shot
+    /// call from `ResolveStackTop`, not inside the layer-2 recursion path
+    /// `matches_effect_filter`'s own raw-field policy exists to dodge; this
+    /// matches the effective-view `card_types` check this same function
+    /// already makes). `None` (every card before this slice) means "any
+    /// creature," unchanged.
+    EntersWithCountersDevour { per_creature: i32, quality: Option<Subtype> },
     /// CR 702.38a (Amplify N): "as this object enters, reveal any number of
     /// cards from your hand that share a creature type with it. This
     /// permanent enters with N +1/+1 counters on it for each card revealed

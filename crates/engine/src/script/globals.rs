@@ -539,14 +539,20 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // and amount are derived at apply time (see the variant's own doc
     // comment) instead of declared here.
     replacement_payloads.set("EntersWithCountersSunburst", ReplacementPayloadTag(ReplacementPayload::EntersWithCountersSunburst))?;
-    // CR 702.82a: `Game.ReplacementPayloads.EntersWithCountersDevour(perCreature)`
+    // CR 702.82a/c: `Game.ReplacementPayloads.EntersWithCountersDevour(perCreature, quality)`
     // - the choice of *which* creatures (if any) to sacrifice is handled
     // entirely outside this payload (see its own doc comment) - all it
-    // carries is the fixed printed per-creature rate.
+    // carries is the fixed printed per-creature rate and an optional
+    // `quality` subtype name (CR 702.82c's "Devour [quality] N" - e.g.
+    // `EntersWithCountersDevour(2, "Nightmare")`), `nil`/omitted meaning "any
+    // creature," same as before this slice.
     replacement_payloads.set(
         "EntersWithCountersDevour",
-        lua.create_function(|_, per_creature: i32| {
-            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersDevour { per_creature }))
+        lua.create_function(|_, (per_creature, quality): (i32, Option<String>)| {
+            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersDevour {
+                per_creature,
+                quality: quality.map(Subtype),
+            }))
         })?,
     )?;
     // CR 702.38a: `Game.ReplacementPayloads.EntersWithCountersAmplify(perCard)`

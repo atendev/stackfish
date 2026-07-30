@@ -293,13 +293,41 @@
     `trailing` field — events owed once the zone-move queue empties, threaded through even a nested
     CR 616.1 pause raised mid-sacrifice, not just the non-pausing path. Every pre-existing caller
     (`Destroy`/`Exile`/the plain `AbilityEffect::Sacrifice` path) passes `Vec::new()`, unaffected.
-- Unresolved: CR 702.82c's "Devour [quality] N" variant (sacrifice permanents of [quality] rather
-  than just creatures) — not modeled, `per_creature` always means "per creature." The
-  nested-pause interaction (a Devour sacrifice where two simultaneously-dying creatures also raise
-  their own competing CR 616.1 ordering choice, exercising `trailing` surviving *that* pause
+- Unresolved: CR 702.82c's "Devour [quality] N" variant — closed by `phase5/devour-quality` below.
+  The nested-pause interaction (a Devour sacrifice where two simultaneously-dying creatures also
+  raise their own competing CR 616.1 ordering choice, exercising `trailing` surviving *that* pause
   specifically) isn't separately tested — the code path is structurally identical to the
   pre-existing `NeedsOrderingChoice` arm (just carrying one more field), and the non-paused majority
   path is covered directly. Amplify — closed by `phase5/amplify` below.
+
+## Slice: devour-quality (merged)
+
+- Branch `phase5/devour-quality`.
+- Scope: closes the prior slice's own named gap — CR 702.82c's "Devour [quality] N" ("Devour
+  Nightmare 2," etc.), which restricts the sacrifice to permanents of a given quality instead of any
+  creature. `ReplacementPayload::EntersWithCountersDevour` gains `quality: Option<Subtype>`
+  (`None` — every card before this slice — means "any creature," unchanged).
+- Design call: `pending_devour_choice`'s new quality check reads
+  `layers::effective_characteristics(...).subtypes` (the *effective*, layer-resolved view), not a
+  raw field — deliberately different from `matches_effect_filter`'s own raw-field policy
+  (`docs/implementation/99-backlog.md`'s "Layer 2 internal filtering" note). That policy exists
+  specifically to dodge a recursion hazard inside `ContinuousEffect::applies_to`/
+  `layers::applicable_effects_in_layer`; `pending_devour_choice` is a one-shot call from
+  `ResolveStackTop`, outside that recursive path entirely, and already used the effective view for
+  its pre-existing `card_types` check — the new `quality` check just matches that established local
+  convention rather than importing a different function's unrelated caveat.
+- `Game.ReplacementPayloads.EntersWithCountersDevour(perCreature, quality)` — `quality` is an
+  optional trailing string arg (`Option<String>` on the Rust side), so every pre-existing card
+  script calling it with one argument keeps working unchanged (Lua passes `nil` for the omitted
+  arg, which decodes to `None`).
+- Verify: 3 new tests in `phase5_devour.rs` — a `pending_devour_choice` unit test (quality narrows
+  candidates to the matching subtype, excluding even the entrant itself when it doesn't match), a
+  Lua decode test for the new optional argument, and a full end-to-end cast-and-resolve test
+  ("Devour Nightmare 2" offering only the one Nightmare creature on the battlefield, sparing a
+  plain Bear). Full workspace suite green (160 test-result blocks, zero failures). Small ripple —
+  `EntersWithCountersDevour` had only 2 real construction/pattern-match sites outside its own
+  definition (`phase5_devour.rs`), not the ~130-site class the `EffectFilter` slices hit.
+- Unresolved: nothing new — this closed the exact gap the prior slice named.
 
 ## Slice: amplify (merged)
 
