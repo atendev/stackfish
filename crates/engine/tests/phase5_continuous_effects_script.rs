@@ -286,7 +286,7 @@ fn script_backed_effect_payload_applies_through_effective_characteristics() {
     state.continuous_effects.push(script_effect(
         source,
         Layer::AbilityAdding,
-        AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         EffectPayload::Script(handle),
     ));
 
@@ -312,7 +312,7 @@ fn mismatched_layer_and_decoded_shape_is_skipped_not_applied() {
     state.continuous_effects.push(script_effect(
         source,
         Layer::PowerToughnessModifying,
-        AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         EffectPayload::Script(handle),
     ));
 

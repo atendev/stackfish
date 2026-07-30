@@ -193,7 +193,7 @@ fn two_matching_wards_pause_the_draw_for_a_cr_616_1_choice() {
             filter: EventFilter::WouldMoveZone {
                 from: Some(ZoneKind::Library),
                 to: Some(ZoneKind::Hand),
-                affected: EffectFilter { card_types: None, controller: Some(FilterController::You), self_only: false },
+                affected: EffectFilter {  card_types: None, controller: Some(FilterController::You), self_only: false, subtypes: None, excluded_subtypes: None, },
             },
             payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
         },

@@ -2,8 +2,10 @@
 //! X," which doesn't target at all (unlike `AbilityEffect::Destroy`, which
 //! only ever destroys the resolving spell/ability's own already-chosen
 //! target). `AbilityEffect::DestroyAll(EffectFilter)` reuses the exact
-//! `EffectFilter` shape (`controller`/`card_types`/`self_only`)
-//! `Game.CreateStaticAbility`'s own `:SetAffected` already uses, and the
+//! `EffectFilter` shape (`controller`/`card_types`/`self_only`, and now
+//! `subtypes`/`excluded_subtypes` too - `phase5/effect-filter-subtypes`,
+//! CR 205.4b - "destroy all Zombies") `Game.CreateStaticAbility`'s own
+//! `:SetAffected` already uses, and the
 //! same `continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, ...)`
 //! pipeline the single-target `Destroy` effect already delegates to - CR
 //! 702.12b indestructibility and the CR 614.13 `WouldDie` replacement check
@@ -49,6 +51,27 @@ fn destroy_all_decodes_a_card_types_and_controller_filter() {
     }
 }
 
+#[test]
+fn destroy_all_decodes_a_subtypes_and_excluded_subtypes_filter() {
+    let runtime = ScriptRuntime::new();
+    let source = r#"
+        local s = {}
+        function s.operation()
+            return Game.Ops.DestroyAll({ subtypes = { "Zombie" }, excluded_subtypes = { "Wall" } })
+        end
+        return s
+    "#;
+    let (effect, _handle) =
+        runtime.build_operation(source).expect("script should load").expect("declares an operation");
+    match effect {
+        Some(AbilityEffect::DestroyAll(filter)) => {
+            assert_eq!(filter.subtypes, Some(vec![Subtype("Zombie".to_string())]));
+            assert_eq!(filter.excluded_subtypes, Some(vec![Subtype("Wall".to_string())]));
+        }
+        other => panic!("expected DestroyAll, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------
 // End-to-end: a script-declared Armageddon
 // ---------------------------------------------------------------------
@@ -65,6 +88,14 @@ const DESTROY_ALL_LANDS_YOU_CONTROL_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
     return Game.Ops.DestroyAll({ card_types = { "Land" }, controller = "you" })
+end
+return s
+"#;
+
+const DESTROY_ALL_ZOMBIES_SCRIPT: &str = r#"
+local s = {}
+function s.operation()
+    return Game.Ops.DestroyAll({ subtypes = { "Zombie" } })
 end
 return s
 "#;
@@ -124,20 +155,24 @@ fn land_definition(definition_id: u64, name: &str, indestructible: bool) -> Card
 }
 
 fn creature_definition(definition_id: u64) -> CardDefinition {
+    subtyped_creature_definition(definition_id, "Test Creature", Vec::new())
+}
+
+fn subtyped_creature_definition(definition_id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefinition {
     CardDefinition {
         definition_id,
-        name: "Test Creature".to_string(),
+        name: name.to_string(),
         mana_cost: ManaCost { symbols: Vec::new() },
         color_indicator: None,
         supertypes: SupertypeSet::empty(),
         card_types: CardTypeSet::CREATURE,
-        subtypes: Vec::new(),
+        subtypes,
         oracle_text: String::new(),
         power: Some(PTValue::Fixed(2)),
         toughness: Some(PTValue::Fixed(2)),
         loyalty: None,
         defense: None,
-        script_ref: ScriptReference::ByKey("creature".to_string()),
+        script_ref: ScriptReference::ByKey(name.to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
@@ -233,4 +268,32 @@ fn destroy_all_lands_you_control_only_kills_the_casters_own_lands() {
 
     assert!(!is_on_battlefield(&engine, "Test Land A"), "the caster's own land should have been destroyed");
     assert!(is_on_battlefield(&engine, "Test Land C"), "controller=\"you\" should leave the opponent's land alone");
+}
+
+#[test]
+fn destroy_all_zombies_only_kills_creatures_with_the_subtype() {
+    let mut state = two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    put_on_battlefield(
+        &mut state,
+        ObjectId(0),
+        subtyped_creature_definition(1, "Test Zombie", vec![Subtype("Zombie".to_string())]),
+        p0,
+    );
+    put_on_battlefield(&mut state, ObjectId(1), creature_definition(2), p1);
+    let card = ObjectId(4);
+    state.objects.insert(
+        card,
+        card_object(card, armageddon_definition(5, DESTROY_ALL_ZOMBIES_SCRIPT), p0, ZoneKind::Hand),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    assert!(!is_on_battlefield(&engine, "Test Zombie"), "a Zombie should have been destroyed");
+    assert!(is_on_battlefield(&engine, "Test Creature"), "a non-Zombie creature should be untouched");
 }

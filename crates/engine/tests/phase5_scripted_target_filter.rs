@@ -122,7 +122,7 @@ fn protection_from_land(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::AddProtectionCardType(CardTypeSet::LAND)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

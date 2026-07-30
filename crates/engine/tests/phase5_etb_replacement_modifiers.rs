@@ -59,6 +59,23 @@ end
 return s
 "#;
 
+/// `phase5/effect-filter-subtypes`: same shape as `OPPONENTS_LANDS_ENTER_TAPPED`
+/// above, but narrowed by subtype instead of card type - proves
+/// `ReplacementEffectBuilder::SetAffected` (which now delegates to the shared
+/// `decode_effect_filter_table`, see that function's own doc comment) reads
+/// `subtypes` correctly, not just `card_types`.
+const OPPONENTS_SWAMPS_ENTER_TAPPED: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
+    e:SetPayload(Game.ReplacementPayloads.EntersTapped)
+    e:SetAffected({ controller = "opponent", subtypes = { "Swamp" } })
+    e:Register()
+end
+return s
+"#;
+
 /// CR 603.6d/614.1c only mean something for a move landing on the
 /// battlefield - `to = "Graveyard"` must be rejected at `:Register()` time
 /// (`validate_replacement_filter_payload_pairing`), not silently accepted as
@@ -96,6 +113,13 @@ fn land_definition(name: &str, script: &str) -> CardDefinition {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
     }
+}
+
+fn subtyped_land_definition(name: &str, subtypes: Vec<Subtype>) -> CardDefinition {
+    let mut definition = land_definition(name, "");
+    definition.script_ref = ScriptReference::ByKey(name.to_string());
+    definition.subtypes = subtypes;
+    definition
 }
 
 fn creature_definition(name: &str, script: &str) -> CardDefinition {
@@ -299,6 +323,65 @@ fn externally_granted_enters_tapped_affects_an_opponents_land_via_play_land() {
     assert_eq!(engine.state().replacement_effects.len(), 1, "a Repeatable granter stays registered");
 }
 
+#[test]
+fn externally_granted_enters_tapped_only_affects_the_matching_subtype() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let granter = ObjectId(0);
+    let granter_definition = creature_definition("Subtype Tangle Wire Wannabe", OPPONENTS_SWAMPS_ENTER_TAPPED);
+    state.objects.insert(granter, card_object(granter, granter_definition.clone(), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(granter);
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &granter_definition, granter)
+        .expect("granter script self-registers cleanly");
+
+    let swamp = ObjectId(1);
+    state.objects.insert(
+        swamp,
+        card_object(swamp, subtyped_land_definition("Plain Swamp", vec![Subtype("Swamp".to_string())]), p0, ZoneKind::Hand),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(swamp);
+
+    let mut engine = Engine::new(state);
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: swamp } }).unwrap();
+    drain(&mut engine);
+
+    let (new_id, ..) = last_zone_change(&engine);
+    assert!(engine.state().object(new_id).unwrap().tapped, "p0's Swamp must enter tapped - matches the subtype filter");
+}
+
+#[test]
+fn externally_granted_enters_tapped_leaves_a_non_matching_subtype_alone() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let granter = ObjectId(0);
+    let granter_definition = creature_definition("Subtype Tangle Wire Wannabe", OPPONENTS_SWAMPS_ENTER_TAPPED);
+    state.objects.insert(granter, card_object(granter, granter_definition.clone(), p1, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(granter);
+    ScriptRuntime::new()
+        .run_card_script(&mut state, &granter_definition, granter)
+        .expect("granter script self-registers cleanly");
+
+    let forest = ObjectId(1);
+    state.objects.insert(
+        forest,
+        card_object(forest, subtyped_land_definition("Plain Forest Two", vec![Subtype("Forest".to_string())]), p0, ZoneKind::Hand),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(forest);
+
+    let mut engine = Engine::new(state);
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: forest } }).unwrap();
+    drain(&mut engine);
+
+    let (new_id, ..) = last_zone_change(&engine);
+    assert!(
+        !engine.state().object(new_id).unwrap().tapped,
+        "p0's Forest must enter untapped - doesn't match the Swamp-only subtype filter"
+    );
+}
+
 // ---------------------------------------------------------------------
 // End to end: CastSpell resolution (move_resolving_spell).
 // ---------------------------------------------------------------------
@@ -366,7 +449,7 @@ fn limited_uses_enters_with_counters_is_consumed_after_first_entry() {
     state.replacement_effects.push(ReplacementEffect {
         source: granter,
         spec: ReplacementSpec::Primitive {
-            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter { controller: None, card_types: None, self_only: false } },
+            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
             payload: ReplacementPayload::EntersWithCounters { kind: CounterKind::PlusOnePlusOne, amount: 1 },
         },
         consumption: ConsumptionPolicy::LimitedUses(1),
@@ -403,7 +486,7 @@ fn repeatable_enters_tapped_applies_to_every_entry() {
     state.replacement_effects.push(ReplacementEffect {
         source: granter,
         spec: ReplacementSpec::Primitive {
-            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter { controller: None, card_types: None, self_only: false } },
+            filter: EventFilter::WouldMoveZone { from: None, to: Some(ZoneKind::Battlefield), affected: EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, } },
             payload: ReplacementPayload::EntersTapped,
         },
         consumption: ConsumptionPolicy::Repeatable,

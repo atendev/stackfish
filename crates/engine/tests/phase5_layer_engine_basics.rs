@@ -104,7 +104,7 @@ fn continuous_effect(
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter { controller: None, card_types: None, self_only: false }
+    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn effect_filter_only_affects_matching_objects() {
         anthem,
         Layer::PowerToughnessModifying,
         EffectPrimitive::ModifyPT { power: 1, toughness: 1 },
-        EffectFilter { controller: Some(FilterController::You), card_types: None, self_only: false },
+        EffectFilter {  controller: Some(FilterController::You), card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, },
         0,
     ));
 
@@ -273,7 +273,7 @@ fn self_only_filter_excludes_other_objects() {
         equipment,
         Layer::PowerToughnessModifying,
         EffectPrimitive::ModifyPT { power: 3, toughness: 0 },
-        EffectFilter { controller: None, card_types: None, self_only: true },
+        EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, },
         0,
     ));
 

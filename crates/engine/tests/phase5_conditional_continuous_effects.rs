@@ -71,11 +71,10 @@ fn conditional_anthem(source: ObjectId, count: u32) -> ContinuousEffect {
     ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter {
+        affected: AffectedFilter::Primitive(EffectFilter { 
             controller: Some(FilterController::You),
             card_types: None,
-            self_only: false,
-        }),
+            self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -172,7 +171,7 @@ fn an_unconditional_effect_is_completely_unaffected() {
     state.continuous_effects.push(ContinuousEffect {
         source: anthem,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: false }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

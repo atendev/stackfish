@@ -142,7 +142,7 @@ fn continuous_effect(
 }
 
 fn no_filter() -> EffectFilter {
-    EffectFilter { controller: None, card_types: None, self_only: false }
+    EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }
 }
 
 const RETURNS_THREE: &str = "return function(source, controller) return 3 end";

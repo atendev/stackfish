@@ -292,7 +292,7 @@ fn self_only_keyword_effect(source: ObjectId, effect: EffectPrimitive) -> Contin
     ContinuousEffect {
         source,
         layer: Layer::AbilityAdding,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: true }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(effect),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

@@ -234,3 +234,65 @@
   (explicit illegal target) - still genuinely unreached, no `CreateToken`/`Search` shape in this
   engine can specify a target at all; CR 303.4m enchanted-player continuous effects - unrelated,
   unchanged.
+
+## Slice: effect-filter-subtypes (implemented, not yet merged)
+
+- Branch `phase5/effect-filter-subtypes`.
+- Scope: closes the `mass-destroy-effect` slice's own named gap - `EffectFilter` had no
+  `subtypes`/`excluded_subtypes` keys, so "destroy all Zombies" (CR 701.8/205.4b) wasn't
+  expressible, only a plain card-type/controller restriction. `EffectFilter` gains
+  `subtypes: Option<Vec<Subtype>>`/`excluded_subtypes: Option<Vec<Subtype>>`, same positive/negated
+  "or, not and" pair `TargetFilter::Object` already has for its own `subtypes`/`excluded_subtypes`.
+  Since `EffectFilter` is shared by both `AbilityEffect::DestroyAll` and `ContinuousEffect`'s own
+  `AffectedFilter::Primitive`, this closes the gap for both at once (`Game.Ops.DestroyAll({ subtypes
+  = {"Zombie"} })` and a static ability's `:SetAffected({ subtypes = {"Wall"} })`).
+- Design call, matching existing precedent: the new fields are checked against the raw
+  `GameObject.definition.subtypes`, not `layers::effective_characteristics.subtypes` - same
+  deliberate "raw field, not layer-resolved" stance `matches_effect_filter`'s pre-existing
+  `card_types`/`controller` checks already take (see backlog's "Layer 2 internal filtering" note):
+  `ContinuousEffect::applies_to` is itself invoked from inside `layers::
+  applicable_effects_in_layer`, the function that computes `effective_characteristics` in the first
+  place, so reading the effective view here would recurse.
+- Real finding, not anticipated in the requirements report: `EffectFilter`/`EventFilter` both
+  derived `Copy`, which `Vec<Subtype>` can't support - both derives had to drop to `Clone`-only,
+  which surfaced 3 real move-out-of-`&mut self` sites in `ReplacementEffectBuilder::Register`
+  (`builders.rs`) needing an explicit `.clone()` each; no behavior change, just ownership.
+- Second real finding, caught only by the new subtype tests actually failing (not by the compiler):
+  `types/effect.rs`'s `event_target_matches` - the function that checks an `EffectFilter` against
+  an *event's* target (`WouldMoveZone`/`DamageDealt` replacement matching) - is a separate,
+  layers-aware near-duplicate of `matches_effect_filter` (it resolves `controller` via
+  `layers::effective_controller` rather than a raw field), not a caller of it. It had its own
+  `card_types`-only check with no subtype equivalent, so a subtype-filtered replacement effect (e.g.
+  "opponent's Swamps enter tapped") silently matched *every* object regardless of subtype until this
+  slice added the same `subtypes`/`excluded_subtypes` check here too - a second near-identical block,
+  not shared, since the two functions differ in how they resolve `controller` and in their
+  `Target::Player`/`Target::Object` split. Also tightened `event_target_matches`'s `Target::Player`
+  arm to reject a `subtypes`-bearing filter the same way it already rejected `card_types` (a player
+  has neither); `excluded_subtypes` deliberately does *not* join that reject list - a player
+  trivially has none of the listed subtypes, so a negated filter is vacuously satisfied rather than
+  a non-match, the same asymmetry the pre-existing `card_types`-only (no `excluded_card_types` on
+  this type) reject list already implies.
+- Refactor folded in: `ReplacementEffectBuilder::SetAffected` (`builders.rs`) had its own ~25-line
+  inline re-decode of `controller`/`card_types`/`self_only` predating `decode_effect_filter_table`'s
+  extraction in the `mass-destroy-effect` slice - replaced with a direct call to
+  `decode_effect_filter_table`, the smallest-footprint way to give this builder `subtypes`/
+  `excluded_subtypes` support too without a third hand-written decode of the same shape.
+- Ripple: `EffectFilter` has no `Default` impl - confirmed with the user before starting (same
+  ripple class `modal-multi-mode`/`bands-with-other-effect-blocked` already flagged and paid) - 131
+  struct-literal construction sites across 59 files needed the two new fields added, entirely
+  mechanical/compiler-driven (`cargo build --workspace --tests`'s `E0063` errors located every site).
+  `crates/scenario/src/lib.rs`'s `build_continuous_effect` (TOML `continuous_effect` fixture support)
+  is the one site that just defaults both new fields to `None` - `ContinuousEffectSpec` has no
+  `filter_subtypes`/`filter_excluded_subtypes` TOML field yet, named as a TODO there rather than
+  built, since no scenario fixture needs it and the requirements report scoped this slice to the
+  engine field/Lua decode/`Game.Ops.DestroyAll`, not the TOML schema.
+- Verify: unit test on `matches_effect_filter` itself (subtypes/excluded_subtypes, `types/effect.rs`);
+  2 new tests in `phase5_mass_destroy_effect.rs` (decode, end-to-end "destroy all Zombies" sparing a
+  non-Zombie creature); 2 new tests in `phase5_etb_replacement_modifiers.rs` (a subtype-filtered
+  externally-granted `EntersTapped` affecting a matching Swamp and sparing a non-matching Forest -
+  this pair is what caught the `event_target_matches` gap above). Full workspace suite green (160
+  test-result blocks, zero failures) after both real findings were fixed.
+- Unresolved: `EffectFilter` still has no `supertypes`/`excluded_supertypes` (e.g. "destroy all
+  legendary permanents") - out of scope for this slice, next follow-up if a real card needs it.
+  Scenario TOML `continuous_effect` fixtures still can't express a subtype filter (see the TODO
+  left in `crates/scenario/src/lib.rs` above).

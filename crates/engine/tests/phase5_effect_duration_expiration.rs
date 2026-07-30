@@ -97,7 +97,7 @@ fn inert_effect(source: ObjectId, duration: EffectDuration) -> ContinuousEffect 
     ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: false }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }),
         timestamp: SequenceNo(0),
         duration,

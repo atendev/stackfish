@@ -218,7 +218,7 @@ fn prevent_damage_effect_stops_a_scripted_damage_spell() {
         source: target,
         spec: ReplacementSpec::Primitive {
             filter: EventFilter::DamageDealt {
-                affected: EffectFilter { card_types: None, controller: None, self_only: false },
+                affected: EffectFilter {  card_types: None, controller: None, self_only: false, subtypes: None, excluded_subtypes: None, },
             },
             payload: ReplacementPayload::PreventDamage,
         },

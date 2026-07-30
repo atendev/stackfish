@@ -574,10 +574,47 @@ pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, 
         None => None,
     };
 
+    // CR 205.4b: "destroy all Zombies" / "Walls get -1/-0" - same plain
+    // subtype-name-list shape decode_filter_table's TargetFilter::Object
+    // branch already uses for its own `subtypes` key.
+    let subtypes_table: Option<Table> =
+        table.get("subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let subtypes = match subtypes_table {
+        Some(t) => {
+            let mut list = Vec::new();
+            for entry in t.sequence_values::<String>() {
+                list.push(Subtype(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?));
+            }
+            Some(list)
+        }
+        None => None,
+    };
+
+    // CR 601.2c/115/205.4b's negated form - "destroy all nonbasic lands,"
+    // same shape/table key `subtypes` just above uses.
+    let excluded_subtypes_table: Option<Table> =
+        table.get("excluded_subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+    let excluded_subtypes = match excluded_subtypes_table {
+        Some(t) => {
+            let mut list = Vec::new();
+            for entry in t.sequence_values::<String>() {
+                list.push(Subtype(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?));
+            }
+            Some(list)
+        }
+        None => None,
+    };
+
     let self_only: Option<bool> =
         table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
 
-    Ok(EffectFilter { controller, card_types, self_only: self_only.unwrap_or(false) })
+    Ok(EffectFilter {
+        controller,
+        card_types,
+        subtypes,
+        excluded_subtypes,
+        self_only: self_only.unwrap_or(false),
+    })
 }
 
 pub(crate) fn decode_affected_value(

@@ -61,7 +61,7 @@ fn gain_control(source: ObjectId, new_controller: PlayerId) -> ContinuousEffect 
     ContinuousEffect {
         source,
         layer: Layer::ControlChangingEffects,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: false }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::GainControl(new_controller)),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,

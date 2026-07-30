@@ -10,7 +10,6 @@ use std::rc::Rc;
 use mlua::{Table, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, RegisteredAbility};
-use crate::types::card::CardTypeSet;
 use crate::types::cost::{CostModifier, CostSpec, FilterSpec};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
@@ -22,9 +21,9 @@ use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::decode::{
-    decode_affected_value, decode_condition_value, decode_cost_component_value, decode_effect_value,
-    decode_filter_table, decode_layer_value, decode_operation_value, decode_target_filter_value,
-    parse_card_type_name, parse_filter_controller_name,
+    decode_affected_value, decode_condition_value, decode_cost_component_value, decode_effect_filter_table,
+    decode_effect_value, decode_filter_table, decode_layer_value, decode_operation_value,
+    decode_target_filter_value,
 };
 use super::tags::{
     ConsumptionPolicyTag, CostComponent, DrawLimitAffectedTag, DurationTag, EventFilterKind, EventFilterKindTag,
@@ -625,31 +624,7 @@ pub(crate) struct ReplacementEffectBuilder {
 impl UserData for ReplacementEffectBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method_mut("SetAffected", |_, this, table: Table| {
-            let controller_name: Option<String> =
-                table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string())).map_err(to_lua_err)?;
-            let controller = controller_name
-                .map(|name| parse_filter_controller_name(&name))
-                .transpose()
-                .map_err(to_lua_err)?;
-
-            let card_types_table: Option<Table> =
-                table.get("card_types").map_err(|e| ScriptError::LoadError(e.to_string())).map_err(to_lua_err)?;
-            let card_types = match card_types_table {
-                Some(t) => {
-                    let mut set = CardTypeSet::empty();
-                    for entry in t.sequence_values::<String>() {
-                        let name = entry.map_err(|e| ScriptError::LoadError(e.to_string())).map_err(to_lua_err)?;
-                        set |= parse_card_type_name(&name).map_err(to_lua_err)?;
-                    }
-                    Some(set)
-                }
-                None => None,
-            };
-
-            let self_only: Option<bool> =
-                table.get("self_only").map_err(|e| ScriptError::LoadError(e.to_string())).map_err(to_lua_err)?;
-
-            this.affected = EffectFilter { controller, card_types, self_only: self_only.unwrap_or(false) };
+            this.affected = decode_effect_filter_table(&table).map_err(to_lua_err)?;
             Ok(())
         });
         // `Game.EventFilters.*` - which EventFilter shape this effect
@@ -678,10 +653,10 @@ impl UserData for ReplacementEffectBuilder {
         });
         methods.add_method_mut("Register", |_, this, ()| {
             let filter = match this.event_kind {
-                EventFilterKind::DamageDealt => EventFilter::DamageDealt { affected: this.affected },
-                EventFilterKind::WouldDie => EventFilter::WouldDie { affected: this.affected },
+                EventFilterKind::DamageDealt => EventFilter::DamageDealt { affected: this.affected.clone() },
+                EventFilterKind::WouldDie => EventFilter::WouldDie { affected: this.affected.clone() },
                 EventFilterKind::WouldMoveZone { from, to } => {
-                    EventFilter::WouldMoveZone { from, to, affected: this.affected }
+                    EventFilter::WouldMoveZone { from, to, affected: this.affected.clone() }
                 }
                 EventFilterKind::WouldDieEnchanted => EventFilter::WouldDieEnchanted,
             };

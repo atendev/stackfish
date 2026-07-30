@@ -83,7 +83,7 @@ fn enters_as_copy_effect(source: ObjectId) -> ReplacementEffect {
             filter: EventFilter::WouldMoveZone {
                 from: None,
                 to: Some(ZoneKind::Battlefield),
-                affected: EffectFilter { controller: None, card_types: None, self_only: true },
+                affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, },
             },
             payload: ReplacementPayload::EntersAsCopy(CopyExceptions::default()),
         },

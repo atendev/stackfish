@@ -127,7 +127,7 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
     state.continuous_effects.push(ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: false }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: -5 }),
         timestamp: SequenceNo(0),
         duration: EffectDuration::Permanent,
@@ -136,7 +136,7 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
     state.continuous_effects.push(ContinuousEffect {
         source,
         layer: Layer::PowerToughnessModifying,
-        affected: AffectedFilter::Primitive(EffectFilter { controller: None, card_types: None, self_only: false }),
+        affected: AffectedFilter::Primitive(EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, }),
         effect: EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 0, toughness: 5 }),
         timestamp: SequenceNo(1),
         duration: EffectDuration::UntilEndOfTurn,
