@@ -319,6 +319,80 @@ fn choosing_not_to_copy_leaves_the_entrant_as_itself() {
     assert_eq!(engine.state().object(object).unwrap().copy_generation, 0, "declining is not a copy application");
 }
 
+/// Spark Double, per CR 707.9e's "additional effect" exception shape:
+/// "...if it's a creature, it enters with an additional +1/+1 counter on
+/// it." Exercises the Lua-side `counter_kind`/`counter_amount` decode too
+/// (`decode_copy_exceptions`), not just the Rust-level field.
+const SPARK_DOUBLE_SCRIPT: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
+    e:SetPayload(Game.ReplacementPayloads.EntersAsCopy({ counter_kind = "PlusOnePlusOne", counter_amount = 1 }))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+return s
+"#;
+
+#[test]
+fn choosing_to_copy_applies_the_707_9e_additional_counter_exception() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let card = ObjectId(0);
+    let bear = ObjectId(1);
+    let mut state = two_player_state();
+    state.objects.insert(card, card_object(card, creature_definition("Spark Double", SPARK_DOUBLE_SCRIPT), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(&mut state, card_object(bear, creature_definition("Bear", ""), p1, ZoneKind::Battlefield));
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    let StepStatus::AwaitingCopyChoice { object, .. } = status else { panic!("expected a copy choice pause, got {status:?}") };
+
+    engine.submit_copy_choice(Some(bear)).expect("the Bear was an offered candidate");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+
+    let runtime = ScriptRuntime::new();
+    let now = layers::effective_characteristics(engine.state(), &runtime, object);
+    assert_eq!(now.name, "Bear", "the entrant's name is now the copied creature's");
+    assert_eq!(
+        engine.state().object(object).unwrap().counters.count(&CounterKind::PlusOnePlusOne),
+        1,
+        "CR 707.9e: the additional-effect exception applied on top of the copy"
+    );
+}
+
+#[test]
+fn declining_to_copy_does_not_apply_the_additional_counter_exception() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let card = ObjectId(0);
+    let bear = ObjectId(1);
+    let mut state = two_player_state();
+    state.objects.insert(card, card_object(card, creature_definition("Spark Double", SPARK_DOUBLE_SCRIPT), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(&mut state, card_object(bear, creature_definition("Bear", ""), p1, ZoneKind::Battlefield));
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    let StepStatus::AwaitingCopyChoice { object, .. } = status else { panic!("expected a copy choice pause, got {status:?}") };
+
+    engine.submit_copy_choice(None).expect("declining to copy is always legal");
+    drain(&mut engine);
+
+    assert_eq!(
+        engine.state().object(object).unwrap().counters.count(&CounterKind::PlusOnePlusOne),
+        0,
+        "no copy application happened, so the exception never applied"
+    );
+}
+
 #[test]
 fn copy_choice_rejects_a_candidate_not_offered() {
     let p0 = PlayerId(0);

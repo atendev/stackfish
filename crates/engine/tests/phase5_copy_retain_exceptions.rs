@@ -241,6 +241,7 @@ fn retain_name_and_retain_color_combine_with_pt_and_keyword_exceptions() {
         retain_name: true,
         retain_color: true,
         grant_recurring_copy_trigger: false,
+        enters_with_additional_counters: None,
     };
     let state = one_player_state(
         vec![
