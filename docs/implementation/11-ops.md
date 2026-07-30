@@ -339,3 +339,30 @@
 - Unresolved: same as the prior slice - scenario TOML `continuous_effect` fixtures still can't
   express a supertype filter either (the same TODO in `crates/scenario/src/lib.rs` now also names
   `filter_supertypes`/`filter_excluded_supertypes`).
+
+## Slice: scenario-continuous-effect-filter-subtypes (merged)
+
+- Branch `phase5/scenario-continuous-effect-filter-subtypes`.
+- Scope: closes the TODO the prior two engine-side slices both left in `crates/scenario/src/lib.rs`'s
+  `build_continuous_effect` - a scenario TOML fixture had no way to express a subtype- or
+  supertype-filtered `continuous_effect`, only a hand-authored Lua script could. `ContinuousEffectSpec`
+  gains `filter_subtypes`/`filter_excluded_subtypes`/`filter_supertypes`/`filter_excluded_supertypes:
+  Vec<String>` (all `#[serde(default)]`, empty means no filter - same convention `filter_card_types`
+  already uses), wired into `build_continuous_effect`'s `EffectFilter` construction in place of the
+  `None`/TODO placeholders.
+- No new Rust-side logic needed - `parse_supertypes` already existed (built for
+  `TargetRequirementSpec.supertypes`) and the `Vec<String> -> Vec<Subtype>` map-and-collect pattern
+  was already established at three other call sites (`TargetRequirementSpec.subtypes`/
+  `excluded_subtypes`). Purely a TOML-schema/wiring gap, not an engine gap.
+- Verify: a new scenario fixture
+  (`crates/engine/tests/scenarios/phase5/phase5_continuous_effect_filter_subtype_supertype.toml`,
+  auto-picked-up by `scenarios.rs`'s generic runner, no bespoke Rust test file needed) - a Wall
+  creature and a Legendary creature each lethally reduced to 0 toughness by their own
+  subtype-/supertype-filtered `-0/-1` enchantment, a plain Grizzly Bears left alive by both, same
+  "SBA-death via `damage_marked`/toughness modifier" assertion convention
+  `phase5_conditional_continuous_effects.toml` already established. Sanity-checked the fixture itself
+  isn't a false positive by temporarily mismatching both filter values (`"NotAWall"`/`"Snow"`) and
+  confirming the run then fails - restored before committing. Full workspace suite green (160
+  test-result blocks, zero failures).
+- Unresolved: nothing new - this was purely closing an already-named gap. `docs/scenario_format.md`'s
+  own `continuous_effect` reference section updated with the four new TOML keys.
