@@ -131,6 +131,8 @@ Game.Ops.BecomeCopy({
     keywords = { "Flying" },         -- CR 707.9a: keep these keywords in addition to the copied ones
     retain_name = true,              -- CR 707.9c: keep this object's own name instead of the copied one
     retain_color = true,             -- CR 707.9d: keep this object's own color instead of the copied one
+    counter_kind = "PlusOnePlusOne", -- CR 707.9e: an "additional effect" exception - a real counter,
+    counter_amount = 1,              --   not a characteristic (must set both together, e.g. Spark Double)
 })
 ```
 

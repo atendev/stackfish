@@ -492,7 +492,30 @@ pub(crate) fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyEx
     // needs a token-generator with this shape).
     let grant_recurring_copy_trigger: bool =
         opts.get::<_, Option<bool>>("grant_recurring_copy_trigger").ok().flatten().unwrap_or(false);
-    Ok(CopyExceptions { set_power_toughness, add_keywords, retain_name, retain_color, grant_recurring_copy_trigger })
+    // CR 707.9e: Spark Double's own "enters with an additional +1/+1
+    // counter" - see CopyExceptions::enters_with_additional_counters's own
+    // doc comment. `{ counter_kind = "PlusOnePlusOne", counter_amount = 1 }`,
+    // both required together (same "set together, not just one" stance
+    // power/toughness above already takes).
+    let counter_kind: Option<String> = opts.get("counter_kind").ok().flatten();
+    let counter_amount: Option<u32> = opts.get("counter_amount").ok().flatten();
+    let enters_with_additional_counters = match (counter_kind, counter_amount) {
+        (Some(kind), Some(amount)) => Some((parse_counter_kind_name(&kind), amount)),
+        (None, None) => None,
+        _ => {
+            return Err(ScriptError::LoadError(
+                "CopyExceptions counter_kind/counter_amount must be set together, not just one".to_string(),
+            ))
+        }
+    };
+    Ok(CopyExceptions {
+        set_power_toughness,
+        add_keywords,
+        retain_name,
+        retain_color,
+        grant_recurring_copy_trigger,
+        enters_with_additional_counters,
+    })
 }
 
 /// `TriggeredAbilityBuilder`'s `:SetLayer` decoder — only a `Game.Layers.*`

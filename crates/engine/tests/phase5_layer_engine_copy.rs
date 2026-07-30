@@ -447,7 +447,7 @@ fn become_copy_with_pt_exception_overrides_base_power_and_toughness() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false, grant_recurring_copy_trigger: false };
+    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false, grant_recurring_copy_trigger: false, enters_with_additional_counters: None };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -473,7 +473,7 @@ fn become_copy_with_keyword_exception_adds_the_keyword() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let salamander = ObjectId(1);
-    let exceptions = CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::TRAMPLE, retain_name: false, retain_color: false, grant_recurring_copy_trigger: false };
+    let exceptions = CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::TRAMPLE, retain_name: false, retain_color: false, grant_recurring_copy_trigger: false, enters_with_additional_counters: None };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -489,6 +489,57 @@ fn become_copy_with_keyword_exception_adds_the_keyword() {
     assert_eq!(chars.name, "Salamander");
     assert_eq!(chars.power, Some(5), "P/T still comes from the copied object - no P/T exception this time");
     assert!(chars.keywords.contains(KeywordSet::TRAMPLE), "granted by the keyword exception");
+}
+
+/// CR 707.9e: Spark Double's own "additional effect" exception - the copy
+/// applies as normal, plus a real +1/+1 counter the copied object's own
+/// characteristics never granted (a `GameObject`-level mutation, not a
+/// `CardDefinition` one, unlike `set_power_toughness`/`add_keywords` above).
+#[test]
+fn become_copy_with_additional_counter_exception_adds_a_real_counter() {
+    let p0 = PlayerId(0);
+    let doppel = ObjectId(0);
+    let bear = ObjectId(1);
+    let exceptions = CopyExceptions { enters_with_additional_counters: Some((CounterKind::PlusOnePlusOne, 1)), ..CopyExceptions::default() };
+    let state = one_player_state(
+        vec![
+            card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
+            card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+        ],
+        vec![become_copy_ability_with_exceptions(doppel, exceptions)],
+    );
+    let mut engine = Engine::new(state);
+
+    activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
+
+    let chars = effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel);
+    assert_eq!(chars.name, "Bear", "the copy itself still applies as normal");
+    assert_eq!(
+        engine.state().object(doppel).unwrap().counters.count(&CounterKind::PlusOnePlusOne),
+        1,
+        "the additional-effect exception granted a real counter"
+    );
+}
+
+/// A bare copy (no exception set) grants no counter - regression guard
+/// against the exception applying unconditionally.
+#[test]
+fn become_copy_without_the_exception_grants_no_counter() {
+    let p0 = PlayerId(0);
+    let doppel = ObjectId(0);
+    let bear = ObjectId(1);
+    let state = one_player_state(
+        vec![
+            card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
+            card_object(bear, bear_definition(), p0, ZoneKind::Battlefield),
+        ],
+        vec![become_copy_ability(doppel)],
+    );
+    let mut engine = Engine::new(state);
+
+    activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(bear)]);
+
+    assert_eq!(engine.state().object(doppel).unwrap().counters.count(&CounterKind::PlusOnePlusOne), 0);
 }
 
 /// CR 707.3: copying an object that's itself already a copy uses *that*
@@ -638,7 +689,7 @@ fn copy_token_with_pt_exception_overrides_base_power_and_toughness() {
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
 
-    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false, grant_recurring_copy_trigger: false };
+    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false, grant_recurring_copy_trigger: false, enters_with_additional_counters: None };
     let card = ObjectId(1);
     state.objects.insert(
         card,

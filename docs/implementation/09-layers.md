@@ -500,6 +500,50 @@
   named TODO), not scoped here. CR 707.9e's "additional effect" exception (distinct from 9a's "gain an
   ability") still has no producer of any kind.
 
+## Slice: copy-additional-effect-exception (branch open)
+
+- Branch `phase5/copy-additional-effect-exception`.
+- Scope: `vesuvan-linked-copy-ability`'s own named next step — CR 707.9e's "additional effect"
+  exception, a different shape from every existing `CopyExceptions` field: `set_power_toughness`/
+  `add_keywords`/`retain_name`/`retain_color` all modify the copy snapshot's `CardDefinition`
+  fields (`CopyExceptions::apply`), while 707.9e's own worked examples (Altered Ego's "enters with
+  X additional +1/+1 counters," Spark Double's "if it's a creature, it enters with an additional
+  +1/+1 counter") are a real `GameObject`-level mutation instead - a counter, not a characteristic.
+- Key changes:
+  - `CopyExceptions.enters_with_additional_counters: Option<(CounterKind, u32)>` (`Default`
+    extended to `None`) - deliberately *not* folded into `CopyExceptions::apply`, since that
+    function only ever touches the `CardDefinition` snapshot.
+  - `commands::apply_copy_additional_counters(object, exceptions)` (`attach.rs`, alongside
+    `grant_linked_copy_ability`): a no-op unless the field is set, otherwise returns a
+    `GameEventKind::CounterAdded` for the caller to push - reuses `CommitEvents`' existing generic
+    counter-apply path rather than mutating `GameObject.counters` directly (the exact "pick exactly
+    one" mistake this backlog's own mistakes-caught section already names for `EntersWithCounters`).
+  - Called from both real copy producers (`resolve_become_copy_effect`, `submit_copy_choice`),
+    right alongside their existing `grant_linked_copy_ability` call.
+  - `script::decode::decode_copy_exceptions` recognizes `counter_kind`/`counter_amount` (Lua table
+    keys, required together like `power`/`toughness` already are), reusing the existing
+    `parse_counter_kind_name` helper.
+- Deliberately out of scope, named in code comments (`CopyExceptions`'s own doc comment,
+  `apply_copy_additional_counters`'s own doc comment): CR 707.9e's own second sentence - the
+  exception's effect doesn't happen if *another* copy effect applies to the object first. This only
+  matters when a copy effect's own granted ability re-fires a second copy effect *during the same
+  entering event* (the rule's own Altered Ego example: copying Clone grants Clone's own "choose a
+  creature to copy" replacement, which re-applies before Altered Ego's own queued counters do) -
+  this engine has no nested/chained copy-effect-during-one-ETB producer at all, a separate, bigger
+  gap than this slice's scope. Only a fixed counter amount is modeled (Spark Double's shape); no
+  X-costed variable amount (Altered Ego's own shape) - that would need X-cost-at-copy-time
+  plumbing this engine doesn't have for `BecomeCopy`/`EntersAsCopy` today.
+- Verify: 4 new tests. `phase5_layer_engine_copy.rs`
+  (`become_copy_with_additional_counter_exception_adds_a_real_counter`/
+  `become_copy_without_the_exception_grants_no_counter`) drive `AbilityEffect::BecomeCopy` directly.
+  `phase5_clone_enters_as_copy.rs`
+  (`choosing_to_copy_applies_the_707_9e_additional_counter_exception`/
+  `declining_to_copy_does_not_apply_the_additional_counter_exception`) drive the real CR 707.6
+  `EntersAsCopy` pause end to end, through a real Lua script exercising the new
+  `counter_kind`/`counter_amount` decode keys. Full workspace suite green.
+- Unresolved: CR 707.9e's own invalidation clause (named above). CR 707.9e's X-costed variable
+  amount. CR 707.9f (exceptions conditional on the copy's own resulting characteristics) untouched.
+
 ## Slice: keyword-layer-fix-and-remove-keyword (merged)
 
 - Branch `phase5/keyword-layer-fix-and-remove-keyword`.

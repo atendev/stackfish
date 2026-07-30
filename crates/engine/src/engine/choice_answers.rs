@@ -429,6 +429,12 @@ impl Engine {
                 // own doc comment.
                 let generation = self.state.object(object).map(|o| o.copy_generation).unwrap_or(0);
                 commands::grant_linked_copy_ability(&mut self.state, object, &exceptions, generation);
+                // CR 707.9e: Spark Double's own "enters with an additional
+                // +1/+1 counter" - see apply_copy_additional_counters's own
+                // doc comment.
+                if let Some(counter_event) = commands::apply_copy_additional_counters(object, &exceptions) {
+                    events_so_far.push(counter_event);
+                }
                 events_so_far.push(GameEventKind::BecameCopy { object, copied });
             }
             // else: the chosen creature no longer resolves (departed

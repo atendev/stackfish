@@ -172,6 +172,32 @@ pub(crate) fn grant_linked_copy_ability(
     state.linked_ability_generation.insert(id, generation);
 }
 
+/// CR 707.9e: Spark Double's own "if it's a creature, it enters with an
+/// additional +1/+1 counter on it" - the "additional effect" exception shape
+/// (as opposed to `CopyExceptions::apply`'s characteristic-modification
+/// shapes) - see `CopyExceptions`'s own doc comment for why this can't just
+/// be folded into `apply`. Returns the `GameEventKind::CounterAdded` to push
+/// alongside the caller's own `BecameCopy` event, rather than mutating
+/// `state` directly - `CommitEvents` already knows how to apply a
+/// `CounterAdded` generically, and pushing straight to `GameObject.counters`
+/// here would double it, the same "pick exactly one" mistake this backlog's
+/// own mistakes-caught section already names for `EntersWithCounters`.
+///
+/// No-op unless `exceptions.enters_with_additional_counters` is set. Called
+/// by both real copy-application call sites
+/// (`resolve_become_copy_effect`/`submit_copy_choice`), right alongside
+/// `grant_linked_copy_ability` - CR 707.9e's own invalidation clause (this
+/// exception's effect doesn't happen if a *second* copy effect supersedes
+/// the first before it applies) is out of scope here, same as it is on
+/// `CopyExceptions` itself - see that type's own doc comment.
+pub(crate) fn apply_copy_additional_counters(
+    object: ObjectId,
+    exceptions: &CopyExceptions,
+) -> Option<crate::types::event::GameEventKind> {
+    let (kind, amount) = exceptions.enters_with_additional_counters.clone()?;
+    Some(crate::types::event::GameEventKind::CounterAdded { object, kind, amount: amount as i32 })
+}
+
 /// CR 303.4: `definition` is an Aura - an enchantment (card type) with the
 /// "Aura" subtype. No `Subtype`-vocabulary parser exists (`Subtype` is a
 /// bare string newtype, `types/card.rs`) - checked by direct string
