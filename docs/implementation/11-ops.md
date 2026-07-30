@@ -235,7 +235,7 @@
   engine can specify a target at all; CR 303.4m enchanted-player continuous effects - unrelated,
   unchanged.
 
-## Slice: effect-filter-subtypes (implemented, not yet merged)
+## Slice: effect-filter-subtypes (merged)
 
 - Branch `phase5/effect-filter-subtypes`.
 - Scope: closes the `mass-destroy-effect` slice's own named gap - `EffectFilter` had no
