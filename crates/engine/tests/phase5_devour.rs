@@ -36,8 +36,12 @@
 //! to, same "skip rather than guess" stance every other post-departure
 //! lookup in this codebase already takes).
 //!
-//! CR 702.82c's "Devour [quality] N" variant (sacrifice permanents of
-//! [quality] rather than just creatures) isn't modeled.
+//! CR 702.82c's "Devour [quality] N" variant is real now too
+//! (`phase5/devour-quality`) - `EntersWithCountersDevour.quality:
+//! Option<Subtype>`, checked in `pending_devour_choice` against
+//! `layers::effective_characteristics(...).subtypes` (narrows the candidate
+//! list to permanents of that quality, in addition to the existing
+//! "creature you control" checks - `None` means "any creature," unchanged).
 
 use stackfish_engine::engine::{DevourChoiceError, Engine, StepStatus};
 use stackfish_engine::replacement;
@@ -69,6 +73,12 @@ fn creature_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDef
     }
 }
 
+fn subtyped_creature_definition(name: &str, mana_cost: ManaCost, script: &str, subtypes: Vec<Subtype>) -> CardDefinition {
+    let mut definition = creature_definition(name, mana_cost, script);
+    definition.subtypes = subtypes;
+    definition
+}
+
 fn artifact_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDefinition {
     CardDefinition {
         definition_id: 1,
@@ -94,6 +104,10 @@ fn artifact_definition(name: &str, mana_cost: ManaCost, script: &str) -> CardDef
 }
 
 fn devour_effect(source: ObjectId, per_creature: i32) -> ReplacementEffect {
+    devour_effect_with_quality(source, per_creature, None)
+}
+
+fn devour_effect_with_quality(source: ObjectId, per_creature: i32, quality: Option<Subtype>) -> ReplacementEffect {
     ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
@@ -102,7 +116,7 @@ fn devour_effect(source: ObjectId, per_creature: i32) -> ReplacementEffect {
                 to: Some(ZoneKind::Battlefield),
                 affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
-            payload: ReplacementPayload::EntersWithCountersDevour { per_creature },
+            payload: ReplacementPayload::EntersWithCountersDevour { per_creature, quality },
         },
         consumption: ConsumptionPolicy::Repeatable,
     }
@@ -147,6 +161,34 @@ fn pending_devour_choice_only_offers_creatures_the_entrant_s_own_controller_cont
     // own_bear both qualify; the opponent's bear and the non-creature
     // artifact don't.
     assert_eq!(candidates, vec![entrant, own_bear]);
+}
+
+#[test]
+fn pending_devour_choice_with_a_quality_only_offers_the_matching_subtype() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let entrant = ObjectId(0);
+    let nightmare = ObjectId(1);
+    let bear = ObjectId(2);
+    state.objects.insert(
+        entrant,
+        card_object(entrant, creature_definition("Gluttonous Beast", ManaCost { symbols: Vec::new() }, ""), p0, ZoneKind::Battlefield),
+    );
+    state.replacement_effects.push(devour_effect_with_quality(entrant, 2, Some(Subtype("Nightmare".to_string()))));
+    put_on_battlefield(
+        &mut state,
+        card_object(nightmare, subtyped_creature_definition("Night Terror", ManaCost { symbols: Vec::new() }, "", vec![Subtype("Nightmare".to_string())]), p0, ZoneKind::Battlefield),
+    );
+    put_on_battlefield(&mut state, card_object(bear, creature_definition("Plain Bear", ManaCost { symbols: Vec::new() }, ""), p0, ZoneKind::Battlefield));
+
+    let runtime = ScriptRuntime::new();
+    let (per_creature, candidates) =
+        replacement::pending_devour_choice(&state, &runtime, entrant, ZoneKind::Stack, p0).expect("a Devour effect is registered with a real candidate");
+
+    assert_eq!(per_creature, 2);
+    // The entrant itself isn't a Nightmare, so it doesn't qualify either -
+    // quality narrows every candidate, not just the non-entrant ones.
+    assert_eq!(candidates, vec![nightmare]);
 }
 
 #[test]
@@ -200,9 +242,42 @@ fn set_payload_devour_registers_correctly() {
     match &state.replacement_effects[0].spec {
         ReplacementSpec::Primitive {
             filter: EventFilter::WouldMoveZone { to: Some(ZoneKind::Battlefield), .. },
-            payload: ReplacementPayload::EntersWithCountersDevour { per_creature: 2 },
+            payload: ReplacementPayload::EntersWithCountersDevour { per_creature: 2, quality: None },
         } => {}
         other => panic!("expected a WouldMoveZone(_, Battlefield)/EntersWithCountersDevour(2) spec, got {other:?}"),
+    }
+}
+
+const DEVOUR_NIGHTMARE_TWO: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
+    e:SetPayload(Game.ReplacementPayloads.EntersWithCountersDevour(2, "Nightmare"))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+return s
+"#;
+
+#[test]
+fn set_payload_devour_with_a_quality_registers_correctly() {
+    let mut state = two_player_state();
+    let source = ObjectId(0);
+    let definition = creature_definition("Gluttonous Nightmare", ManaCost { symbols: Vec::new() }, DEVOUR_NIGHTMARE_TWO);
+    state.objects.insert(source, card_object(source, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+
+    ScriptRuntime::new().run_card_script(&mut state, &definition, source).expect("script self-registers cleanly");
+
+    assert_eq!(state.replacement_effects.len(), 1);
+    match &state.replacement_effects[0].spec {
+        ReplacementSpec::Primitive {
+            filter: EventFilter::WouldMoveZone { to: Some(ZoneKind::Battlefield), .. },
+            payload: ReplacementPayload::EntersWithCountersDevour { per_creature: 2, quality: Some(quality) },
+        } => {
+            assert_eq!(quality, &Subtype("Nightmare".to_string()));
+        }
+        other => panic!("expected a WouldMoveZone(_, Battlefield)/EntersWithCountersDevour(2, \"Nightmare\") spec, got {other:?}"),
     }
 }
 
@@ -270,6 +345,46 @@ fn choosing_to_sacrifice_both_offered_creatures_grants_four_counters_and_removes
     assert!(engine.state().object(bear_b).is_none(), "bear_b was sacrificed, its old id is gone");
     let battlefield: Vec<ObjectId> = engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.iter().copied().collect();
     assert_eq!(battlefield, vec![object], "only the entrant remains on the battlefield");
+}
+
+#[test]
+fn devour_with_a_quality_only_offers_the_matching_subtype_end_to_end() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let card = ObjectId(0);
+    let nightmare = ObjectId(1);
+    let bear = ObjectId(2);
+    let mut state = two_player_state();
+    state.objects.insert(
+        card,
+        card_object(card, creature_definition("Gluttonous Nightmare", ManaCost { symbols: Vec::new() }, DEVOUR_NIGHTMARE_TWO), p0, ZoneKind::Hand),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(
+        &mut state,
+        card_object(nightmare, subtyped_creature_definition("Night Terror", ManaCost { symbols: Vec::new() }, "", vec![Subtype("Nightmare".to_string())]), p0, ZoneKind::Battlefield),
+    );
+    put_on_battlefield(&mut state, card_object(bear, creature_definition("Plain Bear", ManaCost { symbols: Vec::new() }, ""), p0, ZoneKind::Battlefield));
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    let StepStatus::AwaitingDevourChoice { object, per_creature, candidates, .. } = status else {
+        panic!("expected a CR 702.82c Devour [quality] choice pause, got {status:?}")
+    };
+    assert_eq!(per_creature, 2);
+    // Neither the entrant (not a Nightmare) nor the plain Bear qualify -
+    // only Night Terror does.
+    assert_eq!(candidates, vec![nightmare]);
+
+    engine.submit_devour_choice(vec![nightmare]).expect("Night Terror was the offered candidate");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+
+    assert_eq!(engine.state().object(object).unwrap().counters.count(&CounterKind::PlusOnePlusOne), 2);
+    assert!(engine.state().object(nightmare).is_none(), "Night Terror was sacrificed");
+    assert!(engine.state().object(bear).is_some(), "the plain Bear was never a legal candidate, so it's untouched");
 }
 
 #[test]

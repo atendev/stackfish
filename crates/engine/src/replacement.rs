@@ -613,7 +613,8 @@ pub fn apply_enters_battlefield_modifiers(
 /// own `_ => continue` arm) rather than erroring.
 ///
 /// Returns `Some((per_creature, candidates))` — `candidates` is every
-/// creature `controller` currently controls on the battlefield (CR 701.17a:
+/// creature `controller` currently controls on the battlefield, narrowed
+/// further to `quality` (CR 702.82c) if the registered effect has one (CR 701.17a:
 /// sacrificing is always a permanent's own controller's choice, never an
 /// arbitrary creature regardless of who controls it), `object` included
 /// (real Magic allows devouring the source itself, and this engine doesn't
@@ -632,11 +633,11 @@ pub fn pending_devour_choice(
     controller: PlayerId,
 ) -> Option<(i32, Vec<ObjectId>)> {
     let candidate = GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
-    let per_creature = state.replacement_effects.iter().find_map(|r| match &r.spec {
-        ReplacementSpec::Primitive { payload: ReplacementPayload::EntersWithCountersDevour { per_creature }, .. }
+    let (per_creature, quality) = state.replacement_effects.iter().find_map(|r| match &r.spec {
+        ReplacementSpec::Primitive { payload: ReplacementPayload::EntersWithCountersDevour { per_creature, quality }, .. }
             if r.matches(&candidate, false, state, script_runtime) =>
         {
-            Some(*per_creature)
+            Some((*per_creature, quality.clone()))
         }
         _ => None,
     })?;
@@ -644,11 +645,21 @@ pub fn pending_devour_choice(
         .objects
         .values()
         .filter(|obj| {
-            obj.zone == ZoneKind::Battlefield
-                && obj.controller == controller
-                && crate::layers::effective_characteristics(state, script_runtime, obj.object_id)
-                    .card_types
-                    .contains(CardTypeSet::CREATURE)
+            if obj.zone != ZoneKind::Battlefield || obj.controller != controller {
+                return false;
+            }
+            let effective = crate::layers::effective_characteristics(state, script_runtime, obj.object_id);
+            if !effective.card_types.contains(CardTypeSet::CREATURE) {
+                return false;
+            }
+            // CR 702.82c: "Devour [quality] N" narrows the sacrifice to
+            // permanents matching `quality` instead of any creature.
+            if let Some(quality) = &quality {
+                if !effective.subtypes.contains(quality) {
+                    return false;
+                }
+            }
+            true
         })
         .map(|obj| obj.object_id)
         .collect();
