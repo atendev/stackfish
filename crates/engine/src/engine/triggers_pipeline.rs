@@ -8,10 +8,10 @@ use crate::commands;
 use crate::engine_context::PipelineExit;
 use crate::triggers::{self, PendingTrigger};
 use crate::types::event::{GameEvent, GameEventKind};
-use crate::types::ids::{ObjectId, PlayerId};
+use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::{StackEntryKind, StackObject};
 
-use super::{Engine, ProcessState, StepStatus, TriggerOrderError};
+use super::{Engine, ProcessState, StepStatus, TriggerOrderError, TriggerTargetsError};
 
 /// Whether `chosen` is a reordering of `group` — same `PendingTrigger`s
 /// (by value), each used exactly once, any order. Used by
@@ -191,88 +191,11 @@ impl Engine {
         // whole run on AwaitTriggerOrderChoice, not get resolved
         // without them.
         let Some((player, group)) = pending_groups.pop_front() else {
-            // Push each trigger in `ordered` onto self.state.stack
-            // as a real StackObject (CR 603.3b/603.4) - looked up by
-            // its own stable AbilityId via commands::find_ability_by_id
-            // (phase5/ability-stable-id; see AbilityId's own doc
-            // comment for why a position was no longer safe here).
-            for trigger in ordered {
-                // CR 603.10: a Dies/LeavesBattlefield trigger's
-                // source never resolves live in state.abilities
-                // (retire_object already purged it) - fall back to
-                // the same departed_triggered_abilities stash
-                // collect_triggers itself consulted to produce this
-                // PendingTrigger in the first place, matching on the
-                // same stable id.
-                let ability = commands::find_ability_by_id(&self.state, trigger.ability)
-                    .or_else(|| {
-                        self.departed_triggered_abilities.iter().find(|a| a.id == trigger.ability)
-                    });
-                let Some(ability) = ability else {
-                    // Neither state.abilities nor the departed stash
-                    // resolved this trigger - TODO(CR 603.3d):
-                    // sacrifice/discard-as-cost/other zone
-                    // departures aren't wired to the departed stash
-                    // yet (see retire_object's own doc comment), so
-                    // a dies-trigger from one of those still lands
-                    // here and gets silently dropped.
-                    continue;
-                };
-                let operation = ability.operation;
-                let effect = ability.effect.clone();
-                let target_requirement = ability.target.clone();
-                let intervening_if = ability.intervening_if.clone();
-                let stack_id = self.state.allocate_object_id();
-                // TODO(CR 603.3c): triggered abilities that require
-                // targets ("when this dies, destroy target
-                // creature") aren't choosable yet - targets is
-                // always empty here, same script-bridge-mid-
-                // pipeline gap invoke_target/select_targets already
-                // flag. target_requirement is still baked onto the
-                // StackObject (in case a future ability sets a
-                // fixed/no-choice target) so ResolveStackTop's CR
-                // 608.2b recheck applies uniformly regardless of
-                // StackEntryKind.
-                // CR 800.4a: the source's own current owner when
-                // it's still live; `PendingTrigger` has no
-                // last-known-owner of its own for the departed-
-                // source case (a Dies/LeavesBattlefield trigger),
-                // so that narrow case falls back to `controller` -
-                // same proxy this field replaces everywhere else,
-                // now scoped to just this one gap.
-                let source_owner =
-                    self.state.object(trigger.source).map(|o| o.owner).unwrap_or(trigger.controller);
-                self.state.stack.push(StackObject::new(
-                    stack_id,
-                    StackEntryKind::TriggeredAbility,
-                    trigger.source,
-                    source_owner,
-                    trigger.controller,
-                    Vec::new(),
-                    Vec::new(),
-                    target_requirement,
-                    None,
-                    false,
-                    operation,
-                    effect,
-                    intervening_if,
-                    // CR 700.2e: only a modal spell can defer its
-                    // mode choice this way - a triggered ability
-                    // never does.
-                    None,
-                ));
-                let event_id = self.state.allocate_event_id();
-                let sequence_no = self.state.allocate_sequence_no();
-                self.state.ledger.push(GameEvent {
-                    event_id,
-                    sequence_no,
-                    kind: GameEventKind::StackObjectPushed { stack_id },
-                    caused_by_command: None,
-                    parent_event: None,
-                });
-            }
-            self.process_state = self.end_pipeline_run();
-            return StepStatus::Progressed;
+            // Push every trigger in `ordered` onto self.state.stack as a
+            // real StackObject (CR 603.3b/603.4) - see
+            // push_ordered_triggers's own doc comment for why this can no
+            // longer be a plain unpaused for-loop.
+            return self.push_ordered_triggers(ordered.into());
         };
         if group.len() <= 1 {
             ordered.extend(group);
@@ -282,5 +205,168 @@ impl Engine {
                 ProcessState::AwaitTriggerOrderChoice { player, group, ordered, pending_groups };
         }
         StepStatus::Progressed
+    }
+
+    /// Pushes every trigger in `remaining` onto `state.stack` as a real
+    /// `StackObject`, one at a time - pausing on `ProcessState::
+    /// AwaitingTriggerTargets` (CR 603.3d) the moment one needs a real
+    /// target choice its controller hasn't made yet, instead of the old
+    /// unconditional `targets: Vec::new()`. Shared by
+    /// `resolve_put_triggers_apnap_state`'s own initial call (the whole
+    /// freshly-ordered queue) and `submit_trigger_targets`'s resume
+    /// (whatever's left after the just-answered trigger) - same "the queue
+    /// survives the pause, one shared driver walks it either way" shape
+    /// `AwaitTriggerOrderChoice`'s own `pending_groups` already established
+    /// one level up.
+    pub(super) fn push_ordered_triggers(&mut self, mut remaining: VecDeque<PendingTrigger>) -> StepStatus {
+        while let Some(trigger) = remaining.pop_front() {
+            // CR 603.10: a Dies/LeavesBattlefield trigger's source never
+            // resolves live in state.abilities (retire_object already
+            // purged it) - fall back to the same departed_triggered_abilities
+            // stash collect_triggers itself consulted to produce this
+            // PendingTrigger in the first place, matching on the same
+            // stable id.
+            let ability = commands::find_ability_by_id(&self.state, trigger.ability)
+                .or_else(|| self.departed_triggered_abilities.iter().find(|a| a.id == trigger.ability));
+            let Some(ability) = ability else {
+                // Neither state.abilities nor the departed stash resolved
+                // this trigger - TODO(CR 603.3d): sacrifice/discard-as-cost/
+                // other zone departures aren't wired to the departed stash
+                // yet (see retire_object's own doc comment), so a
+                // dies-trigger from one of those still lands here and gets
+                // silently dropped.
+                continue;
+            };
+            // CR 603.3d/601.2c: a triggered ability that names a target
+            // must have one chosen before it goes on the stack at all -
+            // unlike CastSpell/ActivateAbility, nothing submitted `targets`
+            // up front, since a triggered ability isn't initiated by a
+            // player action in the first place. Narrowed to
+            // TargetSpec::Primitive (a single target word) - the
+            // overwhelmingly common real shape, matching every triggered
+            // ability this engine has ever modeled (Wall of Omens' plain
+            // GainLife, Vesuvan's own granted upkeep ability, ...);
+            // TargetSpec::Multiple on a trigger stays a named gap, still
+            // pushed with an empty target list same as `None` always was.
+            if let Some(crate::types::target::TargetSpec::Primitive(requirement)) = &ability.target {
+                let requirement = requirement.clone();
+                let candidates = commands::legal_target_candidates(
+                    &self.state,
+                    &self.script_runtime,
+                    &requirement,
+                    trigger.controller,
+                    trigger.source,
+                );
+                let minimum = if requirement.up_to { 0 } else { requirement.count };
+                if (candidates.len() as u32) < minimum {
+                    // CR 603.3d: "if a choice is required ... but no legal
+                    // choices can be made for it ... the ability is simply
+                    // removed from the stack" - never pushed at all,
+                    // silently move on to the next trigger in this batch.
+                    continue;
+                }
+                self.process_state =
+                    ProcessState::AwaitingTriggerTargets { trigger, requirement, candidates, remaining };
+                return StepStatus::Progressed;
+            }
+            self.push_trigger_stack_object(&trigger, Vec::new());
+        }
+        self.process_state = self.end_pipeline_run();
+        StepStatus::Progressed
+    }
+
+    /// The actual `StackObject`/`StackObjectPushed` construction one
+    /// trigger's own resolved `RegisteredAbility` needs - pulled out of
+    /// `push_ordered_triggers` so both its no-target-needed fast path and
+    /// `submit_trigger_targets`'s resume (after a real choice was made) call
+    /// exactly one shared implementation. `ability`'s own fields are
+    /// re-looked-up here (rather than threaded through as a parameter) so
+    /// the borrow of `self.state`/`self.departed_triggered_abilities` ends
+    /// before this function's own `&mut self.state` mutations - the same
+    /// "extract owned copies, then mutate" shape the original inline loop
+    /// this was split from already used.
+    fn push_trigger_stack_object(&mut self, trigger: &PendingTrigger, targets: Vec<Target>) {
+        let ability = commands::find_ability_by_id(&self.state, trigger.ability)
+            .or_else(|| self.departed_triggered_abilities.iter().find(|a| a.id == trigger.ability));
+        let Some(ability) = ability else { return };
+        let operation = ability.operation;
+        let effect = ability.effect.clone();
+        let target_requirement = ability.target.clone();
+        let intervening_if = ability.intervening_if.clone();
+        let stack_id = self.state.allocate_object_id();
+        // CR 800.4a: the source's own current owner when it's still live;
+        // `PendingTrigger` has no last-known-owner of its own for the
+        // departed-source case (a Dies/LeavesBattlefield trigger), so that
+        // narrow case falls back to `controller` - same proxy this field
+        // replaces everywhere else, now scoped to just this one gap.
+        let source_owner = self.state.object(trigger.source).map(|o| o.owner).unwrap_or(trigger.controller);
+        self.state.stack.push(StackObject::new(
+            stack_id,
+            StackEntryKind::TriggeredAbility,
+            trigger.source,
+            source_owner,
+            trigger.controller,
+            Vec::new(),
+            targets,
+            target_requirement,
+            None,
+            false,
+            operation,
+            effect,
+            intervening_if,
+            // CR 700.2e: only a modal spell can defer its mode choice this
+            // way - a triggered ability never does.
+            None,
+        ));
+        let event_id = self.state.allocate_event_id();
+        let sequence_no = self.state.allocate_sequence_no();
+        self.state.ledger.push(GameEvent {
+            event_id,
+            sequence_no,
+            kind: GameEventKind::StackObjectPushed { stack_id },
+            caused_by_command: None,
+            parent_event: None,
+        });
+    }
+
+    /// Answers a pending CR 603.3d target choice raised by
+    /// `StepStatus::AwaitingTriggerTargets` - `chosen` must satisfy
+    /// `requirement` (validated via `commands::validate_single_target_
+    /// requirement`, the exact same count/dedup/legality checks `CastSpell`/
+    /// `ActivateAbility` already enforce). Separate entry point from
+    /// `submit_action` for the same reason `submit_trigger_order`/
+    /// `submit_copy_choice` are: this is a sub-decision mid-pipeline, not a
+    /// `PlayerAction`/priority decision.
+    pub fn submit_trigger_targets(&mut self, chosen: Vec<Target>) -> Result<(), TriggerTargetsError> {
+        let ProcessState::AwaitingTriggerTargets { trigger, requirement, .. } = &self.process_state else {
+            return Err(TriggerTargetsError::NotAwaitingChoice);
+        };
+        if commands::validate_single_target_requirement(
+            &self.state,
+            &self.script_runtime,
+            requirement,
+            &chosen,
+            trigger.controller,
+            trigger.source,
+        )
+        .is_err()
+        {
+            return Err(TriggerTargetsError::InvalidTargets);
+        }
+        let ProcessState::AwaitingTriggerTargets { trigger, remaining, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        self.push_trigger_stack_object(&trigger, chosen);
+        // Defers the rest of `remaining` to the next step() call, same
+        // "submit_* mutates now, advance() drives the actual continuation
+        // later" convention every other choice-pause resume in this engine
+        // already follows - reuses PutTriggersApnap's own empty-
+        // pending_groups branch (`resolve_put_triggers_apnap_state` calls
+        // `push_ordered_triggers` the moment `pending_groups` is empty)
+        // rather than a third call site for the same loop.
+        self.process_state = ProcessState::PutTriggersApnap { ordered: remaining.into(), pending_groups: VecDeque::new() };
+        Ok(())
     }
 }

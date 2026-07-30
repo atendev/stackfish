@@ -147,6 +147,57 @@
 - Unresolved: none new — this closes the "ability index positional fragility" note `06-abilities.md`
   carried since `activate-ability-mana`/`activated-ability-costs`.
 
+## Slice: trigger-target-selection (branch open)
+
+- Branch `phase5/trigger-target-selection`.
+- Scope: CR 603.3d - a triggered ability that names a target ("when this dies, destroy target
+  creature") genuinely pauses for its controller to choose one before going on the stack, instead of
+  always being pushed with `targets: Vec::new()` and fizzling at the CR 608.2b recheck. This was
+  named in `triggers_pipeline.rs`'s own long-standing TODO (mislabeled `CR 603.3c` there - that rule
+  is actually about *modal* triggered abilities' mode choice; the real citation for a triggered
+  ability's own target selection is CR 603.3d, "identical to the process for casting a spell...").
+  Directly unblocks the previous slice's own named gap: Vesuvan Doppelganger's granted upkeep ability
+  was real and correctly shaped in `state.abilities` but could never actually resolve through ordinary
+  gameplay.
+- Key changes:
+  - `commands::legal_target_candidates` (legality.rs) - a generic candidate scan against any
+    `TargetRequirement`, the same "walk every object/player, filter through `target_is_legal`" shape
+    `attach::legal_aura_entry_candidates` already established, generalized off any requirement
+    instead of just an Aura's own.
+  - `commands::validate_single_target_requirement` - a thin `pub(crate)` wrapper exposing the
+    existing private `validate_one_target_requirement` to `engine::`, which has no `TargetSpec`
+    wrapper to hand the existing `validate_targets` (nothing initiated a trigger with player-submitted
+    targets in the first place).
+  - `ProcessState`/`StepStatus::AwaitingTriggerTargets` - new pause, same shape
+    `AwaitTriggerOrderChoice` already established one level up (the trigger-push queue survives the
+    pause).
+  - `triggers_pipeline.rs`'s old unpaused `for trigger in ordered { ... }` push loop became
+    `Engine::push_ordered_triggers(remaining: VecDeque<PendingTrigger>) -> StepStatus` - resumable,
+    one trigger at a time; pauses the moment a `TargetSpec::Primitive`-shaped trigger has real
+    candidates to choose from (computed via `legal_target_candidates`), and silently skips the push
+    entirely (CR 603.3d's own "the ability is simply removed from the stack") when the requirement's
+    own minimum can't be met. `push_trigger_stack_object` is the shared tail (constructs the real
+    `StackObject`/`StackObjectPushed` event) both the no-target fast path and `submit_trigger_targets`'s
+    resume call into.
+  - `Engine::submit_trigger_targets(chosen: Vec<Target>) -> Result<(), TriggerTargetsError>` - answers
+    the pause; on success, pushes the stack object immediately (same "submit_* mutates now" convention
+    every other choice-pause resume already follows) and defers the rest of the queue to the next
+    `step()` by reusing `PutTriggersApnap`'s own empty-`pending_groups` branch rather than a third call
+    site for the same loop.
+- Deliberately narrow, named in code comments: `TargetSpec::Primitive` only (a single target word) -
+  every real triggered ability this engine has ever modeled is this shape; `TargetSpec::Multiple` on a
+  trigger stays a named gap, still pushed with an empty target list same as before this slice. Modal
+  triggered abilities (CR 603.3c itself) untouched. The pre-existing sacrifice/discard-as-cost
+  departed-source gap (`retire_object`'s own doc comment) is unrelated and untouched.
+- Verify: 5 new tests (`phase5_trigger_target_selection.rs`) - a real end-to-end pause/choose/resolve
+  cycle (`Destroy` against a chosen creature), the CR 603.3d zero-candidate removal case, both
+  `submit_trigger_targets` error paths, and `vesuvans_granted_upkeep_ability_now_really_fires_and_
+  becomes_a_copy` - the flagship proof, driving Vesuvan's exact granted-ability shape through a real
+  `BeginningOfYourUpkeep` collection (no manual re-registration-as-Activated workaround needed
+  anymore) and confirming the copy actually happens. Full workspace suite green.
+- Unresolved: `TargetSpec::Multiple` on a trigger. Modal triggered abilities (CR 603.3c). The
+  departed-source dies-trigger gap already named above.
+
 ## General trigger notes
 
 - Trigger ordering: `group_apnap` groups by controller in APNAP order; intra-group ordering pauses via `AwaitTriggerOrderChoice`.
