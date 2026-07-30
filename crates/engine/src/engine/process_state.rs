@@ -19,7 +19,7 @@ use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ColorSet;
 use crate::types::stack::StackObject;
-use crate::types::target::TargetRequirement;
+use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 /// What happened on one `step()` call, and what the engine needs next.
@@ -141,15 +141,18 @@ pub enum StepStatus {
     /// then `step()` again.
     AwaitingTriggerOrderChoice { player: PlayerId, group: Vec<PendingTrigger> },
     /// CR 603.3d: a triggered ability about to go on the stack has a real
-    /// (`TargetSpec::Primitive`) target requirement and at least
-    /// `requirement`'s own minimum legal candidates exist — `player` (the
-    /// trigger's own controller) must choose from `candidates` and call
-    /// `submit_trigger_targets`, then `step()` again. Unlike `CastSpell`/
-    /// `ActivateAbility`, nothing initiated this ability with player-
-    /// submitted targets already attached — it was detected and queued by
-    /// the trigger pipeline itself, so the choice has to happen here,
-    /// mid-pipeline, the first time this engine asks for one this way.
-    AwaitingTriggerTargets { player: PlayerId, requirement: TargetRequirement, candidates: Vec<Target> },
+    /// target requirement (`spec` - any `TargetSpec`, single- or multi-word)
+    /// and every word has at least its own minimum legal candidates —
+    /// `player` (the trigger's own controller) must choose from `candidates`
+    /// (one legal-candidate list per word, positionally paired with `spec`'s
+    /// own words) and call `submit_trigger_targets` with one flat list
+    /// (split internally the same way `CastSpell`/`ActivateAbility`'s own
+    /// submitted `targets` already are), then `step()` again. Unlike
+    /// `CastSpell`/`ActivateAbility`, nothing initiated this ability with
+    /// player-submitted targets already attached — it was detected and
+    /// queued by the trigger pipeline itself, so the choice has to happen
+    /// here, mid-pipeline, the first time this engine asks for one this way.
+    AwaitingTriggerTargets { player: PlayerId, spec: TargetSpec, candidates: Vec<Vec<Target>> },
     /// CR 601.2f-h: `player` cast a spell that's now on the stack
     /// (`stack_id`) but hasn't paid its cost yet — the caller should look
     /// up the cost (e.g. via the card's `CardDefinition.mana_cost` off
@@ -636,15 +639,15 @@ pub enum ProcessState {
     /// CR 603.3d: paused mid-`PutTriggersApnap`'s own final push loop
     /// (`Engine::push_ordered_triggers`) because `trigger`'s own ability
     /// needs a real target chosen before it can be pushed to the stack —
-    /// `requirement`/`candidates` mirror `StepStatus::AwaitingTriggerTargets`
+    /// `spec`/`candidates` mirror `StepStatus::AwaitingTriggerTargets`
     /// exactly (see that variant's own doc comment); `remaining` is every
     /// other trigger in this same push run still to process afterward, same
     /// "queue survives the pause" convention `AwaitTriggerOrderChoice`'s own
     /// `pending_groups` already established.
     AwaitingTriggerTargets {
         trigger: PendingTrigger,
-        requirement: TargetRequirement,
-        candidates: Vec<Target>,
+        spec: TargetSpec,
+        candidates: Vec<Vec<Target>>,
         remaining: VecDeque<PendingTrigger>,
     },
     /// All players passed with an empty stack — advance turn/phase/step

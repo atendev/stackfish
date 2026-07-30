@@ -210,8 +210,9 @@ impl Engine {
     /// Pushes every trigger in `remaining` onto `state.stack` as a real
     /// `StackObject`, one at a time - pausing on `ProcessState::
     /// AwaitingTriggerTargets` (CR 603.3d) the moment one needs a real
-    /// target choice its controller hasn't made yet, instead of the old
-    /// unconditional `targets: Vec::new()`. Shared by
+    /// target choice (single- or multi-word, any `TargetSpec`) its
+    /// controller hasn't made yet, instead of the old unconditional
+    /// `targets: Vec::new()`. Shared by
     /// `resolve_put_triggers_apnap_state`'s own initial call (the whole
     /// freshly-ordered queue) and `submit_trigger_targets`'s resume
     /// (whatever's left after the just-answered trigger) - same "the queue
@@ -237,36 +238,30 @@ impl Engine {
                 // silently dropped.
                 continue;
             };
-            // CR 603.3d/601.2c: a triggered ability that names a target
-            // must have one chosen before it goes on the stack at all -
-            // unlike CastSpell/ActivateAbility, nothing submitted `targets`
-            // up front, since a triggered ability isn't initiated by a
-            // player action in the first place. Narrowed to
-            // TargetSpec::Primitive (a single target word) - the
-            // overwhelmingly common real shape, matching every triggered
-            // ability this engine has ever modeled (Wall of Omens' plain
-            // GainLife, Vesuvan's own granted upkeep ability, ...);
-            // TargetSpec::Multiple on a trigger stays a named gap, still
-            // pushed with an empty target list same as `None` always was.
-            if let Some(crate::types::target::TargetSpec::Primitive(requirement)) = &ability.target {
-                let requirement = requirement.clone();
-                let candidates = commands::legal_target_candidates(
-                    &self.state,
-                    &self.script_runtime,
-                    &requirement,
-                    trigger.controller,
-                    trigger.source,
-                );
-                let minimum = if requirement.up_to { 0 } else { requirement.count };
-                if (candidates.len() as u32) < minimum {
+            // CR 603.3d/601.2c: a triggered ability that names a target (or
+            // targets - CR 601.2c's multi-word form works here exactly like
+            // it does for a spell/activated ability) must have it/them
+            // chosen before it goes on the stack at all - unlike
+            // CastSpell/ActivateAbility, nothing submitted `targets` up
+            // front, since a triggered ability isn't initiated by a player
+            // action in the first place.
+            if let Some(spec) = &ability.target {
+                let spec = spec.clone();
+                let candidates =
+                    commands::legal_target_candidates_for_spec(&self.state, &self.script_runtime, &spec, trigger.controller, trigger.source);
+                let minimums = commands::target_spec_minimums(&spec);
+                let satisfiable = candidates.iter().zip(&minimums).all(|(c, &min)| c.len() as u32 >= min);
+                if !satisfiable {
                     // CR 603.3d: "if a choice is required ... but no legal
                     // choices can be made for it ... the ability is simply
                     // removed from the stack" - never pushed at all,
                     // silently move on to the next trigger in this batch.
+                    // Same all-or-nothing stance CR 601.2c/e already takes
+                    // for a spell with 2+ target words: one word coming up
+                    // empty voids the whole cast/trigger, not just that word.
                     continue;
                 }
-                self.process_state =
-                    ProcessState::AwaitingTriggerTargets { trigger, requirement, candidates, remaining };
+                self.process_state = ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining };
                 return StepStatus::Progressed;
             }
             self.push_trigger_stack_object(&trigger, Vec::new());
@@ -330,26 +325,20 @@ impl Engine {
     }
 
     /// Answers a pending CR 603.3d target choice raised by
-    /// `StepStatus::AwaitingTriggerTargets` - `chosen` must satisfy
-    /// `requirement` (validated via `commands::validate_single_target_
-    /// requirement`, the exact same count/dedup/legality checks `CastSpell`/
-    /// `ActivateAbility` already enforce). Separate entry point from
-    /// `submit_action` for the same reason `submit_trigger_order`/
-    /// `submit_copy_choice` are: this is a sub-decision mid-pipeline, not a
-    /// `PlayerAction`/priority decision.
+    /// `StepStatus::AwaitingTriggerTargets` - `chosen` must satisfy `spec` as
+    /// a whole (validated via `commands::validate_targets`, the exact same
+    /// count/dedup/legality/per-word-splitting checks `CastSpell`/
+    /// `ActivateAbility` already enforce - one flat list, split by
+    /// `split_targets_by_requirement` under the hood for a `Multiple` spec).
+    /// Separate entry point from `submit_action` for the same reason
+    /// `submit_trigger_order`/`submit_copy_choice` are: this is a
+    /// sub-decision mid-pipeline, not a `PlayerAction`/priority decision.
     pub fn submit_trigger_targets(&mut self, chosen: Vec<Target>) -> Result<(), TriggerTargetsError> {
-        let ProcessState::AwaitingTriggerTargets { trigger, requirement, .. } = &self.process_state else {
+        let ProcessState::AwaitingTriggerTargets { trigger, spec, .. } = &self.process_state else {
             return Err(TriggerTargetsError::NotAwaitingChoice);
         };
-        if commands::validate_single_target_requirement(
-            &self.state,
-            &self.script_runtime,
-            requirement,
-            &chosen,
-            trigger.controller,
-            trigger.source,
-        )
-        .is_err()
+        if commands::validate_targets(&self.state, &self.script_runtime, Some(spec), &chosen, trigger.controller, trigger.source)
+            .is_err()
         {
             return Err(TriggerTargetsError::InvalidTargets);
         }
