@@ -13,7 +13,7 @@ use crate::types::ability::{
     TokenSpec,
 };
 use crate::types::card::{CardTypeSet, Subtype};
-use crate::types::cost::{AdditionalCost, CostSpec, FilterController};
+use crate::types::cost::{AdditionalCost, CostModifierTarget, CostSpec, FilterController};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, EffectDuration, EffectFilter, EffectPrimitive, Layer, ReplacementPayload,
 };
@@ -680,6 +680,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 source: ObjectId(source),
                 filter: None,
                 amount: None,
+                target: CostModifierTarget::Generic,
                 registry: Rc::clone(&registry),
             })
         })?

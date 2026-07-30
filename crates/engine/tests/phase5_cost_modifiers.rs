@@ -4,9 +4,12 @@
 //! layer — cost modification is a one-time adjustment applied while
 //! determining a spell's total cost, not a characteristic query. See
 //! `CostModifier`'s own doc comment (cost.rs) and `ManaCost::apply_cost_delta`
-//! (mana.rs). Scoped to spells only, flat fixed amounts only, generic
-//! component only — same narrowing precedent `{X}`/alternative-costs both
-//! already established for their own slices.
+//! (mana.rs). Scoped to spells only, flat fixed amounts only — same
+//! narrowing precedent `{X}`/alternative-costs both already established for
+//! their own slices. CR 118.7b/c/d's colored/colorless-pip-specific
+//! reduction is real now too (`phase5/cost-modifier-colored-pip`,
+//! `CostModifierTarget`), see the `colored_target_*`/`colorless_target_*`
+//! tests below.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -64,6 +67,7 @@ fn reduction_lowers_generic_component_only() {
         controller: p0,
         filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: -1,
+        target: stackfish_engine::CostModifierTarget::Generic,
     };
     let mut state = two_player_state(ManaPool { red: 1, colorless: 1, ..ManaPool::default() }, vec![modifier]);
     state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
@@ -94,6 +98,7 @@ fn increase_raises_generic_component() {
         controller: p0,
         filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: 1,
+        target: stackfish_engine::CostModifierTarget::Generic,
     };
     let mut state = two_player_state(ManaPool { red: 1, colorless: 1, ..ManaPool::default() }, vec![modifier]);
     state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
@@ -129,6 +134,7 @@ fn reduction_floors_at_zero_generic() {
         controller: p0,
         filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: -2,
+        target: stackfish_engine::CostModifierTarget::Generic,
     };
     let mut state = two_player_state(ManaPool { red: 1, ..ManaPool::default() }, vec![modifier]);
     state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
@@ -168,6 +174,7 @@ fn nonmatching_filter_has_no_effect() {
             extra: None,
         },
         amount: -1,
+        target: stackfish_engine::CostModifierTarget::Generic,
     };
     let mut state = two_player_state(ManaPool { red: 1, ..ManaPool::default() }, vec![modifier]);
     state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
@@ -182,6 +189,160 @@ fn nonmatching_filter_has_no_effect() {
     engine
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
         .expect("cost unaffected - the modifier's filter didn't match a Sorcery");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+}
+
+/// CR 118.7: a {1}{W}{W} spell with a {W}-targeted {W} reduction pays
+/// {1}{W} - the colored pip disappears, the generic component is untouched
+/// (contrast with `reduction_lowers_generic_component_only` above, which is
+/// exactly the mirror image).
+#[test]
+fn colored_target_reduces_only_the_matching_pip() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost = ManaCost {
+        symbols: vec![
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+        ],
+    };
+    let modifier = CostModifier {
+        source: ObjectId(99),
+        controller: p0,
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+        target: CostModifierTarget::Colored(Color::White),
+        amount: -1,
+    };
+    let mut state = two_player_state(ManaPool { white: 1, colorless: 1, ..ManaPool::default() }, vec![modifier]);
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    drain(&mut engine);
+
+    let units = vec![ManaUnit::Colored(Color::White), ManaUnit::Colorless];
+    engine
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .expect("{1}{W} (post-reduction) paid with 1 white + 1 generic");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+}
+
+/// CR 118.7c: a {1}{W} spell with a {W}-targeted reduction of {2} zeroes the
+/// {W} and spills the extra {1} onto the generic component - pays {0}, not
+/// a negative-white impossibility.
+#[test]
+fn colored_target_over_reduction_spills_excess_to_generic() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost = ManaCost {
+        symbols: vec![
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+        ],
+    };
+    let modifier = CostModifier {
+        source: ObjectId(99),
+        controller: p0,
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+        target: CostModifierTarget::Colored(Color::White),
+        amount: -2,
+    };
+    let mut state = two_player_state(ManaPool::default(), vec![modifier]);
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    drain(&mut engine);
+
+    engine
+        .submit_payment(PaymentPlan { payments: Vec::new() })
+        .expect("the {W} is zeroed and the excess {1} spills onto generic, reducing it to {0} too");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+}
+
+/// CR 118.7b: a {R} spell reduced by a {W}-targeted modifier has no white
+/// mana to reduce, so the whole amount redirects to the generic component
+/// instead - a cost with no generic component at all still ends up
+/// reduced (to {0} generic), not left untouched.
+#[test]
+fn colored_target_with_no_matching_color_redirects_to_generic() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
+    let modifier = CostModifier {
+        source: ObjectId(99),
+        controller: p0,
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+        target: CostModifierTarget::Colored(Color::White),
+        amount: -1,
+    };
+    let mut state = two_player_state(ManaPool { red: 1, ..ManaPool::default() }, vec![modifier]);
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    drain(&mut engine);
+
+    // The {R} pip is completely untouched - the reduction had nowhere to
+    // land but generic, and there was no generic component to begin with.
+    let units = vec![ManaUnit::Colored(Color::Red)];
+    engine
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .expect("a {W} reduction on an all-red cost redirects to generic, leaving the {R} pip alone");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+}
+
+/// A colored reduction and a plain generic reduction both matching the same
+/// spell fold into one net generic delta via colored spillover, same
+/// "sum once, don't step" guarantee `two_modifiers_both_apply_in_order`
+/// already proves for two Generic-target modifiers.
+#[test]
+fn colored_and_generic_modifiers_combine_via_spillover() {
+    let p0 = PlayerId(0);
+    let card = ObjectId(0);
+    // {2}{W}: a {W}-targeted reduction of {1} takes the {W} pip cleanly (no
+    // spillover), and a separate Generic reduction of {1} lowers {2} to {1}
+    // - net result {1}, paid with 1 generic only.
+    let mana_cost = ManaCost {
+        symbols: vec![
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+        ],
+    };
+    let colored = CostModifier {
+        source: ObjectId(98),
+        controller: p0,
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+        target: CostModifierTarget::Colored(Color::White),
+        amount: -1,
+    };
+    let generic = CostModifier {
+        source: ObjectId(99),
+        controller: p0,
+        filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
+        target: CostModifierTarget::Generic,
+        amount: -1,
+    };
+    let mut state = two_player_state(ManaPool { colorless: 1, ..ManaPool::default() }, vec![colored, generic]);
+    state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    drain(&mut engine);
+
+    let units = vec![ManaUnit::Colorless];
+    engine
+        .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
+        .expect("{2}{W} minus the {W} pip minus {1} generic = {1}, paid with 1 generic");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
@@ -204,12 +365,14 @@ fn two_modifiers_both_apply_in_order() {
         controller: p0,
         filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: -1,
+        target: stackfish_engine::CostModifierTarget::Generic,
     };
     let increase = CostModifier {
         source: ObjectId(99),
         controller: p0,
         filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None },
         amount: 2,
+        target: stackfish_engine::CostModifierTarget::Generic,
     };
     let mut state =
         two_player_state(ManaPool { red: 1, colorless: 3, ..ManaPool::default() }, vec![reduce, increase]);
@@ -252,6 +415,7 @@ fn modifier_scoped_to_opponent_does_not_apply_to_its_own_controllers_spell() {
             extra: None,
         },
         amount: 1,
+        target: stackfish_engine::CostModifierTarget::Generic,
     };
     let mut state = two_player_state(ManaPool { red: 1, ..ManaPool::default() }, vec![modifier]);
     state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::SORCERY), p0, ZoneKind::Hand));
@@ -324,9 +488,9 @@ fn resolves_to_a_free_spell(modifiers: Vec<CostModifier>) {
 #[test]
 fn reduction_then_increase_and_increase_then_reduction_resolve_to_the_same_cost() {
     let reduce =
-        CostModifier { source: ObjectId(98), controller: PlayerId(0), filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None }, amount: -2 };
+        CostModifier { source: ObjectId(98), controller: PlayerId(0), filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None }, target: CostModifierTarget::Generic, amount: -2 };
     let increase =
-        CostModifier { source: ObjectId(99), controller: PlayerId(0), filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None }, amount: 1 };
+        CostModifier { source: ObjectId(99), controller: PlayerId(0), filter: FilterSpec { card_types: None, supertypes: None, subtypes: None, controller: None, random: false, extra: None }, target: CostModifierTarget::Generic, amount: 1 };
 
     resolves_to_a_free_spell(vec![reduce.clone(), increase.clone()]);
     resolves_to_a_free_spell(vec![increase, reduce]);

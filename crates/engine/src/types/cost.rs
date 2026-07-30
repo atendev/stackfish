@@ -145,8 +145,9 @@ impl CostSpec {
 /// Scoped to spells only this slice (an activated ability's own cost isn't
 /// touched, same "spells first" narrowing `{X}`/alternative-costs both
 /// took) and to a flat, fixed `amount` — no dynamic/count-dependent amounts
-/// (e.g. Affinity), no colored-pip-specific modification (only the generic
-/// component, see `ManaCost::apply_cost_delta`).
+/// (e.g. Affinity). Colored-pip-specific modification (CR 118.7b/c/d) is
+/// real now too (`phase5/cost-modifier-colored-pip`) — see `target`'s own
+/// doc comment.
 ///
 /// `filter`/`controller` reuse `cost.rs`'s existing `FilterSpec` rather than
 /// inventing a parallel "which spells" shape: `FilterSpec::matches` already
@@ -166,14 +167,20 @@ impl CostSpec {
 /// increase and a reduction both match the same spell (e.g. base `{1}`,
 /// modifiers `-2` then `+1`: stepwise gives `{1}`; the same two modifiers
 /// in the opposite order give `{0}` — registration order silently changed
-/// the resolved cost). `apply_cost_modifiers` below sums first, floors
-/// once, so registration order in `state.cost_modifiers` no longer matters
-/// — no CR 616-style ordering-choice pause needed to fix this, since a
-/// single sum-then-floor is provably order-independent for the flat
-/// generic-only deltas this engine models (real Magic's own "order can
-/// matter among multiple reductions" carve-out is specifically about CR
-/// 118.7's colored-vs-generic-pip interactions, which `CostModifier`
-/// explicitly doesn't model — see its own scope note above).
+/// the resolved cost). `apply_cost_modifiers` below sums first per
+/// component (generic, and separately per color/colorless — see `target`
+/// below), floors once, so registration order in `state.cost_modifiers` no
+/// longer matters. Extending this to colored/colorless components
+/// (`phase5/cost-modifier-colored-pip`) stays provably order-independent by
+/// the same "sum, don't step" reasoning *as long as every colored/colorless
+/// modifier for one color is a reduction* (worked through by hand: summing
+/// same-color reduction magnitudes first and computing CR 118.7c's spillover
+/// once gives the identical result no matter what order they'd be applied
+/// stepwise) — a colored *increase* mixed with a colored *reduction* on the
+/// same color would reintroduce the same order-dependence real Magic's own
+/// "may apply them in any order" line is about, which is exactly why
+/// `target`'s own doc comment narrows `Colored`/`Colorless` to reduction
+/// only (no real card needs the mixed case).
 /// `Game.CreateCostModifier(c)` (script.rs's `CostModifierBuilder`) is a real
 /// self-registering builder now (`phase5/cost-modifier-builder`), mirroring
 /// `Game.CreateStaticAbility`/`Game.CreateReplacementEffect`'s own
@@ -188,42 +195,101 @@ pub struct CostModifier {
     /// Some(FilterController::Opponent)`.
     pub controller: PlayerId,
     pub filter: FilterSpec,
-    /// Negative reduces, positive increases the generic component (CR
-    /// 118.9's `{0}` floor is enforced by `ManaCost::apply_cost_delta`, not
-    /// here).
+    pub target: CostModifierTarget,
+    /// Negative reduces, positive increases the component `target` names
+    /// (CR 118.9's `{0}` floor is enforced by `ManaCost::apply_cost_delta`/
+    /// `apply_colored_cost_delta`/`apply_colorless_cost_delta`, not here).
     pub amount: i32,
 }
 
+/// CR 118.7's reduction target — which mana component a `CostModifier`'s
+/// `amount` affects. `Generic` (every modifier before `phase5/cost-modifier-
+/// colored-pip`) is unconditional, both directions, unchanged. `Colored`/
+/// `Colorless` implement CR 118.7b/c/d: if the cost has none of that
+/// component, the whole `amount` redirects to the generic component
+/// instead (118.7b); if `amount` is a reduction exceeding that component,
+/// it's zeroed and the excess spills to generic (118.7c/d). Reduction only
+/// for these two — CR 118.7 itself only ever describes reduction, and no
+/// real card in this engine's test corpus increases a specific colored or
+/// colorless pip (every real "costs more" tax effect this engine models is
+/// generic); a positive `amount` on `Colored`/`Colorless` just adds that
+/// many matching pips directly (well-defined, but untested — see
+/// `apply_cost_modifiers`'s own doc comment for why mixing it with a
+/// same-color reduction would reintroduce order-dependence).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CostModifierTarget {
+    Generic,
+    Colored(Color),
+    Colorless,
+}
+
 /// Applies every `CostModifier` in `modifiers` whose `filter` matches
-/// `spell` (evaluated from that modifier's own `controller`'s perspective)
-/// as a single net delta — sums every matching modifier's `amount` first,
-/// then calls `ManaCost::apply_cost_delta` exactly once, rather than once
-/// per modifier. See this struct's own doc comment (above, `CostModifier`)
-/// for why summing first is what CR 601.2f actually asks for, and why
-/// registration order in `modifiers` mattering at all (the pre-`phase5/
-/// cost-modifier-order` behavior) was the bug, not a missing player choice.
+/// `spell` (evaluated from that modifier's own `controller`'s perspective),
+/// grouped by `target` and summed *within* each group before being applied —
+/// once for generic, once per distinct color, once for colorless — rather
+/// than once per modifier. See `CostModifier`'s own doc comment for why
+/// summing first (per component) is what CR 601.2f actually asks for.
 pub fn apply_cost_modifiers(base: &ManaCost, modifiers: &[CostModifier], spell: &GameObject) -> ManaCost {
-    let net_delta: i32 = modifiers
+    let matching = modifiers
         .iter()
         // `spell`'s own `.controller` is used directly here, not a resolved
         // effective_controller - it's a spell on the stack, not a
         // battlefield permanent, and no GainControl effect (CR 108.4) can
         // target something in that zone.
-        .filter(|modifier| modifier.filter.matches(spell, spell.controller, modifier.controller))
-        .map(|modifier| modifier.amount)
-        .sum();
-    // A net-zero delta (no matching modifiers, or matching modifiers that
-    // cancel out) must be a true no-op - `ManaCost::apply_cost_delta(0)`
-    // isn't one: it always drops an *explicit* `Generic(0)` symbol (e.g. an
-    // {X} cost resolved with X=0, `ManaCost::resolve_x`'s own output),
-    // since a bare `0` never clears its own "adjusted > 0" push condition.
-    // Skipping the call entirely when there's nothing to add preserves
-    // that explicit zero marker - same "don't touch what isn't changing"
-    // bug `phase5/cost-modifier-order` caught via `phase5_x_costs.rs`'s
-    // own `x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry`
+        .filter(|modifier| modifier.filter.matches(spell, spell.controller, modifier.controller));
+
+    let mut generic_delta = 0i32;
+    let mut colored_deltas: Vec<(Color, i32)> = Vec::new();
+    let mut colorless_delta = 0i32;
+    for modifier in matching {
+        match modifier.target {
+            CostModifierTarget::Generic => generic_delta += modifier.amount,
+            CostModifierTarget::Colored(color) => {
+                match colored_deltas.iter_mut().find(|(c, _)| *c == color) {
+                    Some((_, delta)) => *delta += modifier.amount,
+                    None => colored_deltas.push((color, modifier.amount)),
+                }
+            }
+            CostModifierTarget::Colorless => colorless_delta += modifier.amount,
+        }
+    }
+
+    let mut result = base.clone();
+    // Every colored/colorless spillover (CR 118.7b/c/d) folds into the same
+    // generic delta computed below - applied once, alongside every plain
+    // `Generic`-target modifier, not as a separate `apply_cost_delta` call.
+    let mut spillover = 0i32;
+    for (color, delta) in colored_deltas {
+        if delta == 0 {
+            continue;
+        }
+        let (adjusted, spill) = result.apply_colored_cost_delta(color, delta);
+        result = adjusted;
+        spillover += spill;
+    }
+    if colorless_delta != 0 {
+        let (adjusted, spill) = result.apply_colorless_cost_delta(colorless_delta);
+        result = adjusted;
+        spillover += spill;
+    }
+
+    let net_generic = generic_delta + spillover;
+    // A net-zero generic delta (no matching Generic modifiers or spillover,
+    // or ones that cancel out) must be a true no-op - `ManaCost::
+    // apply_cost_delta(0)` isn't one: it always drops an *explicit*
+    // `Generic(0)` symbol (e.g. an {X} cost resolved with X=0, `ManaCost::
+    // resolve_x`'s own output), since a bare `0` never clears its own
+    // "adjusted > 0, push it back" condition. Skipping the call entirely
+    // when there's nothing to add preserves that explicit zero marker -
+    // same "don't touch what isn't changing" bug `phase5/cost-modifier-
+    // order` caught via `phase5_x_costs.rs`'s own
+    // `x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry`
     // regressing once this function started calling `apply_cost_delta`
     // unconditionally.
-    if net_delta == 0 { base.clone() } else { base.apply_cost_delta(net_delta) }
+    if net_generic != 0 {
+        result = result.apply_cost_delta(net_generic);
+    }
+    result
 }
 
 /// `Color` enum order used to index a fixed-size `[u32; 5]` colored-mana

@@ -199,6 +199,50 @@
   (spells only, flat generic amount, no CR 118.7 colored-pip modeling — all pre-existing
   boundaries, untouched by this slice).
 
+## Slice: cost-modifier-colored-pip (merged)
+
+- Branch `phase5/cost-modifier-colored-pip`.
+- Scope: closes the `cost-modifier-order`/`cost-modifier-builder` slices' own named boundary — CR
+  118.7b/c/d, a cost reduction/increase that targets a specific colored or colorless pip instead of
+  the generic component ("costs {W} less to cast"). `CostModifier` gains `target:
+  CostModifierTarget` (`Generic` — every modifier before this slice, unchanged — `Colored(Color)`,
+  or `Colorless`); `ManaCost` gains `apply_colored_cost_delta`/`apply_colorless_cost_delta`,
+  implementing 118.7b (no matching pips at all → the whole amount redirects to generic) and
+  118.7c/d (a reduction exceeding what's there → zeroed, only the excess spills to generic).
+- Design call requiring real analysis, not just mechanical extension: the prior slice's own doc
+  comment on `apply_cost_modifiers` explicitly named CR 118.7's colored-pip interactions as the
+  reason a per-modifier stepwise apply *isn't* order-independent in general, and used that as the
+  justification for staying generic-only. Before extending it, worked through by hand whether
+  summing first *per component* (generic, and separately per color/colorless) preserves that same
+  order-independence — it does, as long as every colored/colorless modifier for one color is a
+  reduction (never mixed with an increase on that same color). That's exactly why `CostModifierTarget`'s
+  own doc comment narrows `Colored`/`Colorless` to reduction-only: a real colored cost *increase*
+  has no known real-card precedent anyway, so the one case that would reintroduce order-dependence
+  simply isn't supported, rather than silently risking it.
+- Scope narrowing, named not hidden: only plain `Atom(Colored(color))` symbols count toward "the
+  colored component" — a Hybrid or Phyrexian pip of that color doesn't (CR 118.7e/f stay
+  unmodeled), same "not inside a Hybrid" narrowing `apply_cost_delta`'s own doc comment already
+  drew for Generic. CR 118.7g (a snow-mana-symbol reduction) needed no new code at all — it's
+  already just a `Generic`-target modifier by another name.
+- `Game.CreateCostModifier`'s `:SetAmount(amount, color)` gained an optional second argument — a
+  letter string (`"W"`/`"U"`/`"B"`/`"R"`/`"G"`) or `"C"` for colorless; omitted keeps the exact
+  pre-existing `Generic` behavior, so no card script needed updating. `parse_single_color_letter`
+  (decode.rs) is a new `Color`-returning sibling of `parse_color_letter` (which returns a
+  `ColorSet`) — `CostModifierTarget::Colored` names exactly one color, not a combinable set.
+- Verify: 4 new unit tests on `ManaCost::apply_colored_cost_delta`/`apply_colorless_cost_delta`
+  (exact match, over-reduction spillover, no-match redirect-to-generic, colorless); 4 new
+  end-to-end tests in `phase5_cost_modifiers.rs` (a `{W}` reduction on a `{1}{W}{W}` spell, CR
+  118.7c's over-reduction spillover, CR 118.7b's redirect-to-generic, and a colored + generic
+  modifier combining via spillover into one net delta); 2 new tests in
+  `phase5_cost_modifier_builder.rs` (Lua self-registration of a colored modifier, a full
+  PlayLand→CastSpell end-to-end proving a `{W}`-cost creature is actually reduced to `{0}`, not
+  just its generic component). Full workspace suite green (160 test-result blocks, zero failures).
+  Small ripple — 11 `CostModifier` construction sites across 3 files (not the ~130-site class the
+  `EffectFilter` slices hit).
+- Unresolved: CR 118.7e (Hybrid) and 118.7f (Phyrexian) pip interactions stay unmodeled, named
+  above. A real colored/colorless cost *increase* is unsupported by design (see the
+  order-independence note above) — untested, since no real card needs it.
+
 ## Slice: mana-ability-real-cost (merged)
 
 - Branch `phase5/mana-ability-real-cost`.

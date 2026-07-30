@@ -189,6 +189,73 @@ impl ManaCost {
         ManaCost { symbols }
     }
 
+    /// CR 118.7b/c: reduces (or, if `delta` is positive, increases — see
+    /// `crate::types::cost::CostModifierTarget`'s own doc comment for why
+    /// that direction is untested/unmodeled beyond "just add the pips," no
+    /// real card needs it) this cost's plain `Colored(color)` component by
+    /// `delta` mana of `color`. Returns the adjusted cost plus a spillover
+    /// delta (always `<= 0`) meant to be folded into the caller's own
+    /// generic-component reduction — CR 118.7b if this cost has none of that
+    /// color at all (the entire `delta` spills), 118.7c if `delta`'s
+    /// magnitude exceeds what's actually there (only the excess spills).
+    /// Only ever matches a bare `Atom(Colored(color))` symbol — a Hybrid or
+    /// Phyrexian symbol of that color doesn't count as "the colored
+    /// component," same narrowing `apply_cost_delta`'s own doc comment
+    /// already draws for Generic ("not inside a Hybrid"); CR 118.7e/f (a
+    /// reduction interacting with those symbol shapes) stays unmodeled.
+    pub fn apply_colored_cost_delta(&self, color: Color, delta: i32) -> (ManaCost, i32) {
+        self.apply_specific_cost_delta(
+            delta,
+            |a| matches!(a, AtomicManaSymbol::Colored(c) if *c == color),
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(color)),
+        )
+    }
+
+    /// CR 118.7d — same shape as `apply_colored_cost_delta` above, but
+    /// against the colorless (`{C}`) component instead of a specific color.
+    pub fn apply_colorless_cost_delta(&self, delta: i32) -> (ManaCost, i32) {
+        self.apply_specific_cost_delta(delta, |a| matches!(a, AtomicManaSymbol::Colorless), ManaSymbol::Atom(AtomicManaSymbol::Colorless))
+    }
+
+    /// Shared removal/spill logic `apply_colored_cost_delta`/
+    /// `apply_colorless_cost_delta` both delegate to, rather than
+    /// duplicating it once per component kind — `matches_atom` picks out
+    /// which bare `Atom` symbols count as "this component," `insert` is the
+    /// symbol a positive `delta` (an increase) appends. A negative `delta`
+    /// removes up to `-delta` matching symbols (order among them doesn't
+    /// matter — CR 118.7 never distinguishes which specific colored source
+    /// is used to pay a reduced-away pip); whatever magnitude is left
+    /// unconsumed once every matching symbol is gone becomes the returned
+    /// spillover.
+    fn apply_specific_cost_delta(
+        &self,
+        delta: i32,
+        matches_atom: impl Fn(&AtomicManaSymbol) -> bool,
+        insert: ManaSymbol,
+    ) -> (ManaCost, i32) {
+        if delta == 0 {
+            return (self.clone(), 0);
+        }
+        if delta > 0 {
+            let mut symbols = self.symbols.clone();
+            for _ in 0..delta {
+                symbols.push(insert);
+            }
+            return (ManaCost { symbols }, 0);
+        }
+        let mut to_remove = (-delta) as usize;
+        let mut symbols = Vec::with_capacity(self.symbols.len());
+        for s in &self.symbols {
+            let is_match = matches!(s, ManaSymbol::Atom(a) if matches_atom(a));
+            if is_match && to_remove > 0 {
+                to_remove -= 1;
+                continue;
+            }
+            symbols.push(*s);
+        }
+        (ManaCost { symbols }, -(to_remove as i32))
+    }
+
     /// Parses a printed mana-cost string (CR 107.4/202.3's `{...}`-group
     /// templating, e.g. `"{1}{R}"`, `"{X}{G}"`, `"{W/U}"`, `"{2/W}"`,
     /// `"{W/P}"`, `"{B/G/P}"`, `"{S}"`) into every symbol shape this engine
@@ -493,6 +560,57 @@ mod tests {
                 ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
             ]
         );
+    }
+
+    #[test]
+    fn apply_colored_cost_delta_reduces_an_exact_match_with_no_spillover() {
+        // CR 118.7: {1}{W}{W} reduced by {W} -> {1}{W}.
+        let cost = ManaCost {
+            symbols: vec![
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+            ],
+        };
+        let (adjusted, spillover) = cost.apply_colored_cost_delta(Color::White, -1);
+        assert_eq!(spillover, 0);
+        assert_eq!(
+            adjusted.symbols,
+            vec![
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White)),
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_colored_cost_delta_over_reduction_spills_the_excess() {
+        // CR 118.7c: {W} reduced by 2 -> the {W} is zeroed, one more generic
+        // reduction spills out.
+        let cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::White))] };
+        let (adjusted, spillover) = cost.apply_colored_cost_delta(Color::White, -2);
+        assert_eq!(spillover, -1);
+        assert!(adjusted.symbols.is_empty());
+    }
+
+    #[test]
+    fn apply_colored_cost_delta_with_no_matching_color_spills_entirely() {
+        // CR 118.7b: a {W} reduction on a cost with no white pips redirects
+        // the whole amount to generic.
+        let cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
+        let (adjusted, spillover) = cost.apply_colored_cost_delta(Color::White, -1);
+        assert_eq!(spillover, -1);
+        assert_eq!(adjusted.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]);
+    }
+
+    #[test]
+    fn apply_colorless_cost_delta_reduces_the_colorless_component() {
+        let cost = ManaCost {
+            symbols: vec![AtomicManaSymbol::Colorless, AtomicManaSymbol::Colorless].into_iter().map(ManaSymbol::Atom).collect(),
+        };
+        let (adjusted, spillover) = cost.apply_colorless_cost_delta(-3);
+        assert_eq!(spillover, -1, "only 2 {{C}} were there to consume, the third spills");
+        assert!(adjusted.symbols.is_empty());
     }
 
     #[test]

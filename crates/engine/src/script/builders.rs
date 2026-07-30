@@ -10,7 +10,7 @@ use std::rc::Rc;
 use mlua::{Table, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, RegisteredAbility};
-use crate::types::cost::{CostModifier, CostSpec, FilterSpec};
+use crate::types::cost::{CostModifier, CostModifierTarget, CostSpec, FilterSpec};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
@@ -23,7 +23,7 @@ use crate::types::zone::ZoneKind;
 use super::decode::{
     decode_affected_value, decode_condition_value, decode_cost_component_value, decode_effect_filter_table,
     decode_effect_value, decode_filter_table, decode_layer_value, decode_operation_value,
-    decode_target_filter_value,
+    decode_target_filter_value, parse_single_color_letter,
 };
 use super::tags::{
     ConsumptionPolicyTag, CostComponent, DrawLimitAffectedTag, DurationTag, EventFilterKind, EventFilterKindTag,
@@ -678,9 +678,15 @@ impl UserData for ReplacementEffectBuilder {
 /// same flat option-bag (`controller`/`card_types`/`supertypes`/`subtypes`/
 /// `random`) `Game.Costs.Sacrifice`/`Discard`/`TapPermanents` already decode
 /// through, no new filter-table shape to learn. `:SetAmount(n)` sets the flat
-/// generic delta (negative reduces, positive increases — see
-/// `CostModifier::amount`'s own doc comment; still no colored-pip-specific
-/// modeling, pre-existing `CostModifier` scope boundary, untouched here).
+/// delta (negative reduces, positive increases — see `CostModifier::amount`'s
+/// own doc comment) against the generic component by default; `:SetAmount(n,
+/// color)` (CR 118.7b/c/d, `phase5/cost-modifier-colored-pip`) targets a
+/// specific colored pip instead — `color` is a letter string (`"W"`/`"U"`/
+/// `"B"`/`"R"`/`"G"`) or `"C"` for the colorless component, reusing
+/// `parse_single_color_letter` (a `Color`-returning sibling of
+/// `parse_color_letter`, which returns a `ColorSet` instead - not reusable
+/// here since `CostModifierTarget::Colored` needs exactly one `Color`, not a
+/// set).
 ///
 /// `:Register()` queues onto the shared registry's `pending_cost_modifiers`
 /// list with a placeholder `controller` (`PlayerId(0)`) — `run_card_script`'s
@@ -695,6 +701,7 @@ pub(crate) struct CostModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) filter: Option<FilterSpec>,
     pub(crate) amount: Option<i32>,
+    pub(crate) target: CostModifierTarget,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
@@ -704,8 +711,13 @@ impl UserData for CostModifierBuilder {
             this.filter = Some(decode_filter_table(table).map_err(to_lua_err)?);
             Ok(())
         });
-        methods.add_method_mut("SetAmount", |_, this, amount: i32| {
+        methods.add_method_mut("SetAmount", |_, this, (amount, color): (i32, Option<String>)| {
             this.amount = Some(amount);
+            this.target = match color.as_deref() {
+                None => CostModifierTarget::Generic,
+                Some("C") => CostModifierTarget::Colorless,
+                Some(letter) => CostModifierTarget::Colored(parse_single_color_letter(letter).map_err(to_lua_err)?),
+            };
             Ok(())
         });
         methods.add_method_mut("Register", |_, this, ()| {
@@ -727,6 +739,7 @@ impl UserData for CostModifierBuilder {
                 // value (see this struct's own doc comment).
                 controller: PlayerId(0),
                 filter,
+                target: this.target,
                 amount,
             });
             Ok(())
