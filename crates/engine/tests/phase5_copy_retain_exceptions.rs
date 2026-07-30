@@ -240,6 +240,7 @@ fn retain_name_and_retain_color_combine_with_pt_and_keyword_exceptions() {
         add_keywords: KeywordSet::TRAMPLE,
         retain_name: true,
         retain_color: true,
+        grant_recurring_copy_trigger: false,
     };
     let state = one_player_state(
         vec![

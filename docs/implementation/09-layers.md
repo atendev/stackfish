@@ -440,6 +440,66 @@
   larger slice — the natural next step once (or if) a Vesuvan Doppelganger-style card is actually
   wanted.
 
+## Slice: vesuvan-linked-copy-ability (merged)
+
+- Branch `phase5/vesuvan-linked-copy-ability`.
+- Scope: `copy-generation`'s own named next step — CR 707.9a's *other* real shape, a copy effect
+  granting a whole new ability (not just a keyword) as part of copying. Vesuvan Doppelganger's own
+  "except it has 'at the beginning of your upkeep, you may have this creature become a copy of target
+  creature'" is the one concrete real-card shape this engine now supports.
+- Key finding that reshaped the plan mid-scoping: `CR 707.9e/g`'s own `linked_ability_generation`
+  supersession check (built last slice) turns out to be structurally unreachable through *either* of
+  this engine's two real copy producers, even with a real producer now in place —
+  `commands::purge_granted_abilities` unconditionally deletes every ability sourced from the copying
+  object (by `source`, not by tag) *before* either producer re-registers anything, so a re-copy always
+  deletes the *previous* granted ability outright rather than merely superseding it; the newly granted
+  one always gets a fresh `AbilityId` tagged with the new generation. The supersession check the
+  previous slice built never actually fires in real play as a result — confirmed by direct test
+  (`become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_each_time`), not just
+  reasoned about. Built anyway: CR 707.9a itself (the actual thing this slice closes) doesn't depend on
+  the generation-tag mattering, and the tag stays real, correct metadata regardless.
+- Key changes:
+  - `CopyExceptions.grant_recurring_copy_trigger: bool` (`Default` extended to `false`, `Clone` already
+    derived) — the flag `commands::grant_linked_copy_ability` (new, `attach.rs`, alongside
+    `purge_granted_abilities`) consults.
+  - `grant_linked_copy_ability(state, object, exceptions, generation)`: a no-op unless the flag is set;
+    otherwise mints a fresh `AbilityId` and pushes a hardcoded `RegisteredAbility` — `Triggered`,
+    `ConditionPrimitive::BeginningOfYourUpkeep`, a `TargetRequirement` for one creature, `effect: Some(
+    AbilityEffect::BecomeCopy(exceptions.clone()))` — then tags it in `linked_ability_generation`. A
+    hardcoded Rust shape rather than something `run_card_script`/Lua produces: no "arbitrary ability
+    blueprint" type exists to author one generically, and this is the only real card that needs one.
+    Carrying `exceptions` forward into the granted ability's own effect is what makes it self-
+    perpetuating — resolving it re-grants the same ability again, matching Vesuvan's own "keeps
+    flipping indefinitely" text.
+  - Called from both real producers (`resolve_become_copy_effect`, `submit_copy_choice`), right after
+    their existing `purge_granted_abilities` + `run_card_script` + `copy_generation` bump.
+  - `script::decode::decode_copy_exceptions` recognizes `grant_recurring_copy_trigger` as a boolean key,
+    shared by all three of `Game.Ops.BecomeCopy`/`Game.Tokens.CopyOf`/`Game.ReplacementPayloads.
+    EntersAsCopy`'s own `opts` decoding.
+- Deliberately narrow, named in code comments: CR 601.2c's "may" isn't modeled as a genuine opt-out
+  pause — this engine has no "decline a triggered ability" mechanism at all yet, so the granted ability
+  simply requires a real target the same way any other targeted trigger does, and fizzles at resolution
+  with none available. More consequentially: CR 603.3c ("triggered abilities that require targets
+  aren't choosable yet," a pre-existing gap named in `triggers_pipeline.rs` well before this slice)
+  means the granted ability can never actually *resolve* through the real turn-based upkeep pipeline
+  today — `PutTriggersApnap` always pushes it with an empty `targets` list, which fizzles at CR 608.2b's
+  own recheck. The granted ability is real, correctly shaped, and appears in `state.abilities` exactly
+  as CR 707.9a describes; it just can't fire yet through ordinary gameplay, same "real but currently
+  unreachable, named not hidden" posture this codebase already takes for comparable gaps.
+- Verify: 3 new tests. `phase5_clone_enters_as_copy.rs` (`choosing_a_vesuvan_style_copy_grants_the_
+  linked_upkeep_ability`/`declining_a_vesuvan_style_copy_grants_no_linked_ability`) drive the real CR
+  707.6 `EntersAsCopy` pause end to end and confirm the grant (or its absence) and the generation tag.
+  `phase5_layer_engine_copy.rs`'s own new test drives two real `BecomeCopy` activations (working around
+  CR 603.3c by activating the granted ability's own *effect* shape through a separately re-registered
+  `Activated` ability rather than through the real Triggered one, since only the effect/regeneration
+  behavior — not the natural-trigger path — is what this test targets) and confirms the linked ability
+  regenerates with a fresh id each time, proving `linked_ability_generation`'s own supersession check is
+  moot here as reasoned above. Full workspace suite green (161 test-result blocks).
+- Unresolved: CR 603.3c (triggered-ability targeting) blocks this ability from ever firing through real
+  gameplay — closing that is a separate, pre-existing, much larger gap (`triggers_pipeline.rs`'s own
+  named TODO), not scoped here. CR 707.9e's "additional effect" exception (distinct from 9a's "gain an
+  ability") still has no producer of any kind.
+
 ## Slice: keyword-layer-fix-and-remove-keyword (merged)
 
 - Branch `phase5/keyword-layer-fix-and-remove-keyword`.

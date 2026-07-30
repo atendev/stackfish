@@ -6,10 +6,11 @@
 use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityKind;
 use crate::types::ability::RegisteredAbility;
+use crate::types::ability::{AbilityEffect, ConditionPrimitive, ConditionSpec, CopyExceptions};
 use crate::types::card::{CardDefinition, CardTypeSet};
 use crate::types::game::GameState;
-use crate::types::ids::{AbilityId, ObjectId, PlayerId, Target};
-use crate::types::target::TargetSpec;
+use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
+use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::legality::target_is_legal;
@@ -104,6 +105,71 @@ pub(crate) fn purge_granted_abilities(state: &mut GameState, id: ObjectId) {
     state.abilities.retain(|a| a.source != id);
     state.continuous_effects.retain(|e| e.source != id);
     state.replacement_effects.retain(|r| r.source != id);
+}
+
+/// CR 707.9a: Vesuvan Doppelganger's own "except it has 'at the beginning of
+/// your upkeep, you may have this creature become a copy of target
+/// creature'" — the one concrete shape this engine supports for "a copy
+/// effect grants a whole new ability" (as opposed to `add_keywords`, which
+/// only grants a keyword). A hardcoded Rust `RegisteredAbility` rather than
+/// something `run_card_script` produces — no Lua-authorable "ability
+/// blueprint" type exists to describe an arbitrary granted ability, and this
+/// is the only real card that needs one.
+///
+/// Called by both real copy-application call sites
+/// (`resolve_become_copy_effect`/`submit_copy_choice`), right after they
+/// call `purge_granted_abilities` + `run_card_script` + bump `object`'s own
+/// `copy_generation` — a no-op unless `exceptions.grant_recurring_copy_
+/// trigger` is set. The granted ability's own `effect` carries `exceptions`
+/// forward unchanged, so triggering it again re-grants the same ability
+/// again (Vesuvan keeps flipping indefinitely) — CR 601.2c's "may" isn't
+/// modeled as a genuine opt-out pause here (this engine has no "declining a
+/// triggered ability" mechanism at all yet); the ability simply requires a
+/// real target the same way any other targeted trigger does, and fizzles at
+/// resolution (CR 608.2b) with none available, a narrowing named rather
+/// than silently assumed.
+///
+/// `generation` tags the new ability in `linked_ability_generation` (CR
+/// 707.9e/g's own hook) — see `CopyExceptions`'s own doc comment for why
+/// this tag's supersession check stays structurally unreached through this
+/// engine's two purge-based copy producers regardless.
+pub(crate) fn grant_linked_copy_ability(
+    state: &mut GameState,
+    object: ObjectId,
+    exceptions: &CopyExceptions,
+    generation: u32,
+) {
+    if !exceptions.grant_recurring_copy_trigger {
+        return;
+    }
+    let id = state.allocate_ability_id();
+    state.abilities.push(RegisteredAbility {
+        id,
+        source: object,
+        kind: AbilityKind::Triggered,
+        condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
+        cost: None,
+        target: Some(TargetSpec::Primitive(TargetRequirement {
+            filter: TargetFilter::Object {
+                card_types: Some(CardTypeSet::CREATURE),
+                excluded_card_types: None,
+                subtypes: None,
+                excluded_subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: None,
+            },
+            count: 1,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        })),
+        operation: ScriptHandle(0),
+        effect: Some(AbilityEffect::BecomeCopy(exceptions.clone())),
+        intervening_if: None,
+    });
+    state.linked_ability_generation.insert(id, generation);
 }
 
 /// CR 303.4: `definition` is an Aura - an enchantment (card type) with the

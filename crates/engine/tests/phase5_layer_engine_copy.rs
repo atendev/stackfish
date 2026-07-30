@@ -345,6 +345,72 @@ fn become_copy_bumps_copy_generation() {
     assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Doppelganger");
 }
 
+/// CR 707.9a: a `grant_recurring_copy_trigger` exception (Vesuvan
+/// Doppelganger's own linked ability, `phase5/vesuvan-linked-copy-ability`)
+/// re-grants itself on every real copy application - the old instance is
+/// gone (purged alongside every other pre-copy ability, same as
+/// `become_copy_purges_old_abilities_and_registers_the_copys_own` already
+/// proves for an ordinary copied-in ability) and a new one, tagged with the
+/// new `copy_generation`, takes its place. Demonstrates directly why
+/// `linked_ability_generation`'s own supersession check stays structurally
+/// unreached through this producer: the *old* `AbilityId` is deleted, not
+/// merely superseded, so nothing is ever left around for the tag to need to
+/// invalidate.
+#[test]
+fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_each_time() {
+    let p0 = PlayerId(0);
+    let doppel = ObjectId(0);
+    let target_a = ObjectId(1);
+    let exceptions = CopyExceptions { grant_recurring_copy_trigger: true, ..CopyExceptions::default() };
+    let state = one_player_state(
+        vec![
+            card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
+            card_object(target_a, salamander_definition(), p0, ZoneKind::Battlefield),
+        ],
+        vec![become_copy_ability_with_exceptions(doppel, exceptions.clone())],
+    );
+    let mut engine = Engine::new(state);
+
+    activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(target_a)]);
+    let linked_after_first: Vec<_> =
+        engine.state().abilities.iter().filter(|a| a.source == doppel && a.kind == AbilityKind::Triggered).collect();
+    assert_eq!(linked_after_first.len(), 1, "the linked ability was granted");
+    let first_id = linked_after_first[0].id;
+    assert_eq!(engine.state().linked_ability_generation.get(&first_id).copied(), Some(1));
+
+    let target_b = ObjectId(2);
+    engine.state_mut().objects.insert(target_b, card_object(target_b, doppelganger_definition(), p0, ZoneKind::Battlefield));
+    engine.state_mut().abilities.push(become_copy_ability_with_exceptions(doppel, exceptions));
+    // ability_index 1, not 0 - the linked ability granted by the first copy
+    // (Triggered, not Activated) is still sitting at index 0 for this source
+    // until this very activation purges it.
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::ActivateAbility {
+                source: doppel,
+                ability_index: 1,
+                targets: vec![Target::Object(target_b)],
+                chosen_colors: Vec::new(),
+            },
+        })
+        .expect("player holds priority");
+    pay_free_and_drain(&mut engine);
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(&mut engine);
+
+    let linked_after_second: Vec<_> =
+        engine.state().abilities.iter().filter(|a| a.source == doppel && a.kind == AbilityKind::Triggered).collect();
+    assert_eq!(linked_after_second.len(), 1, "still exactly one linked ability, not two stacked");
+    assert_ne!(linked_after_second[0].id, first_id, "the first application's own ability was purged outright, not left in place");
+    assert_eq!(engine.state().linked_ability_generation.get(&linked_after_second[0].id).copied(), Some(2));
+    assert_eq!(
+        engine.state().linked_ability_generation.get(&first_id).copied(),
+        Some(1),
+        "the old tag entry is never removed (linked_ability_generation only ever grows), but its own ability is long gone"
+    );
+}
+
 /// CR 707.2a: the copy's abilities come from the copied text, and the
 /// object doesn't keep its pre-copy abilities alongside them - the
 /// `BecomeCopy` ability itself (sourced from `doppel`) is purged by the
@@ -381,7 +447,7 @@ fn become_copy_with_pt_exception_overrides_base_power_and_toughness() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false };
+    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false, grant_recurring_copy_trigger: false };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -407,7 +473,7 @@ fn become_copy_with_keyword_exception_adds_the_keyword() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let salamander = ObjectId(1);
-    let exceptions = CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::TRAMPLE, retain_name: false, retain_color: false };
+    let exceptions = CopyExceptions { set_power_toughness: None, add_keywords: KeywordSet::TRAMPLE, retain_name: false, retain_color: false, grant_recurring_copy_trigger: false };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
@@ -572,7 +638,7 @@ fn copy_token_with_pt_exception_overrides_base_power_and_toughness() {
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
 
-    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false };
+    let exceptions = CopyExceptions { set_power_toughness: Some((1, 1)), add_keywords: KeywordSet::empty(), retain_name: false, retain_color: false, grant_recurring_copy_trigger: false };
     let card = ObjectId(1);
     state.objects.insert(
         card,

@@ -573,18 +573,34 @@ pub enum TokenSpec {
 ///   posture `set_power_toughness`/`add_keywords` themselves were scoped
 ///   with originally.
 ///
+/// - 707.9a's *other* real shape (gain a whole new ability, not just a
+///   keyword, as part of copying): `grant_recurring_copy_trigger`, Vesuvan
+///   Doppelganger's own "except it has 'at the beginning of your upkeep, you
+///   may have this creature become a copy of target creature'" — narrowed to
+///   this one concrete shape rather than a general "grant an arbitrary
+///   ability" system (no Lua-authorable ability blueprint type exists to
+///   describe one). See `commands::grant_linked_copy_ability`'s own doc
+///   comment for how the granted ability itself is built and why it's a
+///   hardcoded Rust shape rather than something `run_card_script` produces.
+///
 /// `Default`'s all-empty value is a bare copy - unaffected, same result as
-/// before this type existed. Not modeled, named rather than guessed at:
-/// 707.9e/g (an exception tied to "was this the most recent copy effect
-/// applied" - this snapshot model has no history to consult; would need a
-/// real `GameObject` schema addition - a copy generation/id - not just a new
-/// `CopyExceptions` field, a genuinely larger gap).
+/// before this type existed. CR 707.9e/g's own schema prerequisite — "was
+/// this the most recent copy effect applied to this object" — is real now
+/// too (`phase5/copy-generation`, `GameObject.copy_generation`/`GameState.
+/// linked_ability_generation`); `grant_recurring_copy_trigger`'s own granted
+/// ability is tagged with it, though `commands::purge_granted_abilities`
+/// already deletes the *previous* granted ability outright on every real
+/// re-copy in this engine (both producers call it before re-registering),
+/// so the generation tag's own supersession check stays structurally
+/// unreached through either of this engine's two copy producers — named,
+/// not silently assumed, while building this exception.
 #[derive(Clone, Debug)]
 pub struct CopyExceptions {
     pub set_power_toughness: Option<(i32, i32)>,
     pub add_keywords: KeywordSet,
     pub retain_name: bool,
     pub retain_color: bool,
+    pub grant_recurring_copy_trigger: bool,
 }
 
 impl Default for CopyExceptions {
@@ -594,6 +610,7 @@ impl Default for CopyExceptions {
             add_keywords: KeywordSet::empty(),
             retain_name: false,
             retain_color: false,
+            grant_recurring_copy_trigger: false,
         }
     }
 }
