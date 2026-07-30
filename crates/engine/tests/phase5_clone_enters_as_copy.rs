@@ -77,6 +77,10 @@ fn artifact_definition(name: &str) -> CardDefinition {
 }
 
 fn enters_as_copy_effect(source: ObjectId) -> ReplacementEffect {
+    enters_as_copy_effect_with_exceptions(source, CopyExceptions::default())
+}
+
+fn enters_as_copy_effect_with_exceptions(source: ObjectId, exceptions: CopyExceptions) -> ReplacementEffect {
     ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {
@@ -85,7 +89,7 @@ fn enters_as_copy_effect(source: ObjectId) -> ReplacementEffect {
                 to: Some(ZoneKind::Battlefield),
                 affected: EffectFilter {  controller: None, card_types: None, self_only: true, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, },
             },
-            payload: ReplacementPayload::EntersAsCopy(CopyExceptions::default()),
+            payload: ReplacementPayload::EntersAsCopy(exceptions),
         },
         consumption: ConsumptionPolicy::Repeatable,
     }
@@ -352,4 +356,94 @@ fn a_creature_without_entersascopy_never_pauses() {
     cast(&mut engine, p0, card);
     let status = pay_free_and_drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "no EntersAsCopy effect registered - no pause, got {status:?}");
+}
+
+// ---------------------------------------------------------------------
+// CR 707.9a: Vesuvan Doppelganger's own "except it has [linked upkeep
+// ability]" - phase5/vesuvan-linked-copy-ability.
+// ---------------------------------------------------------------------
+
+const VESUVAN_SCRIPT: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateReplacementEffect(c)
+    e:SetFilter(Game.EventFilters.WouldMoveZone(nil, "Battlefield"))
+    e:SetPayload(Game.ReplacementPayloads.EntersAsCopy({ grant_recurring_copy_trigger = true }))
+    e:SetAffected({ self_only = true })
+    e:Register()
+end
+return s
+"#;
+
+/// CR 707.9a: choosing to copy grants the linked "at the beginning of your
+/// upkeep, become a copy of target creature" ability alongside whatever the
+/// copied creature's own abilities are - a real, distinct `RegisteredAbility`
+/// tagged in `linked_ability_generation` with the generation this copy
+/// application produced.
+#[test]
+fn choosing_a_vesuvan_style_copy_grants_the_linked_upkeep_ability() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let card = ObjectId(0);
+    let bear = ObjectId(1);
+    let mut state = two_player_state();
+    state.objects.insert(card, card_object(card, creature_definition("Vesuvan Doppelganger", VESUVAN_SCRIPT), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(&mut state, card_object(bear, creature_definition("Bear", ""), p1, ZoneKind::Battlefield));
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    let StepStatus::AwaitingCopyChoice { object, .. } = status else {
+        panic!("expected a CR 707.6 copy choice pause, got {status:?}")
+    };
+
+    engine.submit_copy_choice(Some(bear)).expect("bear was an offered candidate");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
+
+    assert_eq!(engine.state().object(object).unwrap().copy_generation, 1);
+    let linked: Vec<_> = engine
+        .state()
+        .abilities
+        .iter()
+        .filter(|a| a.source == object && a.kind == AbilityKind::Triggered)
+        .collect();
+    assert_eq!(linked.len(), 1, "exactly the granted linked ability - Bear itself has no abilities of its own");
+    assert!(matches!(linked[0].condition, Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep))));
+    assert!(matches!(linked[0].effect, Some(AbilityEffect::BecomeCopy(_))));
+    assert_eq!(
+        engine.state().linked_ability_generation.get(&linked[0].id).copied(),
+        Some(1),
+        "tagged with the copy_generation this application produced"
+    );
+}
+
+/// Declining the copy grants nothing - no linked ability, no bump.
+#[test]
+fn declining_a_vesuvan_style_copy_grants_no_linked_ability() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let card = ObjectId(0);
+    let bear = ObjectId(1);
+    let mut state = two_player_state();
+    state.objects.insert(card, card_object(card, creature_definition("Vesuvan Doppelganger", VESUVAN_SCRIPT), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    put_on_battlefield(&mut state, card_object(bear, creature_definition("Bear", ""), p1, ZoneKind::Battlefield));
+
+    let mut engine = Engine::new(state);
+    cast(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    let StepStatus::AwaitingCopyChoice { object, .. } = status else {
+        panic!("expected a CR 707.6 copy choice pause, got {status:?}")
+    };
+
+    engine.submit_copy_choice(None).expect("declining is always legal");
+    drain(&mut engine);
+
+    assert_eq!(engine.state().object(object).unwrap().copy_generation, 0);
+    assert!(engine.state().abilities.iter().all(|a| a.source != object), "no linked ability granted");
+    assert!(engine.state().linked_ability_generation.is_empty());
 }

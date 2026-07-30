@@ -485,7 +485,14 @@ pub(crate) fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyEx
     }
     let retain_name: bool = opts.get::<_, Option<bool>>("retain_name").ok().flatten().unwrap_or(false);
     let retain_color: bool = opts.get::<_, Option<bool>>("retain_color").ok().flatten().unwrap_or(false);
-    Ok(CopyExceptions { set_power_toughness, add_keywords, retain_name, retain_color })
+    // CR 707.9a: Vesuvan Doppelganger's own "except it has [linked upkeep
+    // ability]" - see CopyExceptions::grant_recurring_copy_trigger's own doc
+    // comment. Only meaningful on `EntersAsCopy`/`BecomeCopy` in practice (a
+    // freshly created `CopyOf` token could carry it too, though no real card
+    // needs a token-generator with this shape).
+    let grant_recurring_copy_trigger: bool =
+        opts.get::<_, Option<bool>>("grant_recurring_copy_trigger").ok().flatten().unwrap_or(false);
+    Ok(CopyExceptions { set_power_toughness, add_keywords, retain_name, retain_color, grant_recurring_copy_trigger })
 }
 
 /// `TriggeredAbilityBuilder`'s `:SetLayer` decoder — only a `Game.Layers.*`

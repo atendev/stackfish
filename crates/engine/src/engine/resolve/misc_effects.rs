@@ -89,6 +89,13 @@ impl Engine {
                     // run_card_script call site in this file
                     // already flags.
                     let _ = self.script_runtime.run_card_script(&mut self.state, &snapshot, source_id);
+                    // CR 707.9a: Vesuvan Doppelganger's own
+                    // "except it has [linked upkeep
+                    // ability]" - see
+                    // grant_linked_copy_ability's own doc
+                    // comment.
+                    let generation = self.state.object(source_id).map(|o| o.copy_generation).unwrap_or(0);
+                    commands::grant_linked_copy_ability(&mut self.state, source_id, exceptions, generation);
                     events.push(GameEventKind::BecameCopy { object: source_id, copied: target_id });
                 }
             }

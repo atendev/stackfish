@@ -424,6 +424,11 @@ impl Engine {
                 // every other run_card_script call site in this file
                 // already flags.
                 let _ = self.script_runtime.run_card_script(&mut self.state, &snapshot, object);
+                // CR 707.9a: Vesuvan Doppelganger's own "except it has
+                // [linked upkeep ability]" - see grant_linked_copy_ability's
+                // own doc comment.
+                let generation = self.state.object(object).map(|o| o.copy_generation).unwrap_or(0);
+                commands::grant_linked_copy_ability(&mut self.state, object, &exceptions, generation);
                 events_so_far.push(GameEventKind::BecameCopy { object, copied });
             }
             // else: the chosen creature no longer resolves (departed
