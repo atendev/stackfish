@@ -1371,6 +1371,7 @@ pub fn build_initial_state(
             is_token: false,
             is_commander: entry.is_commander,
             visibility: VisibilityPolicy { public, visible_to: Vec::new() },
+            copy_generation: 0,
         };
 
         let zone_owner = zone_owner_for(zone_kind, owner);
@@ -1471,6 +1472,7 @@ pub fn build_initial_state(
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
         commander_return_offered: std::collections::HashSet::new(),
+        linked_ability_generation: std::collections::HashMap::new(),
     };
 
     (state, card_ids, trigger_scripts, target_scripts, script_target_requirements, script_operations)

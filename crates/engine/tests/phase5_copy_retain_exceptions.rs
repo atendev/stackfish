@@ -147,6 +147,7 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
         commander_return_offered: std::collections::HashSet::new(),
+        linked_ability_generation: std::collections::HashMap::new(),
     }
 }
 

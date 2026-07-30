@@ -218,6 +218,7 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         pending_step_skips: Vec::new(),
         once_per_turn_triggered: std::collections::HashSet::new(),
         commander_return_offered: std::collections::HashSet::new(),
+        linked_ability_generation: std::collections::HashMap::new(),
     }
 }
 
@@ -304,6 +305,44 @@ fn become_copy_changes_effective_characteristics() {
         engine.state().object(doppel).is_some(),
         "CR 707.4: becoming a copy while remaining on the battlefield doesn't mint a new ObjectId"
     );
+}
+
+/// CR 707.9e/g: `GameObject::copy_generation` counts real, distinct copy
+/// applications on the same object - bumped once here (a single
+/// `BecomeCopy`), and again below by a second, independent activation.
+/// Both copy targets are scriptless (unlike `bear_definition`'s own
+/// unconditional self-registered trigger) so a second real activation in the
+/// same test doesn't leave an unrelated triggered ability sitting on the
+/// stack awaiting its own priority pass.
+#[test]
+fn become_copy_bumps_copy_generation() {
+    let p0 = PlayerId(0);
+    let doppel = ObjectId(0);
+    let target_a = ObjectId(1);
+    let state = one_player_state(
+        vec![
+            card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),
+            card_object(target_a, salamander_definition(), p0, ZoneKind::Battlefield),
+        ],
+        vec![become_copy_ability(doppel)],
+    );
+    let mut engine = Engine::new(state);
+    assert_eq!(engine.state().object(doppel).unwrap().copy_generation, 0, "never copied yet");
+
+    activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(target_a)]);
+    assert_eq!(engine.state().object(doppel).unwrap().copy_generation, 1, "one real copy application");
+    assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Salamander");
+
+    // `become_copy_ability` (the ability that just resolved) was purged
+    // alongside every other pre-copy ability - re-granted here the same way
+    // a real card's own repeatable "you may have this become a copy again"
+    // text would be, to drive a second, independent BecomeCopy.
+    let target_b = ObjectId(2);
+    engine.state_mut().objects.insert(target_b, card_object(target_b, doppelganger_definition(), p0, ZoneKind::Battlefield));
+    engine.state_mut().abilities.push(become_copy_ability(doppel));
+    activate_pay_and_resolve(&mut engine, p0, doppel, vec![Target::Object(target_b)]);
+    assert_eq!(engine.state().object(doppel).unwrap().copy_generation, 2, "a second, distinct copy application");
+    assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Doppelganger");
 }
 
 /// CR 707.2a: the copy's abilities come from the copied text, and the

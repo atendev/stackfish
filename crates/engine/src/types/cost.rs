@@ -929,6 +929,7 @@ mod tests {
             is_commander: false,
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+            copy_generation: 0,
         }
     }
 

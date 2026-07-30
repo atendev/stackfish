@@ -143,6 +143,30 @@ pub struct GameState {
     /// never-reused-id bookkeeping `once_per_turn_triggered` already
     /// accepts, just not reset per-turn since this isn't a per-turn cap.
     pub commander_return_offered: std::collections::HashSet<ObjectId>,
+    /// CR 707.9e/g: tags a `RegisteredAbility` (by stable `AbilityId`) with
+    /// the `GameObject::copy_generation` its source object was at when a
+    /// copy effect granted it — a side-channel map rather than a field on
+    /// `RegisteredAbility` itself, which has 100+ struct-literal construction
+    /// sites and no `Default` impl (the same "field would ripple everywhere,
+    /// most of them meaninglessly `None`" reasoning `ManaPool.restricted`'s
+    /// own doc comment already gives for a sibling side-channel). Consulted
+    /// by `triggers::collect_triggers`: a tagged ability only matches an
+    /// event if its source's *current* `copy_generation` still equals the
+    /// tagged value — once another copy effect applies to the same object
+    /// (bumping the counter), the tag is stale and the ability simply never
+    /// matches again (CR 707.9g, "the ability doesn't trigger"). Entries are
+    /// never removed — a stale tag just means permanent non-matching, not
+    /// something that needs cleanup, same low-cost stance
+    /// `commander_return_offered` already takes.
+    ///
+    /// Real, tested enforcement — nothing writes to this map yet, since no
+    /// `CopyExceptions` shape in this engine grants a brand-new ability as
+    /// part of copying (only characteristic-modification exceptions exist
+    /// so far); same "real mechanism, no producer wired in yet" posture
+    /// `HandRevealModifier`'s own doc comment already takes. CR 707.9e's
+    /// "additional effect" exception is the same underlying question against
+    /// the same counter, with no consumer of any kind in this engine yet.
+    pub linked_ability_generation: std::collections::HashMap<AbilityId, u32>,
 }
 
 impl GameState {
@@ -260,6 +284,7 @@ mod tests {
             pending_step_skips: Vec::new(),
             once_per_turn_triggered: std::collections::HashSet::new(),
             commander_return_offered: std::collections::HashSet::new(),
+            linked_ability_generation: std::collections::HashMap::new(),
         };
 
         let card = ObjectId(0);

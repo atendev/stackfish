@@ -133,6 +133,17 @@ pub fn collect_triggers(
             // this very list before collect_triggers ever ran.
             continue;
         };
+        // CR 707.9g: an ability granted by a copy effect that's since been
+        // superseded by *another* copy effect on the same object no longer
+        // triggers - see GameState::linked_ability_generation's own doc
+        // comment. No producer tags an ability yet, so this is a no-op for
+        // every real card today; the check exists so it's correct the
+        // moment one does.
+        if let Some(&granted_generation) = state.linked_ability_generation.get(&ability.id) {
+            if source_object.copy_generation != granted_generation {
+                continue;
+            }
+        }
         let controller = source_object.controller;
 
         let (matched, once_per_turn) = match &ability.condition {

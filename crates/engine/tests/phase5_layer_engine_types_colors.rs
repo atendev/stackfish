@@ -114,6 +114,7 @@ fn land(id: ObjectId, owner: PlayerId) -> GameObject {
         is_token: false,
         is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
+        copy_generation: 0,
     }
 }
 
