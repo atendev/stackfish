@@ -115,6 +115,15 @@ impl Engine {
         // granted one already sitting in state.replacement_effects)
         // right here, same call `move_resolving_spell`'s own
         // ResolveStackTop caller makes.
+        // TODO(`phase5/devour-amplify-search-entry`): no
+        // `replacement::pending_devour_choice`/`pending_amplify_choice`
+        // check here, unlike `Search`'s own battlefield-entry loop - and
+        // deliberately so, not just unimplemented. This loop only ever runs
+        // for `PlayLand` (a land entering the battlefield), and a land can
+        // never carry CR 702.82a Devour or CR 702.38a Amplify text (both are
+        // creature-only replacement effects) - there is no real card this
+        // could ever matter for. Revisit only if this loop is ever
+        // generalized to a non-land battlefield-entry producer.
         for object_id in &outcome.battlefield_entries {
             if let Some(definition) = self.state.object(*object_id).map(|o| o.definition.clone()) {
                 let _ = self.script_runtime.run_card_script(&mut self.state, &definition, *object_id);

@@ -102,6 +102,16 @@ pub enum StepStatus {
     /// `per_card` counters times however many were revealed; revealed cards
     /// stay in hand untouched.
     AwaitingAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
+    /// Same as `AwaitingDevourChoice` above, but raised by a Devour creature
+    /// fetched onto the battlefield via `Search` rather than resolved off
+    /// the stack — call `submit_search_devour_choice` to answer instead of
+    /// `submit_devour_choice` (`phase5/devour-amplify-search-entry`).
+    AwaitingSearchDevourChoice { player: PlayerId, object: ObjectId, per_creature: i32, candidates: Vec<ObjectId> },
+    /// Same as `AwaitingAmplifyChoice` above, but raised by an Amplify
+    /// creature fetched onto the battlefield via `Search` — call
+    /// `submit_search_amplify_choice` to answer instead of
+    /// `submit_amplify_choice` (`phase5/devour-amplify-search-entry`).
+    AwaitingSearchAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
     /// CR 707.6/614.12a (Clone itself): `replacement::pending_copy_choice`
     /// found a registered `EntersAsCopy` effect on `object` (already a real
     /// battlefield permanent by this point) with 1+ creatures on the
@@ -244,6 +254,39 @@ pub enum ScriptedZoneMoveKind {
     Exile,
 }
 
+/// What `Engine::continue_scripted_zone_move` does once its own `remaining`
+/// queue drains — added by `phase5/devour-amplify-search-entry` so a CR
+/// 702.82a Devour sacrifice raised mid-`Search` (not just mid-`ResolveStackTop`)
+/// can finish by resuming the search's own battlefield-entry loop instead of
+/// unconditionally finalizing into `ReplacementCheck`. Same "generalize the
+/// resume target" shape `SbaResumeThen` already established for
+/// `SbaDeath`/`resume_sba_death`.
+pub enum ScriptedZoneMoveThen {
+    /// The pre-existing behavior: `stack_id` is a resolving spell/ability
+    /// (`ResolveStackTop`'s own `top.stack_id`, already popped off
+    /// `state.stack` by the time any of this runs — see `continue_scripted_
+    /// zone_move`'s own doc comment) — once the queue drains, push
+    /// `StackObjectResolved { stack_id }` and hand off to `ReplacementCheck`.
+    StackResolution { stack_id: ObjectId },
+    /// CR 614.12a wired into `Search` (`phase5/devour-amplify-search-entry`):
+    /// a Devour choice raised mid-`continue_search_battlefield_entry` needs
+    /// its chosen sacrifices performed via the shared scripted-zone-move
+    /// pipeline (so CR 616.1 ordering and dies-triggers apply exactly as
+    /// they do for the resolving-spell path), then control must return to
+    /// the search's own still-pending candidates instead of finalizing —
+    /// `controller`/`remaining`/`destination`/`stack_id`/`shuffle_after` are
+    /// exactly `continue_search_battlefield_entry`'s own parameters, carried
+    /// through the sacrifice (and any nested CR 616.1 pause it itself
+    /// raises) so it can be called again once the sacrifices settle.
+    SearchResume {
+        controller: PlayerId,
+        remaining: VecDeque<ObjectId>,
+        destination: SearchDestination,
+        stack_id: ObjectId,
+        shuffle_after: bool,
+    },
+}
+
 /// One card still to propose+replacement-check+commit into a graveyard —
 /// shared queue entry for `Engine::continue_cost_zone_moves` (a `Sacrifice`/
 /// `Discard` `CostPayment`, built by `commands::collect_cost_zone_moves` from
@@ -280,21 +323,24 @@ pub enum ReplacementResumeTarget {
     /// re-derived from the queue.
     SbaDeath { pending_deaths: VecDeque<sba::DyingCandidate>, is_destroy: bool, then: SbaResumeThen },
     /// Reached from the scripted `Destroy`/`Sacrifice`/`Exile` ops inside
-    /// `ResolveStackTop` (`Engine::continue_scripted_zone_move`). Unlike
-    /// `ReplacementCheck`, there's no pre-built batch of proposed events to
-    /// resume into — each target proposes and inline-commits its own
-    /// `ZoneChange` independently (the "already happened" convention every
-    /// scripted zone-move op here uses), so `remaining` is just the rest of
-    /// this same op's own target list, not yet proposed. `stack_id` is
-    /// needed for the final `StackObjectResolved` event once every target's
-    /// been processed. `trailing` (CR 702.82a, Devour): extra events still
-    /// owed once every target's processed — e.g. `submit_devour_choice`'s
-    /// own `events_so_far` plus a `CounterAdded`, which must survive a CR
-    /// 616.1 ordering-choice pause raised mid-sacrifice just as intact as
-    /// `remaining`/`stack_id` do. Empty for every other caller (`Destroy`/
-    /// `Exile`/the plain `AbilityEffect::Sacrifice` path), which have
-    /// nothing to carry forward.
-    ScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, stack_id: ObjectId, trailing: Vec<GameEventKind> },
+    /// `ResolveStackTop` (`Engine::continue_scripted_zone_move`), or (since
+    /// `phase5/devour-amplify-search-entry`) from a Devour sacrifice raised
+    /// mid-`Search`. Unlike `ReplacementCheck`, there's no pre-built batch of
+    /// proposed events to resume into — each target proposes and
+    /// inline-commits its own `ZoneChange` independently (the "already
+    /// happened" convention every scripted zone-move op here uses), so
+    /// `remaining` is just the rest of this same op's own target list, not
+    /// yet proposed. `then` says what to do once every target's been
+    /// processed — see `ScriptedZoneMoveThen`'s own doc comment; carried
+    /// through this pause unchanged, same as `remaining`. `trailing` (CR
+    /// 702.82a, Devour): extra events still owed once every target's
+    /// processed — e.g. `submit_devour_choice`'s own `events_so_far` plus a
+    /// `CounterAdded`, which must survive a CR 616.1 ordering-choice pause
+    /// raised mid-sacrifice just as intact as `remaining`/`then` do. Empty
+    /// for every other caller (`Destroy`/`Exile`/the plain
+    /// `AbilityEffect::Sacrifice` path), which have nothing to carry
+    /// forward.
+    ScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, then: ScriptedZoneMoveThen, trailing: Vec<GameEventKind> },
     /// Reached from `Engine::continue_cost_zone_moves` (`Engine::
     /// submit_payment`'s own `Sacrifice`/`Discard` handling). Same "each
     /// target proposes+commits independently" shape `ScriptedZoneMove`
@@ -540,6 +586,55 @@ pub enum ProcessState {
         candidates: Vec<ObjectId>,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
+    },
+    /// CR 702.82a (Devour), wired into `Search` (`phase5/devour-amplify-
+    /// search-entry`): paused mid-`continue_search_battlefield_entry`, right
+    /// where `apply_enters_battlefield_modifiers` would otherwise run for
+    /// `object` (a card just fetched onto the battlefield) — same trigger
+    /// condition `AwaitingDevourChoice` above checks, just from the second
+    /// real producer. A separate variant rather than reusing
+    /// `AwaitingDevourChoice` — same "the resume differs, so the pause type
+    /// does too" precedent `AwaitingTokenAttachChoice`'s own doc comment
+    /// already established relative to `AwaitingEntryAttachChoice`:
+    /// `submit_search_devour_choice` must resume back into the search's own
+    /// `remaining`/`destination`/`shuffle_after` loop state once the chosen
+    /// sacrifices settle, which `AwaitingDevourChoice`'s own resume (straight
+    /// to `ReplacementCheck` once `continue_scripted_zone_move`'s queue
+    /// drains) has no way to do. `stack_id`/`events_so_far` are exactly what
+    /// `continue_search_battlefield_entry` had already built before reaching
+    /// this point, same role they play on `AwaitingDevourChoice`;
+    /// `remaining`/`destination`/`controller`/`shuffle_after` are that same
+    /// function's own parameters, needed to call it again on resume.
+    AwaitingSearchDevourChoice {
+        object: ObjectId,
+        controller: PlayerId,
+        per_creature: i32,
+        candidates: Vec<ObjectId>,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+        remaining: VecDeque<ObjectId>,
+        destination: SearchDestination,
+        shuffle_after: bool,
+    },
+    /// CR 702.38a (Amplify), wired into `Search`
+    /// (`phase5/devour-amplify-search-entry`): same relationship to
+    /// `AwaitingAmplifyChoice` that `AwaitingSearchDevourChoice` above has to
+    /// `AwaitingDevourChoice` — a separate variant since
+    /// `submit_search_amplify_choice` must resume the search's own loop
+    /// state instead of finalizing straight to `ReplacementCheck`. Unlike
+    /// Devour, no zone move is involved (revealing doesn't move anything),
+    /// so the resume is a direct call into `continue_search_battlefield_
+    /// entry`, not a `continue_scripted_zone_move` round trip.
+    AwaitingSearchAmplifyChoice {
+        object: ObjectId,
+        controller: PlayerId,
+        per_card: i32,
+        candidates: Vec<ObjectId>,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+        remaining: VecDeque<ObjectId>,
+        destination: SearchDestination,
+        shuffle_after: bool,
     },
     /// CR 707.6/614.12a (Clone itself): paused mid-`ResolveStackTop`, right
     /// where `apply_enters_battlefield_modifiers` would otherwise run for

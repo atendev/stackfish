@@ -17,7 +17,7 @@ use crate::types::zone::ZoneKind;
 
 use super::{
     AmplifyChoiceError, AttachChoiceError, CopyChoiceError, DevourChoiceError, Engine, ModeChoiceError,
-    ProcessState, ScriptChoiceError, ScriptedZoneMoveKind,
+    ProcessState, ScriptChoiceError, ScriptedZoneMoveKind, ScriptedZoneMoveThen,
 };
 
 impl Engine {
@@ -238,7 +238,7 @@ impl Engine {
         self.process_state = self.continue_scripted_zone_move(
             ScriptedZoneMoveKind::Sacrifice,
             sacrificed.into(),
-            stack_id,
+            ScriptedZoneMoveThen::StackResolution { stack_id },
             events_so_far,
         );
         Ok(())

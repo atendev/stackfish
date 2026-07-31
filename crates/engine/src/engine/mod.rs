@@ -644,6 +644,42 @@ impl Engine {
                 status
             }
 
+            ProcessState::AwaitingSearchDevourChoice {
+                object, controller, per_creature, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+            } => {
+                // Nothing to do until submit_search_devour_choice answers -
+                // same "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingSearchDevourChoice {
+                    player: controller,
+                    object,
+                    per_creature,
+                    candidates: candidates.clone(),
+                };
+                self.process_state = ProcessState::AwaitingSearchDevourChoice {
+                    object, controller, per_creature, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                };
+                status
+            }
+
+            ProcessState::AwaitingSearchAmplifyChoice {
+                object, controller, per_card, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+            } => {
+                // Nothing to do until submit_search_amplify_choice answers -
+                // same "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingSearchAmplifyChoice {
+                    player: controller,
+                    object,
+                    per_card,
+                    candidates: candidates.clone(),
+                };
+                self.process_state = ProcessState::AwaitingSearchAmplifyChoice {
+                    object, controller, per_card, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
+                };
+                status
+            }
+
             ProcessState::AwaitingCopyChoice { object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent } => {
                 // Nothing to do until submit_copy_choice answers - same
                 // "put the exact same state back" pattern every other

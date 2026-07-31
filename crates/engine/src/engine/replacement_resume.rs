@@ -18,7 +18,7 @@ use crate::types::zone::ZoneKind;
 
 use super::{
     CommanderReturnChoiceError, Engine, LegendRuleChoiceError, ProcessState, ReplacementChoiceError,
-    ReplacementResumeTarget, SbaResumeThen, ScriptedZoneMoveKind, StepStatus,
+    ReplacementResumeTarget, SbaResumeThen, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatus,
 };
 
 impl Engine {
@@ -121,10 +121,10 @@ impl Engine {
                     }
                 }
             },
-            ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing } => match outcome {
+            ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, then, trailing } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
                     self.commit_scripted_zone_move(kind, event);
-                    self.continue_scripted_zone_move(kind, remaining, stack_id, trailing)
+                    self.continue_scripted_zone_move(kind, remaining, then, trailing)
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                     ProcessState::AwaitingReplacementChoice {
@@ -132,7 +132,7 @@ impl Engine {
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing },
+                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, then, trailing },
                     }
                 }
             },
@@ -605,16 +605,16 @@ impl Engine {
     /// `ReplacementCheck` too, not just the sacrifices this function itself
     /// drives.
     ///
-    /// `pub(in crate::engine)`: `choice_answers.rs`'s `submit_devour_choice`
-    /// also calls this, and a later pass will call it from
-    /// `engine/resolve/destruction.rs` once `ResolveStackTop` itself moves
-    /// out of `mod.rs` — making it accessible now avoids needing to touch
-    /// this file again for that.
+    /// `pub(in crate::engine)`: `choice_answers.rs`'s `submit_devour_choice`/
+    /// `submit_search_devour_choice` also call this, and a later pass will
+    /// call it from `engine/resolve/destruction.rs` once `ResolveStackTop`
+    /// itself moves out of `mod.rs` — making it accessible now avoids
+    /// needing to touch this file again for that.
     pub(in crate::engine) fn continue_scripted_zone_move(
         &mut self,
         kind: ScriptedZoneMoveKind,
         mut remaining: VecDeque<ObjectId>,
-        stack_id: ObjectId,
+        then: ScriptedZoneMoveThen,
         trailing: Vec<GameEventKind>,
     ) -> ProcessState {
         while let Some(id) = remaining.pop_front() {
@@ -657,14 +657,26 @@ impl Engine {
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, stack_id, trailing },
+                        resume: ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, then, trailing },
                     };
                 }
             }
         }
-        let mut final_events: VecDeque<GameEventKind> = trailing.into();
-        final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
-        ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() }
+        match then {
+            ScriptedZoneMoveThen::StackResolution { stack_id } => {
+                let mut final_events: VecDeque<GameEventKind> = trailing.into();
+                final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
+                ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() }
+            }
+            // CR 614.12a wired into Search (`phase5/devour-amplify-search-
+            // entry`): the chosen sacrifices are done - hand control back to
+            // the search's own still-pending candidates instead of
+            // finalizing here; `continue_search_battlefield_entry` pushes
+            // its own `StackObjectResolved` once *its* queue drains, same as
+            // every other real exit from that function.
+            ScriptedZoneMoveThen::SearchResume { controller, remaining, destination, stack_id, shuffle_after } => self
+                .continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, trailing),
+        }
     }
 
     /// CR 120.3/121/616.1: drains `remaining` scripted draws one at a time,
