@@ -1,4 +1,4 @@
-use crate::types::card::{CardTypeSet, KeywordSet, SupertypeSet};
+use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, SpellMode, SupertypeSet};
 use crate::types::cost::{CostSpec, FilterSpec};
 use crate::types::effect::EffectFilter;
 use crate::types::counter::CounterKind;
@@ -1176,6 +1176,39 @@ pub struct RegisteredAbility {
     /// time and baked onto the resulting `StackObject` (`PutTriggersApnap`)
     /// for `ResolveStackTop` to recheck at resolution (CR 608.2a).
     pub intervening_if: Option<InterveningIfSpec>,
+    /// CR 603.3c/700.2b: a modal triggered ability's own mode list — empty
+    /// (the common case) for every non-modal ability, same "empty means
+    /// doesn't apply" stance `CardDefinition::modes` already takes for a
+    /// non-modal spell. Reuses `SpellMode`/`ModeChoice` wholesale rather than
+    /// a parallel type, since the shape (a target requirement + effect per
+    /// option, chosen `mode_choice` of them) is identical to a spell's own —
+    /// only *when* the choice is made differs (CR 603.3c: as the ability is
+    /// put on the stack, via `ProcessState::AwaitingTriggerModeChoice`/
+    /// `Engine::submit_trigger_mode_choice`, since a triggered ability isn't
+    /// initiated by a single synchronous player action the way `CastSpell`
+    /// is). `SpellMode::additional_cost` is never populated on a
+    /// trigger-declared mode and never consulted here — CR 700.2h's
+    /// additional-cost text is tied to *casting* a spell (601.2b/f-h), not to
+    /// a triggered ability going on the stack, so that field stays
+    /// meaningless (not wired) for this ability kind, same "field exists,
+    /// this ability kind just never sets/reads it" stance `cost`/`target`
+    /// already take for a mana ability.
+    pub modes: Vec<SpellMode>,
+    /// Meaningless (but must still be set, `RegisteredAbility` has no
+    /// `Default` impl) when `modes` is empty — same convention
+    /// `CardDefinition::mode_choice` already established.
+    ///
+    /// CR 700.2e "chosen by opponent" is deliberately not supported for a
+    /// triggered ability's own modes this slice — `ModeChoice::
+    /// ExactlyChosenByOpponent`/`UpToChosenByOpponent` exist as variants (the
+    /// enum is shared with `CardDefinition`), but `push_ordered_triggers`
+    /// doesn't special-case them, so they resolve through the same
+    /// caster/controller-chosen path as `Exactly`/`UpTo` — meaning a trigger
+    /// declaring one of those two variants would incorrectly ask its own
+    /// controller instead of the other player. No real card needs this
+    /// combination yet, so it's a named gap, not silently wrong in a way
+    /// anything currently exercises.
+    pub mode_choice: ModeChoice,
 }
 
 #[cfg(test)]

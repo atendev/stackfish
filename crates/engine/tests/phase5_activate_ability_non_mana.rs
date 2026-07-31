@@ -39,6 +39,8 @@ fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: Obje
     GameState {
         objects,
         abilities: vec![RegisteredAbility {
+            modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(0),
             source: ability_owner,
             kind: AbilityKind::Activated,

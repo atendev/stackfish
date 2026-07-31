@@ -104,7 +104,10 @@ fn state_with_cost_and_ward(cost: CostSpec, ward_script: &str) -> (GameState, Pl
             Zone::new(ZoneKind::Graveyard, Some(p0)),
             Zone::new(ZoneKind::Exile, None),
         ],
-        abilities: vec![RegisteredAbility { id: AbilityId(0),
+        abilities: vec![RegisteredAbility {
+            modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
+            id: AbilityId(0),
             source,
             kind: AbilityKind::Activated,
             condition: None,

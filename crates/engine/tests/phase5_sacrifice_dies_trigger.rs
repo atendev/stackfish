@@ -66,7 +66,10 @@ fn discard_cost() -> CostSpec {
 }
 
 fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
@@ -105,7 +108,10 @@ fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, PlayerId, ObjectId, 
             Zone::new(ZoneKind::Graveyard, Some(p1)),
         ],
         abilities: vec![
-            RegisteredAbility { id: AbilityId(1),
+            RegisteredAbility {
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
+                id: AbilityId(1),
                 source,
                 kind: AbilityKind::Activated,
                 condition: None,

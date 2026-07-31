@@ -10,6 +10,7 @@ use std::rc::Rc;
 use mlua::{Table, UserData, UserDataMethods, Value};
 
 use crate::types::ability::{AbilityEffect, AbilityKind, ConditionSpec, InterveningIfSpec, RegisteredAbility};
+use crate::types::card::ModeChoice;
 use crate::types::cost::{CostModifier, CostModifierTarget, CostSpec, FilterSpec};
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
@@ -214,6 +215,8 @@ impl UserData for TriggeredAbilityBuilder {
                 )
             })?;
             let ability = RegisteredAbility {
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
                 // Real id allocated at drain time (run_card_script) - the
                 // builder itself has no &mut GameState to allocate one from
                 // inside a Lua callback, same reason StaticAbilityBuilder's
@@ -332,6 +335,8 @@ impl UserData for ActivatedAbilityBuilder {
                 .clone()
                 .map(|filter| TargetSpec::Primitive(TargetRequirement { filter, count: 1, up_to: false, at_least: false, exclude_source: false }));
             let ability = RegisteredAbility {
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
                 // Real id allocated at drain time - see the sibling
                 // TriggeredAbilityBuilder::Register's own comment.
                 id: AbilityId(0),
@@ -438,6 +443,8 @@ impl UserData for ManaAbilityBuilder {
                 Some(this.cost.clone())
             };
             let ability = RegisteredAbility {
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
                 id: AbilityId(0),
                 source: this.source,
                 kind: AbilityKind::Activated,

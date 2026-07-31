@@ -103,6 +103,8 @@ fn pass_until_turn_advances(engine: &mut Engine, starting_turn: u32) -> StepStat
 
 fn dealsdamage_ability(source: ObjectId, once_per_turn: bool) -> RegisteredAbility {
     RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,

@@ -39,8 +39,9 @@ pub(crate) use attach::{
 pub use attach::{propose_attach, AttachProposal};
 pub(crate) use combat::mark_effect_blocked;
 pub(crate) use legality::{
-    effective_keywords, is_modal_resolvable, legal_target_candidates, legal_target_candidates_for_spec,
-    split_targets_by_requirement, target_is_legal, target_spec_minimums, validate_targets,
+    combine_chosen_modes, effective_keywords, is_modal_resolvable, legal_target_candidates,
+    legal_target_candidates_for_spec, split_targets_by_requirement, target_is_legal, target_spec_minimums,
+    validate_targets,
 };
 pub(crate) use zone_ops::{
     apply_damage_event, collect_cost_zone_moves, commit_payment, commit_zone_move, propose_draw, propose_zone_move,

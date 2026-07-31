@@ -7,7 +7,7 @@ use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityKind;
 use crate::types::ability::RegisteredAbility;
 use crate::types::ability::{AbilityEffect, ConditionPrimitive, ConditionSpec, CopyExceptions};
-use crate::types::card::{CardDefinition, CardTypeSet};
+use crate::types::card::{CardDefinition, CardTypeSet, ModeChoice};
 use crate::types::game::GameState;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
@@ -144,6 +144,8 @@ pub(crate) fn grant_linked_copy_ability(
     }
     let id = state.allocate_ability_id();
     state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
         id,
         source: object,
         kind: AbilityKind::Triggered,

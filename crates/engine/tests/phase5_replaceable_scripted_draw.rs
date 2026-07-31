@@ -87,7 +87,10 @@ fn drawcards_spell_definition(amount: u32) -> CardDefinition {
 }
 
 fn draws_card_trigger_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DrawsCard)),

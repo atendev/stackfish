@@ -80,7 +80,10 @@ fn collect_triggers_matches_a_real_condition_script() {
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    state.abilities.push(RegisteredAbility { id: AbilityId(0),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Script(condition)),
@@ -110,7 +113,10 @@ fn collect_triggers_condition_false_on_a_different_object() {
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    state.abilities.push(RegisteredAbility { id: AbilityId(1),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Script(condition)),
@@ -138,7 +144,10 @@ fn collect_triggers_condition_false_on_wrong_destination_zone() {
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    state.abilities.push(RegisteredAbility { id: AbilityId(2),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(2),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Script(condition)),
@@ -165,7 +174,10 @@ fn collect_triggers_none_condition_matches_any_event() {
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    state.abilities.push(RegisteredAbility { id: AbilityId(3),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(3),
         source: bear,
         kind: AbilityKind::Triggered,
         // No condition at all - RegisteredAbility::condition documents this
@@ -229,7 +241,10 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     let mut engine = Engine::new(state);
     let condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
     let operation = engine.load_script(OPERATION_GAIN_LIFE_1).expect("operation script loads");
-    engine.state_mut().abilities.push(RegisteredAbility { id: AbilityId(4),
+    engine.state_mut().abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(4),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Script(condition)),
@@ -304,7 +319,10 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
     let operation = engine.load_script(OPERATION_GAIN_LIFE_1).expect("operation script loads");
     // The ability is registered to `bear` specifically - casting a
     // different creature (even with the same definition) shouldn't fire it.
-    engine.state_mut().abilities.push(RegisteredAbility { id: AbilityId(5),
+    engine.state_mut().abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(5),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Script(condition)),

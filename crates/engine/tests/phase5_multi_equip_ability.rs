@@ -79,7 +79,10 @@ fn equipment_definition() -> CardDefinition {
 
 /// Index 0: "Equip {0}" - any creature you control.
 fn equip_any(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,
@@ -104,7 +107,10 @@ fn equip_any(source: ObjectId) -> RegisteredAbility {
 
 /// Index 1: "Equip Dragon {0}" - CR 702.6c, only a Dragon you control.
 fn equip_dragon(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(1),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source,
         kind: AbilityKind::Activated,
         condition: None,

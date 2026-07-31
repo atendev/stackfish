@@ -196,6 +196,26 @@ pub enum TriggerTargetsError {
     InvalidTargets,
 }
 
+/// Why `submit_trigger_mode_choice` rejected an answer to a CR 603.3c modal
+/// triggered-ability mode choice — same shape `ModeChoiceError` already
+/// takes for a spell's own CR 700.2e "chosen by opponent" pause.
+#[derive(Debug)]
+pub enum TriggerModeChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingTriggerModeChoice`.
+    NotAwaitingChoice,
+    /// `modes.len()` fell outside the announced `min..=max` range.
+    InvalidCount,
+    /// The same mode index appeared twice and `mode_choice` isn't one of
+    /// CR 700.2d's `*Repeatable` variants.
+    DuplicateMode,
+    /// One of `modes` wasn't a valid index into the ability's own mode list.
+    NoSuchMode,
+    /// 2+ modes chosen, but combining them hit `commands::
+    /// combine_chosen_modes`'s own synchronous-effect-kind/multi-target
+    /// narrowing (see that function's own doc comment).
+    UnsupportedModeCombination,
+}
+
 /// Why `submit_payment` rejected an answer to a CR 601.2f-h
 /// `ProcessState::AwaitingPayment` pause.
 #[derive(Debug)]
@@ -717,7 +737,7 @@ impl Engine {
                 status
             }
 
-            ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining } => {
+            ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining, modal_effect } => {
                 // Nothing to do until submit_trigger_targets answers - same
                 // "put the exact same state back" pattern every other
                 // choice-pause above already uses.
@@ -726,7 +746,25 @@ impl Engine {
                     spec: spec.clone(),
                     candidates: candidates.clone(),
                 };
-                self.process_state = ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining };
+                self.process_state =
+                    ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining, modal_effect };
+                status
+            }
+
+            ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining } => {
+                // Nothing to do until submit_trigger_mode_choice answers -
+                // same "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let (min, max, _repeatable) = mode_choice.bounds();
+                let status = StepStatus::AwaitingTriggerModeChoice {
+                    player: trigger.controller,
+                    modes: modes.clone(),
+                    mode_choice,
+                    min,
+                    max,
+                };
+                self.process_state =
+                    ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining };
                 status
             }
 

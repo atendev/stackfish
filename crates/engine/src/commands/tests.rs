@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use super::*;
 use super::attach::retire_object;
 use crate::types::ability::{AbilityEffect, AbilityKind, RegisteredAbility};
+use crate::types::card::ModeChoice;
 use crate::types::counter::CounterSet;
 use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
@@ -65,6 +66,8 @@ fn minimal_state() -> GameState {
 
 fn dummy_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,

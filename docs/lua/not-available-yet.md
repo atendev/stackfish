@@ -18,8 +18,10 @@ name.
   not a key into an external registry.
 - **No script-backed costs.** `Game.Costs.*` covers every structured cost shape without needing a
   custom function; there's no way to write an arbitrary custom-function cost.
-- **Triggered abilities can't have a target yet**, even though the underlying data model has a
-  slot for one. See [triggered-abilities.md](triggered-abilities.md#whats-not-available-on-this-builder).
+- **Triggered abilities can't have a target *or* modes declared from a card script.** The engine
+  itself genuinely supports both (CR 603.3d target selection, CR 603.3c modal choice) — there's just
+  no builder method to reach either from Lua yet, only by constructing a `RegisteredAbility` directly
+  in Rust. See [triggered-abilities.md](triggered-abilities.md#whats-not-available-on-this-builder).
 - **{X} costs, alternative costs (flashback-style), and hybrid/Phyrexian/snow mana payment** are
   pre-existing gaps in cost-paying generally, not specific to anything in this API.
 - **Only zone changes are visible to a condition.** A condition wanting to check a damage event,

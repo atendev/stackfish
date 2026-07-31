@@ -52,6 +52,8 @@ fn creature_definition(name: &str) -> CardDefinition {
 
 fn linked_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,

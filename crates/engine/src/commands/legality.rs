@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityEffect;
-use crate::types::card::{CardTypeSet, KeywordSet};
+use crate::types::card::{CardTypeSet, KeywordSet, SpellMode};
 use crate::types::cost::FilterController;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
@@ -652,4 +652,78 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::GainControl(_)
             | AbilityEffect::Shuffle
     )
+}
+
+/// CR 700.2c/d: combines `modes[chosen_indices]` (already validated for
+/// count/duplicates by the caller) into the one `(target_requirement,
+/// effect)` pair `ResolveStackTop` resolves — a single chosen mode passes its
+/// own `target_requirement`/`effect` through bare (the pre-existing "Choose
+/// one —" shape), 2+ chosen modes combine into `TargetSpec::Multiple` (one
+/// `TargetRequirement` per chosen mode, a synthetic zero-count placeholder
+/// for a mode with none of its own, CR 700.2c) + `AbilityEffect::Modal` (one
+/// slot per chosen mode, same order) — see `AbilityEffect::Modal`'s own doc
+/// comment for the shape invariant `ResolveStackTop`'s own `Modal` arm relies
+/// on.
+///
+/// Extracted out of `commands::cast::execute_command`'s `CastSpell` caster-
+/// chosen branch so a modal *triggered* ability (`Engine::
+/// submit_trigger_mode_choice`, CR 603.3c) can reuse the exact same
+/// combination rules instead of a third hand-written copy — `chosen_indices`
+/// is assumed already sorted into card-print order by the caller, same
+/// convention `CastSpell`'s own caller already followed. Doesn't collect CR
+/// 700.2h additional costs (`SpellMode::additional_cost`) — that's a
+/// casting-cost concept tied to CR 601.2b/f-h, meaningless for a triggered
+/// ability going on the stack (CR 603.3c has no equivalent clause), so the
+/// caster-chosen `CastSpell` branch still collects it separately around this
+/// call rather than folding it in here.
+pub(crate) fn combine_chosen_modes(
+    modes: &[SpellMode],
+    chosen_indices: &[u32],
+) -> Result<(Option<TargetSpec>, Option<AbilityEffect>), String> {
+    let mut chosen_modes = Vec::with_capacity(chosen_indices.len());
+    for &idx in chosen_indices {
+        let Some(mode) = modes.get(idx as usize) else {
+            return Err("no such mode".to_string());
+        };
+        chosen_modes.push(mode);
+    }
+
+    if let [only] = chosen_modes.as_slice() {
+        return Ok((only.target_requirement.clone(), only.effect.clone()));
+    }
+
+    let mut reqs = Vec::with_capacity(chosen_modes.len());
+    for mode in &chosen_modes {
+        match &mode.target_requirement {
+            None => reqs.push(TargetRequirement {
+                filter: TargetFilter::AnyTarget,
+                count: 0,
+                up_to: false,
+                at_least: false,
+                exclude_source: false,
+            }),
+            Some(TargetSpec::Primitive(req)) => reqs.push(req.clone()),
+            Some(TargetSpec::Multiple(_)) => {
+                return Err(
+                    "a mode with its own multi-target requirement can't be combined with other \
+                     chosen modes"
+                        .to_string(),
+                );
+            }
+        }
+    }
+    for mode in &chosen_modes {
+        if let Some(effect) = &mode.effect {
+            if !is_modal_resolvable(effect) {
+                return Err(
+                    "this mode's effect can't be combined with other chosen modes yet - only \
+                     GainLife/Damage/Counters/Pump/GainControl/Shuffle are supported inside a \
+                     multi-mode choice"
+                        .to_string(),
+                );
+            }
+        }
+    }
+    let effects: Vec<Option<AbilityEffect>> = chosen_modes.iter().map(|m| m.effect.clone()).collect();
+    Ok((Some(TargetSpec::Multiple(reqs)), Some(AbilityEffect::Modal(effects))))
 }

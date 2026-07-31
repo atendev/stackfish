@@ -378,6 +378,30 @@ pub enum ModeChoice {
     UpToChosenByOpponent(u32),
 }
 
+impl ModeChoice {
+    /// `(min, max, repeatable)` — CR 700.2a's "choose a number of those
+    /// options" floor is always at least 1 (`UpTo`/`UpToRepeatable`/
+    /// `UpToChosenByOpponent` never mean "or none"), never 0. Purely a
+    /// numeric decode of the variant itself — doesn't distinguish *who*
+    /// makes the choice (caster/controller vs. CR 700.2e's "chosen by
+    /// opponent"), since that's a pipeline-level routing decision each
+    /// caller already makes on its own (`commands::cast::execute_cast_spell`
+    /// branches on the `*ChosenByOpponent` variants before ever reaching
+    /// this method; `Engine::push_ordered_triggers`/
+    /// `submit_trigger_mode_choice` deliberately don't, a named narrowing —
+    /// see `RegisteredAbility::mode_choice`'s own doc comment).
+    pub(crate) fn bounds(&self) -> (u32, u32, bool) {
+        match *self {
+            ModeChoice::Exactly(n) => (n, n, false),
+            ModeChoice::UpTo(n) => (1, n, false),
+            ModeChoice::ExactlyRepeatable(n) => (n, n, true),
+            ModeChoice::UpToRepeatable(n) => (1, n, true),
+            ModeChoice::ExactlyChosenByOpponent(n) => (n, n, false),
+            ModeChoice::UpToChosenByOpponent(n) => (1, n, false),
+        }
+    }
+}
+
 impl CardDefinition {
     /// Per CR 105.2a: color comes from mana cost symbols and/or an explicit
     /// `color_indicator`, not stored as its own redundant field.

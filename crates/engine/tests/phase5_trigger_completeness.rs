@@ -101,7 +101,10 @@ fn cards_surveiled_event(player: PlayerId) -> GameEvent {
 }
 
 fn watcher_ability(source: ObjectId, condition: ConditionPrimitive) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(condition)),
@@ -289,7 +292,10 @@ end
 "#;
 
 fn interveningif_upkeep_ability_script(source: ObjectId, handle: ScriptHandle) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(1),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),

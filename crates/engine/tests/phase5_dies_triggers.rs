@@ -70,7 +70,10 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
 }
 
 fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
@@ -83,7 +86,10 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
 }
 
 fn leaves_battlefield_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(1),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::LeavesBattlefield)),
@@ -244,7 +250,10 @@ fn deals_damage_and_dies_triggers_both_fire_from_the_same_combat_damage_step() {
     });
     put_on_battlefield(&mut state, creature(attacker, p0, 5, 0));
     put_on_battlefield(&mut state, creature(blocker, p1, 1, 0)); // dies to 3 damage
-    state.abilities.push(RegisteredAbility { id: AbilityId(2),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(2),
         source: attacker,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DealsDamage)),

@@ -70,6 +70,8 @@ fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
 /// without also exercising the departed-source machinery.
 fn destroy_target_creature_trigger(source: ObjectId, exclude_source: bool) -> RegisteredAbility {
     RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
@@ -163,6 +165,8 @@ fn land_target_word() -> TargetRequirement {
 /// "destroy target creature and target land."
 fn destroy_creature_and_land_trigger(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
@@ -293,6 +297,8 @@ fn vesuvans_granted_upkeep_ability_now_really_fires_and_becomes_a_copy() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(salamander);
     let exceptions = CopyExceptions { grant_recurring_copy_trigger: true, ..CopyExceptions::default() };
     state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
         id: AbilityId(0),
         source: doppel,
         kind: AbilityKind::Triggered,
