@@ -596,6 +596,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
             Ok(TriggeredAbilityBuilder {
                 source: ObjectId(source),
                 condition: None,
+                target: None,
                 operation: None,
                 intervening_if: None,
                 registry: Rc::clone(&registry),

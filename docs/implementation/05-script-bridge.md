@@ -169,6 +169,36 @@
 - Unresolved: the mass-destroy (`DestroyAll`-with-filter) `AbilityEffect` primitive Armageddon
   itself still needs is out of scope here, by design — a separate next slice.
 
+## Slice: trigger-target-lua-exposure (branch open)
+
+- Branch `phase5/trigger-target-lua-exposure`.
+- Scope: `Game.CreateTriggeredAbility(c)` gains a real `:SetTarget(table | function)` method —
+  CR 603.3d's target-selection pause has been engine-complete since `phase5/trigger-target-
+  selection`, but `TriggeredAbilityBuilder` had no field/method for it at all, so it was only
+  reachable by constructing a `RegisteredAbility` directly in Rust, never from an actual card
+  script. Scoped narrowly to `:SetTarget` only (not mode declaration) after checking with the user
+  first — CR 603.3c's mode choice (`phase5/trigger-modal-choice`) has no existing Lua vocabulary to
+  mirror at all (modal *spells* don't have a script-facing way to declare modes either), a bigger,
+  more novel design task than mirroring an existing pattern.
+- Key changes:
+  - `TriggeredAbilityBuilder.target: Option<TargetFilter>` — new field, mirrors
+    `ActivatedAbilityBuilder.target` exactly.
+  - `TriggeredAbilityBuilder::SetTarget` — identical body to `ActivatedAbilityBuilder::SetTarget`
+    (`decode_target_filter_value`, table or function shape).
+  - `TriggeredAbilityBuilder::Register` wraps `this.target` into `TargetSpec::Primitive(TargetRequirement
+    { filter, count: 1, up_to: false, at_least: false, exclude_source: false })`, same single-
+    exact-count narrowing `ActivatedAbilityBuilder::Register` already uses — no CR 601.2c multi-word
+    form from this builder.
+- Verify: 4 new tests (`phase5_trigger_target_lua_exposure.rs`) — table-shape decode into a real
+  `TargetRequirement`, omitting `:SetTarget` still registers `target: None` (regression), function-
+  shape decode into `TargetFilter::Script`, and a full end-to-end (`PlayLand` self-registers a
+  script-declared "destroy target creature" trigger, fires, pauses on a real
+  `AwaitingTriggerTargets`, resolves against the chosen target). Full workspace suite green (164
+  test binaries, 0 failed).
+- Unresolved: CR 601.2c multi-word targets from this builder (same narrowing
+  `ActivatedAbilityBuilder` already has). Mode declaration from Lua (named above, a separate,
+  bigger gap). `:SetCost` stays unbound (triggered abilities have no activation cost concept).
+
 ## General notes
 
 - `ScriptRuntime` uses `mlua` vendored Lua 5.4.

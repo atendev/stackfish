@@ -149,12 +149,28 @@ fn validate_replacement_filter_payload_pairing(
 /// `Game.CreateStaticAbility` are the natural sibling builders (both built,
 /// see below).
 ///
-/// `:SetCost`/`:SetTarget` are deliberately not bound this slice —
-/// `ScriptRuntime::invoke_cost`/`invoke_target` are still `todo!()` regardless,
-/// so nothing would consume them yet.
+/// `:SetCost` is deliberately not bound — triggered abilities don't have
+/// activation costs (CR 603 has no equivalent to CR 602.2b's cost payment).
+/// `:SetTarget(table | function)` (`phase5/trigger-target-lua-exposure`)
+/// mirrors `ActivatedAbilityBuilder::SetTarget` exactly — same
+/// `decode_target_filter_value` decode, same single-exact-count narrowing
+/// (`count: 1, up_to: false`, no CR 601.2c multi-word form) — making CR
+/// 603.3d's real target-selection pause (`ProcessState`/`StepStatus::
+/// AwaitingTriggerTargets`, `Engine::submit_trigger_targets`, already
+/// engine-complete since `phase5/trigger-target-selection`) reachable from an
+/// actual card script for the first time, not just direct Rust
+/// `RegisteredAbility` construction. Omitting `:SetTarget` means `target:
+/// None`, same "no targets required" meaning `RegisteredAbility::target`'s
+/// own doc already documents. No mode-declaration method exists on this
+/// builder either — CR 603.3c's modal choice is real in the engine
+/// (`phase5/trigger-modal-choice`) but has no Lua vocabulary anywhere yet
+/// (modal *spells* don't either — see `docs/lua/not-available-yet.md`), a
+/// separate, bigger, more novel gap than this slice's narrow `:SetTarget`
+/// mirror.
 pub(crate) struct TriggeredAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) condition: Option<ConditionSpec>,
+    pub(crate) target: Option<TargetFilter>,
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
     /// CR 603.4's intervening-if clause — see `InterveningIfSpec`'s own doc
     /// comment. Set via `:SetInterveningIf(Game.InterveningIf.*)`, orthogonal
@@ -206,6 +222,13 @@ impl UserData for TriggeredAbilityBuilder {
             this.operation = Some(decoded);
             Ok(())
         });
+        methods.add_method_mut("SetTarget", |lua, this, value: Value| {
+            let mut registry = this.registry.borrow_mut();
+            let decoded = decode_target_filter_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            drop(registry);
+            this.target = Some(decoded);
+            Ok(())
+        });
         methods.add_method_mut("Register", |_, this, ()| {
             let (effect, operation) = this.operation.clone().ok_or_else(|| {
                 mlua::Error::RuntimeError(
@@ -214,6 +237,15 @@ impl UserData for TriggeredAbilityBuilder {
                         .to_string(),
                 )
             })?;
+            // CR 603.3d - same single-exact-count wrapping
+            // `ActivatedAbilityBuilder::Register` already uses for its own
+            // `:SetTarget`; see that builder's own doc comment for why
+            // (nothing built yet to consume "up to N" or a multi-word
+            // TargetSpec::Multiple from this builder).
+            let target = this
+                .target
+                .clone()
+                .map(|filter| TargetSpec::Primitive(TargetRequirement { filter, count: 1, up_to: false, at_least: false, exclude_source: false }));
             let ability = RegisteredAbility {
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
@@ -226,7 +258,7 @@ impl UserData for TriggeredAbilityBuilder {
                 kind: AbilityKind::Triggered,
                 condition: this.condition.clone(),
                 cost: None,
-                target: None,
+                target,
                 operation,
                 effect,
                 intervening_if: this.intervening_if.clone(),
