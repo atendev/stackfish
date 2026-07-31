@@ -485,6 +485,14 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // no-op for this shape (the affected object is always this effect's own
     // attached_to, not a controller/card_types/self_only filter).
     event_filters.set("WouldDieEnchanted", EventFilterKindTag(EventFilterKind::WouldDieEnchanted))?;
+    // CR 303.4m/616 (Wheel of Sun and Moon): "if a card would be put into
+    // enchanted player's graveyard from anywhere" - pairs only with
+    // Game.ReplacementPayloads.ReplaceZoneDestination. :SetAffected is a
+    // no-op here too, same reason WouldDieEnchanted's own comment gives.
+    event_filters.set(
+        "WouldEnterEnchantedPlayerGraveyard",
+        EventFilterKindTag(EventFilterKind::WouldEnterEnchantedPlayerGraveyard),
+    )?;
 
     // `Game.ReplacementPayloads.*` - what a ReplacementEffect rewrites the
     // matched event into (ReplacementEffectBuilder::SetPayload).

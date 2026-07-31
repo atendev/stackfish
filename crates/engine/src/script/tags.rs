@@ -132,6 +132,13 @@ pub(crate) enum EventFilterKind {
     /// `card_types`/`self_only` filter) — `ReplacementEffectBuilder::
     /// Register` ignores `this.affected` entirely for this variant.
     WouldDieEnchanted,
+    /// CR 303.4m/616 (Wheel of Sun and Moon) — see `EventFilter::
+    /// WouldEnterEnchantedPlayerGraveyard`'s own doc comment. Fieldless like
+    /// `WouldDieEnchanted`, for the same reason: `:SetAffected` plays no role
+    /// here either (the affected side is always the registering effect's own
+    /// `attached_to_player`, never a `controller`/`card_types`/`self_only`
+    /// filter).
+    WouldEnterEnchantedPlayerGraveyard,
 }
 
 /// Same idea, for `Game.EventFilters.*` — e.g. `Game.EventFilters.DamageDealt`

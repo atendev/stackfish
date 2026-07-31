@@ -690,6 +690,30 @@ pub enum EventFilter {
     /// concept, `phase5/enchanted-reference`). Only pairs with
     /// `ReplacementPayload::UmbraArmor`.
     WouldDieEnchanted,
+    /// CR 303.4m/616 (Wheel of Sun and Moon's own worked example): "if a
+    /// card would be put into enchanted player's graveyard from anywhere."
+    /// Same wildcard-`from`/fixed-`to: Graveyard` shape `WouldMoveZone`
+    /// already has, but — like `WouldDieEnchanted` relative to `WouldDie` —
+    /// the affected side isn't a `controller`/`card_types`/`self_only`
+    /// filter at all: it's "does this card's own *owner* (CR 400.7 —
+    /// graveyards are owner-keyed, not controller-keyed) equal whichever
+    /// player this effect's own source is attached to." Fieldless, sibling
+    /// to `WouldMoveZone` rather than a new field on it, same ripple-avoidance
+    /// reasoning `WouldDieEnchanted` already gives. Not gated on `is_destroy`
+    /// — CR 616's own wording is "from anywhere," matching a discard/mill/
+    /// death alike, the same ungated stance the plain `WouldMoveZone` variant
+    /// already takes. Only pairs with `ReplacementPayload::
+    /// ReplaceZoneDestination` — reused as-is, not a new payload, since
+    /// Wheel of Sun and Moon's own effect ("revealed and put on the bottom of
+    /// its owner's library") is mechanically just a zone-destination
+    /// substitution to `Library` once the always-`push_bottom` convention
+    /// `commit_zone_move` already uses is taken into account. "Revealed" is
+    /// left unmodeled — this engine has no per-viewer hidden-information
+    /// boundary at all yet (`VisibilityPolicy::is_visible_to` is itself still
+    /// `todo!()`, no callers — same standing gap `HandRevealModifier`'s own
+    /// doc comment already names), so there is nothing for "revealed" to mean
+    /// beyond the zone move that already happens either way.
+    WouldEnterEnchantedPlayerGraveyard,
 }
 
 /// A `ReplacementEffect`'s actual rewrite (CR 614.1: the event doesn't
@@ -996,6 +1020,18 @@ impl ReplacementEffect {
                 // CR 702.89a only fires on genuine destruction, same
                 // is_destroy gate Regenerate's own WouldDie arm checks.
                 is_destroy && state.object(self.source).and_then(|o| o.attached_to) == Some(*object)
+            }
+            (
+                EventFilter::WouldEnterEnchantedPlayerGraveyard,
+                GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. },
+            ) => {
+                // CR 400.7: graveyards are owner-keyed, not controller-keyed
+                // - the check is against `object`'s own owner, not whoever
+                // currently controls it.
+                let Some(enchanted_player) = state.object(self.source).and_then(|o| o.attached_to_player) else {
+                    return false;
+                };
+                state.object(*object).is_some_and(|o| o.owner == enchanted_player)
             }
             (
                 EventFilter::WouldMoveZone { from, to, affected },
