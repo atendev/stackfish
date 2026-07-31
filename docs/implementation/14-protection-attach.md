@@ -329,6 +329,50 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
   CR 303.4m's "enchanted player" reference for continuous effects (unchanged, see
   `enchanted-reference`'s own note above).
 
+## Slice: enchanted-player-replacement (merged)
+
+- Branch `phase5/enchanted-player-replacement`.
+- Scope: CR 303.4m's "enchanted player" reference for a *replacement* effect — the one real,
+  CR-doc-cited "enchanted player" card left unbuilt after the `enchanted-player-hand-size`/
+  `hand-reveal-modifier`/`draw-limit-modifier` cluster (none of which have a real card motivating
+  their own `EnchantedPlayer` variant, confirmed while scoping this slice). CR 616's own worked
+  example under replacement-effect ordering names it directly: **Wheel of Sun and Moon** — "If a
+  card would be put into enchanted player's graveyard from anywhere, instead that card is revealed
+  and put on the bottom of its owner's library." The player-attached sibling of `phase5/umbra-armor`'s
+  object-attached `EventFilter::WouldDieEnchanted`.
+- Verify: 6 new tests (`phase5_enchanted_player_replacement.rs`) — direct `matches()` unit checks
+  (matches the enchanted player's own card regardless of source zone or `is_destroy`, rejects a
+  different player's card, rejects a non-Graveyard destination, rejects an unattached source), an
+  end-to-end SBA-driven death redirected to the bottom of the owner's library instead of the
+  graveyard, a no-Aura control case, and a `Game.CreateReplacementEffect` self-registration test.
+  Full workspace suite green.
+- Key changes:
+  - `EventFilter::WouldEnterEnchantedPlayerGraveyard` — fieldless, sibling to `WouldMoveZone` rather
+    than a new field on it (same ripple-avoidance reasoning `WouldDieEnchanted` already gives).
+    Resolves directly in `ReplacementEffect::matches`: `self.source`'s own `attached_to_player`
+    against the moving card's own *owner* (CR 400.7 — graveyards are owner-keyed, not
+    controller-keyed, unlike `WouldDieEnchanted`'s object-identity check). Not gated on `is_destroy`
+    — CR 616's own wording ("from anywhere") covers a discard/mill the same as a death, same ungated
+    stance the plain `WouldMoveZone` variant already takes.
+  - **No new `ReplacementPayload`** — `ReplaceZoneDestination(Library)` is reused as-is. The real
+    finding while scoping: `sba::commit_death`'s existing `to`-driven zone lookup
+    (`ZoneKind::Battlefield | ZoneKind::Exile => None, _ => Some(owner)`) already resolves a
+    `Library` destination against the moving card's own *owner* and `push_bottom`s it there —
+    already-tested generic machinery (originally proven for the Exile case), not new plumbing. The
+    end-to-end test passed on the first run with zero `sba.rs` changes.
+  - "Revealed" isn't modeled — this engine has no per-viewer hidden-information boundary to reveal
+    from in the first place (`VisibilityPolicy::is_visible_to` is itself still `todo!()`, no
+    callers, same standing gap `HandRevealModifier`'s own doc comment already names) — there's
+    nothing for "revealed" to mean beyond the zone move that already happens either way.
+  - `Game.EventFilters.WouldEnterEnchantedPlayerGraveyard` / pairs only with
+    `Game.ReplacementPayloads.ReplaceZoneDestination` — wired through
+    `validate_replacement_filter_payload_pairing` the same way `WouldDieEnchanted`/`UmbraArmor`
+    already are; `:SetAffected` is a no-op for this shape too (same reason).
+- Unresolved: `HandRevealAffected`/`DrawLimitAffected::EnchantedPlayer` stay unbuilt — no real card
+  motivates them, unchanged from before this slice. CR 303.4m's "enchanted player" reference for
+  general *continuous* effects (as opposed to this slice's replacement-effect shape) remains a
+  separate, larger, unaddressed gap — no shared mechanism links the two effect classes.
+
 ## Equipment / Equip (CR 702.6)
 
 - `AbilityEffect::Attach` primitive; `ActivateAbility` enforces "only as sorcery" for `Attach`.
