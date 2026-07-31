@@ -157,16 +157,22 @@ pub enum TargetSpec {
     /// example: "the same object or player can be chosen once for each
     /// instance of the word 'target'"). `commands::validate_targets`/the CR
     /// 608.2b resolution recheck split a flat submitted-targets list into
-    /// one contiguous chunk per entry, in order (`commands::
-    /// split_targets_by_requirement`) — every entry with an exact count
-    /// (`up_to`/`at_least` both `false`) claims exactly `count`; at most one
-    /// entry may be variable (`up_to`/`at_least`), its own count derived as
-    /// "whatever's left after every exact entry claims its share," since
-    /// nothing in this engine's flat `targets: Vec<Target>` announces a
-    /// variable word's count separately. Two or more variable entries stay
-    /// unsupported — a shared remainder between them is genuinely ambiguous
-    /// from a flat list alone, rejected rather than guessed at. Real
-    /// resolution of a *uniform-verb* multi-word spell (Plague Spores'
+    /// one chunk per entry (`commands::split_targets_by_requirement`) —
+    /// every entry with an exact count (`up_to`/`at_least` both `false`)
+    /// claims exactly `count`; with at most one variable entry
+    /// (`up_to`/`at_least`), that one entry's own count is derived
+    /// positionally, "whatever's left after every exact entry claims its
+    /// share" (since nothing in this engine's flat `targets: Vec<Target>`
+    /// announces a variable word's count separately). Two or more variable
+    /// entries (`phase5/multi-word-variable-count-filter-assignment`) fall
+    /// back to filter-based assignment instead (`assign_targets_by_filter`)
+    /// — each submitted target is assigned to a word whose own `TargetFilter`
+    /// it satisfies, accepting any assignment meeting every word's own count
+    /// bound rather than requiring a *unique* one (see that function's own
+    /// doc comment for why "some valid partition exists" is the right bar
+    /// given every multi-word `AbilityEffect` here applies uniformly across
+    /// the flattened result regardless of word origin). Real resolution of
+    /// a *uniform-verb* multi-word spell (Plague Spores'
     /// "destroy" applying across both words) needs no further engine
     /// support: downstream effect arms (`AbilityEffect::Destroy` etc.)
     /// already just iterate the concatenated per-word legal-target list
