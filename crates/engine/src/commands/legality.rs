@@ -496,10 +496,10 @@ pub(crate) fn validate_targets(
         }
         Some(TargetSpec::Multiple(reqs)) => {
             // CR 601.2c: a flat submitted-targets list, split into one
-            // contiguous chunk per requirement in order - see
-            // `TargetSpec::Multiple`'s own doc comment for why every
-            // requirement here must use an exact count.
-            let Some(chunks) = split_targets_by_requirement(reqs, targets) else {
+            // chunk per requirement - positionally for 0/1 variable words,
+            // by filter-assignment for 2+ (see `split_targets_by_
+            // requirement`'s own doc comment).
+            let Some(chunks) = split_targets_by_requirement(state, script_runtime, reqs, targets, caster, source) else {
                 return Err(CommandError::InvalidTarget);
             };
             // CR 115.3/601.2c: dedup is checked independently per word by
@@ -507,7 +507,7 @@ pub(crate) fn validate_targets(
             // fresh each call) - the same object/player legally can, and
             // often will, appear in two different words' chunks.
             for (req, chunk) in reqs.iter().zip(chunks) {
-                validate_one_target_requirement(state, script_runtime, req, chunk, caster, source)?;
+                validate_one_target_requirement(state, script_runtime, req, &chunk, caster, source)?;
             }
             Ok(())
         }
@@ -556,36 +556,45 @@ fn validate_one_target_requirement(
     Ok(())
 }
 
-/// CR 601.2c/608.2b: splits `targets` into one contiguous slice per entry of
-/// `reqs`, in order. Every entry with an exact count (`up_to`/`at_least`
-/// both `false`) always claims exactly `req.count`. At most one entry may be
-/// variable (`up_to` or `at_least`) - its own count isn't announced
-/// separately anywhere in this engine's `PlayerAction` shape (just one flat
-/// `targets: Vec<Target>`), so it's derived as "however many are left after
-/// every exact-count entry has claimed its own share": `submitted.len() -
-/// sum(exact counts)`, wherever the variable entry sits in word order (the
-/// derivation doesn't depend on position, only on the total). Two or more
-/// variable entries stay a real, unsupported ambiguity - given only a flat
-/// list, nothing says how a shared remainder splits between them (e.g. "up
-/// to two target creatures and up to two target players" with 2 targets
-/// submitted could mean 2+0, 1+1, or 0+2) - `None` rather than guessing.
-/// Also `None` if `targets` is too short to cover every exact entry, if the
-/// derived variable count falls outside that entry's own `up_to`/`at_least`
-/// bound, or if there's a leftover remainder after every entry has claimed
-/// its chunk (a caller/count mismatch, same "reject rather than guess"
-/// stance every other validation failure here takes).
-pub(crate) fn split_targets_by_requirement<'a>(
+/// CR 601.2c/608.2b: splits `targets` into one chunk per entry of `reqs`.
+/// Every entry with an exact count (`up_to`/`at_least` both `false`) always
+/// claims exactly `req.count`. At most one entry may be variable (`up_to` or
+/// `at_least`) for the fast positional path below - its own count isn't
+/// announced separately anywhere in this engine's `PlayerAction` shape (just
+/// one flat `targets: Vec<Target>`), so it's derived as "however many are
+/// left after every exact-count entry has claimed its own share":
+/// `submitted.len() - sum(exact counts)`, wherever the variable entry sits in
+/// word order (the derivation doesn't depend on position, only on the
+/// total). `None` if `targets` is too short to cover every exact entry, if
+/// the derived variable count falls outside that entry's own `up_to`/
+/// `at_least` bound, or if there's a leftover remainder after every entry
+/// has claimed its chunk (a caller/count mismatch, same "reject rather than
+/// guess" stance every other validation failure here takes).
+///
+/// Two or more variable entries (`phase5/multi-word-variable-count-filter-
+/// assignment`) fall through to `assign_targets_by_filter` instead - a flat
+/// list has no positional signal to derive a *shared* remainder's split at
+/// all (e.g. "up to two target creatures and up to two target players" with
+/// 2 targets submitted could mean 2+0, 1+1, or 0+2 by position alone), so
+/// this needs `state`/`script_runtime`/`caster`/`source` to resolve it by
+/// filter-matching instead - unused by the fast positional path, which
+/// remains a pure function of `reqs`/`targets` for the common case.
+pub(crate) fn split_targets_by_requirement(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
     reqs: &[TargetRequirement],
-    targets: &'a [Target],
-) -> Option<Vec<&'a [Target]>> {
+    targets: &[Target],
+    caster: PlayerId,
+    source: ObjectId,
+) -> Option<Vec<Vec<Target>>> {
     let variable_index = {
         let mut found = None;
         for (i, req) in reqs.iter().enumerate() {
             if req.up_to || req.at_least {
                 if found.is_some() {
-                    // A second variable entry - ambiguous, see this
-                    // function's own doc comment.
-                    return None;
+                    // A second variable entry - hand off to the
+                    // filter-assignment path instead of guessing.
+                    return assign_targets_by_filter(state, script_runtime, reqs, targets, caster, source);
                 }
                 found = Some(i);
             }
@@ -615,11 +624,96 @@ pub(crate) fn split_targets_by_requirement<'a>(
             return None;
         }
         let (chunk, remaining) = rest.split_at(n);
-        chunks.push(chunk);
+        chunks.push(chunk.to_vec());
         rest = remaining;
     }
     if rest.is_empty() {
         Some(chunks)
+    } else {
+        None
+    }
+}
+
+/// CR 601.2c, for 2+ variable-count words (`phase5/multi-word-variable-
+/// count-filter-assignment`): assigns each entry of `targets` to a word
+/// whose own `TargetFilter` it satisfies (the same `target_is_legal` check
+/// every single-word/exact-word validation already uses), backtracking over
+/// the small search space until every word's own count bound (exact/up_to/
+/// at_least) is met and every submitted entry is used exactly once.
+///
+/// Deliberately accepts *any* valid assignment rather than requiring a
+/// *unique* one. Real CR 601.2c has the player state the word-target
+/// association explicitly as part of announcing targets, but every
+/// multi-word spell/ability `AbilityEffect` in this engine applies its
+/// resolution uniformly across the *flattened concatenation* of every
+/// word's own legal targets (see `TargetSpec::Multiple`'s own doc comment,
+/// CR 608.2b's Plague Spores example) - which word a target is filed under
+/// has no resolution-time consequence here, only a legality-checking one.
+/// So "some valid partition exists" is the right bar for this engine's own
+/// model, not "the partition is uniquely determined" - there is nothing
+/// downstream that could ever observe the difference between two otherwise-
+/// identical casts that differ only in which word a shared-eligible target
+/// was filed under, so rejecting one as "ambiguous" would only be pickier
+/// than the engine's own semantics actually require.
+///
+/// Plain backtracking, not a real max-flow/bipartite-matching
+/// implementation - simple on purpose. Every real and test-fixture target
+/// count in this engine is tiny (a handful of words, a handful of targets);
+/// this is not the right place to optimize for scale that doesn't exist
+/// here.
+fn assign_targets_by_filter(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    reqs: &[TargetRequirement],
+    targets: &[Target],
+    caster: PlayerId,
+    source: ObjectId,
+) -> Option<Vec<Vec<Target>>> {
+    // Precompute, once, which words each submitted target is even legal
+    // for - the backtracking search below only ever branches over these.
+    let legal_words: Vec<Vec<usize>> = targets
+        .iter()
+        .map(|t| {
+            reqs.iter()
+                .enumerate()
+                .filter(|(_, req)| target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source))
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .collect();
+
+    fn backtrack(idx: usize, targets: &[Target], reqs: &[TargetRequirement], legal_words: &[Vec<usize>], buckets: &mut [Vec<Target>]) -> bool {
+        if idx == targets.len() {
+            return reqs.iter().enumerate().all(|(w, req)| {
+                let n = buckets[w].len();
+                if req.up_to {
+                    n <= req.count as usize
+                } else if req.at_least {
+                    n >= req.count as usize
+                } else {
+                    n == req.count as usize
+                }
+            });
+        }
+        for &w in &legal_words[idx] {
+            // Prune: an exact/up_to word can never exceed its own max -
+            // no point recursing into a branch that's already overfull.
+            let max = if reqs[w].at_least { usize::MAX } else { reqs[w].count as usize };
+            if buckets[w].len() >= max {
+                continue;
+            }
+            buckets[w].push(targets[idx]);
+            if backtrack(idx + 1, targets, reqs, legal_words, buckets) {
+                return true;
+            }
+            buckets[w].pop();
+        }
+        false
+    }
+
+    let mut buckets: Vec<Vec<Target>> = vec![Vec::new(); reqs.len()];
+    if backtrack(0, targets, reqs, &legal_words, &mut buckets) {
+        Some(buckets)
     } else {
         None
     }

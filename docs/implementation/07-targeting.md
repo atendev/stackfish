@@ -502,6 +502,52 @@
   smaller-footprint resolution exists without a `PlayerAction` shape that announces each variable
   word's own chosen count separately, a larger change than this slice's own scope.
 
+## Slice: multi-word-variable-count-filter-assignment (merged)
+
+- Branch `phase5/multi-word-variable-count-filter-assignment`.
+- Scope: CR 601.2c/608.2b — 2+ variable-count target words in one spell/ability, the exact gap
+  `targeting-multi-word-variable-count` left open. No real card motivates this shape (confirmed while
+  scoping — every fixture that exercises it, including the pre-existing "Test Two Variable Words," is
+  synthetic); built anyway as dormant-but-correct machinery, same posture `AwaitingAttachChoice` has,
+  confirmed with the user first given the size of the alternative (a new `PlayerAction`/pause shape
+  across `CastSpell`/`ActivateAbility`/`submit_trigger_targets`) for a case with zero real-card need.
+- Design fork resolved before implementing: true per-word count declaration (a new pre-cast pause,
+  more rules-literal to CR 601.2c's "player states the association") vs. filter-based auto-
+  disambiguation (assign each submitted target to whichever word's filter it matches, no new
+  `PlayerAction` plumbing). Chose the latter — smaller footprint, and every multi-word `AbilityEffect`
+  in this engine already applies uniformly across the flattened target list regardless of word origin
+  (CR 608.2b's Plague Spores example), so which word a target is filed under has no resolution-time
+  consequence here, meaning "some valid partition exists" is the right legality bar, not "a *unique*
+  partition exists."
+- Verify: 3 new/rewritten tests (`phase5_multi_target_word_variable_count.rs`) — disjoint-filter
+  resolution (the old "still rejected as ambiguous" test's own fixture, now correctly resolves, since
+  disjoint filters mean there was never any real ambiguity), overlapping-filter resolution (two
+  identical-filter "at least two" words, 4 creatures submitted, resolves since a valid 2+2 split
+  exists), and genuine infeasibility (same two words, only 3 creatures submitted — correctly rejected,
+  since no split can satisfy both minimums at once). Full workspace suite green.
+- Key changes:
+  - `commands::split_targets_by_requirement`'s signature widened to take `state`/`script_runtime`/
+    `caster`/`source` (needed for filter-legality checks) and its return type changed from
+    `Vec<&'a [Target]>` (borrowed, positionally-contiguous slices) to `Vec<Vec<Target>>` (owned,
+    since a filter-based assignment can no longer promise word-membership is a contiguous run of the
+    original submission order). The existing 0/1-variable-word fast path is otherwise **unchanged
+    bit-for-bit** — only `.to_vec()`'d at the end — so every already-passing test for that path stays
+    correct with zero behavior change; 2+ variable words now falls through to a new
+    `assign_targets_by_filter` instead of returning `None` immediately.
+  - `assign_targets_by_filter` (private) — plain backtracking over the (tiny, in practice) search
+    space: for each submitted target, precompute which words' `TargetFilter`s it legally satisfies
+    (via the same `target_is_legal` every other target check already uses), then recursively assign
+    each target to one of its legal words, pruning a branch the moment a word's own exact/`up_to` max
+    is exceeded, accepting the first complete assignment whose final per-word counts all satisfy their
+    own exact/`up_to`/`at_least` bound. Not a real max-flow/bipartite-matching implementation —
+    deliberately simple, since every real and test-fixture target count here is tiny.
+  - The 3 real call sites (`commands::validate_targets`'s `Multiple` arm, and the CR 608.2b resolution
+    recheck + `AbilityEffect::Modal`'s own per-mode chunking in `engine/resolve/mod.rs`) all already
+    had `state`/`script_runtime`/`caster` (`top.controller`)/`source` (`top.source`) in scope from
+    their own neighboring `target_is_legal` calls — no new plumbing needed to thread the widened
+    signature through, just passing what was already at hand.
+- Unresolved: nothing — this was the exact backlog item `targeting-multi-word-variable-count` named.
+
 ## Slice: script-target-requirement (merged)
 
 - Branch `phase5/script-target-requirement`.

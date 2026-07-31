@@ -160,14 +160,16 @@ impl Engine {
             // time) - falls back to empty rather than panicking,
             // same "recheck, don't assume" posture this whole block
             // already takes.
-            Some(TargetSpec::Multiple(reqs)) => commands::split_targets_by_requirement(reqs, &top.targets)
-                .map(|chunks| {
-                    reqs.iter()
-                        .zip(chunks)
-                        .flat_map(|(req, chunk)| chunk.iter().copied().filter(|t| is_legal_now(t, req)).collect::<Vec<_>>())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            Some(TargetSpec::Multiple(reqs)) => {
+                commands::split_targets_by_requirement(&self.state, &self.script_runtime, reqs, &top.targets, top.controller, top.source)
+                    .map(|chunks| {
+                        reqs.iter()
+                            .zip(chunks)
+                            .flat_map(|(req, chunk)| chunk.into_iter().filter(|t| is_legal_now(t, req)).collect::<Vec<_>>())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
             // `None` (no targets required) or a `Script`-backed
             // requirement (not evaluable this slice, see
             // `TargetSpec`'s own doc comment) - every submitted
@@ -187,14 +189,16 @@ impl Engine {
         // own arm there for why calling is_legal_now again from
         // inside that match wouldn't borrow-check).
         let modal_chunk_legals: Vec<Vec<Target>> = match &top.target_requirement {
-            Some(TargetSpec::Multiple(reqs)) => commands::split_targets_by_requirement(reqs, &top.targets)
-                .map(|chunks| {
-                    reqs.iter()
-                        .zip(chunks)
-                        .map(|(req, chunk)| chunk.iter().copied().filter(|t| is_legal_now(t, req)).collect())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            Some(TargetSpec::Multiple(reqs)) => {
+                commands::split_targets_by_requirement(&self.state, &self.script_runtime, reqs, &top.targets, top.controller, top.source)
+                    .map(|chunks| {
+                        reqs.iter()
+                            .zip(chunks)
+                            .map(|(req, chunk)| chunk.into_iter().filter(|t| is_legal_now(t, req)).collect())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
             _ => Vec::new(),
         };
         let fizzles = match &top.target_requirement {
