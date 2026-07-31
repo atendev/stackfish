@@ -3,18 +3,22 @@
 //! battlefield-destined search can raise mid-loop — split out of
 //! `engine.rs`.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use crate::commands;
 use crate::replacement;
 use crate::types::ability::SearchDestination;
+use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, Target};
 use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
 
 use super::triggers_pipeline::is_exact_partition;
-use super::{AttachChoiceError, Engine, ProcessState, ScryChoiceError, SearchChoiceError, SurveilChoiceError};
+use super::{
+    AmplifyChoiceError, AttachChoiceError, DevourChoiceError, Engine, ProcessState, ScriptedZoneMoveKind,
+    ScriptedZoneMoveThen, ScryChoiceError, SearchChoiceError, SurveilChoiceError,
+};
 
 impl Engine {
     /// Answers a pending CR 701.22 `Game.Ops.Scry(n)` pause raised by
@@ -187,7 +191,7 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        self.continue_search_battlefield_entry(
+        self.process_state = self.continue_search_battlefield_entry(
             chosen.into(),
             destination,
             controller,
@@ -205,16 +209,27 @@ impl Engine {
     /// pop_front`, so a card already processed before a pause is never
     /// revisited); if a `SearchDestination::Battlefield { enters_attached:
     /// true, .. }` Aura/Equipment/Fortification entry finds 2+ legal attach
-    /// candidates (`commands::legal_entry_attach_candidates`), this saves
-    /// everything still needed to pick back up (`remaining`, `destination`,
-    /// the accumulated `events_so_far`, ...) into
-    /// `ProcessState::AwaitingEntryAttachChoice` and returns early -
-    /// `submit_entry_attach_choice` calls back in with the same `remaining`
-    /// queue once the choice is answered. Reaching the end of
-    /// `remaining` with no pause finalizes exactly like the old inline loop
-    /// did: `shuffle_after`, then `StackObjectResolved`, then
-    /// `ReplacementCheck`.
-    fn continue_search_battlefield_entry(
+    /// candidates (`commands::legal_entry_attach_candidates`), this returns
+    /// `ProcessState::AwaitingEntryAttachChoice` with everything still needed
+    /// to pick back up (`remaining`, `destination`, the accumulated
+    /// `events_so_far`, ...) - `submit_entry_attach_choice` calls back in
+    /// with the same `remaining` queue once the choice is answered. A CR
+    /// 702.82a Devour / CR 702.38a Amplify choice (`phase5/devour-amplify-
+    /// search-entry`) pauses the same way, via `AwaitingSearchDevourChoice`/
+    /// `AwaitingSearchAmplifyChoice` - see `replacement::pending_devour_
+    /// choice`'s own doc comment for why this producer, unlike `PlayLand`/
+    /// `CreateToken`, is wired up. Reaching the end of `remaining` with no
+    /// pause finalizes exactly like the old inline loop did: `shuffle_after`,
+    /// then `StackObjectResolved`, then `ReplacementCheck`.
+    ///
+    /// Returns the `ProcessState` to install - callers assign it to
+    /// `self.process_state` themselves, same convention `continue_scripted_
+    /// zone_move`/`continue_create_token` already use (rather than mutating
+    /// `self.process_state` directly), since `Engine::continue_scripted_
+    /// zone_move`'s own `ScriptedZoneMoveThen::SearchResume` arm needs to
+    /// call this and use the result without an intervening `self.process_
+    /// state` write of its own.
+    pub(in crate::engine) fn continue_search_battlefield_entry(
         &mut self,
         mut remaining: VecDeque<ObjectId>,
         destination: SearchDestination,
@@ -222,7 +237,7 @@ impl Engine {
         stack_id: ObjectId,
         shuffle_after: bool,
         mut events_so_far: Vec<GameEventKind>,
-    ) {
+    ) -> ProcessState {
         while let Some(card) = remaining.pop_front() {
             let last_known_info =
                 self.state.object(card).expect("validated against candidates above").clone();
@@ -319,6 +334,52 @@ impl Engine {
                         to: ZoneKind::Battlefield,
                         last_known_info: Some(last_known_info),
                     });
+                    // CR 702.82a/702.38a (`phase5/devour-amplify-search-
+                    // entry`): checked before `apply_enters_battlefield_
+                    // modifiers`, same "only the call site that can actually
+                    // pause should call this" posture `continue_permanent_
+                    // entry`'s own resolving-spell path already established
+                    // - see `pending_devour_choice`/`pending_amplify_choice`'s
+                    // own doc comments. Devour checked first, matching that
+                    // same sibling ordering.
+                    if let Some((per_creature, candidates)) = replacement::pending_devour_choice(
+                        &self.state,
+                        &self.script_runtime,
+                        new_id,
+                        ZoneKind::Library,
+                        controller,
+                    ) {
+                        return ProcessState::AwaitingSearchDevourChoice {
+                            object: new_id,
+                            controller,
+                            per_creature,
+                            candidates,
+                            stack_id,
+                            events_so_far,
+                            remaining,
+                            destination,
+                            shuffle_after,
+                        };
+                    }
+                    if let Some((per_card, candidates)) = replacement::pending_amplify_choice(
+                        &self.state,
+                        &self.script_runtime,
+                        new_id,
+                        ZoneKind::Library,
+                        controller,
+                    ) {
+                        return ProcessState::AwaitingSearchAmplifyChoice {
+                            object: new_id,
+                            controller,
+                            per_card,
+                            candidates,
+                            stack_id,
+                            events_so_far,
+                            remaining,
+                            destination,
+                            shuffle_after,
+                        };
+                    }
                     // CR 603.6d/614.1c: same post-script apply step
                     // `move_resolving_spell`'s caller and the PlayLand
                     // battlefield_entries loop both take - `tapped` above is
@@ -362,7 +423,7 @@ impl Engine {
                                 // (unattached) at this point, same "already
                                 // a permanent, then gets attached" order the
                                 // cast-time Aura-ETB-attach path uses.
-                                self.process_state = ProcessState::AwaitingEntryAttachChoice {
+                                return ProcessState::AwaitingEntryAttachChoice {
                                     attaching: new_id,
                                     controller,
                                     candidates,
@@ -372,7 +433,6 @@ impl Engine {
                                     destination,
                                     shuffle_after,
                                 };
-                                return;
                             }
                         }
                     }
@@ -385,8 +445,7 @@ impl Engine {
         }
 
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
-        self.process_state =
-            ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
     }
 
     /// Answers a pending CR 303.4f/301.5e/301.6 entry attach choice raised by
@@ -422,7 +481,106 @@ impl Engine {
                 events_so_far.push(GameEventKind::AttachedToPlayer { object: attaching, player });
             }
         }
-        self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);
+        self.process_state =
+            self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);
+        Ok(())
+    }
+
+    /// Answers a pending CR 702.82a Devour choice raised mid-`Search` by
+    /// `StepStatus::AwaitingSearchDevourChoice` (`phase5/devour-amplify-
+    /// search-entry`) — same validation shape as `submit_devour_choice`
+    /// (`sacrificed` any subset of `candidates`, no duplicates), and the same
+    /// `apply_one_replacement`/`CounterAdded`/`continue_scripted_zone_move`
+    /// sequence, except the `candidate_event`'s `from` is `ZoneKind::Library`
+    /// (matching how `pending_devour_choice` found this effect in the first
+    /// place, not `ZoneKind::Stack`), and the sacrifice's own finalization is
+    /// `ScriptedZoneMoveThen::SearchResume` rather than `StackResolution` -
+    /// once the sacrifices (and any nested CR 616.1 ordering choice they
+    /// themselves raise) settle, control returns to `continue_search_
+    /// battlefield_entry`'s own still-pending candidates instead of
+    /// finalizing early.
+    pub fn submit_search_devour_choice(&mut self, sacrificed: Vec<ObjectId>) -> Result<(), DevourChoiceError> {
+        let ProcessState::AwaitingSearchDevourChoice { candidates, .. } = &self.process_state else {
+            return Err(DevourChoiceError::NotAwaitingChoice);
+        };
+        if !sacrificed.iter().all(|id| candidates.contains(id)) {
+            return Err(DevourChoiceError::InvalidCandidate);
+        }
+        let mut seen = HashSet::new();
+        if !sacrificed.iter().all(|id| seen.insert(*id)) {
+            return Err(DevourChoiceError::DuplicateCandidate);
+        }
+        let ProcessState::AwaitingSearchDevourChoice {
+            object,
+            controller,
+            per_creature,
+            mut events_so_far,
+            remaining,
+            destination,
+            stack_id,
+            shuffle_after,
+            ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        let candidate_event =
+            GameEventKind::ZoneChange { object, from: ZoneKind::Library, to: ZoneKind::Battlefield, last_known_info: None };
+        replacement::apply_one_replacement(&mut self.state, object, candidate_event);
+        let amount = per_creature * sacrificed.len() as i32;
+        if amount > 0 {
+            events_so_far.push(GameEventKind::CounterAdded { object, kind: CounterKind::PlusOnePlusOne, amount });
+        }
+        self.process_state = self.continue_scripted_zone_move(
+            ScriptedZoneMoveKind::Sacrifice,
+            sacrificed.into(),
+            ScriptedZoneMoveThen::SearchResume { controller, remaining, destination, stack_id, shuffle_after },
+            events_so_far,
+        );
+        Ok(())
+    }
+
+    /// Answers a pending CR 702.38a Amplify choice raised mid-`Search` by
+    /// `StepStatus::AwaitingSearchAmplifyChoice` (`phase5/devour-amplify-
+    /// search-entry`) — same relationship to `submit_amplify_choice` that
+    /// `submit_search_devour_choice` above has to `submit_devour_choice`.
+    /// Unlike Devour, revealing doesn't move anything, so this resumes
+    /// straight into `continue_search_battlefield_entry` rather than
+    /// `continue_scripted_zone_move`.
+    pub fn submit_search_amplify_choice(&mut self, revealed: Vec<ObjectId>) -> Result<(), AmplifyChoiceError> {
+        let ProcessState::AwaitingSearchAmplifyChoice { candidates, .. } = &self.process_state else {
+            return Err(AmplifyChoiceError::NotAwaitingChoice);
+        };
+        if !revealed.iter().all(|id| candidates.contains(id)) {
+            return Err(AmplifyChoiceError::InvalidCandidate);
+        }
+        let mut seen = HashSet::new();
+        if !revealed.iter().all(|id| seen.insert(*id)) {
+            return Err(AmplifyChoiceError::DuplicateCandidate);
+        }
+        let ProcessState::AwaitingSearchAmplifyChoice {
+            object,
+            controller,
+            per_card,
+            mut events_so_far,
+            remaining,
+            destination,
+            stack_id,
+            shuffle_after,
+            ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        let candidate_event =
+            GameEventKind::ZoneChange { object, from: ZoneKind::Library, to: ZoneKind::Battlefield, last_known_info: None };
+        replacement::apply_one_replacement(&mut self.state, object, candidate_event);
+        let amount = per_card * revealed.len() as i32;
+        if amount > 0 {
+            events_so_far.push(GameEventKind::CounterAdded { object, kind: CounterKind::PlusOnePlusOne, amount });
+        }
+        self.process_state =
+            self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);
         Ok(())
     }
 }

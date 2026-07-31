@@ -43,13 +43,18 @@ impl Engine {
     /// plain `Named`/`Creature` token with no script of its own can still be
     /// affected) or a `CopyOf` token whose freshly re-run `run_card_script`
     /// self-registered one. Devour/Amplify stay unwired here on purpose -
-    /// both need a genuine mid-ETB player pause this function structurally
-    /// can't raise (it only ever mutates state/proposes events
-    /// synchronously) - same narrow "no real producer reaches this yet"
-    /// posture `pending_devour_choice`'s own doc comment already takes for
-    /// `Search`. `colors_spent` is always `ColorSet::empty()` - CR 702.44b,
-    /// a token creation is never a cast, same convention `PlayLand`/`Search`
-    /// already use for Sunburst.
+    /// TODO(`phase5/devour-amplify-search-entry`): unlike when this comment
+    /// was first written, that's no longer a structural limitation -
+    /// `continue_create_token` already raises a genuine mid-ETB pause for
+    /// CR 303.4f/301.5e/301.6 attach choices (`AwaitingTokenAttachChoice`),
+    /// so a Devour/Amplify pause could reuse that same resumable-loop shape
+    /// the way `Search`'s own battlefield-entry loop now does. Left unwired
+    /// here purely because no real card exercises it: only `TokenSpec::
+    /// CopyOf` (CR 707.10f) could realistically produce a Devour/Amplify
+    /// token at all (copying a creature that has one), and no card in this
+    /// engine's test corpus does that. `colors_spent` is always
+    /// `ColorSet::empty()` - CR 702.44b, a token creation is never a cast,
+    /// same convention `PlayLand`/`Search` already use for Sunburst.
     ///
     /// CR 303.4f/301.5e/301.6 pre-attached entry is real now too
     /// (`phase5/token-enters-attached`) - see `continue_create_token`'s own

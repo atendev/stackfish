@@ -18,7 +18,7 @@ use crate::types::ids::{ObjectId, Target};
 use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
-use super::super::{Engine, ScriptedZoneMoveKind, StepStatus};
+use super::super::{Engine, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatus};
 
 impl Engine {
     pub(super) fn resolve_sacrifice_effect(
@@ -34,7 +34,7 @@ impl Engine {
             })
             .collect();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Sacrifice, targets, top.stack_id, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Sacrifice, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -51,7 +51,7 @@ impl Engine {
             })
             .collect();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, targets, top.stack_id, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -76,7 +76,7 @@ impl Engine {
             })
             .unwrap_or_default();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, targets, top.stack_id, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -93,7 +93,7 @@ impl Engine {
             })
             .collect();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, top.stack_id, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
         ControlFlow::Break(StepStatus::Progressed)
     }
 }

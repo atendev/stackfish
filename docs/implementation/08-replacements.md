@@ -620,3 +620,62 @@
   instance is already its own independently-matched/consumed `ReplacementEffect`, no shared-state bug
   introduced, just unexercised); no general "replacement effect referencing the enchanted permanent"
   beyond this one concrete shape.
+
+## Slice: devour-amplify-search-entry (merged)
+
+- Branch `phase5/devour-amplify-search-entry`.
+- Scope: CR 614.12a wired into `Search` — `pending_devour_choice`/`pending_amplify_choice` were only
+  ever checked from the resolving-spell path (`ResolveStackTop`); a Devour/Amplify creature fetched
+  onto the battlefield via `Game.Ops.Search(...)` (a tutor) silently entered with zero bonus counters
+  instead, a named, deliberately-unclosed gap. Scoped down from the original "CR 614.12a/b" ask after
+  research showed CR 614.12b's own substance (payability ordering across *simultaneous* ETB choices)
+  has no producer to attach to at all in this engine — `CreateToken`'s `count` loop and `Search`'s own
+  candidate loop are both strictly sequential, one full commit-or-pause per permanent before the next
+  starts, so there's no real "simultaneous entry" concept to order choices across. That half stays a
+  named backlog TODO. `PlayLand` (lands can never carry Devour/Amplify text) and `CreateToken` (only
+  reachable via `TokenSpec::CopyOf` copying a Devour/Amplify creature — no real card in this engine's
+  test corpus does that) stay deliberately unwired too, confirmed with the user before starting; each
+  has its own TODO comment (`engine/action.rs`, `engine/resolve/tokens.rs`) explaining why.
+- Verify: 7 new tests (`phase5_devour_amplify_search_entry.rs`) — a Devour creature and an Amplify
+  creature each fetched via Search and correctly pausing/resolving, a zero-candidate-chosen case, both
+  `InvalidCandidate` rejections, a plain-creature regression (no pause), and the sharpest case: a
+  Devour sacrifice mid-Search raising a *second*, nested CR 616.1 ordering choice on top of the
+  search-devour pause, and still resuming all the way back to the search's own pending state
+  afterward. Full workspace suite green (`cargo test --workspace`).
+- Key changes:
+  - `ScriptedZoneMoveThen { StackResolution { stack_id }, SearchResume { controller, remaining,
+    destination, stack_id, shuffle_after } }` — the real engineering problem this slice solves.
+    `Engine::continue_scripted_zone_move` (the shared Destroy/Sacrifice/Exile pipeline, reused here for
+    Devour's own sacrifice) used to unconditionally finalize into `ProcessState::ReplacementCheck` once
+    its target queue drained, correct for the resolving-spell path but wrong for a Devour choice raised
+    mid-`Search`, which still owes the rest of its own candidate queue. Same "generalize the resume
+    target" shape `SbaResumeThen` already established for `resume_sba_death`. `ReplacementResumeTarget::
+    ScriptedZoneMove`'s own `stack_id: ObjectId` field widened to `then: ScriptedZoneMoveThen` so a
+    nested CR 616.1 pause raised *during* the sacrifice (two replacement effects on the same dying
+    creature) carries the right resume through that inner pause too, not just the outer one — all 4
+    pre-existing call sites (`Destroy`/`Sacrifice`/`Exile`/`DestroyAll` in `resolve/destruction.rs`,
+    `submit_devour_choice`) updated to pass `StackResolution { stack_id }`, unchanged behavior.
+  - `Engine::continue_search_battlefield_entry` (`library_choices.rs`) widened from `fn(..)` (mutating
+    `self.process_state` directly, returning `()`) to `fn(..) -> ProcessState` — same convention
+    `continue_scripted_zone_move`/`continue_create_token` already use, needed so `ScriptedZoneMoveThen::
+    SearchResume`'s own arm can call it and use the result directly. Its `SearchDestination::Battlefield`
+    arm now checks `pending_devour_choice`/`pending_amplify_choice` (with `from: ZoneKind::Library`,
+    matching how `ResolveStackTop`'s own `continue_permanent_entry` calls the same functions with
+    `ZoneKind::Stack` — nothing in either function's signature is producer-specific) right after
+    `run_card_script`, before `apply_enters_battlefield_modifiers` runs — same relative ordering
+    `continue_permanent_entry` already established (Devour checked before Amplify).
+  - `ProcessState`/`StepStatus::AwaitingSearchDevourChoice`/`AwaitingSearchAmplifyChoice` — separate
+    variants from `AwaitingDevourChoice`/`AwaitingAmplifyChoice` rather than reused ones, same "the
+    resume differs, so the pause type does too" precedent `AwaitingTokenAttachChoice` already set
+    relative to `AwaitingEntryAttachChoice`. Carry `remaining`/`destination`/`shuffle_after` (Search's
+    own loop state) alongside the usual `stack_id`/`events_so_far`.
+  - `Engine::submit_search_devour_choice`/`submit_search_amplify_choice` (`library_choices.rs`) — same
+    validation/consumption/`CounterAdded` shape `submit_devour_choice`/`submit_amplify_choice` already
+    have (reusing the same `DevourChoiceError`/`AmplifyChoiceError` types, no new error type needed);
+    Devour's resume is `continue_scripted_zone_move(.., ScriptedZoneMoveThen::SearchResume { .. }, ..)`,
+    Amplify's is a direct call into `continue_search_battlefield_entry` (no zone move, same "simpler
+    than Devour's own resume" shape `submit_amplify_choice` already established).
+- Unresolved: CR 614.12b itself (payability ordering across simultaneous ETB choices) — see Scope above,
+  a green-field gap needing a "simultaneous entry" producer this engine doesn't have anywhere, not a
+  wiring gap this slice could close. Devour/Amplify via `PlayLand`/`CreateToken` — see Scope above, both
+  named TODOs rather than silent gaps.

@@ -600,17 +600,25 @@ pub fn apply_enters_battlefield_modifiers(
 /// `EntersWithCountersDevour` effect that still needs its choice made?
 /// Checked *separately* from `apply_enters_battlefield_modifiers`'s own
 /// matching loop (which deliberately never touches this payload at all —
-/// see `EntersWithCountersDevour`'s own doc comment) since only the caller
-/// that can actually raise `ProcessState::AwaitingDevourChoice` should ever
-/// call this — `ResolveStackTop`, the one battlefield-entry producer that's
-/// a resolving spell. `PlayLand` (only ever moves lands, which can never
-/// have Devour) and `Search` (a real but rare producer — no card in this
-/// engine's test corpus fetches a Devour creature — narrowed out on
-/// purpose, same "no real producer reaches this" posture `aura-attach-
-/// choice`'s own dormant `AwaitingAttachChoice` already established) never
-/// call this at all, so a Devour effect registered by either path silently
-/// grants no counters (falls through `apply_enters_battlefield_modifiers`'s
-/// own `_ => continue` arm) rather than erroring.
+/// see `EntersWithCountersDevour`'s own doc comment) since only a caller
+/// that can actually raise a Devour choice pause should ever call this.
+/// Two real producers do: `ResolveStackTop` (`ProcessState::
+/// AwaitingDevourChoice`, resumed by `Engine::submit_devour_choice`) and, as
+/// of `phase5/devour-amplify-search-entry`, `Search`'s own battlefield-entry
+/// loop (`ProcessState::AwaitingSearchDevourChoice`, resumed by
+/// `Engine::submit_search_devour_choice`) — `continue_search_battlefield_
+/// entry` calls this with `from: ZoneKind::Library` the same way
+/// `ResolveStackTop`'s own `continue_permanent_entry` calls it with
+/// `ZoneKind::Stack`, since nothing in this function's own signature is
+/// producer-specific. `PlayLand` (only ever moves lands, which can never
+/// have Devour) and `CreateToken` (realistically only reachable via
+/// `TokenSpec::CopyOf` copying a Devour creature — no real card in this
+/// engine's test corpus does that — narrowed out on purpose, same "no real
+/// producer reaches this" posture `aura-attach-choice`'s own dormant
+/// `AwaitingAttachChoice` already established) still never call this at
+/// all, so a Devour effect registered by either path silently grants no
+/// counters (falls through `apply_enters_battlefield_modifiers`'s own
+/// `_ => continue` arm) rather than erroring.
 ///
 /// Returns `Some((per_creature, candidates))` — `candidates` is every
 /// creature `controller` currently controls on the battlefield, narrowed
@@ -674,9 +682,12 @@ pub fn pending_devour_choice(
 /// `pending_devour_choice` above uses) carrying a registered
 /// `EntersWithCountersAmplify` effect that still needs its choice made?
 /// Same "checked separately from `apply_enters_battlefield_modifiers`, only
-/// the one call site that can actually pause should call this" posture as
+/// a caller that can actually pause should call this" posture as
 /// `pending_devour_choice` — see `EntersWithCountersAmplify`'s own doc
-/// comment.
+/// comment. Same two real producers as `pending_devour_choice` too, as of
+/// `phase5/devour-amplify-search-entry`: `ResolveStackTop` and `Search`'s
+/// own battlefield-entry loop (`ProcessState::AwaitingSearchAmplifyChoice`,
+/// resumed by `Engine::submit_search_amplify_choice`).
 ///
 /// Returns `Some((per_card, candidates))` — `candidates` is every card in
 /// `controller`'s hand whose `effective_characteristics` subtypes overlap
