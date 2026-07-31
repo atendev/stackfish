@@ -41,6 +41,17 @@ since gone false simply doesn't resolve).
 [card-script-basics.md](card-script-basics.md#writing-an-operation). Required — `:Register()`
 without an operation set is an error.
 
+**`:SetTarget(value)`** — CR 603.3d: "target [something]" in the ability's own text. `value` is
+either a flat option-bag table (the same shape [`Game.SelectTargets`](targeting-and-choices.md)
+accepts, e.g. `{type="object", card_types={"Creature"}, controller="opponent"}`) or a custom
+scripted-legality function `function(object, source, controller, state) -> bool`. Always a single,
+exact-count target (`count: 1, up_to: false`) — no "up to N" and no CR 601.2c multi-word form
+("target creature and target land") from this builder; construct a `RegisteredAbility` directly in
+Rust for either of those. Omitting `:SetTarget` means no target requirement at all (`target: None`).
+When set, the real engine pause this implies (`ProcessState`/`StepStatus::AwaitingTriggerTargets`,
+`Engine::submit_trigger_targets`) happens automatically the moment the ability would go on the
+stack — nothing else needs to be written to make that happen.
+
 **`:Register()`** — finalizes and queues the ability. Requires `:SetOperation` to have been
 called.
 
@@ -49,15 +60,11 @@ called.
 - **No `:SetCost`.** Triggered abilities don't have activation costs (some do have their own
   additional cost the controller can choose to pay — that's a card-specific, not-yet-modeled
   shape).
-- **No `:SetTarget`.** The engine itself now genuinely pauses for a real CR 603.3d target choice
-  when a triggered ability names one (`RegisteredAbility.target`, `ProcessState`/`StepStatus::
-  AwaitingTriggerTargets`) — but this builder has no method to set that field, so it's only reachable
-  by constructing a `RegisteredAbility` directly in Rust, not from a card script. If your triggered
-  ability needs to choose something mid-resolution instead (a target, a yes/no choice), do it from
-  inside the operation function — see [targeting-and-choices.md](targeting-and-choices.md).
-- **No mode declaration.** Same story as `:SetTarget` — CR 603.3c's modal triggered-ability mode
-  choice (`RegisteredAbility.modes`/`.mode_choice`, `Engine::submit_trigger_mode_choice`) is real in
-  the engine, but this builder has no way to declare a trigger's own modes from a card script yet.
+- **No mode declaration.** CR 603.3c's modal triggered-ability mode choice
+  (`RegisteredAbility.modes`/`.mode_choice`, `Engine::submit_trigger_mode_choice`) is real in the
+  engine, but this builder has no way to declare a trigger's own modes from a card script yet — modal
+  *spells* don't have a script-facing way to declare modes either, so this isn't a trigger-specific
+  gap so much as "modes in general aren't part of this scripting API yet."
 
 ## Registering more than one triggered ability on a card
 
