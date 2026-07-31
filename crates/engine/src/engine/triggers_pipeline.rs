@@ -8,6 +8,7 @@ use crate::commands;
 use crate::engine_context::PipelineExit;
 use crate::triggers::{self, PendingTrigger};
 use crate::types::ability::AbilityEffect;
+use crate::types::card::ModeChoice;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::{StackEntryKind, StackObject};
@@ -252,7 +253,37 @@ impl Engine {
             if !ability.modes.is_empty() {
                 let modes = ability.modes.clone();
                 let mode_choice = ability.mode_choice;
-                self.process_state = ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining };
+                // CR 700.2e: "a player other than [the ability's] controller
+                // chooses" - real for a trigger's own modes now too, mirroring
+                // CastSpell's own ChosenByOpponent branch exactly: every mode
+                // must be targetless and costless (nothing here defers cost
+                // payment the way a spell's own resolution-time pause could),
+                // and the game must have exactly one other non-eliminated
+                // player (CR 700.2e's own 3+-player "controller decides who
+                // chooses" sub-clause isn't supported, same narrowing
+                // CastSpell's branch already carries). Either precondition
+                // failing means this ability can never validly go on the
+                // stack at all - there's no "reject the cast" step for a
+                // trigger to fall back on, so it's simply skipped, same CR
+                // 603.3d "removed from stack" stance a trigger with no legal
+                // target already takes below.
+                let chooser = match mode_choice {
+                    ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) => {
+                        let modes_ok =
+                            modes.iter().all(|m| m.target_requirement.is_none() && m.additional_cost.is_none());
+                        let others: Vec<PlayerId> = commands::non_eliminated_players(&self.state)
+                            .into_iter()
+                            .filter(|&p| p != trigger.controller)
+                            .collect();
+                        match (modes_ok, others.as_slice()) {
+                            (true, [only]) => *only,
+                            _ => continue,
+                        }
+                    }
+                    _ => trigger.controller,
+                };
+                self.process_state =
+                    ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining, chooser };
                 return StepStatus::Progressed;
             }
             // CR 603.3d/601.2c: a triggered ability that names a target (or

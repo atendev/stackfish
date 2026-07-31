@@ -751,20 +751,24 @@ impl Engine {
                 status
             }
 
-            ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining } => {
+            ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining, chooser } => {
                 // Nothing to do until submit_trigger_mode_choice answers -
                 // same "put the exact same state back" pattern every other
-                // choice-pause above already uses.
+                // choice-pause above already uses. `chooser` (not
+                // `trigger.controller`) is who's actually prompted - CR
+                // 700.2e's own "chosen by opponent" case already resolved
+                // this to the real other player, before this pause was ever
+                // constructed.
                 let (min, max, _repeatable) = mode_choice.bounds();
                 let status = StepStatus::AwaitingTriggerModeChoice {
-                    player: trigger.controller,
+                    player: chooser,
                     modes: modes.clone(),
                     mode_choice,
                     min,
                     max,
                 };
                 self.process_state =
-                    ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining };
+                    ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining, chooser };
                 status
             }
 

@@ -154,16 +154,18 @@ pub enum StepStatus {
     /// here, mid-pipeline, the first time this engine asks for one this way.
     AwaitingTriggerTargets { player: PlayerId, spec: TargetSpec, candidates: Vec<Vec<Target>> },
     /// CR 603.3c: a triggered ability about to go on the stack is itself
-    /// modal (`RegisteredAbility.modes` non-empty) — `player` (the trigger's
-    /// own controller; CR 700.2e "chosen by opponent" isn't supported for a
-    /// trigger's own modes, see `RegisteredAbility::mode_choice`'s own doc
-    /// comment) must choose between `min` and `max` of `modes` and call
-    /// `Engine::submit_trigger_mode_choice`, then `step()` again. Raised
-    /// *before* `AwaitingTriggerTargets` in `push_ordered_triggers` — CR
-    /// 603.3c's own mode choice happens before 603.3d's target choice
-    /// (mirrors 601.2b before 601.2c for a cast spell) — so a chosen mode
-    /// needing a target chains into that same pause afterward rather than
-    /// needing its own separate target-selection machinery.
+    /// modal (`RegisteredAbility.modes` non-empty) — `player` (normally the
+    /// trigger's own controller, but CR 700.2e's "chosen by opponent" is
+    /// real for a trigger's own modes too, so `player` is the resolved
+    /// other-player chooser in that case — see `ProcessState::
+    /// AwaitingTriggerModeChoice`'s own `chooser` field) must choose between
+    /// `min` and `max` of `modes` and call `Engine::submit_trigger_mode_choice`,
+    /// then `step()` again. Raised *before* `AwaitingTriggerTargets` in
+    /// `push_ordered_triggers` — CR 603.3c's own mode choice happens before
+    /// 603.3d's target choice (mirrors 601.2b before 601.2c for a cast
+    /// spell) — so a chosen mode needing a target chains into that same
+    /// pause afterward rather than needing its own separate target-selection
+    /// machinery.
     AwaitingTriggerModeChoice { player: PlayerId, modes: Vec<SpellMode>, mode_choice: ModeChoice, min: u32, max: u32 },
     /// CR 601.2f-h: `player` cast a spell that's now on the stack
     /// (`stack_id`) but hasn't paid its cost yet — the caller should look
@@ -679,19 +681,30 @@ pub enum ProcessState {
     },
     /// CR 603.3c: paused mid-`PutTriggersApnap`'s own final push loop
     /// (`Engine::push_ordered_triggers`) because `trigger`'s own ability is
-    /// modal (`modes` — its `RegisteredAbility::modes`, non-empty) and its
-    /// controller hasn't announced a mode choice yet. Checked *before* the
+    /// modal (`modes` — its `RegisteredAbility::modes`, non-empty) and
+    /// `chooser` hasn't announced a mode choice yet. Checked *before* the
     /// `AwaitingTriggerTargets` check in the same loop — `modes`/
     /// `mode_choice` are the ability's own fields, cloned out the same way
     /// `AwaitingTriggerTargets`'s own `spec` is; `remaining` is every other
     /// trigger in this same push run still to process afterward, same
     /// "queue survives the pause" convention every other trigger-pipeline
     /// pause already established.
+    ///
+    /// `chooser`: `trigger.controller` for `ModeChoice::Exactly`/`UpTo`/
+    /// `*Repeatable` — but CR 700.2e's "a player other than their controller
+    /// chooses" (`ExactlyChosenByOpponent`/`UpToChosenByOpponent`) is real
+    /// for a trigger's own modes now too (`phase5/trigger-mode-chosen-by-
+    /// opponent`), so `push_ordered_triggers` resolves the real chooser
+    /// *before* constructing this pause rather than the dispatch side
+    /// assuming `trigger.controller` unconditionally — same "resolved once,
+    /// at the point the choice is raised" shape `CastSpell`'s own
+    /// `PendingModeChoice::chooser` already established for a spell.
     AwaitingTriggerModeChoice {
         trigger: PendingTrigger,
         modes: Vec<SpellMode>,
         mode_choice: ModeChoice,
         remaining: VecDeque<PendingTrigger>,
+        chooser: PlayerId,
     },
     /// All players passed with an empty stack — advance turn/phase/step
     /// (CR 500-514) before priority reopens.

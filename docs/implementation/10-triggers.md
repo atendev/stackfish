@@ -299,6 +299,54 @@
   (proven via direct `RegisteredAbility` construction only, same posture `trigger-target-selection`
   itself took - that builder still has no `:SetTarget` either). No scenario TOML wiring.
 
+## Slice: trigger-target-lua-exposure (merged)
+
+- Branch `phase5/trigger-target-lua-exposure`. `Game.CreateTriggeredAbility(c)` gained a real
+  `:SetTarget(table | function)`, mirroring `Game.CreateActivatedAbility`'s own exactly - CR 603.3d
+  was engine-complete but Lua-inaccessible. See `05-script-bridge.md`'s own entry for the full
+  writeup (this slice's real home is the script bridge, not the trigger pipeline itself - nothing
+  in `triggers_pipeline.rs`/`process_state.rs` changed).
+
+## Slice: trigger-mode-chosen-by-opponent (branch open)
+
+- Branch `phase5/trigger-mode-chosen-by-opponent`.
+- Scope: CR 700.2e - "a player other than [the ability's] controller chooses a mode for it" - for a
+  triggered ability's own modes, the first of the two gaps `trigger-modal-choice` named and left
+  open. **CR 700.2h turned out not to apply here at all** - its own rule text says "some modal
+  *spells*" and "paid *as the spell is cast*," with no "or ability" clause the way 700.2a/700.2e both
+  have (checked against `comp_rules.md` directly before starting) - so there was nothing left to
+  build for that citation on a trigger; it's a correctly-inapplicable rule, not an unbuilt one.
+- Key changes:
+  - `ProcessState`/`StepStatus::AwaitingTriggerModeChoice` gained a `chooser: PlayerId` field -
+    previously the dispatch side in `engine.rs` always reported `trigger.controller` as the asker;
+    now `push_ordered_triggers` resolves the *real* chooser once, at the point the pause is raised
+    (mirroring `CastSpell`'s own `PendingModeChoice::chooser`), and the dispatch side just reports
+    whatever was resolved.
+  - `push_ordered_triggers`'s modal check: for `ModeChoice::ExactlyChosenByOpponent`/
+    `UpToChosenByOpponent`, validates the exact same narrowing `CastSpell`'s own branch already
+    enforces (every mode targetless and costless; exactly one other non-eliminated player) before
+    ever constructing the pause. Unlike `CastSpell` (which rejects an invalid combination as a
+    `CommandError` at cast time, since casting is a real player-initiated command that can fail), a
+    triggered ability has no "reject the cast" step to fall back on - an invalid combination just
+    means this ability can never validly go on the stack, so it's skipped outright (`continue`), same
+    CR 603.3d "no legal choice -> removed from the stack" stance a trigger with no legal target
+    already takes a few lines below.
+  - `Engine::submit_trigger_mode_choice` itself needed **no functional change** - it was already
+    player-unauthenticated (like every other `submit_*` in this engine), so the resolved `chooser`
+    only matters for who the caller *prompts*, not for anything the engine validates.
+- Verify: 6 new tests (`phase5_trigger_mode_chosen_by_opponent.rs`) - the pause reports the other
+  player, not the trigger's own controller; the other player's chosen mode(s) still resolve for the
+  trigger's own controller (single mode, and 2+ combined - the latter incidentally proving 2+
+  all-targetless chosen modes still chain into a real, trivially-satisfied `AwaitingTriggerTargets`
+  pause, same as a spell's own multi-mode cast would); both narrowing violations (a mode with its own
+  target, a 3-player game) silently skip the trigger instead of pushing anything; a duplicate-mode
+  rejection (CR 700.2e doesn't grant CR 700.2d's own repeat exception, same as the spell side).
+  Full workspace suite green (165 test binaries, 0 failed).
+- Unresolved: nothing new under CR 700.2/603.3c - this and `trigger-modal-choice` together close
+  every named mode-choice gap for triggered abilities except Lua mode-declaration (a separate,
+  bigger, more novel gap - see `trigger-target-lua-exposure`'s own note on why modes weren't bundled
+  with `:SetTarget`) and scenario TOML wiring.
+
 ## General trigger notes
 
 - Trigger ordering: `group_apnap` groups by controller in APNAP order; intra-group ordering pauses via `AwaitTriggerOrderChoice`.
