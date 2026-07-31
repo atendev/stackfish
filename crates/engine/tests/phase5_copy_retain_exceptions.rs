@@ -80,7 +80,10 @@ fn bear_definition() -> CardDefinition {
 }
 
 fn become_copy_ability(source: ObjectId, exceptions: CopyExceptions) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,
@@ -269,7 +272,10 @@ fn retain_name_and_retain_color_are_a_no_op_for_a_freshly_created_copy_token() {
     let p0 = PlayerId(0);
     let bear = ObjectId(1);
     let exceptions = CopyExceptions { retain_name: true, retain_color: true, ..CopyExceptions::default() };
-    state.abilities.push(RegisteredAbility { id: AbilityId(0),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source: bear,
         kind: AbilityKind::Activated,
         condition: None,

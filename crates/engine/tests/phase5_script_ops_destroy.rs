@@ -74,7 +74,10 @@ fn destroy_spell_definition() -> CardDefinition {
 }
 
 fn dies_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Dies)),
@@ -222,7 +225,10 @@ fn destroy_ability_works_the_same_as_a_destroy_spell() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
     state.objects.insert(target, card_object(target, creature_definition(2, "Bear", KeywordSet::empty()), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
-    state.abilities.push(RegisteredAbility { id: AbilityId(1),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source,
         kind: AbilityKind::Activated,
         condition: None,

@@ -78,7 +78,10 @@ fn primitive_enters_condition_matches_the_bear_entering_the_battlefield() {
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    state.abilities.push(RegisteredAbility { id: AbilityId(0),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(condition),
@@ -107,7 +110,10 @@ fn primitive_enters_condition_false_on_a_different_object() {
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    state.abilities.push(RegisteredAbility { id: AbilityId(1),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(condition),
@@ -133,7 +139,10 @@ fn primitive_enters_condition_false_on_wrong_destination_zone() {
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    state.abilities.push(RegisteredAbility { id: AbilityId(2),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(2),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(condition),
@@ -164,7 +173,10 @@ fn primitive_always_condition_matches_an_unrelated_event() {
     let mut state = two_player_state();
     state.objects.insert(bear, card_object(bear, bear_definition(), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    state.abilities.push(RegisteredAbility { id: AbilityId(3),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(3),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(condition),
@@ -270,7 +282,10 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
         .load_script("return function(source, controller) error('operation should never run when effect is Some') end")
         .expect("poison-pill script loads");
 
-    engine.state_mut().abilities.push(RegisteredAbility { id: AbilityId(4),
+    engine.state_mut().abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(4),
         source: bear,
         kind: AbilityKind::Triggered,
         condition: Some(condition),
@@ -331,7 +346,10 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
     let (effect, operation) =
         engine.load_operation("return Game.Ops.GainLife(1)").expect("operation primitive loads");
     let condition = engine.load_condition("return Game.Conditions.Enters").expect("condition primitive loads");
-    engine.state_mut().abilities.push(RegisteredAbility { id: AbilityId(5),
+    engine.state_mut().abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(5),
         source: primitive_bear,
         kind: AbilityKind::Triggered,
         condition: Some(condition),
@@ -344,7 +362,10 @@ fn primitive_and_script_abilities_both_fire_in_the_same_game() {
 
     let script_condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
     let script_operation = engine.load_script(OPERATION_GAIN_LIFE_1).expect("operation script loads");
-    engine.state_mut().abilities.push(RegisteredAbility { id: AbilityId(6),
+    engine.state_mut().abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(6),
         source: script_bear,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Script(script_condition)),

@@ -7,11 +7,13 @@ use std::collections::VecDeque;
 use crate::commands;
 use crate::engine_context::PipelineExit;
 use crate::triggers::{self, PendingTrigger};
+use crate::types::ability::AbilityEffect;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::{StackEntryKind, StackObject};
+use crate::types::target::TargetSpec;
 
-use super::{Engine, ProcessState, StepStatus, TriggerOrderError, TriggerTargetsError};
+use super::{Engine, ProcessState, StepStatus, TriggerModeChoiceError, TriggerOrderError, TriggerTargetsError};
 
 /// Whether `chosen` is a reordering of `group` — same `PendingTrigger`s
 /// (by value), each used exactly once, any order. Used by
@@ -238,6 +240,21 @@ impl Engine {
                 // silently dropped.
                 continue;
             };
+            // CR 603.3c: a modal triggered ability's controller announces
+            // the mode choice before its target choice - 603.3c's own mode
+            // choice happens before 603.3d's (mirrors 601.2b before 601.2c
+            // for a cast spell) - so this is checked, and paused on, before
+            // `ability.target` is even consulted below. A modal
+            // `RegisteredAbility`'s own `target`/`effect` fields are
+            // meaningless (the real per-mode data lives in `modes`), same
+            // "empty/None means doesn't apply" stance `modes` itself
+            // documents.
+            if !ability.modes.is_empty() {
+                let modes = ability.modes.clone();
+                let mode_choice = ability.mode_choice;
+                self.process_state = ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining };
+                return StepStatus::Progressed;
+            }
             // CR 603.3d/601.2c: a triggered ability that names a target (or
             // targets - CR 601.2c's multi-word form works here exactly like
             // it does for a spell/activated ability) must have it/them
@@ -261,10 +278,11 @@ impl Engine {
                     // empty voids the whole cast/trigger, not just that word.
                     continue;
                 }
-                self.process_state = ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining };
+                self.process_state =
+                    ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining, modal_effect: None };
                 return StepStatus::Progressed;
             }
-            self.push_trigger_stack_object(&trigger, Vec::new());
+            self.push_trigger_stack_object(&trigger, Vec::new(), None);
         }
         self.process_state = self.end_pipeline_run();
         StepStatus::Progressed
@@ -280,13 +298,29 @@ impl Engine {
     /// before this function's own `&mut self.state` mutations - the same
     /// "extract owned copies, then mutate" shape the original inline loop
     /// this was split from already used.
-    fn push_trigger_stack_object(&mut self, trigger: &PendingTrigger, targets: Vec<Target>) {
+    ///
+    /// `modal_override`: `None` means "use `ability.target`/`ability.effect`
+    /// as-is" (the pre-existing, non-modal shape - both call sites below
+    /// pass this). `Some((target_requirement, effect))` is CR 603.3c's own
+    /// case - `Engine::submit_trigger_mode_choice` already combined the
+    /// chosen mode(s) via `commands::combine_chosen_modes`, and a modal
+    /// ability's own `target`/`effect` fields are meaningless placeholders
+    /// (see `RegisteredAbility::modes`'s own doc comment), so they must
+    /// never be read here in that case.
+    fn push_trigger_stack_object(
+        &mut self,
+        trigger: &PendingTrigger,
+        targets: Vec<Target>,
+        modal_override: Option<(Option<TargetSpec>, Option<AbilityEffect>)>,
+    ) {
         let ability = commands::find_ability_by_id(&self.state, trigger.ability)
             .or_else(|| self.departed_triggered_abilities.iter().find(|a| a.id == trigger.ability));
         let Some(ability) = ability else { return };
         let operation = ability.operation;
-        let effect = ability.effect.clone();
-        let target_requirement = ability.target.clone();
+        let (target_requirement, effect) = match modal_override {
+            Some(pair) => pair,
+            None => (ability.target.clone(), ability.effect.clone()),
+        };
         let intervening_if = ability.intervening_if.clone();
         let stack_id = self.state.allocate_object_id();
         // CR 800.4a: the source's own current owner when it's still live;
@@ -342,12 +376,20 @@ impl Engine {
         {
             return Err(TriggerTargetsError::InvalidTargets);
         }
-        let ProcessState::AwaitingTriggerTargets { trigger, remaining, .. } =
+        let ProcessState::AwaitingTriggerTargets { trigger, spec, remaining, modal_effect, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
-        self.push_trigger_stack_object(&trigger, chosen);
+        // CR 603.3c: `modal_effect` is `Some` only when this pause was
+        // reached via `submit_trigger_mode_choice` (a modal trigger whose
+        // chosen mode(s) needed a target) - `spec` itself is already the
+        // combined `TargetSpec` in that case, same as the plain non-modal
+        // path, so it's always the real override for `target_requirement`;
+        // only `effect` differs by path (see `push_trigger_stack_object`'s
+        // own doc comment).
+        let modal_override = modal_effect.map(|effect| (Some(spec), effect));
+        self.push_trigger_stack_object(&trigger, chosen, modal_override);
         // Defers the rest of `remaining` to the next step() call, same
         // "submit_* mutates now, advance() drives the actual continuation
         // later" convention every other choice-pause resume in this engine
@@ -355,6 +397,87 @@ impl Engine {
         // pending_groups branch (`resolve_put_triggers_apnap_state` calls
         // `push_ordered_triggers` the moment `pending_groups` is empty)
         // rather than a third call site for the same loop.
+        self.process_state = ProcessState::PutTriggersApnap { ordered: remaining.into(), pending_groups: VecDeque::new() };
+        Ok(())
+    }
+
+    /// Answers a pending CR 603.3c modal triggered-ability mode choice
+    /// raised by `StepStatus::AwaitingTriggerModeChoice` - `chosen` must
+    /// satisfy the offered `mode_choice`'s count/duplicate rules (same
+    /// `ModeChoice::bounds` rules `CastSpell`'s own caster-chosen branch
+    /// enforces), each index valid into the ability's own `modes`. Combines
+    /// the chosen mode(s) via `commands::combine_chosen_modes` (shared with
+    /// `CastSpell`'s own caster-chosen branch - see that function's own doc
+    /// comment), then either chains straight into the *existing*
+    /// `AwaitingTriggerTargets` pause (CR 603.3c's own mode choice precedes
+    /// 603.3d's target choice) if the combined mode(s) need a target, or
+    /// pushes the ability immediately if not. If the combined target
+    /// requirement turns out to have no legal candidates, the ability is
+    /// removed from the stack (CR 603.3d), same all-or-nothing stance
+    /// `push_ordered_triggers`'s own plain target check already takes.
+    pub fn submit_trigger_mode_choice(&mut self, chosen: Vec<u32>) -> Result<(), TriggerModeChoiceError> {
+        let ProcessState::AwaitingTriggerModeChoice { modes, mode_choice, .. } = &self.process_state else {
+            return Err(TriggerModeChoiceError::NotAwaitingChoice);
+        };
+        let (min, max, repeatable) = mode_choice.bounds();
+        let chosen_count = chosen.len() as u32;
+        if chosen_count < min || chosen_count > max {
+            return Err(TriggerModeChoiceError::InvalidCount);
+        }
+        if !repeatable {
+            let mut seen = std::collections::HashSet::new();
+            if !chosen.iter().all(|m| seen.insert(*m)) {
+                return Err(TriggerModeChoiceError::DuplicateMode);
+            }
+        }
+        // CR 700.2's own convention (per Wizards' rulings on e.g. Cryptic
+        // Command): chosen modes' effects happen in the order printed on
+        // the card/ability, not the order the player listed them in.
+        let mut chosen_indices = chosen;
+        chosen_indices.sort_unstable();
+        if chosen_indices.iter().any(|&idx| modes.get(idx as usize).is_none()) {
+            return Err(TriggerModeChoiceError::NoSuchMode);
+        }
+        let (target_requirement, effect) = commands::combine_chosen_modes(modes, &chosen_indices)
+            .map_err(|_| TriggerModeChoiceError::UnsupportedModeCombination)?;
+
+        let ProcessState::AwaitingTriggerModeChoice { trigger, remaining, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+
+        if let Some(spec) = target_requirement {
+            let candidates = commands::legal_target_candidates_for_spec(
+                &self.state,
+                &self.script_runtime,
+                &spec,
+                trigger.controller,
+                trigger.source,
+            );
+            let minimums = commands::target_spec_minimums(&spec);
+            let satisfiable = candidates.iter().zip(&minimums).all(|(c, &min)| c.len() as u32 >= min);
+            if satisfiable {
+                self.process_state = ProcessState::AwaitingTriggerTargets {
+                    trigger,
+                    spec,
+                    candidates,
+                    remaining,
+                    modal_effect: Some(effect),
+                };
+            } else {
+                // CR 603.3d: no legal choice for the chosen mode(s)' own
+                // target(s) - the ability is simply removed from the stack,
+                // never pushed at all.
+                self.process_state =
+                    ProcessState::PutTriggersApnap { ordered: remaining.into(), pending_groups: VecDeque::new() };
+            }
+            return Ok(());
+        }
+
+        // Every chosen mode is targetless - push immediately, same
+        // no-target fast path `push_ordered_triggers` itself takes.
+        self.push_trigger_stack_object(&trigger, Vec::new(), Some((None, effect)));
         self.process_state = ProcessState::PutTriggersApnap { ordered: remaining.into(), pending_groups: VecDeque::new() };
         Ok(())
     }

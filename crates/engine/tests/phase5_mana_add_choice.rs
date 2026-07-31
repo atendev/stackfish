@@ -38,6 +38,8 @@ fn state_with_ability(source: ObjectId, controller: PlayerId, effect: AbilityEff
     GameState {
         objects,
         abilities: vec![RegisteredAbility {
+            modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
             id: AbilityId(0),
             source,
             kind: AbilityKind::Activated,

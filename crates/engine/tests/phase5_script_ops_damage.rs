@@ -173,7 +173,10 @@ fn damage_ability_with_lifelink_source_gains_its_controller_life() {
     let source = ObjectId(0);
     state.objects.insert(source, card_object(source, creature_definition(1, "Vampire", KeywordSet::LIFELINK), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
-    state.abilities.push(RegisteredAbility { id: AbilityId(0),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,

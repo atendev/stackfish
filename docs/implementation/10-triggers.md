@@ -236,6 +236,69 @@
   indexing into the now-nested `candidates`). Full workspace suite green.
 - Unresolved: CR 603.3c (modal triggered abilities). Nothing else new named by this slice.
 
+## Slice: trigger-modal-choice (branch open)
+
+- Branch `phase5/trigger-modal-choice`.
+- Scope: CR 603.3c - a *modal* triggered ability's controller announces the mode choice when
+  putting the ability on the stack, the exact gap `trigger-multi-target` named and left open
+  ("Deliberately unchanged: CR 603.3c ... a different rule, still unmodeled"). `RegisteredAbility`
+  had no `modes` field at all before this slice - confirmed via `commands/activate.rs`'s own
+  long-standing exhaustiveness-only comment on `AbilityEffect::Modal`: "RegisteredAbility has no
+  modes field, so this variant can't actually originate from an ability today."
+- Key changes:
+  - `RegisteredAbility.modes: Vec<SpellMode>` / `.mode_choice: ModeChoice` - reused wholesale from
+    `CardDefinition`'s own modal shape rather than a parallel type (identical per-option data: a
+    target requirement + effect per mode, chosen `mode_choice` of them). `SpellMode::additional_cost`
+    is never populated/consulted on a trigger-declared mode - CR 700.2h's additional-cost text is a
+    casting-cost concept (601.2b/f-h) with no equivalent for a triggered ability going on the stack.
+    ~124 `RegisteredAbility` struct-literal construction sites across 50 files needed the two new
+    fields (no `Default` impl) - the same ripple class `modal-multi-mode`/`modal-chosen-by-opponent`
+    already paid on `CardDefinition` for the identical reason, done mechanically here too.
+  - `commands::combine_chosen_modes(modes, chosen_indices) -> Result<(Option<TargetSpec>,
+    Option<AbilityEffect>), String>` (legality.rs) - the CR 700.2c/d mode-combination logic (single
+    mode passes through bare; 2+ combine into `TargetSpec::Multiple`/`AbilityEffect::Modal`, gated by
+    `is_modal_resolvable`) extracted out of `commands::cast::execute_cast_spell`'s own caster-chosen
+    branch so a modal trigger's mode choice can reuse it instead of a third hand-written copy.
+    `ModeChoice::bounds(&self) -> (min, max, repeatable)` extracted alongside it for the same reason
+    (previously inlined separately in `execute_cast_spell`).
+  - `ProcessState`/`StepStatus::AwaitingTriggerModeChoice` - new pause, same "queue survives the
+    pause" shape `AwaitingTriggerTargets` already established; checked in
+    `Engine::push_ordered_triggers` *before* the existing `ability.target` check (CR 603.3c's mode
+    choice precedes CR 603.3d's target choice, mirroring 601.2b before 601.2c for a cast spell).
+  - `Engine::submit_trigger_mode_choice(chosen: Vec<u32>) -> Result<(), TriggerModeChoiceError>` -
+    answers the pause: validates count/duplicate against `mode_choice.bounds()`, combines via
+    `combine_chosen_modes`, then either chains straight into the *existing*
+    `ProcessState::AwaitingTriggerTargets` pause (if the combined mode(s) need a target - no new
+    target-selection machinery needed) or pushes the ability immediately (reusing
+    `push_trigger_stack_object`) if not. A combined target requirement with no legal candidates
+    removes the ability from the stack (CR 603.3d), same all-or-nothing stance the plain
+    (non-modal) target check already takes.
+  - `ProcessState::AwaitingTriggerTargets` gained a `modal_effect: Option<Option<AbilityEffect>>`
+    field (outer `Option`: was this pause reached via a modal choice at all; inner: the real,
+    possibly-`None`, combined effect) so `submit_trigger_targets`'s existing resume can push the
+    *combined* modal effect instead of re-deriving from the ability's own (meaningless, for a modal
+    ability) `effect` field - `None` for the pre-existing non-modal path, unchanged.
+  - `push_trigger_stack_object` gained a `modal_override: Option<(Option<TargetSpec>,
+    Option<AbilityEffect>)>` parameter - `None` (both existing call sites) preserves the original
+    "derive from `ability.target`/`ability.effect`" behavior exactly; `Some(pair)` (both new modal
+    call sites) uses the already-resolved pair verbatim instead.
+- Deliberately narrow, named in code/doc comments: CR 700.2e "chosen by opponent" isn't supported
+  for a triggered ability's own modes - `push_ordered_triggers`/`submit_trigger_mode_choice` don't
+  special-case `ModeChoice::ExactlyChosenByOpponent`/`UpToChosenByOpponent`, so a trigger declaring
+  either would incorrectly prompt its own controller instead of the other player; no real card needs
+  this combination yet. CR 700.2h per-mode additional cost is likewise unwired for triggers (see
+  above). Combining `*ChosenByOpponent` with a trigger's own modes was never attempted.
+- Verify: 8 new tests (`phase5_trigger_modal_choice.rs`) - single mode chosen (targetless), 2+ modes
+  combined and chaining into a real `AwaitingTriggerTargets` pause, a single chosen mode with its own
+  target chaining into real target selection end-to-end (Destroy resolving against the chosen
+  creature), CR 603.3d removal when the chosen mode's target has zero legal candidates, and four
+  `submit_trigger_mode_choice` rejection paths (not-awaiting, out-of-range count, duplicate mode,
+  bad index). Full workspace suite green (163 test binaries, 0 failed).
+- Unresolved: CR 700.2e for a triggered ability's own modes. CR 700.2h for a triggered ability's own
+  modes. No Lua exposure - `TriggeredAbilityBuilder` gains no mode-declaration method this slice
+  (proven via direct `RegisteredAbility` construction only, same posture `trigger-target-selection`
+  itself took - that builder still has no `:SetTarget` either). No scenario TOML wiring.
+
 ## General trigger notes
 
 - Trigger ordering: `group_apnap` groups by controller in APNAP order; intra-group ordering pauses via `AwaitTriggerOrderChoice`.

@@ -98,7 +98,10 @@ fn drawcards_spell_definition(amount: u32) -> CardDefinition {
 }
 
 fn draws_card_trigger_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DrawsCard)),
@@ -240,7 +243,10 @@ fn drawcards_ability_works_the_same_as_a_drawcards_spell() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
     state.objects.insert(lib_a, card_object(lib_a, land_definition(2, "Forest"), p0, ZoneKind::Library));
     state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(lib_a);
-    state.abilities.push(RegisteredAbility { id: AbilityId(1),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source,
         kind: AbilityKind::Activated,
         condition: None,

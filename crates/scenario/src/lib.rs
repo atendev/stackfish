@@ -1384,6 +1384,8 @@ pub fn build_initial_state(
         if !spec.mana_ability.is_empty() {
             let units = spec.mana_ability.iter().map(|s| parse_mana_unit(s)).collect();
             abilities.push(RegisteredAbility {
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
                 id: AbilityId(next_ability_id),
                 source: object_id,
                 kind: AbilityKind::Activated,
@@ -1499,6 +1501,8 @@ fn register_trigger_ability(
     });
     let id = engine.state_mut().allocate_ability_id();
     engine.state_mut().abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
         id,
         source,
         kind: AbilityKind::Triggered,
@@ -1762,6 +1766,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             | StepStatus::AwaitingSearchChoice { .. }
             | StepStatus::AwaitingTriggerOrderChoice { .. }
             | StepStatus::AwaitingTriggerTargets { .. }
+            | StepStatus::AwaitingTriggerModeChoice { .. }
             | StepStatus::AwaitingPayment { .. }
             | StepStatus::AwaitingModeChoice { .. }
             | StepStatus::AwaitingDiscard { .. }
@@ -2016,6 +2021,8 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 let units = spec.mana_ability.iter().map(|s| parse_mana_unit(s)).collect();
                 let id = engine.state_mut().allocate_ability_id();
                 engine.state_mut().abilities.push(RegisteredAbility {
+                    modes: Vec::new(),
+                    mode_choice: ModeChoice::Exactly(1),
                     id,
                     source: card_ids[key],
                     kind: AbilityKind::Activated,

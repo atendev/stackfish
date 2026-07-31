@@ -12,11 +12,11 @@ use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
 use crate::types::stack::{PendingModeChoice, StackEntryKind, StackObject};
-use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
+use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::attach::{non_eliminated_players, remap_abilities};
-use super::legality::{is_sorcery_speed, is_modal_resolvable, validate_targets};
+use super::legality::{combine_chosen_modes, is_sorcery_speed, validate_targets};
 use super::{CommandError, CommandOutcome, PaymentResolution, PendingPaymentRequest, PriorityHandoff};
 
 pub(super) fn execute_cast_spell(
@@ -201,17 +201,10 @@ pub(super) fn execute_cast_spell(
                 Some(PendingModeChoice { chooser: *chooser, min, max }),
             )
         } else {
-            let (min, max, repeatable) = match object.definition.mode_choice {
-                ModeChoice::Exactly(n) => (n, n, false),
-                // CR 700.2a: "choose a number of those options" -
-                // never zero, even for an UpTo spell.
-                ModeChoice::UpTo(n) => (1, n, false),
-                ModeChoice::ExactlyRepeatable(n) => (n, n, true),
-                ModeChoice::UpToRepeatable(n) => (1, n, true),
-                ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) => {
-                    unreachable!("handled above")
-                }
-            };
+            // CR 700.2a: "choose a number of those options" - never
+            // zero, even for an UpTo spell (ModeChoice::bounds's own
+            // floor already reflects this).
+            let (min, max, repeatable) = object.definition.mode_choice.bounds();
             let chosen_count = modes.len() as u32;
             if chosen_count < min || chosen_count > max {
                 return Err(CommandError::IllegalAction(format!(
@@ -247,69 +240,22 @@ pub(super) fn execute_cast_spell(
             // chosen, all additional costs must be paid."
             let mode_additional_costs: Vec<AdditionalCost> =
                 chosen_modes.iter().filter_map(|m| m.additional_cost.clone()).collect();
-            if let [only] = chosen_modes.as_slice() {
-                // Single mode chosen - unchanged pre-multi-mode
-                // shape, no TargetSpec::Multiple/AbilityEffect::Modal
-                // wrapping.
-                (only.target_requirement.clone(), only.effect.clone(), mode_additional_costs, None)
-            } else {
-                // 2+ modes chosen: combine into one TargetSpec::
-                // Multiple (one TargetRequirement per chosen mode, a
-                // synthetic zero-count placeholder for a mode with
-                // no target_requirement of its own, CR 700.2c) and
-                // one AbilityEffect::Modal (one slot per chosen
-                // mode, same order) - ResolveStackTop zips the two
-                // back together at resolution time via
-                // split_targets_by_requirement, the same helper
-                // multi-target-word spells already use. A mode
-                // whose own target_requirement is itself
-                // TargetSpec::Multiple (a mode that independently
-                // needs several differently-filtered targets) can't
-                // be combined this way - rejected outright rather
-                // than silently flattened, a named narrow gap.
-                let mut reqs = Vec::with_capacity(chosen_modes.len());
-                for mode in &chosen_modes {
-                    match &mode.target_requirement {
-                        None => reqs.push(TargetRequirement {
-                            filter: TargetFilter::AnyTarget,
-                            count: 0,
-                            up_to: false,
-                            at_least: false,
-                            exclude_source: false,
-                        }),
-                        Some(TargetSpec::Primitive(req)) => reqs.push(req.clone()),
-                        Some(TargetSpec::Multiple(_)) => {
-                            return Err(CommandError::IllegalAction(
-                                "a mode with its own multi-target requirement can't be \
-                                 combined with other chosen modes"
-                                    .to_string(),
-                            ));
-                        }
-                    }
-                }
-                // Always TargetSpec::Multiple, even if every chosen
-                // mode's requirement is the synthetic zero-count
-                // placeholder - ResolveStackTop's Modal handling
-                // always re-derives per-mode target chunks from
-                // this shape, so it must never collapse to `None`
-                // the way a single chosen mode's bare `None` can.
-                for mode in &chosen_modes {
-                    if let Some(effect) = &mode.effect {
-                        if !is_modal_resolvable(effect) {
-                            return Err(CommandError::IllegalAction(
-                                "this mode's effect can't be combined with other chosen \
-                                 modes yet - only GainLife/Damage/Counters/Pump/\
-                                 GainControl/Shuffle are supported inside a multi-mode cast"
-                                    .to_string(),
-                            ));
-                        }
-                    }
-                }
-                let target_requirement = Some(TargetSpec::Multiple(reqs));
-                let effects: Vec<Option<AbilityEffect>> =
-                    chosen_modes.iter().map(|m| m.effect.clone()).collect();
-                (target_requirement, Some(AbilityEffect::Modal(effects)), mode_additional_costs, None)
-            }
+            // CR 700.2c/d: single mode passes through bare (unchanged
+            // pre-multi-mode shape), 2+ modes combine into one
+            // TargetSpec::Multiple/AbilityEffect::Modal pair -
+            // ResolveStackTop zips the two back together at
+            // resolution time via split_targets_by_requirement, the
+            // same helper multi-target-word spells already use.
+            // Shared with a modal *triggered* ability's own mode
+            // choice (Engine::submit_trigger_mode_choice, CR 603.3c)
+            // via commands::legality::combine_chosen_modes - see that
+            // function's own doc comment for the exact combination
+            // rules (including the "mode with its own multi-target
+            // requirement can't be combined" and "unsupported effect
+            // kind" narrow gaps it names).
+            let (target_requirement, modal_effect) =
+                combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(CommandError::IllegalAction)?;
+            (target_requirement, modal_effect, mode_additional_costs, None)
         };
 
     // CR 601.2c/601.2e: target count/filter/dedup validated below via

@@ -183,7 +183,10 @@ fn a_commanders_non_combat_damage_does_not_count() {
     let mut commander_obj = permanent(commander, creature_definition("General", 4, 4, KeywordSet::empty()), p0, true);
     commander_obj.tapped = false; // needs to pay {T} for the activated ability below
     put_on_battlefield(&mut state, commander_obj);
-    state.abilities.push(RegisteredAbility { id: AbilityId(0),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source: commander,
         kind: AbilityKind::Activated,
         condition: None,

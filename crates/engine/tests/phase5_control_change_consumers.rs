@@ -233,7 +233,10 @@ fn control_changed_activation_state() -> (GameState, PlayerId, PlayerId, ObjectI
     let mut state = GameState {
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        abilities: vec![RegisteredAbility { id: AbilityId(0),
+        abilities: vec![RegisteredAbility {
+            modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
+            id: AbilityId(0),
             source,
             kind: AbilityKind::Activated,
             condition: None,
@@ -324,7 +327,10 @@ fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
     let mut state = GameState {
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        abilities: vec![RegisteredAbility { id: AbilityId(1),
+        abilities: vec![RegisteredAbility {
+            modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
+            id: AbilityId(1),
             source,
             kind: AbilityKind::Activated,
             condition: None,

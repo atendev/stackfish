@@ -69,7 +69,10 @@ fn heal_spell_definition() -> CardDefinition {
 }
 
 fn interveningif_upkeep_ability(source: ObjectId, threshold: i32) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),

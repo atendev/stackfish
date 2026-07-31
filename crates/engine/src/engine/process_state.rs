@@ -11,8 +11,8 @@ use crate::replacement;
 use crate::sba;
 use crate::script::ScriptChoiceRequest;
 use crate::triggers::PendingTrigger;
-use crate::types::ability::{CopyExceptions, SearchDestination, TokenSpec};
-use crate::types::card::CardDefinition;
+use crate::types::ability::{AbilityEffect, CopyExceptions, SearchDestination, TokenSpec};
+use crate::types::card::{CardDefinition, ModeChoice, SpellMode};
 use crate::types::command::PlayerAction;
 use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
@@ -153,6 +153,18 @@ pub enum StepStatus {
     /// queued by the trigger pipeline itself, so the choice has to happen
     /// here, mid-pipeline, the first time this engine asks for one this way.
     AwaitingTriggerTargets { player: PlayerId, spec: TargetSpec, candidates: Vec<Vec<Target>> },
+    /// CR 603.3c: a triggered ability about to go on the stack is itself
+    /// modal (`RegisteredAbility.modes` non-empty) — `player` (the trigger's
+    /// own controller; CR 700.2e "chosen by opponent" isn't supported for a
+    /// trigger's own modes, see `RegisteredAbility::mode_choice`'s own doc
+    /// comment) must choose between `min` and `max` of `modes` and call
+    /// `Engine::submit_trigger_mode_choice`, then `step()` again. Raised
+    /// *before* `AwaitingTriggerTargets` in `push_ordered_triggers` — CR
+    /// 603.3c's own mode choice happens before 603.3d's target choice
+    /// (mirrors 601.2b before 601.2c for a cast spell) — so a chosen mode
+    /// needing a target chains into that same pause afterward rather than
+    /// needing its own separate target-selection machinery.
+    AwaitingTriggerModeChoice { player: PlayerId, modes: Vec<SpellMode>, mode_choice: ModeChoice, min: u32, max: u32 },
     /// CR 601.2f-h: `player` cast a spell that's now on the stack
     /// (`stack_id`) but hasn't paid its cost yet — the caller should look
     /// up the cost (e.g. via the card's `CardDefinition.mana_cost` off
@@ -648,6 +660,37 @@ pub enum ProcessState {
         trigger: PendingTrigger,
         spec: TargetSpec,
         candidates: Vec<Vec<Target>>,
+        remaining: VecDeque<PendingTrigger>,
+        /// `None` for the plain (non-modal) path this variant originally
+        /// shipped with - `push_trigger_stack_object` falls back to the
+        /// ability's own `effect` field, unchanged. `Some(effect)` means
+        /// this pause was reached via `Engine::submit_trigger_mode_choice`
+        /// (CR 603.3c) instead - `effect` is the already-combined modal
+        /// effect (via `commands::combine_chosen_modes`), which must be
+        /// used verbatim instead of re-deriving from the ability (a modal
+        /// `RegisteredAbility`'s own `effect` field is a meaningless
+        /// placeholder - see `RegisteredAbility::modes`'s own doc comment).
+        /// The inner `Option` is real, not a second "was this set" flag - a
+        /// single script-driven chosen mode can legitimately combine to
+        /// `effect: None` (CR 603.3c has no "no effect at all" restriction,
+        /// same as `SpellMode::effect`/`RegisteredAbility::effect` already
+        /// allow).
+        modal_effect: Option<Option<AbilityEffect>>,
+    },
+    /// CR 603.3c: paused mid-`PutTriggersApnap`'s own final push loop
+    /// (`Engine::push_ordered_triggers`) because `trigger`'s own ability is
+    /// modal (`modes` — its `RegisteredAbility::modes`, non-empty) and its
+    /// controller hasn't announced a mode choice yet. Checked *before* the
+    /// `AwaitingTriggerTargets` check in the same loop — `modes`/
+    /// `mode_choice` are the ability's own fields, cloned out the same way
+    /// `AwaitingTriggerTargets`'s own `spec` is; `remaining` is every other
+    /// trigger in this same push run still to process afterward, same
+    /// "queue survives the pause" convention every other trigger-pipeline
+    /// pause already established.
+    AwaitingTriggerModeChoice {
+        trigger: PendingTrigger,
+        modes: Vec<SpellMode>,
+        mode_choice: ModeChoice,
         remaining: VecDeque<PendingTrigger>,
     },
     /// All players passed with an empty stack — advance turn/phase/step

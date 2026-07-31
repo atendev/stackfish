@@ -355,6 +355,8 @@ fn register_token_abilities(state: &mut GameState, token_id: ObjectId, spec: &To
         TokenSpec::Named(NamedToken::Clue) => {
             let id = state.allocate_ability_id();
             state.abilities.push(RegisteredAbility {
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
                 id,
                 source: token_id,
                 kind: AbilityKind::Activated,
@@ -376,6 +378,8 @@ fn register_token_abilities(state: &mut GameState, token_id: ObjectId, spec: &To
         TokenSpec::Named(NamedToken::Food) => {
             let id = state.allocate_ability_id();
             state.abilities.push(RegisteredAbility {
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
                 id,
                 source: token_id,
                 kind: AbilityKind::Activated,

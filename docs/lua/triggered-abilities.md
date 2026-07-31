@@ -49,10 +49,15 @@ called.
 - **No `:SetCost`.** Triggered abilities don't have activation costs (some do have their own
   additional cost the controller can choose to pay — that's a card-specific, not-yet-modeled
   shape).
-- **No `:SetTarget`.** Nothing currently reads a target off a triggered ability, even though the
-  underlying data model has a slot for one. If your triggered ability needs to choose something
-  mid-resolution (a target, a yes/no choice), do it from inside the operation function instead —
-  see [targeting-and-choices.md](targeting-and-choices.md).
+- **No `:SetTarget`.** The engine itself now genuinely pauses for a real CR 603.3d target choice
+  when a triggered ability names one (`RegisteredAbility.target`, `ProcessState`/`StepStatus::
+  AwaitingTriggerTargets`) — but this builder has no method to set that field, so it's only reachable
+  by constructing a `RegisteredAbility` directly in Rust, not from a card script. If your triggered
+  ability needs to choose something mid-resolution instead (a target, a yes/no choice), do it from
+  inside the operation function — see [targeting-and-choices.md](targeting-and-choices.md).
+- **No mode declaration.** Same story as `:SetTarget` — CR 603.3c's modal triggered-ability mode
+  choice (`RegisteredAbility.modes`/`.mode_choice`, `Engine::submit_trigger_mode_choice`) is real in
+  the engine, but this builder has no way to declare a trigger's own modes from a card script yet.
 
 ## Registering more than one triggered ability on a card
 

@@ -124,7 +124,10 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
     let watcher = ObjectId(0);
     state.objects.insert(watcher, permanent(watcher, creature_definition("Watcher"), p0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(watcher);
-    state.abilities.push(RegisteredAbility { id: AbilityId(0),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source: watcher,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DiscardsCard)),
@@ -176,7 +179,10 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
     let watcher = ObjectId(0);
     state.objects.insert(watcher, permanent(watcher, creature_definition("Watcher"), p0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(watcher);
-    state.abilities.push(RegisteredAbility { id: AbilityId(1),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source: watcher,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::DiscardsCard)),

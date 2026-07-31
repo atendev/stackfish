@@ -72,7 +72,10 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
 /// "another target creature" - excludes whatever ability source this ends
 /// up registered on.
 fn another_target_creature_ability(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Activated,
         condition: None,

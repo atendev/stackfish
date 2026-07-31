@@ -85,7 +85,10 @@ fn vanilla_hand_card(id: ObjectId, owner: PlayerId) -> GameObject {
 }
 
 fn discarded_trigger(source: ObjectId) -> RegisteredAbility {
-    RegisteredAbility { id: AbilityId(0),
+    RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(0),
         source,
         kind: AbilityKind::Triggered,
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::Discarded)),
@@ -140,7 +143,10 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
 
     state.objects.insert(source, permanent(source, creature_definition("Sac Outlet"), p0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
-    state.abilities.push(RegisteredAbility { id: AbilityId(1),
+    state.abilities.push(RegisteredAbility {
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+        id: AbilityId(1),
         source,
         kind: AbilityKind::Activated,
         condition: None,
