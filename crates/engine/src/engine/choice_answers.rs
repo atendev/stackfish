@@ -8,9 +8,10 @@ use std::collections::HashSet;
 use crate::commands;
 use crate::replacement;
 use crate::script::{OperationOutcome, ScriptChoiceRequest};
-use crate::types::ability::AbilityEffect;
+use crate::types::ability::{AbilityEffect, CopyExceptions};
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
+use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, Target};
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
@@ -19,6 +20,25 @@ use super::{
     AmplifyChoiceError, AttachChoiceError, CopyChoiceError, DevourChoiceError, Engine, ModeChoiceError,
     ProcessState, ScriptChoiceError, ScriptedZoneMoveKind, ScriptedZoneMoveThen,
 };
+
+/// CR 707.9a/e: applies whatever "additional effect" exceptions
+/// `exceptions` carries for real (Vesuvan's linked upkeep ability, Spark
+/// Double's extra counter) — shared by `submit_copy_choice`'s "no chain"
+/// path and its "chained pause was declined" path, since both mean the
+/// same thing: this round's copy application was never superseded by a
+/// later one (CR 707.9e's own condition for suppression).
+fn apply_copy_additional_effect(
+    state: &mut GameState,
+    object: ObjectId,
+    exceptions: &CopyExceptions,
+    events_so_far: &mut Vec<GameEventKind>,
+) {
+    let generation = state.object(object).map(|o| o.copy_generation).unwrap_or(0);
+    commands::grant_linked_copy_ability(state, object, exceptions, generation);
+    if let Some(counter_event) = commands::apply_copy_additional_counters(object, exceptions) {
+        events_so_far.push(counter_event);
+    }
+}
 
 impl Engine {
     /// Answers a pending CR 303.4d attach choice raised by
@@ -383,6 +403,31 @@ impl Engine {
     /// modifiers` with the pause's own carried-through `colors_spent` -
     /// this is what makes a copied Fading/EntersTapped/Sunburst creature's
     /// own ETB modifiers apply for real, not just its copied keywords.
+    ///
+    /// CR 707.9e (chained copies, `phase5/chained-copy-effects`): the
+    /// `run_card_script` call below re-registers whatever `copied`'s own
+    /// definition declares — if that's itself a Clone/Altered-Ego-family
+    /// creature, a fresh `EntersAsCopy` replacement effect now sits on
+    /// `object`. Immediately re-checking `pending_copy_choice` (same
+    /// synthetic-event shape the original raise site uses — it matches on
+    /// the candidate event's `from`/`to` fields, not `object`'s live zone,
+    /// so this works even though `object` already sits on the battlefield)
+    /// detects that chain. If found, this round's own additional-effect
+    /// exceptions (`enters_with_additional_counters`/
+    /// `grant_recurring_copy_trigger` — CR 707.9e's own phrasing, "an
+    /// exception that's an additional effect," covers both alike, not just
+    /// counters) are *deferred* rather than dropped: `AwaitingCopyChoice`'s
+    /// own `carry_forward_if_declined` carries them into the next pause. If
+    /// that next choice picks a real target, a second copy effect really
+    /// was applied, so this round's deferred exceptions are conclusively
+    /// superseded and simply never read again (CR 707.9e's own "the
+    /// exception's effect doesn't happen"). If instead it's declined, no
+    /// second copy effect was ever actually applied, so the deferred
+    /// exceptions are applied after all — see the `chosen.is_none()` arm
+    /// below. No new `ProcessState`/`StepStatus` variant is needed for the
+    /// re-pause itself, since `Engine::mod.rs`'s own step-status derivation
+    /// already reads whatever's in `ProcessState::AwaitingCopyChoice`
+    /// generically.
     pub fn submit_copy_choice(&mut self, chosen: Option<ObjectId>) -> Result<(), CopyChoiceError> {
         let ProcessState::AwaitingCopyChoice { candidates, .. } = &self.process_state else {
             return Err(CopyChoiceError::NotAwaitingChoice);
@@ -390,8 +435,16 @@ impl Engine {
         if chosen.is_some_and(|id| !candidates.contains(&id)) {
             return Err(CopyChoiceError::InvalidCandidate);
         }
-        let ProcessState::AwaitingCopyChoice { object, exceptions, stack_id, mut events_so_far, colors_spent, .. } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingCopyChoice {
+            object,
+            controller,
+            exceptions,
+            stack_id,
+            mut events_so_far,
+            colors_spent,
+            carry_forward_if_declined,
+            ..
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
@@ -424,23 +477,44 @@ impl Engine {
                 // every other run_card_script call site in this file
                 // already flags.
                 let _ = self.script_runtime.run_card_script(&mut self.state, &snapshot, object);
-                // CR 707.9a: Vesuvan Doppelganger's own "except it has
-                // [linked upkeep ability]" - see grant_linked_copy_ability's
-                // own doc comment.
-                let generation = self.state.object(object).map(|o| o.copy_generation).unwrap_or(0);
-                commands::grant_linked_copy_ability(&mut self.state, object, &exceptions, generation);
-                // CR 707.9e: Spark Double's own "enters with an additional
-                // +1/+1 counter" - see apply_copy_additional_counters's own
-                // doc comment.
-                if let Some(counter_event) = commands::apply_copy_additional_counters(object, &exceptions) {
-                    events_so_far.push(counter_event);
-                }
                 events_so_far.push(GameEventKind::BecameCopy { object, copied });
+
+                // CR 707.9e: a second copy effect was just applied to
+                // `object` - `carry_forward_if_declined` from any *earlier*
+                // round (if this itself was answering a chained pause) is
+                // conclusively superseded now and simply dropped here
+                // (never read again).
+                if let Some((chained_exceptions, chained_candidates)) =
+                    replacement::pending_copy_choice(&self.state, &self.script_runtime, object, ZoneKind::Stack)
+                {
+                    // Chain into a fresh pause instead of applying this
+                    // round's own additional-effect exceptions yet - see
+                    // this function's own doc comment.
+                    self.process_state = ProcessState::AwaitingCopyChoice {
+                        object,
+                        controller,
+                        exceptions: chained_exceptions,
+                        candidates: chained_candidates,
+                        stack_id,
+                        events_so_far,
+                        colors_spent,
+                        carry_forward_if_declined: Some(exceptions),
+                    };
+                    return Ok(());
+                }
+
+                apply_copy_additional_effect(&mut self.state, object, &exceptions, &mut events_so_far);
             }
             // else: the chosen creature no longer resolves (departed
             // between the pause and this answer) - skip rather than guess,
             // same stance every other unresolvable-reference case in this
             // codebase already takes; `object` simply stays itself.
+        } else if let Some(deferred) = carry_forward_if_declined {
+            // CR 707.9e: declining this pause means no second copy effect
+            // was ever actually *applied* (only offered) - the earlier
+            // round's own exception was never superseded, so it applies
+            // after all.
+            apply_copy_additional_effect(&mut self.state, object, &deferred, &mut events_so_far);
         }
         let counter_events = replacement::apply_enters_battlefield_modifiers(
             &mut self.state,

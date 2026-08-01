@@ -544,6 +544,68 @@
 - Unresolved: CR 707.9e's own invalidation clause (named above). CR 707.9e's X-costed variable
   amount. CR 707.9f (exceptions conditional on the copy's own resulting characteristics) untouched.
 
+## Slice: chained-copy-effects (merged)
+
+- Branch `phase5/chained-copy-effects`.
+- Scope: CR 707.9e's own second sentence, named unmodeled by every prior slice in this cluster —
+  "If another copy effect is applied to that object after applying the copy effect with that
+  exception, the exception's effect doesn't happen." The rule's own worked example: Altered Ego
+  copies Clone; Clone's own granted "enter as a copy" ability then lets you choose a second
+  creature to copy, and because a second copy effect is applied, Altered Ego's own extra-counters
+  exception never happens. Scoping turned up a much smaller fix than expected — no new
+  `ProcessState`/`StepStatus` variant, no recursive call stack: `submit_copy_choice` already
+  re-runs the copied definition's own script (`run_card_script`), which self-registers a fresh
+  `EntersAsCopy` if the copied creature is itself a Clone/Altered-Ego-family creature. This slice
+  just re-checks `replacement::pending_copy_choice` right after that (same synthetic-event shape
+  the original raise site uses — it matches on the candidate event's `from`/`to` fields, not
+  `object`'s live zone, so it works even though `object` already sits on the battlefield), and if a
+  chain is found, re-enters `AwaitingCopyChoice` instead of finishing. `Engine::mod.rs`'s own
+  step-status derivation already reads whatever's in `ProcessState::AwaitingCopyChoice` generically,
+  so the second (and any further) pause surfaces to callers exactly like the first one did.
+- Key changes:
+  - `ProcessState::AwaitingCopyChoice` gained `carry_forward_if_declined: Option<CopyExceptions>` —
+    `None` for a first pause (nothing's copied anything yet). When `submit_copy_choice` detects a
+    chain, it defers this round's own additional-effect exceptions here instead of applying them
+    immediately, since CR 707.9e's suppression condition ("another copy effect is *applied*... after")
+    isn't actually met yet — only offered. If the next pause picks a real target, a second copy
+    effect really was applied, so the deferred exceptions are conclusively superseded and never read
+    again. If instead it's declined, no second copy effect was ever applied, so `submit_copy_choice`
+    applies the deferred exceptions after all (found this asymmetry the hard way — the first
+    implementation attempt discarded the deferred exceptions unconditionally the moment a chain was
+    offered, which silently ate Spark Double's own counter in the "chain offered then declined" case;
+    caught by `declining_the_chained_choice_still_applies_the_first_rounds_exception`, which failed
+    with 0 counters instead of 1 on the first run).
+  - `apply_copy_additional_effect` (`choice_answers.rs`, new private helper) bundles
+    `grant_linked_copy_ability` + `apply_copy_additional_counters` into one call, shared by the
+    "no chain" path and the "chained pause was declined" path — both mean the same thing structurally
+    (this round's application was never superseded).
+  - `grant_linked_copy_ability` (CR 707.9a, Vesuvan's granted-ability exception) gets the identical
+    chain-suppression treatment as the counter exception, not a narrower one — CR 707.9e's own
+    phrasing ("an exception that's an additional effect... rather than a modification of the
+    affected object's characteristics") covers both alike, not just counters. No real card combines
+    both in one chain, but there was no rules reason to treat them differently once the mechanism
+    existed, so both are suppressed/deferred uniformly rather than picking one arbitrarily.
+  - A chain can go arbitrarily deep — no depth cap. Each further link requires its own external
+    `submit_copy_choice` call (declining at any step ends it), so there's no runaway-loop risk in the
+    engine itself; `copy_generation` bumps once per real link, verified to increment correctly across
+    a 2-deep chain.
+- Verify: 4 new tests (`phase5_chained_copy_effects.rs`) — a chain re-pauses instead of finishing
+  (and the outer round's counters haven't landed yet at that point); a completed 2-deep chain
+  suppresses the first round's counters entirely, ends as a copy of the *final* link, and logs two
+  real `BecameCopy` events; declining the chained pause still applies the first round's counters
+  (no second copy effect was ever actually applied); a non-chaining target (no `EntersAsCopy` of its
+  own) applies the exception immediately with no extra pause, same as before this slice. Full
+  workspace suite green (17/17 across both `phase5_chained_copy_effects.rs` and the pre-existing
+  `phase5_clone_enters_as_copy.rs`, unchanged).
+- Unresolved, confirmed out of scope rather than narrowed by mistake: Altered Ego's own X-costed
+  counter amount (as opposed to Spark Double's fixed one, exercised here) — `x_value` today lives
+  only on `StackObject`, consumed once by mana-cost payment, and is never threaded into
+  `run_card_script`'s Lua call or either copy-choice pause struct; making X available at
+  copy-resolution time is separate, unrelated new plumbing, deferred to a future slice.
+  `resolve_become_copy_effect` (`AbilityEffect::BecomeCopy`, CR 707.4) isn't given the same chaining
+  treatment — it doesn't move zones and has no existing chain-detection hook to extend, a narrower
+  sibling gap named here rather than silently extended into.
+
 ## Slice: keyword-layer-fix-and-remove-keyword (merged)
 
 - Branch `phase5/keyword-layer-fix-and-remove-keyword`.
