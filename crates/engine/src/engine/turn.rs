@@ -59,8 +59,10 @@ impl Engine {
         }
 
         let since_ledger = self.state.ledger.len();
-        let pending: VecDeque<PendingZoneMove> =
-            cards.into_iter().map(|id| PendingZoneMove { id, from: ZoneKind::Hand }).collect();
+        let pending: VecDeque<PendingZoneMove> = cards
+            .into_iter()
+            .map(|id| PendingZoneMove { id, from: ZoneKind::Hand, to: ZoneKind::Graveyard })
+            .collect();
         self.process_state = self.continue_discard_moves(pending, since_ledger);
         Ok(())
     }
@@ -83,7 +85,7 @@ impl Engine {
         since_ledger: usize,
     ) -> ProcessState {
         while let Some(pending) = remaining.pop_front() {
-            let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from) else {
+            let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from, pending.to) else {
                 continue;
             };
             // CR 614.8: a cleanup discard is never genuine destruction - a

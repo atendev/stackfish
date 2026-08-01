@@ -14,21 +14,26 @@ use crate::types::zone::ZoneKind;
 use super::attach::retire_object;
 use super::legality::effective_keywords;
 
-/// CR 601.2h/616.1/514.1: a card moving to a graveyard - whether via a
-/// `Sacrifice`/`Discard` cost payment or CR 514.1's cleanup hand-size
-/// discard - is itself a replaceable zone-change proposal ("if a permanent
-/// you control would be sacrificed, exile it instead" is a real, if
-/// unusual, card pattern). This builds the *proposed* event only, mirroring
-/// `sba::resolve_deaths`'/`Engine::continue_scripted_zone_move`'s own
-/// "propose, then replacement-check, then commit" split rather than
+/// CR 601.2h/616.1/514.1: a card moving to a graveyard or exile - whether
+/// via a `Sacrifice`/`Discard`/`Exile` cost payment or CR 514.1's cleanup
+/// hand-size discard - is itself a replaceable zone-change proposal ("if a
+/// permanent you control would be sacrificed, exile it instead" is a real,
+/// if unusual, card pattern). This builds the *proposed* event only,
+/// mirroring `sba::resolve_deaths`'/`Engine::continue_scripted_zone_move`'s
+/// own "propose, then replacement-check, then commit" split rather than
 /// mutating directly the way this function's predecessor
 /// (`move_to_graveyard_for_cost`, folded into `commit_payment` itself) used
 /// to. Two callers: `Engine::continue_cost_zone_moves` (cost payments) and
 /// `Engine::continue_discard_moves` (cleanup discard, `phase5/replaceable-
 /// cleanup-discard`) - see either's own doc comment for its full pipeline.
-pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind) -> Option<GameEventKind> {
+///
+/// `to` was a hardcoded `Graveyard` before `phase5/escape-alternative-cost`
+/// (every prior caller happened to end there) - widened to a real parameter
+/// once `AdditionalCost::ExileFromGraveyard`'s own `CostPayment::Exile`
+/// needed a `Graveyard -> Exile` proposal through this same pipeline.
+pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind, to: ZoneKind) -> Option<GameEventKind> {
     let last_known_info = state.object(id)?.clone();
-    Some(GameEventKind::ZoneChange { object: id, from, to: ZoneKind::Graveyard, last_known_info: Some(last_known_info) })
+    Some(GameEventKind::ZoneChange { object: id, from, to, last_known_info: Some(last_known_info) })
 }
 
 /// CR 504.1/616.1: drawing a card is itself a replaceable zone-change
@@ -177,7 +182,7 @@ pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &
                 }
                 events.push(GameEventKind::Tapped { object: *id });
             }
-            CostPayment::Sacrifice(_) | CostPayment::Discard(_) => {
+            CostPayment::Sacrifice(_) | CostPayment::Discard(_) | CostPayment::Exile(_) => {
                 // Handled by Engine::continue_cost_zone_moves instead - see
                 // this function's own doc comment.
             }
@@ -199,18 +204,19 @@ pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &
 }
 
 /// `PendingZoneMove` (`Engine::continue_cost_zone_moves`'s own queue
-/// entry) - collects every `Sacrifice`/`Discard` payment in `payments` into
-/// a `(id, source zone)` pair, ready for `propose_zone_move`. Kept as a
-/// standalone pass (not folded into `commit_payment` above) since it must
-/// run *before* any replacement-checked commit happens - `PaymentPlan::
-/// validate` has already confirmed every id here really is in the zone it
-/// claims to be.
-pub(crate) fn collect_cost_zone_moves(payments: &[CostPayment]) -> Vec<(ObjectId, ZoneKind)> {
+/// entry) - collects every `Sacrifice`/`Discard`/`Exile` payment in
+/// `payments` into an `(id, source zone, destination zone)` triple, ready
+/// for `propose_zone_move`. Kept as a standalone pass (not folded into
+/// `commit_payment` above) since it must run *before* any
+/// replacement-checked commit happens - `PaymentPlan::validate` has already
+/// confirmed every id here really is in the zone it claims to be.
+pub(crate) fn collect_cost_zone_moves(payments: &[CostPayment]) -> Vec<(ObjectId, ZoneKind, ZoneKind)> {
     payments
         .iter()
         .filter_map(|payment| match payment {
-            CostPayment::Sacrifice(id) => Some((*id, ZoneKind::Battlefield)),
-            CostPayment::Discard(id) => Some((*id, ZoneKind::Hand)),
+            CostPayment::Sacrifice(id) => Some((*id, ZoneKind::Battlefield, ZoneKind::Graveyard)),
+            CostPayment::Discard(id) => Some((*id, ZoneKind::Hand, ZoneKind::Graveyard)),
+            CostPayment::Exile(id) => Some((*id, ZoneKind::Graveyard, ZoneKind::Exile)),
             _ => None,
         })
         .collect()

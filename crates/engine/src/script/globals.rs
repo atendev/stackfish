@@ -318,6 +318,15 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
             Ok(CostTag(CostComponent::Additional(AdditionalCost::TapPermanents { filter, count })))
         })?,
     )?;
+    // CR 702.138a Escape's "Exile N other cards from your graveyard" - same
+    // filter+count shape as TapPermanents, just against the graveyard.
+    costs.set(
+        "ExileFromGraveyard",
+        lua.create_function(|_, (table, count): (Table, u32)| {
+            let filter = decode_filter_table(table).map_err(to_lua_err)?;
+            Ok(CostTag(CostComponent::Additional(AdditionalCost::ExileFromGraveyard { filter, count })))
+        })?,
+    )?;
     costs.set(
         "Life",
         lua.create_function(|_, amount: u32| {
