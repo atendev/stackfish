@@ -645,7 +645,71 @@
 - Unresolved: none new — Banding remains the one real `KeywordSet` bit with no Lua grant path at all
   (unchanged by this slice, already named in `docs/lua/game-constants.md`).
 
+## Slice: volraths-shapeshifter (merged)
+
+- Branch `phase5/volraths-shapeshifter`.
+- Scope: CR 612.6 (Volrath's Shapeshifter) — "full text of another object" changes not just the
+  text box/type line (CR 612.5's own narrower `exchange-of-words` scope) but also the text that
+  represents name, mana cost, color indicator, power, and toughness. Named unmodeled by
+  `layer-engine-text`'s own closing note ever since. CR 612.7 (Spy Kit, "all names of nonlegendary
+  creature cards") was scoped out entirely, confirmed with the user before starting — it has *zero*
+  supporting substrate in this engine (no dynamic name-predicate matching anywhere; the only name
+  comparison, the legend rule's own grouping, is a fixed-string equality check; no card-catalog
+  capability exists to even enumerate "every nonlegendary creature card"), a much bigger, separate
+  gap than 612.6's.
+- Key design decision, confirmed with the user before implementing: modeled as a live
+  `ContinuousEffect` (Layer 3, reusing the existing `EffectDuration`/timestamp/condition machinery
+  for free — Volrath's Shapeshifter's own real duration, "until end of turn," needs genuine
+  live/reversible behavior, not a one-time mutation) rather than reusing `AbilityEffect::BecomeCopy`/
+  `ExchangeTextBoxes`'s existing "mutate `copiable_override`/re-run script once, never revert" shape.
+  That decision has a real, structural consequence: `layers::effective_characteristics` is a pure,
+  read-only query with no `&mut GameState` — it can apply new plain-data field overrides (which is
+  all this slice needs) but can never re-run a script or register a real ability the way the
+  one-time-mutation precedents do. So CR 612.6 is deliberately narrowed here to the *characteristic*
+  half only (name/mana cost/color/type line/keywords/power/toughness) — a Shapeshifter using this
+  effect looks and fights like the copied creature, but doesn't gain its activated/triggered
+  abilities. Named, not hidden - a structural fact of this design choice, not an oversight.
+- Key changes:
+  - `FullTextOverride` (`types/effect.rs`) — a new struct carrying just the fields
+    `EffectiveCharacteristics` actually derives from a `CardDefinition` (not the whole struct, which
+    also carries ability/cost/target-requirement fields with no "text" meaning here at all).
+    `From<&CardDefinition>` for easy construction from a real donor. Doesn't derive `PartialEq`/`Eq`
+    automatically (`ManaCost`/`PTValue` don't derive them either) — a minimal by-name `PartialEq` is
+    hand-written instead, since `EffectPrimitive`'s own derive just needs *something* to call, not a
+    deep structural comparison no real caller will ever perform.
+  - `EffectPrimitive::SetFullText(Box<FullTextOverride>)` — Layer 3, boxed to avoid bloating every
+    other `EffectPrimitive` variant with this one's much larger payload.
+  - `layers::effective_characteristics` restructured: `mana_cost`/`supertypes`/`subtypes` became
+    mutable locals seeded from `def` up front (previously read straight off `def` at the very end) so
+    `SetFullText`'s own match arm — folded into the *same* ordered Layer 3 pass `SetName` already
+    runs in, rather than a second loop — can override every characteristic this slice touches,
+    including re-invoking `resolve_base_pt` against the *donor's* own `power`/`toughness` (so even a
+    donor with a `PTValue::CharacteristicDefining` CDA base transfers correctly, for free — CDA
+    resolution is itself a pure, side-effect-free script call, unlike ability registration).
+    Timestamp ordering between `SetFullText` and a separate plain `SetName` in the same layer/pass
+    falls out correctly without any special-casing: a later `SetFullText` overwrites `name` too
+    (among everything else), but a later plain `SetName` only ever touches `name` on top of it.
+- Verify: 6 new tests (`phase5_volraths_shapeshifter.rs`) — `FullTextOverride::colors()`'s own
+  derivation, a real `effective_characteristics` consumer swapping every touched field, a `self_only`
+  check against an unrelated object, both timestamp-ordering directions against a separate `SetName`,
+  and a real end-to-end `EffectDuration::UntilEndOfTurn` expiry test (advances through a real Cleanup
+  step, confirming the effect is drained and the object reverts to its own printed identity) — this
+  last one needed *zero* new expiry-handling code, since `engine/turn.rs`'s existing
+  `begin_cleanup_step` already `retain`s non-`UntilEndOfTurn` effects generically, with no awareness
+  of which specific payload it's draining. Full workspace suite green.
+- Unresolved, confirmed narrowed rather than a gap in disguise: no producer wires a real activated
+  ability that captures "target creature card in a graveyard" into a fresh `SetFullText` effect yet
+  (proven via direct `ContinuousEffect` construction only, same posture several other first-proof
+  slices in this cluster already took) — a real Volrath's Shapeshifter card script would need a new
+  `AbilityEffect` variant to build that target-capture-into-a-new-continuous-effect shape, a separate
+  follow-up. No Lua exposure either — `CardDefinition` is a large struct; a full Lua table decoder
+  for it is disproportionate for one card. CR 612.7 (Spy Kit) remains entirely unaddressed, per the
+  scoping note above.
+
 ## General layer notes
 
-- Layer order in `effective_characteristics`: 2 control, 4 type, 5 color, 6 abilities, 7a CDA, 7b set P/T, 7c modify P/T interleaved with counters (CR 613.4c, `phase5/layer7d-counter-interleaving`), 7e switch.
+- Layer order in `effective_characteristics`: 3 text (CR 612.6/612.8, `volraths-shapeshifter`/
+  `layer-engine-text` — runs first, since `SetFullText` can override what every later layer treats
+  as its own base), 2 control, 4 type, 5 color, 6 abilities, 7a CDA, 7b set P/T, 7c modify P/T
+  interleaved with counters (CR 613.4c, `phase5/layer7d-counter-interleaving`), 7e switch.
 - Dependency ordering only active in 7c due to `DoublePT`; other layers use timestamp order. Counters merge into 7c by timestamp comparison, not the dependency graph itself (they have no dependency of their own).
