@@ -60,8 +60,8 @@ fn chosen_by_opponent_definition(mode_choice: ModeChoice) -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: vec![
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None },
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::Shuffle), additional_cost: None },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None, pawprint_weight: 0 },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::Shuffle), additional_cost: None, pawprint_weight: 0 },
         ],
         mode_choice,
     }
@@ -82,11 +82,12 @@ fn any_target_requirement() -> TargetSpec {
 fn chosen_by_opponent_with_a_target_definition() -> CardDefinition {
     CardDefinition {
         modes: vec![
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None, pawprint_weight: 0 },
             SpellMode {
                 target_requirement: Some(any_target_requirement()),
                 effect: Some(AbilityEffect::Damage(2)),
                 additional_cost: None,
+                pawprint_weight: 0,
             },
         ],
         ..chosen_by_opponent_definition(ModeChoice::ExactlyChosenByOpponent(1))

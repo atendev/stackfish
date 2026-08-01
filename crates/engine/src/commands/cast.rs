@@ -200,6 +200,39 @@ pub(super) fn execute_cast_spell(
                 Vec::new(),
                 Some(PendingModeChoice { chooser: *chooser, min, max }),
             )
+        } else if let ModeChoice::PawprintBudget(budget) = object.definition.mode_choice {
+            // CR 700.2i: constrained by total pawprint *weight*, not mode
+            // count - no floor (0 modes is legal, unlike every count-based
+            // variant's implicit "at least one"), and no repeats (no real
+            // card combines a pawprint budget with CR 700.2d's "choose the
+            // same mode more than once" exception).
+            let mut seen_modes = HashSet::new();
+            let mut total_weight: u32 = 0;
+            for &m in &modes {
+                if !seen_modes.insert(m) {
+                    return Err(CommandError::IllegalAction(
+                        "the same mode can't be chosen more than once".to_string(),
+                    ));
+                }
+                let mode = object.definition.modes.get(m as usize).ok_or_else(|| {
+                    CommandError::IllegalAction("no such mode on this card".to_string())
+                })?;
+                total_weight += mode.pawprint_weight;
+            }
+            if total_weight > budget {
+                return Err(CommandError::IllegalAction(format!(
+                    "this modal spell allows choosing modes worth up to {budget} pawprint(s), got {total_weight}"
+                )));
+            }
+            let mut chosen_indices = modes.clone();
+            chosen_indices.sort_unstable();
+            let mode_additional_costs: Vec<AdditionalCost> = chosen_indices
+                .iter()
+                .filter_map(|&idx| object.definition.modes.get(idx as usize).and_then(|m| m.additional_cost.clone()))
+                .collect();
+            let (target_requirement, modal_effect) =
+                combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(CommandError::IllegalAction)?;
+            (target_requirement, modal_effect, mode_additional_costs, None)
         } else {
             // CR 700.2a: "choose a number of those options" - never
             // zero, even for an UpTo spell (ModeChoice::bounds's own

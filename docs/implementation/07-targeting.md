@@ -642,3 +642,50 @@
     (`Engine::build_target_requirement`) and patching it onto the already-inserted card object, the
     same placeholder-then-patch timing the scenario crate's own `register_target_script` established.
 - Unresolved: none new for this shape.
+
+## Slice: modal-pawprint-budget (merged)
+
+- Branch `phase5/modal-pawprint-budget`.
+- Scope: CR 700.2i, named unmodeled by `modal-multi-mode`'s own closing note above — some modal
+  spells weight their modes with pawprint ({P}) symbols instead of a flat bulleted count, and let
+  their controller choose any number of modes whose combined weight doesn't exceed a stated budget.
+  Unlike every existing `ModeChoice` variant, the constraint is on total *weight*, not mode *count*.
+- Key changes:
+  - `SpellMode.pawprint_weight: u32` — a new field (~24 existing `SpellMode {` construction sites
+    across 9 files needed it, mechanical, compiler-forced, the same ripple class every prior
+    `ModeChoice`/`SpellMode` field addition already paid) — meaningless (but still must be set, no
+    `Default` impl) unless the card's own `mode_choice` is `PawprintBudget`.
+  - `ModeChoice::PawprintBudget(u32)` — the printed total budget. Deliberately **not** folded into
+    `ModeChoice::bounds()`'s `(min, max, repeatable)` shape — that method has no access to the modes
+    list and can't derive a meaningful count bound from a weight budget alone (a budget of 3 could
+    mean "at most 1 mode" or "at most 3," depending on individual weights). `bounds()` does still
+    return `(0, budget, false)` for this variant, but only as a *display*-only hint for
+    `StepStatus::AwaitingTriggerModeChoice`'s own `min`/`max` fields — real enforcement never calls
+    `bounds()` for this variant, each real site has its own explicit weight-sum check instead, the
+    same way `ExactlyChosenByOpponent`/`UpToChosenByOpponent` are already special-cased ahead of
+    `bounds()` rather than folded into it.
+  - Two real enforcement sites, each with their own weight-sum check (no shared helper between them —
+    one reads `object.definition.modes` off a freshly-looked-up card, the other reads `modes` already
+    borrowed from `ProcessState`): `commands::cast::execute_command`'s `CastSpell` arm (caster-chosen
+    spells) and `Engine::submit_trigger_mode_choice` (CR 603.3c modal triggered abilities, which share
+    `ModeChoice`/`SpellMode` wholesale with `CardDefinition` — a pawprint-budgeted triggered ability
+    works for free once the type-level support existed, needing only its own validation branch).
+  - CR 700.2i's own wording ("can choose any number of modes such that... not greater than") sets no
+    floor, unlike every other `ModeChoice` variant's implicit "at least one" — choosing zero modes is
+    legal, and the spell/ability still resolves, doing nothing (falls out for free from
+    `combine_chosen_modes`'s existing empty-slice handling, no new code needed there).
+  - Scenario TOML: **not** wired — `build_mode_choice`/`SpellModeSpec` only ever produce count-based
+    `ModeChoice` variants; the one required scenario-crate construction site (`build_spell_modes`)
+    just sets `pawprint_weight: 0`, named with a TODO rather than silently defaulted. Proven via direct
+    Rust construction only, same posture the Lua/TOML-inaccessible `*ChosenByOpponent` variants
+    already took.
+- Verify: 7 new tests (`phase5_modal_pawprint_budget.rs`) — an exact-fit combination accepted, a
+  cheap-mode-only combination accepted with budget to spare, zero modes chosen accepted (no floor),
+  an over-budget combination rejected, a repeated mode rejected (no repeat support for this variant),
+  and two triggered-ability tests (a pawprint-budgeted trigger accepting a combination that chains
+  into the pre-existing `AwaitingTriggerTargets` pause for its own two synthetic zero-count slots,
+  and one rejecting an over-budget combination). Full workspace suite green, all pre-existing modal
+  tests (`Exactly`/`UpTo`/`*Repeatable`/`*ChosenByOpponent`) unaffected.
+- Unresolved, confirmed narrowed rather than a gap in disguise: no repeatable pawprint-budget modes
+  and no CR 700.2e "chosen by opponent" combination — no real card combines either with this shape.
+  CR 700.2i itself has no further known gap after this slice.

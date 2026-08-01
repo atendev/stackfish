@@ -328,6 +328,12 @@ pub struct SpellMode {
     /// needed, only new population of an existing, already-generic field.
     /// `None` (the common case) for a mode with no cost of its own.
     pub additional_cost: Option<AdditionalCost>,
+    /// CR 700.2i: this mode's own printed pawprint ({P}) weight, consulted
+    /// only when the card's own `mode_choice` is `ModeChoice::
+    /// PawprintBudget` — meaningless (but still must be set, no `Default`
+    /// impl on this struct) otherwise, same "set even when it doesn't apply
+    /// yet" stance `CardDefinition::mode_choice` itself already takes.
+    pub pawprint_weight: u32,
 }
 
 /// CR 700.2's "Choose one —"/"Choose two —"/"Choose one or more —" instruction
@@ -376,6 +382,22 @@ pub enum ModeChoice {
     UpToRepeatable(u32),
     ExactlyChosenByOpponent(u32),
     UpToChosenByOpponent(u32),
+    /// CR 700.2i: choose modes whose combined `SpellMode::pawprint_weight`
+    /// doesn't exceed this budget — a constraint on total *weight*, not
+    /// mode *count*, so it's deliberately not folded into `bounds()` below
+    /// (that method has no access to the modes list, and couldn't derive a
+    /// meaningful count bound from a weight budget alone: a budget of 3
+    /// could mean "at most 1 mode" or "at most 3," depending on individual
+    /// weights). Every real validation site special-cases this variant with
+    /// its own weight-sum check before ever calling `bounds()`, the same
+    /// way `ExactlyChosenByOpponent`/`UpToChosenByOpponent` are already
+    /// special-cased ahead of it. CR 700.2i's own wording ("can choose any
+    /// number of modes such that... not greater than") sets no floor,
+    /// unlike every other variant here — choosing zero modes is legal.
+    /// Narrowed: no repeatable pawprint-budget modes and no "chosen by
+    /// opponent" combination — no real card combines either with this
+    /// shape.
+    PawprintBudget(u32),
 }
 
 impl ModeChoice {
@@ -390,6 +412,12 @@ impl ModeChoice {
     /// this method; `Engine::push_ordered_triggers`/
     /// `submit_trigger_mode_choice` deliberately don't, a named narrowing —
     /// see `RegisteredAbility::mode_choice`'s own doc comment).
+    ///
+    /// `PawprintBudget` has no real count bound (see its own doc comment) —
+    /// callers needing a *display*-only hint (not real enforcement) get
+    /// `(0, budget, false)` here, with `max` understood to mean "pawprint
+    /// budget," not "mode count," for this one variant; real enforcement is
+    /// each call site's own explicit weight-sum check, never this method.
     pub(crate) fn bounds(&self) -> (u32, u32, bool) {
         match *self {
             ModeChoice::Exactly(n) => (n, n, false),
@@ -398,6 +426,7 @@ impl ModeChoice {
             ModeChoice::UpToRepeatable(n) => (1, n, true),
             ModeChoice::ExactlyChosenByOpponent(n) => (n, n, false),
             ModeChoice::UpToChosenByOpponent(n) => (1, n, false),
+            ModeChoice::PawprintBudget(n) => (0, n, false),
         }
     }
 }

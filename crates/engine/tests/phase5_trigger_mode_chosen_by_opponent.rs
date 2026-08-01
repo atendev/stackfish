@@ -67,8 +67,8 @@ fn any_target_requirement() -> TargetSpec {
 fn modal_upkeep_ability_chosen_by_opponent(source: ObjectId, mode_choice: ModeChoice) -> RegisteredAbility {
     RegisteredAbility {
         modes: vec![
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None },
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::Shuffle), additional_cost: None },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None, pawprint_weight: 0 },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::Shuffle), additional_cost: None, pawprint_weight: 0 },
         ],
         mode_choice,
         id: AbilityId(0),
@@ -88,11 +88,12 @@ fn modal_upkeep_ability_chosen_by_opponent(source: ObjectId, mode_choice: ModeCh
 fn modal_upkeep_ability_chosen_by_opponent_with_a_target(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: vec![
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None, pawprint_weight: 0 },
             SpellMode {
                 target_requirement: Some(any_target_requirement()),
                 effect: Some(AbilityEffect::Damage(2)),
                 additional_cost: None,
+                pawprint_weight: 0,
             },
         ],
         ..modal_upkeep_ability_chosen_by_opponent(source, ModeChoice::ExactlyChosenByOpponent(1))

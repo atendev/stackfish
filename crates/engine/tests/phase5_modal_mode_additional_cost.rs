@@ -55,11 +55,12 @@ fn mode_cost_definition() -> CardDefinition {
         alternative_costs: Vec::new(),
         effect: None,
         modes: vec![
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None, pawprint_weight: 0 },
             SpellMode {
                 target_requirement: Some(any_target_requirement()),
                 effect: Some(AbilityEffect::Damage(2)),
                 additional_cost: Some(AdditionalCost::LifePayment { amount: 2 }),
+                pawprint_weight: 0,
             },
         ],
         mode_choice: ModeChoice::UpTo(2),
