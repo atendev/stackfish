@@ -174,6 +174,12 @@ impl Engine {
                 ReplacementOutcome::Resolved(event) => {
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
+                    // CR 702.29b: same hand-entry self-registration as the
+                    // unpaused draw path (turn.rs) - this is its CR 616.1
+                    // ordering-choice-delayed sibling.
+                    if let GameEventKind::ZoneChange { object, .. } = committed.kind {
+                        self.run_card_script_for(object);
+                    }
                     self.state.ledger.push(committed);
                     self.enter_priority_via_replacement_check(tail_events, since_ledger)
                 }
@@ -192,6 +198,11 @@ impl Engine {
                     ReplacementOutcome::Resolved(event) => {
                         let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                         self.departed_triggered_abilities.extend(departed);
+                        // CR 702.29b: same hand-entry self-registration as
+                        // continue_draw_cards' own unpaused commit below.
+                        if let GameEventKind::ZoneChange { object, .. } = committed.kind {
+                            self.run_card_script_for(object);
+                        }
                         self.state.ledger.push(committed);
                         self.continue_draw_cards(remaining, player, stack_id, events_so_far)
                     }
@@ -714,6 +725,12 @@ impl Engine {
                 ReplacementOutcome::Resolved(event) => {
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
+                    // CR 702.29b: a Game.Ops.DrawCards(n)-drawn card's own
+                    // script self-registers any hand-only ability now, same
+                    // as every other Library->Hand producer.
+                    if let GameEventKind::ZoneChange { object, .. } = committed.kind {
+                        self.run_card_script_for(object);
+                    }
                     self.state.ledger.push(committed);
                 }
                 ReplacementOutcome::NeedsOrderingChoice {

@@ -293,6 +293,10 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;
+    // CR 702.29a Cycling's "Discard this card" - always the ability's own
+    // source, no filter table (mirrors TapSelf's own no-argument shape,
+    // distinct from the filter-driven Discard binding just below).
+    costs.set("DiscardSelf", CostTag(CostComponent::Additional(AdditionalCost::DiscardSelf)))?;
     costs.set(
         "Sacrifice",
         lua.create_function(|_, table: Table| {

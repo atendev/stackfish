@@ -92,6 +92,13 @@ pub enum AdditionalCost {
     TapSelf,
     Sacrifice { filter: FilterSpec },
     Discard { filter: FilterSpec },
+    /// CR 702.29a Cycling's "Discard this card" — the `Discard` sibling
+    /// `TapSelf` already is to `TapPermanents`: always the ability's own
+    /// source (`PaymentPlan::validate`'s `source` param), never a filter
+    /// choice, unlike the plain `Discard { filter }` above (which lets the
+    /// payer discard *any* matching hand card, wrong for a card that must
+    /// specifically discard itself to pay its own cycling cost).
+    DiscardSelf,
     TapPermanents { filter: FilterSpec, count: u32 },
     LifePayment { amount: u32 },
     Other { description: String },
@@ -855,6 +862,21 @@ impl PaymentPlan {
                         return false;
                     }
                     if !filter.matches(obj, obj.controller, payer) {
+                        return false;
+                    }
+                }
+                AdditionalCost::DiscardSelf => {
+                    let Some(CostPayment::Discard(id)) = payments.next() else { return false };
+                    if *id != source {
+                        return false;
+                    }
+                    let Some(obj) = state.object(*id) else { return false };
+                    // CR 702.29a: the source must actually still be sitting
+                    // in its controller's hand - same shape the plain
+                    // Discard { filter } arm above checks, minus the filter
+                    // (there's nothing left to match against once the id is
+                    // pinned to source).
+                    if obj.zone != ZoneKind::Hand || obj.controller != payer {
                         return false;
                     }
                 }

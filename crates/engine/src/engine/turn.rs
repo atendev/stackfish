@@ -500,6 +500,13 @@ impl Engine {
                     ReplacementOutcome::Resolved(event) => {
                         let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                         self.departed_triggered_abilities.extend(departed);
+                        // CR 702.29b: a drawn card's own script self-registers
+                        // any hand-only ability (Cycling) now that it's
+                        // really in the hand zone - see run_card_script_for's
+                        // own doc comment.
+                        if let GameEventKind::ZoneChange { object, .. } = committed.kind {
+                            self.run_card_script_for(object);
+                        }
                         self.state.ledger.push(committed);
                     }
                     ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {

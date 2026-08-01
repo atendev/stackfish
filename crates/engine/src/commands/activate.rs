@@ -49,15 +49,6 @@ pub(super) fn execute_activate_ability(
             "actor does not control the ability's source".to_string(),
         ));
     }
-    // CR 602.1/112.6: activated abilities on permanents are only
-    // usable while the permanent is on the battlefield (unless the
-    // ability itself says otherwise — no such override exists yet).
-    if source_object.zone != ZoneKind::Battlefield {
-        return Err(CommandError::IllegalAction(
-            "source is not on the battlefield".to_string(),
-        ));
-    }
-
     let ability = find_ability(state, source, ability_index).ok_or_else(|| {
         CommandError::IllegalAction("no such ability on source".to_string())
     })?;
@@ -70,6 +61,25 @@ pub(super) fn execute_activate_ability(
     let cost = ability.cost.clone();
     let operation = ability.operation;
     let target_requirement = ability.target.clone();
+
+    // CR 602.1/112.6: activated abilities on permanents are only usable
+    // while the permanent is on the battlefield, "unless the ability itself
+    // says otherwise" - CR 702.29a Cycling is exactly that override, so its
+    // own required zone is Hand instead. Matched on the ability's own cost
+    // shape (does it include DiscardSelf?) rather than a new RegisteredAbility
+    // field, same "match on shape, don't grow the struct" precedent the
+    // Equip sorcery-speed check just below already set.
+    let requires_hand = cost
+        .as_ref()
+        .is_some_and(|c| c.additional.iter().any(|a| matches!(a, AdditionalCost::DiscardSelf)));
+    let required_zone = if requires_hand { ZoneKind::Hand } else { ZoneKind::Battlefield };
+    if source_object.zone != required_zone {
+        return Err(CommandError::IllegalAction(if requires_hand {
+            "source is not in hand".to_string()
+        } else {
+            "source is not on the battlefield".to_string()
+        }));
+    }
 
     // CR 702.6a: "Activate only as a sorcery" - Equip's own timing
     // restriction, enforced here by matching on the effect shape

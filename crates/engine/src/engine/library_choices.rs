@@ -262,6 +262,10 @@ impl Engine {
                         .expect("hand zone must exist")
                         .push_bottom(new_id);
                     self.state.objects.insert(new_id, new_object);
+                    // CR 702.29b: a tutored-to-hand card's own script
+                    // self-registers any hand-only ability now, same as
+                    // every other Library->Hand producer.
+                    self.run_card_script_for(new_id);
                     events_so_far.push(GameEventKind::ZoneChange {
                         object: new_id,
                         from: ZoneKind::Library,

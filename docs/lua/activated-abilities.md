@@ -90,3 +90,37 @@ that restriction separately; every ability using it gets it for free.
 Activating an ability with a cost pauses for a real payment step — even a bare `{T}` cost — before
 anything happens. The actual tap/sacrifice/discard/life payment is committed at that step, not
 when the ability is announced.
+
+## Worked example: Cycling
+
+CR 702.29a — "`[Cost]`, Discard this card: Draw a card," an ability that functions only while the
+card sits in its controller's hand. `Game.Costs.DiscardSelf` (not the filter-driven `Discard`) is
+what makes that possible — an ability whose cost includes it may be activated from `Hand` instead
+of the usual `Battlefield` requirement (CR 602.1's own "unless the ability itself says otherwise"):
+
+```lua
+-- Cycling {2}
+local s = {}
+
+function s.register_abilities(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:AddCost(Game.Costs.Mana("{2}"))
+    e:AddCost(Game.Costs.DiscardSelf)
+    e:SetOperation(Game.Ops.DrawCards(1))
+    e:Register()
+end
+
+return s
+```
+
+Typecycling (CR 702.29e) is the same shape with `Game.Ops.Search` instead of `DrawCards`:
+
+```lua
+-- Islandcycling {1}
+e:AddCost(Game.Costs.Mana("{1}"))
+e:AddCost(Game.Costs.DiscardSelf)
+e:SetOperation(Game.Ops.Search({ subtypes = { "Island" } }, 1))
+```
+
+Not modeled: CR 702.29c/d's "when you cycle this card" / "cycles or discards" triggers — nothing in
+this engine's trigger model yet distinguishes a cycling-cost discard from any other discard.
