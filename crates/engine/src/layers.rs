@@ -16,12 +16,19 @@ use crate::types::object::GameObject;
 /// every call rather than cached — see the no-mutable-cache rationale on
 /// `EffectiveCharacteristics` itself.
 ///
-/// Layer 3 (`TextChanging`, narrowed to CR 612.8 name-setting only), 4
-/// (`TypeChanging`), 5 (`ColorChanging`), 6 (`AbilityAdding`), 7a
-/// (`PowerToughnessCDA`), 7b (`PowerToughnessSetting`), 7c
-/// (`PowerToughnessModifying`), and 7e (`PowerToughnessSwitching`) are
-/// applied — see `Layer`'s own doc comment for why the rest (copy/control)
-/// aren't built yet.
+/// Layer 3 (`TextChanging`, CR 612.8 name-setting and CR 612.6's own
+/// "full text" `SetFullText` — see `FullTextOverride`'s own doc comment for
+/// what it does and doesn't cover), 4 (`TypeChanging`), 5 (`ColorChanging`),
+/// 6 (`AbilityAdding`), 7a (`PowerToughnessCDA`), 7b
+/// (`PowerToughnessSetting`), 7c (`PowerToughnessModifying`), and 7e
+/// (`PowerToughnessSwitching`) are applied — see `Layer`'s own doc comment
+/// for why the rest (copy/control) aren't built yet.
+///
+/// `mana_cost`/`supertypes`/`subtypes` are mutable locals seeded from `def`
+/// up front (not read straight off `def` at the very end the way they used
+/// to be) — `SetFullText` needs to be able to override them mid-pass, the
+/// same way every other field this function tracks across its layer loops
+/// already works.
 ///
 /// Layer 7d/CR 613.4c's `+1/+1`/`-1/-1` counters are folded into the same
 /// 7c pass as `ModifyPT`/`DoublePT`, interleaved by timestamp against them
@@ -89,14 +96,41 @@ pub fn effective_characteristics(
     // were still todo!() stubs) - real color, printed mana cost symbols
     // included, now derived correctly.
     let mut colors = def.colors();
+    // Mutable locals rather than read straight off `def` at the bottom of
+    // this function, as they used to be - CR 612.6's own SetFullText (below)
+    // needs to be able to override them, same as every other field this
+    // function tracks across its layer loops.
+    let mut mana_cost = def.mana_cost.clone();
+    let mut supertypes = def.supertypes;
+    let mut subtypes = def.subtypes.clone();
 
-    // Layer 3 (CR 612.8): override-wins-outright, same shape as layer 2's
-    // GainControl/layer 7b's SetPT - a later-timestamp SetName replaces an
-    // earlier one entirely, doesn't combine.
+    // Layer 3: CR 612.8's SetName (override-wins-outright, same shape as
+    // layer 2's GainControl/layer 7b's SetPT - a later-timestamp SetName
+    // replaces an earlier one entirely, doesn't combine) and CR 612.6's
+    // SetFullText (Volrath's Shapeshifter) share this one ordered pass -
+    // both are Layer 3, so a later-timestamp SetFullText can still be
+    // overridden by an even-later plain SetName touching only `name`, per
+    // each primitive's own timestamp-ordered override semantics. See
+    // `FullTextOverride`'s own doc comment for exactly what SetFullText
+    // does and doesn't cover.
     let mut name = def.name.clone();
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::TextChanging) {
-        if let Some(EffectPrimitive::SetName(new_name)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
-            name = new_name;
+        match resolve_primitive(effect, state, script_runtime, obj.controller) {
+            Some(EffectPrimitive::SetName(new_name)) => {
+                name = new_name;
+            }
+            Some(EffectPrimitive::SetFullText(donor)) => {
+                name = donor.name.clone();
+                mana_cost = donor.mana_cost.clone();
+                colors = donor.colors();
+                card_types = donor.card_types;
+                supertypes = donor.supertypes;
+                subtypes = donor.subtypes.clone();
+                keywords = donor.keywords;
+                power = resolve_base_pt(donor.power.as_ref(), state, script_runtime, object, obj.controller);
+                toughness = resolve_base_pt(donor.toughness.as_ref(), state, script_runtime, object, obj.controller);
+            }
+            _ => {}
         }
     }
 
@@ -273,11 +307,11 @@ pub fn effective_characteristics(
 
     EffectiveCharacteristics {
         name,
-        mana_cost: def.mana_cost.clone(),
+        mana_cost,
         colors,
         card_types,
-        supertypes: def.supertypes,
-        subtypes: def.subtypes.clone(),
+        supertypes,
+        subtypes,
         keywords,
         protection_colors,
         protection_card_types,

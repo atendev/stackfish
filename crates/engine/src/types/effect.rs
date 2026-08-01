@@ -3,10 +3,84 @@ use crate::{
     GameObject, GameState, GameEventKind, ScriptHandle, Target, ZoneKind,
 };
 use crate::types::ability::{CopyExceptions, InterveningIfSpec};
-use crate::types::card::KeywordSet;
+use crate::types::card::{CardDefinition, KeywordSet, PTValue};
 use crate::types::cost::FilterController;
 use crate::types::counter::CounterKind;
 use crate::script::ScriptRuntime;
+
+/// CR 612.6's "full text" payload — just the fields `EffectiveCharacteristics`
+/// actually derives from a `CardDefinition` (name, mana cost, color, type
+/// line, keywords, power/toughness), not the whole struct: `CardDefinition`
+/// also carries ability/cost/target-requirement fields (`alternative_costs`,
+/// `target_requirement`, `effect`, `modes`, `mode_choice`, `script_ref`) that
+/// have no "text" meaning here and — critically — can't safely transfer via
+/// this mechanism at all. `layers::effective_characteristics` is a pure,
+/// read-only query with no `&mut GameState`; it can apply this payload's
+/// fields (plain data, no side effects) but can never re-run a script or
+/// register a new ability the way `AbilityEffect::BecomeCopy`/
+/// `ExchangeTextBoxes` do for their own one-time, non-reverting mutations.
+/// So CR 612.6's own "full text" is deliberately narrowed here to the
+/// *characteristic* half — a Volrath's Shapeshifter-style effect looks and
+/// fights like the copied creature (right name/cost/color/type line/P&T),
+/// but doesn't gain its activated/triggered abilities. Named, not hidden:
+/// this is a structural consequence of modeling CR 612.6 as a live,
+/// reversible continuous effect (reusing `EffectDuration`'s existing
+/// expiry machinery for free) rather than a permanent one-time mutation.
+///
+/// Doesn't derive `PartialEq`/`Eq` on its own component fields (`ManaCost`/
+/// `PTValue` don't derive them either) — `EffectPrimitive`'s own derive just
+/// needs *a* `PartialEq` impl to exist, so a minimal by-name one is
+/// hand-written below rather than pulled in through every field.
+#[derive(Clone, Debug)]
+pub struct FullTextOverride {
+    pub name: String,
+    pub mana_cost: ManaCost,
+    pub color_indicator: Option<ColorSet>,
+    pub card_types: CardTypeSet,
+    pub supertypes: SupertypeSet,
+    pub subtypes: Vec<Subtype>,
+    pub keywords: KeywordSet,
+    pub power: Option<PTValue>,
+    pub toughness: Option<PTValue>,
+}
+
+impl FullTextOverride {
+    /// CR 105.2a/202.2: same `color_indicator`-or-mana-cost split
+    /// `CardDefinition::colors()` already implements.
+    pub fn colors(&self) -> ColorSet {
+        match self.color_indicator {
+            Some(indicator) => indicator,
+            None => self.mana_cost.colors(),
+        }
+    }
+}
+
+impl From<&CardDefinition> for FullTextOverride {
+    fn from(def: &CardDefinition) -> Self {
+        FullTextOverride {
+            name: def.name.clone(),
+            mana_cost: def.mana_cost.clone(),
+            color_indicator: def.color_indicator,
+            card_types: def.card_types,
+            supertypes: def.supertypes,
+            subtypes: def.subtypes.clone(),
+            keywords: def.keywords,
+            power: def.power.clone(),
+            toughness: def.toughness.clone(),
+        }
+    }
+}
+
+impl PartialEq for FullTextOverride {
+    /// No real caller compares two `FullTextOverride` payloads for
+    /// structural equality — this exists only so `EffectPrimitive`'s own
+    /// derive has *something* to call. Name is the one field that reads as
+    /// "this override's own identity" for any future debugging/test use.
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+impl Eq for FullTextOverride {}
 
 /// CR 613.1 layers, with sublayers for layer 7 (power/toughness).
 /// `TypeChanging` (4), `ColorChanging` (5), `AbilityAdding` (6),
@@ -165,6 +239,18 @@ pub enum EffectPrimitive {
     /// non-`Copy` `EffectPrimitive` variant — see `layers::resolve_primitive`
     /// for why the type dropped `Copy` to accommodate it.
     SetName(String),
+    /// Layer 3 (CR 612.6, Volrath's Shapeshifter): "full text of another
+    /// object" — overrides name, mana cost, color, type line (card types/
+    /// supertypes/subtypes), keywords, and power/toughness all at once,
+    /// same override-not-additive shape `SetName`/`SetPT` already establish
+    /// (a later-timestamp `SetFullText` replaces an earlier one's result
+    /// entirely; a later-timestamp plain `SetName` can still independently
+    /// override just the name on top of it, since they touch different
+    /// fields). Boxed to avoid bloating every other `EffectPrimitive`
+    /// variant with this one's much larger payload. See
+    /// `FullTextOverride`'s own doc comment for why this deliberately
+    /// doesn't cover the object's actual registered abilities.
+    SetFullText(Box<FullTextOverride>),
     /// Layer 2 (CR 108.4/613.1): the object's controller becomes this
     /// player — overrides whatever came before this layer entirely, exactly
     /// like `SetPT`'s override semantics for layer 7b (a later-timestamp
