@@ -680,13 +680,13 @@ impl Engine {
                 status
             }
 
-            ProcessState::AwaitingCopyChoice { object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent } => {
+            ProcessState::AwaitingCopyChoice { object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent, carry_forward_if_declined } => {
                 // Nothing to do until submit_copy_choice answers - same
                 // "put the exact same state back" pattern every other
                 // choice-pause above already uses.
                 let status = StepStatus::AwaitingCopyChoice { player: controller, object, candidates: candidates.clone() };
                 self.process_state = ProcessState::AwaitingCopyChoice {
-                    object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent,
+                    object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent, carry_forward_if_declined,
                 };
                 status
             }

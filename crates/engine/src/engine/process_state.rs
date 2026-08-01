@@ -649,6 +649,21 @@ pub enum ProcessState {
     /// `costs_paid` at the point this pause is raised) so a copied Sunburst
     /// creature still gets a real count once `apply_enters_battlefield_
     /// modifiers` runs on resume.
+    ///
+    /// `carry_forward_if_declined` (CR 707.9e, `phase5/chained-copy-effects`)
+    /// is `None` for every *first* pause (the object hasn't copied anything
+    /// yet, so there's nothing to supersede). It's only ever `Some` when
+    /// `submit_copy_choice` itself detects a *chain* — the just-copied
+    /// definition has its own `EntersAsCopy` — and re-enters this same
+    /// variant instead of finishing: it holds the outer round's own
+    /// already-applied-copy-but-not-yet-applied-additional-effect
+    /// `CopyExceptions`, to be applied after all if this new pause's choice
+    /// is declined (CR 707.9e's own condition, "another copy effect is
+    /// applied... after," was never actually met in that case). If instead
+    /// this pause's choice picks a real target, the outer round's exception
+    /// is conclusively superseded and `submit_copy_choice` discards this
+    /// field for good, keeping only its own newly-applied round's exceptions
+    /// as the next `carry_forward_if_declined` candidate.
     AwaitingCopyChoice {
         object: ObjectId,
         controller: PlayerId,
@@ -657,6 +672,7 @@ pub enum ProcessState {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
         colors_spent: ColorSet,
+        carry_forward_if_declined: Option<CopyExceptions>,
     },
     /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
     /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —

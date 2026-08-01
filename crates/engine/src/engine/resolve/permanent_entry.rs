@@ -219,6 +219,11 @@ impl Engine {
                         stack_id: top.stack_id,
                         events_so_far: events,
                         colors_spent: colors_spent(&top.costs_paid),
+                        // CR 707.9e: this is the first pause for this
+                        // entering object - nothing has copied anything yet,
+                        // so there's no outer round's exception to fall back
+                        // to if this choice is declined.
+                        carry_forward_if_declined: None,
                     });
                 }
                 // CR 702.82a: checked *before*
