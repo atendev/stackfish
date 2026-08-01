@@ -453,6 +453,12 @@ impl Engine {
             self.state.zone_mut(ZoneKind::Hand, Some(player)).expect("hand zone").push_bottom(new_id);
             self.state.objects.insert(new_id, new_obj);
             commands::remap_abilities(&mut self.state, card, new_id);
+            // CR 702.29b: an opening-hand card's own script self-registers
+            // any hand-only ability now, same as every other Library->Hand
+            // producer - remap_abilities just above is a no-op today (no
+            // producer ever registers an ability against a still-in-library
+            // object), so this is what actually populates it.
+            self.run_card_script_for(new_id);
             let event_id = self.state.allocate_event_id();
             let seq = self.state.allocate_sequence_no();
             self.state.ledger.push(GameEvent {

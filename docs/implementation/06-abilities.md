@@ -352,3 +352,63 @@
     but no real card needing it was used to scope this slice.
   - Any restriction shape beyond a single card-type filter (e.g. "only to cast blue spells" by
     color, or "only to activate abilities").
+
+## Slice: cycling-ability (merged)
+
+- Branch `phase5/cycling-ability`.
+- Scope: CR 702.29a Cycling ("`[Cost]`, Discard this card: Draw a card" — an activated ability
+  that functions only while its card sits in a player's hand) and CR 702.29e Typecycling (same
+  shape with a library search instead of a draw). Requirements report given in chat before
+  implementation.
+- Verify: 11 new tests (`phase5_cycling.rs`) — 2 Lua self-registration, 5 mechanism/rejection
+  tests via hand-built `RegisteredAbility`s, 1 Typecycling end-to-end, 3 "real producer wiring"
+  tests (see below) — full workspace suite green (172 test binaries, 0 failed).
+- Key finding that reshaped scope mid-implementation: every `run_card_script` call site in this
+  engine was battlefield-entry-only (`PlayLand`, spell resolution, copy effects, search-to-
+  battlefield, tokens) — a card drawn into hand never had a chance to self-register a hand-only
+  ability at all, so Cycling's own mechanism would've been provably unreachable through real
+  gameplay even once built. Surfaced in the requirements report as a scope fork (mechanism-only,
+  proven by direct construction, vs. also wiring real hand-zone registration); the user chose to
+  pull the wiring in.
+- Key changes:
+  - `AdditionalCost::DiscardSelf` (types/cost.rs) — the `Discard` sibling `TapSelf` already is to
+    `TapPermanents`: always the ability's own source (`PaymentPlan::validate`'s `source` param),
+    never a filter choice, unlike the pre-existing `Discard { filter }` (which would let the payer
+    discard *any* matching hand card — wrong for a card that must specifically discard itself).
+    `commit_payment`/`collect_cost_zone_moves` needed zero changes — both already handle
+    `CostPayment::Discard(id)` generically regardless of which `AdditionalCost` produced it.
+  - `commands::activate::execute_activate_ability` — reordered so `find_ability` runs before the
+    battlefield-zone check, then the required zone becomes `Hand` instead of `Battlefield` when
+    the found ability's own cost contains `DiscardSelf` — matched on cost shape, not a new
+    `RegisteredAbility` field, the same "match on shape, don't grow the struct" precedent Equip's
+    own sorcery-speed check already set (see that check's own doc comment). This is the literal
+    override CR 602.1's own pre-existing comment named ("unless the ability itself says otherwise
+    — no such override exists yet").
+  - `Engine::run_card_script_for(object_id)` (engine/mod.rs) — the hand-zone counterpart to
+    `action.rs`'s own `battlefield_entries` loop, extracted as a shared helper since (unlike every
+    prior single-call-site `run_card_script` idiom in this codebase) it's now needed at six call
+    sites across four files. Called by every real Library→Hand producer this engine has: the
+    turn-based draw (`turn.rs`, both the direct-resolve and CR 616.1-paused-resume paths),
+    `Game.Ops.DrawCards` (`replacement_resume.rs::continue_draw_cards`, both paths), tutor-to-hand
+    (`library_choices.rs::continue_search_battlefield_entry`'s `SearchDestination::Hand` branch),
+    and the opening-hand deal (`pregame.rs::draw_opening_hand`). Deliberately narrow: only
+    Library→Hand entry calls it — a card leaving hand for any other zone still purges its
+    `RegisteredAbility` via the pre-existing `retire_object` convention unchanged, same as every
+    other ability in this engine (CR 702.29b's "the ability continues to exist... in all other
+    zones" has no real consumer today — no filter/effect anywhere queries "does this object have
+    an activated ability" — so that half is a named, unobserved gap, not something attempted).
+  - `Game.Costs.DiscardSelf` (script/globals.rs) — no-argument binding sibling to `TapSelf`,
+    reusing `ActivatedAbilityBuilder`'s existing `:AddCost` decode path unchanged.
+  - Typecycling needed zero new resolution code — `AbilityEffect::Search { destination: Hand, .. }`
+    already existed and already fully resolves; only the cost half (`DiscardSelf`) was new.
+- Deviations: none from the requirements report's design, once the hand-wiring scope was pulled in
+  by explicit user choice.
+- Unresolved, named not silently dropped:
+  - CR 702.29c/d ("when you cycle this card" / "cycles or discards" triggers) — no way in this
+    engine's event/trigger model to distinguish a discard that paid a cycling cost from any other
+    discard (hand-size cleanup, Mind Rot, ...). The existing self-referential `ConditionPrimitive::
+    Discarded` fires on *any* discard of its source, which would over-fire for this narrower CR
+    702.29c meaning — a real, separate gap, not attempted here.
+  - CR 702.29b's "ability persists in every other zone" — only the Library→Hand direction is wired;
+    a card leaving hand still purges its abilities like any other object in this engine. Unobserved
+    today (no consumer queries "has an activated ability" at all), named above.

@@ -16,7 +16,7 @@ use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
 use crate::types::config::GameSettings;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::ScriptHandle;
+use crate::types::ids::{ObjectId, ScriptHandle};
 use crate::types::turn::Phase;
 
 mod action;
@@ -411,6 +411,31 @@ impl Engine {
     /// Remove once the script bridge lands.
     pub fn state_mut(&mut self) -> &mut GameState {
         &mut self.state
+    }
+
+    /// Runs `object_id`'s card script now that it has just entered the hand
+    /// zone (CR 400.7 fresh id already minted by the caller), self-
+    /// registering any ability that — like CR 702.29 Cycling — only
+    /// functions from hand. The hand-zone counterpart to `action.rs`'s own
+    /// `battlefield_entries` loop, which does the identical `run_card_script`
+    /// call for a Hand->Battlefield move; this one covers every real
+    /// Library->Hand producer instead (draw, opening hand, search-to-hand) —
+    /// see each call site for why that producer needs it. Same "silently
+    /// drop a script error" gap `battlefield_entries`' own call already
+    /// carries, not new here.
+    ///
+    /// Deliberately narrow: only Library->Hand entry calls this. A card
+    /// leaving hand for any other zone still purges its `RegisteredAbility`
+    /// entries via the pre-existing `retire_object` convention, same as
+    /// every other ability in this engine — CR 702.29b's "the ability
+    /// continues to exist... in all other zones" has no real consumer today
+    /// (no filter/effect in this engine ever queries "does this object have
+    /// an activated ability"), so that half is a named, unobserved gap
+    /// rather than something this method attempts.
+    pub(in crate::engine) fn run_card_script_for(&mut self, object_id: ObjectId) {
+        if let Some(definition) = self.state.object(object_id).map(|o| o.definition.clone()) {
+            let _ = self.script_runtime.run_card_script(&mut self.state, &definition, object_id);
+        }
     }
 
     /// Loads a standalone Lua callback (see `ScriptRuntime::load_function`)
