@@ -373,6 +373,43 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
   general *continuous* effects (as opposed to this slice's replacement-effect shape) remains a
   separate, larger, unaddressed gap — no shared mechanism links the two effect classes.
 
+## Slice: enchanted-player-controls (merged)
+
+- Branch `phase5/enchanted-player-controls`.
+- Scope: CR 303.4m's "enchanted player" reference for a general *continuous* effect whose affected
+  set is other objects, not the enchanted player's own characteristics — the gap named unclosed by
+  every prior slice in this cluster. The real card: **Curse of Vitality** — "Creatures enchanted
+  player controls have lifelink."
+- Verify: 7 new tests (`phase5_enchanted_player_controls.rs`) — direct `applies_to()` unit checks
+  (matches only the enchanted player's own objects, not the Aura's controller's; no match when the
+  source has no `attached_to_player`; no accidental match against an unrelated object), a real
+  `effective_characteristics` consumer test proving Curse of Vitality's own shape end to end, a
+  change-of-control re-evaluation test (no caching — losing/gaining qualification tracks control
+  changing hands live), and two `Game.CreateStaticAbility`/`:SetAffected({ enchanted_player_controls
+  = true })` self-registration tests. Full workspace suite green.
+- Key changes:
+  - `AffectedFilter::EnchantedPlayerControls` — fieldless, sibling to `EnchantedOnly` rather than a
+    field on `EffectFilter` (same ripple-avoidance precedent `EnchantedOnly` itself already set).
+    Resolved directly in `ContinuousEffect::applies_to`: `source.attached_to_player.is_some_and(|p|
+    object.controller == p)` — no `GameState` lookup needed, since `source: &GameObject` is already
+    borrowed there, same "free" resolution shape `EnchantedOnly` gets (cheaper than the `state.
+    object(m.source)` lookup `HandSizeModifier`/`HandRevealModifier`'s own `EnchantedPlayer` variants
+    need, since those are evaluated somewhere that only has a bare `source: ObjectId`).
+  - `layers::applicable_effects_in_layer`'s `AffectedFilter` match widened to include the new variant
+    alongside `Primitive`/`EnchantedOnly` (all three route through `e.applies_to`).
+  - `decode_affected_value`: `{ enchanted_player_controls = true }` short-circuits the same way
+    `{ enchanted_only = true }` already does, checked second (so a table setting both keys
+    deterministically prefers `enchanted_only` rather than erroring).
+  - Fieldless and exclusive with `controller`/`card_types`, same narrowing `EnchantedOnly` already
+    took — no real "creatures enchanted player controls that are also a [type]" card exists to
+    justify combining this with `EffectFilter`'s other fields.
+  - `docs/lua/static-abilities.md` updated with the new filter-table key alongside `enchanted_only`.
+- Unresolved: combining with `EffectFilter`'s `card_types`/`subtypes`/`controller` (named above, not
+  narrowed by mistake). `HandRevealAffected`/`DrawLimitAffected::EnchantedPlayer` remain a separate,
+  unrelated, still-unbuilt gap (player-level, not object-level — no shared mechanism). This slice
+  closes CR 303.4m's last named-unaddressed shape (player-level, replacement-effect, and now
+  general-continuous-effect are all real) — CR 303.4m itself has no further known gap.
+
 ## Equipment / Equip (CR 702.6)
 
 - `AbilityEffect::Attach` primitive; `ActivateAbility` enforces "only as sorcery" for `Attach`.

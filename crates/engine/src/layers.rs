@@ -386,11 +386,14 @@ fn applicable_effects_in_layer<'a>(
                 return false;
             }
             match &e.affected {
-                // CR 303.4m: EnchantedOnly's real body lives on
-                // `applies_to` itself (both `object`/`source_obj` are
-                // already full `&GameObject`s here, no extra lookup needed)
-                // - same treatment `Primitive` already gets.
-                AffectedFilter::Primitive(_) | AffectedFilter::EnchantedOnly => e.applies_to(object, source_obj),
+                // CR 303.4m: EnchantedOnly/EnchantedPlayerControls's real
+                // bodies both live on `applies_to` itself (`object`/
+                // `source_obj` are already full `&GameObject`s here, no
+                // extra lookup needed) - same treatment `Primitive` already
+                // gets.
+                AffectedFilter::Primitive(_)
+                | AffectedFilter::EnchantedOnly
+                | AffectedFilter::EnchantedPlayerControls => e.applies_to(object, source_obj),
                 AffectedFilter::Script(handle) => {
                     let enchanted = source_obj.attached_to;
                     script_runtime
