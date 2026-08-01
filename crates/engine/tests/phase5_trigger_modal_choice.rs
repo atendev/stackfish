@@ -109,16 +109,18 @@ fn creature_target_requirement(exclude_source: bool) -> TargetSpec {
 fn modal_upkeep_ability(source: ObjectId, mode_choice: ModeChoice, destroy_excludes_source: bool) -> RegisteredAbility {
     RegisteredAbility {
         modes: vec![
-            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None },
+            SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None, pawprint_weight: 0 },
             SpellMode {
                 target_requirement: Some(any_target_requirement()),
                 effect: Some(AbilityEffect::Damage(2)),
                 additional_cost: None,
+                pawprint_weight: 0,
             },
             SpellMode {
                 target_requirement: Some(creature_target_requirement(destroy_excludes_source)),
                 effect: Some(AbilityEffect::Destroy),
                 additional_cost: None,
+                pawprint_weight: 0,
             },
         ],
         mode_choice,

@@ -450,15 +450,37 @@ impl Engine {
         let ProcessState::AwaitingTriggerModeChoice { modes, mode_choice, .. } = &self.process_state else {
             return Err(TriggerModeChoiceError::NotAwaitingChoice);
         };
-        let (min, max, repeatable) = mode_choice.bounds();
-        let chosen_count = chosen.len() as u32;
-        if chosen_count < min || chosen_count > max {
-            return Err(TriggerModeChoiceError::InvalidCount);
-        }
-        if !repeatable {
+        if let ModeChoice::PawprintBudget(budget) = mode_choice {
+            // CR 700.2i: weight-sum constraint, not a count bound - see
+            // `ModeChoice::PawprintBudget`'s own doc comment and
+            // `commands::cast::execute_command`'s identical `CastSpell`
+            // branch (the two aren't shared since one validates against a
+            // `Vec<SpellMode>` reference already borrowed from
+            // `ProcessState`, the other from a freshly-looked-up
+            // `object.definition.modes`).
             let mut seen = std::collections::HashSet::new();
             if !chosen.iter().all(|m| seen.insert(*m)) {
                 return Err(TriggerModeChoiceError::DuplicateMode);
+            }
+            let mut total_weight: u32 = 0;
+            for &idx in &chosen {
+                let mode = modes.get(idx as usize).ok_or(TriggerModeChoiceError::NoSuchMode)?;
+                total_weight += mode.pawprint_weight;
+            }
+            if total_weight > *budget {
+                return Err(TriggerModeChoiceError::InvalidCount);
+            }
+        } else {
+            let (min, max, repeatable) = mode_choice.bounds();
+            let chosen_count = chosen.len() as u32;
+            if chosen_count < min || chosen_count > max {
+                return Err(TriggerModeChoiceError::InvalidCount);
+            }
+            if !repeatable {
+                let mut seen = std::collections::HashSet::new();
+                if !chosen.iter().all(|m| seen.insert(*m)) {
+                    return Err(TriggerModeChoiceError::DuplicateMode);
+                }
             }
         }
         // CR 700.2's own convention (per Wizards' rulings on e.g. Cryptic

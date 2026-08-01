@@ -1152,6 +1152,14 @@ fn build_spell_modes(specs: &[SpellModeSpec]) -> Vec<SpellMode> {
             // same pre-existing gap CardSpec itself has for the top-level
             // card's own additional costs (no TOML representation at all).
             additional_cost: None,
+            // TODO(CR 700.2i): no TOML field for a mode's own pawprint
+            // weight, or a `mode_choice = "pawprint_budget"` shape on
+            // CardSpec, yet - `build_mode_choice` below only ever produces
+            // count-based ModeChoice variants. Meaningless (0) until a
+            // scenario fixture needs one; proven via direct Rust
+            // construction only, same posture other Lua/TOML-inaccessible
+            // ModeChoice variants (`*ChosenByOpponent`) already took.
+            pawprint_weight: 0,
         })
         .collect()
 }
