@@ -593,7 +593,12 @@ pub(crate) fn decode_effect_value(
 /// `AffectedFilter::EnchantedOnly` before any of `controller`/`card_types`/
 /// `self_only` are even read — same "no real card needs both" narrowing
 /// `EnchantedOnly`'s own doc comment already states, so combining it with
-/// the other keys is simply ignored rather than rejected.
+/// the other keys is simply ignored rather than rejected. `{
+/// enchanted_player_controls = true }` mirrors it for `AffectedFilter::
+/// EnchantedPlayerControls` (CR 303.4m's player-side sibling, e.g. Curse of
+/// Vitality's "Creatures enchanted player controls have lifelink"), checked
+/// second so an (invalid, but not rejected) table setting both keys
+/// deterministically prefers `enchanted_only`.
 /// The `controller`/`card_types`/`self_only` portion of `:SetAffected`'s
 /// filter table, decoded straight to a bare `EffectFilter` - shared by
 /// `decode_affected_value` (below, for `AffectedFilter::Primitive`) and
@@ -708,6 +713,13 @@ pub(crate) fn decode_affected_value(
                 table.get("enchanted_only").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             if enchanted_only.unwrap_or(false) {
                 return Ok(AffectedFilter::EnchantedOnly);
+            }
+
+            let enchanted_player_controls: Option<bool> = table
+                .get("enchanted_player_controls")
+                .map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            if enchanted_player_controls.unwrap_or(false) {
+                return Ok(AffectedFilter::EnchantedPlayerControls);
             }
 
             Ok(AffectedFilter::Primitive(decode_effect_filter_table(&table)?))

@@ -480,14 +480,31 @@ pub struct EffectFilter {
 /// deliberately: can't combine with `controller`/`card_types` the way
 /// `Primitive` can, since no real "enchanted creature that's also a
 /// [type]"-filtered *affects* clause exists to justify the combinatorics
-/// (same narrowing precedent `self_only` already sets). Player-side "enchant
-/// player" stays unmodeled — `attached_to` is `ObjectId`-only (see
-/// `docs/implementation/14-protection-attach.md`), a separate, larger gap.
+/// (same narrowing precedent `self_only` already sets).
+///
+/// `EnchantedPlayerControls` closes the "player-side enchant player" gap
+/// this comment used to name as unmodeled (`phase5/enchanted-player-
+/// controls`) — CR 303.4m's "enchanted player" reference for a general
+/// *continuous* effect (as opposed to the player-level `HandSizeModifier`/
+/// `HandRevealModifier`::`EnchantedPlayer` shape, or the replacement-effect
+/// `WouldEnterEnchantedPlayerGraveyard` shape) — the real card is Curse of
+/// Vitality, "Creatures enchanted player controls have lifelink." Matches an
+/// *object* (not the enchanted player themselves) whose controller equals
+/// whatever player `ContinuousEffect::source` (the Aura/permanent bearing
+/// this static ability) is attached to via `GameObject::attached_to_player`
+/// — mirrors `EnchantedOnly`'s exact resolution shape (no `GameState` lookup
+/// needed, `source: &GameObject` is already borrowed in `applies_to`), just
+/// keyed off the player-attach field instead of the object-attach one.
+/// Fieldless and exclusive with `Primitive`, same narrowing `EnchantedOnly`
+/// already took and for the same reason: no real "creatures enchanted
+/// player controls that are also a [type]" card exists to justify combining
+/// this with `controller`/`card_types`.
 #[derive(Clone, Debug)]
 pub enum AffectedFilter {
     Primitive(EffectFilter),
     Script(ScriptHandle),
     EnchantedOnly,
+    EnchantedPlayerControls,
 }
 
 /// Not exhaustive in the original draft — MTG has more duration shapes than
@@ -598,17 +615,22 @@ impl ContinuousEffect {
     /// Also the real body for `EnchantedOnly` (CR 303.4m) — `source.
     /// attached_to` is already a full field on the `&GameObject` passed in,
     /// so no `GameState` lookup is needed here, unlike `layers::
-    /// applicable_effects_in_layer`'s own `Script` arm. `Script` isn't
-    /// evaluable yet (no card can construct one — see `AffectedFilter`'s
-    /// doc comment) — treated as "doesn't match" rather than guessed, same
-    /// stance `layers::effective_characteristics` takes for an unresolvable
-    /// CDA.
+    /// applicable_effects_in_layer`'s own `Script` arm. Same story for
+    /// `EnchantedPlayerControls` (also CR 303.4m, the player-side sibling) —
+    /// `source.attached_to_player` is checked against `object.controller`
+    /// directly, no lookup either. `Script` isn't evaluable yet (no card can
+    /// construct one — see `AffectedFilter`'s doc comment) — treated as
+    /// "doesn't match" rather than guessed, same stance `layers::
+    /// effective_characteristics` takes for an unresolvable CDA.
     pub fn applies_to(&self, object: &GameObject, source: &GameObject) -> bool {
         match &self.affected {
             AffectedFilter::Primitive(filter) => {
                 matches_effect_filter(filter, object, self.source, source.controller)
             }
             AffectedFilter::EnchantedOnly => source.attached_to == Some(object.object_id),
+            AffectedFilter::EnchantedPlayerControls => {
+                source.attached_to_player.is_some_and(|p| object.controller == p)
+            }
             AffectedFilter::Script(_) => false,
         }
     }

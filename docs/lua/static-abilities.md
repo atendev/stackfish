@@ -62,15 +62,24 @@ e:SetAffected({
     card_types = { "Creature" },  -- default: no filter
     self_only = true,             -- default false — "just this effect's own source"
     enchanted_only = true,        -- default false — CR 303.4m, "whatever this is attached to"
+    enchanted_player_controls = true, -- default false — CR 303.4m, "creatures enchanted player controls"
 })
 ```
 
 `enchanted_only = true` (CR 303.4m, e.g. "Enchanted creature gets +1/+1") can't be combined with
 the other keys — it short-circuits to "whatever this effect's own source (the Aura, or any other
 permanent with something attached to it) is currently attached to." Matches only permanents —
-enchanting/equipping a player isn't modeled. Combined with the parent effect's own `self_only`,
-note this is about the *target of attachment*, not the effect's own source — don't set both
-`self_only` and `enchanted_only`.
+enchanting a player is `enchanted_player_controls` instead, below. Combined with the parent
+effect's own `self_only`, note this is about the *target of attachment*, not the effect's own
+source — don't set both `self_only` and `enchanted_only`.
+
+`enchanted_player_controls = true` (CR 303.4m's player-side sibling, e.g. Curse of Vitality's
+"Creatures enchanted player controls have lifelink") is the same kind of short-circuit —
+"objects controlled by whichever player this effect's own source is currently attached to (via
+`:SetTarget`ing a player instead of an object)," `false`/no match if the source isn't attached to
+a player at all. Also can't be combined with the other keys, same narrowing `enchanted_only`
+already takes — no real "creatures enchanted player controls that are also a [type]" card exists
+to justify it.
 
 ## Script-backed `:SetAffected`/`:SetEffect`
 
