@@ -53,6 +53,7 @@ fn mode_cost_definition() -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: vec![
             SpellMode { target_requirement: None, effect: Some(AbilityEffect::GainLife(3)), additional_cost: None, pawprint_weight: 0 },
@@ -81,7 +82,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes, targets, x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card, modes, targets, x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("player holds priority, spell is in hand");
 }
@@ -213,6 +214,7 @@ fn non_modal_spell_is_unaffected_by_mode_additional_cost_plumbing() {
                 keywords: KeywordSet::empty(),
                 target_requirement: None,
                 alternative_costs: Vec::new(),
+                buyback_cost: None,
                 effect: None,
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
@@ -239,6 +241,7 @@ fn non_modal_spell_is_unaffected_by_mode_additional_cost_plumbing() {
         keywords: KeywordSet::empty(),
         target_requirement: Some(any_target_requirement()),
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: Some(AbilityEffect::Damage(2)),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),

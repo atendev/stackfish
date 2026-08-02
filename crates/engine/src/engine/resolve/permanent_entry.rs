@@ -45,7 +45,13 @@ impl Engine {
         // up front.
         let destination = self.state.object(top.stack_id).map(|obj| {
             if obj.definition.card_types.intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY) {
-                if top.exile_on_leaving_stack {
+                // CR 702.27a: buyback checked before exile_on_leaving_stack -
+                // no real card combines the two, but if one somehow did,
+                // "returns to hand" is the more specific, more recently
+                // chosen alternative.
+                if top.bought_back {
+                    ZoneKind::Hand
+                } else if top.exile_on_leaving_stack {
                     ZoneKind::Exile
                 } else {
                     ZoneKind::Graveyard

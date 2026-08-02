@@ -52,6 +52,7 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32, keywords
         keywords,
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -92,6 +93,7 @@ fn become_blocked_spell_definition() -> CardDefinition {
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: Some(AbilityEffect::BecomeBlocked),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -154,7 +156,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("player holds priority, spell is in hand");
 }
@@ -303,7 +305,7 @@ fn an_attacker_already_blocked_is_left_untouched() {
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     engine.state_mut().combat.as_mut().unwrap().blocks.push((blocker, attacker));
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::CastSpell {
-        card, modes: Vec::new(), targets: vec![Target::Object(attacker)], x_value: None, alternative_cost: None,
+        card, modes: Vec::new(), targets: vec![Target::Object(attacker)], x_value: None, alternative_cost: None, pay_buyback: false,
     } }).expect("player holds priority, spell is in hand");
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);

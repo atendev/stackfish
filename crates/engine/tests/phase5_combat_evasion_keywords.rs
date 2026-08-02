@@ -43,6 +43,7 @@ fn creature_definition(name: &str, keywords: KeywordSet, color: Option<ColorSet>
         keywords,
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),

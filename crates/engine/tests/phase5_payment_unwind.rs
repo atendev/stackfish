@@ -32,6 +32,7 @@ fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -56,6 +57,7 @@ fn permanent_definition() -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -85,7 +87,7 @@ fn cast_and_await_payment(engine: &mut Engine, player: PlayerId, card: ObjectId)
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .expect("player holds priority, spell is in hand, main phase, empty stack");

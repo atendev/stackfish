@@ -126,6 +126,7 @@ fn land_definition(name: &str, script: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -164,6 +165,7 @@ fn creature_definition(name: &str, script: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -495,7 +497,7 @@ fn cast_creature_resolution_self_registered_enters_with_counters() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .unwrap();

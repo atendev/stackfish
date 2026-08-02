@@ -55,6 +55,7 @@ fn bolt_definition() -> CardDefinition {
             from_zone: ZoneKind::Graveyard,
             exile_on_leaving_stack: true,
         }],
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -79,6 +80,7 @@ fn creature_definition() -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -108,7 +110,7 @@ fn cast_spell(
             modes: Vec::new(),
             targets,
             x_value: None,
-            alternative_cost,
+            alternative_cost, pay_buyback: false,
         },
     })
 }

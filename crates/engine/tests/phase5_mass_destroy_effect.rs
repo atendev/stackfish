@@ -155,6 +155,7 @@ fn armageddon_definition(definition_id: u64, source: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -179,6 +180,7 @@ fn land_definition(definition_id: u64, name: &str, indestructible: bool) -> Card
         keywords: if indestructible { KeywordSet::INDESTRUCTIBLE } else { KeywordSet::empty() },
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -216,6 +218,7 @@ fn supertyped_creature_definition(
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -237,6 +240,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 targets: Vec::new(),
                 x_value: None,
                 alternative_cost: None,
+                pay_buyback: false,
             },
         })
         .expect("player holds priority, spell is in hand");

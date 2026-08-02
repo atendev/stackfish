@@ -53,6 +53,16 @@ pub struct StackObject {
     /// that would otherwise send a resolving/fizzling spell to its owner's
     /// graveyard send it to exile instead.
     pub exile_on_leaving_stack: bool,
+    /// CR 702.27a Buyback: baked in at push time from whether the caster
+    /// announced (and this card offers) a buyback cost - `false` for a
+    /// spell cast normally, or an ability (abilities never set this, same
+    /// as `exile_on_leaving_stack`). When `true`, a resolving instant/
+    /// sorcery goes to its owner's hand instead of the graveyard
+    /// (`engine/resolve/permanent_entry.rs`) - unlike
+    /// `exile_on_leaving_stack`, this is *not* checked on the CR 608.2b
+    /// fizzle path, since CR 702.27a's own text only covers "as it
+    /// resolves," not "or as it leaves the stack otherwise."
+    pub bought_back: bool,
     pub costs_paid: Vec<CostPayment>,
     /// Which script callback to invoke on resolution. Present in the
     /// original adaptation doc's `StackObject` spec ("resolution callback
@@ -114,6 +124,7 @@ impl StackObject {
         target_requirement: Option<TargetSpec>,
         x_value: Option<u32>,
         exile_on_leaving_stack: bool,
+        bought_back: bool,
         operation: ScriptHandle,
         effect: Option<AbilityEffect>,
         intervening_if: Option<InterveningIfSpec>,
@@ -134,6 +145,7 @@ impl StackObject {
             target_requirement,
             x_value,
             exile_on_leaving_stack,
+            bought_back,
             costs_paid: Vec::new(),
             operation,
             effect,

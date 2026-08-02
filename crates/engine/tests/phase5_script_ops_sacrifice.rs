@@ -39,6 +39,7 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
         keywords,
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -75,6 +76,7 @@ fn sacrifice_spell_definition() -> CardDefinition {
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: Some(AbilityEffect::Sacrifice),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -148,7 +150,7 @@ fn cast_sacrifice_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, t
                 modes: Vec::new(),
                 targets: vec![Target::Object(target)],
                 x_value: None,
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .expect("player holds priority, spell is in hand");

@@ -82,6 +82,7 @@ fn escape_creature_definition() -> CardDefinition {
             from_zone: ZoneKind::Graveyard,
             exile_on_leaving_stack: false,
         }],
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -106,6 +107,7 @@ fn filler_definition(definition_id: u64, name: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -139,7 +141,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, alternative
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost , pay_buyback: false},
         })
         .expect("player controls the card and holds priority");
 }

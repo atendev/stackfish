@@ -23,12 +23,13 @@ name.
   spells don't have one either — modes in general aren't part of this scripting API yet), only by
   constructing a `RegisteredAbility` directly in Rust. `:SetTarget` (CR 603.3d) *is* available now —
   see [triggered-abilities.md](triggered-abilities.md#whats-not-available-on-this-builder).
-- **Alternative costs (flashback/escape-style) have no Lua builder.** The engine itself fully
-  supports them (`CardDefinition::alternative_costs`, `PlayerActionKind::CastSpell::
-  alternative_cost`) — a card can be cast from its graveyard for a different cost that replaces
-  its mana cost entirely — but a card script can't declare one yet, only direct Rust/TOML
-  construction. Hybrid/Phyrexian/snow mana payment remain pre-existing gaps in cost-paying
-  generally, not specific to anything in this API.
+- **Alternative costs (flashback/escape-style) and Buyback have no Lua builder.** The engine itself
+  fully supports both (`CardDefinition::alternative_costs`/`buyback_cost`, `PlayerActionKind::
+  CastSpell::alternative_cost`/`pay_buyback`) — a card can be cast from its graveyard for a
+  different cost that replaces its mana cost entirely, or pay an optional additional cost that
+  returns it to hand instead of the graveyard on resolution — but a card script can't declare
+  either yet, only direct Rust/TOML construction. Hybrid/Phyrexian/snow mana payment remain
+  pre-existing gaps in cost-paying generally, not specific to anything in this API.
 - **Only zone changes are visible to a condition.** A condition wanting to check a damage event,
   life change, or tap/untap event will always see `nil` for `event` — see
   [card-script-basics.md](card-script-basics.md#writing-a-condition).

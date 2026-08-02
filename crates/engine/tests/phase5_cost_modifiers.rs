@@ -44,7 +44,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .expect("player holds priority, spell is in hand");

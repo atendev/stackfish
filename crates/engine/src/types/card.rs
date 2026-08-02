@@ -268,6 +268,19 @@ pub struct CardDefinition {
     /// announces which one (if any) they're invoking, same "announced at
     /// cast time" pattern as `x_value`.
     pub alternative_costs: Vec<crate::types::cost::AlternativeCost>,
+    /// CR 702.27a Buyback's "you may pay an additional [cost] as you cast
+    /// this spell" — `None` for the overwhelming majority of cards.
+    /// Announced via `PlayerActionKind::CastSpell::pay_buyback`, same
+    /// "announced at cast time" pattern `alternative_cost`/`x_value` already
+    /// use. Distinct from `alternative_costs` above: this is paid *in
+    /// addition to* whatever cost already applies (usually the printed
+    /// `mana_cost`), never a replacement for it - so it's its own field,
+    /// not another `AlternativeCost` variant. Scoped to a flat `ManaCost`
+    /// rather than the fuller `CostSpec` `AlternativeCost::Replacement` uses
+    /// - every real Buyback card is a flat mana amount, and a `CostSpec`
+    /// here would mean inventing a "merge two `CostSpec`s" primitive with no
+    /// other caller.
+    pub buyback_cost: Option<ManaCost>,
     /// A spell's Rust-native fast-path effect (CR 608.2m resolution) —
     /// same `AbilityEffect` shape `RegisteredAbility.effect` already uses
     /// for activated/triggered abilities, e.g. `Some(AbilityEffect::

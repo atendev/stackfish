@@ -41,6 +41,7 @@ fn creature_definition(definition_id: u64, name: &str, power: i32, toughness: i3
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -71,6 +72,7 @@ fn growth_definition(duration: EffectDuration) -> CardDefinition {
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: Some(AbilityEffect::Pump { power: 3, toughness: 3, duration }),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -91,7 +93,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("player holds priority, spell is in hand");
 }

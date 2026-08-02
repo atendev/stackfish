@@ -37,6 +37,7 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
         keywords,
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -67,6 +68,7 @@ fn destroy_spell_definition() -> CardDefinition {
             exclude_source: false,
         })),
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: Some(AbilityEffect::Destroy),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -116,7 +118,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("player holds priority, spell is in hand");
 }

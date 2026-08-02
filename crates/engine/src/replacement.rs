@@ -846,6 +846,7 @@ mod tests {
                 keywords: KeywordSet::empty(),
                 target_requirement: None,
                 alternative_costs: Vec::new(),
+                buyback_cost: None,
                 effect: None,
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),

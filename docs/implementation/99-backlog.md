@@ -2,6 +2,19 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Buyback (CR 702.27)**: real now (`phase5/buyback-additional-cost`) — `CardDefinition.
+  buyback_cost: Option<ManaCost>`, `PlayerActionKind::CastSpell.pay_buyback: bool`, `StackObject.
+  bought_back: bool`. Confirmed by reading the resolution pipeline directly (not assumed) that the
+  destination-decision code and `Engine::move_resolving_spell` were already fully generic over the
+  target zone (`Engine::unwind_payment` already proved Hand-return works, for CR 601.6) — so this
+  slice only had to add the "announce and remember an optional additional cost" half, one line in
+  `engine/resolve/permanent_entry.rs` for the hand-instead-of-graveyard redirect, and a mana-symbol
+  concatenation in `commands::cast::execute_cast_spell`. Per CR 702.27a's own narrower wording (vs.
+  Flashback's 702.34a), the redirect is checked only on normal resolution, never on the CR 608.2b
+  fizzle path. Still unmodeled: Buyback combined with an alternative cost or a modal spell (no real
+  card does this); no Lua builder for `buyback_cost` (same scope Flashback/Escape's own alternative-
+  cost machinery already established).
+
 - **Escape (CR 702.138)**: real now (`phase5/escape-alternative-cost`) — `AdditionalCost::
   ExileFromGraveyard`/`CostPayment::Exile`, the same N-distinct-payments shape `TapPermanents`
   already established, checked against the graveyard. Built on top of `AlternativeCost::

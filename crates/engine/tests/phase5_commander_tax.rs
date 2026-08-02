@@ -31,6 +31,7 @@ fn creature_definition(name: &str, mana_cost: ManaCost) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -93,7 +94,7 @@ fn cast_and_pay(engine: &mut Engine, card: ObjectId, n: u32) -> u32 {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .expect("player holds priority");
@@ -167,7 +168,7 @@ fn x_cost_commander_first_cast_still_needs_an_explicit_empty_mana_entry() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: Some(0),
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .expect("X=0 is a legal announced value, first cast, no tax yet");
@@ -380,7 +381,7 @@ fn tax_stacks_additively_onto_a_real_printed_cost() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: None,
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .expect("player holds priority");
