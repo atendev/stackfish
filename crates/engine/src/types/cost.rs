@@ -100,6 +100,15 @@ pub enum AdditionalCost {
     /// specifically discard itself to pay its own cycling cost).
     DiscardSelf,
     TapPermanents { filter: FilterSpec, count: u32 },
+    /// CR 702.138a Escape's "Exile N other cards from your graveyard" — same
+    /// N-distinct-payments shape `TapPermanents` already has, just against
+    /// the graveyard instead of the battlefield. No self-exclusion is
+    /// needed the way `DiscardSelf` needed one for Cycling: by the time this
+    /// cost is paid, the escaping card itself has already moved to the
+    /// stack (CR 601.2a — casting moves the card first, cost is paid after),
+    /// so it's structurally impossible for one of these `count` graveyard
+    /// candidates to be the card being cast.
+    ExileFromGraveyard { filter: FilterSpec, count: u32 },
     LifePayment { amount: u32 },
     Other { description: String },
 }
@@ -603,6 +612,10 @@ pub enum CostPayment {
     Mana { units: Vec<ManaUnit>, phyrexian_life: u32 },
     Sacrifice(ObjectId),
     Discard(ObjectId),
+    /// CR 702.138a Escape's "exile N other cards from your graveyard" — one
+    /// entry per exiled card, same "one `CostPayment` per instance" shape
+    /// `TapPermanents`' repeated `Tap(id)` entries already use.
+    Exile(ObjectId),
     Tap(ObjectId),
     Life(u32),
     Other { description: String },
@@ -832,6 +845,28 @@ impl PaymentPlan {
                         }
                         let controller = crate::layers::effective_controller(state, script_runtime, *id);
                         if !filter.matches(obj, controller, payer) {
+                            return false;
+                        }
+                        used.push(*id);
+                    }
+                }
+                AdditionalCost::ExileFromGraveyard { filter, count } => {
+                    let mut used: Vec<ObjectId> = Vec::with_capacity(*count as usize);
+                    for _ in 0..*count {
+                        let Some(CostPayment::Exile(id)) = payments.next() else { return false };
+                        if used.contains(id) {
+                            return false;
+                        }
+                        let Some(obj) = state.object(*id) else { return false };
+                        // A graveyard card's `.controller` always equals its
+                        // owner in this engine (no GainControl effect
+                        // targets a non-battlefield card, CR 108.4) - same
+                        // reasoning `Discard { filter }`'s own raw-field
+                        // check below already documents.
+                        if obj.zone != ZoneKind::Graveyard || obj.controller != payer {
+                            return false;
+                        }
+                        if !filter.matches(obj, obj.controller, payer) {
                             return false;
                         }
                         used.push(*id);

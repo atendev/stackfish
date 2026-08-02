@@ -2,6 +2,21 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Escape (CR 702.138)**: real now (`phase5/escape-alternative-cost`) — `AdditionalCost::
+  ExileFromGraveyard`/`CostPayment::Exile`, the same N-distinct-payments shape `TapPermanents`
+  already established, checked against the graveyard. Built on top of `AlternativeCost::
+  Replacement` (CR 601.2b flashback/escape-style alternative costs), which turned out to already
+  be fully real and generic from an earlier, undocumented slice — `phase5_flashback_alternative_
+  costs.rs` was the pre-existing proof, just never logged in `docs/implementation/`; closed
+  retroactively in `02-zone-moves.md`. `commands::zone_ops::propose_zone_move` gained a real `to`
+  parameter (was hardcoded to `Graveyard`, since Sacrifice/Discard/cleanup-discard all happened to
+  end there) so the exile-cost payment can propose a `Graveyard -> Exile` move through the same
+  pipeline. Still unmodeled: CR 702.138c/d ("escapes with [counters/ability]," linked to "if this
+  permanent escaped") — no provenance tracking exists for "was this permanent cast via escape,"
+  would need a new linked-ability mechanism. No Lua builder for the alternative-cost declaration
+  itself (only the `ExileFromGraveyard` cost component is Lua-exposed) — same scope Flashback's own
+  slice already established.
+
 - **Cycling (CR 702.29)**: plain Cycling (702.29a) and Typecycling (702.29e) are real now
   (`phase5/cycling-ability`) — `AdditionalCost::DiscardSelf`, and `commands::activate::
   execute_activate_ability`'s zone check now allows `Hand` (instead of requiring `Battlefield`)

@@ -55,7 +55,7 @@ impl Engine {
         // driven below by continue_cost_zone_moves.
         let pending_zone_moves: VecDeque<PendingZoneMove> = commands::collect_cost_zone_moves(&plan.payments)
             .into_iter()
-            .map(|(id, from)| PendingZoneMove { id, from })
+            .map(|(id, from, to)| PendingZoneMove { id, from, to })
             .collect();
         let immediate_events = commands::commit_payment(&mut self.state, payer, &plan.payments);
         if let Some(stack_object) = self.state.stack.iter_mut().find(|s| s.stack_id == stack_id) {
@@ -115,7 +115,7 @@ impl Engine {
         on_paid: PaymentResolution,
     ) -> ProcessState {
         while let Some(pending) = remaining.pop_front() {
-            let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from) else {
+            let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from, pending.to) else {
                 // Already gone somehow (shouldn't happen - PaymentPlan::
                 // validate confirmed it) - skip rather than guess, same
                 // stance continue_scripted_zone_move's own analogous check

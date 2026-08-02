@@ -151,6 +151,7 @@ calls).
 | `Discard(filter)` | `filter`: shared filter-table shape | Discard a card from your hand matching `filter`. |
 | `DiscardSelf` | — | CR 702.29a Cycling's "Discard this card" — discards the ability's own source. Always the source, never a choice (mirrors `TapSelf`), unlike `Discard(filter)` above. An activated ability whose cost includes this may be activated from `Hand` instead of `Battlefield` (CR 602.1's "unless the ability itself says otherwise" carve-out) — see [activated-abilities.md](activated-abilities.md). |
 | `TapPermanents(filter, count)` | `filter`: shared filter-table shape. `count`: how many. | Tap `count` *other* permanents (not the source) matching `filter` — distinct from `TapSelf`. |
+| `ExileFromGraveyard(filter, count)` | `filter`: shared filter-table shape. `count`: how many. | CR 702.138a Escape's "exile N other cards from your graveyard" — same shape as `TapPermanents`, checked against your graveyard instead of the battlefield. No self-exclusion needed: an escaping card has already left the graveyard (moved to the stack) by the time this cost is paid, so it can never be one of its own `count` candidates. |
 | `Life(amount)` | integer | CR 119.4, pay exactly `amount` life. You can't pay more life than you have. |
 | `Mana(cost)` | a mana-cost string, e.g. `"{1}{R}"` | The mana-cost component of the activation cost. Full hybrid/Phyrexian/generic parsing per the normal mana-cost grammar. At most one `Mana(...)` per ability. |
 

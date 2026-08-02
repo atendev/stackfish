@@ -287,18 +287,20 @@ pub enum ScriptedZoneMoveThen {
     },
 }
 
-/// One card still to propose+replacement-check+commit into a graveyard —
-/// shared queue entry for `Engine::continue_cost_zone_moves` (a `Sacrifice`/
-/// `Discard` `CostPayment`, built by `commands::collect_cost_zone_moves` from
-/// an already-validated `PaymentPlan`) and `Engine::continue_discard_moves`
+/// One card still to propose+replacement-check+commit — shared queue entry
+/// for `Engine::continue_cost_zone_moves` (a `Sacrifice`/`Discard`/`Exile`
+/// `CostPayment`, built by `commands::collect_cost_zone_moves` from an
+/// already-validated `PaymentPlan`) and `Engine::continue_discard_moves`
 /// (CR 514.1's cleanup hand-size discard, `phase5/replaceable-cleanup-
-/// discard`). `from` is the zone the card is claimed to move out of
-/// (`Battlefield` for `Sacrifice`, `Hand` for `Discard`/cleanup discard) —
-/// the caller already confirmed `id` is really there before queuing it.
+/// discard`). `from`/`to` are the zones the card is claimed to move between
+/// (`Battlefield`->`Graveyard` for `Sacrifice`, `Hand`->`Graveyard` for
+/// `Discard`/cleanup discard, `Graveyard`->`Exile` for `Exile`) — the caller
+/// already confirmed `id` is really sitting in `from` before queuing it.
 #[derive(Clone, Copy, Debug)]
 pub struct PendingZoneMove {
     pub id: ObjectId,
     pub from: ZoneKind,
+    pub to: ZoneKind,
 }
 
 /// Which pipeline a paused `ProcessState::AwaitingReplacementChoice` should

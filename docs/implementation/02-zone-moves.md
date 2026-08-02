@@ -109,3 +109,47 @@
 
 - Added `Step::PreCombatMain`/`Step::PostCombatMain`; removed `GameState.postcombat_main`.
 - Scenario `parse_step` and `docs/scenario_format.md` updated.
+
+## Slice: escape-alternative-cost (merged)
+
+- Branch `phase5/escape-alternative-cost`.
+- Scope: CR 702.138 Escape ("cast from your graveyard by paying [cost]," where `[cost]` typically
+  includes "exile N other cards from your graveyard"). Requirements report given in chat before
+  implementation. Note: `AlternativeCost::Replacement` (CR 601.2b flashback/escape-style
+  alternative costs) was already fully real and generic by this point — built in an earlier,
+  undocumented slice (no prior entry exists in this file; `phase5_flashback_alternative_costs.rs`
+  is the pre-existing proof) — this slice only needed the one missing cost component.
+- Verify: 6 new tests (`phase5_escape.rs`) — happy path (exiles exactly `count`, leaves the rest of
+  the graveyard alone), 3 rejection cases (too few exile targets, duplicate id, a non-graveyard
+  id), the pre-existing "wrong from_zone" rejection shape reused from Flashback, and one Lua
+  self-registration/decode test. Full workspace suite (173 test binaries) green.
+- Key finding that confirmed the scope stayed small: read `commands::cast::execute_cast_spell`
+  directly rather than assuming — a cast spell moves to the stack (CR 601.2a) *before* its cost is
+  paid, so by the time an exile-cost payment is validated, the escaping card has already left the
+  graveyard. No self-exclusion logic (the kind Cycling's `DiscardSelf` needed) was needed here —
+  structurally impossible for the card being cast to appear among its own exile candidates.
+- Key changes:
+  - `AdditionalCost::ExileFromGraveyard { filter: FilterSpec, count: u32 }` / `CostPayment::
+    Exile(ObjectId)` — the same N-distinct-payments shape `TapPermanents`/`CostPayment::Tap`
+    already established, checked against `ZoneKind::Graveyard` instead of `Battlefield`.
+    `PaymentPlan::validate` gained one new arm, mirroring `TapPermanents`'s loop exactly.
+  - `commands::zone_ops::propose_zone_move` — `to: ZoneKind` was a hardcoded `Graveyard` before
+    this slice (every prior caller — Sacrifice/Discard cost payments, CR 514.1 cleanup discard —
+    happened to end there); widened to a real parameter so an `Exile` payment can propose a
+    `Graveyard -> Exile` move through the same replacement-checked pipeline. `collect_cost_
+    zone_moves` widened from `Vec<(ObjectId, ZoneKind)>` (id, from) to `Vec<(ObjectId, ZoneKind,
+    ZoneKind)>` (id, from, to) accordingly; `PendingZoneMove` gained a `to` field. Two existing call
+    sites (`engine/payment.rs`, `engine/turn.rs::continue_discard_moves`) updated mechanically —
+    both keep passing `Graveyard` as before, no behavior change for Sacrifice/Discard/cleanup
+    discard.
+  - `Game.Costs.ExileFromGraveyard(filter, count)` — Lua binding, same shape as `TapPermanents`.
+  - No change needed to the cast/alternative-cost pipeline itself (`commands/cast.rs`) — already
+    fully generic over any `AlternativeCost::Replacement`, proven by Flashback.
+- Deviations: none from the requirements report's design.
+- Unresolved, named not silently dropped:
+  - CR 702.138c/d ("escapes with [counters/ability]," linked to "if this permanent escaped") — no
+    provenance tracking exists anywhere in this engine for "was this permanent cast via escape";
+    would need a new linked-ability mechanism, a separate and bigger piece.
+  - No Lua builder for `AlternativeCost::Replacement` itself (the escape/flashback declaration) —
+    same scope Flashback's own (undocumented) slice already established; only `Game.Costs.
+    ExileFromGraveyard` (the cost component) has Lua exposure.
