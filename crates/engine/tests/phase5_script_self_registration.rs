@@ -282,7 +282,7 @@ fn cast_self_registering_creature_gains_life_on_etb_end_to_end() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card: bear, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
@@ -336,7 +336,7 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
         engine
             .submit_action(PlayerAction {
                 player: p0,
-                kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
+                kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
             })
             .expect("p0 holds priority");
         pay_free_and_drain(engine);

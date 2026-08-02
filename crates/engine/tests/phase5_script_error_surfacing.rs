@@ -61,6 +61,7 @@ fn creature_definition(name: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -87,6 +88,7 @@ fn drain_spell_definition() -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: Some(AbilityEffect::GainLife(-15)),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -116,7 +118,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("player holds priority, spell is in hand");
 }

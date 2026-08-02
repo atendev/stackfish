@@ -35,6 +35,12 @@ pub enum PlayerActionKind {
         /// `CastSpell` arm rejects an out-of-range index, and requires the
         /// card to actually be in the chosen alternative's `from_zone`.
         alternative_cost: Option<usize>,
+        /// CR 702.27a Buyback: whether the caster is paying the card's
+        /// `CardDefinition::buyback_cost` (if any) in addition to whatever
+        /// cost already applies — same "announced at cast time" phase as
+        /// `alternative_cost`/`x_value`. `commands.rs`'s `CastSpell` arm
+        /// rejects `true` on a card with no `buyback_cost`.
+        pay_buyback: bool,
     },
     ActivateAbility {
         source: ObjectId,

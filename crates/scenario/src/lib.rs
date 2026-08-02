@@ -1345,6 +1345,7 @@ pub fn build_initial_state(
             keywords: parse_keywords(&spec.keywords),
             target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
             alternative_costs: Vec::new(),
+            buyback_cost: None,
             effect: None,
             modes: build_spell_modes(&spec.modes),
             mode_choice: build_mode_choice(spec),
@@ -1641,6 +1642,9 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                 // TODO: no TOML scenario field for this yet - see the
                 // matching TODO on CardDefinition.alternative_costs above.
                 alternative_cost: None,
+                // TODO: no TOML scenario field for buyback yet either -
+                // same "direct struct literal only" limit as above.
+                pay_buyback: false,
             },
         ),
         ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors } => (
@@ -1960,6 +1964,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 // literals in Rust integration tests (see
                 // phase5_flashback_alternative_costs.rs).
                 alternative_costs: Vec::new(),
+                buyback_cost: None,
                 // TODO: no TOML scenario field for a Rust-native effect
                 // (Game.Ops.Damage/GainLife/...) yet either - same
                 // "direct struct literal only" limit as alternative_costs
@@ -1997,6 +2002,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 keywords: parse_keywords(&spec.keywords),
                 target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
                 alternative_costs: Vec::new(),
+                buyback_cost: None,
                 effect: None,
                 modes: build_spell_modes(&spec.modes),
                 mode_choice: build_mode_choice(spec),

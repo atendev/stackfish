@@ -186,7 +186,7 @@ pub fn execute_command(
         PlayerActionKind::PlayLand { card } => {
             return land::execute_play_land(state, script_runtime, command.actor, card);
         }
-        PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost } => {
+        PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost, pay_buyback } => {
             return cast::execute_cast_spell(
                 state,
                 script_runtime,
@@ -196,6 +196,7 @@ pub fn execute_command(
                 targets,
                 x_value,
                 alternative_cost,
+                pay_buyback,
             );
         }
         PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors } => {

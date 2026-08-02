@@ -11,6 +11,7 @@ use crate::types::cost::{self, AdditionalCost, AlternativeCost, CostSpec};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, ScriptHandle, Target};
+use crate::types::mana::ManaCost;
 use crate::types::stack::{PendingModeChoice, StackEntryKind, StackObject};
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -28,11 +29,20 @@ pub(super) fn execute_cast_spell(
     targets: Vec<Target>,
     x_value: Option<u32>,
     alternative_cost: Option<usize>,
+    pay_buyback: bool,
 ) -> Result<CommandOutcome, CommandError> {
     let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
     if object.definition.card_types.contains(CardTypeSet::LAND) {
         return Err(CommandError::IllegalAction(
             "lands aren't cast as spells - use PlayLand".to_string(),
+        ));
+    }
+    // CR 702.27a: buyback is announced up front, same phase as
+    // alternative_cost/x_value - rejected here (before any state
+    // mutation) rather than silently ignored if the card has none.
+    if pay_buyback && object.definition.buyback_cost.is_none() {
+        return Err(CommandError::IllegalAction(
+            "this spell has no buyback cost to pay".to_string(),
         ));
     }
     // CR 601.2b: an announced alternative cost (flashback, etc)
@@ -397,6 +407,18 @@ pub(super) fn execute_cast_spell(
     // paid together with the rest of this cost, through the same
     // already-generic PaymentPlan machinery.
     cost.additional.extend(mode_additional_costs);
+    // CR 702.27a: buyback's own cost is paid *in addition to* whatever
+    // cost already applies (checked above: pay_buyback implies
+    // buyback_cost.is_some()) - concatenated directly onto the resolved
+    // cost's own mana symbols, so PaymentPlan::validate enforces the
+    // combined total through the same generic mana-payment check, rather
+    // than a second independent one.
+    if pay_buyback {
+        let buyback_cost = object.definition.buyback_cost.clone().expect("checked above");
+        let mut mana = cost.mana.unwrap_or(ManaCost { symbols: Vec::new() });
+        mana.symbols.extend(buyback_cost.symbols);
+        cost.mana = Some(mana);
+    }
 
     // Snapshot before the move - CR 603.10's last_known_info (see
     // GameEventKind::ZoneChange's doc comment).
@@ -480,6 +502,11 @@ pub(super) fn execute_cast_spell(
         target_requirement,
         x_value,
         exile_on_leaving_stack,
+        // CR 702.27a: already confirmed above (pay_buyback implies
+        // buyback_cost.is_some()) - baked in here so the resolution-side
+        // destination check (engine/resolve/permanent_entry.rs) doesn't
+        // need to re-read CardDefinition.
+        pay_buyback,
         operation,
         effect,
         // CR 603.4's "if" clause is triggered-ability-only text - a

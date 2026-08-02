@@ -371,6 +371,9 @@ impl Engine {
             target_requirement,
             None,
             false,
+            // CR 702.27a: buyback is a spell-only concept - a triggered
+            // ability never carries it.
+            false,
             operation,
             effect,
             intervening_if,

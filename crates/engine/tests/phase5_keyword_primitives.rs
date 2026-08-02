@@ -46,6 +46,7 @@ fn creature_definition(name: &str, power: i32, toughness: i32, keywords: Keyword
         keywords,
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -452,7 +453,7 @@ fn flash_creature_castable_outside_main_phase() {
     let p0 = PlayerId(0);
     let mut engine = Engine::new(state);
     let status = engine
-        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None } })
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false} })
         .map(|_| drain(&mut engine));
     assert!(
         matches!(status, Ok(StepStatus::AwaitingPayment { .. })),
@@ -466,7 +467,7 @@ fn non_flash_creature_rejected_outside_main_phase() {
     let p0 = PlayerId(0);
     let mut engine = Engine::new(state);
     engine
-        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None } })
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false} })
         .expect("actor holds priority - the sorcery-speed rejection happens inside execute_command, not submit_action");
     let status = drain(&mut engine);
     assert!(

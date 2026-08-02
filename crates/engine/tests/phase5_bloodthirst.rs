@@ -45,6 +45,7 @@ fn creature_definition(name: &str, script: &str) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -234,7 +235,7 @@ fn cast_creature_resolution_gets_bloodthirst_counters_after_real_combat_damage()
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .unwrap();
     pay_free_and_drain(&mut engine);

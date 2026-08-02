@@ -59,6 +59,7 @@ fn flying_creature(id: u64, name: &str) -> CardDefinition {
         keywords: KeywordSet::FLYING,
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -83,6 +84,7 @@ fn trample_creature(id: u64, name: &str) -> CardDefinition {
         keywords: KeywordSet::TRAMPLE,
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -128,6 +130,7 @@ fn exchange_of_words_definition() -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Multiple(vec![creature_word(), creature_word()])),
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: Some(AbilityEffect::ExchangeTextBoxes),
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -148,7 +151,7 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("player holds priority, spell is in hand");
 }

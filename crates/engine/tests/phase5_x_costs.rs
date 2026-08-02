@@ -30,6 +30,7 @@ fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
         keywords: KeywordSet::empty(),
         target_requirement: None,
         alternative_costs: Vec::new(),
+        buyback_cost: None,
         effect: None,
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -75,7 +76,7 @@ fn x_spell_cast_with_announced_value_is_payable() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: Some(3),
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .expect("X announced matches the cost's {X}");
@@ -118,7 +119,7 @@ fn x_spell_cast_without_announcing_x_is_rejected() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None },
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .unwrap();
     let status = drain(&mut engine);
@@ -146,7 +147,7 @@ fn announcing_x_for_a_non_x_spell_is_rejected() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: Some(1),
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .unwrap();
@@ -175,7 +176,7 @@ fn x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry() {
                 modes: Vec::new(),
                 targets: Vec::new(),
                 x_value: Some(0),
-                alternative_cost: None,
+                alternative_cost: None, pay_buyback: false,
             },
         })
         .expect("X=0 is a legal announced value");

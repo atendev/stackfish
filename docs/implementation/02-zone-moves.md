@@ -153,3 +153,53 @@
   - No Lua builder for `AlternativeCost::Replacement` itself (the escape/flashback declaration) —
     same scope Flashback's own (undocumented) slice already established; only `Game.Costs.
     ExileFromGraveyard` (the cost component) has Lua exposure.
+
+## Slice: buyback-additional-cost (merged)
+
+- Branch `phase5/buyback-additional-cost`.
+- Scope: CR 702.27 Buyback ("you may pay an additional [cost] as you cast this spell; if paid, it
+  returns to hand instead of the graveyard when it resolves"). Requirements report given in chat
+  before implementation, including an explicit size-of-ripple flag (new fields on `CardDefinition`/
+  `PlayerActionKind::CastSpell`/`StackObject`, each touching many construction sites) confirmed with
+  the user before starting.
+- Verify: 5 new tests (`phase5_buyback.rs`) — unaffected-by-default baseline, combined-cost
+  enforcement + hand-return on resolution, underpayment rejection, "no buyback cost on this card"
+  rejection, and a fizzle still landing in the graveyard (not hand, per CR 702.27a's narrower
+  wording vs. Flashback's 702.34a). Full workspace suite (174 test binaries) green.
+- Key finding that kept the resolution-side change to one line: read `engine/resolve/
+  permanent_entry.rs::resolve_permanent_entry` and `Engine::move_resolving_spell` directly before
+  assuming new machinery was needed — the destination-decision closure already branched on
+  `exile_on_leaving_stack`, and `move_resolving_spell` was already fully generic over the
+  destination zone, proven pre-existing by `Engine::unwind_payment` (CR 601.6) already sending a
+  card back to `ZoneKind::Hand` through the same helper. So the only genuinely new mechanism this
+  slice needed was announcing and remembering the optional cost itself - nothing about the
+  resolution/zone-move pipeline.
+- Key changes:
+  - `CardDefinition.buyback_cost: Option<ManaCost>` — new field (`None` for the overwhelming
+    majority of cards). Scoped to a flat `ManaCost` rather than the fuller `CostSpec` `Alternative
+    Cost::Replacement` uses — every real Buyback card is a flat mana amount, and a `CostSpec` here
+    would mean inventing a "merge two `CostSpec`s" primitive with no other caller.
+  - `PlayerActionKind::CastSpell.pay_buyback: bool` — announced at cast time, same phase as
+    `alternative_cost`/`x_value`. `commands::cast::execute_cast_spell` rejects `true` on a card with
+    no `buyback_cost`, before any state mutation; when paid, the buyback `ManaCost`'s symbols are
+    concatenated directly onto the resolved cost's own mana symbols, so `PaymentPlan::validate`
+    enforces the combined total through the same generic mana-payment check rather than a second
+    independent one.
+  - `StackObject.bought_back: bool` — baked in at push time, sibling to `exile_on_leaving_stack`
+    (never set by an ability, only a spell). `engine/resolve/permanent_entry.rs`'s destination
+    closure checks it before `exile_on_leaving_stack` (no real card combines the two, but if one
+    somehow did, "returns to hand" is the more specific choice) — deliberately *not* checked in
+    `resolve/mod.rs`'s CR 608.2b fizzle branch, since CR 702.27a's own text only covers "as it
+    resolves," unlike Flashback's broader "as it resolves or as it leaves the stack otherwise."
+  - Mechanical ripple: `buyback_cost`/`pay_buyback`/`bought_back` field additions touched ~150
+    `CardDefinition` literals, ~100 `PlayerActionKind::CastSpell` literals, and ~12 `StackObject`
+    construction sites across the engine, scenario, and testutil crates — every site either fixed
+    by a single change to a shared builder (`testutil::minimal_card_definition`) or by a scripted,
+    idempotency-checked mass patch (verified via a full `--keep-going` workspace rebuild to green,
+    not just "no errors in the first batch").
+- Deviations: none from the requirements report's design.
+- Unresolved, named not silently dropped:
+  - Buyback combined with an alternative cost or a modal spell — not blocked structurally, but no
+    real card does this and it's untested.
+  - No Lua builder for `buyback_cost` — same scope Flashback/Escape's own alternative-cost
+    machinery already established.
