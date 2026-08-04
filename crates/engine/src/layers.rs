@@ -227,6 +227,33 @@ pub fn effective_characteristics(
             _ => {}
         }
     }
+    // CR 702.22b: "bands with other" is a special form of banding - if an
+    // effect causes a permanent to *lose* banding, it loses every "bands
+    // with other" ability too, even one that was never itself the target of
+    // a `RemoveKeyword`/`RemoveAllAbilities` effect. `RemoveAllAbilities`
+    // already clears both together above (it clears everything at once);
+    // this is the same cross-clear for the narrower `RemoveKeyword(BANDING)`
+    // case. Deliberately gated on `def.keywords` (this object's own
+    // printed-or-copied Banding, CR 702.22b's own precondition: banding
+    // must actually have been *lost*, not simply never present) rather than
+    // firing whenever the effective set merely lacks `BANDING` - every real
+    // "bands with other [quality]" card is also printed with Banding, but
+    // this engine models the two as independently effect-granted (no
+    // printed field for either backs "bands with other" - see
+    // `EffectPrimitive::AddBandsWithOther`'s own doc comment), so a
+    // permanent that only ever had an effect-granted "bands with other" and
+    // genuinely never had Banding at all (CR 702.22c's own second clause
+    // allows this - no real printed card does it, but it's not illegal) must
+    // not have that grant zeroed out here; only a printed-Banding creature
+    // whose Banding was subsequently stripped should lose it. Checked once
+    // here (not inside the loop) since only the *final* accumulated
+    // `keywords` value after every applicable effect has folded in - not
+    // any one intermediate step - determines whether Banding is still
+    // present.
+    if def.keywords.contains(KeywordSet::BANDING) && !keywords.contains(KeywordSet::BANDING) {
+        bands_with_other_subtypes = Vec::new();
+        bands_with_other_supertypes = crate::types::card::SupertypeSet::empty();
+    }
 
     // Layer 7b: setting replaces whatever came before this layer entirely -
     // later timestamp wins outright, it doesn't stack with an earlier SetPT.
