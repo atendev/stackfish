@@ -706,6 +706,49 @@
   for it is disproportionate for one card. CR 612.7 (Spy Kit) remains entirely unaddressed, per the
   scoping note above.
 
+## Slice: bands-with-other-keyword-loss (merged)
+
+- CR 702.22b: "if an effect causes a permanent to lose banding, the
+  permanent loses all 'bands with other' abilities as well." Closes the
+  last named gap in CR 702.22 (banding).
+- Backlog's own prior note on this ("no effect in this engine removes a
+  keyword yet, untestable") was stale — `EffectPrimitive::RemoveKeyword`
+  already existed, real and Lua-exposed (`keyword-layer-fix-and-remove-
+  keyword` above), never logged back to that line. Caught by grepping the
+  actual code before scoping, not trusting the prose.
+- The real gap: `effective_characteristics`'s layer 6 fold already
+  accumulates `bands_with_other_subtypes`/`bands_with_other_supertypes`
+  fully independently of `keywords` — `RemoveKeyword(BANDING)` cleared
+  Banding itself but left a creature's separate bands-with-other grant
+  untouched. Fixed with one check at the end of the fold: if `def.keywords`
+  (this object's own printed-or-copied base) contains Banding but the final
+  accumulated `keywords` no longer does, both `bands_with_other_*`
+  accumulators are cleared — the same cross-clear `RemoveAllAbilities`
+  already does as a side effect of wiping everything.
+- Deliberately gated on *printed* Banding (`def.keywords`), not "effective
+  set merely lacks it" — `phase5/bands-with-other`'s own
+  `quality_band_legal_with_no_banding_member_at_all` test already proved a
+  creature can legally grant bands-with-other while never printing Banding
+  at all (CR 702.22c's second clause allows this, no real card does it but
+  it isn't illegal); that shape must not be affected by an actual *loss*
+  rule. `def` (the copy-aware `copiable_override.as_ref().unwrap_or(&obj.
+  definition)`) was already in scope at the point this check needed it, no
+  new plumbing required.
+- `commands::combat::declare::DeclareBands`/`damage.rs`'s
+  `has_bands_with_other_pair` needed zero changes — both already consume
+  `effective_characteristics` generically.
+- Verify: 6 new tests (`phase5_bands_with_other_keyword_loss.rs`) - unit
+  level (subtype and supertype forms both clear on loss; an unrelated
+  keyword's removal leaves bands-with-other untouched; a creature that
+  never had Banding at all is unaffected) plus end-to-end `DeclareBands`
+  (a quality band that would be legal is rejected once Banding is stripped,
+  and a control test proving it's legal without the strip). Full existing
+  `phase5_bands_with_other.rs`/`phase5_banding.rs`/`phase5_bands_with_
+  other_effect_blocked.rs` suites re-run clean, including the "never had
+  Banding" test this slice's own gating was built specifically not to
+  break. Full workspace suite green.
+- Unresolved: none — CR 702.22 has no further known gap.
+
 ## General layer notes
 
 - Layer order in `effective_characteristics`: 3 text (CR 612.6/612.8, `volraths-shapeshifter`/
