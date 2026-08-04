@@ -320,6 +320,7 @@ fn is_battlefield_entry_modifier(spec: &ReplacementSpec) -> bool {
                 | ReplacementPayload::EntersWithCountersSunburst
                 | ReplacementPayload::EntersWithCountersDevour { .. }
                 | ReplacementPayload::EntersWithCountersAmplify { .. }
+                | ReplacementPayload::EntersWithCountersEscape { .. }
                 | ReplacementPayload::EntersAsCopy(_),
             ..
         }
@@ -516,7 +517,8 @@ pub fn apply_enters_battlefield_modifiers(
                     payload: ReplacementPayload::EntersTapped
                         | ReplacementPayload::EntersWithCounters { .. }
                         | ReplacementPayload::EntersWithCountersBloodthirst { .. }
-                        | ReplacementPayload::EntersWithCountersSunburst,
+                        | ReplacementPayload::EntersWithCountersSunburst
+                        | ReplacementPayload::EntersWithCountersEscape { .. },
                     ..
                 }
             )
@@ -559,6 +561,16 @@ pub fn apply_enters_battlefield_modifiers(
             ReplacementPayload::EntersWithCountersBloodthirst { kind, amount } => {
                 let controller = state.object(object).map(|o| o.controller);
                 if controller.is_some_and(|c| opponent_damaged_this_turn(state, c)) {
+                    counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
+                }
+            }
+            // CR 702.138c: same gated shape as Bloodthirst above, checked
+            // against `entered_via_escape` instead - already set on `object`
+            // by `Engine::move_resolving_spell` before this function ever
+            // runs (both real call sites invoke it after the entering
+            // permanent's own `GameObject` is already in `state.objects`).
+            ReplacementPayload::EntersWithCountersEscape { kind, amount } => {
+                if state.object(object).is_some_and(|o| o.entered_via_escape) {
                     counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
                 }
             }
@@ -870,6 +882,7 @@ mod tests {
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
             copy_generation: 0,
+            entered_via_escape: false,
         }
     }
 

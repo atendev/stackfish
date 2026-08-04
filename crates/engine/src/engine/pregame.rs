@@ -86,6 +86,7 @@ impl Engine {
                     is_commander: false,
                     visibility: VisibilityPolicy { public: false, visible_to: Vec::new() },
                     copy_generation: 0,
+                    entered_via_escape: false,
                 };
                 lib_zone.contents.push_back(obj_id);
                 objects.insert(obj_id, obj);
@@ -128,6 +129,7 @@ impl Engine {
                     // default as the battlefield/graveyard/exile.
                     visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
                     copy_generation: 0,
+                    entered_via_escape: false,
                 };
                 command_zone.contents.push_back(obj_id);
                 objects.insert(obj_id, obj);

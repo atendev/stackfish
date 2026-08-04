@@ -28,11 +28,9 @@
 //! directly), so it's structurally impossible for the card being cast to
 //! also appear among its own exile-cost candidates.
 //!
-//! Deliberately out of scope, named not hidden: CR 702.138c/d ("escapes with
-//! [counters/ability]," linked to "if this permanent escaped") - no
-//! provenance tracking for "was this permanent cast via escape" exists
-//! anywhere in this engine, and building one would mean a new linked-ability
-//! mechanism, a separate and bigger piece not needed for the core mechanic.
+//! CR 702.138b/c/d ("if this permanent escaped," "escapes with
+//! [counters/ability]") are real now too (`phase5/escape-provenance`) - see
+//! `phase5_escape_provenance.rs` for the full slice.
 
 use stackfish_engine::commands::CommandError;
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
@@ -81,6 +79,7 @@ fn escape_creature_definition() -> CardDefinition {
             },
             from_zone: ZoneKind::Graveyard,
             exile_on_leaving_stack: false,
+            escape: true,
         }],
         buyback_cost: None,
         effect: None,

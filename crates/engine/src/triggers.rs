@@ -193,7 +193,7 @@ pub fn collect_triggers(
         // whatever `PutTriggersApnap` bakes onto the `StackObject`.
         let intervening_if_holds = match &ability.intervening_if {
             None => true,
-            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, controller),
+            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, controller, ability.source),
             Some(InterveningIfSpec::Script(handle)) => {
                 match runtime.invoke_intervening_if(*handle, state, ability.source, controller) {
                     Ok(v) => v,
@@ -270,7 +270,7 @@ pub fn collect_triggers(
         // CR 603.4 applies here too - see the main loop's own comment above.
         let intervening_if_holds = match &ability.intervening_if {
             None => true,
-            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, lki.controller),
+            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, lki.controller, ability.source),
             Some(InterveningIfSpec::Script(handle)) => {
                 match runtime.invoke_intervening_if(*handle, state, ability.source, lki.controller) {
                     Ok(v) => v,

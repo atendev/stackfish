@@ -374,6 +374,9 @@ impl Engine {
             // CR 702.27a: buyback is a spell-only concept - a triggered
             // ability never carries it.
             false,
+            // CR 702.138b: "escaped" is a spell-cast-shaped concept - a
+            // triggered ability never carries it either.
+            false,
             operation,
             effect,
             intervening_if,

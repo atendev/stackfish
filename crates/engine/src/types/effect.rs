@@ -903,6 +903,17 @@ pub enum ReplacementPayload {
     /// deliberately not bundled in here to keep this primitive matching
     /// exactly what was scoped.
     EntersWithCountersBloodthirst { kind: CounterKind, amount: i32 },
+    /// CR 702.138c (Escape N): "[This permanent] escapes with N [kind]
+    /// counters" means "if this permanent escaped, it enters with N [kind]
+    /// counters" — same no-player-choice gated shape `EntersWithCountersBloodthirst`
+    /// already established, checked against `GameObject::entered_via_escape`
+    /// (`phase5/escape-provenance`) instead of `opponent_damaged_this_turn`.
+    /// CR 702.138c's own second sentence ("may have a triggered ability
+    /// linked to it that triggers 'when it enters this way'") isn't modeled
+    /// — no real card in this corpus combines Escape with a linked trigger,
+    /// same posture the Vesuvan-only `grant_recurring_copy_trigger` shape
+    /// already takes for its own narrower CR 707.9a case.
+    EntersWithCountersEscape { kind: CounterKind, amount: i32 },
     /// CR 702.44 (Sunburst): like `EntersWithCounters`, but both `kind` and
     /// `amount` are derived at apply time instead of fixed at registration —
     /// no fields on this variant at all. `amount` is the number of *distinct*
@@ -1506,6 +1517,7 @@ mod tests {
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
             copy_generation: 0,
+            entered_via_escape: false,
         }
     }
 

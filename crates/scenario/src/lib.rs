@@ -1381,6 +1381,7 @@ pub fn build_initial_state(
             is_commander: entry.is_commander,
             visibility: VisibilityPolicy { public, visible_to: Vec::new() },
             copy_generation: 0,
+            entered_via_escape: false,
         };
 
         let zone_owner = zone_owner_for(zone_kind, owner);

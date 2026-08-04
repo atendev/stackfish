@@ -118,6 +118,9 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(InterveningIfTag(InterveningIfPrimitive::ControllerControlsAtLeast { filter, count }))
     })?;
     intervening_if.set("ControlsAtLeast", controls_at_least)?;
+    // CR 603.4/702.138b: "if it escaped" - Kroxa/Uro's own real card
+    // pattern (an ordinary ETB trigger's intervening-if).
+    intervening_if.set("Escaped", InterveningIfTag(InterveningIfPrimitive::Escaped))?;
 
     let ops = lua.create_table()?;
     // CR 605: `Game.Ops.AddMana(letter, count?)` - `letter` is a single
@@ -554,6 +557,16 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         lua.create_function(|_, (kind_name, amount): (String, i32)| {
             let kind = parse_counter_kind_name(&kind_name);
             Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersBloodthirst { kind, amount }))
+        })?,
+    )?;
+    // CR 702.138c: `Game.ReplacementPayloads.EntersWithCountersEscape(kindName, amount)`
+    // - same fixed-amount shape as `EntersWithCountersBloodthirst` above,
+    // gated on `GameObject::entered_via_escape` instead.
+    replacement_payloads.set(
+        "EntersWithCountersEscape",
+        lua.create_function(|_, (kind_name, amount): (String, i32)| {
+            let kind = parse_counter_kind_name(&kind_name);
+            Ok(ReplacementPayloadTag(ReplacementPayload::EntersWithCountersEscape { kind, amount }))
         })?,
     )?;
     // CR 702.44: `Game.ReplacementPayloads.EntersWithCountersSunburst` - no

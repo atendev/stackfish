@@ -252,7 +252,7 @@ impl Engine {
 
         let mut events = Vec::new();
         if matches!(stack_object.kind, StackEntryKind::Spell) {
-            if let Some(event) = self.move_resolving_spell(stack_id, ZoneKind::Hand, false) {
+            if let Some(event) = self.move_resolving_spell(stack_id, ZoneKind::Hand, false, false) {
                 events.push(event);
             }
         }
@@ -294,6 +294,12 @@ impl Engine {
         stack_id: ObjectId,
         destination: ZoneKind,
         run_script: bool,
+        // CR 702.138b: `true` only from `resolve_permanent_entry`'s real
+        // entry call, carrying the resolving `StackObject::escaped` flag -
+        // `false` from every other call site (returning to hand on CR
+        // 601.6 unwind, or a fizzle/instant/sorcery landing in the
+        // graveyard/exile - none of those are "entering the battlefield").
+        entered_via_escape: bool,
     ) -> Option<GameEventKind> {
         let spell_object = self.state.object(stack_id)?;
         let last_known_info = spell_object.clone();
@@ -316,6 +322,11 @@ impl Engine {
         // was never in play.
         if destination == ZoneKind::Battlefield {
             new_object.controlled_since_turn = self.state.turn_number;
+            // CR 702.138b: this incarnation's own provenance - always
+            // re-derived fresh here, never carried forward from
+            // `last_known_info` (a stack object's own prior value is
+            // meaningless; only the caller's real `escaped` flag matters).
+            new_object.entered_via_escape = entered_via_escape;
         }
 
         self.state.objects.remove(&stack_id);

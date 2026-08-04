@@ -398,6 +398,63 @@
   own "ability persists in other zones" caveat, named in `phase5/cycling-
   ability`'s own entry, is unrelated and still open).
 
+## CR 702.138b/c/d: Escape provenance (`phase5/escape-provenance`)
+
+- Kroxa/Uro's own real card pattern — "when ~ enters the battlefield, if it
+  escaped" — is an *ordinary* CR 603.4 ETB trigger whose intervening-if asks
+  "did this permanent escape" (CR 702.138b), not CR 702.138c/d's own more
+  literal "escapes with [counters/ability]" templates (no real card in this
+  corpus uses those verbatim, but they're cheap once provenance is real).
+- New provenance chain: `AlternativeCost::Replacement.escape: bool` (the
+  only thing that structurally distinguishes Escape from Flashback, since
+  both share `from_zone: Graveyard`) -> `StackObject::escaped` (baked in at
+  push time) -> `GameObject::entered_via_escape` (set by `Engine::
+  move_resolving_spell` once a spell with `escaped: true` resolves to the
+  battlefield).
+- `InterveningIfPrimitive::Escaped` — a new self-contained variant, checked
+  against `state.object(source).entered_via_escape`. `InterveningIfPrimitive
+  ::holds` widened to take `source: ObjectId` (previously only `controller`
+  — every prior variant only ever needed the ability's controller, never the
+  object itself) - 4 real call sites updated (`triggers.rs`'s live and
+  departed loops, `layers.rs`'s conditional-continuous-effect check,
+  `resolve/mod.rs`'s CR 608.2a resolution-time recheck).
+- CR 702.138d ("has [ability] if escaped") needed **no new mechanism** — a
+  static ability's own `StaticAbilityBuilder:SetCondition` (CR 611.2c,
+  `phase5/conditional-continuous-effects`) already accepts any
+  `InterveningIfPrimitive` generically, so `Game.InterveningIf.Escaped`
+  plugs in directly and `layers::applicable_effects_in_layer` re-evaluates
+  it fresh off the *live* object on every query - no CR 603.10
+  departed-ability concern the way the ETB-trigger shape above has, since a
+  static ability's condition is only ever checked while its source is still
+  on the battlefield.
+- CR 702.138c ("escapes with N counters") mirrors `EntersWithCountersBloodthirst`'s
+  own no-player-choice gated shape exactly (`ReplacementPayload::
+  EntersWithCountersEscape`), checked against `entered_via_escape` instead
+  of `opponent_damaged_this_turn`. Caught a real, separate 4th "which
+  payloads pair with which filter" allowlist while testing:
+  `script/builders.rs`'s `validate_replacement_filter_payload_pairing` is a
+  Lua-side `:Register()`-time guard, distinct from the two Rust-side
+  `is_battlefield_entry_modifier`-shaped match lists in `replacement.rs` -
+  missing it surfaced immediately as a real `ScriptError` from a live
+  `:Register()` call in the end-to-end test, not a silent no-op.
+- `GameObject::entered_via_escape` field ripple checked small before
+  building: `GameObject::new` is itself still `todo!()`, so every real
+  constructor is a hand-written literal — but there are only ~6 of them
+  total (`testutil::card_object`, the one canonical test constructor
+  everything else builds on via `..card_object(...)` update-syntax, plus a
+  handful of real production/test-helper sites) - everywhere else already
+  clones an existing `GameObject` forward, so the field rides along for
+  free.
+- Verify: 2 new tests (`phase5_escape_provenance.rs`) - one creature with
+  all three escape-gated effects (ETB trigger, counters, conditional
+  keyword) proven together, cast two ways (via Escape: all three apply;
+  normally from hand: none do) - proving `entered_via_escape` is real
+  per-incarnation provenance, not a standing permission on the card. Full
+  workspace suite green.
+- Unresolved: CR 702.138c's own second sentence (a linked "when it enters
+  this way" trigger, CR 603.11) stays unmodeled - no real card in this
+  corpus combines Escape with one.
+
 ## General trigger notes
 
 - Trigger ordering: `group_apnap` groups by controller in APNAP order; intra-group ordering pauses via `AwaitTriggerOrderChoice`.

@@ -167,7 +167,7 @@ impl Engine {
         destination: ZoneKind,
     ) -> ControlFlow<ProcessState, (StackObject, Vec<GameEventKind>)> {
         let run_script = destination == ZoneKind::Battlefield;
-        if let Some(event) = self.move_resolving_spell(top.stack_id, destination, run_script) {
+        if let Some(event) = self.move_resolving_spell(top.stack_id, destination, run_script, top.escaped) {
             // CR 303.4b: an Aura entering the battlefield
             // this way attaches to its (already
             // legality-checked, CR 608.2b, above)

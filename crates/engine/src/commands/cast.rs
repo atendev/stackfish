@@ -338,9 +338,9 @@ pub(super) fn execute_cast_spell(
     // missing. TODO: X combined with an alternative cost (e.g.
     // flashback on an X spell) isn't handled - x_value is simply
     // unchecked in that branch below.
-    let (mut cost, exile_on_leaving_stack) = match alternative {
-        Some(AlternativeCost::Replacement { cost, exile_on_leaving_stack, .. }) => {
-            (cost.clone(), *exile_on_leaving_stack)
+    let (mut cost, exile_on_leaving_stack, escaped) = match alternative {
+        Some(AlternativeCost::Replacement { cost, exile_on_leaving_stack, escape, .. }) => {
+            (cost.clone(), *exile_on_leaving_stack, *escape)
         }
         None => {
             let has_x = object.definition.mana_cost.has_x();
@@ -398,7 +398,7 @@ pub(super) fn execute_cast_spell(
             } else {
                 resolved_mana_cost
             };
-            (CostSpec::mana_only(resolved_mana_cost), false)
+            (CostSpec::mana_only(resolved_mana_cost), false, false)
         }
     };
     // CR 700.2h: every chosen mode's own additional cost (collected
@@ -507,6 +507,9 @@ pub(super) fn execute_cast_spell(
         // destination check (engine/resolve/permanent_entry.rs) doesn't
         // need to re-read CardDefinition.
         pay_buyback,
+        // CR 702.138b: already resolved above from the chosen alternative
+        // cost's own `escape` flag.
+        escaped,
         operation,
         effect,
         // CR 603.4's "if" clause is triggered-ability-only text - a

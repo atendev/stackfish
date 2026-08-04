@@ -411,7 +411,7 @@ fn applicable_effects_in_layer<'a>(
             // much larger change than this slice's own scope.
             let condition_holds = match &e.condition {
                 None => true,
-                Some(InterveningIfSpec::Primitive(p)) => p.holds(state, source_obj.controller),
+                Some(InterveningIfSpec::Primitive(p)) => p.holds(state, source_obj.controller, e.source),
                 Some(InterveningIfSpec::Script(handle)) => script_runtime
                     .invoke_intervening_if(*handle, state, e.source, source_obj.controller)
                     .unwrap_or(false),

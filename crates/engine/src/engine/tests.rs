@@ -155,6 +155,7 @@ fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::Gam
         is_token: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
         copy_generation: 0,
+        entered_via_escape: false,
     }
 }
 

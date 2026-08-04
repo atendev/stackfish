@@ -117,6 +117,7 @@ fn land(id: ObjectId, owner: PlayerId) -> GameObject {
         is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
         copy_generation: 0,
+        entered_via_escape: false,
     }
 }
 
