@@ -221,33 +221,45 @@ pub fn collect_triggers(
     // `departed` matching on that same id to resolve a `PendingTrigger` back
     // into a `RegisteredAbility`.
     for ability in departed {
-        // Only Dies/LeavesBattlefield/Discarded are meaningful for a source
-        // that no longer resolves live - every other condition shape (None/
-        // Always/DealsDamage/a Script condition/...) either assumes a live
-        // source or isn't scoped to this slice (see the TODO on
+        // Only Dies/LeavesBattlefield/Discarded/Cycled are meaningful for a
+        // source that no longer resolves live - every other condition shape
+        // (None/Always/DealsDamage/a Script condition/...) either assumes a
+        // live source or isn't scoped to this slice (see the TODO on
         // ConditionPrimitive itself). Discarded joined this list in
         // `phase5/discarded-trigger` - a discarded card's own abilities are
         // purged from `state.abilities` by `retire_object` exactly like a
-        // battlefield departure's, so it needs the same LKI fallback.
+        // battlefield departure's, so it needs the same LKI fallback. Cycled
+        // joined it in `phase5/cycling-triggers` for the exact same reason -
+        // a cycled card's own "when you cycle this card" ability is purged
+        // the moment it leaves hand too.
         let (primitive, once_per_turn) = match &ability.condition {
             Some(ConditionSpec::Primitive(
                 primitive @ (ConditionPrimitive::Dies
                 | ConditionPrimitive::LeavesBattlefield
-                | ConditionPrimitive::Discarded),
+                | ConditionPrimitive::Discarded
+                | ConditionPrimitive::Cycled),
             )) => (primitive, false),
             // CR 603.2h applies here too - a departed object's own Dies/
-            // LeavesBattlefield/Discarded trigger is just as capable of
-            // carrying "This ability triggers only once each turn" as a live
-            // one's.
+            // LeavesBattlefield/Discarded/Cycled trigger is just as capable
+            // of carrying "This ability triggers only once each turn" as a
+            // live one's.
             Some(ConditionSpec::PrimitiveOncePerTurn(
                 primitive @ (ConditionPrimitive::Dies
                 | ConditionPrimitive::LeavesBattlefield
-                | ConditionPrimitive::Discarded),
+                | ConditionPrimitive::Discarded
+                | ConditionPrimitive::Cycled),
             )) => (primitive, true),
             _ => continue,
         };
-        let GameEventKind::ZoneChange { last_known_info: Some(lki), .. } = &event.kind else {
-            continue;
+        // Dies/LeavesBattlefield/Discarded all read their LKI off
+        // ZoneChange; Cycled is a separate marker event with its own
+        // last_known_info field (same shape, different variant) - extracted
+        // generically here so the rest of this loop (controller/
+        // intervening-if/PendingTrigger) doesn't need to care which.
+        let lki = match &event.kind {
+            GameEventKind::ZoneChange { last_known_info: Some(lki), .. } => lki,
+            GameEventKind::Cycled { last_known_info, .. } => last_known_info,
+            _ => continue,
         };
         if lki.object_id != ability.source {
             continue;

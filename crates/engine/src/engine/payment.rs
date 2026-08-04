@@ -6,13 +6,32 @@ use std::collections::VecDeque;
 
 use crate::commands::{self, PaymentResolution};
 use crate::replacement::{self, ReplacementOutcome};
-use crate::types::cost::PaymentPlan;
+use crate::types::cost::{AdditionalCost, PaymentPlan};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
 use crate::types::stack::StackEntryKind;
 use crate::types::zone::ZoneKind;
 
 use super::{Engine, PaymentError, PendingZoneMove, ProcessState, ReplacementResumeTarget};
+
+/// CR 702.29c/f: builds the `GameEventKind::Cycled` marker for a just-
+/// resolved cost zone-move `event`, if it's the one payment `cycling_source`
+/// names (`Engine::submit_payment`'s own `AdditionalCost::DiscardSelf`
+/// check) - `None` for every other zone-moving payment in the same cost
+/// (e.g. a `Sacrifice` paid alongside a `DiscardSelf`), and for every
+/// non-Cycling ability entirely. Shared by `continue_cost_zone_moves`'s own
+/// loop and `replacement_resume.rs`'s `CostZoneMove` resume arm, which
+/// independently commits the one item that raised a CR 616.1 ordering
+/// choice before re-entering that loop for the rest.
+pub(super) fn cycled_marker_event(event: &GameEventKind, cycling_source: Option<ObjectId>) -> Option<GameEventKind> {
+    let GameEventKind::ZoneChange { object, last_known_info: Some(lki), .. } = event else {
+        return None;
+    };
+    if Some(*object) != cycling_source {
+        return None;
+    }
+    Some(GameEventKind::Cycled { object: *object, last_known_info: lki.clone() })
+}
 
 impl Engine {
     /// Answers a pending CR 601.2f-h cost payment raised by
@@ -39,6 +58,22 @@ impl Engine {
         if !valid {
             return Err(PaymentError::InvalidPlan);
         }
+        // CR 702.29c/f: this cost's own AdditionalCost::DiscardSelf, if any,
+        // is always paid by discarding `source` itself (PaymentPlan::
+        // validate's own check) - so a Cycling/Typecycling ability's own
+        // discard cost is identifiable here, before the general Sacrifice/
+        // Discard/Exile queue below loses track of which AdditionalCost each
+        // payment answered. `None` for every other ability (including a
+        // plain Discard{filter} cost, which never discards `source`
+        // specifically unless that's what the payer separately chose - not
+        // "cycling" either way, since the ability itself isn't templated as
+        // Cycling).
+        let cycling_source = {
+            let ProcessState::AwaitingPayment { cost, .. } = &self.process_state else {
+                unreachable!("checked above");
+            };
+            cost.additional.iter().any(|c| matches!(c, AdditionalCost::DiscardSelf)).then_some(source)
+        };
         let ProcessState::AwaitingPayment { stack_id, on_paid, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
@@ -80,7 +115,7 @@ impl Engine {
         // before the pause happened. continue_cost_zone_moves logs CostPaid
         // itself once every zone-moving payment (if any) has committed, and
         // returns SbaLoop the same way this used to unconditionally.
-        self.process_state = self.continue_cost_zone_moves(pending_zone_moves, payer, stack_id, on_paid);
+        self.process_state = self.continue_cost_zone_moves(pending_zone_moves, payer, stack_id, on_paid, cycling_source);
         Ok(())
     }
 
@@ -113,6 +148,7 @@ impl Engine {
         payer: PlayerId,
         stack_id: ObjectId,
         on_paid: PaymentResolution,
+        cycling_source: Option<ObjectId>,
     ) -> ProcessState {
         while let Some(pending) = remaining.pop_front() {
             let Some(proposed) = commands::propose_zone_move(&self.state, pending.id, pending.from, pending.to) else {
@@ -126,8 +162,12 @@ impl Engine {
             // - a regeneration shield never intercepts either.
             match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
                 ReplacementOutcome::Resolved(event) => {
+                    let cycled = cycled_marker_event(&event, cycling_source);
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
+                    if let Some(kind) = cycled {
+                        self.log_events(vec![kind]);
+                    }
                     self.state.ledger.push(committed);
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
@@ -136,7 +176,7 @@ impl Engine {
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid },
+                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid, cycling_source },
                     };
                 }
             }

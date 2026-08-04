@@ -136,12 +136,16 @@ impl Engine {
                     }
                 }
             },
-            ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid } => match outcome {
+            ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid, cycling_source } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
+                    let cycled = super::payment::cycled_marker_event(&event, cycling_source);
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
+                    if let Some(kind) = cycled {
+                        self.log_events(vec![kind]);
+                    }
                     self.state.ledger.push(committed);
-                    self.continue_cost_zone_moves(remaining, payer, stack_id, on_paid)
+                    self.continue_cost_zone_moves(remaining, payer, stack_id, on_paid, cycling_source)
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                     ProcessState::AwaitingReplacementChoice {
@@ -149,7 +153,7 @@ impl Engine {
                         pending_event: event,
                         candidates,
                         excluded,
-                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid },
+                        resume: ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid, cycling_source },
                     }
                 }
             },

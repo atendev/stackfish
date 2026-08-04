@@ -347,6 +347,57 @@
   bigger, more novel gap - see `trigger-target-lua-exposure`'s own note on why modes weren't bundled
   with `:SetTarget`) and scenario TOML wiring.
 
+## CR 702.29c/d: Cycling triggers (`phase5/cycling-triggers`)
+
+- "When you cycle this card" (702.29c) needed a way to distinguish a
+  cycling-cost discard from any other discard of the same card - the
+  pre-existing self-referential `Discarded` primitive fires on *any* hand ->
+  graveyard departure, which over-fires for this narrower meaning.
+- `GameEventKind::Cycled { object, last_known_info }` - a purpose-built
+  marker event logged *alongside* (not instead of) the ordinary `ZoneChange`
+  a cycling discard already produces, only when `Engine::submit_payment`
+  finds `AdditionalCost::DiscardSelf` in the cost being paid. Same "ships
+  with its own trigger match, pure log fact" shape `BecameCopy`/`Attached`
+  already established.
+- Discriminator: `DiscardSelf`'s own `PaymentPlan::validate` check already
+  requires the discarded card to be the ability's own source, so
+  `cost.additional.contains(DiscardSelf) -> cycling_source = Some(source)`
+  is unambiguous - no other cost shape produces that combination.
+  `cycling_source` threads through `continue_cost_zone_moves` and
+  `ReplacementResumeTarget::CostZoneMove` (a CR 616.1 ordering choice raised
+  mid-cycling-payment must not lose track of it) rather than becoming a
+  field on `PendingZoneMove` itself - that struct is shared with CR 514.1's
+  unrelated cleanup-discard queue, which has no such concept.
+- `ConditionPrimitive::Cycled` joins the `departed`-ability CR 603.10
+  fallback loop in `triggers.rs::collect_triggers` alongside
+  `Dies`/`LeavesBattlefield`/`Discarded` - the cycled card's own "when you
+  cycle this card" ability is purged from `state.abilities` the moment it
+  leaves hand, same as any other departure. The loop's LKI-extraction line
+  widened to read either `ZoneChange`'s or `Cycled`'s own
+  `last_known_info` generically.
+- CR 702.29c's own "triggers from whatever zone the card winds up in after
+  it's cycled" falls out for free - `Cycled::matches` never reads `to` at
+  all.
+- CR 702.29f (Typecycling's `DiscardSelf` cost counts as a cycling cost too)
+  needed zero extra code - both share the identical `AdditionalCost::
+  DiscardSelf` cost component already.
+- CR 702.29d ("cycles or discards") needed **no new mechanism** -
+  `DiscardsCard`/`EachDiscardsCard` already match any Hand -> Graveyard
+  `ZoneChange`, and a cycling discard is exactly that shape. Proven directly
+  by `phase5_cycling_triggers.rs`'s own
+  `cycles_or_discards_condition_already_fires_for_a_cycling_discard` test
+  rather than left assumed.
+- `Game.Conditions.Cycled` - one-line Lua exposure, same table
+  `Discarded`/`Dies` already sit in.
+- Verify: 4 new tests (`phase5_cycling_triggers.rs`) - plain Cycling fires
+  the trigger; Typecycling fires it too; the CR 514.1 cleanup hand-size
+  discard of the same card does *not* fire it (proves `Cycled`/`Discarded`
+  stay distinct); the 702.29d free-coverage regression above. Full
+  workspace suite green.
+- Unresolved: CR 702.29 has no further known gap after this slice (702.29b's
+  own "ability persists in other zones" caveat, named in `phase5/cycling-
+  ability`'s own entry, is unrelated and still open).
+
 ## General trigger notes
 
 - Trigger ordering: `group_apnap` groups by controller in APNAP order; intra-group ordering pauses via `AwaitTriggerOrderChoice`.
