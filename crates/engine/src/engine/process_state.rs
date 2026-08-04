@@ -361,6 +361,12 @@ pub enum ReplacementResumeTarget {
         payer: PlayerId,
         stack_id: ObjectId,
         on_paid: PaymentResolution,
+        /// CR 702.29c/f: threaded through unchanged from `Engine::
+        /// submit_payment`'s own `AdditionalCost::DiscardSelf` check, so a
+        /// CR 616.1 ordering choice raised mid-cycling-cost-payment doesn't
+        /// lose track of which payment (if any) is the Cycling ability's
+        /// own self-discard once this pause resolves.
+        cycling_source: Option<ObjectId>,
     },
     /// Reached from `Engine::continue_discard_moves` (`Engine::
     /// submit_discard`'s own CR 514.1 cleanup hand-size discard). Same

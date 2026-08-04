@@ -825,6 +825,22 @@ pub enum ConditionPrimitive {
     /// their departed `Triggered` abilities for the `collect_triggers` LKI
     /// fallback to see (closed by the same fix that added `DiscardsCard`).
     Discarded,
+    /// "When you cycle this card" (CR 702.29c/f) — narrower self-referential
+    /// sibling of `Discarded`: unlike `Discarded` (matches *any* hand ->
+    /// graveyard departure of this card, whatever the cause), this matches
+    /// only `GameEventKind::Cycled`, a purpose-built marker event logged
+    /// alongside (not instead of) the ordinary `ZoneChange` only when the
+    /// discard specifically paid a `AdditionalCost::DiscardSelf` cost
+    /// (`Engine::continue_cost_zone_moves`'s `cycling_source` parameter) —
+    /// the same discriminator this engine already uses to mean "this is a
+    /// Cycling/Typecycling ability's own cost" (`commands::activate`'s
+    /// hand-zone override). CR 702.29c's own "triggers from whatever zone
+    /// the card winds up in after it's cycled" falls out for free: this
+    /// primitive never reads `to` at all. Reuses the same CR 603.10
+    /// departed/LKI fallback shape `Discarded` itself uses, since the
+    /// cycled card's own abilities are purged the moment it leaves hand,
+    /// same as any other departure.
+    Cycled,
     /// "At the beginning of combat on your turn" (CR 507) — matches
     /// `GameEventKind::StepStarted{step: Step::BeginningOfCombat}` only when
     /// the ability's controller is also the active player. Same reachability
@@ -974,6 +990,10 @@ impl ConditionPrimitive {
                 event,
                 GameEventKind::ZoneChange { from: ZoneKind::Hand, to: ZoneKind::Graveyard, last_known_info: Some(lki), .. }
                     if lki.object_id == source
+            ),
+            ConditionPrimitive::Cycled => matches!(
+                event,
+                GameEventKind::Cycled { object, .. } if *object == source
             ),
             ConditionPrimitive::BeginningOfYourCombat => {
                 controller == active_player

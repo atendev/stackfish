@@ -69,6 +69,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     conditions.set("DiscardsCard", ConditionTag(ConditionPrimitive::DiscardsCard))?;
     conditions.set("EachDiscardsCard", ConditionTag(ConditionPrimitive::EachDiscardsCard))?;
     conditions.set("Discarded", ConditionTag(ConditionPrimitive::Discarded))?;
+    conditions.set("Cycled", ConditionTag(ConditionPrimitive::Cycled))?;
     conditions.set("Scries", ConditionTag(ConditionPrimitive::Scries))?;
     conditions.set("EachScries", ConditionTag(ConditionPrimitive::EachScries))?;
     conditions.set("Surveils", ConditionTag(ConditionPrimitive::Surveils))?;

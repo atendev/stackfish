@@ -28,10 +28,10 @@
 //! those three surfaces (draw, tutor, opening hand) actually registers the
 //! ability, not just that the mechanism works when hand-built by hand.
 //!
-//! Deliberately out of scope, named not hidden: CR 702.29c/d ("when you
-//! cycle this card" / "cycles or discards" triggers) — there is no way in
-//! this engine's event/trigger model yet to distinguish a discard that paid
-//! a cycling cost from any other discard (Mind Rot, hand-size cleanup, ...).
+//! CR 702.29c/d ("when you cycle this card" / "cycles or discards"
+//! triggers) are real now too (`phase5/cycling-triggers`) — see
+//! `phase5_cycling_triggers.rs` for the full slice.
+//!
 //! A card leaving hand for any zone other than via a fresh draw still purges
 //! its `RegisteredAbility` the same way every other ability in this engine
 //! already does (CR 702.29b's "the ability continues to exist... in all

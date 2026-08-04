@@ -204,6 +204,17 @@ pub enum GameEventKind {
     /// returns more than one committed event for a single resolved
     /// replacement — see that function's own doc comment.
     UmbraArmorConsumed { enchanted: ObjectId, aura: ObjectId },
+    /// CR 702.29c/f: `object` was discarded specifically to pay a Cycling/
+    /// Typecycling ability's own `AdditionalCost::DiscardSelf` cost —
+    /// logged alongside (not instead of) the ordinary `ZoneChange` that
+    /// same discard already produces, same "pure marker, own event" shape
+    /// `Attached`/`BecameCopy` already established. `last_known_info` is a
+    /// snapshot of `object` exactly as it was in hand (CR 603.10), same
+    /// reason `ZoneChange` itself carries one — the card's own "when you
+    /// cycle this card" ability has already been purged from `state.
+    /// abilities` by the time this is checked. `Engine::
+    /// continue_cost_zone_moves` is this event's only producer.
+    Cycled { object: ObjectId, last_known_info: GameObject },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.
