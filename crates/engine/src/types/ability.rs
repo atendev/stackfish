@@ -1098,10 +1098,20 @@ pub enum InterveningIfPrimitive {
     /// CR 611.2c's overwhelmingly common real shape: "as long as you
     /// control `count` or more permanents matching `filter`."
     ControllerControlsAtLeast { filter: FilterSpec, count: u32 },
+    /// CR 603.4/702.138b: "if it escaped" — Kroxa/Uro's own real card
+    /// pattern (an ordinary ETB trigger's intervening-if, not CR 702.138c/
+    /// d's own "escapes with [counters/ability]" templates, which are a
+    /// different, narrower shape - see `ReplacementPayload::
+    /// EntersWithCountersEscape` for those). Checked against the ability's
+    /// own `source` object's `GameObject::entered_via_escape` - `false`
+    /// (never holds) if `source` no longer resolves live, same
+    /// conservative default `ControllerControlsAtLeast` already takes for
+    /// an unresolvable state.
+    Escaped,
 }
 
 impl InterveningIfPrimitive {
-    pub fn holds(&self, state: &crate::types::game::GameState, controller: PlayerId) -> bool {
+    pub fn holds(&self, state: &crate::types::game::GameState, controller: PlayerId, source: ObjectId) -> bool {
         match self {
             InterveningIfPrimitive::ControllerAtOrBelowLife(threshold) => {
                 state.player(controller).is_some_and(|p| p.life <= *threshold)
@@ -1114,6 +1124,9 @@ impl InterveningIfPrimitive {
                     .filter(|o| filter.matches(o, o.controller, controller))
                     .count();
                 matching as u32 >= *count
+            }
+            InterveningIfPrimitive::Escaped => {
+                state.object(source).is_some_and(|o| o.entered_via_escape)
             }
         }
     }
@@ -1430,6 +1443,7 @@ mod tests {
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
             copy_generation: 0,
+            entered_via_escape: false,
         }
     }
 
@@ -1823,21 +1837,21 @@ mod tests {
     fn controller_at_or_below_life_holds_when_life_is_at_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 5);
-        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0));
+        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0)));
     }
 
     #[test]
     fn controller_at_or_below_life_holds_when_life_is_below_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 3);
-        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0));
+        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0)));
     }
 
     #[test]
     fn controller_at_or_below_life_does_not_hold_when_life_is_above_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 6);
-        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0));
+        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0)));
     }
 
     #[test]
@@ -1845,7 +1859,7 @@ mod tests {
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let state = state_with_life(p0, 1);
-        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p1));
+        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p1, ObjectId(0)));
     }
 
     /// A minimal battlefield permanent for `ControllerControlsAtLeast`
@@ -1904,6 +1918,7 @@ mod tests {
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
             copy_generation: 0,
+            entered_via_escape: false,
         }
     }
 
@@ -1926,7 +1941,7 @@ mod tests {
         state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
         state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT));
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
-        assert!(primitive.holds(&state, p0));
+        assert!(primitive.holds(&state, p0, ObjectId(0)));
     }
 
     #[test]
@@ -1936,7 +1951,7 @@ mod tests {
         state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
         state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
-        assert!(!primitive.holds(&state, p0));
+        assert!(!primitive.holds(&state, p0, ObjectId(0)));
     }
 
     #[test]
@@ -1947,13 +1962,13 @@ mod tests {
         state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
         state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT));
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
-        assert!(primitive.holds(&state, p0), "3 artifacts meets the threshold");
+        assert!(primitive.holds(&state, p0, ObjectId(0)), "3 artifacts meets the threshold");
 
         // Re-derived fresh, no stale state - removing one below the
         // threshold flips the same query without needing to invalidate a
         // cache anywhere.
         state.objects.remove(&ObjectId(2));
-        assert!(!primitive.holds(&state, p0), "down to 2 artifacts, no longer holds");
+        assert!(!primitive.holds(&state, p0, ObjectId(0)), "down to 2 artifacts, no longer holds");
     }
 
     #[test]
@@ -1966,7 +1981,7 @@ mod tests {
         state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p1, CardTypeSet::ARTIFACT));
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
         assert!(
-            !primitive.holds(&state, p0),
+            !primitive.holds(&state, p0, ObjectId(0)),
             "p0 controls only 1 artifact - the opponent's 2 don't count toward p0's threshold"
         );
     }

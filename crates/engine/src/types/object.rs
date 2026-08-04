@@ -151,6 +151,21 @@ pub struct GameObject {
     /// same question against the same counter, just with no consumer at all
     /// in this engine (no "additional effect" copy exception exists either).
     pub copy_generation: u32,
+    /// CR 702.138b: `true` only if this object's own current incarnation
+    /// entered the battlefield as a spell cast via an Escape ability's
+    /// alternative cost (`StackObject::escaped`, carried across by
+    /// `Engine::move_resolving_spell`) - `false` for every other object,
+    /// including a card still sitting in its graveyard waiting to be
+    /// escaped (this describes *this incarnation's own* provenance, not a
+    /// standing permission). Consulted by `InterveningIfPrimitive::Escaped`
+    /// (CR 603.4's "if it escaped" clause, Kroxa/Uro's real card pattern)
+    /// and exposed on the Lua object-state snapshot for CR 702.138c/d's own
+    /// literal "escapes with [counters/ability]" templates
+    /// (`phase5/escape-provenance`). Never reset once true - a permanent
+    /// only changes `object_id` (CR 400.7) by leaving and re-entering,
+    /// which always re-derives this fresh from whatever cast it *that*
+    /// time.
+    pub entered_via_escape: bool,
 }
 
 impl GameObject {

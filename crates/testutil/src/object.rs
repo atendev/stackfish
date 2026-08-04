@@ -28,5 +28,6 @@ pub fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zo
         is_commander: false,
         visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
         copy_generation: 0,
+        entered_via_escape: false,
     }
 }

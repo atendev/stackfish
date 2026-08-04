@@ -225,7 +225,7 @@ impl Engine {
         // `Spell`/`ActivatedAbility`, and any `TriggeredAbility`
         // without "if" text) never fizzles this way.
         let intervening_if_fizzles = match &top.intervening_if {
-            Some(InterveningIfSpec::Primitive(p)) => !p.holds(&self.state, top.controller),
+            Some(InterveningIfSpec::Primitive(p)) => !p.holds(&self.state, top.controller, top.source),
             // A script error falls back to the same conservative
             // "doesn't hold" default as before, but is now logged as
             // a real ScriptError event instead of silently
@@ -267,7 +267,7 @@ impl Engine {
             if matches!(top.kind, StackEntryKind::Spell) {
                 let destination =
                     if top.exile_on_leaving_stack { ZoneKind::Exile } else { ZoneKind::Graveyard };
-                if let Some(event) = self.move_resolving_spell(top.stack_id, destination, false) {
+                if let Some(event) = self.move_resolving_spell(top.stack_id, destination, false, false) {
                     events.push(event);
                 }
             }

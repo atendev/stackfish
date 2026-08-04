@@ -63,6 +63,13 @@ pub struct StackObject {
     /// fizzle path, since CR 702.27a's own text only covers "as it
     /// resolves," not "or as it leaves the stack otherwise."
     pub bought_back: bool,
+    /// CR 702.138b: baked in at push time from the chosen `AlternativeCost::
+    /// Replacement::escape` (`false` for a spell cast normally, or an
+    /// ability - abilities never set this, same as `exile_on_leaving_stack`/
+    /// `bought_back`). Carried onto the entering permanent's own
+    /// `GameObject::entered_via_escape` by `Engine::move_resolving_spell`
+    /// once this resolves to the battlefield.
+    pub escaped: bool,
     pub costs_paid: Vec<CostPayment>,
     /// Which script callback to invoke on resolution. Present in the
     /// original adaptation doc's `StackObject` spec ("resolution callback
@@ -125,6 +132,7 @@ impl StackObject {
         x_value: Option<u32>,
         exile_on_leaving_stack: bool,
         bought_back: bool,
+        escaped: bool,
         operation: ScriptHandle,
         effect: Option<AbilityEffect>,
         intervening_if: Option<InterveningIfSpec>,
@@ -146,6 +154,7 @@ impl StackObject {
             x_value,
             exile_on_leaving_stack,
             bought_back,
+            escaped,
             costs_paid: Vec::new(),
             operation,
             effect,

@@ -165,6 +165,7 @@ fn play_land_rejects_nonempty_stack() {
         x_value: None,
         exile_on_leaving_stack: false,
         bought_back: false,
+        escaped: false,
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),
         effect: None,

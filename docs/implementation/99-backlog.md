@@ -24,11 +24,33 @@
   retroactively in `02-zone-moves.md`. `commands::zone_ops::propose_zone_move` gained a real `to`
   parameter (was hardcoded to `Graveyard`, since Sacrifice/Discard/cleanup-discard all happened to
   end there) so the exile-cost payment can propose a `Graveyard -> Exile` move through the same
-  pipeline. Still unmodeled: CR 702.138c/d ("escapes with [counters/ability]," linked to "if this
-  permanent escaped") — no provenance tracking exists for "was this permanent cast via escape,"
-  would need a new linked-ability mechanism. No Lua builder for the alternative-cost declaration
-  itself (only the `ExileFromGraveyard` cost component is Lua-exposed) — same scope Flashback's own
-  slice already established.
+  pipeline. CR 702.138b/c/d ("if this permanent escaped," "escapes with [counters/ability]") are real
+  now too (`phase5/escape-provenance`) — `AlternativeCost::Replacement.escape: bool` (the only thing
+  that structurally distinguishes Escape from Flashback, since both share `from_zone: Graveyard`),
+  `StackObject::escaped` (baked in at push time, same contract `exile_on_leaving_stack`/`bought_back`
+  already establish), `GameObject::entered_via_escape` (set by `Engine::move_resolving_spell` once a
+  spell with `escaped: true` resolves to the battlefield — small ripple confirmed before building:
+  `GameObject::new` is itself still `todo!()`, so there are only ~6 real hand-written constructors
+  total, everywhere else clones an existing object forward). `InterveningIfPrimitive::Escaped` (CR
+  603.4's "if it escaped" clause — Kroxa/Uro's own real card pattern is an *ordinary* ETB trigger
+  with this as its intervening-if, a different and more common shape than 702.138c/d's own literal
+  "escapes with" templates) required widening `InterveningIfPrimitive::holds`'s signature to take a
+  `source: ObjectId` (previously only `controller` — no existing variant needed the object itself).
+  702.138c ("escapes with N counters") is real too — `ReplacementPayload::EntersWithCountersEscape`,
+  mirroring `EntersWithCountersBloodthirst`'s own no-player-choice gated shape exactly, checked
+  against `entered_via_escape` instead of `opponent_damaged_this_turn` (needed a 4th, easy-to-miss
+  update site beyond the two `is_battlefield_entry_modifier`-style match lists in `replacement.rs`:
+  `script/builders.rs`'s own `validate_replacement_filter_payload_pairing` allowlist, caught
+  immediately by a real Lua `:Register()` call erroring in testing, not silently). 702.138d ("has
+  [ability] if escaped") needed **no new mechanism at all** — a static ability's own
+  `StaticAbilityBuilder:SetCondition` (CR 611.2c, `phase5/conditional-continuous-effects`) already
+  accepts any `InterveningIfPrimitive`, so `Game.InterveningIf.Escaped` plugs in directly, and
+  `layers::applicable_effects_in_layer` already re-evaluates a condition fresh off the *live* object
+  on every query (no CR 603.10 departed-ability concern, unlike the ETB-trigger shape above). No Lua
+  builder for the alternative-cost declaration itself (only the `ExileFromGraveyard` cost component
+  and now `escape`'s own consumers are Lua-exposed) — same scope Flashback's own slice already
+  established. CR 702.138c's own second sentence (a linked "when it enters this way" trigger) stays
+  unmodeled — no real card in this corpus combines Escape with one.
 
 - **Cycling (CR 702.29)**: plain Cycling (702.29a) and Typecycling (702.29e) are real now
   (`phase5/cycling-ability`) — `AdditionalCost::DiscardSelf`, and `commands::activate::

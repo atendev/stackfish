@@ -120,6 +120,7 @@ fn validate_replacement_filter_payload_pairing(
                 | ReplacementPayload::EntersWithCountersSunburst
                 | ReplacementPayload::EntersWithCountersDevour { .. }
                 | ReplacementPayload::EntersWithCountersAmplify { .. }
+                | ReplacementPayload::EntersWithCountersEscape { .. }
                 | ReplacementPayload::EntersAsCopy(_)
         )
     );

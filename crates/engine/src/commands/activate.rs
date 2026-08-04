@@ -361,6 +361,9 @@ pub(super) fn execute_activate_ability(
                 // CR 702.27a: buyback is a spell-only concept - an
                 // activated ability never carries it.
                 false,
+                // CR 702.138b: "escaped" is a spell-cast-shaped concept - an
+                // activated ability never carries it either.
+                false,
                 operation,
                 non_mana_effect,
                 // CR 603.4's "if" clause is triggered-ability-only

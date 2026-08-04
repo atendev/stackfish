@@ -135,6 +135,21 @@ pub enum AlternativeCost {
         /// it next leaves the stack. Baked onto `StackObject` at push time
         /// once this alternative is chosen (see `StackObject::exile_on_leaving_stack`).
         exile_on_leaving_stack: bool,
+        /// CR 702.138b: `true` only for Escape's own alternative cost -
+        /// `false` for Flashback/every other `Replacement` shape. Both
+        /// share `from_zone: Graveyard`, so this is the only thing that
+        /// structurally distinguishes "cast from a graveyard with an
+        /// escape ability" (CR 702.138b's own definition of "escaped")
+        /// from any other graveyard-cast alternative cost - deliberately
+        /// its own named field rather than inferred from
+        /// `exile_on_leaving_stack` (which happens to anti-correlate with
+        /// it for the two real producers today, but means something
+        /// unrelated: "does this spell get exiled on leaving the stack").
+        /// Baked onto `StackObject` at push time (see
+        /// `StackObject::escaped`), then onto the entering permanent's own
+        /// `GameObject::entered_via_escape` (CR 702.138b/c/d,
+        /// `phase5/escape-provenance`).
+        escape: bool,
     },
 }
 
@@ -988,6 +1003,7 @@ mod tests {
             is_token: false,
             visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
             copy_generation: 0,
+            entered_via_escape: false,
         }
     }
 

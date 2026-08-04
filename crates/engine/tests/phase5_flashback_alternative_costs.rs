@@ -54,6 +54,7 @@ fn bolt_definition() -> CardDefinition {
             }),
             from_zone: ZoneKind::Graveyard,
             exile_on_leaving_stack: true,
+            escape: false,
         }],
         buyback_cost: None,
         effect: None,

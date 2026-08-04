@@ -305,6 +305,7 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
         x_value: None,
         exile_on_leaving_stack: false,
         bought_back: false,
+        escaped: false,
         costs_paid: Vec::new(),
         operation: ScriptHandle(0),
         effect: None,

@@ -190,6 +190,7 @@ fn an_ability_targeting_its_own_source_fizzles_at_resolution_recheck() {
         None,
         false,
         false,
+        false,
         ScriptHandle(0),
         Some(AbilityEffect::Damage(1)),
         None,
