@@ -294,7 +294,14 @@ pub(super) fn execute_activate_ability(
         // see that variant's own doc comment) - an ability's effect
         // can't be this shape. Listed for exhaustiveness only, same
         // reason as Modal just above.
-        | Some(AbilityEffect::Script(_))) => {
+        | Some(AbilityEffect::Script(_))
+        // CR 702.79a/702.93a: only ever meaningful on a Dies-triggered
+        // ability (see this variant's own doc comment) - no real card
+        // grants Persist/Undying as an activated ability's own effect, but
+        // it's still a recognized primitive that goes on the stack the
+        // same way as any other here. Listed for exhaustiveness, same
+        // reason as Modal/Script above.
+        | Some(AbilityEffect::ReturnSelfWithCounter(_))) => {
             validate_targets(
                 state,
                 script_runtime,
@@ -371,6 +378,9 @@ pub(super) fn execute_activate_ability(
                 None,
                 // CR 700.2e: only a modal spell can defer its mode
                 // choice this way - an activated ability never does.
+                None,
+                // An activated ability never has a departed source - it's
+                // always activated from a live object.
                 None,
             ));
 

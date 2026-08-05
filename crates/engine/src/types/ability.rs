@@ -479,6 +479,26 @@ pub enum AbilityEffect {
     /// convention `Modal` above already established for a similarly
     /// can't-actually-originate-there case.
     Script(ScriptHandle),
+    /// CR 702.79a Persist / 702.93a Undying — "return it to the battlefield
+    /// under its owner's control with a [-1/-1 | +1/+1] counter on it."
+    /// Only ever meaningful on a `Dies`-triggered `RegisteredAbility`
+    /// (`ability.source` is the departed, pre-death `ObjectId` by the time
+    /// this resolves) — `ResolveStackTop` locates the actual graveyard
+    /// object via `ObjectLineage::previous == Some(top.source)` (the same
+    /// link `sba::commit_death` mints for exactly this kind of lookup), a
+    /// no-op if it's no longer there (exiled in response, etc. — matches
+    /// real Magic: nothing to return). Deliberately narrow, same posture
+    /// every other first-proof slice in this file takes: doesn't propose
+    /// the entry through `replacement::apply_replacements` (no CR 616
+    /// "would enter, redirect elsewhere" support for this specific
+    /// producer — no real Persist/Undying card needs it) and doesn't call
+    /// `apply_enters_battlefield_modifiers` (so a card combining this with
+    /// its own Devour/Bloodthirst/EntersTapped text won't compose — also no
+    /// real card). Ordinary "when this creature enters" triggers (this
+    /// card's own or anyone else's) still fire for free, since those are
+    /// driven off the plain `ZoneChange` event this pushes to the ledger,
+    /// not off either of the skipped mechanisms above.
+    ReturnSelfWithCounter(CounterKind),
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
@@ -1108,10 +1128,29 @@ pub enum InterveningIfPrimitive {
     /// conservative default `ControllerControlsAtLeast` already takes for
     /// an unresolvable state.
     Escaped,
+    /// CR 603.4/702.79a/702.93a: "if it had no [kind] counters on it" —
+    /// checked against the object *as it was the moment it died*, not live
+    /// state (by the time this is ever evaluated, a `Dies`-sourced
+    /// `source` has already been purged/renumbered by `retire_object`, the
+    /// same CR 603.10 problem `ConditionPrimitive::Dies` itself solves with
+    /// a last-known-info fallback). Reads `lki` when the caller has one
+    /// (always true in practice — the only real producer is a departed
+    /// `Dies` trigger, both at collection in `triggers::collect_triggers`'s
+    /// own LKI-fallback loop and at the CR 608.2a resolution recheck via
+    /// `StackObject::source_lki`); falls back to a live `state.object(
+    /// source)` lookup otherwise, same conservative-default shape `Escaped`
+    /// above already takes for its own unresolvable-source case.
+    HadNoCountersOfKind(CounterKind),
 }
 
 impl InterveningIfPrimitive {
-    pub fn holds(&self, state: &crate::types::game::GameState, controller: PlayerId, source: ObjectId) -> bool {
+    pub fn holds(
+        &self,
+        state: &crate::types::game::GameState,
+        controller: PlayerId,
+        source: ObjectId,
+        lki: Option<&crate::types::object::GameObject>,
+    ) -> bool {
         match self {
             InterveningIfPrimitive::ControllerAtOrBelowLife(threshold) => {
                 state.player(controller).is_some_and(|p| p.life <= *threshold)
@@ -1128,6 +1167,10 @@ impl InterveningIfPrimitive {
             InterveningIfPrimitive::Escaped => {
                 state.object(source).is_some_and(|o| o.entered_via_escape)
             }
+            InterveningIfPrimitive::HadNoCountersOfKind(kind) => match lki {
+                Some(lki) => lki.counters.count(kind) == 0,
+                None => state.object(source).is_some_and(|o| o.counters.count(kind) == 0),
+            },
         }
     }
 }
@@ -1837,21 +1880,21 @@ mod tests {
     fn controller_at_or_below_life_holds_when_life_is_at_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 5);
-        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0)));
+        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0), None));
     }
 
     #[test]
     fn controller_at_or_below_life_holds_when_life_is_below_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 3);
-        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0)));
+        assert!(InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0), None));
     }
 
     #[test]
     fn controller_at_or_below_life_does_not_hold_when_life_is_above_the_threshold() {
         let p0 = PlayerId(0);
         let state = state_with_life(p0, 6);
-        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0)));
+        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p0, ObjectId(0), None));
     }
 
     #[test]
@@ -1859,7 +1902,7 @@ mod tests {
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let state = state_with_life(p0, 1);
-        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p1, ObjectId(0)));
+        assert!(!InterveningIfPrimitive::ControllerAtOrBelowLife(5).holds(&state, p1, ObjectId(0), None));
     }
 
     /// A minimal battlefield permanent for `ControllerControlsAtLeast`
@@ -1941,7 +1984,7 @@ mod tests {
         state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
         state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT));
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
-        assert!(primitive.holds(&state, p0, ObjectId(0)));
+        assert!(primitive.holds(&state, p0, ObjectId(0), None));
     }
 
     #[test]
@@ -1951,7 +1994,7 @@ mod tests {
         state.objects.insert(ObjectId(0), battlefield_object(ObjectId(0), p0, CardTypeSet::ARTIFACT));
         state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
-        assert!(!primitive.holds(&state, p0, ObjectId(0)));
+        assert!(!primitive.holds(&state, p0, ObjectId(0), None));
     }
 
     #[test]
@@ -1962,13 +2005,13 @@ mod tests {
         state.objects.insert(ObjectId(1), battlefield_object(ObjectId(1), p0, CardTypeSet::ARTIFACT));
         state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p0, CardTypeSet::ARTIFACT));
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
-        assert!(primitive.holds(&state, p0, ObjectId(0)), "3 artifacts meets the threshold");
+        assert!(primitive.holds(&state, p0, ObjectId(0), None), "3 artifacts meets the threshold");
 
         // Re-derived fresh, no stale state - removing one below the
         // threshold flips the same query without needing to invalidate a
         // cache anywhere.
         state.objects.remove(&ObjectId(2));
-        assert!(!primitive.holds(&state, p0, ObjectId(0)), "down to 2 artifacts, no longer holds");
+        assert!(!primitive.holds(&state, p0, ObjectId(0), None), "down to 2 artifacts, no longer holds");
     }
 
     #[test]
@@ -1981,7 +2024,7 @@ mod tests {
         state.objects.insert(ObjectId(2), battlefield_object(ObjectId(2), p1, CardTypeSet::ARTIFACT));
         let primitive = InterveningIfPrimitive::ControllerControlsAtLeast { filter: artifacts_filter(), count: 3 };
         assert!(
-            !primitive.holds(&state, p0, ObjectId(0)),
+            !primitive.holds(&state, p0, ObjectId(0), None),
             "p0 controls only 1 artifact - the opponent's 2 don't count toward p0's threshold"
         );
     }

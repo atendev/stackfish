@@ -121,6 +121,14 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // CR 603.4/702.138b: "if it escaped" - Kroxa/Uro's own real card
     // pattern (an ordinary ETB trigger's intervening-if).
     intervening_if.set("Escaped", InterveningIfTag(InterveningIfPrimitive::Escaped))?;
+    // CR 603.4/702.79a/702.93a: "if it had no [kind] counters on it" -
+    // Persist/Undying's own intervening-if, checked against the object as
+    // it was the moment it died (see `InterveningIfPrimitive::
+    // HadNoCountersOfKind`'s own doc comment).
+    let had_no_counters = lua.create_function(|_, kind: String| {
+        Ok(InterveningIfTag(InterveningIfPrimitive::HadNoCountersOfKind(parse_counter_kind_name(&kind))))
+    })?;
+    intervening_if.set("HadNoCounters", had_no_counters)?;
 
     let ops = lua.create_table()?;
     // CR 605: `Game.Ops.AddMana(letter, count?)` - `letter` is a single
@@ -188,6 +196,15 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
     })?;
     ops.set("Counters", counters)?;
+    // CR 702.79a/702.93a: `Game.Ops.ReturnSelfWithCounter(kind)` - Persist/
+    // Undying's own resolution effect, only meaningful paired with a
+    // `Game.Conditions.Dies` condition and a matching `Game.InterveningIf.
+    // HadNoCounters(kind)` (see `AbilityEffect::ReturnSelfWithCounter`'s
+    // own doc comment for the full shape).
+    let return_self_with_counter = lua.create_function(|_, kind: String| {
+        Ok(OperationTag(AbilityEffect::ReturnSelfWithCounter(parse_counter_kind_name(&kind))))
+    })?;
+    ops.set("ReturnSelfWithCounter", return_self_with_counter)?;
     // `Game.Ops.Pump(power, toughness, duration)` - `duration` is a
     // `Game.Durations.*` tag (see `DurationTag`'s own doc comment for which
     // ones exist and why).
