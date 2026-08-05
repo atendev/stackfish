@@ -137,15 +137,18 @@ impl StackObject {
         effect: Option<AbilityEffect>,
         intervening_if: Option<InterveningIfSpec>,
         pending_mode_choice: Option<PendingModeChoice>,
+        // CR 603.4/608.2a: `Some` only for a triggered ability pushed off an
+        // already-departed source (Dies/LeavesBattlefield/Discarded/Cycled)
+        // whose own `intervening_if` needs it (`triggers::find_departed_lki`)
+        // - `None` for every spell/activated ability, and for a live-sourced
+        // triggered ability, same as before this parameter existed.
+        source_lki: Option<GameObject>,
     ) -> Self {
         StackObject {
             stack_id,
             kind,
             source,
-            // Not captured at construction - only meaningful once `source`
-            // might actually leave its zone before this resolves (CR
-            // 608.2b), which is a later mutation, not part of building this.
-            source_lki: None,
+            source_lki,
             owner,
             controller,
             chosen_modes,

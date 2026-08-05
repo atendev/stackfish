@@ -359,7 +359,19 @@ impl Engine {
         // departed-source case (a Dies/LeavesBattlefield trigger), so that
         // narrow case falls back to `controller` - same proxy this field
         // replaces everywhere else, now scoped to just this one gap.
-        let source_owner = self.state.object(trigger.source).map(|o| o.owner).unwrap_or(trigger.controller);
+        let source_is_live = self.state.object(trigger.source).is_some();
+        let source_owner =
+            self.state.object(trigger.source).map(|o| o.owner).unwrap_or(trigger.controller);
+        // CR 603.4/608.2a: only a departed source with its own
+        // intervening-if ever needs this (see `find_departed_lki`'s own doc
+        // comment) - skip the ledger scan otherwise, the overwhelming
+        // common case (a live-sourced trigger, or one with no "if" clause
+        // at all).
+        let source_lki = if !source_is_live && intervening_if.is_some() {
+            triggers::find_departed_lki(&self.state, trigger.source)
+        } else {
+            None
+        };
         self.state.stack.push(StackObject::new(
             stack_id,
             StackEntryKind::TriggeredAbility,
@@ -383,6 +395,7 @@ impl Engine {
             // CR 700.2e: only a modal spell can defer its mode choice this
             // way - a triggered ability never does.
             None,
+            source_lki,
         ));
         let event_id = self.state.allocate_event_id();
         let sequence_no = self.state.allocate_sequence_no();

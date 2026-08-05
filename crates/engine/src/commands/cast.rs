@@ -516,6 +516,9 @@ pub(super) fn execute_cast_spell(
         // spell never carries one.
         None,
         pending_mode_choice,
+        // A spell never carries a departed-source LKI - only a triggered
+        // ability pushed off a Dies-style departed source does.
+        None,
     ));
 
     return Ok(CommandOutcome {

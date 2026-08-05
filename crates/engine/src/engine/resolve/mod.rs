@@ -30,6 +30,8 @@
 //! - `misc_effects`: `Attach`, `BecomeCopy`, `ExchangeTextBoxes`, and the
 //!   `AddMana`/`AddManaChoice`/`Script` no-ops plus the `None`-effect script-
 //!   bridge fallback.
+//! - `reanimation`: `ReturnSelfWithCounter` (CR 702.79a Persist/702.93a
+//!   Undying).
 //!
 //! Every extracted effect-resolver returns `std::ops::ControlFlow<StepStatus,
 //! Vec<GameEventKind>>` — `Break(status)` for "this resolution is pausing,
@@ -56,6 +58,7 @@ mod direct_effects;
 mod library_effects;
 mod misc_effects;
 mod permanent_entry;
+mod reanimation;
 mod tokens;
 
 use super::{Engine, ProcessState, StepStatus};
@@ -225,7 +228,9 @@ impl Engine {
         // `Spell`/`ActivatedAbility`, and any `TriggeredAbility`
         // without "if" text) never fizzles this way.
         let intervening_if_fizzles = match &top.intervening_if {
-            Some(InterveningIfSpec::Primitive(p)) => !p.holds(&self.state, top.controller, top.source),
+            Some(InterveningIfSpec::Primitive(p)) => {
+                !p.holds(&self.state, top.controller, top.source, top.source_lki.as_ref())
+            }
             // A script error falls back to the same conservative
             // "doesn't hold" default as before, but is now logged as
             // a real ScriptError event instead of silently
@@ -680,6 +685,14 @@ impl Engine {
             // only, same "silent no-op" stance every other
             // arm here takes for an unreachable target shape.
             Some(AbilityEffect::Attach) => self.resolve_attach_effect(top, legal_targets, events),
+            // CR 702.79a/702.93a Persist/Undying - see this variant's own
+            // doc comment in ability.rs for the full shape (locates the
+            // graveyard object via lineage, mints a new CR 400.7 object on
+            // the battlefield, self-registers its abilities, and pushes
+            // the ability's own counter as a plain CounterAdded event).
+            Some(AbilityEffect::ReturnSelfWithCounter(kind)) => {
+                self.resolve_return_self_with_counter_effect(top, kind.clone(), events)
+            }
             // AddMana/AddManaChoice are only ever set on a mana
             // ability, which resolves immediately and never
             // reaches the stack (CR 605.1a/605.3b) - no

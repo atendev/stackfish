@@ -455,6 +455,76 @@
   this way" trigger, CR 603.11) stays unmodeled - no real card in this
   corpus combines Escape with one.
 
+## CR 702.79a/702.93a: Persist / Undying (`phase5/persist-undying`)
+
+- Both keywords are a single, self-contained sub-rule (no lettered clauses
+  beyond `a`), so this slice closes each completely. Trigger collection is
+  free — `ConditionPrimitive::Dies` (this file's own CR 603.10 LKI-fallback
+  loop) already matches "when this permanent is put into a graveyard from
+  the battlefield" exactly.
+- New: `InterveningIfPrimitive::HadNoCountersOfKind(CounterKind)` for "if it
+  had no [kind] counters on it" — checked against the object *as it was the
+  moment it died*, not live state (by resolution time a `Dies`-sourced
+  `source` no longer resolves at all). `InterveningIfPrimitive::holds`
+  widened again (see the Escape-provenance entry above for the last time
+  this happened) to take a 4th `lki: Option<&GameObject>` parameter — `Some`
+  from `collect_triggers`'s departed loop (which already has the snapshot
+  in scope) and from the CR 608.2a resolution recheck (via the newly
+  populated `StackObject::source_lki`), `None` from every live-sourced call
+  site.
+- `StackObject::source_lki` (a field that already existed for exactly this
+  purpose but was previously always hardcoded to `None`) is now populated
+  at `push_trigger_stack_object` time via a new `triggers::
+  find_departed_lki(state, source)` — a reverse scan of `state.ledger` for
+  the `ZoneChange`/`Cycled` event whose own `last_known_info.object_id`
+  matches the departed source, reusing `collect_triggers`'s own departed-
+  loop match shape. Deliberately *not* a new `PendingTrigger` field: that
+  struct derives `Copy`/`PartialEq` (`triggers_pipeline::is_permutation`/
+  `group_apnap` both rely on it for trigger-ordering answers), and a
+  `GameObject` can't cheaply support either — the ledger scan sidesteps the
+  ripple entirely since the exact same event is already sitting there by
+  the time `push_trigger_stack_object` runs.
+- New: `AbilityEffect::ReturnSelfWithCounter(CounterKind)`
+  (`engine/resolve/reanimation.rs`) — the actual "return it to the
+  battlefield" mover, and the first producer in this engine that moves a
+  card graveyard→battlefield directly (Escape/Buyback both *cast* from the
+  graveyard via the stack; neither teleports a permanent). Locates the
+  graveyard object via `ObjectLineage::previous == Some(top.source)` (the
+  same link `sba::commit_death` already mints for exactly this kind of
+  lookup) — a no-op if it's no longer there (exiled in response, etc.,
+  matching real Magic). Mints a fresh CR 400.7 id and explicitly resets
+  `tapped`/`damage_marked`/`deathtouched`/`counters`/`attachments`/
+  `attached_to`/`attached_to_player`/`phased_out`/`copiable_override`/
+  `copy_generation`/`entered_via_escape` — unlike `move_resolving_spell`/
+  `commit_death`'s own clones (whose source object was never meaningfully
+  tapped/damaged/countered to begin with), the graveyard object cloned
+  here genuinely can carry those over from the moment it died.
+- Logs its own `ZoneChange` straight to `state.ledger` rather than routing
+  through `replacement::apply_replacements`/`ReplacementCheck` —
+  deliberately narrow, no CR 616 "would enter, redirect elsewhere" support
+  for this one producer and no `apply_enters_battlefield_modifiers`-family
+  interaction (no real Persist/Undying card needs either). Ordinary "when
+  this creature enters" triggers still fire off it for free regardless,
+  since `CollectTriggers` just scans the ledger tail. Calls
+  `run_card_script_for` so the returned incarnation's own abilities
+  self-register fresh, same convention every other real battlefield-entry
+  producer already follows. The ability's own counter is a plain
+  `CounterAdded` pushed through the normal `ReplacementCheck`->
+  `CommitEvents` pipeline (not a direct `counters.add()` mutation here),
+  avoiding this file's own double-apply mistake class.
+- Lua-exposed (`Game.InterveningIf.HadNoCounters(kind)`, `Game.Ops.
+  ReturnSelfWithCounter(kind)`) — both keywords are common enough real
+  cards to warrant it, unlike some narrower first-proof slices.
+- Verify: 6 new tests (`phase5_persist_undying.rs`) — Persist/Undying each
+  returning with exactly one counter after dying with none; each *not*
+  triggering when the creature already had a counter of that kind (CR
+  603.4's intervening-if correctly keeping the ability off the stack
+  entirely); a stolen creature (owner ≠ controller) returning under its
+  *owner's* control; a clean no-op when the graveyard card is gone before
+  the ability resolves. Full workspace suite green (120+ tests).
+- Unresolved: no further known gap in CR 702.79/702.93 — both rules are
+  fully closed by this slice.
+
 ## General trigger notes
 
 - Trigger ordering: `group_apnap` groups by controller in APNAP order; intra-group ordering pauses via `AwaitTriggerOrderChoice`.

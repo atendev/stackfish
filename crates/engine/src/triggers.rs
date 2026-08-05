@@ -193,7 +193,7 @@ pub fn collect_triggers(
         // whatever `PutTriggersApnap` bakes onto the `StackObject`.
         let intervening_if_holds = match &ability.intervening_if {
             None => true,
-            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, controller, ability.source),
+            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, controller, ability.source, None),
             Some(InterveningIfSpec::Script(handle)) => {
                 match runtime.invoke_intervening_if(*handle, state, ability.source, controller) {
                     Ok(v) => v,
@@ -270,7 +270,7 @@ pub fn collect_triggers(
         // CR 603.4 applies here too - see the main loop's own comment above.
         let intervening_if_holds = match &ability.intervening_if {
             None => true,
-            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, lki.controller, ability.source),
+            Some(InterveningIfSpec::Primitive(p)) => p.holds(state, lki.controller, ability.source, Some(lki)),
             Some(InterveningIfSpec::Script(handle)) => {
                 match runtime.invoke_intervening_if(*handle, state, ability.source, lki.controller) {
                     Ok(v) => v,
@@ -338,4 +338,32 @@ pub fn group_apnap(
             }
         })
         .collect()
+}
+
+/// CR 603.4/608.2a: re-derives a departed source's own last-known-info at
+/// `push_trigger_stack_object` time (later than `collect_triggers` itself,
+/// possibly after an `AwaitingTriggerOrderChoice` pause), for
+/// `StackObject::source_lki` — needed so `InterveningIfPrimitive::
+/// HadNoCountersOfKind`'s own CR 608.2a resolution recheck has something to
+/// read (a `Dies`-sourced `source` no longer resolves live by then, same
+/// CR 603.10 problem the collection-time check already has to solve).
+/// Deliberately not a new `PendingTrigger`/`Engine` field carrying the
+/// snapshot forward - `PendingTrigger` derives `Copy`/`PartialEq`
+/// (`is_permutation`/`group_apnap` both rely on it), and a `GameObject`
+/// can't cheaply support either; the exact same event this trigger was
+/// collected from (its `last_known_info`, keyed by the now-departed
+/// `source` id, which is never reused per CR 400.7) is already sitting in
+/// `state.ledger` by this point, so a reverse scan reusing `collect_triggers`'
+/// own departed-loop match shape (`ZoneChange`/`Cycled`, matched by
+/// `object_id`) finds it directly instead.
+pub fn find_departed_lki(state: &GameState, source: ObjectId) -> Option<crate::types::object::GameObject> {
+    state.ledger.iter().rev().find_map(|event| match &event.kind {
+        GameEventKind::ZoneChange { last_known_info: Some(lki), .. } if lki.object_id == source => {
+            Some(lki.clone())
+        }
+        GameEventKind::Cycled { last_known_info, .. } if last_known_info.object_id == source => {
+            Some(last_known_info.clone())
+        }
+        _ => None,
+    })
 }
