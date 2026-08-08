@@ -32,6 +32,8 @@
 //!   bridge fallback.
 //! - `reanimation`: `ReturnSelfWithCounter` (CR 702.79a Persist/702.93a
 //!   Undying).
+//! - `madness`: `MadnessCastOrDiscard` (CR 702.35a Madness's own "cast or
+//!   discard" decision).
 //!
 //! Every extracted effect-resolver returns `std::ops::ControlFlow<StepStatus,
 //! Vec<GameEventKind>>` — `Break(status)` for "this resolution is pausing,
@@ -56,6 +58,7 @@ use crate::types::zone::ZoneKind;
 mod destruction;
 mod direct_effects;
 mod library_effects;
+mod madness;
 mod misc_effects;
 mod permanent_entry;
 mod reanimation;
@@ -693,6 +696,11 @@ impl Engine {
             Some(AbilityEffect::ReturnSelfWithCounter(kind)) => {
                 self.resolve_return_self_with_counter_effect(top, kind.clone(), events)
             }
+            // CR 702.35a Madness - see this variant's own doc comment in
+            // ability.rs and `madness::resolve_madness_effect`'s own doc
+            // comment for the full shape (locates the exiled object via
+            // lineage, always pauses for a real cast-or-decline choice).
+            Some(AbilityEffect::MadnessCastOrDiscard) => self.resolve_madness_effect(top, events),
             // AddMana/AddManaChoice are only ever set on a mana
             // ability, which resolves immediately and never
             // reaches the stack (CR 605.1a/605.3b) - no

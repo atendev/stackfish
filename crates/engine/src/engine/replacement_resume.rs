@@ -73,6 +73,9 @@ impl Engine {
             ReplacementResumeTarget::CostZoneMove { .. } => false,
             // CR 614.8: cleanup discard isn't destruction either.
             ReplacementResumeTarget::CleanupDiscard { .. } => false,
+            // CR 614.8: "put it into your graveyard" (CR 702.35a's decline
+            // branch) is its own zone-change verb, not destruction.
+            ReplacementResumeTarget::MadnessDecline { .. } => false,
             // CR 614.8: drawing a card isn't destruction either.
             ReplacementResumeTarget::Draw { .. } => false,
             // CR 614.8: a scripted DrawCards(n) ability is also just a draw,
@@ -139,9 +142,13 @@ impl Engine {
             ReplacementResumeTarget::CostZoneMove { remaining, payer, stack_id, on_paid, cycling_source } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
                     let cycled = super::payment::cycled_marker_event(&event, cycling_source);
+                    let madness = replacement::madness_marker_event(&self.state, &event);
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
                     if let Some(kind) = cycled {
+                        self.log_events(vec![kind]);
+                    }
+                    if let Some(kind) = madness {
                         self.log_events(vec![kind]);
                     }
                     self.state.ledger.push(committed);
@@ -159,8 +166,12 @@ impl Engine {
             },
             ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
+                    let madness = replacement::madness_marker_event(&self.state, &event);
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
+                    if let Some(kind) = madness {
+                        self.log_events(vec![kind]);
+                    }
                     self.state.ledger.push(committed);
                     self.continue_discard_moves(remaining, since_ledger)
                 }
@@ -171,6 +182,24 @@ impl Engine {
                         candidates,
                         excluded,
                         resume: ReplacementResumeTarget::CleanupDiscard { remaining, since_ledger },
+                    }
+                }
+            },
+            ReplacementResumeTarget::MadnessDecline { card, stack_id, mut events_so_far } => match outcome {
+                ReplacementOutcome::Resolved(event) => {
+                    let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                    self.departed_triggered_abilities.extend(departed);
+                    self.state.ledger.push(committed);
+                    events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+                    ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
+                }
+                ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                    ProcessState::AwaitingReplacementChoice {
+                        affected_player,
+                        pending_event: event,
+                        candidates,
+                        excluded,
+                        resume: ReplacementResumeTarget::MadnessDecline { card, stack_id, events_so_far },
                     }
                 }
             },

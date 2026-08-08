@@ -3,7 +3,7 @@ use crate::types::ability::CopyExceptions;
 use crate::types::card::CardTypeSet;
 use crate::types::cost::FilterController;
 use crate::types::counter::CounterKind;
-use crate::types::effect::{ConsumptionPolicy, ReplacementPayload, ReplacementSpec};
+use crate::types::effect::{ConsumptionPolicy, EventFilter, ReplacementPayload, ReplacementSpec};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
@@ -821,6 +821,52 @@ pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bo
         .any(|e| matches!(&e.kind, GameEventKind::DamageDealt { target: Target::Player(p), .. } if *p != controller))
 }
 
+/// CR 702.35a: builds the `GameEventKind::MadnessExiled` marker for a
+/// just-resolved discard `event`, if `object`'s own final destination
+/// (Exile) matches a madness-style redirect it has registered on itself
+/// (`source == object`, `WouldMoveZone(Hand, Graveyard) ->
+/// ReplaceZoneDestination(Exile)`) — `None` for every other zone-moving
+/// event, and for a card exiled by some other effect entirely. Must be
+/// called against the *post-replacement, pre-commit* `event`/`state` — once
+/// `commands::commit_zone_move` runs, `retire_object` purges this object's
+/// own `state.replacement_effects` entry (keyed by the now-departed hand
+/// id), so this would always read `None` afterward. Shared by `Engine::
+/// continue_discard_moves` (cleanup discard) and `Engine::
+/// continue_cost_zone_moves` (cost-payment discard) — both already have the
+/// resolved-but-uncommitted event in hand at exactly the right moment.
+///
+/// Narrowed: doesn't track *which* registered effect actually won CR
+/// 616.1's ordering choice when more than one exile-instead-of-discard
+/// effect could apply to the same card — re-derives eligibility from the
+/// final committed event instead, same posture `InterveningIfPrimitive::
+/// HadNoCountersOfKind` already takes (checked against the result, not
+/// threaded state). No real card in this engine's test corpus combines
+/// Madness with a second, independent "discard -> exile" effect on the same
+/// card, so this can't yet produce a wrong answer in practice.
+pub fn madness_marker_event(state: &GameState, event: &GameEventKind) -> Option<GameEventKind> {
+    let GameEventKind::ZoneChange { object, from: ZoneKind::Hand, to: ZoneKind::Exile, last_known_info: Some(lki) } =
+        event
+    else {
+        return None;
+    };
+    let has_own_madness_redirect = state.replacement_effects.iter().any(|effect| {
+        if effect.source != *object {
+            return false;
+        }
+        matches!(
+            &effect.spec,
+            ReplacementSpec::Primitive {
+                filter: EventFilter::WouldMoveZone { from, to, .. },
+                payload: ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile),
+            } if from.is_none_or(|f| f == ZoneKind::Hand) && to.is_none_or(|t| t == ZoneKind::Graveyard)
+        )
+    });
+    if !has_own_madness_redirect {
+        return None;
+    }
+    Some(GameEventKind::MadnessExiled { object: *object, last_known_info: lki.clone() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -947,6 +993,7 @@ mod tests {
             once_per_turn_triggered: std::collections::HashSet::new(),
             commander_return_offered: std::collections::HashSet::new(),
             linked_ability_generation: std::collections::HashMap::new(),
+            pending_timing_bypass: None,
         }
     }
 

@@ -92,8 +92,15 @@ impl Engine {
             // regeneration shield never intercepts one.
             match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
                 ReplacementOutcome::Resolved(event) => {
+                    // CR 702.35a: must be derived before commit_zone_move
+                    // purges this object's own replacement_effects entry -
+                    // see madness_marker_event's own doc comment.
+                    let madness = replacement::madness_marker_event(&self.state, &event);
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
+                    if let Some(kind) = madness {
+                        self.log_events(vec![kind]);
+                    }
                     self.state.ledger.push(committed);
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {

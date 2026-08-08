@@ -31,6 +31,18 @@ pub(super) fn execute_cast_spell(
     alternative_cost: Option<usize>,
     pay_buyback: bool,
 ) -> Result<CommandOutcome, CommandError> {
+    // CR 601.3/702.35b: a one-shot timing waiver set by `Engine::
+    // submit_madness_cast` immediately before this call - the resolving
+    // madness triggered ability's own "you may cast it" text is itself the
+    // CR 601.3 "effect [that] allows" casting here, outside `card`'s normal
+    // timing permission, not a property of the alternative cost declaration
+    // itself (see `GameState::pending_timing_bypass`'s own doc comment for
+    // why this is a side channel rather than a new `CastSpell` field).
+    // `.take()` unconditionally so it can never leak into a later,
+    // unrelated ordinary cast of the same card. Computed before `object` is
+    // borrowed below since both borrow `state` and `object` stays alive for
+    // the rest of this function.
+    let timing_bypassed = state.pending_timing_bypass.take() == Some(card);
     let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
     if object.definition.card_types.contains(CardTypeSet::LAND) {
         return Err(CommandError::IllegalAction(
@@ -107,18 +119,20 @@ pub(super) fn execute_cast_spell(
     // is consulted here.
     let castable_at_instant_speed = object.definition.card_types.contains(CardTypeSet::INSTANT)
         || object.definition.keywords.contains(KeywordSet::FLASH);
-    if castable_at_instant_speed {
-        if state.priority_player != actor {
+    if !timing_bypassed {
+        if castable_at_instant_speed {
+            if state.priority_player != actor {
+                return Err(CommandError::IllegalAction(
+                    "actor does not hold priority".to_string(),
+                ));
+            }
+        } else if !is_sorcery_speed(state, actor) {
             return Err(CommandError::IllegalAction(
-                "actor does not hold priority".to_string(),
+                "this spell can only be cast at sorcery speed: actor's turn, a main \
+                 phase, actor holding priority, and an empty stack"
+                    .to_string(),
             ));
         }
-    } else if !is_sorcery_speed(state, actor) {
-        return Err(CommandError::IllegalAction(
-            "this spell can only be cast at sorcery speed: actor's turn, a main \
-             phase, actor holding priority, and an empty stack"
-                .to_string(),
-        ));
     }
 
     // CR 700.2a/d/h: a modal card requires the caster to announce
@@ -434,8 +448,14 @@ pub(super) fn execute_cast_spell(
     new_object.zone = ZoneKind::Stack;
     new_object.timestamp = state.allocate_sequence_no();
 
+    // CR 400.7: Exile (like Battlefield) is a shared zone, not per-player -
+    // same owner derivation `commands::commit_zone_move` already uses. Every
+    // `from_zone` before Madness's own `AlternativeCost::Replacement {
+    // from_zone: Exile, .. }` was per-player (Hand/Graveyard/Command), so
+    // this case was never reachable until now.
+    let from_owner = if from_zone == ZoneKind::Exile { None } else { Some(actor) };
     state
-        .zone_mut(from_zone, Some(actor))
+        .zone_mut(from_zone, from_owner)
         .ok_or_else(|| CommandError::IllegalAction("actor has no such zone".to_string()))?
         .remove(card);
     state.objects.remove(&card);

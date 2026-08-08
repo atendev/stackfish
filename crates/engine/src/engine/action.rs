@@ -12,7 +12,7 @@ use crate::types::zone::ZoneKind;
 use super::{ActionError, Engine, ProcessState, StepStatus};
 
 impl Engine {
-    fn allocate_command_id(&mut self) -> CommandId {
+    pub(super) fn allocate_command_id(&mut self) -> CommandId {
         let id = CommandId(self.next_command_id);
         self.next_command_id += 1;
         id

@@ -301,7 +301,14 @@ pub(super) fn execute_activate_ability(
         // it's still a recognized primitive that goes on the stack the
         // same way as any other here. Listed for exhaustiveness, same
         // reason as Modal/Script above.
-        | Some(AbilityEffect::ReturnSelfWithCounter(_))) => {
+        | Some(AbilityEffect::ReturnSelfWithCounter(_))
+        // CR 702.35a: only ever meaningful on a MadnessExiled-triggered
+        // ability (see this variant's own doc comment) - no real card
+        // grants Madness's own "cast or discard" as an activated ability's
+        // effect, but it's still a recognized primitive that goes on the
+        // stack the same way as any other here. Listed for exhaustiveness,
+        // same reason as ReturnSelfWithCounter above.
+        | Some(AbilityEffect::MadnessCastOrDiscard)) => {
             validate_targets(
                 state,
                 script_runtime,

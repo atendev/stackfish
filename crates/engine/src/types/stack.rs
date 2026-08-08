@@ -138,7 +138,8 @@ impl StackObject {
         intervening_if: Option<InterveningIfSpec>,
         pending_mode_choice: Option<PendingModeChoice>,
         // CR 603.4/608.2a: `Some` only for a triggered ability pushed off an
-        // already-departed source (Dies/LeavesBattlefield/Discarded/Cycled)
+        // already-departed source (Dies/LeavesBattlefield/Discarded/Cycled/
+        // MadnessExiled)
         // whose own `intervening_if` needs it (`triggers::find_departed_lki`)
         // - `None` for every spell/activated ability, and for a live-sourced
         // triggered ability, same as before this parameter existed.
