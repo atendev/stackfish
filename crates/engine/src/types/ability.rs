@@ -499,6 +499,23 @@ pub enum AbilityEffect {
     /// driven off the plain `ZoneChange` event this pushes to the ledger,
     /// not off either of the skipped mechanisms above.
     ReturnSelfWithCounter(CounterKind),
+    /// CR 702.35a's second ability — "you may cast it by paying [cost]
+    /// rather than paying its mana cost. If you don't, put it into your
+    /// graveyard." Only ever meaningful on a `MadnessExiled`-triggered
+    /// `RegisteredAbility` (`ability.source` is the departed, pre-exile
+    /// hand `ObjectId` by the time this resolves, same "trigger's own
+    /// source is stale, look up the live descendant" shape `ReturnSelfWithCounter`
+    /// above already established) — `ResolveStackTop` locates the actual
+    /// exile object via `ObjectLineage::previous == Some(top.source)`, a
+    /// no-op if it's no longer there. Unlike every other `AbilityEffect`
+    /// variant, resolving this doesn't finish synchronously — it always
+    /// pauses (`ProcessState::AwaitingMadnessChoice`) for a real decision,
+    /// same "always pauses" posture `Sacrifice`/`Destroy`/`Exile` already
+    /// take, just with a genuinely new two-way resume (`Engine::
+    /// decline_madness_cast`/`submit_madness_cast`) instead of a zone-move
+    /// queue. See `engine::resolve::madness`'s own doc comment for the full
+    /// shape.
+    MadnessCastOrDiscard,
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
@@ -861,6 +878,18 @@ pub enum ConditionPrimitive {
     /// cycled card's own abilities are purged the moment it leaves hand,
     /// same as any other departure.
     Cycled,
+    /// "When this card is exiled this way" (CR 702.35a's second ability) —
+    /// same narrower-self-referential-sibling-of-`Discarded` shape `Cycled`
+    /// above already established, matching only `GameEventKind::
+    /// MadnessExiled`, a purpose-built marker event logged alongside the
+    /// ordinary `ZoneChange` only when a discard's own madness redirect
+    /// (`ReplacementPayload::ReplaceZoneDestination(ZoneKind::Exile)`,
+    /// registered by the card on itself) actually won
+    /// (`replacement::madness_marker_event`). Reuses the same CR 603.10
+    /// departed/LKI fallback shape `Cycled`/`Discarded` both use, since the
+    /// card's own madness triggered ability is purged the moment it leaves
+    /// hand, same as any other departure.
+    MadnessExiled,
     /// "At the beginning of combat on your turn" (CR 507) — matches
     /// `GameEventKind::StepStarted{step: Step::BeginningOfCombat}` only when
     /// the ability's controller is also the active player. Same reachability
@@ -1014,6 +1043,10 @@ impl ConditionPrimitive {
             ConditionPrimitive::Cycled => matches!(
                 event,
                 GameEventKind::Cycled { object, .. } if *object == source
+            ),
+            ConditionPrimitive::MadnessExiled => matches!(
+                event,
+                GameEventKind::MadnessExiled { object, .. } if *object == source
             ),
             ConditionPrimitive::BeginningOfYourCombat => {
                 controller == active_player
@@ -1873,6 +1906,7 @@ mod tests {
             once_per_turn_triggered: std::collections::HashSet::new(),
             commander_return_offered: std::collections::HashSet::new(),
             linked_ability_generation: std::collections::HashMap::new(),
+            pending_timing_bypass: None,
         }
     }
 

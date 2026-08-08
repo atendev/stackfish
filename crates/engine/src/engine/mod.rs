@@ -9,7 +9,7 @@
 //! whole engine) delegates into the `resolve/` subdirectory rather than a
 //! single sibling file — see `resolve`'s own module doc comment.
 
-use crate::commands::PendingPaymentRequest;
+use crate::commands::{CommandError, PendingPaymentRequest};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
@@ -106,6 +106,25 @@ pub enum AmplifyChoiceError {
     /// The same id appeared twice in `revealed` — each card can only be
     /// revealed once.
     DuplicateCandidate,
+}
+
+/// Why `decline_madness_cast`/`submit_madness_cast` rejected an answer to a
+/// CR 702.35a Madness choice.
+#[derive(Debug)]
+pub enum MadnessChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingMadnessChoice`.
+    NotAwaitingChoice,
+    /// `card` has no `AlternativeCost::Replacement { from_zone: Exile, .. }`
+    /// entry — shouldn't happen for a real madness card (its own static
+    /// ability is what put it in this pause in the first place), but a
+    /// defensive check rather than an `unreachable!` since nothing actually
+    /// enforces the two halves of Madness are always declared together.
+    NoMadnessCost,
+    /// `commands::execute_command` rejected the synthetic `CastSpell` (bad
+    /// targets, unpayable cost, ...) — the pause is left untouched so the
+    /// caller can retry with different targets/modes or call
+    /// `decline_madness_cast` instead.
+    IllegalCast(CommandError),
 }
 
 /// Why `submit_copy_choice` rejected an answer to a CR 707.6/614.12a "enter
@@ -666,6 +685,15 @@ impl Engine {
                 };
                 self.process_state =
                     ProcessState::AwaitingAmplifyChoice { object, controller, per_card, candidates, stack_id, events_so_far };
+                status
+            }
+
+            ProcessState::AwaitingMadnessChoice { player, card, stack_id, events_so_far } => {
+                // Nothing to do until decline_madness_cast/submit_madness_cast
+                // answers - same "put the exact same state back" pattern
+                // every other choice-pause above already uses.
+                let status = StepStatus::AwaitingMadnessChoice { player, card };
+                self.process_state = ProcessState::AwaitingMadnessChoice { player, card, stack_id, events_so_far };
                 status
             }
 

@@ -2,6 +2,51 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Madness (CR 702.35)**: real now (`phase5/madness`) — the static "discard
+  -> exile instead" half needed no new engine mechanism at all: `ReplacementPayload::
+  ReplaceZoneDestination(ZoneKind::Exile)` matched against `EventFilter::WouldMoveZone
+  { from: Hand, to: Graveyard }` was already fully generic (the pre-existing "Leyline
+  of the Void" pattern `Engine::continue_discard_moves`/`continue_cost_zone_moves`
+  both already route every real discard producer through), and hand-only self-
+  registration was already solved by the Cycling slice's `run_card_script_for`
+  widening. Two genuinely new pieces: a provenance marker (`GameEventKind::
+  MadnessExiled`/`ConditionPrimitive::MadnessExiled`, the same purpose-built-marker
+  shape `Cycled` already established, so "when this card is exiled this way" doesn't
+  fire off an unrelated exile-instead-of-discard effect) and a real "cast now, or put
+  it in your graveyard" decision (`AbilityEffect::MadnessCastOrDiscard`, `ProcessState::
+  AwaitingMadnessChoice`, `Engine::decline_madness_cast`/`submit_madness_cast`) — the
+  first pause in this engine whose "yes" branch is a full nested cast (its own
+  targets/modes/payment) rather than a canned `Ops.*` effect. `submit_madness_cast`
+  reuses `commands::execute_command`'s `CastSpell` arm wholesale (same alternative-cost
+  machinery Flashback/Escape/Buyback already share, this is just the first to combine
+  `from_zone: Exile` with `exile_on_leaving_stack: false`) rather than inventing a
+  second casting path. CR 702.35b's own timing permission (the resolving trigger's "you
+  may cast it" text lets this happen outside the caster's normal sorcery-speed window,
+  same footing Cascade/Suspend's own "cast without paying, ignoring timing" grants,
+  though those remain unmodeled) is a new one-shot `GameState::pending_timing_bypass:
+  Option<ObjectId>` consumed by `commands::cast::execute_cast_spell` — a side channel
+  rather than a new field on `PlayerActionKind::CastSpell` (~87 construction sites, the
+  same ripple class this project has repeatedly avoided for that enum).
+  `madness_marker_event`'s own provenance check is deliberately narrow (`phase5/madness`'s
+  own scoping conversation): it re-derives "was this card's own madness redirect what
+  won" from the post-replacement, pre-commit state rather than threading which
+  `ReplacementCandidate` actually won CR 616.1's ordering choice through the pipeline —
+  wrong only if a *second*, independent exile-instead-of-discard effect also applies to
+  the same card and wins instead, which no real card in this corpus creates. Found and
+  fixed a real, previously-unreachable bug while building this: `execute_cast_spell`'s
+  own zone-removal call (`state.zone_mut(from_zone, Some(actor))`) assumed every
+  alternative-cost `from_zone` is per-player - true for Flashback/Escape's own
+  `Graveyard`, but Exile (like Battlefield) is a shared zone, so casting from exile
+  panicked-then-errored ("actor has no such zone") until this slice's own test exercised
+  it, the first real `from_zone: Exile` producer. No Lua builder for `AlternativeCost::
+  Replacement` itself — same scope every prior alternative-cost slice (Flashback/Escape/
+  Buyback) already left unclosed; tests use direct `CardDefinition`/`RegisteredAbility`/
+  `ReplacementEffect` construction. Effect-driven discards ("target player discards a
+  card," e.g. Mind Rot) still aren't a real producer in this engine at all — a
+  pre-existing, separate gap, unaffected by this slice - Madness is exercisable today via
+  cleanup hand-size discard and a cost-payment `Discard`, both proven end to end in
+  `phase5_madness.rs`.
+
 - **Buyback (CR 702.27)**: real now (`phase5/buyback-additional-cost`) — `CardDefinition.
   buyback_cost: Option<ManaCost>`, `PlayerActionKind::CastSpell.pay_buyback: bool`, `StackObject.
   bought_back: bool`. Confirmed by reading the resolution pipeline directly (not assumed) that the

@@ -70,6 +70,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     conditions.set("EachDiscardsCard", ConditionTag(ConditionPrimitive::EachDiscardsCard))?;
     conditions.set("Discarded", ConditionTag(ConditionPrimitive::Discarded))?;
     conditions.set("Cycled", ConditionTag(ConditionPrimitive::Cycled))?;
+    conditions.set("MadnessExiled", ConditionTag(ConditionPrimitive::MadnessExiled))?;
     conditions.set("Scries", ConditionTag(ConditionPrimitive::Scries))?;
     conditions.set("EachScries", ConditionTag(ConditionPrimitive::EachScries))?;
     conditions.set("Surveils", ConditionTag(ConditionPrimitive::Surveils))?;
@@ -311,6 +312,12 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // (a `TargetSpec::Multiple` of exactly two entries), not values passed
     // here.
     ops.set("ExchangeTextBoxes", OperationTag(AbilityEffect::ExchangeTextBoxes))?;
+    // `Game.Ops.MadnessCastOrDiscard` (CR 702.35a) - no arguments, same
+    // toggle shape as `Game.Ops.Attach`/`ExchangeTextBoxes`; the exiled card
+    // is located via `ObjectLineage` off the triggered ability's own source,
+    // not a value passed here (see `AbilityEffect::MadnessCastOrDiscard`'s
+    // own doc comment).
+    ops.set("MadnessCastOrDiscard", OperationTag(AbilityEffect::MadnessCastOrDiscard))?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;

@@ -167,6 +167,21 @@ pub struct GameState {
     /// "additional effect" exception is the same underlying question against
     /// the same counter, with no consumer of any kind in this engine yet.
     pub linked_ability_generation: std::collections::HashMap<AbilityId, u32>,
+    /// CR 702.35b: one-shot timing-restriction waiver, set immediately
+    /// before `Engine::submit_madness_cast` queues its synthetic `CastSpell`
+    /// command and consumed (`.take()`) by `commands::cast::execute_cast_spell`'s
+    /// own sorcery-speed/priority gate — the resolving triggered ability's
+    /// own "you may cast it" text is itself the CR 601.3 "effect [that]
+    /// allows" casting outside the caster's normal timing permission, not a
+    /// property of the alternative cost declaration itself (unlike
+    /// `AlternativeCost::Replacement.escape`, which is real provenance data
+    /// consulted long after the cast). A side-channel `Option<ObjectId>`
+    /// rather than a new field threaded through `PlayerActionKind::CastSpell`
+    /// — that enum has ~87 construction sites, the same ripple class this
+    /// project has repeatedly avoided (see `ModeChoice`'s own history).
+    /// `.take()`-consumed unconditionally so it can never leak into a later,
+    /// unrelated ordinary cast of the same card.
+    pub pending_timing_bypass: Option<ObjectId>,
 }
 
 impl GameState {
@@ -285,6 +300,7 @@ mod tests {
             once_per_turn_triggered: std::collections::HashSet::new(),
             commander_return_offered: std::collections::HashSet::new(),
             linked_ability_generation: std::collections::HashMap::new(),
+            pending_timing_bypass: None,
         };
 
         let card = ObjectId(0);

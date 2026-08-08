@@ -6,9 +6,12 @@
 use std::collections::HashSet;
 
 use crate::commands;
-use crate::replacement;
+use crate::engine_context::PipelineContext;
+use crate::replacement::{self, ReplacementOutcome};
 use crate::script::{OperationOutcome, ScriptChoiceRequest};
 use crate::types::ability::{AbilityEffect, CopyExceptions};
+use crate::types::command::{EngineCommand, PlayerActionKind};
+use crate::types::cost::AlternativeCost;
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -17,8 +20,9 @@ use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::{
-    AmplifyChoiceError, AttachChoiceError, CopyChoiceError, DevourChoiceError, Engine, ModeChoiceError,
-    ProcessState, ScriptChoiceError, ScriptedZoneMoveKind, ScriptedZoneMoveThen,
+    AmplifyChoiceError, AttachChoiceError, CopyChoiceError, DevourChoiceError, Engine, MadnessChoiceError,
+    ModeChoiceError, ProcessState, ReplacementResumeTarget, ScriptChoiceError, ScriptedZoneMoveKind,
+    ScriptedZoneMoveThen,
 };
 
 /// CR 707.9a/e: applies whatever "additional effect" exceptions
@@ -302,6 +306,137 @@ impl Engine {
             events_so_far.push(GameEventKind::CounterAdded { object, kind: CounterKind::PlusOnePlusOne, amount });
         }
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        Ok(())
+    }
+
+    /// Answers a pending CR 702.35a Madness choice raised by `StepStatus::
+    /// AwaitingMadnessChoice` with "no" — moves `card` from exile to
+    /// graveyard via the ordinary propose/replacement-check pipeline (a
+    /// ZoneChange no different from any other structural zone move, unlike
+    /// `ReturnSelfWithCounter`'s own battlefield-entry mover), then folds
+    /// this trigger's own `events_so_far` plus that proposal into the same
+    /// `ReplacementCheck` tail every other synchronous-only resolution ends
+    /// on. `Engine::submit_madness_cast` is the "yes" sibling.
+    pub fn decline_madness_cast(&mut self) -> Result<(), MadnessChoiceError> {
+        if !matches!(self.process_state, ProcessState::AwaitingMadnessChoice { .. }) {
+            return Err(MadnessChoiceError::NotAwaitingChoice);
+        }
+        let ProcessState::AwaitingMadnessChoice { card, stack_id, mut events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        let Some(proposed) = commands::propose_zone_move(&self.state, card, ZoneKind::Exile, ZoneKind::Graveyard) else {
+            // Defensive - `card` was confirmed present when this pause was
+            // raised, and nothing between then and now can move it again
+            // (the pause blocks every ordinary action). Same "nothing to
+            // do" no-op stance every other pause here takes for an
+            // unreachable-in-practice shape.
+            events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+            self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+            return Ok(());
+        };
+        match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, false) {
+            ReplacementOutcome::Resolved(event) => {
+                let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                self.departed_triggered_abilities.extend(departed);
+                self.state.ledger.push(committed);
+                events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+                self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+            }
+            ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                self.process_state = ProcessState::AwaitingReplacementChoice {
+                    affected_player,
+                    pending_event: event,
+                    candidates,
+                    excluded,
+                    resume: ReplacementResumeTarget::MadnessDecline { card, stack_id, events_so_far },
+                };
+            }
+        }
+        Ok(())
+    }
+
+    /// Answers a pending CR 702.35a Madness choice raised by `StepStatus::
+    /// AwaitingMadnessChoice` with "yes" — CR 702.35b: casting this way
+    /// follows the ordinary alternative-cost rules (601.2b/601.2f-h), so
+    /// this builds and runs a synthetic `PlayerActionKind::CastSpell`
+    /// against `card`'s own madness `AlternativeCost::Replacement { from_zone:
+    /// Exile, .. }` entry through the exact same `commands::execute_command`
+    /// path `Engine::handle_pending_action` uses for an ordinary priority
+    /// action - the resolving triggered ability's own "you may cast it" text
+    /// is itself the CR 601.3 permission to do so outside `card`'s normal
+    /// casting timing, granted one-shot via `GameState::pending_timing_bypass`
+    /// (consumed by `commands::cast::execute_cast_spell`) rather than a
+    /// property threaded through `PlayerActionKind::CastSpell` itself (see
+    /// that field's own doc comment for why). On success, this trigger's own
+    /// `StackObjectResolved { stack_id }` and the cast's own proposed events
+    /// are folded together into one `ReplacementCheck` batch — CR 702.35a's
+    /// casting happens *as* the ability resolves, not as a separate later
+    /// priority action, so both belong in the same pipeline step. On
+    /// failure (bad targets, unpayable cost, ...) the pause is left
+    /// untouched, same "no-partial-payment" stance every other choice-answer
+    /// in this file already takes — the caller may retry or call
+    /// `decline_madness_cast` instead.
+    pub fn submit_madness_cast(
+        &mut self,
+        modes: Vec<u32>,
+        targets: Vec<Target>,
+        x_value: Option<u32>,
+    ) -> Result<(), MadnessChoiceError> {
+        let ProcessState::AwaitingMadnessChoice { player, card, .. } = &self.process_state else {
+            return Err(MadnessChoiceError::NotAwaitingChoice);
+        };
+        let (player, card) = (*player, *card);
+        let alt_idx = self
+            .state
+            .object(card)
+            .and_then(|o| {
+                o.definition
+                    .alternative_costs
+                    .iter()
+                    .position(|ac| matches!(ac, AlternativeCost::Replacement { from_zone: ZoneKind::Exile, .. }))
+            })
+            .ok_or(MadnessChoiceError::NoMadnessCost)?;
+
+        self.state.pending_timing_bypass = Some(card);
+        let command_id = self.allocate_command_id();
+        let since_ledger = self.state.ledger.len();
+        let command = EngineCommand {
+            command_id,
+            actor: player,
+            action: PlayerActionKind::CastSpell {
+                card,
+                modes,
+                targets,
+                x_value,
+                alternative_cost: Some(alt_idx),
+                pay_buyback: false,
+            },
+        };
+        let outcome = match commands::execute_command(&mut self.state, &self.script_runtime, command) {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                self.state.pending_timing_bypass = None;
+                return Err(MadnessChoiceError::IllegalCast(err));
+            }
+        };
+
+        let ProcessState::AwaitingMadnessChoice { stack_id, mut events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        events_so_far.extend(outcome.events);
+
+        self.pipeline_context =
+            Some(PipelineContext { since_ledger, caused_by_command: Some(command_id), parent_event: None });
+        self.pending_payment = outcome.requires_payment;
+        if outcome.broke_pass_chain {
+            self.state.consecutive_passes = 0;
+        }
         self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
         Ok(())
     }

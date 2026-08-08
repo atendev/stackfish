@@ -112,6 +112,17 @@ pub enum StepStatus {
     /// `submit_search_amplify_choice` to answer instead of
     /// `submit_amplify_choice` (`phase5/devour-amplify-search-entry`).
     AwaitingSearchAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
+    /// CR 702.35a (Madness): the madness triggered ability resolved and
+    /// found `card` still sitting in exile (its own live descendant of the
+    /// departed hand object, located via `ObjectLineage`) — `player` (its
+    /// controller) must either call `Engine::submit_madness_cast` to cast it
+    /// paying its madness cost, or `Engine::decline_madness_cast` to put it
+    /// into their graveyard instead. Unlike `AwaitingDevourChoice`/
+    /// `AwaitingAmplifyChoice`, this isn't a `Vec<ObjectId>` candidate
+    /// choice — the "yes" branch is a full nested cast (its own targets/
+    /// modes/payment), so `card`/`player` are all the caller needs to decide
+    /// which of the two entry points to call.
+    AwaitingMadnessChoice { player: PlayerId, card: ObjectId },
     /// CR 707.6/614.12a (Clone itself): `replacement::pending_copy_choice`
     /// found a registered `EntersAsCopy` effect on `object` (already a real
     /// battlefield permanent by this point) with 1+ creatures on the
@@ -378,6 +389,15 @@ pub enum ReplacementResumeTarget {
     /// sees this discard's own earlier-committed `ZoneChange`s, not just
     /// whatever comes after the choice.
     CleanupDiscard { remaining: VecDeque<PendingZoneMove>, since_ledger: usize },
+    /// Reached from `Engine::decline_madness_cast`'s own Exile -> Graveyard
+    /// proposal (CR 702.35a's "if you don't, put it into your graveyard").
+    /// A single proposal, not a queue - same "nothing left to loop over"
+    /// shape `Draw` above has. `stack_id`/`events_so_far` are the madness
+    /// trigger's own paused-resolution state (this trigger's own
+    /// `StackObjectResolved` hasn't been pushed yet) - once this resolves,
+    /// both are folded into the normal `ReplacementCheck` tail, same as the
+    /// synchronous (no CR 616.1 collision) path already does.
+    MadnessDecline { card: ObjectId, stack_id: ObjectId, events_so_far: Vec<GameEventKind> },
     /// Reached from `ProcessState::AdvanceTurnStep`'s own `Step::Draw`
     /// handling (CR 504.1's turn-based draw, `phase5/replaceable-draw`) -
     /// a single proposal, not a queue (`draw_step` is always exactly one
@@ -643,6 +663,24 @@ pub enum ProcessState {
         remaining: VecDeque<ObjectId>,
         destination: SearchDestination,
         shuffle_after: bool,
+    },
+    /// CR 702.35a (Madness): paused mid-`ResolveStackTop` once the madness
+    /// triggered ability's own `MadnessCastOrDiscard` effect located its
+    /// live exile-zone descendant — `stack_id`/`events_so_far` are exactly
+    /// what this resolution had already built before reaching this point,
+    /// same "not yet committed, still a local `Vec`" state its Devour/
+    /// Amplify siblings above carry (both `Engine::decline_madness_cast`/
+    /// `Engine::submit_madness_cast` push this trigger's own
+    /// `StackObjectResolved { stack_id }` into `events_so_far` on resume,
+    /// same as every other pause here does for its own triggering
+    /// resolution). `card` is the live exile object (not `player`'s
+    /// original hand object, which no longer resolves) — `submit_madness_
+    /// cast` reads its own `alternative_costs` off this id directly.
+    AwaitingMadnessChoice {
+        player: PlayerId,
+        card: ObjectId,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
     },
     /// CR 707.6/614.12a (Clone itself): paused mid-`ResolveStackTop`, right
     /// where `apply_enters_battlefield_modifiers` would otherwise run for

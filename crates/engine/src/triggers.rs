@@ -237,28 +237,31 @@ pub fn collect_triggers(
                 primitive @ (ConditionPrimitive::Dies
                 | ConditionPrimitive::LeavesBattlefield
                 | ConditionPrimitive::Discarded
-                | ConditionPrimitive::Cycled),
+                | ConditionPrimitive::Cycled
+                | ConditionPrimitive::MadnessExiled),
             )) => (primitive, false),
             // CR 603.2h applies here too - a departed object's own Dies/
-            // LeavesBattlefield/Discarded/Cycled trigger is just as capable
-            // of carrying "This ability triggers only once each turn" as a
-            // live one's.
+            // LeavesBattlefield/Discarded/Cycled/MadnessExiled trigger is
+            // just as capable of carrying "This ability triggers only once
+            // each turn" as a live one's.
             Some(ConditionSpec::PrimitiveOncePerTurn(
                 primitive @ (ConditionPrimitive::Dies
                 | ConditionPrimitive::LeavesBattlefield
                 | ConditionPrimitive::Discarded
-                | ConditionPrimitive::Cycled),
+                | ConditionPrimitive::Cycled
+                | ConditionPrimitive::MadnessExiled),
             )) => (primitive, true),
             _ => continue,
         };
         // Dies/LeavesBattlefield/Discarded all read their LKI off
-        // ZoneChange; Cycled is a separate marker event with its own
-        // last_known_info field (same shape, different variant) - extracted
-        // generically here so the rest of this loop (controller/
+        // ZoneChange; Cycled/MadnessExiled are separate marker events with
+        // their own last_known_info field (same shape, different variant) -
+        // extracted generically here so the rest of this loop (controller/
         // intervening-if/PendingTrigger) doesn't need to care which.
         let lki = match &event.kind {
             GameEventKind::ZoneChange { last_known_info: Some(lki), .. } => lki,
             GameEventKind::Cycled { last_known_info, .. } => last_known_info,
+            GameEventKind::MadnessExiled { last_known_info, .. } => last_known_info,
             _ => continue,
         };
         if lki.object_id != ability.source {
@@ -362,6 +365,9 @@ pub fn find_departed_lki(state: &GameState, source: ObjectId) -> Option<crate::t
             Some(lki.clone())
         }
         GameEventKind::Cycled { last_known_info, .. } if last_known_info.object_id == source => {
+            Some(last_known_info.clone())
+        }
+        GameEventKind::MadnessExiled { last_known_info, .. } if last_known_info.object_id == source => {
             Some(last_known_info.clone())
         }
         _ => None,
