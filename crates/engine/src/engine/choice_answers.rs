@@ -35,11 +35,12 @@ fn apply_copy_additional_effect(
     state: &mut GameState,
     object: ObjectId,
     exceptions: &CopyExceptions,
+    x_value: Option<u32>,
     events_so_far: &mut Vec<GameEventKind>,
 ) {
     let generation = state.object(object).map(|o| o.copy_generation).unwrap_or(0);
     commands::grant_linked_copy_ability(state, object, exceptions, generation);
-    if let Some(counter_event) = commands::apply_copy_additional_counters(object, exceptions) {
+    if let Some(counter_event) = commands::apply_copy_additional_counters(object, exceptions, x_value) {
         events_so_far.push(counter_event);
     }
 }
@@ -673,6 +674,7 @@ impl Engine {
             mut events_so_far,
             colors_spent,
             carry_forward_if_declined,
+            x_value,
             ..
         } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
@@ -729,11 +731,14 @@ impl Engine {
                         events_so_far,
                         colors_spent,
                         carry_forward_if_declined: Some(exceptions),
+                        // `object`'s own X never changes across a chain -
+                        // see AwaitingCopyChoice::x_value's own doc comment.
+                        x_value,
                     };
                     return Ok(());
                 }
 
-                apply_copy_additional_effect(&mut self.state, object, &exceptions, &mut events_so_far);
+                apply_copy_additional_effect(&mut self.state, object, &exceptions, x_value, &mut events_so_far);
             }
             // else: the chosen creature no longer resolves (departed
             // between the pause and this answer) - skip rather than guess,
@@ -744,7 +749,7 @@ impl Engine {
             // was ever actually *applied* (only offered) - the earlier
             // round's own exception was never superseded, so it applies
             // after all.
-            apply_copy_additional_effect(&mut self.state, object, &deferred, &mut events_so_far);
+            apply_copy_additional_effect(&mut self.state, object, &deferred, x_value, &mut events_so_far);
         }
         let counter_events = replacement::apply_enters_battlefield_modifiers(
             &mut self.state,

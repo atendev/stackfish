@@ -188,15 +188,25 @@ pub(crate) fn grant_linked_copy_ability(
 /// No-op unless `exceptions.enters_with_additional_counters` is set. Called
 /// by both real copy-application call sites
 /// (`resolve_become_copy_effect`/`submit_copy_choice`), right alongside
-/// `grant_linked_copy_ability` - CR 707.9e's own invalidation clause (this
-/// exception's effect doesn't happen if a *second* copy effect supersedes
-/// the first before it applies) is out of scope here, same as it is on
-/// `CopyExceptions` itself - see that type's own doc comment.
+/// `grant_linked_copy_ability` - the caller's own invalidation-clause
+/// handling (this exception's effect doesn't happen if a *second* copy
+/// effect supersedes the first before it applies) is out of scope here, same
+/// as it is on `CopyExceptions` itself - see that type's own doc comment.
+///
+/// `x_value` (CR 107.3b, `phase5/altered-ego-x-counters`) resolves
+/// `CounterAmount::X` - the entering object's own paid X, `None`/no `{X}` in
+/// its cost treated as 0 same as CR 107.3b's own default. Ignored for
+/// `CounterAmount::Fixed`.
 pub(crate) fn apply_copy_additional_counters(
     object: ObjectId,
     exceptions: &CopyExceptions,
+    x_value: Option<u32>,
 ) -> Option<crate::types::event::GameEventKind> {
     let (kind, amount) = exceptions.enters_with_additional_counters.clone()?;
+    let amount = match amount {
+        crate::types::ability::CounterAmount::Fixed(amount) => amount,
+        crate::types::ability::CounterAmount::X => x_value.unwrap_or(0),
+    };
     Some(crate::types::event::GameEventKind::CounterAdded { object, kind, amount: amount as i32 })
 }
 

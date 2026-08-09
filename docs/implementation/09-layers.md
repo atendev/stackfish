@@ -606,6 +606,48 @@
   treatment — it doesn't move zones and has no existing chain-detection hook to extend, a narrower
   sibling gap named here rather than silently extended into.
 
+## Slice: altered-ego-x-counters (branch open)
+
+- Branch `phase5/altered-ego-x-counters`.
+- Scope: `chained-copy-effects`'s own named next step — Altered Ego's X-costed counter amount, as
+  opposed to Spark Double's fixed one. CR 707.9e's Altered Ego worked example itself: "You may have
+  this creature enter the battlefield as a copy of any creature on the battlefield, except it enters
+  with X additional +1/+1 counters on it."
+- Key changes:
+  - `CopyExceptions.enters_with_additional_counters`'s amount widened from a bare `u32` to a new
+    `CounterAmount { Fixed(u32), X }` (one field, two-shaped amount — not a second parallel `Option`,
+    so "fixed and X both set at once" isn't representable). Only ~5 construction sites (mostly
+    tests), so widening the existing field beat adding a sibling.
+  - `commands::apply_copy_additional_counters`/`choice_answers::apply_copy_additional_effect` gained
+    an `x_value: Option<u32>` parameter to resolve `CounterAmount::X` (CR 107.3b: undefined X treated
+    as 0, same as no `{X}` in the cost at all).
+  - `ProcessState::AwaitingCopyChoice` gained `x_value: Option<u32>`, captured once from
+    `top.x_value` at `continue_permanent_entry`'s raise site (the entering object's own paid X) and
+    carried unchanged through `submit_copy_choice`'s chained re-pause — the X belongs to the entering
+    permanent itself (paid once, at cast time), not to whichever candidate ends up copied at any one
+    link in a chain, so it's invariant through the chain the same way `colors_spent`/`stack_id`/
+    `controller` already are.
+  - `resolve_become_copy_effect` (`AbilityEffect::BecomeCopy`, Vesuvan's own producer) gets the
+    identical `top.x_value` plumbing for symmetry with the `EntersAsCopy` path, though no real
+    `BecomeCopy` card needs `CounterAmount::X` — unexercised by a real card, proven only by the type
+    system and the shared helper, same "real but currently unreachable, named not hidden" stance
+    `grant_recurring_copy_trigger` already takes elsewhere in this cluster.
+  - `script::decode::decode_copy_exceptions` accepts `counter_amount = "X"` (a Lua string) alongside
+    the existing numeric case — read as a raw `mlua::Value` first (a bare `.get::<u32>()` silently
+    fails to match a string rather than erroring), matched by hand into `CounterAmount::Fixed`/`X`,
+    erroring on anything that's neither a non-negative number nor `"X"`.
+- Deliberately out of scope: a chain where *two* independent links each carry their own X-costed
+  exception — no real card stacks two X-cost copy effects in one chain, so only "one X survives a
+  chain" needed proving, not "two independent X's coexist."
+- Verify: 5 new tests (`phase5_altered_ego_x_counters.rs`) — `counter_amount = "X"` decodes to
+  `CounterAmount::X`; a non-number/non-`"X"` value is a script error at registration time; casting
+  with an announced X=3 and choosing to copy lands exactly 3 counters; X=0 lands 0 (not a fixed
+  fallback); declining a chained copy (Altered Ego copies a plain Clone link, decline the Clone
+  link's own re-offered choice) still applies Altered Ego's own deferred exception using the
+  *original* X=5, not a re-derived or reset value. Full workspace suite green.
+- Unresolved: CR 707.9f (exceptions conditional on the copy's own resulting characteristics)
+  untouched, same standing gap named since `copy-additional-effect-exception`.
+
 ## Slice: keyword-layer-fix-and-remove-keyword (merged)
 
 - Branch `phase5/keyword-layer-fix-and-remove-keyword`.

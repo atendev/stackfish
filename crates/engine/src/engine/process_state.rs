@@ -744,6 +744,15 @@ pub enum ProcessState {
         events_so_far: Vec<GameEventKind>,
         colors_spent: ColorSet,
         carry_forward_if_declined: Option<CopyExceptions>,
+        /// CR 107.3b/707.9e (`phase5/altered-ego-x-counters`): `object`'s own
+        /// paid X (`StackObject.x_value` at the point this pause was first
+        /// raised) - resolves `CounterAmount::X` in whichever round's
+        /// exceptions end up applied. `object` never changes across a
+        /// chained re-pause (only the *candidate* being copied does), so
+        /// this is captured once and carried through unchanged, same
+        /// invariant-through-the-chain treatment `colors_spent` already
+        /// gets.
+        x_value: Option<u32>,
     },
     /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
     /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —
