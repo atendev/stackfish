@@ -173,6 +173,7 @@ impl Engine {
             commander_return_offered: std::collections::HashSet::new(),
             linked_ability_generation: std::collections::HashMap::new(),
             pending_timing_bypass: None,
+            pending_free_cast: None,
         };
 
         Engine {
@@ -395,6 +396,43 @@ impl Engine {
             caused_by_command: None,
             parent_event: None,
         });
+    }
+
+    /// CR 702.85a Cascade's own "put all cards exiled this way that weren't
+    /// cast on the bottom of your library in a random order" — `cards` are
+    /// currently sitting in exile (`resolve_cascade_effect`'s own library
+    /// walk); each is moved Exile -> Library (per-player, so
+    /// `commit_zone_move`'s own owner derivation reads it off the card's
+    /// own `last_known_info.owner`, no separate `player` parameter needed)
+    /// in a freshly Fisher-Yates-shuffled order — same swap-and-log
+    /// technique `shuffle_library` above already establishes, just applied
+    /// to this small input list instead of the whole library, so the *rest*
+    /// of the library's own order is left untouched. Same "no replacement-
+    /// check, direct commit" posture every other library-zone mover in this
+    /// engine already takes (`continue_search_battlefield_entry`) - library
+    /// moves aren't replaceable anywhere in this codebase today.
+    pub(in crate::engine) fn bottom_cards_in_random_order(&mut self, mut cards: Vec<ObjectId>) {
+        for i in (1..cards.len()).rev() {
+            let rng_val = self.next_rng();
+            let j = (rng_val % (i as u64 + 1)) as usize;
+            cards.swap(i, j);
+            let event_id = self.state.allocate_event_id();
+            let seq = self.state.allocate_sequence_no();
+            self.state.ledger.push(GameEvent {
+                event_id,
+                sequence_no: seq,
+                kind: GameEventKind::RngDrawn { purpose: "cascade-bottom".to_string(), value: rng_val },
+                caused_by_command: None,
+                parent_event: None,
+            });
+        }
+        for card in cards {
+            if let Some(proposed) = commands::propose_zone_move(&self.state, card, ZoneKind::Exile, ZoneKind::Library) {
+                let (committed, departed) = commands::commit_zone_move(&mut self.state, proposed);
+                self.departed_triggered_abilities.extend(departed);
+                self.state.ledger.push(committed);
+            }
+        }
     }
 
     /// Returns all cards from `player`'s hand to the top of their library

@@ -123,6 +123,17 @@ pub enum StepStatus {
     /// modes/payment), so `card`/`player` are all the caller needs to decide
     /// which of the two entry points to call.
     AwaitingMadnessChoice { player: PlayerId, card: ObjectId },
+    /// CR 702.85a (Cascade): the cascade trigger's own library walk
+    /// finished — `candidate` is the first nonland card found whose mana
+    /// value was less than the cascade spell's own (`None` if the library
+    /// ran out first). `player` (the cascade spell's own controller) must
+    /// either call `Engine::submit_cascade_cast` (only legal if `candidate`
+    /// is `Some`) to cast it for free, or `Engine::decline_cascade_cast` to
+    /// put every exiled card on the bottom of their library in a random
+    /// order. Same "not a `Vec<ObjectId>` candidate choice, the 'yes'
+    /// branch is a full nested cast" shape `AwaitingMadnessChoice` above
+    /// already established.
+    AwaitingCascadeChoice { player: PlayerId, candidate: Option<ObjectId> },
     /// CR 707.6/614.12a (Clone itself): `replacement::pending_copy_choice`
     /// found a registered `EntersAsCopy` effect on `object` (already a real
     /// battlefield permanent by this point) with 1+ creatures on the
@@ -679,6 +690,20 @@ pub enum ProcessState {
     AwaitingMadnessChoice {
         player: PlayerId,
         card: ObjectId,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+    },
+    /// CR 702.85a (Cascade): paused once `resolve_cascade_effect`'s own
+    /// synchronous library walk finished — `exiled` is every card the walk
+    /// moved to exile (in walk order), `candidate` the first nonland one
+    /// with mana value less than the cascade spell's own (`None` if the
+    /// library ran dry first). `stack_id`/`events_so_far` are this trigger's
+    /// own paused-resolution state, same role they play on
+    /// `AwaitingMadnessChoice` above.
+    AwaitingCascadeChoice {
+        player: PlayerId,
+        candidate: Option<ObjectId>,
+        exiled: Vec<ObjectId>,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },

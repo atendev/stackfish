@@ -182,6 +182,19 @@ pub struct GameState {
     /// `.take()`-consumed unconditionally so it can never leak into a later,
     /// unrelated ordinary cast of the same card.
     pub pending_timing_bypass: Option<ObjectId>,
+    /// CR 702.85a Cascade: a one-shot "cast this exact object paying no
+    /// mana cost at all" grant, set immediately before `Engine::
+    /// submit_cascade_cast` queues its synthetic `CastSpell` command and
+    /// consumed (`.take()`) by `commands::cast::execute_cast_spell`, which
+    /// synthesizes a transient `{0}`-mana `AlternativeCost::Replacement`
+    /// for it rather than reading one off the object's own (nonexistent —
+    /// a random library card was never printed with a Cascade-shaped
+    /// alternative cost) `CardDefinition.alternative_costs`. Distinct from
+    /// `pending_timing_bypass` above: Madness's own cost is real (its own
+    /// printed alternative cost), only the *timing* needed waiving; Cascade
+    /// waives the *cost* itself, and (like Madness) also needs the timing
+    /// waiver, so `submit_cascade_cast` sets both fields together.
+    pub pending_free_cast: Option<ObjectId>,
 }
 
 impl GameState {
@@ -301,6 +314,7 @@ mod tests {
             commander_return_offered: std::collections::HashSet::new(),
             linked_ability_generation: std::collections::HashMap::new(),
             pending_timing_bypass: None,
+            pending_free_cast: None,
         };
 
         let card = ObjectId(0);

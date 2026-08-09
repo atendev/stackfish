@@ -71,6 +71,13 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     conditions.set("Discarded", ConditionTag(ConditionPrimitive::Discarded))?;
     conditions.set("Cycled", ConditionTag(ConditionPrimitive::Cycled))?;
     conditions.set("MadnessExiled", ConditionTag(ConditionPrimitive::MadnessExiled))?;
+    // CR 601.2i - "when you cast this spell" (self-referential). No real
+    // producer self-registers this via Lua yet - a card would need its own
+    // script to run again once it hits the stack (CR 601.2a), which no
+    // producer does today (see `ConditionPrimitive::Cast`'s own doc
+    // comment for the double-registration hazard that ran into when tried
+    // generically); direct `RegisteredAbility` construction only for now.
+    conditions.set("Cast", ConditionTag(ConditionPrimitive::Cast))?;
     conditions.set("Scries", ConditionTag(ConditionPrimitive::Scries))?;
     conditions.set("EachScries", ConditionTag(ConditionPrimitive::EachScries))?;
     conditions.set("Surveils", ConditionTag(ConditionPrimitive::Surveils))?;
@@ -318,6 +325,11 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // not a value passed here (see `AbilityEffect::MadnessCastOrDiscard`'s
     // own doc comment).
     ops.set("MadnessCastOrDiscard", OperationTag(AbilityEffect::MadnessCastOrDiscard))?;
+    // `Game.Ops.Cascade` (CR 702.85a) - no arguments, same toggle shape as
+    // `Game.Ops.MadnessCastOrDiscard`; the cascade spell's own mana value is
+    // derived from `top.source`/`top.x_value` at resolution time, not a
+    // value passed here.
+    ops.set("Cascade", OperationTag(AbilityEffect::Cascade))?;
 
     let costs = lua.create_table()?;
     costs.set("TapSelf", CostTag(CostComponent::Additional(AdditionalCost::TapSelf)))?;

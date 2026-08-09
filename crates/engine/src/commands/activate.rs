@@ -308,7 +308,12 @@ pub(super) fn execute_activate_ability(
         // effect, but it's still a recognized primitive that goes on the
         // stack the same way as any other here. Listed for exhaustiveness,
         // same reason as ReturnSelfWithCounter above.
-        | Some(AbilityEffect::MadnessCastOrDiscard)) => {
+        | Some(AbilityEffect::MadnessCastOrDiscard)
+        // CR 702.85a: only ever meaningful on a Cast-triggered ability (see
+        // this variant's own doc comment) - no real card grants Cascade as
+        // an activated ability's own effect either. Listed for
+        // exhaustiveness, same reason as MadnessCastOrDiscard above.
+        | Some(AbilityEffect::Cascade)) => {
             validate_targets(
                 state,
                 script_runtime,

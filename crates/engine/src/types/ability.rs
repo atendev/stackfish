@@ -516,6 +516,23 @@ pub enum AbilityEffect {
     /// queue. See `engine::resolve::madness`'s own doc comment for the full
     /// shape.
     MadnessCastOrDiscard,
+    /// CR 702.85a Cascade — "exile cards from the top of your library until
+    /// you exile a nonland card whose mana value is less than this spell's
+    /// mana value. You may cast that card without paying its mana cost if
+    /// the resulting spell's mana value is less than this spell's mana
+    /// value. Then put all cards exiled this way that weren't cast on the
+    /// bottom of your library in a random order." Only ever meaningful on a
+    /// `Cast`-triggered `RegisteredAbility` self-registered on the cascade
+    /// spell itself while it's on the stack — `ability.source`/`top.source`
+    /// is the spell object itself here (unlike `ReturnSelfWithCounter`/
+    /// `MadnessCastOrDiscard`, this trigger's own source is still live, no
+    /// `ObjectLineage` lookup needed). Always pauses (`ProcessState::
+    /// AwaitingCascadeChoice`) once the library walk finds a candidate (or
+    /// exhausts the library) — see `engine::resolve::cascade`'s own doc
+    /// comment for the full shape, including the narrowing this slice takes
+    /// on CR 702.85a's own second "if the resulting spell's mana value is
+    /// less" re-check.
+    Cascade,
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
@@ -890,6 +907,32 @@ pub enum ConditionPrimitive {
     /// card's own madness triggered ability is purged the moment it leaves
     /// hand, same as any other departure.
     MadnessExiled,
+    /// "When you cast this spell" (CR 601.2i, CR 702.85a Cascade's own first
+    /// clause) — matches `GameEventKind::SpellCast{object} if object ==
+    /// source`. Unlike `Cycled`/`MadnessExiled`/`Discarded`, this is a
+    /// self-referential condition on a still-*live* source (the spell is
+    /// still sitting on the stack when this fires - nothing purges it), so
+    /// it's matched by `triggers::collect_triggers`'s ordinary main loop,
+    /// no CR 603.10 departed/LKI fallback needed at all.
+    ///
+    /// No real self-registration producer exists for this yet - tried
+    /// generically (a `CommandOutcome::stack_entries` field, `Engine::
+    /// handle_pending_action` re-running a card's own `run_card_script` a
+    /// second time once it hits the stack, mirroring `battlefield_entries`)
+    /// but reverted: every existing card's `register_abilities(c)` is
+    /// written assuming it runs *once* per object lifecycle - running it a
+    /// second time at cast time, on top of the *existing* battlefield-entry
+    /// call, double-registers every ordinary ETB trigger too (`commands::
+    /// remap_abilities` carries the cast-time registration forward across
+    /// the stack->battlefield move, and the pre-existing `run_card_script`
+    /// call at battlefield-entry then registers a second, independent copy
+    /// on the same final object) - caught directly by `phase5_escape_
+    /// provenance.rs`'s own pre-existing test regressing into a genuine CR
+    /// 603.3b two-copy ordering-choice pause instead of a single clean
+    /// trigger. Direct `RegisteredAbility` construction only for now, same
+    /// posture other alternative-cost-family slices already take for their
+    /// own Lua-inaccessible pieces.
+    Cast,
     /// "At the beginning of combat on your turn" (CR 507) — matches
     /// `GameEventKind::StepStarted{step: Step::BeginningOfCombat}` only when
     /// the ability's controller is also the active player. Same reachability
@@ -1047,6 +1090,10 @@ impl ConditionPrimitive {
             ConditionPrimitive::MadnessExiled => matches!(
                 event,
                 GameEventKind::MadnessExiled { object, .. } if *object == source
+            ),
+            ConditionPrimitive::Cast => matches!(
+                event,
+                GameEventKind::SpellCast { object } if *object == source
             ),
             ConditionPrimitive::BeginningOfYourCombat => {
                 controller == active_player
@@ -1907,6 +1954,7 @@ mod tests {
             commander_return_offered: std::collections::HashSet::new(),
             linked_ability_generation: std::collections::HashMap::new(),
             pending_timing_bypass: None,
+            pending_free_cast: None,
         }
     }
 

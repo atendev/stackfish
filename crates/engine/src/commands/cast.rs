@@ -43,6 +43,20 @@ pub(super) fn execute_cast_spell(
     // borrowed below since both borrow `state` and `object` stays alive for
     // the rest of this function.
     let timing_bypassed = state.pending_timing_bypass.take() == Some(card);
+    // CR 702.85a: a one-shot "cast this exact object for {0}, from Exile"
+    // grant set by `Engine::submit_cascade_cast` immediately before this
+    // call - see `GameState::pending_free_cast`'s own doc comment for why
+    // this can't be an ordinary printed `alternative_costs` entry (the
+    // permission comes from Cascade's own effect, not from anything the
+    // exiled candidate card was ever printed with).
+    let free_cast = state.pending_free_cast.take() == Some(card);
+    let free_cast_alternative = AlternativeCost::Replacement {
+        description: "cast without paying its mana cost".to_string(),
+        cost: CostSpec::mana_only(ManaCost { symbols: Vec::new() }),
+        from_zone: ZoneKind::Exile,
+        exile_on_leaving_stack: false,
+        escape: false,
+    };
     let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
     if object.definition.card_types.contains(CardTypeSet::LAND) {
         return Err(CommandError::IllegalAction(
@@ -63,17 +77,21 @@ pub(super) fn execute_cast_spell(
     // than the hand in the first place - so the zone permission and
     // the alternative-cost choice are resolved together, not as two
     // independent checks.
-    let alternative: Option<&AlternativeCost> = match alternative_cost {
-        Some(idx) => Some(
-            object
-                .definition
-                .alternative_costs
-                .get(idx)
-                .ok_or(CommandError::IllegalAction(
-                    "no such alternative cost on this card".to_string(),
-                ))?,
-        ),
-        None => None,
+    let alternative: Option<&AlternativeCost> = if free_cast {
+        Some(&free_cast_alternative)
+    } else {
+        match alternative_cost {
+            Some(idx) => Some(
+                object
+                    .definition
+                    .alternative_costs
+                    .get(idx)
+                    .ok_or(CommandError::IllegalAction(
+                        "no such alternative cost on this card".to_string(),
+                    ))?,
+            ),
+            None => None,
+        }
     };
     // CR 903.8: a commander may be cast from the command zone by its
     // owner (not just controller - matching the rule text) at the
