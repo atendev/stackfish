@@ -509,7 +509,7 @@ fn become_copy_with_additional_counter_exception_adds_a_real_counter() {
     let p0 = PlayerId(0);
     let doppel = ObjectId(0);
     let bear = ObjectId(1);
-    let exceptions = CopyExceptions { enters_with_additional_counters: Some((CounterKind::PlusOnePlusOne, 1)), ..CopyExceptions::default() };
+    let exceptions = CopyExceptions { enters_with_additional_counters: Some((CounterKind::PlusOnePlusOne, CounterAmount::Fixed(1))), ..CopyExceptions::default() };
     let state = one_player_state(
         vec![
             card_object(doppel, doppelganger_definition(), p0, ZoneKind::Battlefield),

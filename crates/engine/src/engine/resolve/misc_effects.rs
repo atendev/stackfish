@@ -99,7 +99,15 @@ impl Engine {
                     // CR 707.9e: Spark Double's own "enters with an
                     // additional +1/+1 counter" - see
                     // apply_copy_additional_counters's own doc comment.
-                    if let Some(counter_event) = commands::apply_copy_additional_counters(source_id, exceptions) {
+                    // `top.x_value` (`phase5/altered-ego-x-counters`) is
+                    // plumbed through for symmetry with the EntersAsCopy/
+                    // submit_copy_choice path, though no real BecomeCopy
+                    // producer (Vesuvan's triggered ability) needs
+                    // CounterAmount::X - TODO: unexercised by a real card,
+                    // proven only by direct construction if a test needs it.
+                    if let Some(counter_event) =
+                        commands::apply_copy_additional_counters(source_id, exceptions, top.x_value)
+                    {
                         events.push(counter_event);
                     }
                     events.push(GameEventKind::BecameCopy { object: source_id, copied: target_id });

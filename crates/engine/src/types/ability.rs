@@ -659,16 +659,18 @@ pub enum TokenSpec {
 ///   plain `GameEventKind::CounterAdded` push - reuses `CommitEvents`'
 ///   existing generic counter-apply path, no new event variant needed.
 ///   707.9e's own second sentence (the exception's effect doesn't happen if
-///   *another* copy effect applies to the object first) stays unmodeled: it
-///   only matters when a copy effect's own granted ability re-fires a second
-///   copy effect *during the same entering event* (Altered Ego copying
-///   Clone, which grants Clone's own "choose a creature to copy" replacement,
-///   which then re-applies before Altered Ego's own queued counters do) -
-///   this engine has no nested/chained copy-effect-during-one-ETB producer
-///   at all, a separate, bigger gap than this slice's own scope, named not
-///   silently assumed (same posture `grant_recurring_copy_trigger`'s own
-///   supersession check already took when it had no reachable producer
-///   either).
+///   *another* copy effect applies to the object first) is real now too
+///   (`phase5/chained-copy-effects`) - see `Engine::submit_copy_choice`'s own
+///   doc comment for the chain-detection/`carry_forward_if_declined`
+///   mechanism. `CounterAmount::X` (`phase5/altered-ego-x-counters`, CR
+///   707.9e's own Altered Ego worked example) is the variable-amount sibling
+///   to `Fixed` - resolved against the *entering object's own* `x_value`
+///   (`StackObject.x_value`, captured once at `AwaitingCopyChoice`'s raise
+///   site and carried unchanged through any chain, same invariant-through-
+///   the-chain treatment `colors_spent`/`stack_id`/`controller` already get -
+///   the X belongs to Altered Ego itself, not to whichever creature ends up
+///   copied at any one link), not a per-round value re-derived from whatever
+///   was just copied.
 #[derive(Clone, Debug)]
 pub struct CopyExceptions {
     pub set_power_toughness: Option<(i32, i32)>,
@@ -676,7 +678,20 @@ pub struct CopyExceptions {
     pub retain_name: bool,
     pub retain_color: bool,
     pub grant_recurring_copy_trigger: bool,
-    pub enters_with_additional_counters: Option<(CounterKind, u32)>,
+    pub enters_with_additional_counters: Option<(CounterKind, CounterAmount)>,
+}
+
+/// The amount half of `CopyExceptions::enters_with_additional_counters` -
+/// `Fixed` (Spark Double's "an additional +1/+1 counter") or `X` (Altered
+/// Ego's "X additional +1/+1 counters", resolved against the entering
+/// object's own `StackObject.x_value` at copy-application time - see
+/// `CopyExceptions`'s own doc comment for why that's invariant through a
+/// chain). A single field with a two-shaped amount, not two separate
+/// `Option` fields, so "fixed and X both set at once" isn't representable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CounterAmount {
+    Fixed(u32),
+    X,
 }
 
 impl Default for CopyExceptions {

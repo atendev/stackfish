@@ -230,6 +230,11 @@ impl Engine {
                         // so there's no outer round's exception to fall back
                         // to if this choice is declined.
                         carry_forward_if_declined: None,
+                        // CR 707.9e/107.3b (Altered Ego): object_id's own
+                        // paid X, captured here once - see
+                        // AwaitingCopyChoice::x_value's own doc comment for
+                        // why this doesn't get re-derived per chain link.
+                        x_value: top.x_value,
                     });
                 }
                 // CR 702.82a: checked *before*
