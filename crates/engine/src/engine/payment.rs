@@ -218,6 +218,15 @@ impl Engine {
             caused_by_command: None,
             parent_event: None,
         });
+        // CR 601.2i: `stack_id` has just become cast (every step of 601.2a-h
+        // - moved to the stack, costs paid - is now complete) if it's a real
+        // spell, not an activated ability paying its own cost (both share
+        // `PaymentResolution::StackObject`) - see `GameEventKind::SpellCast`'s
+        // own doc comment for why this is a dedicated marker rather than
+        // reusing `CostPaid` itself (an ability's own CostPaid isn't a cast).
+        if self.state.stack.iter().any(|s| s.stack_id == stack_id && matches!(s.kind, StackEntryKind::Spell)) {
+            self.log_events(vec![GameEventKind::SpellCast { object: stack_id }]);
+        }
         ProcessState::SbaLoop
     }
 

@@ -2,6 +2,95 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Cascade (CR 702.85a)**: real now (`phase5/cascade`) — three real new pieces, each
+  scoped wider than Cascade alone on purpose:
+  - `ManaCost::mana_value` (CR 202.3) — didn't exist anywhere in this engine before.
+    Reuses `resolve_x` (already existed for X-cost payment) rather than duplicating
+    X-handling: a raw unresolved `{X}` contributes 0 (CR 202.3e's off-the-stack
+    default, correct for a library/hand/graveyard card that's never on the stack);
+    an on-stack spell's own mana value must call `resolve_x` first. Hybrid uses the
+    larger component (CR 202.3f); Phyrexian contributes 1 (CR 202.3g). CR
+    202.3b/c/d (DFC back faces, melded permanents, split cards) are explicit
+    DESIGN.md non-goals, untouched.
+  - CR 601.2i's "when you cast this spell" trigger point — genuinely new: traced
+    the full payment-completion path first and found every real `CastSpell` in this
+    engine *always* pauses for an explicit payment acknowledgment (even a bare
+    `{0}`, per CR 118.5a), so there's exactly one real "becomes cast" commit point
+    to hook (`Engine::continue_cost_zone_moves`'s own tail, gated on `on_paid ==
+    PaymentResolution::StackObject` + the object still being `StackEntryKind::
+    Spell` — an activated ability's own cost completion shares the same
+    `PaymentResolution` variant and must not fire this). `GameEventKind::SpellCast`
+    is a plain self-referential marker (unlike `Cycled`/`MadnessExiled`, no LKI
+    needed — the spell is still alive on the stack when this fires, so `Condition
+    Primitive::Cast` is matched by `collect_triggers`'s ordinary live loop, no CR
+    603.10 departed fallback). `since_ledger` is already correct for this for free —
+    confirmed by reading `finish_sba_loop`'s own `CollectTriggers { since }`
+    derivation before writing anything, not assumed — so no pipeline-exit
+    restructuring was needed, just logging the marker at the right point.
+  - `AbilityEffect::Cascade` itself — a synchronous library walk (no per-card
+    player choice, unlike `Search`'s own candidate-queue shape) that always pauses
+    at the end (`ProcessState::AwaitingCascadeChoice`) for the real "cast the
+    candidate, or not" decision. Library moves aren't replacement-checked anywhere
+    in this engine (confirmed against `Search`'s own found-card mover before
+    building this one the same way) — CR 616.1 concern deliberately narrowed away,
+    same posture that precedent already takes. The "cast" branch
+    (`Engine::submit_cascade_cast`) reuses the same synthetic-`CastSpell`-via-
+    `execute_command` shape `phase5/madness`'s `submit_madness_cast` established,
+    plus a new sibling one-shot grant `GameState::pending_free_cast` (Madness's own
+    `pending_timing_bypass` only waives *timing*, since its own cost is real and
+    printed; Cascade's candidate was never printed with any cost permission at all,
+    so the grant has to waive the *cost itself* too — synthesized as a transient
+    `AlternativeCost::Replacement` with an empty `ManaCost` at the exact call site
+    that already handles every other alternative-cost shape). `Engine::
+    bottom_cards_in_random_order` (new, `engine/pregame.rs`, next to
+    `shuffle_library`) reuses the same per-swap Fisher-Yates/`RngDrawn`-logging
+    technique, scoped to just the exiled subset rather than the whole library.
+    Narrowed, named: CR 702.85a's own second mana-value check (re-verifying the
+    candidate's mana value hasn't changed between being exiled and being cast) uses
+    the value already computed by the walk rather than re-deriving it — no real
+    card in this corpus can change a card's mana value between those two points.
+    CR 702.85b ("as you cascade" actions) stays unmodeled, no real card needs it;
+    CR 702.85c (multiple Cascade instances trigger separately) needed no code at
+    all, falls out for free from ordinary trigger collection.
+
+  A fourth piece was **tried and reverted**: a generic `CommandOutcome::
+  stack_entries` field (mirroring `battlefield_entries`) that re-ran a card's own
+  `run_card_script` a second time once it hit the stack, so a script could
+  self-register `Cast` directly (CR 601.2a: abilities exist from the moment a
+  spell hits the stack, not just once it resolves). This broke a real, unrelated,
+  already-passing test (`phase5_escape_provenance.rs`) — every existing card's own
+  `register_abilities(c)` is written assuming it's called *exactly once* per
+  object lifecycle; running it a second time at cast time, on top of the
+  pre-existing battlefield-entry call, double-registered the Escape test card's
+  own ordinary ETB trigger (`commands::remap_abilities` carries the cast-time
+  registration across the stack→battlefield move, and the pre-existing
+  battlefield-entry `run_card_script` call then registers an independent *second*
+  copy on the same final object) — surfaced as a genuine CR 603.3b two-copy
+  ordering-choice pause instead of a single clean trigger, not a silent no-op.
+  Root-caused via direct instrumentation (not guessed) before reverting. This
+  slice's own tests register the Cascade trigger via direct `RegisteredAbility`
+  construction instead (predicting the cast spell's own deterministic stack-object
+  id — `next_object_id` starts at 1000 in every `testutil::two_player_state`, and
+  nothing else in these tests allocates an id first), same "no Lua wiring proven
+  this slice" posture Escape/Madness/Flashback/Buyback already take for their own
+  Lua-inaccessible pieces. Making `register_abilities(c)` genuinely safe to call
+  more than once per object (or having `move_resolving_spell` purge-then-
+  reregister instead of remap-then-reregister) is a real, separate, bigger gap —
+  named here rather than attempted.
+
+  Also touched, incidentally: fixed a real pre-existing bug in `execute_cast_spell`
+  surfaced by Cascade being the first-ever `from_zone: Exile` alternative-cost
+  producer (Flashback/Escape/Buyback are all `Graveyard`, a per-player zone) — its
+  own zone-removal call assumed every `from_zone` is per-player, but Exile (like
+  Battlefield) is shared, so casting from exile errored ("actor has no such zone")
+  until this slice's own test exercised it. Also updated four pre-existing
+  scenario TOML fixtures whose `ledger_len` assertions hardcode an exact ledger
+  count (`phase5_script_self_registration`/`phase5_targeting_basics`/
+  `phase5_script_bridge_primitives`/`phase5_script_bridge_trigger`) — each now +1
+  for the new `SpellCast` marker a real cast always logs; found by running the
+  full scenario suite to exhaustion (it stops at the first hard failure per run)
+  rather than assuming only one fixture was affected.
+
 - **Madness (CR 702.35)**: real now (`phase5/madness`) — the static "discard
   -> exile instead" half needed no new engine mechanism at all: `ReplacementPayload::
   ReplaceZoneDestination(ZoneKind::Exile)` matched against `EventFilter::WouldMoveZone

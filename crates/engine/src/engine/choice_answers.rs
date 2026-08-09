@@ -20,9 +20,9 @@ use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::{
-    AmplifyChoiceError, AttachChoiceError, CopyChoiceError, DevourChoiceError, Engine, MadnessChoiceError,
-    ModeChoiceError, ProcessState, ReplacementResumeTarget, ScriptChoiceError, ScriptedZoneMoveKind,
-    ScriptedZoneMoveThen,
+    AmplifyChoiceError, AttachChoiceError, CascadeChoiceError, CopyChoiceError, DevourChoiceError, Engine,
+    MadnessChoiceError, ModeChoiceError, ProcessState, ReplacementResumeTarget, ScriptChoiceError,
+    ScriptedZoneMoveKind, ScriptedZoneMoveThen,
 };
 
 /// CR 707.9a/e: applies whatever "additional effect" exceptions
@@ -428,6 +428,101 @@ impl Engine {
         else {
             unreachable!("checked above");
         };
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        events_so_far.extend(outcome.events);
+
+        self.pipeline_context =
+            Some(PipelineContext { since_ledger, caused_by_command: Some(command_id), parent_event: None });
+        self.pending_payment = outcome.requires_payment;
+        if outcome.broke_pass_chain {
+            self.state.consecutive_passes = 0;
+        }
+        self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        Ok(())
+    }
+
+    /// Answers a pending CR 702.85a Cascade choice raised by `StepStatus::
+    /// AwaitingCascadeChoice` with "no" (or "there was no candidate to
+    /// cast") — puts every exiled card on the bottom of the library in a
+    /// random order (`Engine::bottom_cards_in_random_order`), then folds
+    /// this trigger's own `events_so_far` into the same `ReplacementCheck`
+    /// tail every other synchronous-only resolution ends on.
+    /// `Engine::submit_cascade_cast` is the "yes" sibling.
+    pub fn decline_cascade_cast(&mut self) -> Result<(), CascadeChoiceError> {
+        if !matches!(self.process_state, ProcessState::AwaitingCascadeChoice { .. }) {
+            return Err(CascadeChoiceError::NotAwaitingChoice);
+        }
+        let ProcessState::AwaitingCascadeChoice { exiled, stack_id, mut events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        self.bottom_cards_in_random_order(exiled);
+        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+        self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        Ok(())
+    }
+
+    /// Answers a pending CR 702.85a Cascade choice raised by `StepStatus::
+    /// AwaitingCascadeChoice` with "yes" — casts `candidate` paying no mana
+    /// cost at all (`GameState::pending_free_cast`, consumed by `commands::
+    /// cast::execute_cast_spell`), through the same synthetic-`CastSpell`-
+    /// via-`commands::execute_command` shape `submit_madness_cast` already
+    /// established (including the timing waiver, since this cast also
+    /// happens *as* the trigger resolves, not as a later priority action).
+    /// Every *other* exiled card (everything except `candidate`) goes to the
+    /// bottom of the library in a random order — same as `decline_cascade_
+    /// cast`, just excluding whichever card was actually cast. Errors
+    /// (`NoCandidate`, or `IllegalCast` if the cast itself is illegal) leave
+    /// the pause untouched, same no-partial-commitment stance
+    /// `submit_madness_cast` already takes.
+    pub fn submit_cascade_cast(
+        &mut self,
+        modes: Vec<u32>,
+        targets: Vec<Target>,
+        x_value: Option<u32>,
+    ) -> Result<(), CascadeChoiceError> {
+        let ProcessState::AwaitingCascadeChoice { player, candidate, .. } = &self.process_state else {
+            return Err(CascadeChoiceError::NotAwaitingChoice);
+        };
+        let (player, candidate) = (*player, *candidate);
+        let Some(candidate) = candidate else {
+            return Err(CascadeChoiceError::NoCandidate);
+        };
+
+        self.state.pending_free_cast = Some(candidate);
+        self.state.pending_timing_bypass = Some(candidate);
+        let command_id = self.allocate_command_id();
+        let since_ledger = self.state.ledger.len();
+        let command = EngineCommand {
+            command_id,
+            actor: player,
+            action: PlayerActionKind::CastSpell {
+                card: candidate,
+                modes,
+                targets,
+                x_value,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
+        };
+        let outcome = match commands::execute_command(&mut self.state, &self.script_runtime, command) {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                self.state.pending_free_cast = None;
+                self.state.pending_timing_bypass = None;
+                return Err(CascadeChoiceError::IllegalCast(err));
+            }
+        };
+
+        let ProcessState::AwaitingCascadeChoice { exiled, stack_id, mut events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        let leftover: Vec<ObjectId> = exiled.into_iter().filter(|&id| id != candidate).collect();
+        self.bottom_cards_in_random_order(leftover);
+
         events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
         events_so_far.extend(outcome.events);
 

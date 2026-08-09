@@ -34,6 +34,7 @@
 //!   Undying).
 //! - `madness`: `MadnessCastOrDiscard` (CR 702.35a Madness's own "cast or
 //!   discard" decision).
+//! - `cascade`: `Cascade` (CR 702.85a).
 //!
 //! Every extracted effect-resolver returns `std::ops::ControlFlow<StepStatus,
 //! Vec<GameEventKind>>` — `Break(status)` for "this resolution is pausing,
@@ -55,6 +56,7 @@ use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
+mod cascade;
 mod destruction;
 mod direct_effects;
 mod library_effects;
@@ -701,6 +703,12 @@ impl Engine {
             // comment for the full shape (locates the exiled object via
             // lineage, always pauses for a real cast-or-decline choice).
             Some(AbilityEffect::MadnessCastOrDiscard) => self.resolve_madness_effect(top, events),
+            // CR 702.85a Cascade - see this variant's own doc comment in
+            // ability.rs and `cascade::resolve_cascade_effect`'s own doc
+            // comment for the full shape (synchronous library walk, always
+            // pauses for a real cast-or-decline choice once it finds a
+            // candidate or exhausts the library).
+            Some(AbilityEffect::Cascade) => self.resolve_cascade_effect(top, events),
             // AddMana/AddManaChoice are only ever set on a mana
             // ability, which resolves immediately and never
             // reaches the stack (CR 605.1a/605.3b) - no

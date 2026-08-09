@@ -127,6 +127,23 @@ pub enum MadnessChoiceError {
     IllegalCast(CommandError),
 }
 
+/// Why `decline_cascade_cast`/`submit_cascade_cast` rejected an answer to a
+/// CR 702.85a Cascade choice. Same shape as `MadnessChoiceError` — see that
+/// type's own doc comment.
+#[derive(Debug)]
+pub enum CascadeChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingCascadeChoice`.
+    NotAwaitingChoice,
+    /// `submit_cascade_cast` was called but the library walk found no
+    /// qualifying candidate (`candidate: None`) — nothing to cast, only
+    /// `decline_cascade_cast` is legal.
+    NoCandidate,
+    /// `commands::execute_command` rejected the synthetic `CastSpell` (bad
+    /// targets, ...) — the pause is left untouched so the caller can retry
+    /// with different targets/modes or call `decline_cascade_cast` instead.
+    IllegalCast(CommandError),
+}
+
 /// Why `submit_copy_choice` rejected an answer to a CR 707.6/614.12a "enter
 /// as a copy" choice (Clone itself). No `DuplicateCandidate` variant, unlike
 /// `DevourChoiceError`/`AmplifyChoiceError` — this is "which one, if any,"
@@ -694,6 +711,16 @@ impl Engine {
                 // every other choice-pause above already uses.
                 let status = StepStatus::AwaitingMadnessChoice { player, card };
                 self.process_state = ProcessState::AwaitingMadnessChoice { player, card, stack_id, events_so_far };
+                status
+            }
+
+            ProcessState::AwaitingCascadeChoice { player, candidate, exiled, stack_id, events_so_far } => {
+                // Nothing to do until decline_cascade_cast/submit_cascade_cast
+                // answers - same "put the exact same state back" pattern
+                // every other choice-pause above already uses.
+                let status = StepStatus::AwaitingCascadeChoice { player, candidate };
+                self.process_state =
+                    ProcessState::AwaitingCascadeChoice { player, candidate, exiled, stack_id, events_so_far };
                 status
             }
 

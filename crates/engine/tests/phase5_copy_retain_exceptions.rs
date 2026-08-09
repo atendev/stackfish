@@ -154,6 +154,7 @@ fn one_player_state(objects: Vec<GameObject>, abilities: Vec<RegisteredAbility>)
         commander_return_offered: std::collections::HashSet::new(),
         linked_ability_generation: std::collections::HashMap::new(),
         pending_timing_bypass: None,
+        pending_free_cast: None,
     }
 }
 

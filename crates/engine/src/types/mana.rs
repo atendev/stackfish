@@ -52,6 +52,17 @@ pub enum AtomicManaSymbol {
 }
 
 impl AtomicManaSymbol {
+    /// CR 202.3/202.3g: this atom's own contribution to mana value — 1 for
+    /// every atom except `Generic(n)`, which contributes `n` (a colored,
+    /// colorless, snow, or Phyrexian pip is still exactly one mana, so each
+    /// counts as 1 regardless of what it costs to pay).
+    pub fn mana_value(&self) -> u32 {
+        match self {
+            AtomicManaSymbol::Generic(n) => *n,
+            AtomicManaSymbol::Colored(_) | AtomicManaSymbol::Colorless | AtomicManaSymbol::Snow | AtomicManaSymbol::Phyrexian(_) => 1,
+        }
+    }
+
     /// Colors this atom contributes to a card's color (CR 202.2) — empty for
     /// `Generic`/`Colorless`/`Snow`.
     pub fn colors(&self) -> ColorSet {
@@ -92,6 +103,22 @@ pub enum ManaSymbol {
 }
 
 impl ManaSymbol {
+    /// CR 202.3e/202.3f: this symbol's own contribution to mana value — a
+    /// plain atom's own `mana_value`, the *larger* of a hybrid's two atoms
+    /// (CR 202.3f's explicit "use the largest component" rule — e.g. `{2/W}`
+    /// contributes 2, not 1), and 0 for a raw, still-unresolved `X` (CR
+    /// 202.3e's off-the-stack default; an on-stack spell's own `{X}` should
+    /// already have been substituted via `ManaCost::resolve_x` before this
+    /// is ever called, so this arm is never reached for a real on-stack
+    /// mana value - see `ManaCost::mana_value`'s own doc comment).
+    pub fn mana_value(&self) -> u32 {
+        match self {
+            ManaSymbol::Atom(a) => a.mana_value(),
+            ManaSymbol::Hybrid(a, b) => a.mana_value().max(b.mana_value()),
+            ManaSymbol::X => 0,
+        }
+    }
+
     /// Union of colors contributed by this symbol's atom(s) — for `Hybrid`,
     /// a hybrid symbol is all of its component colors (CR 107.4e/f), not
     /// just one.
@@ -113,6 +140,22 @@ impl ManaCost {
     /// Union of colors across all symbols (CR 202.2).
     pub fn colors(&self) -> ColorSet {
         self.symbols.iter().fold(ColorSet::empty(), |acc, s| acc | s.colors())
+    }
+
+    /// CR 202.3: the total mana value of this cost — sum of every symbol's
+    /// own contribution (CR 202.3g's Phyrexian/202.3f's hybrid rules folded
+    /// into `ManaSymbol::mana_value` itself). CR 202.3a (no mana cost at
+    /// all -> mana value 0) falls out for free: an empty `symbols` sums to
+    /// 0. A raw `{X}` still present contributes 0 (CR 202.3e's off-the-stack
+    /// default) - callers computing an *on-stack* spell's own mana value
+    /// must call `resolve_x` first (`StackObject::x_value`, already
+    /// resolved at cast time) so `{X}` is a real `Generic(x)` by the time
+    /// this sums it; every other caller (a library/hand/graveyard card,
+    /// never on the stack) wants the off-stack default directly. CR
+    /// 202.3b/c/d (DFC back faces, melded permanents, split cards) are all
+    /// explicit DESIGN.md non-goals - not handled here.
+    pub fn mana_value(&self) -> u32 {
+        self.symbols.iter().map(|s| s.mana_value()).sum()
     }
 
     /// Whether this cost has an `{X}` in it (CR 107.3a) — the caller's cue
@@ -530,6 +573,59 @@ mod tests {
         let without_x =
             ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
         assert!(!without_x.has_x());
+    }
+
+    #[test]
+    fn mana_value_sums_generic_and_colored_pips() {
+        // {1}{R}{R} -> 1 + 1 + 1 = 3.
+        let cost = ManaCost {
+            symbols: vec![
+                ManaSymbol::Atom(AtomicManaSymbol::Generic(1)),
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+                ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red)),
+            ],
+        };
+        assert_eq!(cost.mana_value(), 3);
+    }
+
+    #[test]
+    fn mana_value_no_mana_cost_is_zero() {
+        assert_eq!(ManaCost { symbols: Vec::new() }.mana_value(), 0);
+    }
+
+    #[test]
+    fn mana_value_hybrid_uses_the_larger_component() {
+        // CR 202.3f: {2/W} contributes 2, not 1.
+        let cost = ManaCost {
+            symbols: vec![ManaSymbol::Hybrid(AtomicManaSymbol::Generic(2), AtomicManaSymbol::Colored(Color::White))],
+        };
+        assert_eq!(cost.mana_value(), 2);
+        // {W/U} - both atoms are worth 1, so the max is still 1.
+        let color_hybrid = ManaCost {
+            symbols: vec![ManaSymbol::Hybrid(AtomicManaSymbol::Colored(Color::White), AtomicManaSymbol::Colored(Color::Blue))],
+        };
+        assert_eq!(color_hybrid.mana_value(), 1);
+    }
+
+    #[test]
+    fn mana_value_phyrexian_counts_as_one() {
+        let cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Phyrexian(Color::Black))] };
+        assert_eq!(cost.mana_value(), 1);
+    }
+
+    #[test]
+    fn mana_value_unresolved_x_is_zero_off_the_stack() {
+        // CR 202.3e: X is 0 while not on the stack.
+        let cost = ManaCost { symbols: vec![ManaSymbol::X, ManaSymbol::Atom(AtomicManaSymbol::Generic(1))] };
+        assert_eq!(cost.mana_value(), 1);
+    }
+
+    #[test]
+    fn mana_value_resolved_x_counts_the_announced_value() {
+        // CR 202.3e: X is the chosen value while on the stack - resolve_x
+        // must be applied first.
+        let cost = ManaCost { symbols: vec![ManaSymbol::X] };
+        assert_eq!(cost.resolve_x(3).mana_value(), 3);
     }
 
     #[test]

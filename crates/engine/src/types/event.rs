@@ -226,6 +226,19 @@ pub enum GameEventKind {
     /// this is checked. `replacement::madness_marker_event` is this event's
     /// only producer.
     MadnessExiled { object: ObjectId, last_known_info: GameObject },
+    /// CR 601.2i: `object` (a spell, `StackEntryKind::Spell`) has become
+    /// cast — every step of CR 601.2a-h (moved to the stack, costs paid)
+    /// has completed. Unlike `Cycled`/`MadnessExiled`, no `last_known_info`
+    /// - the spell is still alive on the stack at the moment this is
+    /// checked (nothing purges it), so a live `state.object()` lookup
+    /// already works fine, same as any ordinary trigger condition. Logged
+    /// once per real cast, whether or not it needed a payment pause - see
+    /// `Engine::maybe_log_spell_cast`'s own doc comment for the two commit
+    /// points this fires from. Purpose-built for CR 702.85 Cascade's "when
+    /// you cast this spell" trigger, but deliberately general (not
+    /// Cascade-specific) - the same "when you cast a spell" hook Storm-style
+    /// keywords would need too.
+    SpellCast { object: ObjectId },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

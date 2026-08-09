@@ -56,6 +56,7 @@ fn minimal_state() -> GameState {
         commander_return_offered: std::collections::HashSet::new(),
         linked_ability_generation: std::collections::HashMap::new(),
         pending_timing_bypass: None,
+        pending_free_cast: None,
     }
 }
 
