@@ -533,41 +533,57 @@ pub enum AbilityEffect {
     /// on CR 702.85a's own second "if the resulting spell's mana value is
     /// less" re-check.
     Cascade,
-    /// The `Game.Ops.ForEachPlayer(fn)` primitive (`phase5/mass-choice-
+    /// The `Game.Ops.ForEachPlayer(x)` primitive (`phase5/mass-choice-
     /// effects`, CR 101.4's APNAP-order "each player ..." shape — the rules
     /// text's own worked example is literally "each player sacrifices a
-    /// creature"). No fields on this marker itself — the real payload is
-    /// `RegisteredAbility::operation`/`StackObject::operation`, a real
-    /// `ScriptHandle` for once rather than the usual `ScriptHandle(0)`
-    /// placeholder that pairs with every other static `Game.Ops.*` tag (see
-    /// `ForEachPlayerTag`'s own doc comment for why). `engine::resolve::
-    /// each_player::resolve_for_each_player_effect` invokes that same script
-    /// function once per player in CR 101.4 APNAP order (active player,
-    /// then each other player in turn order), rebasing which `PlayerId`
-    /// counts as `controller`/"you" each time rather than adding any new
-    /// "whose perspective" mechanism — `TargetFilter::Object::controller`'s
+    /// creature"). `x` is either a script function or a bare `SacrificeRandom`/
+    /// `DiscardRandom` tag (`ForEachPlayerTag`'s own doc comment covers both
+    /// shapes and why the Lua binding restricts the tag case to just those
+    /// two) — this field is `None` for the function shape (the real payload
+    /// there is `RegisteredAbility::operation`/`StackObject::operation`, a
+    /// real `ScriptHandle` for once rather than the usual `ScriptHandle(0)`
+    /// placeholder every other static tag pairs with) and `Some(inner)` for
+    /// the bare-tag shape, carrying `inner` directly since there's no
+    /// script handle to stash it under.
+    ///
+    /// Function shape: `engine::resolve::each_player::
+    /// resolve_for_each_player_effect` invokes that same script function
+    /// once per player in CR 101.4 APNAP order (active player, then each
+    /// other player in turn order), rebasing which `PlayerId` counts as
+    /// `controller`/"you" each time rather than adding any new "whose
+    /// perspective" mechanism — `TargetFilter::Object::controller`'s
     /// "you"/"opponent" already resolves against whatever `controller` was
     /// passed into `ScriptRuntime::invoke_operation`, not a value hardcoded
     /// to the spell's original caster, so this composes for free with
     /// `Game.ChooseN`/`Game.SelectTargets`/`Game.Ops.SacrificeChosen`/
-    /// `DiscardChosen` called from inside the wrapped function.
-    ///
-    /// CR 101.4's "then the actions happen simultaneously": a per-player
-    /// invocation's own `sacrifice_chosen`/`discard_chosen` result-table
-    /// keys (see `OperationOutcome::PendingZoneMoves`) are *not* applied
-    /// right after that player's own choice — `resolve_for_each_player_effect`
+    /// `DiscardChosen` called from inside the wrapped function. CR 101.4's
+    /// "then the actions happen simultaneously": a per-player invocation's
+    /// own `sacrifice_chosen`/`discard_chosen` result-table keys (see
+    /// `OperationOutcome::PendingZoneMoves`) are *not* applied right after
+    /// that player's own choice — `resolve_for_each_player_effect`
     /// accumulates every player's ids into one combined batch per verb and
     /// performs the real zone moves only after the last player's choice, so
     /// a mid-loop replacement effect (or a later player's own choice) still
     /// sees every permanent/card that's *about* to leave, not one that
     /// already has.
     ///
-    /// TODO: only wraps a script function - a static `Game.Ops.*` tag
-    /// (`SacrificeRandom`/`DiscardRandom`) can't be handed to
-    /// `ForEachPlayer` directly (e.g. "each player discards a card at
-    /// random" would need a one-line Lua wrapper function around it); no
-    /// real card built this slice needs that combination.
-    ForEachPlayer,
+    /// Bare-tag shape: no script involved at all — `resolve_for_each_player_
+    /// effect` draws each player's own random picks directly (`Engine::
+    /// pick_sacrifice_random_ids`/`pick_discard_random_ids`, the same
+    /// `next_rng`-driven helpers `resolve_sacrifice_random_effect`/
+    /// `resolve_discard_random_effect` use for the single-player case), pure
+    /// synchronous Rust with no possibility of pausing mid-computation, then
+    /// merges every player's picks into one queue before the single real
+    /// `continue_scripted_zone_move` call — same "simultaneous" guarantee as
+    /// the function shape, for free, since there's no per-player commit
+    /// point to even consider skipping.
+    ///
+    /// TODO: only `SacrificeRandom`/`DiscardRandom` are accepted as a bare
+    /// tag (checked in the `Game.Ops.ForEachPlayer` Lua binding itself, a
+    /// loud load-time error otherwise) — no real card needs any other
+    /// `Game.Ops.*` primitive applied per-player without a script function
+    /// wrapping it.
+    ForEachPlayer(Option<Box<AbilityEffect>>),
     /// The `Game.Ops.SacrificeRandom(filter, count)` primitive (CR 701.21,
     /// "at random" — a true random procedure, not a player choice, unlike
     /// `Game.ChooseN`+`Game.Ops.SacrificeChosen`). `filter` matches
@@ -583,16 +599,17 @@ pub enum AbilityEffect {
     /// zone_move(Sacrifice, ...)` pipeline `Sacrifice`/`DestroyAll` already
     /// use, so CR 616.1 ordering and dies-triggers apply identically.
     SacrificeRandom { filter: EffectFilter, count: u32 },
-    /// The `Game.Ops.DiscardRandom(count)` primitive (CR 701.9b: "some
-    /// effects... require a random discard"). Always the resolving
-    /// `StackObject`'s own controller's hand, no filter - no real card
-    /// built this slice discards a filtered random selection (e.g. "discard
-    /// a random land"), so unlike `SacrificeRandom` this doesn't carry an
-    /// `EffectFilter` yet; add one the same way if a real card needs it.
-    /// Same "fewer than `count` if the hand is smaller" stance as
+    /// The `Game.Ops.DiscardRandom(filter, count)` primitive (CR 701.9b:
+    /// "some effects... require a random discard"). `filter` matches
+    /// `SacrificeRandom`'s own shape (`phase5/mass-choice-effects` follow-up
+    /// — an empty table matches every card, same "no restriction" default
+    /// every other `EffectFilter` consumer uses) - e.g. "discard a random
+    /// land" is `Game.Ops.DiscardRandom({ card_types = { "Land" } }, 1)`.
+    /// Always the resolving `StackObject`'s own controller's hand. Same
+    /// "fewer than `count` if the hand is smaller" stance as
     /// `SacrificeRandom`, mirroring CR 701.17b's mill precedent. Resolved
     /// via `continue_scripted_zone_move(Discard, ...)`.
-    DiscardRandom { count: u32 },
+    DiscardRandom { filter: EffectFilter, count: u32 },
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two

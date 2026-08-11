@@ -14,7 +14,7 @@ use std::ops::ControlFlow;
 
 use crate::types::effect::{matches_effect_filter, EffectFilter};
 use crate::types::event::{GameEvent, GameEventKind};
-use crate::types::ids::{ObjectId, Target};
+use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
@@ -98,21 +98,53 @@ impl Engine {
     }
 
     /// CR 701.21 (Sacrifice) + "at random" — `Game.Ops.SacrificeRandom(filter,
-    /// count)`. Same candidate collection as `resolve_destroy_all_effect`
-    /// above, then `count` of them (or fewer, if `count` exceeds however many
-    /// matched — same "as many as possible" stance CR 701.17b's mill takes)
-    /// are drawn without replacement via `next_rng`, each draw logged as a
-    /// `RngDrawn` event exactly like `Engine::shuffle_library` already does.
-    /// Candidates are collected into a plain `Vec` (not the `VecDeque` the
-    /// final queue needs) so `next_rng`'s modulus can index into it directly
-    /// and `Vec::remove` can pop the chosen one out without disturbing the
-    /// rest.
+    /// count)`. Draws via `pick_sacrifice_random_ids` below, then hands the
+    /// result straight to `continue_scripted_zone_move` for the single-player
+    /// case (a bare `Game.Ops.ForEachPlayer(Game.Ops.SacrificeRandom(...))`,
+    /// `phase5/mass-choice-effects`, calls the picking half directly instead
+    /// — see `each_player::resolve_for_each_player_effect`'s own doc comment
+    /// for why merging every player's picks before the one real zone move is
+    /// both simpler and already CR 101.4-"simultaneous" for free).
     pub(super) fn resolve_sacrifice_random_effect(
         &mut self,
         top: &StackObject,
         filter: &EffectFilter,
         count: u32,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let chosen = self.pick_sacrifice_random_ids(top.source, top.controller, filter, count);
+        self.process_state = self.continue_scripted_zone_move(
+            ScriptedZoneMoveKind::Sacrifice,
+            chosen,
+            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+            Vec::new(),
+        );
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
+    /// The picking half of `resolve_sacrifice_random_effect` above, split out
+    /// (`phase5/mass-choice-effects`) so a bare-tag `Game.Ops.ForEachPlayer`
+    /// can draw one player's own random picks without also performing the
+    /// real zone move on the spot (that only happens once, after every
+    /// player's own picks are merged — see `AbilityEffect::ForEachPlayer`'s
+    /// own doc comment). Candidates matching `filter` (relative to `source`/
+    /// `controller`, same as `resolve_destroy_all_effect`'s own convention)
+    /// are collected into a plain `Vec` (not the `VecDeque` the caller
+    /// ultimately needs) so `next_rng`'s modulus can index into it directly
+    /// and `Vec::remove` can pop the chosen one out without disturbing the
+    /// rest; `count` of them (or fewer, if `count` exceeds however many
+    /// matched — same "as many as possible" stance CR 701.17b's mill takes)
+    /// are drawn without replacement, each draw logged as a `RngDrawn` event
+    /// exactly like `Engine::shuffle_library` already does. Pure synchronous
+    /// Rust, no Lua involved — can't pause mid-computation the way a
+    /// `Game.ChooseN`-driven pick can, so a caller merging several players'
+    /// worth of these never needs to consider an intermediate pause.
+    pub(in crate::engine) fn pick_sacrifice_random_ids(
+        &mut self,
+        source: ObjectId,
+        controller: PlayerId,
+        filter: &EffectFilter,
+        count: u32,
+    ) -> VecDeque<ObjectId> {
         let mut candidates: Vec<ObjectId> = self
             .state
             .zone(ZoneKind::Battlefield, None)
@@ -121,9 +153,7 @@ impl Engine {
                     .iter()
                     .copied()
                     .filter(|id| {
-                        self.state
-                            .object(*id)
-                            .is_some_and(|object| matches_effect_filter(filter, object, top.source, top.controller))
+                        self.state.object(*id).is_some_and(|object| matches_effect_filter(filter, object, source, controller))
                     })
                     .collect()
             })
@@ -146,12 +176,6 @@ impl Engine {
                 parent_event: None,
             });
         }
-        self.process_state = self.continue_scripted_zone_move(
-            ScriptedZoneMoveKind::Sacrifice,
-            chosen,
-            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
-            Vec::new(),
-        );
-        ControlFlow::Break(StepStatus::Progressed)
+        chosen
     }
 }

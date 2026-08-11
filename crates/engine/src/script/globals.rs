@@ -208,26 +208,59 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::SacrificeRandom { filter, count }))
     })?;
     ops.set("SacrificeRandom", sacrifice_random)?;
-    // `Game.Ops.DiscardRandom(count)` (CR 701.9b) - no filter, see
-    // AbilityEffect::DiscardRandom's own doc comment for why.
-    let discard_random =
-        lua.create_function(|_, count: u32| Ok(OperationTag(AbilityEffect::DiscardRandom { count })))?;
+    // `Game.Ops.DiscardRandom(filter, count)` (CR 701.9b, `phase5/mass-
+    // choice-effects` follow-up) - same `EffectFilter` table decode
+    // SacrificeRandom just above uses.
+    let discard_random = lua.create_function(|_, (table, count): (Table, u32)| {
+        let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::DiscardRandom { filter, count }))
+    })?;
     ops.set("DiscardRandom", discard_random)?;
-    // `Game.Ops.ForEachPlayer(fn)` (CR 101.4) - unlike every other
-    // `Game.Ops.*` entry, `fn` is a real per-card Lua function, not a
-    // precomputed static value, so this registers it into the script
-    // registry right away (same registration `decode_operation_value`'s own
-    // `Value::Function` arm does for a bare `:SetOperation(function...)`)
-    // and wraps the resulting handle in a `ForEachPlayerTag` instead of an
-    // `OperationTag` - see that tag's own doc comment for why.
+    // `Game.Ops.ForEachPlayer(x)` (CR 101.4) - `x` is either a real per-card
+    // Lua function (registered into the script registry right away, same
+    // registration `decode_operation_value`'s own `Value::Function` arm does
+    // for a bare `:SetOperation(function...)`) or a bare `SacrificeRandom`/
+    // `DiscardRandom` value (unwrapped from its `OperationTag` directly, no
+    // registration needed - there's no function to invoke). Anything else,
+    // including any other `Game.Ops.*` tag, is a loud load-time error rather
+    // than a silent no-op - see `ForEachPlayerTag`'s own doc comment for the
+    // full shape.
     let for_each_player = {
         let registry = Rc::clone(&registry);
-        lua.create_function(move |lua, func: Function| {
-            let key = lua.create_registry_value(func)?;
-            let mut reg = registry.borrow_mut();
-            let handle = reg.next_script_handle();
-            reg.scripts.insert(handle, key);
-            Ok(ForEachPlayerTag(handle))
+        lua.create_function(move |lua, value: Value| match value {
+            Value::Function(func) => {
+                let key = lua.create_registry_value(func)?;
+                let mut reg = registry.borrow_mut();
+                let handle = reg.next_script_handle();
+                reg.scripts.insert(handle, key);
+                Ok(ForEachPlayerTag::Function(handle))
+            }
+            Value::UserData(ud) => {
+                let tag: OperationTag = ud
+                    .borrow::<OperationTag>()
+                    .map_err(|_| {
+                        mlua::Error::RuntimeError(
+                            "Game.Ops.ForEachPlayer expects a function or a Game.Ops.SacrificeRandom/DiscardRandom \
+                             value"
+                                .to_string(),
+                        )
+                    })?
+                    .clone();
+                match &tag.0 {
+                    AbilityEffect::SacrificeRandom { .. } | AbilityEffect::DiscardRandom { .. } => {
+                        Ok(ForEachPlayerTag::Static(tag.0.clone()))
+                    }
+                    _ => Err(mlua::Error::RuntimeError(
+                        "Game.Ops.ForEachPlayer can only wrap a function or a bare SacrificeRandom/DiscardRandom \
+                         value directly - wrap any other Game.Ops.* primitive in a function instead"
+                            .to_string(),
+                    )),
+                }
+            }
+            other => Err(mlua::Error::RuntimeError(format!(
+                "Game.Ops.ForEachPlayer expects a function or a Game.Ops.* value, got {}",
+                other.type_name()
+            ))),
         })?
     };
     ops.set("ForEachPlayer", for_each_player)?;
@@ -932,17 +965,29 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // `Game.ChooseN(filter, n, opts)` (`phase5/mass-choice-effects`) - the
     // generic "ask the player to choose N objects mid-resolution" primitive,
     // built entirely out of the two pre-existing yields above rather than a
-    // new coroutine-request shape: each of the `n` iterations makes its own
-    // `Game.SelectTargets`-equivalent ask, growing an `exclude_ids` list (see
+    // new coroutine-request shape: each pick makes its own `Game.
+    // SelectTargets`-equivalent ask, growing an `exclude_ids` list (see
     // `ScriptChoiceRequest::SelectTarget`'s own doc comment) so the same
-    // object can't be picked twice. `opts.up_to` (CR 601.2c/115.6-style
-    // "up to N") asks a `Game.MayChoose`-equivalent "one more?" before every
-    // pick (including the first) and stops the loop on a `false` answer,
-    // rather than a dedicated request shape of its own. Returns a plain
-    // array of `{kind, id}` tables, same shape one `Game.SelectTargets` call
-    // already returns - `Game.Ops.SacrificeChosen`/`DiscardChosen` are the
-    // two intended consumers, but any script can read `.id` off each entry
-    // directly.
+    // object can't be picked twice. Returns a plain array of `{kind, id}`
+    // tables, same shape one `Game.SelectTargets` call already returns -
+    // `Game.Ops.SacrificeChosen`/`DiscardChosen` are the two intended
+    // consumers, but any script can read `.id` off each entry directly.
+    //
+    // `opts.up_to`/`opts.at_least` mirror `TargetRequirement`'s own CR
+    // 601.2c/115.6 count modes - at most one should be `true` (same "no
+    // Lua-side validation, just two independent flags" convention
+    // `decode_target_requirement_table` already takes for the identical
+    // pair; `at_least` wins if a script sets both):
+    // - neither: exactly `n`, no `Game.MayChoose`-equivalent ask at all
+    //   (the original, still-default shape).
+    // - `up_to`: anywhere from 0 to `n` - asks "one more?" before every pick
+    //   (including the first) and stops on a `false` answer.
+    // - `at_least`: `n` or more, no upper bound of its own (capped only by
+    //   how many legal candidates actually exist, same "caller's own
+    //   responsibility" stance every other count shape in this engine takes
+    //   - see `TargetRequirement`'s own doc comment) - the first `n` picks
+    //   are mandatory (no ask), then "one more?" is asked before every pick
+    //   past that, indefinitely, until declined.
     let choose_n: Function = lua
         .load(
             r#"
@@ -950,8 +995,11 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 opts = opts or {}
                 local results = {}
                 local ids = {}
-                for i = 1, n do
-                    if opts.up_to then
+                local i = 1
+                while true do
+                    local past_minimum = i > n
+                    if past_minimum and not opts.at_least then break end
+                    if (opts.up_to and not opts.at_least) or (opts.at_least and past_minimum) then
                         local more = coroutine.yield({ op = "may_choose" })
                         if not more then break end
                     end
@@ -960,6 +1008,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                     if picked.kind == "object" then
                         table.insert(ids, picked.id)
                     end
+                    i = i + 1
                 end
                 return results
             end

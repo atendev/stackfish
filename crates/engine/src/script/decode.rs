@@ -78,15 +78,20 @@ pub(crate) fn decode_operation_value(
     value: Value,
 ) -> Result<(Option<AbilityEffect>, ScriptHandle), ScriptError> {
     match value {
-        // `phase5/mass-choice-effects`: `Game.Ops.ForEachPlayer(fn)` returns
-        // a `ForEachPlayerTag` carrying a real, already-registered handle for
-        // `fn` - checked ahead of the plain `OperationTag` case below since
-        // it's a different concrete `UserData` type (see that tag's own doc
-        // comment for why it can't just be an `OperationTag`).
+        // `phase5/mass-choice-effects`: `Game.Ops.ForEachPlayer(x)` returns a
+        // `ForEachPlayerTag` - checked ahead of the plain `OperationTag` case
+        // below since it's a different concrete `UserData` type (see that
+        // tag's own doc comment for why it can't just be an `OperationTag`
+        // either way).
         Value::UserData(ref ud) if ud.is::<ForEachPlayerTag>() => {
             let tag: ForEachPlayerTag =
                 ud.borrow::<ForEachPlayerTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?.clone();
-            Ok((Some(AbilityEffect::ForEachPlayer), tag.0))
+            match tag {
+                ForEachPlayerTag::Function(handle) => Ok((Some(AbilityEffect::ForEachPlayer(None)), handle)),
+                ForEachPlayerTag::Static(effect) => {
+                    Ok((Some(AbilityEffect::ForEachPlayer(Some(Box::new(effect)))), ScriptHandle(0)))
+                }
+            }
         }
         Value::UserData(ud) => {
             let tag: OperationTag = ud
@@ -768,15 +773,25 @@ pub(crate) fn decode_affected_value(
     }
 }
 
-/// Decodes `Game.SelectTargets`/`Game.MayChoose`'s yielded request table —
-/// `{ op = "select_target", filter = {...} }` or `{ op = "may_choose" }`. An
-/// unrecognized op is a real error, not guessed at, same stance
-/// `decode_condition_value` takes for an unrecognized shape.
-pub(crate) fn decode_script_choice_request(table: Table) -> Result<ScriptChoiceRequest, ScriptError> {
+/// Decodes `Game.SelectTargets`/`Game.MayChoose`/`Game.ChooseN`'s yielded
+/// request table — `{ op = "select_target", filter = ... }` or `{ op =
+/// "may_choose" }`. An unrecognized op is a real error, not guessed at, same
+/// stance `decode_condition_value` takes for an unrecognized shape. `lua`/
+/// `registry` (`phase5/mass-choice-effects` follow-up) are needed because
+/// `filter` can now be a scripted predicate (a bare function, or `{type=
+/// "player", filter=fn}`) same as `:SetTarget`'s own filter argument — see
+/// `decode_target_filter_value`'s own doc comment for the full shape; a
+/// script-backed filter needs its function registered into the registry the
+/// same way any other custom-function value does.
+pub(crate) fn decode_script_choice_request(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    table: Table,
+) -> Result<ScriptChoiceRequest, ScriptError> {
     let op: String = table.get("op").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     match op.as_str() {
         "select_target" => {
-            let filter_table: Table =
+            let filter_value: Value =
                 table.get("filter").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             // `phase5/mass-choice-effects`: `Game.ChooseN`'s Lua loop grows
             // this by one id per iteration so a repeat ask can't hand back
@@ -788,7 +803,10 @@ pub(crate) fn decode_script_choice_request(table: Table) -> Result<ScriptChoiceR
                 table.get("exclude_ids").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             let exclude_ids =
                 exclude_ids.unwrap_or_default().into_iter().map(|id| ObjectId(id as u64)).collect();
-            Ok(ScriptChoiceRequest::SelectTarget { filter: decode_target_filter_table(filter_table)?, exclude_ids })
+            Ok(ScriptChoiceRequest::SelectTarget {
+                filter: decode_target_filter_value(lua, registry, filter_value)?,
+                exclude_ids,
+            })
         }
         "may_choose" => Ok(ScriptChoiceRequest::MayChoose),
         other => Err(ScriptError::RuntimeError(format!("unknown script choice request op '{other}'"))),

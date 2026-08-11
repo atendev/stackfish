@@ -177,10 +177,35 @@ e:SetOperation(function(source, controller)
 end)
 ```
 
-`opts.up_to` (default `false`) allows choosing fewer than `n` — before every pick (including the
-first), the player is asked "one more?" (`Game.MayChoose`-shaped); answering no stops the loop early
-with however many have been chosen so far. Each pick's filter automatically excludes every object
-already chosen this call, so the same creature can't be picked twice.
+`opts.up_to`/`opts.at_least` mirror `target_requirement()`'s own CR 601.2c/115.6 count modes — at most
+one should be `true` (`at_least` wins if both are set, same "no validation, just two flags" convention
+the underlying `TargetRequirement` decode already takes):
+
+- neither (default): exactly `n`, no `Game.MayChoose`-shaped ask at all.
+- `up_to`: anywhere from 0 to `n` — before every pick (including the first), the player is asked "one
+  more?"; answering no stops the loop early with however many have been chosen so far.
+- `at_least`: `n` or more, no upper bound of its own (capped only by however many legal candidates
+  actually exist — the caller's own responsibility to leave a real choice, same stance every other
+  count shape in this engine takes). The first `n` picks are mandatory, no ask; every pick past that
+  asks "one more?" first, indefinitely, until declined.
+
+Each pick's filter automatically excludes every object already chosen this call, so the same creature
+can't be picked twice. `filter` accepts the same scripted-predicate shape `:SetTarget`/
+`target_requirement()` do (see [Scripted targeting predicates](#scripted-targeting-predicates) above)
+— a bare `function(object, source, controller, state) -> bool`, or `{ type = "player", filter = fn }`
+for a player-candidate predicate — not just the flat option-bag table, for a check the table shape
+can't express (e.g. "creature with power 4 or greater," which has no `power` key):
+
+```lua
+local chosen = Game.ChooseN(function(object, source, controller, state)
+    for _, card in ipairs(state.battlefield) do
+        if card.id == object then
+            return card.power ~= nil and card.power >= 4
+        end
+    end
+    return false
+end, 1)
+```
 
 `Game.Ops.SacrificeChosen(list)`/`Game.Ops.DiscardChosen(list)` take a `Game.ChooseN` result and
 sacrifice/discard exactly that list (CR 701.21/701.9) — the operation's own return value, same as any
@@ -198,12 +223,14 @@ operation needs to do both in the same turn (see `Game.Ops.ForEachPlayer`'s own 
 
 ## Sacrificing/discarding at random
 
-`Game.Ops.SacrificeRandom(filter, count)`/`Game.Ops.DiscardRandom(count)` (CR 701.9b/CR "at random")
-pick `count` matching permanents/cards themselves — no player choice at all, unlike
+`Game.Ops.SacrificeRandom(filter, count)`/`Game.Ops.DiscardRandom(filter, count)` (CR 701.9b/CR "at
+random") pick `count` matching permanents/cards themselves — no player choice at all, unlike
 `Game.ChooseN`+`SacrificeChosen`/`DiscardChosen` above. Static values, not custom functions — set
 `e:SetOperation(Game.Ops.SacrificeRandom({ card_types = { "Creature" } }, 2))` directly, same as
 `Game.Ops.Destroy`/`Sacrifice`. Fewer than `count` are affected if fewer than `count` candidates exist
-(CR 701.17b's mill precedent — not an error).
+(CR 701.17b's mill precedent — not an error). `DiscardRandom`'s `filter` is the same shared filter
+table (e.g. `Game.Ops.DiscardRandom({ card_types = { "Land" } }, 1)` for "discard a random land") — an
+empty table (`{}`) matches every card in hand, same as omitting a restriction anywhere else.
 
 ## Applying an effect to each player
 
@@ -236,6 +263,25 @@ once every player (including one whose own body never asked anything, because th
 the minimum) has been invoked. A replacement effect reading the battlefield mid-loop still sees every
 permanent that's *about to* leave, not one that already has.
 
+`Game.Ops.ForEachPlayer` also accepts a bare `Game.Ops.SacrificeRandom`/`DiscardRandom` value
+directly, with no wrapper function at all — CR 701.9b/701.21's "at random" shape has no player choice
+to make, so there's no need for a script to run per player:
+
+```lua
+function s.operation()
+    -- "Each player sacrifices a creature at random."
+    return Game.Ops.ForEachPlayer(Game.Ops.SacrificeRandom({ card_types = { "Creature" }, controller = "you" }, 1))
+end
+```
+
+Every player's own random picks are drawn first and merged into one batch before any of them actually
+move, same simultaneity guarantee as the function shape above — with no coroutine involved at all,
+this resolves in a single synchronous step (no `AwaitingScriptChoice` pause ever happens). Handing
+`Game.Ops.ForEachPlayer` any other `Game.Ops.*` value directly (anything other than
+`SacrificeRandom`/`DiscardRandom`) is a load-time error, not a silent no-op — wrap it in a function
+instead if it needs to run per player (e.g. `Game.Ops.ForEachPlayer(function(s, c) return
+Game.Ops.GainLife(1) end)`).
+
 ## What these can't do yet
 
 - Only usable from inside an operation function — there's no equivalent for asking mid-condition
@@ -244,9 +290,5 @@ permanent that's *about to* leave, not one that already has.
   Choosing a mode for a modal spell ("choose one —") happens before the spell even goes on the
   stack, as part of casting it — a different mechanism entirely, and not something a card script
   drives (see [not-available-yet.md](not-available-yet.md)).
-- `Game.Ops.ForEachPlayer` only wraps a custom function — a static tag like `Game.Ops.
-  SacrificeRandom` can't be handed to it directly (e.g. "each player discards a card at random"
-  needs a one-line wrapper function around `Game.Ops.DiscardRandom` instead).
-- `Game.ChooseN`'s `filter` is the flat option-bag shape only — a scripted predicate filter
-  (`filter = function(...) ... end`) isn't accepted here yet, only on `:SetTarget`/
-  `target_requirement()`.
+- `Game.Ops.ForEachPlayer`'s bare-tag shape only accepts `SacrificeRandom`/`DiscardRandom` — no
+  other `Game.Ops.*` primitive can be applied per-player without a wrapping function.

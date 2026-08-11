@@ -12,30 +12,75 @@ use std::ops::ControlFlow;
 
 use crate::script::{OperationOutcome, ScriptZoneMoveKind};
 use crate::triggers::apnap_player_order;
+use crate::types::ability::AbilityEffect;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId};
 use crate::types::stack::StackObject;
 
-use super::super::{EachPlayerLoop, Engine, ProcessState, ScriptedZoneMoveThen, StepStatus};
+use super::super::{EachPlayerLoop, Engine, ProcessState, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatus};
 
 impl Engine {
     /// CR 101.4: builds this loop's own APNAP player order (`active_player`
     /// first, then each other player in turn order — `triggers::
     /// apnap_player_order`, the same rotation `group_apnap` uses for trigger
-    /// placement), then invokes `top.operation` for the first player. No
-    /// players (shouldn't be reachable - every real game has at least the
-    /// active player) is a silent no-op, same defensive stance every other
-    /// "should always have at least one candidate" arm in this dispatcher
-    /// takes.
+    /// placement). No players (shouldn't be reachable - every real game has
+    /// at least the active player) is a silent no-op, same defensive stance
+    /// every other "should always have at least one candidate" arm in this
+    /// dispatcher takes.
+    ///
+    /// `wrapped` (`phase5/mass-choice-effects`) is `AbilityEffect::
+    /// ForEachPlayer`'s own field — `Some(inner)` for a bare `Game.Ops.
+    /// SacrificeRandom`/`DiscardRandom` tag (no script involved at all: each
+    /// player's own random picks are drawn directly via `pick_sacrifice_
+    /// random_ids`/`pick_discard_random_ids`, pure synchronous Rust that
+    /// can't pause mid-computation, then merged into one queue before the
+    /// single real `continue_scripted_zone_move` call - already CR 101.4-
+    /// "simultaneous" for free, no `EachPlayerLoop` pause-tracking needed
+    /// since there's nothing that can pause until that one final call).
+    /// `None` is the pre-existing script-function shape below.
     pub(super) fn resolve_for_each_player_effect(
         &mut self,
         top: &StackObject,
+        wrapped: &Option<Box<AbilityEffect>>,
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let mut order: VecDeque<PlayerId> = apnap_player_order(&self.state).into();
         let Some(first_player) = order.pop_front() else {
             return ControlFlow::Continue(events);
         };
+
+        if let Some(inner) = wrapped {
+            let mut all_players: VecDeque<PlayerId> = VecDeque::from([first_player]);
+            all_players.extend(order);
+            let kind = match inner.as_ref() {
+                AbilityEffect::SacrificeRandom { .. } => ScriptedZoneMoveKind::Sacrifice,
+                AbilityEffect::DiscardRandom { .. } => ScriptedZoneMoveKind::Discard,
+                _ => unreachable!(
+                    "Game.Ops.ForEachPlayer's Lua binding only ever accepts SacrificeRandom/DiscardRandom as a bare tag"
+                ),
+            };
+            let mut ids: VecDeque<ObjectId> = VecDeque::new();
+            for player in all_players {
+                let picked = match inner.as_ref() {
+                    AbilityEffect::SacrificeRandom { filter, count } => {
+                        self.pick_sacrifice_random_ids(top.source, player, filter, *count)
+                    }
+                    AbilityEffect::DiscardRandom { filter, count } => {
+                        self.pick_discard_random_ids(top.source, player, filter, *count)
+                    }
+                    _ => unreachable!("checked above"),
+                };
+                ids.extend(picked);
+            }
+            self.process_state = self.continue_scripted_zone_move(
+                kind,
+                ids,
+                ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+                events,
+            );
+            return ControlFlow::Break(StepStatus::Progressed);
+        }
+
         let each_player = EachPlayerLoop {
             source: top.source,
             operation: top.operation,

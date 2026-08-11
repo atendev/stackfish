@@ -517,7 +517,7 @@ impl Engine {
             // resolving StackObject's own controller's hand instead of the
             // battlefield - see AbilityEffect::DiscardRandom's own doc
             // comment.
-            Some(AbilityEffect::DiscardRandom { count }) => self.resolve_discard_random_effect(top, *count),
+            Some(AbilityEffect::DiscardRandom { filter, count }) => self.resolve_discard_random_effect(top, filter, *count),
             // CR 101.4: invokes top.operation (a real script function
             // handle, not the usual ScriptHandle(0) placeholder - see
             // AbilityEffect::ForEachPlayer's own doc comment) once per
@@ -525,7 +525,7 @@ impl Engine {
             // discard_chosen ids across every player before performing any
             // real zone move, so CR 101.4's "then the actions happen
             // simultaneously" holds.
-            Some(AbilityEffect::ForEachPlayer) => self.resolve_for_each_player_effect(top, events),
+            Some(AbilityEffect::ForEachPlayer(wrapped)) => self.resolve_for_each_player_effect(top, wrapped, events),
             // CR 122.1a: same "push an unapplied event, let
             // CommitEvents retroactively apply it" pattern as
             // Damage above - GameEventKind::CounterAdded

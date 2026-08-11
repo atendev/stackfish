@@ -4,16 +4,16 @@
 
 - **Mass-choice effects (Balance, `phase5/mass-choice-effects`, merged)**: `Game.ChooseN`,
   `Game.Ops.SacrificeChosen`/`DiscardChosen`/`SacrificeRandom`/`DiscardRandom`/`ForEachPlayer` all
-  landed — full account in `docs/implementation/12-coroutines.md`'s own entry. Left open:
-  - `Game.Ops.ForEachPlayer` can only wrap a custom function, not a static tag like
-    `SacrificeRandom`/`DiscardRandom` directly — a card like "each player discards a card at
-    random" needs a one-line Lua wrapper around `Game.Ops.DiscardRandom` for now.
-  - `Game.Ops.DiscardRandom` has no `filter` parameter (`SacrificeRandom` does) — no real card
-    needs a filtered random discard yet.
-  - `Game.ChooseN`'s `opts.up_to` only allows choosing *fewer* than `n` — no `at_least`/"N or more"
-    shape.
-  - `Game.ChooseN`'s filter is the flat option-bag shape only, no scripted-predicate `filter = fn`
-    form (unlike `:SetTarget`/`target_requirement()`).
+  landed — full account in `docs/implementation/12-coroutines.md`'s own entry. Follow-up slice closed
+  every gap named at merge time: `Game.Ops.ForEachPlayer` now accepts a bare `SacrificeRandom`/
+  `DiscardRandom` tag directly (no wrapper function needed for those two); `Game.Ops.DiscardRandom`
+  gained a `filter` parameter matching `SacrificeRandom`'s own shape; `Game.ChooseN` gained
+  `opts.at_least` (CR 601.2c/115.6 "N or more," mandatory minimum then unbounded) alongside
+  `opts.up_to`; `Game.ChooseN`'s `filter` now accepts the same scripted-predicate shape
+  `:SetTarget`/`target_requirement()` do, not just the flat option-bag table. Left open:
+  - `Game.Ops.ForEachPlayer`'s bare-tag shape still only accepts `SacrificeRandom`/`DiscardRandom`
+    — no other `Game.Ops.*` primitive can run per-player without a wrapping function; no real card
+    needs a third one yet.
 
 - **Cascade (CR 702.85a)**: real now (`phase5/cascade`) — three real new pieces, each
   scoped wider than Cascade alone on purpose:

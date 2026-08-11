@@ -275,7 +275,7 @@ pub(super) fn execute_activate_ability(
         // recognized primitives that go on the stack the same way as any
         // other here - listed for exhaustiveness, same reason as
         // ReturnSelfWithCounter/MadnessCastOrDiscard/Cascade below.
-        | Some(AbilityEffect::ForEachPlayer)
+        | Some(AbilityEffect::ForEachPlayer(_))
         | Some(AbilityEffect::SacrificeRandom { .. })
         | Some(AbilityEffect::DiscardRandom { .. })
         | Some(AbilityEffect::Counters { .. })

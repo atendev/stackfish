@@ -79,7 +79,8 @@
 - Scope: four generic primitives for Balance-shaped effects ("each player chooses N, sacrifices/
   discards the rest") — none tailored to Balance specifically. Balance itself built as the
   validating end-to-end test, entirely in Lua on top of the four primitives.
-- Verify: 8 new tests (7 primitive tests + Balance itself), 1363 total, 0 failed.
+- Verify: 13 new tests (7 primitive tests + Balance itself + 5 follow-up-pass tests), 1368 total, 0
+  failed.
 - Key changes:
   - `Game.ChooseN(filter, n, opts)` — pure-Lua loop on top of `Game.SelectTargets`/`Game.MayChoose`,
     no new coroutine request shape. `opts.up_to` asks a `MayChoose`-shaped "one more?" before each
@@ -124,15 +125,28 @@
     compatible (Lua ignores extra call arguments).
   - `card_summary_to_lua` gained a `card_types` field (was `is_creature`-only) — needed to tell lands
     apart from the snapshot at all.
-- Deviations from the original plan:
-  - `Game.Ops.ForEachPlayer` only wraps a custom function, not a static tag directly (e.g. "each
-    player discards at random" needs a one-line wrapper) — no real card needed the combination this
-    slice, named as a follow-up rather than built speculatively.
-  - `Game.ChooseN`'s `filter` is the flat option-bag shape only, no scripted-predicate `filter = fn`
-    form (that's `:SetTarget`/`target_requirement()`'s own thing) — not needed by Balance.
+- Follow-up pass (same branch, before merge) closed every gap the first pass deferred:
+  - `Game.Ops.ForEachPlayer` now accepts a bare `SacrificeRandom`/`DiscardRandom` tag directly, not
+    just a custom function — `ForEachPlayerTag` widened from a single `ScriptHandle` wrapper to an
+    enum (`Function(ScriptHandle)`/`Static(AbilityEffect)`); `AbilityEffect::ForEachPlayer` widened
+    from a bare marker to `ForEachPlayer(Option<Box<AbilityEffect>>)` (`None` = function shape,
+    `Some(inner)` = bare tag). The bare-tag path draws every player's own random picks via new
+    `Engine::pick_sacrifice_random_ids`/`pick_discard_random_ids` helpers (the picking half of
+    `resolve_sacrifice_random_effect`/`resolve_discard_random_effect`, split out) and merges them
+    into one queue before the single real `continue_scripted_zone_move` call — pure synchronous
+    Rust, no coroutine, so it's CR 101.4-"simultaneous" for free with none of the `EachPlayerLoop`
+    pause-tracking the function shape needs. Any other `Game.Ops.*` tag handed to `ForEachPlayer`
+    directly is a load-time error, not a silent no-op.
+  - `Game.Ops.DiscardRandom` gained a `filter` parameter (`DiscardRandom { filter: EffectFilter,
+    count: u32 }`, matching `SacrificeRandom`'s own shape) — e.g. "discard a random land."
+  - `Game.ChooseN` gained `opts.at_least` (CR 601.2c/115.6 "N or more") alongside `opts.up_to` — one
+    unified `while` loop in the Lua binding covers all three count modes (exact/up_to/at_least) by
+    tracking whether the loop is still inside its mandatory minimum.
+  - `Game.ChooseN`'s `filter` argument now goes through `decode_target_filter_value` (the same
+    entry point `:SetTarget`/`target_requirement()` use) instead of the narrower
+    `decode_target_filter_table`, so a bare predicate function or `{type="player", filter=fn}` is
+    accepted too — `decode_script_choice_request` widened to take `&Lua`/`&mut ScriptRegistry` so a
+    predicate function found in the yielded request can be registered.
 - Unresolved / explicitly deferred:
-  - `Game.Ops.SacrificeRandom`/`DiscardRandom` can't be composed inside a `ForEachPlayer` body (see
-    "deviations" above).
-  - `DiscardRandom` has no `filter` parameter (`SacrificeRandom` does) — no real card discards a
-    filtered random selection yet.
-  - `Game.ChooseN`'s `up_to` only allows fewer picks, no `at_least`/"N or more" shape.
+  - `Game.Ops.ForEachPlayer`'s bare-tag shape still only accepts `SacrificeRandom`/`DiscardRandom`
+    — no other `Game.Ops.*` primitive can run per-player without a wrapping function.

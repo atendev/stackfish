@@ -12,8 +12,9 @@
 use std::collections::VecDeque;
 use std::ops::ControlFlow;
 
+use crate::types::effect::{matches_effect_filter, EffectFilter};
 use crate::types::event::{GameEvent, GameEventKind};
-use crate::types::ids::ObjectId;
+use crate::types::ids::{ObjectId, PlayerId};
 use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
@@ -21,20 +22,57 @@ use super::super::{Engine, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatu
 
 impl Engine {
     /// CR 701.9b's "require a random discard" shape — `Game.Ops.
-    /// DiscardRandom(count)`. Same "draw without replacement via `next_rng`,
-    /// log each as `RngDrawn`, fewer than `count` if the hand is smaller"
-    /// shape `destruction::resolve_sacrifice_random_effect` uses, from the
-    /// resolving `StackObject`'s own controller's hand instead of the
-    /// battlefield.
+    /// DiscardRandom(filter, count)`. Draws via `pick_discard_random_ids`
+    /// below, then hands the result straight to `continue_scripted_zone_move`
+    /// for the single-player case — see `destruction::
+    /// resolve_sacrifice_random_effect`'s own doc comment for why the
+    /// picking half is split out (a bare-tag `Game.Ops.ForEachPlayer(Game.
+    /// Ops.DiscardRandom(...))` needs it too).
     pub(super) fn resolve_discard_random_effect(
         &mut self,
         top: &StackObject,
+        filter: &EffectFilter,
         count: u32,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let chosen = self.pick_discard_random_ids(top.source, top.controller, filter, count);
+        self.process_state = self.continue_scripted_zone_move(
+            ScriptedZoneMoveKind::Discard,
+            chosen,
+            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+            Vec::new(),
+        );
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
+    /// The picking half of `resolve_discard_random_effect` above, split out
+    /// (`phase5/mass-choice-effects`) the same way and for the same reason
+    /// `destruction::pick_sacrifice_random_ids` is — see that method's own
+    /// doc comment. `count` of `controller`'s own hand cards matching
+    /// `filter` (relative to `source`/`controller`, same `matches_effect_
+    /// filter` convention every other filtered picker in this engine uses;
+    /// an empty filter table matches every card, same "no restriction"
+    /// default) — or fewer, if fewer match (CR 701.17b's mill precedent
+    /// again) — are drawn without replacement via `next_rng`, each draw
+    /// logged as `RngDrawn`.
+    pub(in crate::engine) fn pick_discard_random_ids(
+        &mut self,
+        source: ObjectId,
+        controller: PlayerId,
+        filter: &EffectFilter,
+        count: u32,
+    ) -> VecDeque<ObjectId> {
         let mut candidates: Vec<ObjectId> = self
             .state
-            .zone(ZoneKind::Hand, Some(top.controller))
-            .map(|zone| zone.contents.iter().copied().collect())
+            .zone(ZoneKind::Hand, Some(controller))
+            .map(|zone| {
+                zone.contents
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        self.state.object(*id).is_some_and(|object| matches_effect_filter(filter, object, source, controller))
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
         let mut chosen: VecDeque<ObjectId> = VecDeque::new();
         for _ in 0..count {
@@ -54,12 +92,6 @@ impl Engine {
                 parent_event: None,
             });
         }
-        self.process_state = self.continue_scripted_zone_move(
-            ScriptedZoneMoveKind::Discard,
-            chosen,
-            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
-            Vec::new(),
-        );
-        ControlFlow::Break(StepStatus::Progressed)
+        chosen
     }
 }

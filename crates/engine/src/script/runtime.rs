@@ -737,7 +737,7 @@ impl ScriptRuntime {
                     result.type_name()
                 )));
             };
-            let request = decode_script_choice_request(request_table)?;
+            let request = decode_script_choice_request(&self.lua, &mut self.registry.borrow_mut(), request_table)?;
             let thread_handle = self.stash_thread(thread)?;
             return Ok(OperationOutcome::NeedsChoice { thread: thread_handle, request });
         }
