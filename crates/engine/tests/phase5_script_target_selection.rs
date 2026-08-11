@@ -243,7 +243,7 @@ fn a_script_calling_select_targets_pauses_with_the_real_filter() {
         panic!("expected the operation to pause on Game.SelectTargets, got {status:?}")
     };
     assert_eq!(player, p0);
-    let ScriptChoiceRequest::SelectTarget { filter } = request else {
+    let ScriptChoiceRequest::SelectTarget { filter, .. } = request else {
         panic!("expected a SelectTarget request")
     };
     let TargetFilter::Object { card_types, .. } = filter else {
@@ -317,7 +317,7 @@ fn a_script_calling_select_targets_with_type_player_pauses_with_a_player_filter(
     let StepStatus::AwaitingScriptChoice { request, .. } = status else {
         panic!("expected the operation to pause on Game.SelectTargets, got {status:?}")
     };
-    let ScriptChoiceRequest::SelectTarget { filter } = request else {
+    let ScriptChoiceRequest::SelectTarget { filter, .. } = request else {
         panic!("expected a SelectTarget request")
     };
     assert_eq!(filter, TargetFilter::Player, "the real filter from the script should have reached the pause");
@@ -377,7 +377,7 @@ fn a_script_calling_select_targets_with_type_any_accepts_a_creature() {
     let StepStatus::AwaitingScriptChoice { request, .. } = status else {
         panic!("expected a pause, got {status:?}")
     };
-    let ScriptChoiceRequest::SelectTarget { filter } = request else {
+    let ScriptChoiceRequest::SelectTarget { filter, .. } = request else {
         panic!("expected a SelectTarget request")
     };
     assert_eq!(filter, TargetFilter::AnyTarget);

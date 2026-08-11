@@ -25,4 +25,4 @@ mod types;
 // every `crates/engine/tests/phase5_*.rs` integration test) already reach
 // through this module - see `runtime`/`types` for the real definitions.
 pub use runtime::ScriptRuntime;
-pub use types::{OperationOutcome, ScriptChoiceRequest, ScriptContext, ScriptError};
+pub use types::{OperationOutcome, ScriptChoiceRequest, ScriptContext, ScriptError, ScriptZoneMoveKind};

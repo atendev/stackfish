@@ -34,9 +34,9 @@ use super::decode::{
 };
 use super::tags::{
     ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DrawLimitAffectedTag, DurationTag,
-    EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, HandRevealAffectedTag, HandSizeAffectedTag,
-    HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag, OperationTag, RedirectDamageToSourceTag,
-    ReplacementPayloadTag, TokenTag,
+    EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, ForEachPlayerTag, HandRevealAffectedTag,
+    HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag, OperationTag,
+    RedirectDamageToSourceTag, ReplacementPayloadTag, TokenTag,
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
@@ -200,6 +200,37 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     ops.set("DestroyAll", destroy_all)?;
     ops.set("Sacrifice", OperationTag(AbilityEffect::Sacrifice))?;
     ops.set("Exile", OperationTag(AbilityEffect::Exile))?;
+    // `Game.Ops.SacrificeRandom(filter, count)` (`phase5/mass-choice-effects`,
+    // CR 701.21 + "at random") - same `EffectFilter` table decode DestroyAll
+    // just above uses.
+    let sacrifice_random = lua.create_function(|_, (table, count): (Table, u32)| {
+        let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::SacrificeRandom { filter, count }))
+    })?;
+    ops.set("SacrificeRandom", sacrifice_random)?;
+    // `Game.Ops.DiscardRandom(count)` (CR 701.9b) - no filter, see
+    // AbilityEffect::DiscardRandom's own doc comment for why.
+    let discard_random =
+        lua.create_function(|_, count: u32| Ok(OperationTag(AbilityEffect::DiscardRandom { count })))?;
+    ops.set("DiscardRandom", discard_random)?;
+    // `Game.Ops.ForEachPlayer(fn)` (CR 101.4) - unlike every other
+    // `Game.Ops.*` entry, `fn` is a real per-card Lua function, not a
+    // precomputed static value, so this registers it into the script
+    // registry right away (same registration `decode_operation_value`'s own
+    // `Value::Function` arm does for a bare `:SetOperation(function...)`)
+    // and wraps the resulting handle in a `ForEachPlayerTag` instead of an
+    // `OperationTag` - see that tag's own doc comment for why.
+    let for_each_player = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |lua, func: Function| {
+            let key = lua.create_registry_value(func)?;
+            let mut reg = registry.borrow_mut();
+            let handle = reg.next_script_handle();
+            reg.scripts.insert(handle, key);
+            Ok(ForEachPlayerTag(handle))
+        })?
+    };
+    ops.set("ForEachPlayer", for_each_player)?;
     let counters = lua.create_function(|_, (kind, amount): (String, i32)| {
         Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
     })?;
@@ -898,6 +929,83 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     let may_choose: Function =
         lua.load(r#"function() return coroutine.yield({ op = "may_choose" }) end"#).eval()?;
 
+    // `Game.ChooseN(filter, n, opts)` (`phase5/mass-choice-effects`) - the
+    // generic "ask the player to choose N objects mid-resolution" primitive,
+    // built entirely out of the two pre-existing yields above rather than a
+    // new coroutine-request shape: each of the `n` iterations makes its own
+    // `Game.SelectTargets`-equivalent ask, growing an `exclude_ids` list (see
+    // `ScriptChoiceRequest::SelectTarget`'s own doc comment) so the same
+    // object can't be picked twice. `opts.up_to` (CR 601.2c/115.6-style
+    // "up to N") asks a `Game.MayChoose`-equivalent "one more?" before every
+    // pick (including the first) and stops the loop on a `false` answer,
+    // rather than a dedicated request shape of its own. Returns a plain
+    // array of `{kind, id}` tables, same shape one `Game.SelectTargets` call
+    // already returns - `Game.Ops.SacrificeChosen`/`DiscardChosen` are the
+    // two intended consumers, but any script can read `.id` off each entry
+    // directly.
+    let choose_n: Function = lua
+        .load(
+            r#"
+            function(filter, n, opts)
+                opts = opts or {}
+                local results = {}
+                local ids = {}
+                for i = 1, n do
+                    if opts.up_to then
+                        local more = coroutine.yield({ op = "may_choose" })
+                        if not more then break end
+                    end
+                    local picked = coroutine.yield({ op = "select_target", filter = filter or {}, exclude_ids = ids })
+                    table.insert(results, picked)
+                    if picked.kind == "object" then
+                        table.insert(ids, picked.id)
+                    end
+                end
+                return results
+            end
+            "#,
+        )
+        .eval()?;
+
+    // `Game.Ops.SacrificeChosen(list)`/`Game.Ops.DiscardChosen(list)`
+    // (`phase5/mass-choice-effects`, CR 701.21/701.9) - takes `Game.ChooseN`'s
+    // own return shape and builds the `sacrifice_chosen`/`discard_chosen`
+    // result-table key `ScriptRuntime::handle_operation_result` decodes into
+    // `OperationOutcome::PendingZoneMoves` (see that variant's own doc
+    // comment for why this can't just mutate `GameState` directly the way
+    // `{ gain_life = n }` does). Plain functions, not coroutine yields -
+    // nothing here suspends, they just reshape a table, so
+    // `e:SetOperation(function(...) ... return Game.Ops.SacrificeChosen(ids)
+    // end)` returns normally like any other operation function.
+    let sacrifice_chosen: Function = lua
+        .load(
+            r#"
+            function(list)
+                local ids = {}
+                for _, v in ipairs(list) do
+                    if v.kind == "object" then table.insert(ids, v.id) end
+                end
+                return { sacrifice_chosen = ids }
+            end
+            "#,
+        )
+        .eval()?;
+    ops.set("SacrificeChosen", sacrifice_chosen)?;
+    let discard_chosen: Function = lua
+        .load(
+            r#"
+            function(list)
+                local ids = {}
+                for _, v in ipairs(list) do
+                    if v.kind == "object" then table.insert(ids, v.id) end
+                end
+                return { discard_chosen = ids }
+            end
+            "#,
+        )
+        .eval()?;
+    ops.set("DiscardChosen", discard_chosen)?;
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("InterveningIf", intervening_if)?;
@@ -925,5 +1033,6 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     game.set("DrawLimitAffected", draw_limit_affected)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;
+    game.set("ChooseN", choose_n)?;
     lua.globals().set("Game", game)
 }

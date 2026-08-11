@@ -56,12 +56,40 @@ pub enum ScriptChoiceRequest {
     /// `Game.SelectTargets(filter)` — a single target matching a
     /// `TargetFilter` (no count > 1, same narrowing precedent every other
     /// targeting-adjacent slice already set — see `TargetFilter`'s own doc
-    /// comment).
-    SelectTarget { filter: TargetFilter },
+    /// comment). `exclude_ids` (`phase5/mass-choice-effects`, `Game.ChooseN`)
+    /// is a set of already-picked object ids to reject regardless of `filter`
+    /// — empty for a bare `Game.SelectTargets` call; `Game.ChooseN`'s Lua
+    /// loop grows it by one entry per iteration so repeat calls to the same
+    /// underlying ask can't hand back a target already chosen this batch.
+    /// Checked directly in `Engine::submit_script_choice`, not folded into
+    /// `TargetFilter` itself — `TargetFilter::Object` is constructed at ~50
+    /// call sites across this crate (card scripts' own `target_requirement`,
+    /// costs, static-effect affected-filters, ...), and none of the others
+    /// need a per-ask exclusion set, so widening that shared enum would mean
+    /// touching every one of them for a need only this one request shape has.
+    SelectTarget { filter: TargetFilter, exclude_ids: Vec<ObjectId> },
     /// `Game.MayChoose()` (backlog item 9a, CR 608.2d) — a plain yes/no
     /// choice with no filter to satisfy; any `bool` answer is legal, unlike
-    /// `SelectTarget`'s `target_is_legal` check.
+    /// `SelectTarget`'s `target_is_legal` check. `Game.ChooseN`'s `up_to`
+    /// mode reuses this same request to ask "one more?" before each optional
+    /// pick, rather than inventing a dedicated request shape.
     MayChoose,
+}
+
+/// Which zone-move verb a script operation's returned table asked for —
+/// `phase5/mass-choice-effects`'s `Game.Ops.SacrificeChosen`/`DiscardChosen`,
+/// consumed by `ScriptRuntime::handle_operation_result` decoding the
+/// `sacrifice_chosen`/`discard_chosen` result keys. Deliberately a small
+/// script-local enum rather than reusing `engine::process_state::
+/// ScriptedZoneMoveKind` directly — this `script` module doesn't depend on
+/// `engine`'s internals (the dependency runs the other way: `engine` reads
+/// `OperationOutcome`), so the one `engine::resolve::misc_effects`/
+/// `engine::resolve::each_player` call site that consumes this maps it to
+/// the real `ScriptedZoneMoveKind` with a one-line `match`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScriptZoneMoveKind {
+    Sacrifice,
+    Discard,
 }
 
 /// What one `ScriptRuntime::invoke_operation`/`resume_operation` call
@@ -72,10 +100,23 @@ pub enum ScriptChoiceRequest {
 /// `NeedsChoice` is new: the script yielded a real request and must be
 /// resumed (`resume_operation`) with the player's answer before it can
 /// continue — `Engine::submit_script_choice` is the only intended caller.
+/// `PendingZoneMoves` (`phase5/mass-choice-effects`) is the `sacrifice_chosen`/
+/// `discard_chosen` result-table generalization the pre-existing `gain_life`
+/// arm's own TODO flagged — one entry per distinct verb the returned table
+/// asked for (at most two today: a Balance-style per-player body can ask for
+/// both a sacrifice batch and a discard batch in the same return), each a
+/// real zone-move still to perform. Unlike `gain_life` (a direct `GameState`
+/// mutation `handle_operation_result` can just do inline), a zone move needs
+/// `Engine::continue_scripted_zone_move`'s full replacement-checked pipeline
+/// — `ScriptRuntime` has no access to that (it lives one layer up, in
+/// `engine`), so this variant hands the *request* back up instead of trying
+/// to perform it itself, the same "outcome describes, engine acts" split
+/// `NeedsChoice` already established.
 #[derive(Debug)]
 pub enum OperationOutcome {
     Finished,
     NeedsChoice { thread: ScriptHandle, request: ScriptChoiceRequest },
+    PendingZoneMoves(Vec<(ScriptZoneMoveKind, Vec<ObjectId>)>),
 }
 
 /// Shared, interior-mutable store for loaded Lua callbacks plus whatever a

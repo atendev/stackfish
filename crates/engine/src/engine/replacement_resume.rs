@@ -10,6 +10,7 @@ use crate::commands;
 use crate::engine_context::PipelineExit;
 use crate::replacement::{self, ReplacementOutcome};
 use crate::sba::{self, SbaOutcome};
+use crate::script::ScriptZoneMoveKind;
 use crate::types::ability::RegisteredAbility;
 use crate::types::card::KeywordSet;
 use crate::types::event::{GameEvent, GameEventKind};
@@ -629,6 +630,59 @@ impl Engine {
                 };
                 self.state.ledger.push(committed);
             }
+            // CR 701.9a (`phase5/mass-choice-effects`): moves a card off a
+            // player's Hand rather than a permanent off the Battlefield —
+            // can't reuse `sba::commit_death`/`commit_death_or_regeneration`
+            // (both hardcode removing from `ZoneKind::Battlefield`) or
+            // `Exile`'s own arm just above (same hardcode in its final
+            // committed event's `from`), so this mirrors their generic
+            // "retire the old id, mint a fresh one in the destination zone"
+            // shape with `kind.from_zone()` (Hand) in both spots instead. No
+            // dies-trigger bookkeeping to fold in (a discarded card was never
+            // a permanent) — CR 701.9's own "whenever you discard a card"
+            // triggers key off the `ZoneChange` event this pushes, the same
+            // generic trigger-collection path every other zone move already
+            // feeds, not anything special-cased here.
+            ScriptedZoneMoveKind::Discard => {
+                let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = final_event else {
+                    unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
+                };
+                let last_known_info = last_known_info
+                    .expect("continue_scripted_zone_move always proposes with last_known_info populated");
+                let owner = last_known_info.owner;
+                let new_id = self.state.allocate_object_id();
+                let mut new_object = last_known_info.clone();
+                new_object.object_id = new_id;
+                new_object.lineage = ObjectLineage { previous: Some(old_id) };
+                new_object.zone = to;
+                new_object.timestamp = self.state.allocate_sequence_no();
+
+                if let Some(zone) = self.state.zone_mut(ScriptedZoneMoveKind::Discard.from_zone(), Some(owner)) {
+                    zone.remove(old_id);
+                }
+                let departed = commands::retire_object(&mut self.state, old_id);
+                self.departed_triggered_abilities.extend(departed);
+                if let Some(zone) = self.state.zone_mut(to, Some(owner)) {
+                    zone.push_bottom(new_id);
+                }
+                self.state.objects.insert(new_id, new_object);
+
+                let event_id = self.state.allocate_event_id();
+                let sequence_no = self.state.allocate_sequence_no();
+                let committed = GameEvent {
+                    event_id,
+                    sequence_no,
+                    kind: GameEventKind::ZoneChange {
+                        object: new_id,
+                        from: ScriptedZoneMoveKind::Discard.from_zone(),
+                        to,
+                        last_known_info: Some(last_known_info),
+                    },
+                    caused_by_command: None,
+                    parent_event: None,
+                };
+                self.state.ledger.push(committed);
+            }
         }
     }
 
@@ -661,12 +715,11 @@ impl Engine {
         then: ScriptedZoneMoveThen,
         trailing: Vec<GameEventKind>,
     ) -> ProcessState {
+        let from = kind.from_zone();
         while let Some(id) = remaining.pop_front() {
-            let Some(last_known_info) =
-                self.state.object(id).filter(|obj| obj.zone == ZoneKind::Battlefield).cloned()
-            else {
-                // Target already left the battlefield (or never resolved) -
-                // nothing to move, same "skip rather than guess" stance
+            let Some(last_known_info) = self.state.object(id).filter(|obj| obj.zone == from).cloned() else {
+                // Target already left its expected zone (or never resolved)
+                // - nothing to move, same "skip rather than guess" stance
                 // every other arm here takes.
                 continue;
             };
@@ -681,12 +734,7 @@ impl Engine {
                 }
             }
             let to = if kind == ScriptedZoneMoveKind::Exile { ZoneKind::Exile } else { ZoneKind::Graveyard };
-            let proposed = GameEventKind::ZoneChange {
-                object: id,
-                from: ZoneKind::Battlefield,
-                to,
-                last_known_info: Some(last_known_info),
-            };
+            let proposed = GameEventKind::ZoneChange { object: id, from, to, last_known_info: Some(last_known_info) };
             // CR 614.8: only Destroy is genuine destruction - a regeneration
             // shield can intercept it and only it (Sacrifice/Exile are each
             // their own real zone-change verb, neither is destruction).
@@ -720,7 +768,58 @@ impl Engine {
             // every other real exit from that function.
             ScriptedZoneMoveThen::SearchResume { controller, remaining, destination, stack_id, shuffle_after } => self
                 .continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, trailing),
+            // `phase5/mass-choice-effects`: this batch is done - run the
+            // chained second batch (`chain_pending_zone_moves`'s own tail),
+            // handing it the same `trailing` events since neither batch on
+            // its own is the "real" one; whichever finishes last is the one
+            // that actually reaches ScriptedZoneMoveThen::StackResolution.
+            ScriptedZoneMoveThen::ThenScriptedZoneMove { kind, remaining, then } => {
+                self.continue_scripted_zone_move(kind, remaining, *then, trailing)
+            }
         }
+    }
+
+    /// `phase5/mass-choice-effects`: performs 0-2 zone-move batches from a
+    /// script operation's own `sacrifice_chosen`/`discard_chosen` result
+    /// (`OperationOutcome::PendingZoneMoves`) — `Sacrifice`/`Discard` are
+    /// different `ScriptedZoneMoveKind`s (different `from_zone()`), and
+    /// `continue_scripted_zone_move` only ever drains one `kind` per call, so
+    /// two non-empty batches are chained via `ScriptedZoneMoveThen::
+    /// ThenScriptedZoneMove` rather than attempted in one call. Empty
+    /// batches are dropped rather than chained (nothing to move); an empty
+    /// `moves` altogether falls through to `continue_scripted_zone_move`'s
+    /// own "queue already empty" tail, which just applies `then` immediately
+    /// — same as if this function had never been called. Shared by
+    /// `misc_effects::resolve_misc_or_script_effect` (a standalone script
+    /// operation's own result, moved immediately - no batching context) and
+    /// `each_player::resolve_for_each_player_effect` (the *final* combined
+    /// batch once every player in a `ForEachPlayer` loop has chosen).
+    pub(in crate::engine) fn chain_pending_zone_moves(
+        &mut self,
+        moves: Vec<(ScriptZoneMoveKind, Vec<ObjectId>)>,
+        then: ScriptedZoneMoveThen,
+        trailing: Vec<GameEventKind>,
+    ) -> ProcessState {
+        let mut moves: Vec<(ScriptedZoneMoveKind, VecDeque<ObjectId>)> = moves
+            .into_iter()
+            .filter(|(_, ids)| !ids.is_empty())
+            .map(|(kind, ids)| {
+                let kind = match kind {
+                    ScriptZoneMoveKind::Sacrifice => ScriptedZoneMoveKind::Sacrifice,
+                    ScriptZoneMoveKind::Discard => ScriptedZoneMoveKind::Discard,
+                };
+                (kind, ids.into())
+            })
+            .collect();
+        if moves.is_empty() {
+            return self.continue_scripted_zone_move(ScriptedZoneMoveKind::Sacrifice, VecDeque::new(), then, trailing);
+        }
+        let (first_kind, first_remaining) = moves.remove(0);
+        let mut chained_then = then;
+        for (kind, remaining) in moves.into_iter().rev() {
+            chained_then = ScriptedZoneMoveThen::ThenScriptedZoneMove { kind, remaining, then: Box::new(chained_then) };
+        }
+        self.continue_scripted_zone_move(first_kind, first_remaining, chained_then, trailing)
     }
 
     /// CR 120.3/121/616.1: drains `remaining` scripted draws one at a time,

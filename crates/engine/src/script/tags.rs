@@ -9,6 +9,7 @@ use mlua::UserData;
 use crate::types::ability::{AbilityEffect, ConditionPrimitive, InterveningIfPrimitive, TokenSpec};
 use crate::types::cost::AdditionalCost;
 use crate::types::effect::{ConsumptionPolicy, EffectDuration, EffectPrimitive, Layer, ReplacementPayload};
+use crate::types::ids::ScriptHandle;
 use crate::types::mana::ManaCost;
 use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect};
 use crate::types::zone::ZoneKind;
@@ -54,6 +55,22 @@ impl UserData for OncePerTurnTag {}
 #[derive(Clone)]
 pub(crate) struct OperationTag(pub(crate) AbilityEffect);
 impl UserData for OperationTag {}
+
+/// `Game.Ops.ForEachPlayer(fn)`'s return value (`phase5/mass-choice-effects`,
+/// CR 101.4 APNAP) — unlike every other `Game.Ops.*` entry, this one takes a
+/// real per-card Lua function rather than being a precomputed static value,
+/// so it can't be a plain `OperationTag(AbilityEffect::ForEachPlayer)`
+/// (`OperationTag`'s decode path always pairs a tag with `ScriptHandle(0)` —
+/// see `decode_operation_value`'s own doc comment). `Game.Ops.ForEachPlayer`
+/// is instead a `create_function` closure (`globals.rs`) that registers `fn`
+/// into the script registry immediately, the same way a bare `function(...)`
+/// passed straight to `:SetOperation` already does, and wraps the resulting
+/// real handle in one of these — `decode_operation_value` recognizes this
+/// type ahead of `OperationTag` and returns `(Some(AbilityEffect::
+/// ForEachPlayer), handle)` instead of `(Some(tag.0), ScriptHandle(0))`.
+#[derive(Clone)]
+pub(crate) struct ForEachPlayerTag(pub(crate) ScriptHandle);
+impl UserData for ForEachPlayerTag {}
 
 /// `Game.Tokens.*` return value — wraps a `TokenSpec` so `Game.Ops.CreateToken`
 /// can receive it as a typed argument instead of parsing a string.

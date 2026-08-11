@@ -22,7 +22,7 @@ use super::decode::{
 };
 use super::encode::{event_to_lua, state_to_lua};
 use super::globals::bind_game_globals;
-use super::types::{OperationOutcome, ScriptContext, ScriptError, ScriptRegistry};
+use super::types::{OperationOutcome, ScriptContext, ScriptError, ScriptRegistry, ScriptZoneMoveKind};
 
 /// Owns the embedded Lua VM and every loaded card script. One `ScriptRuntime`
 /// per running engine process, not per-game — scripts load once and are
@@ -636,8 +636,19 @@ impl ScriptRuntime {
         let function = self.function(handle)?;
         let thread =
             self.lua.create_thread(function).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        let result: Value =
-            thread.resume((source.0, controller.0)).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        // `phase5/mass-choice-effects`: a third `state` argument - the same
+        // read-only snapshot condition/CDA/continuous-effect scripts already
+        // get (`state_to_lua`'s own doc comment covers exactly what is and
+        // isn't exposed - public zones in full, hidden zones as counts only)
+        // - needed for a `ForEachPlayer` body to compute something like
+        // Balance's "the fewest lands any player controls" before calling
+        // `Game.ChooseN`. Backward compatible: a pre-existing `function(source,
+        // controller) ... end` operation simply never reads its third
+        // parameter, same as Lua ignores any extra call argument.
+        let snapshot = state_to_lua(&self.lua, state)?;
+        let result: Value = thread
+            .resume((source.0, controller.0, snapshot))
+            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         self.handle_operation_result(thread, result, state, controller)
     }
 
@@ -736,16 +747,42 @@ impl ScriptRuntime {
                 result.type_name()
             )));
         };
-        // TODO(more effect shapes): gain_life is the only key wired this
-        // slice - draw_cards/deal_damage/add_counters/etc need their own
-        // `result.get::<_, Option<_>>("...")` + apply arm here as real cards
-        // need them.
+        // TODO(more effect shapes): gain_life/sacrifice_chosen/discard_chosen
+        // are the only keys wired so far - draw_cards/deal_damage/
+        // add_counters/etc need their own `result.get::<_, Option<_>>("...")`
+        // + apply arm here as real cards need them.
         let gain_life: Option<i32> =
             result.get("gain_life").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         if let Some(amount) = gain_life {
             if let Some(player) = state.player_mut(controller) {
                 player.gain_life(amount);
             }
+        }
+        // `phase5/mass-choice-effects`: `Game.Ops.SacrificeChosen(list)`/
+        // `DiscardChosen(list)` (both hand-written Lua helpers, `globals.rs`)
+        // return `{ sacrifice_chosen = {ids...} }`/`{ discard_chosen =
+        // {ids...} }` rather than mutating `GameState` directly the way
+        // `gain_life` above does - a zone move needs `Engine::
+        // continue_scripted_zone_move`'s full replacement-checked pipeline,
+        // which this `ScriptRuntime` (one layer below `engine`) has no
+        // access to, so the request is handed back up instead (see
+        // `OperationOutcome::PendingZoneMoves`'s own doc comment). Both keys
+        // can be set on the same returned table (e.g. a `ForEachPlayer` body
+        // sacrificing lands+creatures *and* discarding in one turn) - both
+        // are read unconditionally, not an `if`/`else if`.
+        let sacrifice_chosen: Option<Vec<i64>> =
+            result.get("sacrifice_chosen").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let discard_chosen: Option<Vec<i64>> =
+            result.get("discard_chosen").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let mut moves = Vec::new();
+        if let Some(ids) = sacrifice_chosen {
+            moves.push((ScriptZoneMoveKind::Sacrifice, ids.into_iter().map(|id| ObjectId(id as u64)).collect()));
+        }
+        if let Some(ids) = discard_chosen {
+            moves.push((ScriptZoneMoveKind::Discard, ids.into_iter().map(|id| ObjectId(id as u64)).collect()));
+        }
+        if !moves.is_empty() {
+            return Ok(OperationOutcome::PendingZoneMoves(moves));
         }
         Ok(OperationOutcome::Finished)
     }

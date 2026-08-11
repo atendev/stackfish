@@ -17,7 +17,7 @@ use crate::types::stack::StackObject;
 use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
-use super::super::{Engine, ProcessState, StepStatus};
+use super::super::{Engine, ProcessState, ScriptedZoneMoveThen, StepStatus};
 
 impl Engine {
     /// CR 702.6a: Equip's own resolution - attaches `top.source` (the
@@ -254,7 +254,24 @@ impl Engine {
                             stack_id: top.stack_id,
                             controller: top.controller,
                             events_so_far: events,
+                            each_player: None,
                         };
+                        ControlFlow::Break(StepStatus::Progressed)
+                    }
+                    // `phase5/mass-choice-effects`: a standalone (not
+                    // ForEachPlayer-wrapped) script operation's own
+                    // sacrifice_chosen/discard_chosen result - unlike
+                    // resolve_for_each_player_effect's own handling of the
+                    // same outcome, there's no batching context here (this
+                    // is the only player whose choice this resolution will
+                    // ever ask for), so each verb's ids move immediately via
+                    // the normal continue_scripted_zone_move pipeline.
+                    Ok(OperationOutcome::PendingZoneMoves(moves)) => {
+                        self.process_state = self.chain_pending_zone_moves(
+                            moves,
+                            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+                            events,
+                        );
                         ControlFlow::Break(StepStatus::Progressed)
                     }
                 }

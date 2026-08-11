@@ -22,7 +22,11 @@
 //!   resolution) — `Modal`, `GainLife`, `Damage`, `Counters`, `Pump`,
 //!   `GainControl`, `Regenerate`.
 //! - `destruction`: the always-pausing zone-move arms — `Sacrifice`,
-//!   `Destroy`, `DestroyAll`, `Exile`.
+//!   `Destroy`, `DestroyAll`, `Exile`, `SacrificeRandom`.
+//! - `discard`: `DiscardRandom` (`phase5/mass-choice-effects`) — CR 701.9's
+//!   discard verb had no resolution-time producer at all before this slice.
+//! - `each_player`: `ForEachPlayer` (`phase5/mass-choice-effects`, CR 101.4)
+//!   — re-invokes a script function once per player in APNAP order.
 //! - `library_effects`: the library-touching arms — `DrawCards`, `Shuffle`,
 //!   `Scry`, `Surveil`, `Search`.
 //! - `tokens`: `CreateToken` (plus the token-definition-building free
@@ -59,6 +63,8 @@ use crate::types::zone::ZoneKind;
 mod cascade;
 mod destruction;
 mod direct_effects;
+mod discard;
+mod each_player;
 mod library_effects;
 mod madness;
 mod misc_effects;
@@ -485,6 +491,13 @@ impl Engine {
             // `WouldDie` replacement check all apply
             // identically - no new destruction logic here.
             Some(AbilityEffect::DestroyAll(filter)) => self.resolve_destroy_all_effect(top, filter),
+            // CR 701.21/CR 701.something "at random": count candidates
+            // drawn without replacement via next_rng, same deterministic
+            // ledger-logged source shuffle_library already uses - see
+            // AbilityEffect::SacrificeRandom's own doc comment.
+            Some(AbilityEffect::SacrificeRandom { filter, count }) => {
+                self.resolve_sacrifice_random_effect(top, filter, *count)
+            }
             // CR 701.18: exile the first chosen target from
             // the battlefield. Unlike Destroy, indestructibility
             // is irrelevant - exile bypasses it entirely (CR
@@ -499,6 +512,20 @@ impl Engine {
             // ordering-choice handling as Destroy/Sacrifice
             // above.
             Some(AbilityEffect::Exile) => self.resolve_exile_effect(top, legal_targets),
+            // CR 701.9b: same "count candidates drawn without replacement
+            // via next_rng" shape as SacrificeRandom above, from the
+            // resolving StackObject's own controller's hand instead of the
+            // battlefield - see AbilityEffect::DiscardRandom's own doc
+            // comment.
+            Some(AbilityEffect::DiscardRandom { count }) => self.resolve_discard_random_effect(top, *count),
+            // CR 101.4: invokes top.operation (a real script function
+            // handle, not the usual ScriptHandle(0) placeholder - see
+            // AbilityEffect::ForEachPlayer's own doc comment) once per
+            // player in APNAP order, accumulating sacrifice_chosen/
+            // discard_chosen ids across every player before performing any
+            // real zone move, so CR 101.4's "then the actions happen
+            // simultaneously" holds.
+            Some(AbilityEffect::ForEachPlayer) => self.resolve_for_each_player_effect(top, events),
             // CR 122.1a: same "push an unapplied event, let
             // CommitEvents retroactively apply it" pattern as
             // Damage above - GameEventKind::CounterAdded

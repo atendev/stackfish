@@ -11,12 +11,15 @@ use crate::types::card::{CardTypeSet, KeywordSet, Subtype, SupertypeSet};
 use crate::types::counter::CounterKind;
 use crate::types::cost::{FilterController, FilterSpec};
 use crate::types::effect::{AffectedFilter, EffectFilter, EffectPayload, LandwalkQuality, Layer};
-use crate::types::ids::ScriptHandle;
+use crate::types::ids::{ObjectId, ScriptHandle};
 use crate::types::mana::{Color, ColorSet, ManaUnit};
 use crate::types::target::{TargetFilter, TargetRequirement};
 use crate::types::zone::ZoneKind;
 
-use super::tags::{ConditionTag, CostComponent, CostTag, EffectPrimitiveTag, LayerTag, OncePerTurnTag, OperationTag};
+use super::tags::{
+    ConditionTag, CostComponent, CostTag, EffectPrimitiveTag, ForEachPlayerTag, LayerTag, OncePerTurnTag,
+    OperationTag,
+};
 use super::types::{ScriptChoiceRequest, ScriptError, ScriptRegistry};
 
 /// Shared by `ScriptRuntime::load_condition` (decoding a freshly-`eval`'d
@@ -75,6 +78,16 @@ pub(crate) fn decode_operation_value(
     value: Value,
 ) -> Result<(Option<AbilityEffect>, ScriptHandle), ScriptError> {
     match value {
+        // `phase5/mass-choice-effects`: `Game.Ops.ForEachPlayer(fn)` returns
+        // a `ForEachPlayerTag` carrying a real, already-registered handle for
+        // `fn` - checked ahead of the plain `OperationTag` case below since
+        // it's a different concrete `UserData` type (see that tag's own doc
+        // comment for why it can't just be an `OperationTag`).
+        Value::UserData(ref ud) if ud.is::<ForEachPlayerTag>() => {
+            let tag: ForEachPlayerTag =
+                ud.borrow::<ForEachPlayerTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?.clone();
+            Ok((Some(AbilityEffect::ForEachPlayer), tag.0))
+        }
         Value::UserData(ud) => {
             let tag: OperationTag = ud
                 .borrow::<OperationTag>()
@@ -765,7 +778,17 @@ pub(crate) fn decode_script_choice_request(table: Table) -> Result<ScriptChoiceR
         "select_target" => {
             let filter_table: Table =
                 table.get("filter").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            Ok(ScriptChoiceRequest::SelectTarget { filter: decode_target_filter_table(filter_table)? })
+            // `phase5/mass-choice-effects`: `Game.ChooseN`'s Lua loop grows
+            // this by one id per iteration so a repeat ask can't hand back
+            // an object already picked this batch - see `ScriptChoiceRequest
+            // ::SelectTarget`'s own doc comment for why this lives here
+            // rather than on `TargetFilter` itself. Absent for a bare
+            // `Game.SelectTargets` call, same as every pre-existing script.
+            let exclude_ids: Option<Vec<i64>> =
+                table.get("exclude_ids").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let exclude_ids =
+                exclude_ids.unwrap_or_default().into_iter().map(|id| ObjectId(id as u64)).collect();
+            Ok(ScriptChoiceRequest::SelectTarget { filter: decode_target_filter_table(filter_table)?, exclude_ids })
         }
         "may_choose" => Ok(ScriptChoiceRequest::MayChoose),
         other => Err(ScriptError::RuntimeError(format!("unknown script choice request op '{other}'"))),
@@ -779,8 +802,11 @@ pub(crate) fn decode_script_choice_request(table: Table) -> Result<ScriptChoiceR
 /// convention (`crates/scenario/src/lib.rs`'s `build_target_requirement`)
 /// exactly, rather than inventing a second vocabulary. `type` defaults to
 /// `"object"` so every pre-existing script that omits it (this slice's own
-/// predecessor) keeps working unchanged. No zone override (backlog item 9's
-/// own narrowing, unchanged by this slice).
+/// predecessor) keeps working unchanged. `zone` (`phase5/mass-choice-effects`,
+/// e.g. `Game.ChooseN({ zone = "Hand", ... }, n)` for CR 701.9 discard) is a
+/// zone name string parsed via `parse_zone_kind_name`, same names/casing the
+/// TOML fixture format already uses - `None` still defaults to `Battlefield`
+/// exactly as before for every filter that omits it.
 pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError> {
     let kind: Option<String> = table.get("type").map_err(|e| ScriptError::LoadError(e.to_string()))?;
     match kind.as_deref().unwrap_or("object") {
@@ -888,6 +914,9 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
                 None => None,
             };
 
+            let zone_name: Option<String> = table.get("zone").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let zone = zone_name.map(|name| parse_zone_kind_name(&name)).transpose()?;
+
             Ok(TargetFilter::Object {
                 card_types,
                 excluded_card_types,
@@ -896,7 +925,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
                 supertypes,
                 excluded_supertypes,
                 controller,
-                zone: None,
+                zone,
             })
         }
         other => Err(ScriptError::LoadError(format!(

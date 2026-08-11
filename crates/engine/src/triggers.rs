@@ -316,20 +316,11 @@ pub fn group_apnap(
     if triggers.is_empty() {
         return Vec::new();
     }
-    // Rotate turn_order to start at active_player (APNAP order), then
-    // partition triggers by controller in that order. Intra-group order is
-    // deliberately left as collect_triggers produced it - that's the
-    // controller's choice (CR 603.3b), resolved by
+    // Partition triggers by controller in apnap_player_order's order.
+    // Intra-group order is deliberately left as collect_triggers produced it
+    // - that's the controller's choice (CR 603.3b), resolved by
     // engine.rs/AwaitTriggerOrderChoice, not here.
-    let mut order: Vec<PlayerId> = Vec::new();
-    match state.turn_order.iter().position(|p| *p == state.active_player) {
-        Some(start) => {
-            order.extend(state.turn_order[start..].iter().copied());
-            order.extend(state.turn_order[..start].iter().copied());
-        }
-        None => order.extend(state.turn_order.iter().copied()),
-    }
-    order
+    apnap_player_order(state)
         .into_iter()
         .filter_map(|pid| {
             let group: Vec<PendingTrigger> =
@@ -341,6 +332,25 @@ pub fn group_apnap(
             }
         })
         .collect()
+}
+
+/// CR 101.4's APNAP order as a bare player list: `state.turn_order` rotated
+/// to start at `state.active_player`, then every other player in turn order.
+/// Factored out of `group_apnap` (`phase5/mass-choice-effects`) so `engine::
+/// resolve::each_player::resolve_for_each_player_effect`'s own CR 101.4
+/// "each player ..." loop can reuse the identical rotation instead of a
+/// second copy — `group_apnap` itself now just partitions triggers by
+/// controller in this order.
+pub fn apnap_player_order(state: &GameState) -> Vec<PlayerId> {
+    let mut order: Vec<PlayerId> = Vec::new();
+    match state.turn_order.iter().position(|p| *p == state.active_player) {
+        Some(start) => {
+            order.extend(state.turn_order[start..].iter().copied());
+            order.extend(state.turn_order[..start].iter().copied());
+        }
+        None => order.extend(state.turn_order.iter().copied()),
+    }
+    order
 }
 
 /// CR 603.4/608.2a: re-derives a departed source's own last-known-info at

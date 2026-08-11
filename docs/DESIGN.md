@@ -37,6 +37,9 @@ request). Replace the YGO rules kernel entirely with an MTG-native one per the a
 - Replacement/prevention pre-commit rewrite pipeline
 - State-based actions (SBA) fixed-point loop
 - Trigger queue with APNAP stack-insertion ordering
+- `Game.Ops.ForEachPlayer` (`phase5/mass-choice-effects`): APNAP applied to effect *resolution* too
+  (CR 101.4's "each player ..." shape, not just trigger placement) - `triggers::apnap_player_order`
+  is the one shared rotation both use
 - Structured cost/payment system
 
 ### Step-able core (replay requirement)

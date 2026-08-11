@@ -31,6 +31,13 @@ effect.
 `Game.SelectTargets`/`:SetTarget` additionally accept a `type` key (`"object"`, `"player"`, or
 `"any"`, default `"object"`) to say what kind of thing is being targeted at all — see below.
 
+`Game.SelectTargets`/`Game.ChooseN`'s own filter (not `:SetTarget`'s) additionally accepts a `zone`
+key — a zone name string (`"Hand"`, `"Battlefield"`, ...), same names/casing the TOML fixture format
+uses. Defaults to `"Battlefield"` if omitted, same as before. This is how a mid-resolution ask reaches
+into a player's own hand (CR 701.9's discard, e.g. `Game.ChooseN({ zone = "Hand", controller = "you" },
+n)`) — `:SetTarget`'s own target-requirement filter has no such key; a card's own base "target" is
+always CR 115.2's battlefield-by-default.
+
 ## A card's own base targeting (Enchant, etc.)
 
 The filter table above is also how a card declares *its own* target requirement — the thing that
@@ -155,11 +162,91 @@ e:SetOperation(function(source, controller)
 end)
 ```
 
+## Choosing N objects/cards mid-resolution
+
+`Game.ChooseN(filter, n, opts)` (`phase5/mass-choice-effects`) asks the player to choose `n` objects
+or cards matching `filter`, one at a time, without repeats — built entirely on top of
+`Game.SelectTargets`/`Game.MayChoose` above, not a new request shape:
+
+```lua
+e:SetOperation(function(source, controller)
+    local chosen = Game.ChooseN({ card_types = { "Creature" }, controller = "you" }, 2)
+    -- chosen is a list of { kind = "object"|"player", id = n } tables, same
+    -- shape Game.SelectTargets itself returns, one entry per pick
+    return Game.Ops.SacrificeChosen(chosen)
+end)
+```
+
+`opts.up_to` (default `false`) allows choosing fewer than `n` — before every pick (including the
+first), the player is asked "one more?" (`Game.MayChoose`-shaped); answering no stops the loop early
+with however many have been chosen so far. Each pick's filter automatically excludes every object
+already chosen this call, so the same creature can't be picked twice.
+
+`Game.Ops.SacrificeChosen(list)`/`Game.Ops.DiscardChosen(list)` take a `Game.ChooseN` result and
+sacrifice/discard exactly that list (CR 701.21/701.9) — the operation's own return value, same as any
+other `Game.Ops.*` result:
+
+```lua
+e:SetOperation(function(source, controller)
+    local chosen = Game.ChooseN({ zone = "Hand", controller = "you" }, 1)
+    return Game.Ops.DiscardChosen(chosen)
+end)
+```
+
+A single return table can set both `sacrifice_chosen` and `discard_chosen` — build one manually if an
+operation needs to do both in the same turn (see `Game.Ops.ForEachPlayer`'s own example below).
+
+## Sacrificing/discarding at random
+
+`Game.Ops.SacrificeRandom(filter, count)`/`Game.Ops.DiscardRandom(count)` (CR 701.9b/CR "at random")
+pick `count` matching permanents/cards themselves — no player choice at all, unlike
+`Game.ChooseN`+`SacrificeChosen`/`DiscardChosen` above. Static values, not custom functions — set
+`e:SetOperation(Game.Ops.SacrificeRandom({ card_types = { "Creature" } }, 2))` directly, same as
+`Game.Ops.Destroy`/`Sacrifice`. Fewer than `count` are affected if fewer than `count` candidates exist
+(CR 701.17b's mill precedent — not an error).
+
+## Applying an effect to each player
+
+`Game.Ops.ForEachPlayer(fn)` (CR 101.4) invokes `fn` once per player, active player first, then each
+other player in turn order — the rules' own worked example is literally "each player sacrifices a
+creature":
+
+```lua
+function s.operation()
+    return Game.Ops.ForEachPlayer(function(source, controller, state)
+        -- controller is *this* player, not the spell's original caster -
+        -- "you" inside Game.ChooseN's own filter resolves against controller
+        local chosen = Game.ChooseN({ card_types = { "Creature" }, controller = "you" }, 1)
+        return Game.Ops.SacrificeChosen(chosen)
+    end)
+end
+```
+
+Every operation function (whether wrapped in `ForEachPlayer` or not) now receives a third `state`
+argument — a read-only snapshot of public game state (same shape condition/CDA scripts already get:
+`state.battlefield`/`state.exile` are full card-summary arrays including a `card_types` list and
+`controller`; `state.hand_count`/`state.library_count` are per-player counts, hidden zones staying
+count-only per CR 400.2/402.3). This is how a `ForEachPlayer` body computes something like Balance's
+own "the fewest lands any player controls" before ever asking a question — see
+[card-script-basics.md](card-script-basics.md) for the full snapshot shape.
+
+CR 101.4's "then the actions happen simultaneously": every player's own `sacrifice_chosen`/
+`discard_chosen` answer is accumulated, not applied immediately — the real zone moves happen only
+once every player (including one whose own body never asked anything, because they were already at
+the minimum) has been invoked. A replacement effect reading the battlefield mid-loop still sees every
+permanent that's *about to* leave, not one that already has.
+
 ## What these can't do yet
 
 - Only usable from inside an operation function — there's no equivalent for asking mid-condition
   or mid-cost.
-- `Game.SelectTargets`/`Game.MayChoose` are for a choice made *during resolution*. Choosing a mode
-  for a modal spell ("choose one —") happens before the spell even goes on the stack, as part of
-  casting it — a different mechanism entirely, and not something a card script drives (see
-  [not-available-yet.md](not-available-yet.md)).
+- `Game.SelectTargets`/`Game.MayChoose`/`Game.ChooseN` are for a choice made *during resolution*.
+  Choosing a mode for a modal spell ("choose one —") happens before the spell even goes on the
+  stack, as part of casting it — a different mechanism entirely, and not something a card script
+  drives (see [not-available-yet.md](not-available-yet.md)).
+- `Game.Ops.ForEachPlayer` only wraps a custom function — a static tag like `Game.Ops.
+  SacrificeRandom` can't be handed to it directly (e.g. "each player discards a card at random"
+  needs a one-line wrapper function around `Game.Ops.DiscardRandom` instead).
+- `Game.ChooseN`'s `filter` is the flat option-bag shape only — a scripted predicate filter
+  (`filter = function(...) ... end`) isn't accepted here yet, only on `:SetTarget`/
+  `target_requirement()`.

@@ -269,11 +269,30 @@ pub struct StepResult {
 /// through), `Exile` can't reuse either (its destination is the shared
 /// Exile zone, `owner: None`, not a per-player zone `commit_death`'s
 /// `zone_mut(to, Some(owner))` call assumes) so it's committed inline.
+/// `Discard` (`phase5/mass-choice-effects`, CR 701.9) is the odd one out of
+/// the four: every other kind moves a permanent off the Battlefield, this
+/// one moves a card off a player's Hand — `Engine::continue_scripted_
+/// zone_move` reads `from_zone()` below instead of hardcoding Battlefield.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ScriptedZoneMoveKind {
     Destroy,
     Sacrifice,
     Exile,
+    Discard,
+}
+
+impl ScriptedZoneMoveKind {
+    /// Which zone `Engine::continue_scripted_zone_move` should find each
+    /// queued id sitting in before it'll propose a move for it — Battlefield
+    /// for every permanent-facing verb, Hand for `Discard` alone (CR 701.9a).
+    pub(in crate::engine) fn from_zone(self) -> ZoneKind {
+        match self {
+            ScriptedZoneMoveKind::Discard => ZoneKind::Hand,
+            ScriptedZoneMoveKind::Destroy | ScriptedZoneMoveKind::Sacrifice | ScriptedZoneMoveKind::Exile => {
+                ZoneKind::Battlefield
+            }
+        }
+    }
 }
 
 /// What `Engine::continue_scripted_zone_move` does once its own `remaining`
@@ -307,6 +326,17 @@ pub enum ScriptedZoneMoveThen {
         stack_id: ObjectId,
         shuffle_after: bool,
     },
+    /// `phase5/mass-choice-effects`: chains a *second* scripted zone-move
+    /// batch after the first one's own queue (and any CR 616.1 ordering
+    /// pause it raises) fully settles — `Engine::chain_pending_zone_moves`'
+    /// own tail for a script operation's `sacrifice_chosen`+`discard_chosen`
+    /// result (`OperationOutcome::PendingZoneMoves`), since each is a
+    /// different `ScriptedZoneMoveKind` (different `from_zone()`) and
+    /// `continue_scripted_zone_move` only ever drains one `kind` per call.
+    /// Once `kind`/`remaining` themselves drain, `continue_scripted_zone_
+    /// move` recurses into `*then` — chains of length > 2 work for free the
+    /// same way, though nothing here builds one longer than 2.
+    ThenScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, then: Box<ScriptedZoneMoveThen> },
 }
 
 /// One card still to propose+replacement-check+commit — shared queue entry
@@ -458,6 +488,31 @@ pub enum ReplacementResumeTarget {
     /// continuation the non-paused path already calls once its own
     /// destination is decided synchronously.
     PermanentEntry { top: StackObject, legal_targets: Vec<Target>, events: Vec<GameEventKind> },
+}
+
+/// `phase5/mass-choice-effects`, CR 101.4: the rest of a `Game.Ops.
+/// ForEachPlayer(fn)` loop still to run once the *current* player's own
+/// `Game.SelectTargets`/`Game.ChooseN`/`Game.MayChoose` ask (an
+/// `AwaitingScriptChoice` pause with this struct attached) is answered.
+/// `source`/`operation` are exactly what `engine::resolve::each_player::
+/// resolve_for_each_player_effect` was invoking `fn` with — needed to
+/// re-invoke it for whichever player is next, since the stack object itself
+/// is already popped off `state.stack` by this point (same reason
+/// `AwaitingScriptChoice`'s own `stack_id`/`controller` are carried rather
+/// than re-derived). `remaining_players` is this loop's own CR 101.4 APNAP
+/// order queue, not yet asked. `sacrifice_ids`/`discard_ids` accumulate every
+/// player's own `sacrifice_chosen`/`discard_chosen` answers so far (see
+/// `OperationOutcome::PendingZoneMoves`) — *not* applied as each player
+/// finishes, only once `remaining_players` finally empties, so CR 101.4's
+/// "then the actions happen simultaneously" holds for the whole loop, not
+/// just within one player's own choice.
+#[derive(Debug)]
+pub struct EachPlayerLoop {
+    pub source: ObjectId,
+    pub operation: ScriptHandle,
+    pub remaining_players: VecDeque<PlayerId>,
+    pub sacrifice_ids: Vec<ObjectId>,
+    pub discard_ids: Vec<ObjectId>,
 }
 
 /// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
@@ -763,13 +818,20 @@ pub enum ProcessState {
     /// by this point, same as any other in-progress resolution), carried
     /// here so `submit_script_choice` can pick up in the same spot — push
     /// the final `StackObjectResolved` and continue into `ReplacementCheck`
-    /// — rather than re-deriving them.
+    /// — rather than re-deriving them. `each_player` (`phase5/mass-choice-
+    /// effects`) is `Some` only when this ask came from inside a
+    /// `Game.Ops.ForEachPlayer` per-player invocation — see `EachPlayerLoop`'s
+    /// own doc comment for what `submit_script_choice`/`submit_script_may_
+    /// choice` do differently once `controller`'s own answer resumes the
+    /// thread. `None` (every pre-existing pause shape) behaves exactly as
+    /// before.
     AwaitingScriptChoice {
         thread: ScriptHandle,
         request: ScriptChoiceRequest,
         stack_id: ObjectId,
         controller: PlayerId,
         events_so_far: Vec<GameEventKind>,
+        each_player: Option<EachPlayerLoop>,
     },
     /// Backlog item 14a: paused mid-`ResolveStackTop` because the resolving
     /// `StackObject`'s effect was `AbilityEffect::Scry(n)` — `cards` is the
