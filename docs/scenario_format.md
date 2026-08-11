@@ -45,6 +45,7 @@ If `[game]` is present, `[[players]]` and `[[setup]]` are ignored entirely.
 
 ```toml
 seed = 1          # u64, optional - seeds GameState.rng; required on manual path, optional when [game].rng_seed is set
+card_db = "path/to/cards.sqlite"   # string, optional - see `[[cards]]`'s `db_script_id` below
 
 [[players]]        # zero or more (manual path only — ignored when [game] is set)
 [[cards]]           # zero or more - ad-hoc test card definitions (used by both paths)
@@ -54,6 +55,11 @@ seed = 1          # u64, optional - seeds GameState.rng; required on manual path
 [[assertions]]      # zero or more - checked after all actions run      / use one style
 [[steps]]           # zero or more - actions + assertions interleaved  /  not both
 ```
+
+**`card_db`:** path to a `stackfish-carddb` SQLite file. A relative path resolves against *this
+scenario file's own directory* (not the process's current working directory — matters because
+`cargo test`'s CWD is the crate root, not the individual `.toml`'s subdirectory under
+`tests/scenarios/`). Only needed if some `[[cards]]` entry sets `db_script_id`; omit otherwise.
 
 `[[steps]]` and the `[[actions]]`/`[[assertions]]` pair are mutually exclusive — if `[[steps]]` is
 non-empty it takes precedence and the other two are ignored.
@@ -151,8 +157,9 @@ pregame completes.
 
 ## `[[cards]]`
 
-Ad-hoc test fixtures — not real card data, no connection to the external card database project.
-Define just enough of a card to exercise what a scenario needs.
+Ad-hoc test fixtures — not real card data, no connection to the external card database project,
+**unless `db_script_id` is set** (see below), in which case this entry pulls the real card instead.
+Otherwise, define just enough of a card to exercise what a scenario needs.
 
 ```toml
 [[cards]]
@@ -160,7 +167,7 @@ key = "bear"                # string, referenced by [[setup]]/[[actions]]/[[asse
 name = "Test Bear"
 generic_cost = 1             # u32, default 0 - the whole generic component as one number
 colors = ["G"]                # one entry PER PIP (repeats included), default []
-types = ["Creature"]          # required - see Card types below
+types = ["Creature"]          # required unless db_script_id is set - see Card types below
 supertypes = ["Legendary"]     # optional, default [] - see Card types below
 subtypes = ["Human", "Wizard"] # optional, default [] - see Card types below
 power = 2                     # optional i32
@@ -172,7 +179,25 @@ keywords = ["Flying", "Deathtouch"]  # optional, default [] - see Keywords below
 trigger_condition = "..."      # optional Lua source, default none - see Triggered abilities below
 trigger_operation = "..."      # optional Lua source, default none - see Triggered abilities below
 script = "..."                 # optional full self-registering Lua source, default none - see below
+db_script_id = "m00003639"     # optional string, default none - see Real card lookup below
 ```
+
+**`db_script_id` (real card lookup):** looks this card up in the top-level `card_db` SQLite file
+via `stackfish_carddb::CardDb::load_by_script_id` — the DB's `cards.script_id` column, a stable
+human-typed slug (e.g. the `-- Script: m00003639` header a card's own Lua script file carries),
+*not* this table's `name` field or the DB's internal UUID `oracle_id`. Pulls the real mana cost,
+type_line, oracle text, power/toughness, keywords, and active Lua script straight from the
+database instead of hand-writing them here — the point being to test against the actual card as
+it exists in the database, not a hand-approximated stand-in.
+
+Requires the top-level `card_db` path to be set; a `[[cards]]` entry with `db_script_id` but no
+`card_db` panics with a clear message rather than silently falling back to this entry's other
+fields. When set, every other characteristic field above (`name`, `generic_cost`/`colors`,
+`types`, `supertypes`, `subtypes`, `power`/`power_script`, `toughness`/`toughness_script`,
+`keywords`) is ignored — not rejected if also present, just unused. `script`/`mana_ability`/
+`trigger_condition`+`trigger_operation` are unaffected either way: those register separate
+abilities keyed off the object's id, not fields on the card's own definition, so a scenario can
+still attach a synthetic ability to a real DB-backed card to test an interaction.
 
 **`mana_ability` (CR 605):** if non-empty, every instance of this card gets one
 `RegisteredAbility { kind: Activated, effect: AddMana(...) }` set up automatically — activate it via

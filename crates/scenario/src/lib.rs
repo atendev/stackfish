@@ -27,6 +27,7 @@ use std::panic::{self, AssertUnwindSafe};
 
 use serde::Deserialize;
 
+use stackfish_carddb::CardDb;
 use stackfish_engine::*;
 use stackfish_engine::engine::{ActionError, DiscardError, Engine, StepStatus};
 use stackfish_engine::types::config::{GameConfig, GameSettings, PlayerConfig};
@@ -63,6 +64,34 @@ pub struct ScenarioFile {
     /// `[[players]]` / `[[setup]]` sections are ignored when `[game]` is set.
     #[serde(default)]
     pub game: Option<GameSpec>,
+    /// Path to the external card-database SQLite file (`stackfish-carddb`) -
+    /// set this once and any `[[cards]]` entry can pull a real
+    /// `CardDefinition` from it via `CardSpec.db_script_id` instead of
+    /// hand-writing every field. `None` (the default) means no `[[cards]]`
+    /// entry in this file may set `db_script_id` - attempting to do so
+    /// panics with a clear message rather than silently falling back to the
+    /// from-scratch TOML fields.
+    ///
+    /// A relative path is resolved against `base_dir` below (this scenario
+    /// file's own directory), not the process's current working directory -
+    /// see that field's own doc comment for why that distinction matters. An
+    /// absolute path is used as-is either way.
+    #[serde(default)]
+    pub card_db: Option<String>,
+    /// This scenario file's own directory - `None` when `load()` wasn't used
+    /// to build this `ScenarioFile` (a hand-built one, or one parsed
+    /// directly from a string via `toml::from_str`, as every integration
+    /// test in this repo does). `#[serde(skip)]`: not a TOML field, set by
+    /// `load()` after parsing from the path it was given. Exists solely so
+    /// `card_db` above can resolve relative to *this file*, the same way a
+    /// shell resolves a relative include path against the including
+    /// script's own directory - not against wherever the process happened
+    /// to be launched from (which for `cargo test` is the crate root, not
+    /// the individual scenario file's own subdirectory under `tests/
+    /// scenarios/`, a mismatch that would otherwise make every relative
+    /// `card_db` fragile and confusing).
+    #[serde(skip)]
+    pub base_dir: Option<std::path::PathBuf>,
 }
 
 /// Top-level `[game]` section — triggers the `Engine::new_game` path.
@@ -159,12 +188,39 @@ pub struct ManaPoolSpec {
 #[derive(Deserialize)]
 pub struct CardSpec {
     pub key: String,
+    /// Required unless `db_script_id` is set - see that field's own doc
+    /// comment for why this and every other characteristic field below
+    /// becomes optional in that mode.
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub generic_cost: u32,
     #[serde(default)]
     pub colors: Vec<String>,
+    /// Required unless `db_script_id` is set.
+    #[serde(default)]
     pub types: Vec<String>,
+    /// Looks this card up in the top-level `card_db` SQLite file
+    /// (`stackfish_carddb::CardDb::load_by_script_id`) instead of building a
+    /// `CardDefinition` from this spec's own fields — the DB's
+    /// `cards.script_id` column, a stable human-typed slug (e.g.
+    /// `"lightning_bolt"`), not the card's printed `name` or its UUID
+    /// `oracle_id`. Lets a scenario test against the exact real card instead
+    /// of retyping its mana cost/types/power/toughness/keywords by hand.
+    ///
+    /// When set, every other characteristic field on this struct (`name`,
+    /// `generic_cost`/`colors`, `types`, `supertypes`, `subtypes`, `power`/
+    /// `power_script`, `toughness`/`toughness_script`, `keywords`,
+    /// `target_requirement`) is ignored — not rejected if also set, same
+    /// "not a supported combination" stance this file already takes for
+    /// `power`/`power_script`'s own overlap. `script`, `mana_ability`,
+    /// `trigger_condition`/`trigger_operation`, and `continuous_effect` are
+    /// unaffected either way: those build separate `RegisteredAbility`/
+    /// `ContinuousEffect`/pending-script entries keyed off the object's id,
+    /// not fields on `CardDefinition` itself, so a scenario can still attach
+    /// a synthetic ability to a real DB-backed card to probe an interaction.
+    #[serde(default)]
+    pub db_script_id: Option<String>,
     /// CR 205.4a — this card's own printed supertypes (e.g. `["Legendary"]`).
     /// Distinct from `TargetRequirementSpec.supertypes`, which restricts what
     /// a spell/ability is legal to target, not what a card itself is.
@@ -872,8 +928,15 @@ impl AssertionSpec {
 pub fn load(path: &std::path::Path) -> ScenarioFile {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("failed to read scenario file {}: {e}", path.display()));
-    toml::from_str(&text)
-        .unwrap_or_else(|e| panic!("failed to parse scenario file {}: {e}", path.display()))
+    let mut file: ScenarioFile = toml::from_str(&text)
+        .unwrap_or_else(|e| panic!("failed to parse scenario file {}: {e}", path.display()));
+    // `path.parent()` is `Some("")` for a bare filename with no directory
+    // component (e.g. `load(Path::new("foo.toml"))`) - `PathBuf::from("")`
+    // joined against a relative `card_db` below is a harmless no-op
+    // (`"".join("cards.sqlite")` is just `"cards.sqlite"`), so this doesn't
+    // need special-casing.
+    file.base_dir = path.parent().map(|p| p.to_path_buf());
+    file
 }
 
 // ---------------------------------------------------------------------
@@ -932,6 +995,102 @@ fn build_pt(value: Option<i32>, script: &Option<String>) -> Option<PTValue> {
         });
     }
     value.map(PTValue::Fixed)
+}
+
+/// Opens `file.card_db` if set — shared by `build_initial_state` and
+/// `build_new_game_engine` so both scenario formats support
+/// `CardSpec.db_script_id` the same way. `None` when `card_db` is unset;
+/// `card_definition_from_spec` is what turns "a `[[cards]]` entry sets
+/// `db_script_id` but this returned `None`" into a clear panic instead of a
+/// confusing downstream error.
+fn open_card_db(file: &ScenarioFile) -> Option<CardDb> {
+    file.card_db.as_ref().map(|path| {
+        let resolved = resolve_card_db_path(file, path);
+        CardDb::open(&resolved)
+            .unwrap_or_else(|e| panic!("failed to open card_db {} (from {path:?}): {e}", resolved.display()))
+    })
+}
+
+/// A relative `card_db` path resolves against this scenario file's own
+/// directory (`file.base_dir`, set by `load()`), not the process's current
+/// working directory — see `ScenarioFile.base_dir`'s own doc comment for
+/// why. An absolute path is returned unchanged either way. `file.base_dir`
+/// is `None` for a `ScenarioFile` built directly (via `toml::from_str`
+/// rather than `load()`, as every integration test in this repo does, or by
+/// hand) — a relative `card_db` there falls back to the pre-existing
+/// CWD-relative behavior, unchanged from before `base_dir` existed.
+fn resolve_card_db_path(file: &ScenarioFile, path: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(path);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    match &file.base_dir {
+        Some(dir) => dir.join(path),
+        None => path.to_path_buf(),
+    }
+}
+
+/// Builds one `[[cards]]` entry's `CardDefinition` — either a real DB-backed
+/// definition (`spec.db_script_id` set: looked up via `CardDb::
+/// load_by_script_id`, using the DB's own real `definition_id` and every
+/// other structural characteristic it knows) or the pre-existing
+/// from-scratch struct literal built out of this `CardSpec`'s own TOML
+/// fields. `placeholder_definition_id` only matters for the from-scratch
+/// path — the two call sites disagree with each other on what to use there
+/// (`build_initial_state` passes the card's real `ObjectId.0`,
+/// `build_new_game_engine` passes a hardcoded `0` for every card) - a
+/// pre-existing inconsistency this function deliberately preserves exactly
+/// as each call site already had it, rather than silently "fixing" it as a
+/// side effect of this refactor.
+///
+/// See `CardSpec.db_script_id`'s own doc comment for which fields the DB
+/// path ignores and which side-channel fields (`script`/`mana_ability`/
+/// `trigger_condition`+`trigger_operation`/`continuous_effect`) still apply
+/// regardless of which path built the definition.
+fn card_definition_from_spec(card_db: Option<&CardDb>, placeholder_definition_id: u64, spec: &CardSpec) -> CardDefinition {
+    if let Some(script_id) = &spec.db_script_id {
+        let db = card_db.unwrap_or_else(|| {
+            panic!(
+                "card '{}' sets db_script_id {script_id:?} but this scenario file has no top-level \
+                 card_db path set",
+                spec.key
+            )
+        });
+        return db.load_by_script_id(script_id).unwrap_or_else(|e| {
+            panic!("card '{}': db_script_id {script_id:?} failed to load: {e}", spec.key)
+        });
+    }
+
+    let symbols = mana_symbols(spec.generic_cost, &spec.colors);
+    CardDefinition {
+        definition_id: placeholder_definition_id,
+        name: spec.name.clone(),
+        mana_cost: ManaCost { symbols },
+        color_indicator: None,
+        supertypes: parse_supertypes(&spec.supertypes),
+        card_types: parse_card_types(&spec.types),
+        subtypes: spec.subtypes.iter().cloned().map(Subtype).collect(),
+        oracle_text: String::new(),
+        power: build_pt(spec.power, &spec.power_script),
+        toughness: build_pt(spec.toughness, &spec.toughness_script),
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
+        keywords: parse_keywords(&spec.keywords),
+        target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
+        // TODO: no TOML scenario field for alternative costs yet -
+        // flashback/escape-style cards aren't constructible via a scenario
+        // fixture, only via direct struct literals in Rust integration
+        // tests (see phase5_flashback_alternative_costs.rs).
+        alternative_costs: Vec::new(),
+        buyback_cost: None,
+        // TODO: no TOML scenario field for a Rust-native effect
+        // (Game.Ops.Damage/GainLife/...) yet either - same "direct struct
+        // literal only" limit as alternative_costs above.
+        effect: None,
+        modes: build_spell_modes(&spec.modes),
+        mode_choice: build_mode_choice(spec),
+    }
 }
 
 fn parse_color(letter: &str) -> Color {
@@ -1253,6 +1412,7 @@ pub fn build_initial_state(
     Vec<PendingScriptTargetRequirement>,
     Vec<PendingScriptOperation>,
 ) {
+    let card_db = open_card_db(file);
     let mut next_object_id: u64 = 0;
     // Seeds `AbilityId`s for any `mana_ability` built below - draws from a
     // local counter rather than hardcoding a placeholder (unlike
@@ -1326,30 +1486,7 @@ pub fn build_initial_state(
         let object_id = ObjectId(next_object_id);
         next_object_id += 1;
 
-        let symbols = mana_symbols(spec.generic_cost, &spec.colors);
-
-        let definition = CardDefinition {
-            definition_id: object_id.0,
-            name: spec.name.clone(),
-            mana_cost: ManaCost { symbols },
-            color_indicator: None,
-            supertypes: parse_supertypes(&spec.supertypes),
-            card_types: parse_card_types(&spec.types),
-            subtypes: spec.subtypes.iter().cloned().map(Subtype).collect(),
-            oracle_text: String::new(),
-            power: build_pt(spec.power, &spec.power_script),
-            toughness: build_pt(spec.toughness, &spec.toughness_script),
-            loyalty: None,
-            defense: None,
-            script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
-            keywords: parse_keywords(&spec.keywords),
-            target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
-            alternative_costs: Vec::new(),
-            buyback_cost: None,
-            effect: None,
-            modes: build_spell_modes(&spec.modes),
-            mode_choice: build_mode_choice(spec),
-        };
+        let definition = card_definition_from_spec(card_db.as_ref(), object_id.0, spec);
 
         let owner = PlayerId(entry.player);
         let zone_kind = parse_zone_kind(&entry.zone);
@@ -1930,6 +2067,7 @@ fn build_game_settings(spec: &GameSettingsSpec) -> GameSettings {
 fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashMap<String, ObjectId>) {
     let card_specs: HashMap<&str, &CardSpec> =
         file.cards.iter().map(|c| (c.key.as_str(), c)).collect();
+    let card_db = open_card_db(file);
 
     let settings = build_game_settings(&game.settings);
     let rng_seed = game.rng_seed.or(file.seed).unwrap_or(0);
@@ -1946,38 +2084,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 .unwrap_or_else(|| panic!("game.players library references unknown card key '{key}'"));
             card_ids.insert(key.clone(), ObjectId(next_id));
             next_id += 1;
-            let symbols = mana_symbols(spec.generic_cost, &spec.colors);
-            CardDefinition {
-                definition_id: 0,
-                name: spec.name.clone(),
-                mana_cost: ManaCost { symbols },
-                color_indicator: None,
-                supertypes: parse_supertypes(&spec.supertypes),
-                card_types: parse_card_types(&spec.types),
-                subtypes: spec.subtypes.iter().cloned().map(Subtype).collect(),
-                oracle_text: String::new(),
-                power: build_pt(spec.power, &spec.power_script),
-                toughness: build_pt(spec.toughness, &spec.toughness_script),
-                loyalty: None,
-                defense: None,
-                script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
-                keywords: parse_keywords(&spec.keywords),
-                target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
-                // TODO: no TOML scenario field for alternative costs yet -
-                // flashback/escape-style cards aren't constructible via a
-                // scenario fixture this slice, only via direct struct
-                // literals in Rust integration tests (see
-                // phase5_flashback_alternative_costs.rs).
-                alternative_costs: Vec::new(),
-                buyback_cost: None,
-                // TODO: no TOML scenario field for a Rust-native effect
-                // (Game.Ops.Damage/GainLife/...) yet either - same
-                // "direct struct literal only" limit as alternative_costs
-                // above.
-                effect: None,
-                modes: build_spell_modes(&spec.modes),
-                mode_choice: build_mode_choice(spec),
-            }
+            card_definition_from_spec(card_db.as_ref(), 0, spec)
         }).collect();
         // CR 903.6: minted after this player's library, matching
         // `Engine::new_game`'s own id-allocation order exactly (library
@@ -1989,29 +2096,7 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
                 .unwrap_or_else(|| panic!("game.players commanders references unknown card key '{key}'"));
             card_ids.insert(key.clone(), ObjectId(next_id));
             next_id += 1;
-            let symbols = mana_symbols(spec.generic_cost, &spec.colors);
-            CardDefinition {
-                definition_id: 0,
-                name: spec.name.clone(),
-                mana_cost: ManaCost { symbols },
-                color_indicator: None,
-                supertypes: parse_supertypes(&spec.supertypes),
-                card_types: parse_card_types(&spec.types),
-                subtypes: spec.subtypes.iter().cloned().map(Subtype).collect(),
-                oracle_text: String::new(),
-                power: build_pt(spec.power, &spec.power_script),
-                toughness: build_pt(spec.toughness, &spec.toughness_script),
-                loyalty: None,
-                defense: None,
-                script_ref: ScriptReference::Inline(spec.script.clone().unwrap_or_default()),
-                keywords: parse_keywords(&spec.keywords),
-                target_requirement: spec.target_requirement.as_ref().map(build_target_requirement),
-                alternative_costs: Vec::new(),
-                buyback_cost: None,
-                effect: None,
-                modes: build_spell_modes(&spec.modes),
-                mode_choice: build_mode_choice(spec),
-            }
+            card_definition_from_spec(card_db.as_ref(), 0, spec)
         }).collect();
         PlayerConfig { player_id: PlayerId(gp.id), library, commanders, life_override: gp.life_override }
     }).collect();
