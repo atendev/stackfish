@@ -150,3 +150,35 @@
 - Unresolved / explicitly deferred:
   - `Game.Ops.ForEachPlayer`'s bare-tag shape still only accepts `SacrificeRandom`/`DiscardRandom`
     — no other `Game.Ops.*` primitive can run per-player without a wrapping function.
+
+## Slice: scenario-script-choice-action (merged)
+
+- Branch `phase5/scenario-script-choice-action`.
+- Scope: the scenario TOML crate had no way to answer a `StepStatus::AwaitingScriptChoice { request:
+  ScriptChoiceRequest::SelectTarget, .. }` pause at all — `drain()` just parked on it. No scenario
+  file anywhere in the tree exercised `Game.SelectTargets`/`Game.ChooseN`'s mid-resolution pick, so
+  `crates/engine/tests/phase5_balance.rs` (mass-choice-effects' own end-to-end Balance proof) had no
+  TOML equivalent. Added a new `submit_script_choice` scenario action — generic over whatever
+  `TargetFilter` the pending request carries, not tied to Balance or any other specific card, since
+  `Game.SelectTargets` and every `Game.ChooseN` iteration raise the identical pause shape and
+  `Engine::submit_script_choice` itself doesn't distinguish them.
+- Verify: `crates/engine/tests/scenarios/phase5/phase5_mass_choice_balance.toml`, a TOML port of
+  `phase5_balance.rs`'s own fixture (two players, Balance sacrificing/discarding p0 down to p1's own
+  counts) — 24 steps, all pass. Full workspace `cargo test --workspace` green, no regressions.
+- Key changes:
+  - `ActionSpec::SubmitScriptChoice { player: u32, target: TargetSpec }` — reuses the existing
+    `TargetSpec`/`resolve_target` convention every other action's targets already use (bare player id
+    or card key). `player` is documentation only, not validated against the pending request's own
+    `controller` — same stance `SubmitPayment`/`SubmitDiscard` already take.
+  - `run_script_choice` — same "own entry point" shape as `run_payment`/`run_discard`:
+    `run_action_spec` intercepts `SubmitScriptChoice` before `to_player_action` (which has an
+    `unreachable!()` arm for it, matching the other three own-entry-point actions), calls
+    `Engine::submit_script_choice(target)` directly, then `drain()`s to the next pause. Works in both
+    `[[actions]]` and `[[steps]]` for free — `ScenarioStep::Action` wraps `ActionSpec` directly, no
+    separate step-only enum to touch.
+  - `docs/scenario_format.md` gained the new action's own section, next to `submit_discard`.
+- Unresolved / explicitly deferred:
+  - `Game.MayChoose`'s sibling pause (`ScriptChoiceRequest::MayChoose`, `Engine::
+    submit_script_may_choice(bool)`) still has no TOML action — no scenario fixture has needed a
+    yes/no mid-resolution choice yet. Same shape as this slice's own `submit_script_choice` would
+    apply if one ever does.
