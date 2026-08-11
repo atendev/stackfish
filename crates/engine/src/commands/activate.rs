@@ -270,6 +270,14 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::DestroyAll(_))
         | Some(AbilityEffect::Sacrifice)
         | Some(AbilityEffect::Exile)
+        // `phase5/mass-choice-effects`: no real card grants any of these
+        // three as an activated ability's own effect yet, but they're
+        // recognized primitives that go on the stack the same way as any
+        // other here - listed for exhaustiveness, same reason as
+        // ReturnSelfWithCounter/MadnessCastOrDiscard/Cascade below.
+        | Some(AbilityEffect::ForEachPlayer)
+        | Some(AbilityEffect::SacrificeRandom { .. })
+        | Some(AbilityEffect::DiscardRandom { .. })
         | Some(AbilityEffect::Counters { .. })
         | Some(AbilityEffect::Pump { .. })
         | Some(AbilityEffect::GainControl(_))

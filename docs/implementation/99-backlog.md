@@ -2,6 +2,19 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Mass-choice effects (Balance, `phase5/mass-choice-effects`, merged)**: `Game.ChooseN`,
+  `Game.Ops.SacrificeChosen`/`DiscardChosen`/`SacrificeRandom`/`DiscardRandom`/`ForEachPlayer` all
+  landed — full account in `docs/implementation/12-coroutines.md`'s own entry. Left open:
+  - `Game.Ops.ForEachPlayer` can only wrap a custom function, not a static tag like
+    `SacrificeRandom`/`DiscardRandom` directly — a card like "each player discards a card at
+    random" needs a one-line Lua wrapper around `Game.Ops.DiscardRandom` for now.
+  - `Game.Ops.DiscardRandom` has no `filter` parameter (`SacrificeRandom` does) — no real card
+    needs a filtered random discard yet.
+  - `Game.ChooseN`'s `opts.up_to` only allows choosing *fewer* than `n` — no `at_least`/"N or more"
+    shape.
+  - `Game.ChooseN`'s filter is the flat option-bag shape only, no scripted-predicate `filter = fn`
+    form (unlike `:SetTarget`/`target_requirement()`).
+
 - **Cascade (CR 702.85a)**: real now (`phase5/cascade`) — three real new pieces, each
   scoped wider than Cascade alone on purpose:
   - `ManaCost::mana_value` (CR 202.3) — didn't exist anywhere in this engine before.

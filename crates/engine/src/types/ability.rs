@@ -533,6 +533,66 @@ pub enum AbilityEffect {
     /// on CR 702.85a's own second "if the resulting spell's mana value is
     /// less" re-check.
     Cascade,
+    /// The `Game.Ops.ForEachPlayer(fn)` primitive (`phase5/mass-choice-
+    /// effects`, CR 101.4's APNAP-order "each player ..." shape — the rules
+    /// text's own worked example is literally "each player sacrifices a
+    /// creature"). No fields on this marker itself — the real payload is
+    /// `RegisteredAbility::operation`/`StackObject::operation`, a real
+    /// `ScriptHandle` for once rather than the usual `ScriptHandle(0)`
+    /// placeholder that pairs with every other static `Game.Ops.*` tag (see
+    /// `ForEachPlayerTag`'s own doc comment for why). `engine::resolve::
+    /// each_player::resolve_for_each_player_effect` invokes that same script
+    /// function once per player in CR 101.4 APNAP order (active player,
+    /// then each other player in turn order), rebasing which `PlayerId`
+    /// counts as `controller`/"you" each time rather than adding any new
+    /// "whose perspective" mechanism — `TargetFilter::Object::controller`'s
+    /// "you"/"opponent" already resolves against whatever `controller` was
+    /// passed into `ScriptRuntime::invoke_operation`, not a value hardcoded
+    /// to the spell's original caster, so this composes for free with
+    /// `Game.ChooseN`/`Game.SelectTargets`/`Game.Ops.SacrificeChosen`/
+    /// `DiscardChosen` called from inside the wrapped function.
+    ///
+    /// CR 101.4's "then the actions happen simultaneously": a per-player
+    /// invocation's own `sacrifice_chosen`/`discard_chosen` result-table
+    /// keys (see `OperationOutcome::PendingZoneMoves`) are *not* applied
+    /// right after that player's own choice — `resolve_for_each_player_effect`
+    /// accumulates every player's ids into one combined batch per verb and
+    /// performs the real zone moves only after the last player's choice, so
+    /// a mid-loop replacement effect (or a later player's own choice) still
+    /// sees every permanent/card that's *about* to leave, not one that
+    /// already has.
+    ///
+    /// TODO: only wraps a script function - a static `Game.Ops.*` tag
+    /// (`SacrificeRandom`/`DiscardRandom`) can't be handed to
+    /// `ForEachPlayer` directly (e.g. "each player discards a card at
+    /// random" would need a one-line Lua wrapper function around it); no
+    /// real card built this slice needs that combination.
+    ForEachPlayer,
+    /// The `Game.Ops.SacrificeRandom(filter, count)` primitive (CR 701.21,
+    /// "at random" — a true random procedure, not a player choice, unlike
+    /// `Game.ChooseN`+`Game.Ops.SacrificeChosen`). `filter` matches
+    /// `AbilityEffect::DestroyAll`'s own `EffectFilter` shape (`controller`
+    /// resolved against the resolving `StackObject`'s own controller, same
+    /// "you"/"opponent"/"any" vocabulary), evaluated fresh at resolution —
+    /// no targeting. `count` candidates are drawn without replacement via
+    /// `Engine::next_rng` (same deterministic, ledger-logged source
+    /// `shuffle_library` already uses), fewer than `count` sacrificed if
+    /// fewer than `count` candidates match (mirrors CR 701.17b's mill
+    /// "can't mill more than exist" stance - no real card needs this engine
+    /// to error out instead). Resolved via the same `continue_scripted_
+    /// zone_move(Sacrifice, ...)` pipeline `Sacrifice`/`DestroyAll` already
+    /// use, so CR 616.1 ordering and dies-triggers apply identically.
+    SacrificeRandom { filter: EffectFilter, count: u32 },
+    /// The `Game.Ops.DiscardRandom(count)` primitive (CR 701.9b: "some
+    /// effects... require a random discard"). Always the resolving
+    /// `StackObject`'s own controller's hand, no filter - no real card
+    /// built this slice discards a filtered random selection (e.g. "discard
+    /// a random land"), so unlike `SacrificeRandom` this doesn't carry an
+    /// `EffectFilter` yet; add one the same way if a real card needs it.
+    /// Same "fewer than `count` if the hand is smaller" stance as
+    /// `SacrificeRandom`, mirroring CR 701.17b's mill precedent. Resolved
+    /// via `continue_scripted_zone_move(Discard, ...)`.
+    DiscardRandom { count: u32 },
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two

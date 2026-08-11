@@ -144,9 +144,18 @@ impl Engine {
         let ProcessState::AwaitingScriptChoice { request, controller, stack_id, .. } = &self.process_state else {
             return Err(ScriptChoiceError::NotAwaitingChoice);
         };
-        let ScriptChoiceRequest::SelectTarget { filter } = request else {
+        let ScriptChoiceRequest::SelectTarget { filter, exclude_ids } = request else {
             return Err(ScriptChoiceError::WrongRequestKind);
         };
+        // `phase5/mass-choice-effects`: Game.ChooseN's own repeat-ask
+        // exclusion - see ScriptChoiceRequest::SelectTarget's own doc
+        // comment for why this lives here rather than folded into
+        // target_is_legal/TargetFilter.
+        if let Target::Object(id) = chosen {
+            if exclude_ids.contains(&id) {
+                return Err(ScriptChoiceError::InvalidCandidate);
+            }
+        }
         // CR 702.16c: the resolving StackObject's own id is the "source"
         // protection checks against, not the controller - same distinction
         // validate_targets' own callers already make for a static target
@@ -161,7 +170,7 @@ impl Engine {
         {
             return Err(ScriptChoiceError::InvalidCandidate);
         }
-        let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, mut events_so_far, .. } =
+        let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, events_so_far, each_player, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
@@ -171,15 +180,7 @@ impl Engine {
             .script_runtime
             .resume_operation(thread, &mut self.state, controller, chosen)
             .unwrap_or(OperationOutcome::Finished);
-        self.process_state = match outcome {
-            OperationOutcome::Finished => {
-                events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
-                ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
-            }
-            OperationOutcome::NeedsChoice { thread, request } => {
-                ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far }
-            }
-        };
+        self.process_state = self.settle_script_operation_outcome(outcome, stack_id, controller, events_so_far, each_player);
         Ok(())
     }
 
@@ -199,7 +200,7 @@ impl Engine {
         let ScriptChoiceRequest::MayChoose = request else {
             return Err(ScriptChoiceError::WrongRequestKind);
         };
-        let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, mut events_so_far, .. } =
+        let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, events_so_far, each_player, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
@@ -209,15 +210,7 @@ impl Engine {
             .script_runtime
             .resume_operation_bool(thread, &mut self.state, controller, chosen)
             .unwrap_or(OperationOutcome::Finished);
-        self.process_state = match outcome {
-            OperationOutcome::Finished => {
-                events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
-                ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
-            }
-            OperationOutcome::NeedsChoice { thread, request } => {
-                ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far }
-            }
-        };
+        self.process_state = self.settle_script_operation_outcome(outcome, stack_id, controller, events_so_far, each_player);
         Ok(())
     }
 

@@ -262,3 +262,12 @@ Static-ability affects-predicates and effect-shape custom functions *do* receive
 real, public board state as a trailing argument (see [static-abilities.md](static-abilities.md)) —
 a deliberately wider boundary than the plain condition callback, since those need to inspect other
 permanents to decide who/what an effect applies to.
+
+An operation function (`:SetOperation(function(source, controller) ... end)`, or `s.operation()`'s
+own custom-function shape) gets the same snapshot too, as a third `state` argument
+(`phase5/mass-choice-effects`) — `function(source, controller, state) ... end`. Same public-zones-
+only, hidden-zones-as-counts-only boundary as everywhere else this snapshot appears (CR 400.2/402.3):
+`state.battlefield`/`state.exile` are full card-summary arrays (`card_types`, `controller`, ...);
+`state.hand_count`/`state.library_count` are per-player counts only, never contents. This is what lets
+an operation compute something like Balance's own "the fewest lands any player controls" before
+making a choice — see [targeting-and-choices.md](targeting-and-choices.md#applying-an-effect-to-each-player).

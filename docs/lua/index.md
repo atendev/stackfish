@@ -37,9 +37,11 @@ several abilities.
 
 - **[Targeting and mid-resolution choices](targeting-and-choices.md)** — the shared filter-table
   shape (`card_types`/`controller`/`subtypes`/...) used across `:SetAffected`/`:SetTarget`/cost
-  filters; scripted targeting predicates for cases a plain filter table can't express; and the two
-  mechanisms for asking the player something in the middle of resolving an effect,
-  `Game.SelectTargets`/`Game.MayChoose`.
+  filters; scripted targeting predicates for cases a plain filter table can't express; the
+  mechanisms for asking the player something in the middle of resolving an effect
+  (`Game.SelectTargets`/`Game.MayChoose`/`Game.ChooseN`); `Game.Ops.SacrificeChosen`/
+  `DiscardChosen`/`SacrificeRandom`/`DiscardRandom`; and `Game.Ops.ForEachPlayer` (CR 101.4
+  APNAP, e.g. Balance's "each player ...").
 - **[Tokens](tokens.md)** — `Game.Tokens.*` token specs and `Game.Ops.CreateToken`.
 - **[Not available yet](not-available-yet.md)** — real gaps, named rather than silently guessed
   at, plus a short how-to for adding a new primitive if you're extending the engine itself.

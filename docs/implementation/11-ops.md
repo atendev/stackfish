@@ -366,3 +366,11 @@
   test-result blocks, zero failures).
 - Unresolved: nothing new - this was purely closing an already-named gap. `docs/scenario_format.md`'s
   own `continuous_effect` reference section updated with the four new TOML keys.
+
+## Slice: mass-choice-effects (merged) - new Game.Ops.* entries
+
+- Branch `phase5/mass-choice-effects` - `Game.Ops.SacrificeChosen`/`DiscardChosen`/`SacrificeRandom`/
+  `DiscardRandom`/`ForEachPlayer` all landed this slice, alongside the coroutine-side `Game.ChooseN`.
+  Full account (including `AbilityEffect`/`ScriptedZoneMoveKind` changes) lives in
+  [12-coroutines.md](12-coroutines.md#slice-mass-choice-effects-merged), grouped with the coroutine
+  machinery they build on rather than duplicated here.

@@ -544,8 +544,12 @@ impl Engine {
 
     /// Advances `state.rng` by one step and returns the raw u64. Uses
     /// splitmix64 so the sequence is deterministic from `seed` alone and
-    /// every output is logged as `RngDrawn`.
-    fn next_rng(&mut self) -> u64 {
+    /// every output is logged as `RngDrawn`. `pub(in crate::engine)` (widened
+    /// by `phase5/mass-choice-effects`) rather than private to this file —
+    /// `engine::resolve::destruction`/`discard`'s own `SacrificeRandom`/
+    /// `DiscardRandom` need the same deterministic, ledger-logged draws
+    /// `shuffle_library` already uses, not a second RNG source.
+    pub(in crate::engine) fn next_rng(&mut self) -> u64 {
         self.state.rng.draws_consumed += 1;
         let mut z = self.state.rng.seed.wrapping_add(
             0x9e3779b97f4a7c15u64.wrapping_mul(self.state.rng.draws_consumed),

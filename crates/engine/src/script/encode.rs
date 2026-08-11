@@ -161,6 +161,15 @@ fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'
     table
         .set("is_creature", obj.definition.card_types.contains(CardTypeSet::CREATURE))
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    // `phase5/mass-choice-effects`: the raw card type list (e.g. `{"Land"}`),
+    // same name strings a filter table's own `card_types` key accepts - added
+    // alongside `is_creature` (not replacing it) since a `ForEachPlayer` body
+    // computing something like Balance's "how many lands does each player
+    // control" needs to distinguish more than just creature-or-not from this
+    // snapshot. `is_creature` stays for whatever already reads it.
+    table
+        .set("card_types", card_type_names_to_lua(lua, obj.definition.card_types)?)
+        .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     table.set("controller", obj.controller.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     // CR 303.4m/703.4b: what this object is attached to (an Aura/Equipment/
     // Fortification's own "enchanted"/"equipped" reference), and what's
@@ -181,6 +190,34 @@ fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'
         attachments.set((i + 1) as i64, id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     }
     table.set("attachments", attachments).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    Ok(Value::Table(table))
+}
+
+/// `CardTypeSet` -> the same name-string vocabulary a filter table's own
+/// `card_types` key accepts (`decode::parse_card_type_name`'s inverse) - a
+/// 1-indexed array of every type this object has, in a fixed check order.
+/// `phase5/mass-choice-effects`'s own `card_summary_to_lua` is the only
+/// caller so far.
+fn card_type_names_to_lua<'lua>(lua: &'lua Lua, types: CardTypeSet) -> Result<Value<'lua>, ScriptError> {
+    let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let mut i = 1i64;
+    let named: &[(CardTypeSet, &str)] = &[
+        (CardTypeSet::ARTIFACT, "Artifact"),
+        (CardTypeSet::CREATURE, "Creature"),
+        (CardTypeSet::ENCHANTMENT, "Enchantment"),
+        (CardTypeSet::INSTANT, "Instant"),
+        (CardTypeSet::LAND, "Land"),
+        (CardTypeSet::SORCERY, "Sorcery"),
+        (CardTypeSet::KINDRED, "Kindred"),
+        (CardTypeSet::PLANESWALKER, "Planeswalker"),
+        (CardTypeSet::BATTLE, "Battle"),
+    ];
+    for (bit, name) in named {
+        if types.contains(*bit) {
+            table.set(i, *name).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            i += 1;
+        }
+    }
     Ok(Value::Table(table))
 }
 
