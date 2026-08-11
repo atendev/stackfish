@@ -1,0 +1,109 @@
+# Armageddon test scenario — "Destroy all lands."
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "armageddon"
+name = "Armageddon"
+types = ["Sorcery"]
+script = """
+local s = {}
+
+function s.operation()
+    return Game.Ops.DestroyAll({ card_types = { "Land" } })
+end
+
+return s
+"""
+
+[[cards]]
+key = "plains"
+name = "Plains"
+types = ["Land"]
+
+[[cards]]
+key = "mountain"
+name = "Mountain"
+types = ["Land"]
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "filler"
+name = "Filler Card"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "armageddon"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "plains"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "mountain"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+[[setup]]
+player = 0
+zone = "library"
+card = "filler"
+
+# PreGame -> Untap -> Upkeep -> Draw -> Main
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "armageddon"
+targets = []
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "plains"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "mountain"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "battlefield"
