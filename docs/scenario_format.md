@@ -735,6 +735,28 @@ and reported as `Errored` in the scenario output. Same "own entry point" design 
 setups share the same key, only the last ObjectId is tracked and only that instance can be named in
 `cards`).
 
+```toml
+[[actions]]
+type = "submit_script_choice"
+player = 0
+target = "bear"   # same Targets convention as everywhere else - a player id or a card key
+```
+
+Answers a pending `ProcessState::AwaitingScriptChoice { request: ScriptChoiceRequest::SelectTarget,
+.. }` pause (backlog item 9) — a card script asking mid-resolution for one target matching its own
+`TargetFilter`, via `Game.SelectTargets` directly or one iteration of a `Game.ChooseN` loop (both
+raise the identical pause shape; this action doesn't distinguish them, so the same TOML action
+answers either). `target` is checked against the request's own filter the same way
+`Engine::submit_script_choice` always has — an illegal candidate (wrong type/zone/controller, or
+already picked earlier in the same `Game.ChooseN` batch) is rejected and reported as `Errored`. Same
+"own entry point" design as `submit_payment`/`submit_discard` — not routed through `submit_action`;
+`player` is documentation only (matches the pending request's own controller), not validated against
+it. See `crates/engine/tests/scenarios/phase5/phase5_mass_choice_balance.toml` for a full worked
+example (Balance, CR 701.8 — one `submit_script_choice` per `Game.ChooseN` pick across a two-player
+`Game.Ops.ForEachPlayer` resolution). `Game.MayChoose`'s sibling boolean-answer pause
+(`ScriptChoiceRequest::MayChoose`, `Engine::submit_script_may_choice`) has no TOML action yet — no
+scenario fixture has needed it so far.
+
 ### Pregame actions (new-game path only)
 
 These three action types answer mulligan decisions during `ProcessState::AwaitingMulliganDecision`

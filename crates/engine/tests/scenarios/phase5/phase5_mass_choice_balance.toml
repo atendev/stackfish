@@ -1,0 +1,315 @@
+# Mass-choice effects (CR 701.8/601.2c) end to end through the scenario
+# crate, proving the new generic `submit_script_choice` action: Balance
+# itself, built entirely out of `Game.ChooseN`/`Game.Ops.SacrificeChosen`/
+# `Game.Ops.DiscardChosen`/`Game.Ops.ForEachPlayer` (phase5/mass-choice-
+# effects) - no card-specific engine code at all. Same fixture as
+# `crates/engine/tests/phase5_balance.rs`, ported to TOML now that a
+# scenario can answer a `Game.SelectTargets`/`Game.ChooseN` mid-resolution
+# pick. Each battlefield/hand card gets its own `[[cards]]` key (rather than
+# reusing one land/bear key across multiple `[[setup]]` entries) since
+# `card_ids` tracks only the last object instance minted for a given key -
+# every card here needs to stay individually addressable by
+# `submit_script_choice`/`assert_object_zone` afterward.
+#
+# p0 controls 3 lands + 2 creatures + 3 hand cards (incl. Balance); p1
+# controls 1 land + 0 creatures + 1 hand card - p1 is already at the fewest
+# in every category, so p1 never gets asked anything, and p0 alone must
+# reduce down to p1's own counts (2 lands sacrificed, 2 creatures
+# sacrificed, 1 extra hand card discarded - Balance itself already left
+# p0's hand by the time this resolves).
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "balance"
+name = "Test Balance"
+types = ["Sorcery"]
+script = """
+local s = {}
+
+local function type_has(card_types, name)
+    for _, t in ipairs(card_types) do
+        if t == name then return true end
+    end
+    return false
+end
+
+function s.operation()
+    return Game.Ops.ForEachPlayer(function(source, controller, state)
+        local lands = {}
+        local creatures = {}
+        for _, obj in ipairs(state.battlefield) do
+            if type_has(obj.card_types, "Land") then
+                lands[obj.controller] = (lands[obj.controller] or 0) + 1
+            end
+            if obj.is_creature then
+                creatures[obj.controller] = (creatures[obj.controller] or 0) + 1
+            end
+        end
+
+        local min_lands, min_creatures, min_hand = nil, nil, nil
+        for pid, hand_size in pairs(state.hand_count) do
+            local land_count = lands[pid] or 0
+            local creature_count = creatures[pid] or 0
+            if min_lands == nil or land_count < min_lands then min_lands = land_count end
+            if min_creatures == nil or creature_count < min_creatures then min_creatures = creature_count end
+            if min_hand == nil or hand_size < min_hand then min_hand = hand_size end
+        end
+
+        local my_lands = lands[controller] or 0
+        local my_creatures = creatures[controller] or 0
+        local my_hand = state.hand_count[controller] or 0
+
+        local sac_ids = {}
+        if my_lands > min_lands then
+            local chosen = Game.ChooseN({ card_types = { "Land" }, controller = "you" }, my_lands - min_lands)
+            for _, v in ipairs(chosen) do table.insert(sac_ids, v) end
+        end
+        if my_creatures > min_creatures then
+            local chosen = Game.ChooseN({ card_types = { "Creature" }, controller = "you" }, my_creatures - min_creatures)
+            for _, v in ipairs(chosen) do table.insert(sac_ids, v) end
+        end
+        local result = Game.Ops.SacrificeChosen(sac_ids)
+
+        if my_hand > min_hand then
+            local chosen_cards = Game.ChooseN({ zone = "Hand", controller = "you" }, my_hand - min_hand)
+            local discarded = Game.Ops.DiscardChosen(chosen_cards)
+            result.discard_chosen = discarded.discard_chosen
+        end
+
+        return result
+    end)
+end
+
+return s
+"""
+
+[[cards]]
+key = "p0_land_a"
+name = "P0 Plains A"
+types = ["Land"]
+
+[[cards]]
+key = "p0_land_b"
+name = "P0 Plains B"
+types = ["Land"]
+
+[[cards]]
+key = "p0_land_c"
+name = "P0 Plains C"
+types = ["Land"]
+
+[[cards]]
+key = "p0_bear_a"
+name = "P0 Bear A"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "p0_bear_b"
+name = "P0 Bear B"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[cards]]
+key = "p0_extra_a"
+name = "P0 Extra A"
+types = ["Land"]
+
+[[cards]]
+key = "p0_extra_b"
+name = "P0 Extra B"
+types = ["Land"]
+
+[[cards]]
+key = "p1_island"
+name = "P1 Island"
+types = ["Land"]
+
+[[cards]]
+key = "p1_card"
+name = "P1 Card"
+types = ["Land"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "balance"
+
+# p0: 3 lands, 2 creatures, 2 extra hand cards (+ Balance itself = 3).
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "p0_land_a"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "p0_land_b"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "p0_land_c"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "p0_bear_a"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "p0_bear_b"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "p0_extra_a"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "p0_extra_b"
+
+# p1: 1 land, 0 creatures, 1 hand card - already the fewest everywhere.
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "p1_island"
+
+[[setup]]
+player = 1
+zone = "hand"
+card = "p1_card"
+
+# Two players, so every step transition needs both to pass in a row (CR
+# 117.4) - PreGame -> Upkeep (Untap auto-chains, no priority) -> PreCombatMain
+# (Draw skipped turn 1, CR 103.8a/500.7), 2 passes each - see
+# phase5_combat_declarations.toml's own comment for the fuller derivation.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "balance"
+targets = []
+
+[[steps]]
+type = "submit_payment"
+player = 0
+# no mana_cost - still needs an explicit empty plan (CR 118.5a).
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+# resolves Balance off the stack - engine now pauses at the first
+# Game.ChooseN pick inside ForEachPlayer's p0 iteration.
+
+# p0 must choose 2 of 3 lands to sacrifice (3 - min(3,1) = 2).
+[[steps]]
+type = "submit_script_choice"
+player = 0
+target = "p0_land_a"
+
+[[steps]]
+type = "submit_script_choice"
+player = 0
+target = "p0_land_b"
+
+# Then 2 of 2 creatures (2 - min(2,0) = 2).
+[[steps]]
+type = "submit_script_choice"
+player = 0
+target = "p0_bear_a"
+
+[[steps]]
+type = "submit_script_choice"
+player = 0
+target = "p0_bear_b"
+
+# Then 1 of 2 extra hand cards (2 - 1 = 1 - Balance itself doesn't count,
+# it already left p0's hand by the time this resolves).
+[[steps]]
+type = "submit_script_choice"
+player = 0
+target = "p0_extra_a"
+
+# p1 is already at the fewest everywhere - never asked anything, the whole
+# ForEachPlayer loop finishes once p0's last choice resolves.
+[[steps]]
+type = "assert_priority_player"
+equals = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "p0_land_a"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "p0_land_b"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "p0_land_c"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "p0_bear_a"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "p0_bear_b"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "p0_extra_a"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "p0_extra_b"
+equals = "hand"
+
+[[steps]]
+type = "assert_hand_size"
+player = 0
+equals = 1
+
+[[steps]]
+type = "assert_object_zone"
+card = "p1_island"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_hand_size"
+player = 1
+equals = 1

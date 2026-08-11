@@ -677,6 +677,19 @@ pub enum ActionSpec {
     /// zone order). Routes through `Engine::submit_bottom_cards`. Use
     /// `first_n = 0` to bottom nothing (only valid when count == 0).
     BottomCards { player: u32, #[serde(default)] first_n: usize },
+    /// Backlog item 9 (`Game.SelectTargets`/`Game.ChooseN`): answers a
+    /// pending `ProcessState::AwaitingScriptChoice { request: SelectTarget,
+    /// .. }` pause — a card script asking mid-resolution for one target
+    /// matching its own `TargetFilter`, regardless of which primitive
+    /// (`Game.SelectTargets` directly, or a `Game.ChooseN` loop iteration)
+    /// raised it. `target` is a bare player id or card key, same
+    /// `TargetSpec` convention every other action's targets use. Same "own
+    /// entry point" rationale as `SubmitPayment` — routed through
+    /// `Engine::submit_script_choice`, not `submit_action`. `player` is
+    /// documentation only (matches the request's own `controller`, which
+    /// the engine already knows) — not validated against it, same stance
+    /// `SubmitPayment`/`SubmitDiscard` already take.
+    SubmitScriptChoice { player: u32, target: TargetSpec },
 }
 
 fn describe_target(target: &TargetSpec) -> String {
@@ -752,6 +765,9 @@ impl ActionSpec {
             ActionSpec::UnwindPayment { player } => format!("unwind_payment(player={player})"),
             ActionSpec::SubmitDiscard { player, cards } => {
                 format!("submit_discard(player={player}, cards={cards:?})")
+            }
+            ActionSpec::SubmitScriptChoice { player, target } => {
+                format!("submit_script_choice(player={player}, target={})", describe_target(target))
             }
             ActionSpec::KeepHand { player } => format!("keep_hand(player={player})"),
             ActionSpec::TakeMulligan { player } => format!("take_mulligan(player={player})"),
@@ -1854,6 +1870,9 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
         ActionSpec::KeepHand { .. } | ActionSpec::TakeMulligan { .. } | ActionSpec::BottomCards { .. } => {
             unreachable!("pregame actions are handled in run_action_spec, before to_player_action")
         }
+        ActionSpec::SubmitScriptChoice { .. } => {
+            unreachable!("SubmitScriptChoice is handled in run_action_spec, before to_player_action")
+        }
     };
     PlayerAction { player: PlayerId(player), kind }
 }
@@ -1974,6 +1993,26 @@ fn run_payment(engine: &mut Engine, plan: PaymentPlan) -> StepOutcome {
 fn run_unwind_payment(engine: &mut Engine) -> StepOutcome {
     let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
         if let Err(err) = engine.unwind_payment() {
+            return StepOutcome::Errored(format!("{err:?}"));
+        }
+        drain(engine)
+    }));
+    match result {
+        Ok(outcome) => outcome,
+        Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
+    }
+}
+
+/// Same shape as `run_payment`, but for the `SubmitScriptChoice` action —
+/// answers a `ProcessState::AwaitingScriptChoice { request: SelectTarget,
+/// .. }` pause via `Engine::submit_script_choice`. Generic over whatever
+/// `TargetFilter` the pending request carries - works for a bare
+/// `Game.SelectTargets` ask or any iteration of a `Game.ChooseN` loop alike,
+/// since both raise the identical pause shape and `submit_script_choice`
+/// itself doesn't distinguish them.
+fn run_script_choice(engine: &mut Engine, target: Target) -> StepOutcome {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
+        if let Err(err) = engine.submit_script_choice(target) {
             return StepOutcome::Errored(format!("{err:?}"));
         }
         drain(engine)
@@ -2419,6 +2458,9 @@ fn run_action_spec(
         }),
         ActionSpec::BottomCards { player, first_n } => {
             run_bottom_cards(engine, PlayerId(*player), *first_n)
+        }
+        ActionSpec::SubmitScriptChoice { target, .. } => {
+            run_script_choice(engine, resolve_target(target, card_ids))
         }
         other => run_action(engine, to_player_action(other, card_ids)),
     };
