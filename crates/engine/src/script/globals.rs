@@ -1055,6 +1055,30 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         .eval()?;
     ops.set("DiscardChosen", discard_chosen)?;
 
+    // `Game.RegisterKeyword(source, name)` - sugar for the layer-6
+    // (AbilityAdding) self-only static ability every printed keyword needs
+    // (CR 613.1f). Equivalent to:
+    //   local e = Game.CreateStaticAbility(source)
+    //   e:SetLayer(Game.Layers.AbilityAdding)
+    //   e:SetEffect(Game.Effects.AddKeyword(name))
+    //   e:SetAffected({ self_only = true })
+    //   e:Register()
+    // Resolves `Game.*` at call time, so this must run after `Game` itself
+    // is assigned to the Lua globals below.
+    let register_keyword: Function = lua
+        .load(
+            r#"
+            function(source, name)
+                local e = Game.CreateStaticAbility(source)
+                e:SetLayer(Game.Layers.AbilityAdding)
+                e:SetEffect(Game.Effects.AddKeyword(name))
+                e:SetAffected({ self_only = true })
+                e:Register()
+            end
+            "#,
+        )
+        .eval()?;
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("InterveningIf", intervening_if)?;
@@ -1069,6 +1093,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     game.set("Tokens", tokens)?;
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
     game.set("CreateStaticAbility", create_static_ability)?;
+    game.set("RegisterKeyword", register_keyword)?;
     game.set("CreateReplacementEffect", create_replacement_effect)?;
     game.set("CreateActivatedAbility", create_activated_ability)?;
     game.set("CreateManaAbility", create_mana_ability)?;

@@ -99,6 +99,14 @@ end
 return s
 "#;
 
+const REGISTER_KEYWORD_FLYING: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    Game.RegisterKeyword(c, "Flying")
+end
+return s
+"#;
+
 const TWO_STATIC_ABILITIES: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -222,6 +230,24 @@ fn run_card_script_self_registers_a_remove_keyword_static_ability() {
     let effect = &state.continuous_effects[0];
     assert_eq!(effect.layer, Layer::AbilityAdding);
     assert!(matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::RemoveKeyword(set)) if set == KeywordSet::DEFENDER));
+}
+
+#[test]
+fn run_card_script_register_keyword_helper_grants_flying() {
+    let mut state = two_player_state();
+    let bear = ObjectId(0);
+    let definition = bear_definition(REGISTER_KEYWORD_FLYING);
+    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+
+    let mut runtime = ScriptRuntime::new();
+    runtime.run_card_script(&mut state, &definition, bear).expect("Game.RegisterKeyword self-registers cleanly");
+
+    assert_eq!(state.continuous_effects.len(), 1);
+    let effect = &state.continuous_effects[0];
+    assert_eq!(effect.source, bear);
+    assert_eq!(effect.layer, Layer::AbilityAdding);
+    assert!(matches!(effect.effect, EffectPayload::Primitive(EffectPrimitive::AddKeyword(set)) if set == KeywordSet::FLYING));
+    assert!(matches!(effect.affected, AffectedFilter::Primitive(EffectFilter { self_only: true, .. })));
 }
 
 #[test]

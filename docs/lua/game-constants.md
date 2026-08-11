@@ -217,6 +217,14 @@ A custom function is also accepted in place of any `Game.Effects.*` value — se
 [static-abilities.md](static-abilities.md) for its call signature (it returns a table describing
 the effect shape instead of using a tag).
 
+`Game.RegisterKeyword(source, name)` is a standalone helper (not part of the `Game.Effects.*`
+table) that wraps the `CreateStaticAbility`/`SetLayer(AbilityAdding)`/`SetEffect(AddKeyword(name))`/
+`SetAffected({ self_only = true })`/`Register()` boilerplate for the common case of a card granting
+itself a printed keyword — see the
+[cookbook](../wiki/Card-Script-Cookbook.md#grant-itself-a-printed-keyword-ability) for the full
+comparison. Fall back to the longhand `Game.Effects.AddKeyword` form when the target isn't
+self-only or the duration isn't permanent.
+
 ### Supported keyword names (`AddKeyword`/`RemoveKeyword`)
 
 The complete list both `Game.Effects.AddKeyword(name)` and `Game.Effects.RemoveKeyword(name)`
