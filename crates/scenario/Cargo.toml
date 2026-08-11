@@ -5,5 +5,9 @@ edition = "2024"
 
 [dependencies]
 stackfish-engine = { path = "../engine" }
+stackfish-carddb = { path = "../carddb" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+
+[dev-dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
