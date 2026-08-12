@@ -22,6 +22,8 @@
 //! `catch_unwind` so one stubbed action doesn't abort the whole report;
 //! each action's outcome is reported individually.
 
+mod card_templates;
+
 use std::collections::{HashMap, VecDeque};
 use std::panic::{self, AssertUnwindSafe};
 
@@ -941,11 +943,32 @@ impl AssertionSpec {
 // Loading
 // ---------------------------------------------------------------------
 
+/// Parses scenario TOML text into a `ScenarioFile`, expanding any
+/// `[[cards]]` entry's `template` field first (`card_templates::expand` -
+/// see that module for what a template is and where they're defined). The
+/// canonical entry point every text-based caller (`load` below,
+/// `run_db_tests`'s per-row parse) should use instead of calling
+/// `toml::from_str::<ScenarioFile>` directly, so template expansion isn't
+/// something each caller has to remember to opt into separately.
+pub fn parse(text: &str) -> ScenarioFile {
+    let mut root: toml::Table =
+        toml::from_str(text).unwrap_or_else(|e| panic!("failed to parse scenario TOML: {e}"));
+    card_templates::expand(&mut root);
+    // Round-trips through a string rather than a direct `Table -> ScenarioFile`
+    // conversion - keeps this on the same well-worn `toml::from_str` path
+    // every other TOML parse in this crate already uses, instead of a second,
+    // less-exercised deserialization route.
+    let expanded_text = toml::to_string(&root).unwrap_or_else(|e| {
+        panic!("failed to re-serialize scenario TOML after template expansion: {e}")
+    });
+    toml::from_str(&expanded_text)
+        .unwrap_or_else(|e| panic!("failed to parse scenario file after template expansion: {e}"))
+}
+
 pub fn load(path: &std::path::Path) -> ScenarioFile {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("failed to read scenario file {}: {e}", path.display()));
-    let mut file: ScenarioFile = toml::from_str(&text)
-        .unwrap_or_else(|e| panic!("failed to parse scenario file {}: {e}", path.display()));
+    let mut file = parse(&text);
     // `path.parent()` is `Some("")` for a bare filename with no directory
     // component (e.g. `load(Path::new("foo.toml"))`) - `PathBuf::from("")`
     // joined against a relative `card_db` below is a harmless no-op
@@ -2596,8 +2619,7 @@ pub fn run_db_tests(db_path: &std::path::Path) -> Vec<DbTestOutcome> {
 fn run_one_db_test(db_path_str: &str, row: CardTestRow) -> DbTestOutcome {
     let CardTestRow { oracle_id, card_name, test_name, version, test_source } = row;
     let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
-        let mut file: ScenarioFile = toml::from_str(&test_source)
-            .unwrap_or_else(|e| panic!("failed to parse test_source: {e}"));
+        let mut file = parse(&test_source);
         file.card_db = Some(db_path_str.to_string());
         run(&file)
     }));

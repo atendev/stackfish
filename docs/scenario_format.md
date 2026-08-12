@@ -187,7 +187,29 @@ trigger_condition = "..."      # optional Lua source, default none - see Trigger
 trigger_operation = "..."      # optional Lua source, default none - see Triggered abilities below
 script = "..."                 # optional full self-registering Lua source, default none - see below
 db_script_id = "m00003639"     # optional string, default none - see Real card lookup below
+template = "test_land_green"   # optional string, default none - see Templates below
 ```
+
+**`template` (quick fixture shortcut):** expands to a pre-written `[[cards]]` table from
+`crates/scenario/card_templates.toml` before this entry is even parsed — a plain TOML-level
+substitution (`card_templates::expand`), not a `CardSpec` field; `CardSpec` never sees the word
+`template`. Lets you write `template = "test_land_green"` instead of spelling out
+`types = ["Land"]` + `mana_ability = ["G"]` by hand every time you just need *a land that taps for
+green* and don't care about the rest of the card. Any field this entry sets itself (besides `key`
+and `template`) overrides the template's value for that same field, so you can still tweak one
+thing:
+
+```toml
+[[cards]]
+key = "big_bear"
+template = "test_creature_vanilla"
+power = 9   # template's power (2) is overridden; toughness (2) still comes from the template
+```
+
+Edit `crates/scenario/card_templates.toml` directly to add, rename, or change templates — it's a
+plain TOML file, each top-level table is one template named by its table header, no Rust code
+involved. An unknown `template` name panics with a clear message rather than silently falling back
+to this entry's other fields.
 
 **`db_script_id` (real card lookup):** looks this card up in the top-level `card_db` SQLite file
 via `stackfish_carddb::CardDb::load_by_script_id` — the DB's `cards.script_id` column, a stable

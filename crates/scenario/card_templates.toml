@@ -1,0 +1,63 @@
+# Quick-fixture card templates for scenario TOML files.
+#
+# Use `template = "name"` on a [[cards]] entry instead of writing out every
+# field by hand, e.g.:
+#
+#   [[cards]]
+#   key = "forest"
+#   template = "test_land_green"
+#
+# is exactly equivalent to copy-pasting this file's [test_land_green] table
+# into that [[cards]] entry. Any field the entry sets itself (besides `key`
+# and `template`) overrides the template's value for that same field, so you
+# can still tweak one thing without writing the whole card out, e.g.:
+#
+#   [[cards]]
+#   key = "big_bear"
+#   template = "test_creature_vanilla"
+#   power = 9
+#
+# Add more templates here as you need them - each top-level table below is
+# one template, named by its table header. See docs/scenario_format.md's
+# `[[cards]]` section for the full set of fields a card can set.
+
+[test_land]
+name = "Test Land"
+types = ["Land"]
+mana_ability = ["C"]
+
+[test_land_white]
+name = "Test White Land"
+types = ["Land"]
+mana_ability = ["W"]
+
+[test_land_blue]
+name = "Test Blue Land"
+types = ["Land"]
+mana_ability = ["U"]
+
+[test_land_black]
+name = "Test Black Land"
+types = ["Land"]
+mana_ability = ["B"]
+
+[test_land_red]
+name = "Test Red Land"
+types = ["Land"]
+mana_ability = ["R"]
+
+[test_land_green]
+name = "Test Green Land"
+types = ["Land"]
+mana_ability = ["G"]
+
+[test_land_colorless]
+name = "Test Colorless Land"
+types = ["Land"]
+mana_ability = ["C"]
+
+[test_creature_vanilla]
+name = "Test Vanilla Creature"
+types = ["Creature"]
+power = 2
+toughness = 2
