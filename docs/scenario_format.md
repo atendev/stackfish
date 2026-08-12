@@ -12,6 +12,13 @@ plus assertions to check afterward. Used by:
   `crates/engine/tests/scenarios.rs`).
 - `cargo run -p stackfish-cli -- path/to/scenario.toml` — runs one scenario file and prints a
   report. Use this for one-off manual or AI-driven testing.
+- `cargo run -p stackfish-cli -- db-tests path/to/cards.sqlite` — runs every active row in that
+  `stackfish-carddb` file's `card_tests` table as its own scenario (`stackfish_carddb::CardDb::
+  active_tests`, `stackfish_scenario::run_db_tests`). Each row's `test_source` is scenario TOML
+  same as a file on disk; its `card_db` is always forced to the `.sqlite` file being run, so cards
+  resolve against real oracle data regardless of what (if anything) `test_source` itself sets. A
+  row that fails to parse or panics while building/running is reported `ERRORED` rather than
+  aborting the rest of the batch — one bad row doesn't hide every other card's results.
 
 Actions that hit not-yet-implemented engine code report `not yet implemented` rather than
 crashing the run — that's expected pre-Phase 7, not a failure. Only an assertion that actually ran

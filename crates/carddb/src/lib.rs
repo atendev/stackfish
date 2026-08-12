@@ -217,6 +217,51 @@ impl CardDb {
             .optional()?;
         Ok(ScriptReference::Inline(source.unwrap_or_else(script::vanilla_stub)))
     }
+
+    /// Every active `card_tests` row, one per `(oracle_id, test_name)` -
+    /// same "`is_active = 1`, highest `version` wins" convention
+    /// `load_script_ref` already uses for `card_scripts`, just per test name
+    /// instead of a single row per card. Ordered by card name then test name
+    /// so a batch run's output is stable/readable run to run.
+    pub fn active_tests(&self) -> Result<Vec<CardTestRow>, CardLoadError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ct.oracle_id, c.name, ct.test_name, ct.version, ct.test_source \
+             FROM card_tests ct \
+             JOIN cards c ON c.oracle_id = ct.oracle_id \
+             WHERE ct.is_active = 1 \
+             AND ct.version = ( \
+                 SELECT MAX(ct2.version) FROM card_tests ct2 \
+                 WHERE ct2.oracle_id = ct.oracle_id \
+                   AND ct2.test_name = ct.test_name \
+                   AND ct2.is_active = 1 \
+             ) \
+             ORDER BY c.name, ct.test_name",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(CardTestRow {
+                    oracle_id: row.get(0)?,
+                    card_name: row.get(1)?,
+                    test_name: row.get(2)?,
+                    version: row.get(3)?,
+                    test_source: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+/// One active row from `card_tests`, joined with the card's own `name` for
+/// reporting - a hand-authored scenario TOML (see `docs/scenario_format.md`)
+/// stored in the DB and tied to the card it exercises, rather than living as
+/// a file under `tests/scenarios/`.
+pub struct CardTestRow {
+    pub oracle_id: String,
+    pub card_name: String,
+    pub test_name: String,
+    pub version: i64,
+    pub test_source: String,
 }
 
 struct CardRow {
