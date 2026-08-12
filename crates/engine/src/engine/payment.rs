@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 
-use crate::commands::{self, PaymentResolution};
+use crate::commands::{self, PaymentResolution, PendingPaymentRequest};
 use crate::replacement::{self, ReplacementOutcome};
 use crate::types::cost::{AdditionalCost, PaymentPlan};
 use crate::types::event::{GameEvent, GameEventKind};
@@ -12,7 +12,7 @@ use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
 use crate::types::stack::StackEntryKind;
 use crate::types::zone::ZoneKind;
 
-use super::{Engine, PaymentError, PendingZoneMove, ProcessState, ReplacementResumeTarget};
+use super::{Engine, PaymentError, PendingZoneMove, ProcessState, ReplacementResumeTarget, SuspendedPayment};
 
 /// CR 702.29c/f: builds the `GameEventKind::Cycled` marker for a just-
 /// resolved cost zone-move `event`, if it's the one payment `cycling_source`
@@ -228,6 +228,34 @@ impl Engine {
             self.log_events(vec![GameEventKind::SpellCast { object: stack_id }]);
         }
         ProcessState::SbaLoop
+    }
+
+    /// CR 601.2g/605.3a: the shared check both `Engine::end_pipeline_run`'s
+    /// `PipelineExit::BackToPriority` arm and `handle_pending_action`'s
+    /// error arm make before falling back to their own old unconditional
+    /// behavior (`fallback`, `PriorityWindow` at both current call sites).
+    /// A nested mana-ability activation accepted by `submit_action` while
+    /// mid-payment (see that method's own doc comment) pushed the outer
+    /// `AwaitingPayment` it interrupted onto `suspended_payments` before
+    /// queuing itself as a fresh `PendingAction` - once that nested action's
+    /// own pipeline run fully settles (or errors out before ever really
+    /// starting), popping here resumes the outer payment exactly where it
+    /// left off, restoring the `pipeline_context`/`pipeline_exit` the
+    /// nested run's own `handle_pending_action` call overwrote (see
+    /// `Engine::pending_payment`'s sibling `suspended_payments` doc comment
+    /// for why those two specifically have to travel with the pause).
+    /// Nothing suspended (the overwhelmingly common case - no nesting in
+    /// play) just returns `fallback` unchanged.
+    pub(super) fn resume_suspended_payment_or(&mut self, fallback: ProcessState) -> ProcessState {
+        let Some(SuspendedPayment { request, pipeline_context, pipeline_exit }) =
+            self.suspended_payments.pop()
+        else {
+            return fallback;
+        };
+        self.pipeline_context = pipeline_context;
+        self.pipeline_exit = pipeline_exit;
+        let PendingPaymentRequest { stack_id, payer, cost, source, on_paid } = request;
+        ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid }
     }
 
     /// Answers a pending CR 601.2f-h payment pause by abandoning the cast/

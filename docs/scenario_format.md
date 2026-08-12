@@ -613,6 +613,17 @@ ability_index = 0
 targets = []
 ```
 
+**Exception (CR 601.2g/605.3a):** if a mana ability's own `source`/`ability_index` resolve to an
+`AddMana`/`AddManaChoice` effect, this action is also legal while a *different* pending payment is
+open (`ProcessState::AwaitingPayment` from an earlier `cast_spell`/`activate_ability` in the same
+sequence) — as long as `player` is that pause's own payer. This is the one way `activate_ability`
+skips the normal priority check: tapping a land mid-payment to cover the very cost being paid,
+instead of requiring every mana source to be pre-tapped before the `cast_spell`/`activate_ability`
+action that needs it. Nothing else is legal in that window (a second spell, a non-mana ability, or
+any other player's ability still get the ordinary "not waiting for a player action" rejection).
+See `crates/engine/tests/phase5_mana_ability_during_payment.rs` for worked examples, including a
+real-cost (Treasure-style) mana ability nesting its own payment pause inside the outer one.
+
 ```toml
 [[actions]]
 type = "declare_attackers"
@@ -699,10 +710,11 @@ mana = { units = ["G", "C", "C"] }   # optional, default {} (an empty plan)
 ```
 
 Answers a pending `ProcessState::AwaitingPayment` pause (CR 601.2f-h) — i.e. the action right
-after a `cast_spell`/`activate_ability` that has a real cost. Deliberately **not** routed through
-`submit_action` like every other action above — it answers `Engine::submit_payment` directly
-(mirrors how a replacement-ordering or trigger-ordering choice would, if those ever got a TOML
-shape too).
+after a `cast_spell`/`activate_ability` that has a real cost, or after any `activate_ability` mana
+abilities issued mid-payment (see that action's own note above) have settled. Deliberately **not**
+routed through `submit_action` like every other action above — it answers `Engine::submit_payment`
+directly (mirrors how a replacement-ordering or trigger-ordering choice would, if those ever got a
+TOML shape too).
 
 #### `mana.units`: the exact literal mana spent
 
