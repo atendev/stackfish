@@ -79,7 +79,9 @@ fn run_db_tests(db_path: &std::path::Path) -> ExitCode {
         );
         match &outcome.result {
             DbTestResult::Errored(msg) => println!("  ERRORED - {msg}"),
-            DbTestResult::Report(report) => print_failures_only(report),
+            DbTestResult::Report(report) => {
+                print_report(report);
+            }
         }
     }
 
@@ -90,27 +92,6 @@ fn run_db_tests(db_path: &std::path::Path) -> ExitCode {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
-    }
-}
-
-/// Same entries `print_report` walks, but only the ones that actually
-/// indicate a problem — a real action error or a failed assertion. Skips
-/// `Ran`/`NotImplemented`/`PASS` entirely so a long-running scenario's
-/// output doesn't drown the one line that matters.
-fn print_failures_only(report: &stackfish_scenario::ScenarioReport) {
-    for (i, entry) in report.entries.iter().enumerate() {
-        match &entry.outcome {
-            EntryOutcome::Action(StepOutcome::Errored(msg)) => {
-                println!("  [{i}] action | errored - {} ({msg})", entry.description);
-            }
-            EntryOutcome::Assertion(AssertionOutcome::Failed { expected, actual }) => {
-                println!(
-                    "  [{i}] assert | FAIL  - {} (expected {expected}, got {actual})",
-                    entry.description
-                );
-            }
-            _ => {}
-        }
     }
 }
 
