@@ -1317,6 +1317,14 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
                 .then(|| parse_supertypes(&spec.excluded_supertypes)),
             controller: spec.controller.as_deref().map(parse_filter_controller),
             zone: spec.zone.as_deref().map(parse_zone_kind),
+            // TODO: TargetRequirementSpec has no mana_value TOML field yet -
+            // no scenario fixture needs "target spell with mana value X"
+            // expressed via TOML, only via a real card script
+            // (`s.target_requirement()`), same "engine/Lua first, TOML
+            // follow-up if a fixture ever needs it" posture the
+            // subtypes/supertypes filter fields took before their own
+            // scenario-side follow-up slice.
+            mana_value: None,
         },
         "player" => TargetFilter::Player,
         "any" => TargetFilter::AnyTarget,

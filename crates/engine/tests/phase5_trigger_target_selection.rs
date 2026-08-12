@@ -79,7 +79,7 @@ fn destroy_target_creature_trigger(source: ObjectId, exclude_source: bool) -> Re
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { mana_value: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 excluded_card_types: None,
                 subtypes: None,
@@ -127,7 +127,7 @@ fn land_definition(name: &str) -> CardDefinition {
 
 fn creature_target_word() -> TargetRequirement {
     TargetRequirement {
-        filter: TargetFilter::Object {
+        filter: TargetFilter::Object { mana_value: None,
             card_types: Some(CardTypeSet::CREATURE),
             excluded_card_types: None,
             subtypes: None,
@@ -146,7 +146,7 @@ fn creature_target_word() -> TargetRequirement {
 
 fn land_target_word() -> TargetRequirement {
     TargetRequirement {
-        filter: TargetFilter::Object {
+        filter: TargetFilter::Object { mana_value: None,
             card_types: Some(CardTypeSet::LAND),
             excluded_card_types: None,
             subtypes: None,
@@ -307,7 +307,7 @@ fn vesuvans_granted_upkeep_ability_now_really_fires_and_becomes_a_copy() {
         condition: Some(ConditionSpec::Primitive(ConditionPrimitive::BeginningOfYourUpkeep)),
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { mana_value: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 excluded_card_types: None,
                 subtypes: None,

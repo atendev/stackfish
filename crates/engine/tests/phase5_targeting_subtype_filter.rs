@@ -79,7 +79,7 @@ fn human_bolt_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_human_bolt".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None,
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: Some(vec![Subtype("Human".to_string())]),
                 supertypes: None, excluded_supertypes: None,
@@ -284,7 +284,7 @@ fn game_selecttargets_decoder_accepts_a_subtypes_key_for_equip() {
         &ability.target,
         Some(TargetSpec::Primitive(req)) if matches!(
             &req.filter,
-            TargetFilter::Object { subtypes: Some(s), .. } if s == &vec![Subtype("Dragon".to_string())]
+            TargetFilter::Object { mana_value: None, subtypes: Some(s), .. } if s == &vec![Subtype("Dragon".to_string())]
         )
     ));
 }

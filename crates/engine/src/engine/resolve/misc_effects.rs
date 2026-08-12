@@ -152,6 +152,7 @@ impl Engine {
                 top.controller,
                 top.source,
                 req.exclude_source,
+                top.x_value,
             )
         };
         if let (Some(TargetSpec::Multiple(reqs)), [Target::Object(a_id), Target::Object(b_id)]) =

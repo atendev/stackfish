@@ -284,14 +284,19 @@ pub enum AbilityEffect {
     /// empty and the *Counterspell itself* fizzles via the ordinary path,
     /// never reaching this arm at all.
     ///
+    /// "Counter target spell with mana value X (or less/or greater)"
+    /// (Convolute's fixed-number form, or the X-comparison form) is real now
+    /// too, via `TargetFilter::Object::mana_value` - see that field's own
+    /// doc comment for the full shape (`ManaValueRequirement`/
+    /// `ManaValueBound`, threading the casting/resolving spell's own
+    /// announced `x_value` through `commands::target_is_legal`).
+    ///
     /// TODO: "counter target activated or triggered ability" (Stifle,
     /// Trickbind) isn't reachable this slice - an ability's `StackObject` has
     /// no matching `GameObject` for a `TargetFilter::Object` to find, and no
     /// ability-shaped target vocabulary exists yet. TODO: "counter unless
     /// [that player] pays {X}" (Mana Leak, Condescend) needs a real
-    /// mid-resolution payment ask - not built. TODO: "counter target spell
-    /// with mana value N or less" (Convolute) needs a `mana_value` key on
-    /// `TargetFilter::Object` that doesn't exist yet.
+    /// mid-resolution payment ask - not built.
     Counter,
     /// The `Game.Ops.CreateToken()` primitive — creates one or more token
     /// permanents on the battlefield under the controller's control (CR 111).

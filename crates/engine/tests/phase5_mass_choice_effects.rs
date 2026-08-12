@@ -446,7 +446,7 @@ fn discard_chosen_moves_the_chosen_card_from_hand_to_graveyard() {
     let status = cast_and_resolve(&mut engine, p0, p1, card);
     let (player, filter, _exclude_ids) = expect_select_target(status);
     assert_eq!(player, p0);
-    let TargetFilter::Object { zone, .. } = filter else { panic!("expected an Object filter") };
+    let TargetFilter::Object { mana_value: None, zone, .. } = filter else { panic!("expected an Object filter") };
     assert_eq!(zone, Some(ZoneKind::Hand), "Game.ChooseN's zone override must reach the real request");
     engine.submit_script_choice(Target::Object(extra_card)).expect("extra_card is in hand");
     drain(&mut engine);
@@ -603,7 +603,7 @@ fn for_each_player_asks_in_apnap_order_and_sacrifices_simultaneously() {
     let status = cast_and_resolve(&mut engine, p0, p1, card);
     let (player, filter, _exclude_ids) = expect_select_target(status);
     assert_eq!(player, p0, "active player is asked first (CR 101.4 APNAP)");
-    let TargetFilter::Object { controller, .. } = filter else { panic!("expected an Object filter") };
+    let TargetFilter::Object { mana_value: None, controller, .. } = filter else { panic!("expected an Object filter") };
     assert_eq!(controller, Some(FilterController::You));
 
     engine.submit_script_choice(Target::Object(p0_bear)).expect("p0_bear is p0's own creature");

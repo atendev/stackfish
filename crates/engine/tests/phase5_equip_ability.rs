@@ -114,7 +114,7 @@ fn equip_ability(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None,
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
                 supertypes: None, excluded_supertypes: None,
@@ -219,7 +219,7 @@ fn game_ops_attach_self_registers_a_real_equip_ability() {
         &ability.target,
         Some(TargetSpec::Primitive(req)) if matches!(
             req.filter,
-            TargetFilter::Object { card_types: Some(t), controller: Some(FilterController::You), zone: None, .. }
+            TargetFilter::Object { mana_value: None, card_types: Some(t), controller: Some(FilterController::You), zone: None, .. }
                 if t == CardTypeSet::CREATURE
         )
     ));

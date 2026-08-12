@@ -75,7 +75,7 @@ fn legend_bolt_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_legend_bolt".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None,
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
                 supertypes: Some(SupertypeSet::LEGENDARY),
@@ -277,7 +277,7 @@ fn game_selecttargets_decoder_accepts_a_supertypes_key_for_equip() {
         &ability.target,
         Some(TargetSpec::Primitive(req)) if matches!(
             &req.filter,
-            TargetFilter::Object { supertypes: Some(s), .. } if *s == SupertypeSet::LEGENDARY
+            TargetFilter::Object { mana_value: None, supertypes: Some(s), .. } if *s == SupertypeSet::LEGENDARY
         )
     ));
 }

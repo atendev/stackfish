@@ -103,7 +103,7 @@ fn aura_source_definition(id: u64, name: &str) -> CardDefinition {
         script_ref: ScriptReference::ByKey(name.to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { mana_value: None,
                 excluded_card_types: None,
                 excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),

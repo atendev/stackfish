@@ -64,7 +64,7 @@ fn target_requirement_function_decodes_a_subtype_filter_with_count() {
     assert!(!req.up_to);
     assert!(!req.at_least);
     match req.filter {
-        TargetFilter::Object { subtypes: Some(subtypes), card_types: None, .. } => {
+        TargetFilter::Object { mana_value: None, subtypes: Some(subtypes), card_types: None, .. } => {
             assert_eq!(subtypes, vec![Subtype("Wall".to_string())]);
         }
         other => panic!("expected an Object filter with subtypes=[Wall], got {other:?}"),
@@ -130,7 +130,7 @@ fn target_requirement_function_without_a_filter_key_still_decodes_the_flat_shape
     let requirement =
         runtime.build_target_requirement(source).expect("script should load").expect("declares a requirement");
     let TargetSpec::Primitive(req) = requirement else { panic!("expected Primitive") };
-    assert!(matches!(req.filter, TargetFilter::Object { subtypes: Some(_), .. }));
+    assert!(matches!(req.filter, TargetFilter::Object { mana_value: None, subtypes: Some(_), .. }));
 }
 
 #[test]

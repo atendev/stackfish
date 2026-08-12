@@ -161,6 +161,7 @@ pub(crate) fn grant_linked_copy_ability(
                 excluded_supertypes: None,
                 controller: None,
                 zone: None,
+                mana_value: None,
             },
             count: 1,
             up_to: false,
@@ -281,7 +282,10 @@ pub(crate) fn legal_aura_entry_candidates(
     let player_candidates = non_eliminated_players(state).into_iter().map(Target::Player);
     object_candidates
         .chain(player_candidates)
-        .filter(|&target| target_is_legal(state, script_runtime, target, &req.filter, controller, aura_source, req.exclude_source))
+        // CR 202.3: an Aura's own "Enchant [quality]" restriction has no X
+        // context at all (not a live cast/resolution, just a card
+        // definition's own base filter) - `None` is a real no-op.
+        .filter(|&target| target_is_legal(state, script_runtime, target, &req.filter, controller, aura_source, req.exclude_source, None))
         .collect()
 }
 

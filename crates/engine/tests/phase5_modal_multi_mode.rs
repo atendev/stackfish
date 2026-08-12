@@ -98,7 +98,7 @@ fn choose_two_definition() -> CardDefinition {
             },
             SpellMode {
                 target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-                    filter: TargetFilter::Object {
+                    filter: TargetFilter::Object { mana_value: None,
                         card_types: Some(CardTypeSet::CREATURE),
                         excluded_card_types: None,
                         subtypes: None,

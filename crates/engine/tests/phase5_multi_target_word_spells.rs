@@ -73,7 +73,7 @@ fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
 
 fn nonblack_creature_word() -> TargetRequirement {
     TargetRequirement {
-        filter: TargetFilter::Object {
+        filter: TargetFilter::Object { mana_value: None,
             card_types: Some(CardTypeSet::CREATURE),
             excluded_card_types: None,
             subtypes: None,
@@ -92,7 +92,7 @@ fn nonblack_creature_word() -> TargetRequirement {
 
 fn land_word() -> TargetRequirement {
     TargetRequirement {
-        filter: TargetFilter::Object {
+        filter: TargetFilter::Object { mana_value: None,
             card_types: Some(CardTypeSet::LAND),
             excluded_card_types: None,
             subtypes: None,

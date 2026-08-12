@@ -82,7 +82,7 @@ fn any_target_requirement() -> TargetSpec {
 
 fn creature_target_requirement(exclude_source: bool) -> TargetSpec {
     TargetSpec::Primitive(TargetRequirement {
-        filter: TargetFilter::Object {
+        filter: TargetFilter::Object { mana_value: None,
             card_types: Some(CardTypeSet::CREATURE),
             excluded_card_types: None,
             subtypes: None,

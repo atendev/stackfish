@@ -90,7 +90,7 @@ fn equip_any(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None,
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
                 supertypes: None, excluded_supertypes: None,
@@ -118,7 +118,7 @@ fn equip_dragon(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None,
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 subtypes: Some(vec![Subtype("Dragon".to_string())]),
                 supertypes: None, excluded_supertypes: None,
@@ -248,13 +248,13 @@ fn a_script_can_self_register_two_distinct_equip_abilities_on_one_card() {
     assert_eq!(state.abilities.len(), 2, "both Register() calls must produce their own RegisteredAbility entry");
     assert!(matches!(
         &state.abilities[0].target,
-        Some(TargetSpec::Primitive(req)) if matches!(&req.filter, TargetFilter::Object { subtypes: None, .. })
+        Some(TargetSpec::Primitive(req)) if matches!(&req.filter, TargetFilter::Object { mana_value: None, subtypes: None, .. })
     ));
     assert!(matches!(
         &state.abilities[1].target,
         Some(TargetSpec::Primitive(req)) if matches!(
             &req.filter,
-            TargetFilter::Object { subtypes: Some(s), .. } if s == &vec![Subtype("Dragon".to_string())]
+            TargetFilter::Object { mana_value: None, subtypes: Some(s), .. } if s == &vec![Subtype("Dragon".to_string())]
         )
     ));
 }

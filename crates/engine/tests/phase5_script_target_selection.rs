@@ -246,7 +246,7 @@ fn a_script_calling_select_targets_pauses_with_the_real_filter() {
     let ScriptChoiceRequest::SelectTarget { filter, .. } = request else {
         panic!("expected a SelectTarget request")
     };
-    let TargetFilter::Object { card_types, .. } = filter else {
+    let TargetFilter::Object { mana_value: None, card_types, .. } = filter else {
         panic!("expected an Object filter, got {filter:?}")
     };
     assert_eq!(card_types, Some(CardTypeSet::CREATURE), "the real filter from the script should have reached the pause");

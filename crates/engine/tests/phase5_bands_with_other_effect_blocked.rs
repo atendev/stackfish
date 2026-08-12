@@ -77,7 +77,7 @@ fn become_blocked_spell_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_become_blocked".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { mana_value: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 excluded_card_types: None,
                 subtypes: None,

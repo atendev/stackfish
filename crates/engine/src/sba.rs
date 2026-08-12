@@ -617,6 +617,8 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
                         o.controller,
                         o.object_id,
                         req.exclude_source,
+                        // Not a live cast/resolution - no X context.
+                        None,
                     ),
                     _ => state.object(target_id).is_none(),
                 },
@@ -632,6 +634,7 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
                                 o.controller,
                                 o.object_id,
                                 req.exclude_source,
+                                None,
                             ),
                             _ => false,
                         }
@@ -725,6 +728,7 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
         excluded_supertypes: None,
         controller: None,
         zone: None,
+        mana_value: None,
     };
     state
         .objects
@@ -742,6 +746,7 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
                 // A synthetic CR 301.5 filter, not a real TargetRequirement
                 // - "another target" has no meaning here.
                 false,
+                None,
             );
             illegal.then_some(o.object_id)
         })

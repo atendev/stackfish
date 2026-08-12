@@ -421,7 +421,9 @@ impl Engine {
         let ProcessState::AwaitingTriggerTargets { trigger, spec, .. } = &self.process_state else {
             return Err(TriggerTargetsError::NotAwaitingChoice);
         };
-        if commands::validate_targets(&self.state, &self.script_runtime, Some(spec), &chosen, trigger.controller, trigger.source)
+        // CR 202.3: a triggered ability never has an announced X of its own
+        // - a `mana_value` filter's own `X` bound resolves as 0.
+        if commands::validate_targets(&self.state, &self.script_runtime, Some(spec), &chosen, trigger.controller, trigger.source, None)
             .is_err()
         {
             return Err(TriggerTargetsError::InvalidTargets);

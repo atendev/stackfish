@@ -348,6 +348,10 @@ pub(super) fn execute_cast_spell(
         &targets,
         actor,
         card,
+        // CR 202.3/107.3a: this casting's own announced X, if any - a
+        // `mana_value` target filter's `X` bound (e.g. "counter target
+        // spell with mana value X") resolves against exactly this.
+        x_value,
     )?;
 
     // CR 601.2f: total cost = the card's printed mana_cost, unless

@@ -13,7 +13,7 @@ use crate::types::cost::{FilterController, FilterSpec};
 use crate::types::effect::{AffectedFilter, EffectFilter, EffectPayload, LandwalkQuality, Layer};
 use crate::types::ids::{ObjectId, ScriptHandle};
 use crate::types::mana::{Color, ColorSet, ManaUnit};
-use crate::types::target::{TargetFilter, TargetRequirement};
+use crate::types::target::{ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement};
 use crate::types::zone::ZoneKind;
 
 use super::tags::{
@@ -935,6 +935,33 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
             let zone_name: Option<String> = table.get("zone").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let zone = zone_name.map(|name| parse_zone_kind_name(&name)).transpose()?;
 
+            // CR 202.3: "target spell with mana value X (or less/or
+            // greater)" - three independent optional keys (matching
+            // `up_to`/`at_least`'s own flat-boolean-flags convention rather
+            // than a nested comparison table), each accepting either a plain
+            // number (`ManaValueBound::Fixed`) or the literal string "X"
+            // (`ManaValueBound::X`, resolving against whatever this
+            // cast/resolution's own announced X is - see `ManaValueBound`'s
+            // own doc comment). At most one is expected to be set on any
+            // real card; if more than one is, `equals` wins over `at_most`
+            // over `at_least`, same "no validation, just precedence" stance
+            // `at_least` already takes over `up_to` elsewhere in this file.
+            let mana_value_equals: Option<Value> =
+                table.get("mana_value_equals").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let mana_value_at_most: Option<Value> =
+                table.get("mana_value_at_most").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let mana_value_at_least: Option<Value> =
+                table.get("mana_value_at_least").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let mana_value = if let Some(v) = mana_value_equals {
+                Some(ManaValueRequirement { comparison: ManaValueComparison::Equal, bound: decode_mana_value_bound(v)? })
+            } else if let Some(v) = mana_value_at_most {
+                Some(ManaValueRequirement { comparison: ManaValueComparison::AtMost, bound: decode_mana_value_bound(v)? })
+            } else if let Some(v) = mana_value_at_least {
+                Some(ManaValueRequirement { comparison: ManaValueComparison::AtLeast, bound: decode_mana_value_bound(v)? })
+            } else {
+                None
+            };
+
             Ok(TargetFilter::Object {
                 card_types,
                 excluded_card_types,
@@ -944,10 +971,28 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
                 excluded_supertypes,
                 controller,
                 zone,
+                mana_value,
             })
         }
         other => Err(ScriptError::LoadError(format!(
             "unknown Game.SelectTargets filter type '{other}' - expected object/player/any"
+        ))),
+    }
+}
+
+/// `mana_value_equals`/`mana_value_at_most`/`mana_value_at_least`'s shared
+/// value decode — a nonnegative integer (`ManaValueBound::Fixed`) or the
+/// literal string `"X"` (`ManaValueBound::X`). Any other shape (a negative
+/// number, a bool, some other string) is a loud load-time error, same
+/// "typo'd input fails to load rather than silently guessing" stance every
+/// other decoder in this file already takes.
+fn decode_mana_value_bound(value: Value) -> Result<ManaValueBound, ScriptError> {
+    match value {
+        Value::Integer(n) if n >= 0 => Ok(ManaValueBound::Fixed(n as u32)),
+        Value::Number(n) if n >= 0.0 => Ok(ManaValueBound::Fixed(n as u32)),
+        Value::String(s) if s.to_str().is_ok_and(|s| s == "X") => Ok(ManaValueBound::X),
+        other => Err(ScriptError::LoadError(format!(
+            "mana_value bound must be a nonnegative number or the string \"X\", got {other:?}"
         ))),
     }
 }

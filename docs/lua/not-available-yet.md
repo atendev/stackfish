@@ -56,6 +56,6 @@ name.
   target spell" and "counter target activated/triggered ability" (Stifle, Trickbind), but an
   ability's `StackObject` has no matching `GameObject` for a `TargetFilter::Object` to target — no
   ability-shaped target vocabulary exists yet. "Counter unless [that player] pays {X}" (Mana Leak,
-  Condescend) also isn't modeled — it needs a real mid-resolution payment ask. "Counter target spell
-  with mana value N or less" (Convolute) isn't expressible either — `TargetFilter::Object` has no
-  `mana_value` key.
+  Condescend) also isn't modeled — it needs a real mid-resolution payment ask. (Mana-value-restricted
+  counters, e.g. Convolute's "mana value 3 or less" or "mana value X," *are* expressible now via
+  `mana_value_at_most`/`mana_value_equals` — see [game-constants.md](game-constants.md#gameops).)

@@ -82,7 +82,7 @@ fn another_target_creature_ability(source: ObjectId) -> RegisteredAbility {
         condition: None,
         cost: None,
         target: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
             count: 1,
             up_to: false, at_least: false,
             exclude_source: true,
@@ -182,7 +182,7 @@ fn an_ability_targeting_its_own_source_fizzles_at_resolution_recheck() {
         Vec::new(),
         vec![Target::Object(olivia)],
         Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object { excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
             count: 1,
             up_to: false, at_least: false,
             exclude_source: true,

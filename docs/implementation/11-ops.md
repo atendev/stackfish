@@ -411,6 +411,57 @@
 - Unresolved, named rather than guessed at: "counter target activated or triggered ability" (Stifle,
   Trickbind) - an ability's `StackObject` has no matching `GameObject` for a `TargetFilter::Object` to
   find, and no ability-shaped target vocabulary exists yet. "Counter unless [that player] pays {X}"
-  (Mana Leak, Condescend) - needs a real mid-resolution payment ask, not built. "Counter target spell
-  with mana value N or less" (Convolute) - needs a `mana_value` key on `TargetFilter::Object` that
-  doesn't exist yet.
+  (Mana Leak, Condescend) - needs a real mid-resolution payment ask, not built.
+
+## Slice: mana-value-target-filter (same branch, `phase5/counter-target-spell`)
+
+- Scope: closes this slice's own just-named "mana value N or less" gap - `TargetFilter::Object` gains
+  `mana_value: Option<ManaValueRequirement>` (`types/target.rs`) - `ManaValueRequirement { comparison:
+  Equal | AtMost | AtLeast, bound: Fixed(u32) | X }`, `ManaValueBound::X`/`Fixed` mirroring
+  `CounterAmount`'s own `Fixed(u32) | X` shape (ability.rs). Covers both Convolute's "mana value 3 or
+  less" (`Fixed`) and the user's own ask, "counter target spell with mana value X" (`X`, resolved
+  against *this casting's own* announced X) - the same mechanism generalizes to any `TargetFilter::
+  Object` consumer, not just `Counter`.
+- Key design call: considered exposing this purely as a `TargetFilter::Script` predicate (the stack and
+  mana costs aren't in the Lua state snapshot at all - a real, separate, pre-existing gap named in
+  `state_to_lua`'s own doc comment) instead of a new `TargetFilter::Object` field - rejected as the
+  bigger, messier lift (would need to build stack/mana-cost Lua exposure first); the flat-field route
+  needed only a ~76-site mechanical struct-literal ripple (`mana_value: None` on every existing
+  `TargetFilter::Object` literal - the exact same shape/size ripple `effect-filter-subtypes` already
+  took once), done via a small brace-counting Python script (perl's own past false-positive trap on
+  this exact ripple class - see `effect-filter-supertypes`'s backlog note - avoided by anchoring the
+  match on the fully-qualified `TargetFilter::Object {` text, not a bare field-name heuristic). Real
+  finding: the same blind text-substitution approach also "fixed" two doc comments that happened to
+  contain literal `TargetFilter::Object { ... }` example text (ability.rs, this slice's own test file's
+  module doc) - caught by a targeted comment-line grep after the fact and reverted by hand; not caught
+  by the compiler since a doc comment isn't type-checked.
+- `commands::target_is_legal` gains a `caster_x_value: Option<u32>` parameter (the casting/resolving
+  spell's own announced X, threaded from `StackObject::x_value`/`CastSpell::x_value` through
+  `validate_targets`/`validate_one_target_requirement`/`split_targets_by_requirement`/
+  `assign_targets_by_filter`) - `None` from every call site with no live X context (an activated
+  ability, a triggered ability's own CR 603.3d candidate scan, an SBA illegal-attachment recheck, an
+  Aura's own entry-attach legality, a `Game.SelectTargets` mid-resolution ask) resolves a `mana_value`
+  filter's own `X` bound as `0`, same as CR 202.3b's real off-the-stack default. `cast.rs`'s own
+  `validate_targets` call passes the real `x_value` cast-time parameter; `engine/resolve/mod.rs`'s
+  CR 608.2b recheck and `misc_effects.rs`'s `ExchangeTextBoxes` recheck pass `top.x_value`.
+- The candidate's *own* mana value (not the caster's) is computed via `ManaCost::resolve_x` against
+  whatever `StackObject::x_value` that candidate itself carries if it's currently in `state.stack`
+  (`None`/off-stack defaults to 0) - CR 202.3b's own "only a live-on-the-stack object gets its real X"
+  rule, so a countered X-cost spell's own mana value is computed correctly regardless of which side of
+  the interaction announced which X.
+- Lua decode: `decode_target_filter_table` (shared by `Game.SelectTargets`/`:SetTarget`/
+  `s.target_requirement()`) gains `mana_value_equals`/`mana_value_at_most`/`mana_value_at_least`, each
+  a plain number or the literal string `"X"` (`decode_mana_value_bound`) - flat independent keys
+  matching `up_to`/`at_least`'s own "no nested table" convention, not a single nested comparison table.
+- Verify: 4 new tests (`phase5_counter_target_spell.rs`) - an `{X}` Counterspell with X=3 counters a
+  target whose own mana value is 3; the same card with X=2 against a mana-value-3 target is rejected at
+  cast time (`InvalidTarget`, before the cast even reaches the stack); a `mana_value_equals = "X"`
+  decode test; a `mana_value_at_most = 3` decode test. Full workspace suite green (unchanged pass count
+  plus these 4), zero new warnings.
+- Unresolved: "counter target spell with mana value N or less" (Convolute) is real now via
+  `mana_value_at_most`, but nothing yet combines `mana_value` with `TargetFilter::Script` (a scripted
+  predicate can't currently also reference the casting's own X - not needed by anything built this
+  slice). Scenario TOML `[cards.target_requirement]` has no `mana_value_equals`/`mana_value_at_most`/
+  `mana_value_at_least` keys either (`crates/scenario/src/lib.rs`'s `build_target_requirement` defaults
+  the new field to `None`, same "engine/Lua first, TOML follow-up if a fixture ever needs it" posture
+  the subtypes/supertypes filter fields took before their own scenario-side follow-up slice).

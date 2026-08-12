@@ -11,7 +11,7 @@ use crate::types::cost::FilterController;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::object::GameObject;
-use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
+use crate::types::target::{ManaValueBound, ManaValueComparison, TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
@@ -237,6 +237,13 @@ pub(crate) fn target_is_legal(
     caster: PlayerId,
     source: ObjectId,
     exclude_source: bool,
+    // CR 202.3/107.3a: the *casting/resolving* spell's own announced X
+    // (`StackObject::x_value`/`CastSpell::x_value`, not the candidate's own)
+    // — only consumed by `TargetFilter::Object::mana_value`'s `X` bound.
+    // `None` from every caller with no live X context (an ability, an SBA
+    // recheck, a triggered-ability candidate scan) resolves as `0`, same as
+    // "no X announced" — see `ManaValueBound::X`'s own doc comment.
+    caster_x_value: Option<u32>,
 ) -> bool {
     // CR 115.4/"another target": the source is never a legal candidate for
     // a requirement that says so, regardless of what the rest of `filter`
@@ -247,11 +254,33 @@ pub(crate) fn target_is_legal(
     }
     match filter {
         TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
-        TargetFilter::Object { card_types, excluded_card_types, subtypes, excluded_subtypes, supertypes, excluded_supertypes, controller, zone } => {
+        TargetFilter::Object { card_types, excluded_card_types, subtypes, excluded_subtypes, supertypes, excluded_supertypes, controller, zone, mana_value } => {
             let Target::Object(id) = target else { return false };
             let Some(obj) = state.object(id) else { return false };
             if obj.zone != zone.unwrap_or(ZoneKind::Battlefield) {
                 return false;
+            }
+            if let Some(req) = mana_value {
+                // CR 202.3b: a candidate's own mana value only uses a real X
+                // while it's on the stack (`StackObject::x_value`, resolved
+                // at that spell's own cast time) - every other zone treats
+                // its `{X}` as 0, same off-the-stack default `ManaCost::
+                // mana_value`'s own doc comment already establishes.
+                let candidate_x =
+                    state.stack.iter().find(|so| so.stack_id == id).and_then(|so| so.x_value).unwrap_or(0);
+                let candidate_mv = obj.definition.mana_cost.resolve_x(candidate_x).mana_value();
+                let bound = match req.bound {
+                    ManaValueBound::Fixed(n) => n,
+                    ManaValueBound::X => caster_x_value.unwrap_or(0),
+                };
+                let matches_mana_value = match req.comparison {
+                    ManaValueComparison::Equal => candidate_mv == bound,
+                    ManaValueComparison::AtMost => candidate_mv <= bound,
+                    ManaValueComparison::AtLeast => candidate_mv >= bound,
+                };
+                if !matches_mana_value {
+                    return false;
+                }
             }
             if card_types.is_some()
                 || excluded_card_types.is_some()
@@ -406,7 +435,11 @@ pub(crate) fn legal_target_candidates(
     object_candidates
         .chain(player_candidates)
         .filter(|&target| {
-            target_is_legal(state, script_runtime, target, &requirement.filter, caster, source, requirement.exclude_source)
+            // CR 603.3d candidate scan for a *triggered* ability - no
+            // PlayerActionKind::CastSpell exists here to have announced an X
+            // at all, so `None` (a `mana_value` filter's own `X` bound
+            // resolves as 0 - see `target_is_legal`'s own doc comment).
+            target_is_legal(state, script_runtime, target, &requirement.filter, caster, source, requirement.exclude_source, None)
         })
         .collect()
 }
@@ -482,6 +515,11 @@ pub(crate) fn validate_targets(
     targets: &[Target],
     caster: PlayerId,
     source: ObjectId,
+    // CR 202.3/107.3a: this cast/activation's own announced X, if any - see
+    // `target_is_legal`'s own doc comment. `None` from every caller with no
+    // X concept (`ActivateAbility` has no `x_value` field at all; a
+    // triggered ability's own CR 603.3d target choice never has one either).
+    caster_x_value: Option<u32>,
 ) -> Result<(), CommandError> {
     match requirement {
         None => {
@@ -492,14 +530,14 @@ pub(crate) fn validate_targets(
             }
         }
         Some(TargetSpec::Primitive(req)) => {
-            validate_one_target_requirement(state, script_runtime, req, targets, caster, source)
+            validate_one_target_requirement(state, script_runtime, req, targets, caster, source, caster_x_value)
         }
         Some(TargetSpec::Multiple(reqs)) => {
             // CR 601.2c: a flat submitted-targets list, split into one
             // chunk per requirement - positionally for 0/1 variable words,
             // by filter-assignment for 2+ (see `split_targets_by_
             // requirement`'s own doc comment).
-            let Some(chunks) = split_targets_by_requirement(state, script_runtime, reqs, targets, caster, source) else {
+            let Some(chunks) = split_targets_by_requirement(state, script_runtime, reqs, targets, caster, source, caster_x_value) else {
                 return Err(CommandError::InvalidTarget);
             };
             // CR 115.3/601.2c: dedup is checked independently per word by
@@ -507,7 +545,7 @@ pub(crate) fn validate_targets(
             // fresh each call) - the same object/player legally can, and
             // often will, appear in two different words' chunks.
             for (req, chunk) in reqs.iter().zip(chunks) {
-                validate_one_target_requirement(state, script_runtime, req, &chunk, caster, source)?;
+                validate_one_target_requirement(state, script_runtime, req, &chunk, caster, source, caster_x_value)?;
             }
             Ok(())
         }
@@ -525,6 +563,7 @@ fn validate_one_target_requirement(
     targets: &[Target],
     caster: PlayerId,
     source: ObjectId,
+    caster_x_value: Option<u32>,
 ) -> Result<(), CommandError> {
     // CR 601.2c/115.6: "up to N" accepts anywhere from 0 to `count`
     // chosen; "N or more" accepts `count` or more with no upper
@@ -549,7 +588,7 @@ fn validate_one_target_requirement(
         }
     }
     for t in targets {
-        if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source) {
+        if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source, caster_x_value) {
             return Err(CommandError::InvalidTarget);
         }
     }
@@ -586,6 +625,7 @@ pub(crate) fn split_targets_by_requirement(
     targets: &[Target],
     caster: PlayerId,
     source: ObjectId,
+    caster_x_value: Option<u32>,
 ) -> Option<Vec<Vec<Target>>> {
     let variable_index = {
         let mut found = None;
@@ -594,7 +634,7 @@ pub(crate) fn split_targets_by_requirement(
                 if found.is_some() {
                     // A second variable entry - hand off to the
                     // filter-assignment path instead of guessing.
-                    return assign_targets_by_filter(state, script_runtime, reqs, targets, caster, source);
+                    return assign_targets_by_filter(state, script_runtime, reqs, targets, caster, source, caster_x_value);
                 }
                 found = Some(i);
             }
@@ -668,6 +708,7 @@ fn assign_targets_by_filter(
     targets: &[Target],
     caster: PlayerId,
     source: ObjectId,
+    caster_x_value: Option<u32>,
 ) -> Option<Vec<Vec<Target>>> {
     // Precompute, once, which words each submitted target is even legal
     // for - the backtracking search below only ever branches over these.
@@ -676,7 +717,7 @@ fn assign_targets_by_filter(
         .map(|t| {
             reqs.iter()
                 .enumerate()
-                .filter(|(_, req)| target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source))
+                .filter(|(_, req)| target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source, caster_x_value))
                 .map(|(i, _)| i)
                 .collect()
         })

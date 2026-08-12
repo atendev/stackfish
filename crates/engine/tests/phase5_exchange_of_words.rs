@@ -93,7 +93,7 @@ fn trample_creature(id: u64, name: &str) -> CardDefinition {
 
 fn creature_word() -> TargetRequirement {
     TargetRequirement {
-        filter: TargetFilter::Object {
+        filter: TargetFilter::Object { mana_value: None,
             card_types: Some(CardTypeSet::CREATURE),
             excluded_card_types: None,
             subtypes: None,

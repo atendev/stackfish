@@ -75,7 +75,7 @@ fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
 }
 
 fn creature_filter() -> TargetFilter {
-    TargetFilter::Object {
+    TargetFilter::Object { mana_value: None,
         card_types: Some(CardTypeSet::CREATURE),
         excluded_card_types: None,
         subtypes: None,
@@ -88,7 +88,7 @@ fn creature_filter() -> TargetFilter {
 }
 
 fn land_filter() -> TargetFilter {
-    TargetFilter::Object {
+    TargetFilter::Object { mana_value: None,
         card_types: Some(CardTypeSet::LAND),
         excluded_card_types: None,
         subtypes: None,

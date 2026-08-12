@@ -99,7 +99,7 @@ fn set_target_with_a_table_decodes_into_a_real_target_requirement() {
     assert!(!requirement.up_to);
     assert!(matches!(
         requirement.filter,
-        TargetFilter::Object { card_types: Some(types), .. } if types == CardTypeSet::CREATURE
+        TargetFilter::Object { mana_value: None, card_types: Some(types), .. } if types == CardTypeSet::CREATURE
     ));
 }
 

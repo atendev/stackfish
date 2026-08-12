@@ -159,6 +159,11 @@ impl Engine {
                 top.controller,
                 top.source,
                 req.exclude_source,
+                // CR 202.3: this resolving spell/ability's own announced X
+                // (already resolved at cast time) - same value a
+                // `mana_value` filter's own `X` bound was checked against
+                // when this was cast/activated.
+                top.x_value,
             )
         };
         let legal_targets: Vec<Target> = match &top.target_requirement {
@@ -179,7 +184,7 @@ impl Engine {
             // same "recheck, don't assume" posture this whole block
             // already takes.
             Some(TargetSpec::Multiple(reqs)) => {
-                commands::split_targets_by_requirement(&self.state, &self.script_runtime, reqs, &top.targets, top.controller, top.source)
+                commands::split_targets_by_requirement(&self.state, &self.script_runtime, reqs, &top.targets, top.controller, top.source, top.x_value)
                     .map(|chunks| {
                         reqs.iter()
                             .zip(chunks)
@@ -208,7 +213,7 @@ impl Engine {
         // inside that match wouldn't borrow-check).
         let modal_chunk_legals: Vec<Vec<Target>> = match &top.target_requirement {
             Some(TargetSpec::Multiple(reqs)) => {
-                commands::split_targets_by_requirement(&self.state, &self.script_runtime, reqs, &top.targets, top.controller, top.source)
+                commands::split_targets_by_requirement(&self.state, &self.script_runtime, reqs, &top.targets, top.controller, top.source, top.x_value)
                     .map(|chunks| {
                         reqs.iter()
                             .zip(chunks)

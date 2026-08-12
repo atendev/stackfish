@@ -3,6 +3,44 @@ use crate::types::cost::FilterController;
 use crate::types::ids::ScriptHandle;
 use crate::types::zone::ZoneKind;
 
+/// The comparison half of `TargetFilter::Object::mana_value`'s "mana value
+/// [op] [bound]" restriction — three operators, matching every real card's
+/// own templating exactly (Magic mana-value restrictions are always
+/// equality or an inclusive bound; "mana value less than N"/"greater than
+/// N" doesn't appear on a real card, so `LessThan`/`GreaterThan` aren't
+/// built).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ManaValueComparison {
+    Equal,
+    AtMost,
+    AtLeast,
+}
+
+/// The bound half of `TargetFilter::Object::mana_value` — same `Fixed(u32) |
+/// X` shape `CounterAmount` (ability.rs) already established for "a fixed
+/// number, or this casting's own announced X." `X` resolves against
+/// whatever `Option<u32>` `commands::target_is_legal`'s caller passes as the
+/// *casting/resolving* spell's own announced X (`None` — no X announced,
+/// e.g. this filter is on a non-X card, or the caller isn't a live cast at
+/// all — resolves as `0`, CR 107.3a: nothing can announce X for a spell with
+/// no `{X}` in its cost, so a `mana_value` filter referencing `X` on such a
+/// card is a real, if unusual, script authoring mistake rather than an
+/// engine gap).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ManaValueBound {
+    Fixed(u32),
+    X,
+}
+
+/// CR 202.3/601.2c/115: "target spell with mana value X (or less/or
+/// greater)" — see `TargetFilter::Object::mana_value`'s own doc comment for
+/// the full shape and worked examples.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ManaValueRequirement {
+    pub comparison: ManaValueComparison,
+    pub bound: ManaValueBound,
+}
+
 /// What CR 601.2c/602.2b/115 restrict a chosen target to. Mirrors the
 /// `EffectFilter` (effect.rs) / `FilterSpec` (cost.rs) "controller +
 /// card_types" shape rather than inventing a third one, plus a `zone` (CR
@@ -51,6 +89,21 @@ pub enum TargetFilter {
         excluded_supertypes: Option<SupertypeSet>,
         controller: Option<FilterController>,
         zone: Option<ZoneKind>,
+        /// CR 202.3/601.2c/115: "target spell with mana value X" (Convolute-
+        /// style "mana value 3 or less," or a candidate's mana value compared
+        /// against *this casting's own* announced X, e.g. Counter's own
+        /// "counter target spell with mana value X"). Checked in
+        /// `commands::target_is_legal` against the candidate's own mana
+        /// value — `ManaCost::mana_value()`, resolving the candidate's *own*
+        /// `{X}` first if it's currently on the stack with a resolved
+        /// `StackObject::x_value` (CR 202.3b: a mana value is only computed
+        /// with a real X value while the object is on the stack; every other
+        /// zone uses X = 0, same "off-the-stack default" `ManaCost::
+        /// mana_value`'s own doc comment already establishes for `Cascade`).
+        /// `None` (the overwhelming majority of filters) means no mana-value
+        /// restriction at all, same "absent key, no restriction" convention
+        /// every other `Option` field here already uses.
+        mana_value: Option<ManaValueRequirement>,
     },
     /// "target player" / "target opponent". TODO: a controller restriction
     /// ("target opponent" specifically, vs. "target player" meaning any) is

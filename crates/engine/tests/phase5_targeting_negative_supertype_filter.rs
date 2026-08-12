@@ -62,7 +62,7 @@ fn purge_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_purge".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { mana_value: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 excluded_card_types: None,
                 subtypes: None,
@@ -106,7 +106,7 @@ fn smite_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_smite".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { mana_value: None,
                 card_types: Some(CardTypeSet::CREATURE),
                 excluded_card_types: None,
                 subtypes: None,

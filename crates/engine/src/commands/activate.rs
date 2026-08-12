@@ -337,6 +337,10 @@ pub(super) fn execute_activate_ability(
                 &targets,
                 actor,
                 source,
+                // CR 202.3: an activated ability never has an announced X of
+                // its own (`ActivateAbility` has no `x_value` field) - a
+                // `mana_value` filter's own `X` bound resolves as 0.
+                None,
             )?;
 
             // `None` means "no cost at all" - same empty-CostSpec

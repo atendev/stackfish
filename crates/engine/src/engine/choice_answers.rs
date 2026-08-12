@@ -166,7 +166,12 @@ impl Engine {
         // mid-resolution choice can't express "another target" yet, only a
         // static card-level target_requirement can (see validate_targets'
         // own call site).
-        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller, *stack_id, false)
+        // CR 202.3: a `Game.SelectTargets`/`Game.ChooseN` mid-resolution ask
+        // carries only a bare `TargetFilter`, not a live X context - no
+        // script builds a `mana_value` filter through this path (it's only
+        // reachable via a card's own static `target_requirement()`), so
+        // `None` is a real no-op here, not a narrowing.
+        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller, *stack_id, false, None)
         {
             return Err(ScriptChoiceError::InvalidCandidate);
         }

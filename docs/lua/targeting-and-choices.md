@@ -40,6 +40,22 @@ a card's own base "target" reaches onto the stack (CR 701.6a's "counter target s
 `s.target_requirement()` below and `Game.Ops.Counter` in
 [game-constants.md](game-constants.md#gameops)).
 
+An object filter also accepts up to one of `mana_value_equals`/`mana_value_at_most`/
+`mana_value_at_least` (CR 202.3, e.g. Convolute's "mana value 3 or less" or "counter target spell
+with mana value X") — each takes either a plain number or the literal string `"X"`, meaning this
+casting's own announced X (CR 107.3a; only meaningful on a card whose own mana cost has an `{X}` to
+announce a value for):
+
+```lua
+function s.target_requirement()
+    return { zone = "Stack", mana_value_equals = "X", count = 1 }
+end
+```
+
+`"X"` resolves against whatever `x_value` was announced for *this* cast/activation, re-checked fresh
+at resolution the same way every other filter key already is (CR 608.2b) — a target counted illegal
+because its mana value stopped matching X is treated exactly like any other now-illegal target.
+
 ## A card's own base targeting (Enchant, etc.)
 
 The filter table above is also how a card declares *its own* target requirement — the thing that

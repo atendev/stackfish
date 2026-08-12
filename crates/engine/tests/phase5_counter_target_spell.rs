@@ -66,7 +66,7 @@ fn counterspell_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_counter".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { mana_value: None,
                 card_types: None,
                 excluded_card_types: None,
                 subtypes: None,
@@ -93,7 +93,7 @@ fn counterspell_definition() -> CardDefinition {
 fn counter_noncreature_spell_definition() -> CardDefinition {
     CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Object {
+            filter: TargetFilter::Object { mana_value: None,
                 card_types: None,
                 excluded_card_types: Some(CardTypeSet::CREATURE),
                 subtypes: None,
@@ -112,6 +112,35 @@ fn counter_noncreature_spell_definition() -> CardDefinition {
     }
 }
 
+/// "Test Exclude: Counter target spell with mana value X." A real `{X}`
+/// mana cost - CR 202.3/107.3a's "this casting's own announced X" is only
+/// meaningful on a card whose own cost actually has an `{X}` to announce a
+/// value for.
+fn counter_mana_value_x_spell_definition() -> CardDefinition {
+    CardDefinition {
+        mana_cost: ManaCost { symbols: vec![ManaSymbol::X] },
+        oracle_text: "Counter target spell with mana value X.".to_string(),
+        target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
+            filter: TargetFilter::Object {
+                card_types: None,
+                excluded_card_types: None,
+                subtypes: None,
+                excluded_subtypes: None,
+                supertypes: None,
+                excluded_supertypes: None,
+                controller: None,
+                zone: Some(ZoneKind::Stack),
+                mana_value: Some(ManaValueRequirement { comparison: ManaValueComparison::Equal, bound: ManaValueBound::X }),
+            },
+            count: 1,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        })),
+        ..counterspell_definition()
+    }
+}
+
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -120,6 +149,15 @@ fn two_player_state() -> GameState {
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Exile]))
     }
+}
+
+/// Same as `two_player_state`, but p0 starts with `colorless` mana already
+/// in their pool - needed to actually pay a real `{X}` cost (`pay_free_and_
+/// drain`'s empty `PaymentPlan` only works for a `{0}` cost).
+fn two_player_state_with_p0_colorless(colorless: u32) -> GameState {
+    let mut state = two_player_state();
+    state.players[0].mana_pool.colorless = colorless;
+    state
 }
 
 /// Puts a creature spell directly on the stack (bypassing the real cast/pay
@@ -151,11 +189,50 @@ fn push_creature_spell_on_stack(state: &mut GameState, stack_id: ObjectId, owner
     });
 }
 
+/// Same as `push_creature_spell_on_stack`, but with a caller-chosen
+/// `mana_cost` (and no `x_value` of its own - CR 202.3b's off-the-stack-only
+/// concern doesn't apply since this target is never itself an X spell in
+/// these tests) so the target's own mana value can be controlled.
+fn push_spell_with_mana_value_on_stack(state: &mut GameState, stack_id: ObjectId, owner: PlayerId, mana_value: u32) {
+    let mut definition = creature_definition(1, "Bear");
+    definition.mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(mana_value))] };
+    state.objects.insert(stack_id, card_object(stack_id, definition, owner, ZoneKind::Stack));
+    state.stack.push(StackObject {
+        stack_id,
+        kind: StackEntryKind::Spell,
+        source: stack_id,
+        source_lki: None,
+        owner,
+        controller: owner,
+        chosen_modes: Vec::new(),
+        targets: Vec::new(),
+        target_requirement: None,
+        x_value: None,
+        exile_on_leaving_stack: false,
+        bought_back: false,
+        escaped: false,
+        costs_paid: Vec::new(),
+        operation: ScriptHandle(0),
+        effect: None,
+        intervening_if: None,
+        pending_mode_choice: None,
+    });
+}
+
 fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) {
     engine
         .submit_action(PlayerAction {
             player,
             kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None, pay_buyback: false },
+        })
+        .expect("player holds priority, spell is in hand");
+}
+
+fn cast_spell_with_x(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>, x_value: u32) {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: Some(x_value), alternative_cost: None, pay_buyback: false },
         })
         .expect("player holds priority, spell is in hand");
 }
@@ -291,4 +368,104 @@ fn game_ops_counter_decodes_to_the_counter_effect() {
     let (effect, _handle) =
         runtime.build_operation(source).expect("script should load").expect("declares an operation");
     assert!(matches!(effect, Some(AbilityEffect::Counter)), "expected Counter, got {effect:?}");
+}
+
+#[test]
+fn counter_with_mana_value_x_counters_a_spell_whose_mana_value_equals_the_announced_x() {
+    let mut state = two_player_state_with_p0_colorless(3);
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let target = ObjectId(0);
+    push_spell_with_mana_value_on_stack(&mut state, target, p1, 3);
+
+    let card = ObjectId(2);
+    state.objects.insert(card, card_object(card, counter_mana_value_x_spell_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell_with_x(&mut engine, p0, card, vec![Target::Object(target)], 3);
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "X=3 matched the target's own mana value 3, cast is legal");
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colorless; 3], phyrexian_life: 0 }],
+        })
+        .expect("3 colorless covers {X} with X=3");
+    drain(&mut engine);
+    assert_eq!(engine.state().stack.len(), 2);
+
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    assert!(engine.state().stack.is_empty());
+    assert!(engine.state().object(target).is_none(), "the mana-value-3 spell was countered");
+    assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p1)).unwrap().contents.len(), 1);
+    let countered = engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Countered { stack_id } if stack_id == target));
+    assert!(countered);
+}
+
+#[test]
+fn counter_with_mana_value_x_rejects_a_target_whose_mana_value_does_not_equal_x() {
+    let mut state = two_player_state_with_p0_colorless(2);
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let target = ObjectId(0);
+    // Target's own mana value is 3, but this Counterspell announces X=2 -
+    // CR 601.2c/115: not a legal target at all, rejected before the cast
+    // even goes on the stack (same "checked at cast time, not just
+    // resolution" treatment every other TargetFilter key already gets).
+    push_spell_with_mana_value_on_stack(&mut state, target, p1, 3);
+
+    let card = ObjectId(2);
+    state.objects.insert(card, card_object(card, counter_mana_value_x_spell_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell_with_x(&mut engine, p0, card, vec![Target::Object(target)], 2);
+    let status = drain(&mut engine);
+    assert!(
+        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
+        "mana value 3 != announced X=2, got {status:?}"
+    );
+}
+
+#[test]
+fn mana_value_equals_x_decodes_correctly() {
+    let runtime = ScriptRuntime::new();
+    let source = r#"
+        local s = {}
+        function s.target_requirement()
+            return { zone = "Stack", mana_value_equals = "X", count = 1 }
+        end
+        return s
+    "#;
+    let spec = runtime.build_target_requirement(source).expect("script should load").expect("declares a target_requirement");
+    let TargetSpec::Primitive(req) = spec else { panic!("expected a Primitive requirement") };
+    match req.filter {
+        TargetFilter::Object { zone: Some(ZoneKind::Stack), mana_value: Some(mv), .. } => {
+            assert_eq!(mv.comparison, ManaValueComparison::Equal);
+            assert_eq!(mv.bound, ManaValueBound::X);
+        }
+        other => panic!("expected an Object filter with a mana_value_equals X requirement, got {other:?}"),
+    }
+}
+
+#[test]
+fn mana_value_at_most_decodes_a_fixed_bound() {
+    let runtime = ScriptRuntime::new();
+    let source = r#"
+        local s = {}
+        function s.target_requirement()
+            return { zone = "Stack", mana_value_at_most = 3, count = 1 }
+        end
+        return s
+    "#;
+    let spec = runtime.build_target_requirement(source).expect("script should load").expect("declares a target_requirement");
+    let TargetSpec::Primitive(req) = spec else { panic!("expected a Primitive requirement") };
+    match req.filter {
+        TargetFilter::Object { mana_value: Some(mv), .. } => {
+            assert_eq!(mv.comparison, ManaValueComparison::AtMost);
+            assert_eq!(mv.bound, ManaValueBound::Fixed(3));
+        }
+        other => panic!("expected an Object filter with a mana_value_at_most 3 requirement, got {other:?}"),
+    }
 }
