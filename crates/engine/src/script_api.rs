@@ -36,12 +36,12 @@ use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 /// identical ones, since the only real difference is which callback slots
 /// are populated.
 pub fn register_triggered_ability(
-    state: &mut GameState,
-    source: ObjectId,
-    condition: Option<ScriptHandle>,
-    cost: Option<ScriptHandle>,
-    target: Option<ScriptHandle>,
-    operation: ScriptHandle,
+    _state: &mut GameState,
+    _source: ObjectId,
+    _condition: Option<ScriptHandle>,
+    _cost: Option<ScriptHandle>,
+    _target: Option<ScriptHandle>,
+    _operation: ScriptHandle,
 ) {
     // TODO: state.abilities.push(RegisteredAbility { source, kind: ...,
     // condition, cost, target, operation }). `kind` isn't a parameter here
@@ -55,11 +55,11 @@ pub fn register_triggered_ability(
 
 /// `Game.AddContinuousEffect`.
 pub fn add_continuous_effect(
-    state: &mut GameState,
-    source: ObjectId,
-    layer: Layer,
-    predicate: ScriptHandle,
-    duration: EffectDuration,
+    _state: &mut GameState,
+    _source: ObjectId,
+    _layer: Layer,
+    _predicate: ScriptHandle,
+    _duration: EffectDuration,
 ) {
     // TODO: state.continuous_effects.push(ContinuousEffect { source, layer,
     // affected_predicate: predicate, timestamp: <current SequenceNo - needs
@@ -69,7 +69,7 @@ pub fn add_continuous_effect(
 }
 
 /// `Game.ReplaceEvent`.
-pub fn replace_event(state: &mut GameState, source: ObjectId, pattern: ScriptHandle) {
+pub fn replace_event(_state: &mut GameState, _source: ObjectId, _pattern: ScriptHandle) {
     // TODO: state.replacement_effects.push(ReplacementEffect { source,
     // event_pattern: pattern, consumption: <not a parameter here, but
     // ReplacementEffect requires one - same kind of gap as
@@ -86,7 +86,7 @@ pub fn replace_event(state: &mut GameState, source: ObjectId, pattern: ScriptHan
 /// (`PlayerActionKind::CastSpell`). Still goes through the same legality
 /// checks; `free` skips the mana cost specifically — other additional
 /// costs still apply unless the card's own effect says otherwise.
-pub fn cast_spell(state: &mut GameState, card: ObjectId, controller: PlayerId, free: bool) -> Result<(), CommandError> {
+pub fn cast_spell(_state: &mut GameState, _card: ObjectId, _controller: PlayerId, _free: bool) -> Result<(), CommandError> {
     // TODO: build the equivalent of a CastSpell EngineCommand (modes/
     // targets/x_value need defaults or params - "cast target spell" effects
     // usually specify these themselves, so this signature is likely
@@ -96,7 +96,7 @@ pub fn cast_spell(state: &mut GameState, card: ObjectId, controller: PlayerId, f
 }
 
 /// `Game.PayCost`.
-pub fn pay_cost(state: &mut GameState, payer: PlayerId, plan: PaymentPlan) -> Result<(), CommandError> {
+pub fn pay_cost(_state: &mut GameState, _payer: PlayerId, _plan: PaymentPlan) -> Result<(), CommandError> {
     // TODO: validate plan against whatever CostSpec it's paying (not a
     // parameter here - needs one added, PaymentPlan::validate takes a
     // &CostSpec and this function doesn't have one to pass it), commit if
@@ -111,10 +111,10 @@ pub fn pay_cost(state: &mut GameState, payer: PlayerId, plan: PaymentPlan) -> Re
 /// this function call. Kept as a direct `-> Vec<Target>` return for this
 /// first signature pass.
 pub fn select_targets(
-    state: &GameState,
-    controller: PlayerId,
-    filter: FilterSpec,
-    count: u32,
+    _state: &GameState,
+    _controller: PlayerId,
+    _filter: FilterSpec,
+    _count: u32,
 ) -> Vec<Target> {
     // TODO: blocked on the same coroutine design as
     // ScriptRuntime::invoke_target (script.rs) - don't implement

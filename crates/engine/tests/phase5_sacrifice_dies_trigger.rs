@@ -187,7 +187,7 @@ fn dies_trigger_does_not_fire_for_a_permanent_that_was_not_sacrificed() {
     // A creature that survives on the battlefield never leaves it, so its
     // own Dies trigger must not fire just because *some* sacrifice happened
     // elsewhere in the same payment.
-    let (mut state, p0, p1, source, fodder, _hand_card) = state_with_cost(sacrifice_cost());
+    let (mut state, p0, _p1, source, fodder, _hand_card) = state_with_cost(sacrifice_cost());
     let bystander = ObjectId(3);
     state.objects.insert(bystander, object(bystander, vanilla_definition("Bystander", CardTypeSet::CREATURE), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bystander);
@@ -210,7 +210,7 @@ fn discard_cost_captures_departed_abilities_without_a_behavior_change() {
     // departed abilities the same way Sacrifice's does, but stays dormant -
     // no ConditionPrimitive matches a Hand-departure LKI yet, so a Dies
     // ability on a discarded card must not fire.
-    let (state, p0, p1, source, _fodder, hand_card) = state_with_cost(discard_cost());
+    let (state, p0, _p1, source, _fodder, hand_card) = state_with_cost(discard_cost());
     let mut engine = Engine::new(state);
     // dies_ability was registered against `fodder` in state_with_cost, not
     // `hand_card` - register one against hand_card directly so this test

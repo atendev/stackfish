@@ -20,7 +20,7 @@ pub struct Emblem {
 }
 
 impl Emblem {
-    pub fn new(emblem_id: ObjectId, source: ObjectId, ability_text: impl Into<String>) -> Self {
+    pub fn new(_emblem_id: ObjectId, _source: ObjectId, _ability_text: impl Into<String>) -> Self {
         // TODO: Emblem { emblem_id, source, ability_text: ability_text.into() }.
         todo!()
     }
@@ -64,7 +64,7 @@ pub struct PlayerState {
 }
 
 impl PlayerState {
-    pub fn new(player_id: PlayerId, starting_life: i32) -> Self {
+    pub fn new(_player_id: PlayerId, _starting_life: i32) -> Self {
         // TODO: PlayerState { player_id, life: starting_life, mana_pool:
         // ManaPool::empty(), counters: CounterSet::new(), emblems: vec![],
         // commander_damage_taken: vec![], eliminated: false,

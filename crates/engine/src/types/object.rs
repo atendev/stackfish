@@ -19,7 +19,7 @@ pub struct VisibilityPolicy {
 }
 
 impl VisibilityPolicy {
-    pub fn is_visible_to(&self, player: PlayerId) -> bool {
+    pub fn is_visible_to(&self, _player: PlayerId) -> bool {
         // TODO: self.public || self.visible_to.contains(&player). Note this
         // struct only covers the override layer (see doc comment above) -
         // callers needing the *effective* visibility (zone default plus
@@ -170,11 +170,11 @@ pub struct GameObject {
 
 impl GameObject {
     pub fn new(
-        object_id: ObjectId,
-        definition: CardDefinition,
-        owner: PlayerId,
-        zone: ZoneKind,
-        timestamp: SequenceNo,
+        _object_id: ObjectId,
+        _definition: CardDefinition,
+        _owner: PlayerId,
+        _zone: ZoneKind,
+        _timestamp: SequenceNo,
     ) -> Self {
         // TODO: controller defaults to owner at creation (CR 110.2);
         // lineage: ObjectLineage { previous: None } for a brand-new object

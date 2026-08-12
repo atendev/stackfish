@@ -9,7 +9,6 @@
 //! `no_priority_during_untap` test already proves one full pass-round from
 //! `PreGame` lands exactly on `Upkeep`).
 
-use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;

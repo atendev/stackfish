@@ -690,7 +690,7 @@ fn for_each_player_rejects_an_unsupported_bare_tag() {
     let mut state = two_player_state();
     state.objects.insert(card, card_object(card, sorcery_definition(1, BAD_SCRIPT), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
-    let mut engine = Engine::new(state);
+    let engine = Engine::new(state);
 
     let err = engine.build_operation(BAD_SCRIPT).expect_err("Destroy isn't SacrificeRandom/DiscardRandom");
     let message = format!("{err:?}");

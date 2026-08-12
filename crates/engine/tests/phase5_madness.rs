@@ -23,7 +23,6 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
@@ -398,7 +397,7 @@ fn ordinary_priority_actions_are_rejected_while_awaiting_the_madness_choice() {
 #[test]
 fn a_cost_payment_discard_also_triggers_madness() {
     let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
+    let _p1 = PlayerId(1);
     let card = ObjectId(0);
     let outlet = ObjectId(1);
     let mut state = two_player_state(ManaPool::default());

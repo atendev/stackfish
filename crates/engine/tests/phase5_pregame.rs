@@ -260,7 +260,7 @@ fn keep_wrong_player_rejected() {
 #[test]
 fn take_mulligan_redraws_and_increments() {
     let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
+    let _p1 = PlayerId(1);
     // 21 cards each so P0 can take 2 mulligans (7 + 7 + 7)
     let mut engine = Engine::new_game(two_player_config(21, 7, GameSettings::default()));
     run_until_pause(&mut engine); // paused at P0
@@ -335,7 +335,7 @@ fn one_paid_mulligan_requires_bottoming() {
 #[test]
 fn bottoming_moves_card_to_library() {
     let p0 = PlayerId(0);
-    let p1 = PlayerId(1);
+    let _p1 = PlayerId(1);
     let mut engine = Engine::new_game(two_player_config(14, 7, GameSettings::default()));
 
     // Drive P0 to take 1 mulligan then keep, P1 keeps

@@ -172,22 +172,6 @@ fn creature_definition(name: &str, script: &str) -> CardDefinition {
     }
 }
 
-fn player_state(id: PlayerId) -> PlayerState {
-    PlayerState {
-        player_id: id,
-        life: 20,
-        mana_pool: ManaPool::default(),
-        counters: CounterSet::new(),
-        emblems: Vec::new(),
-        commander_damage_taken: Vec::new(),
-        eliminated: false,
-        drew_from_empty_library: false,
-        mulligans_taken: 0,
-        hand_kept: false,
-        commander_casts: std::collections::HashMap::new(),
-    }
-}
-
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }

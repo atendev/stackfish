@@ -10,7 +10,6 @@
 //! concrete condition proving it, mirroring
 //! `phase5_upkeep_triggers.rs::BeginningOfYourUpkeep`'s own tests closely.
 
-use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;

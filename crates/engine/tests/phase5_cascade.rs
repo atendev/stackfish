@@ -130,7 +130,7 @@ impl AsLand for CardDefinition {
 /// `ObjectId(1000)`) - same "no Lua wiring proven this slice, direct
 /// construction only" posture every other alternative-cost-family slice in
 /// this engine already takes (Flashback/Escape/Buyback/Madness).
-fn cascade_trigger(source: ObjectId, controller: PlayerId) -> RegisteredAbility {
+fn cascade_trigger(source: ObjectId, _controller: PlayerId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),

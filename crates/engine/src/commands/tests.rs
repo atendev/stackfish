@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use super::*;
 use super::attach::retire_object;
 use crate::types::ability::{AbilityEffect, AbilityKind, RegisteredAbility};
 use crate::types::card::ModeChoice;
