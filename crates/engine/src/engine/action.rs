@@ -1,15 +1,16 @@
 //! `submit_action`'s validation entry point, `CommandId` allocation, and the
 //! `ProcessState::PendingAction` pipeline stage - split out of `engine.rs`.
 
-use crate::commands::{self, PriorityHandoff};
+use crate::commands::{self, find_ability, PendingPaymentRequest, PriorityHandoff};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement;
+use crate::types::ability::AbilityEffect;
 use crate::types::command::{EngineCommand, PlayerAction, PlayerActionKind};
 use crate::types::ids::CommandId;
 use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
 
-use super::{ActionError, Engine, ProcessState, StepStatus};
+use super::{ActionError, Engine, ProcessState, StepStatus, SuspendedPayment};
 
 impl Engine {
     pub(super) fn allocate_command_id(&mut self) -> CommandId {
@@ -43,8 +44,25 @@ impl Engine {
     /// `AdvanceTurnStep` only open a generic priority window on every step,
     /// combat steps included).
     pub fn submit_action(&mut self, action: PlayerAction) -> Result<(), ActionError> {
-        match self.process_state {
+        match &self.process_state {
             ProcessState::PriorityWindow => {}
+            // CR 601.2g/605.3a: a mana ability may be activated "even if
+            // it's in the middle of casting or resolving a spell or
+            // activating or resolving an ability" that itself needs a mana
+            // payment - the one exception to "only in a real priority
+            // window", and only for the payer's own mana abilities, never
+            // any other action (a second spell, a non-mana ability, or
+            // anyone but the payer trying to interject). `suspend_current_payment`
+            // stashes the interrupted `AwaitingPayment` (plus the
+            // `pipeline_context`/`pipeline_exit` this nested action's own
+            // `handle_pending_action` call is about to overwrite) onto
+            // `suspended_payments`, resumed by `resume_suspended_payment_or`
+            // once this nested action's own pipeline run settles.
+            ProcessState::AwaitingPayment { payer, .. }
+                if action.player == *payer && self.is_mana_ability_activation(&action.kind) =>
+            {
+                self.suspend_current_payment();
+            }
             _ => {
                 return Err(ActionError::IllegalAction(
                     "engine is mid-pipeline, not waiting for a player action".to_string(),
@@ -75,6 +93,50 @@ impl Engine {
         Ok(())
     }
 
+    /// CR 605.1a/605.3a: `submit_action`'s own scope-check for its nested-
+    /// mid-payment exception - `true` only for an `ActivateAbility` whose
+    /// target ability is a real mana ability (`AddMana`/`AddManaChoice`),
+    /// same effect-shape dispatch `commands::activate::execute_activate_ability`
+    /// itself already branches on. `false` (not just "no such ability") for
+    /// a bad `source`/`ability_index` too - either way, `submit_action`
+    /// rejects up front rather than queuing something `execute_command`
+    /// would just reject again downstream, since a downstream rejection
+    /// would (harmlessly, but pointlessly) still suspend the outer payment
+    /// first via `handle_pending_action`'s error-arm fallback.
+    fn is_mana_ability_activation(&self, kind: &PlayerActionKind) -> bool {
+        let PlayerActionKind::ActivateAbility { source, ability_index, .. } = kind else {
+            return false;
+        };
+        let Some(ability) = find_ability(&self.state, *source, *ability_index) else {
+            return false;
+        };
+        matches!(ability.effect, Some(AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. }))
+    }
+
+    /// `submit_action`'s own nested-mid-payment branch: pulls the current
+    /// `AwaitingPayment` (and the `pipeline_context`/`pipeline_exit` the
+    /// about-to-run nested `PendingAction` would otherwise clobber - see
+    /// `Engine::suspended_payments`' own doc comment) off the live fields
+    /// and onto the suspension stack, leaving `process_state` set to
+    /// whatever the caller assigns next (`submit_action` always follows
+    /// this with `ProcessState::PendingAction(action)`, same as the normal
+    /// `PriorityWindow` branch). `mem::take`/`mem::replace`, not `.clone()`
+    /// - nothing reads the live fields again before the nested action's own
+    /// `handle_pending_action` call overwrites them anyway, so there's
+    /// nothing to preserve in place.
+    fn suspend_current_payment(&mut self) {
+        let ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("caller only takes this branch when process_state is AwaitingPayment");
+        };
+        self.suspended_payments.push(SuspendedPayment {
+            request: PendingPaymentRequest { stack_id, payer, cost, source, on_paid },
+            pipeline_context: self.pipeline_context.take(),
+            pipeline_exit: std::mem::replace(&mut self.pipeline_exit, PipelineExit::BackToPriority),
+        });
+    }
+
     /// `ProcessState::PendingAction(action)` — executes the queued action via
     /// `commands::execute_command` and folds its `CommandOutcome` into
     /// `state`, then hands off to `ReplacementCheck` for the events it
@@ -89,8 +151,13 @@ impl Engine {
             Err(err) => {
                 // Reset to PriorityWindow rather than leaving process_state
                 // in limbo - see StepStatus::Error's doc comment for why
-                // this doesn't attempt rollback.
-                self.process_state = ProcessState::PriorityWindow;
+                // this doesn't attempt rollback. If this was a nested
+                // mana-ability activation (CR 601.2g/605.3a) that errored
+                // out before `pipeline_context`/`pipeline_exit` were even
+                // touched, resume the outer `AwaitingPayment` it suspended
+                // instead of abandoning it - see `submit_action`'s own doc
+                // comment.
+                self.process_state = self.resume_suspended_payment_or(ProcessState::PriorityWindow);
                 return StepStatus::Error(err);
             }
         };

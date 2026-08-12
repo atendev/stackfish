@@ -412,3 +412,58 @@
   - CR 702.29b's "ability persists in every other zone" — only the Library→Hand direction is wired;
     a card leaving hand still purges its abilities like any other object in this engine. Unobserved
     today (no consumer queries "has an activated ability" at all), named above.
+
+## Slice: mana-ability-during-payment (branch `phase5/mana-ability-during-payment`, not yet merged)
+
+- Scope: CR 601.2g/605.3a — a mana ability may be activated "even if it's in the middle of casting
+  or resolving a spell or activating or resolving an ability" that itself requires a mana payment.
+  Reported by the user as a real scenario bug: `activate_ability` on a land right after `cast_spell`
+  paused on `AwaitingPayment` errored with `IllegalAction("engine is mid-pipeline, not waiting for a
+  player action")` — `submit_action` only ever accepted input during `ProcessState::PriorityWindow`,
+  so every mana source had to be pre-tapped *before* casting, contrary to CR 601.2g's actual
+  sequencing (mana abilities are activated as their own explicit sub-step, after cost determination
+  but before payment, and CR 605.3a extends that license to mid-cast generally). Requirements report
+  given in chat before implementation.
+- Verify: 7 new tests (`phase5_mana_ability_during_payment.rs`) — the direct repro (tap two lands
+  mid-payment, pay with the floated mana), rejecting a non-payer, rejecting a non-mana ability,
+  regression-checking a second `cast_spell` mid-payment is still illegal, a real-cost (Treasure-
+  style) mana ability nesting its own `AwaitingPayment` inside the outer one and both resolving,
+  and `unwind_payment` on that nested pause correctly resuming the outer one rather than abandoning
+  it. Full workspace suite green (190 test-result blocks, 0 failed).
+- Key changes:
+  - `Engine::submit_action` (`engine/action.rs`) — its `PriorityWindow`-only guard gained one
+    exception: `ProcessState::AwaitingPayment { payer, .. }` also accepts an `ActivateAbility` when
+    `action.player == payer` and the target ability's effect is `AddMana`/`AddManaChoice` (checked
+    via `find_ability`, newly re-exported `pub(crate)` from `commands::attach` alongside its sibling
+    `find_ability_by_id`). Anything else mid-payment (a second spell, a non-mana ability, anyone but
+    the payer) still gets the pre-existing "mid-pipeline" rejection unchanged.
+  - `Engine::suspended_payments: Vec<SuspendedPayment>` (new field, `engine/mod.rs`) — each frame
+    bundles the interrupted `AwaitingPayment`'s fields (reusing `commands::PendingPaymentRequest`'s
+    shape verbatim) plus the outer pipeline run's own `pipeline_context`/`pipeline_exit`, both taken
+    via `mem::take`/`mem::replace` in the new `submit_action`-private `suspend_current_payment`
+    right before the nested `ActivateAbility` is queued as an ordinary `PendingAction` — necessary
+    because `handle_pending_action` unconditionally overwrites both live fields for *any* new
+    action, and without saving them first the outer run's trigger-collection window and eventual
+    post-settle destination would silently pick up the nested run's values instead of its own.
+  - `Engine::resume_suspended_payment_or` (new, `engine/payment.rs`) — the one shared consumer: pops
+    a suspended frame (restoring `pipeline_context`/`pipeline_exit` and returning the outer
+    `AwaitingPayment`) or returns the caller's fallback if nothing's suspended. Two call sites, both
+    previously hardcoding `ProcessState::PriorityWindow`: `end_pipeline_run`'s `BackToPriority` arm
+    (`triggers_pipeline.rs` — the actual "this pipeline run is over" decision point, reached whether
+    the nested activation was a plain instant-resolve mana ability or a real-cost one that itself
+    paused and later settled) and `handle_pending_action`'s error arm (`action.rs` — defensive, so a
+    nested activation that somehow errors doesn't strand the outer cast).
+  - No changes needed to `event_pipeline.rs`'s `CommitEvents` tail or `payment.rs`'s
+    `continue_cost_zone_moves` tail, despite both being part of the original plan — tracing the
+    actual pipeline showed both already correctly fall through to `SbaLoop`/trigger collection for
+    the nested run's own events regardless of nesting; `end_pipeline_run` alone is where "resume vs.
+    truly open a priority window" gets decided.
+  - `suspended_payments` is a `Vec` (not a single slot) so a real-cost mana ability activated
+    mid-payment can itself pause on its own nested `AwaitingPayment` without losing the outer one —
+    confirmed end to end by the Treasure-style test, not just asserted structurally.
+- Deviations: only the `event_pipeline.rs`/`payment.rs` non-change named above; otherwise matches
+  the requirements report's design as scoped.
+- Unresolved:
+  - Three-levels-deep nesting (a mana ability whose own cost itself requires a mana payment) is
+    structurally supported by the `Vec`-based stack but not separately tested — no real card in the
+    corpus needs it.

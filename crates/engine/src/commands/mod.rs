@@ -32,9 +32,9 @@ mod zone_ops;
 // integration test) already reaches through this module - see each
 // submodule for the real definition and its own doc comment.
 pub(crate) use attach::{
-    apply_copy_additional_counters, attach_permanent, attach_permanent_to_player, find_ability_by_id,
-    grant_linked_copy_ability, is_aura, is_equipment, legal_entry_attach_candidates, next_active_player,
-    non_eliminated_players, purge_granted_abilities, remap_abilities, retire_object,
+    apply_copy_additional_counters, attach_permanent, attach_permanent_to_player, find_ability,
+    find_ability_by_id, grant_linked_copy_ability, is_aura, is_equipment, legal_entry_attach_candidates,
+    next_active_player, non_eliminated_players, purge_granted_abilities, remap_abilities, retire_object,
 };
 pub use attach::{propose_attach, AttachProposal};
 pub(crate) use combat::mark_effect_blocked;

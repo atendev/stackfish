@@ -107,7 +107,14 @@ impl Engine {
         self.pipeline_context = None;
         self.departed_triggered_abilities.clear();
         match std::mem::replace(&mut self.pipeline_exit, PipelineExit::BackToPriority) {
-            PipelineExit::BackToPriority => ProcessState::PriorityWindow,
+            // CR 601.2g/605.3a: this pipeline run might just be a nested
+            // mana-ability activation that interrupted an outer
+            // `AwaitingPayment` (see `submit_action`'s own doc comment) -
+            // resume that instead of really opening a priority window, if
+            // one's suspended. `resume_suspended_payment_or` also restores
+            // the `pipeline_context`/`pipeline_exit` this run's own
+            // `handle_pending_action` call overwrote at its start.
+            PipelineExit::BackToPriority => self.resume_suspended_payment_or(ProcessState::PriorityWindow),
             PipelineExit::ResolveStackTop => ProcessState::ResolveStackTop,
             PipelineExit::AdvanceTurnStep => ProcessState::AdvanceTurnStep,
             PipelineExit::CleanupCheck { since_ledger } => {

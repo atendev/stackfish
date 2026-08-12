@@ -351,6 +351,22 @@ pub enum BottomCardsError {
     DuplicateCard,
 }
 
+/// One frame of `Engine::suspended_payments` — everything needed to resume
+/// an outer `ProcessState::AwaitingPayment` once the nested mana-ability
+/// activation that paused it (CR 601.2g/605.3a) fully settles. `request`
+/// carries the same fields `AwaitingPayment` itself does; `pipeline_context`/
+/// `pipeline_exit` are the outer run's own values, saved off because
+/// `handle_pending_action` unconditionally overwrites both live fields the
+/// moment the nested `PendingAction` runs (see `Engine::pipeline_context`'s
+/// own doc comment) - without this, the outer run's trigger-collection
+/// window and post-settle destination would silently pick up the nested
+/// run's values instead of its own once resumed.
+struct SuspendedPayment {
+    request: PendingPaymentRequest,
+    pipeline_context: Option<PipelineContext>,
+    pipeline_exit: PipelineExit,
+}
+
 /// The step-able rules processor (DESIGN.md's "step-able core"). Wraps
 /// `GameState` (pure data) with the actual turn/phase/priority/stack
 /// advancement logic. Live play drives `step()` in a tight loop between
@@ -397,6 +413,20 @@ pub struct Engine {
     /// not "this pipeline run" in general — `ResolveStackTop` runs never set
     /// it, and it's already `None` by the time they reach `CommitEvents`.
     pending_payment: Option<PendingPaymentRequest>,
+    /// CR 601.2g/605.3a: a mana ability may be activated "even if it's in
+    /// the middle of casting or resolving a spell or activating or
+    /// resolving an ability" that itself requires a mana payment - so
+    /// `submit_action` (see its own doc comment) may accept a nested
+    /// `ActivateAbility` for a mana ability while `process_state` is already
+    /// `AwaitingPayment` for something else. Each entry is one suspended
+    /// outer payment, LIFO - a real-cost (Treasure-style) mana ability
+    /// activated mid-payment can itself pause on a fresh `AwaitingPayment`
+    /// for its own cost, nesting one level deeper. Popped by
+    /// `resume_suspended_payment_or` (the one place both `end_pipeline_run`'s
+    /// `BackToPriority` arm and `handle_pending_action`'s error arm check
+    /// before falling back to their old unconditional behavior) once the
+    /// nested action's own pipeline run fully settles.
+    suspended_payments: Vec<SuspendedPayment>,
     /// Settings that govern automated pregame behavior and format-level thresholds
     /// (life totals, poison threshold, max hand size). Stored on `Engine`, not
     /// `GameState`, because they're configuration for this session, not mutable
@@ -428,6 +458,7 @@ impl Engine {
             departed_triggered_abilities: Vec::new(),
             next_command_id: 0,
             pending_payment: None,
+            suspended_payments: Vec::new(),
             settings: GameSettings::default(),
             pregame_setup_done: true,
             script_runtime: ScriptRuntime::new(),
