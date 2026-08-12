@@ -52,3 +52,10 @@ name.
   `controller`/`self_only` — "destroy all Zombies" or "destroy all nonland permanents" aren't
   expressible via mass destruction yet, only a plain type/controller restriction like Armageddon's
   "destroy all lands." See [game-constants.md](game-constants.md#gameops).
+- **`Game.Ops.Counter` only counters a spell, never an ability.** CR 701.6a covers both "counter
+  target spell" and "counter target activated/triggered ability" (Stifle, Trickbind), but an
+  ability's `StackObject` has no matching `GameObject` for a `TargetFilter::Object` to target — no
+  ability-shaped target vocabulary exists yet. "Counter unless [that player] pays {X}" (Mana Leak,
+  Condescend) also isn't modeled — it needs a real mid-resolution payment ask. "Counter target spell
+  with mana value N or less" (Convolute) isn't expressible either — `TargetFilter::Object` has no
+  `mana_value` key.

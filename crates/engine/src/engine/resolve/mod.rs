@@ -39,6 +39,9 @@
 //! - `madness`: `MadnessCastOrDiscard` (CR 702.35a Madness's own "cast or
 //!   discard" decision).
 //! - `cascade`: `Cascade` (CR 702.85a).
+//! - `counter`: `Counter` (CR 701.6a) — removes a *different*, still-present
+//!   `StackObject` from `state.stack` by matching `stack_id`, not a
+//!   zone-move arm on `top` itself like `destruction`'s cluster.
 //!
 //! Every extracted effect-resolver returns `std::ops::ControlFlow<StepStatus,
 //! Vec<GameEventKind>>` — `Break(status)` for "this resolution is pausing,
@@ -61,6 +64,7 @@ use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 mod cascade;
+mod counter;
 mod destruction;
 mod direct_effects;
 mod discard;
@@ -512,6 +516,11 @@ impl Engine {
             // ordering-choice handling as Destroy/Sacrifice
             // above.
             Some(AbilityEffect::Exile) => self.resolve_exile_effect(top, legal_targets),
+            // CR 701.6a: removes the *targeted* StackObject (a different
+            // stack_id than top.stack_id) from state.stack directly - see
+            // AbilityEffect::Counter's own doc comment and
+            // counter::resolve_counter_effect for the full shape.
+            Some(AbilityEffect::Counter) => self.resolve_counter_effect(legal_targets, events),
             // CR 701.9b: same "count candidates drawn without replacement
             // via next_rng" shape as SacrificeRandom above, from the
             // resolving StackObject's own controller's hand instead of the

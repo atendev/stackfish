@@ -247,6 +247,52 @@ pub enum AbilityEffect {
     /// at resolution time; deferred as a named follow-up. No fields — a
     /// toggle, not a value, same shape as `Destroy`.
     Exile,
+    /// The `Game.Ops.Counter()` primitive (CR 701.6a) — "counter target
+    /// spell." The target is a `Target::Object` referring to another
+    /// `StackObject`'s own `stack_id` (a spell on the stack already has a
+    /// real `GameObject` at `zone: Stack` sharing that same `ObjectId` — see
+    /// `commands::cast::execute_cast_spell` — so `TargetFilter::Object {
+    /// zone: Some(ZoneKind::Stack), .. }` already targets it correctly with
+    /// no engine change; card_types/controller narrow it the same way any
+    /// other `Object` filter does, e.g. Negate's "target noncreature spell").
+    ///
+    /// Unlike every other single-target `AbilityEffect` here, the affected
+    /// object is *not* `top.source`/the resolving spell's own target in the
+    /// zone-mutation sense `Destroy`/`Exile`/`Sacrifice` use (those all act
+    /// on a Battlefield object reachable through `continue_scripted_zone_move`)
+    /// — it's a *different*, still-present entry in `state.stack` itself.
+    /// `resolve_counter_effect` finds and removes that `StackObject` by
+    /// matching `stack_id` (a plain `Vec::retain`/position-remove, since
+    /// `state.stack` is a bare `Vec`, not a queue with its own removal
+    /// primitive), then — only if it was a `Spell` (an ability "just stops
+    /// existing," same as a fizzled ability, no `ZoneChange`) — reuses
+    /// `Engine::move_resolving_spell` for the card's own zone move (CR
+    /// 701.6a: owner's graveyard, or exile if *that* spell's own
+    /// `exile_on_leaving_stack` is set, e.g. a flashbacked spell that gets
+    /// countered still ends up exiled per CR 702.34a - not the *countering*
+    /// spell's own flag). No `apply_replacements` call - same "a spell
+    /// leaving the stack for graveyard/exile isn't a `WouldDie`-shaped
+    /// replacement-checked move" stance the CR 608.2b fizzle branch already
+    /// takes for the identical zone-move shape. No CR 616.1 ordering pause
+    /// either - a single stack entry being removed, not several simultaneous
+    /// battlefield deaths.
+    ///
+    /// CR 608.2b already covers "the targeted spell left the stack before
+    /// this resolves" for free: `target_is_legal`'s zone check fails once
+    /// the target's `ObjectId` no longer resolves to a `zone: Stack` object
+    /// (every zone change mints a fresh id), so `legal_targets` comes back
+    /// empty and the *Counterspell itself* fizzles via the ordinary path,
+    /// never reaching this arm at all.
+    ///
+    /// TODO: "counter target activated or triggered ability" (Stifle,
+    /// Trickbind) isn't reachable this slice - an ability's `StackObject` has
+    /// no matching `GameObject` for a `TargetFilter::Object` to find, and no
+    /// ability-shaped target vocabulary exists yet. TODO: "counter unless
+    /// [that player] pays {X}" (Mana Leak, Condescend) needs a real
+    /// mid-resolution payment ask - not built. TODO: "counter target spell
+    /// with mana value N or less" (Convolute) needs a `mana_value` key on
+    /// `TargetFilter::Object` that doesn't exist yet.
+    Counter,
     /// The `Game.Ops.CreateToken()` primitive — creates one or more token
     /// permanents on the battlefield under the controller's control (CR 111).
     /// Named tokens (Clue, Food) are fully implemented; Treasure is blocked

@@ -73,6 +73,23 @@ pub enum GameEventKind {
     /// owner's graveyard, pushed just before this); a fizzled ability just
     /// stops existing, no `ZoneChange` for it.
     Fizzled { stack_id: ObjectId },
+    /// CR 701.6a: `stack_id` was removed from the stack by
+    /// `AbilityEffect::Counter` rather than resolving - it doesn't resolve
+    /// and none of its effects occur (CR 701.6a's own second sentence). Same
+    /// "emitted instead of `StackObjectResolved`, with an accompanying
+    /// `ZoneChange` to the countered spell's owner's graveyard/exile pushed
+    /// just before this only when it was a `Spell`" shape `Fizzled` already
+    /// establishes - a countered ability just stops existing, no
+    /// `ZoneChange`. Distinct from `Fizzled` (CR 608.2b, this object's own
+    /// targets/intervening-if became illegal) since real cards care about
+    /// the difference (e.g. "if a spell would be countered, counter it
+    /// instead" replacement effects, or "whenever a spell is countered this
+    /// way" triggers - neither modeled yet, see `AbilityEffect::Counter`'s
+    /// own doc comment for what's out of scope this slice). TODO: no
+    /// `ConditionPrimitive` matches this event yet - same "primitive ships
+    /// before its own trigger condition" precedent `Damage`/`Scry` already
+    /// set; no real card built so far needs "whenever a spell is countered."
+    Countered { stack_id: ObjectId },
     /// CR 601.6: `Engine::unwind_payment` abandoned `stack_id`'s cast/
     /// activation rather than paying its cost - the game "returns to the
     /// moment before [it] was proposed." Same "emitted instead of/alongside

@@ -374,3 +374,43 @@
   Full account (including `AbilityEffect`/`ScriptedZoneMoveKind` changes) lives in
   [12-coroutines.md](12-coroutines.md#slice-mass-choice-effects-merged), grouped with the coroutine
   machinery they build on rather than duplicated here.
+
+## Slice: counter-target-spell (branch `phase5/counter-target-spell`)
+
+- Scope: CR 701.6a - "counter target spell." New `AbilityEffect::Counter` / `Game.Ops.Counter`.
+- Key finding that shaped the design: no new targeting plumbing was needed. A spell on the stack
+  already has a real `GameObject` at `zone: Stack` sharing its own `StackObject::stack_id`
+  (`commands::cast::execute_cast_spell`), and `TargetFilter::Object.zone` plus its Lua decode
+  (`decode_target_filter_table`, reused by `s.target_requirement()` via `decode_target_requirement_table`)
+  already parsed a `"Stack"` zone name end to end before this slice - `docs/lua/targeting-and-choices.md`
+  claimed otherwise ("`:SetTarget`'s own target-requirement filter has no such key"), which was stale,
+  not accurate; fixed as part of this slice. CR 608.2b's existing recheck-at-resolution in
+  `resolve_stack_top` also covers "the targeted spell already left the stack" for free - the target's
+  `zone` check fails once it's no longer `Stack` (every zone change mints a fresh `ObjectId`), so
+  `legal_targets` comes back empty and the *Counterspell itself* fizzles via the pre-existing path.
+- What's genuinely new: `engine/resolve/counter.rs`'s `resolve_counter_effect` - unlike every other
+  single-target `AbilityEffect`, the affected object isn't reached through `continue_scripted_zone_move`'s
+  battlefield-object path; it's a *different*, still-present `StackObject` in `state.stack` (a plain
+  `Vec`, no prior removal-by-id primitive existed - only `resolve_stack_top`'s own top-of-stack `pop()`).
+  Found by `stack_id`, removed via `Vec::remove`, then (only if it was a `Spell`, not an ability - an
+  ability "just stops existing," no `ZoneChange`) its card's own zone move reuses `Engine::
+  move_resolving_spell` unchanged - the exact helper the CR 608.2b fizzle branch already calls for the
+  identical "move this `stack_id`'s `GameObject` to graveyard/exile, no replacement check, no CR 616.1
+  ordering pause" shape. New `GameEventKind::Countered { stack_id }`, distinct from `Fizzled` (real
+  cards care about the difference - "whenever a spell is countered this way" - not modeled this slice,
+  no `ConditionPrimitive` matches it yet, same "primitive ships before its own trigger condition"
+  precedent `Damage`/`Scry` already set).
+- Verify: 4 new tests (`phase5_counter_target_spell.rs`) - a countered creature spell lands in its
+  owner's graveyard and never resolves; the Counterspell itself fizzles (not panics) when its own
+  target already left the stack; a `excluded_card_types`-restricted "counter target noncreature spell"
+  correctly rejects a creature-spell target at cast time (via `drain()`, not synchronously in
+  `submit_action` - target validation is queued, a real test-writing trap hit and fixed while building
+  this); a `Game.Ops.Counter` decode test (a bare value like `Destroy`/`Sacrifice`, not a called
+  function - `Game.Ops.Counter`, not `Game.Ops.Counter()`, another trap hit and fixed). Full workspace
+  suite green, zero new warnings.
+- Unresolved, named rather than guessed at: "counter target activated or triggered ability" (Stifle,
+  Trickbind) - an ability's `StackObject` has no matching `GameObject` for a `TargetFilter::Object` to
+  find, and no ability-shaped target vocabulary exists yet. "Counter unless [that player] pays {X}"
+  (Mana Leak, Condescend) - needs a real mid-resolution payment ask, not built. "Counter target spell
+  with mana value N or less" (Convolute) - needs a `mana_value` key on `TargetFilter::Object` that
+  doesn't exist yet.

@@ -270,6 +270,14 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::DestroyAll(_))
         | Some(AbilityEffect::Sacrifice)
         | Some(AbilityEffect::Exile)
+        // CR 701.6a: no real card grants Counter as an activated ability's
+        // own effect (Stifle-style "counter target activated/triggered
+        // ability" is a different, unbuilt targeting shape - see
+        // AbilityEffect::Counter's own doc comment), but it's still a
+        // recognized primitive that goes on the stack the same way as any
+        // other here. Listed for exhaustiveness, same reason as
+        // ForEachPlayer/SacrificeRandom/DiscardRandom below.
+        | Some(AbilityEffect::Counter)
         // `phase5/mass-choice-effects`: no real card grants any of these
         // three as an activated ability's own effect yet, but they're
         // recognized primitives that go on the stack the same way as any

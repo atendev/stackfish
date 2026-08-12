@@ -31,12 +31,14 @@ effect.
 `Game.SelectTargets`/`:SetTarget` additionally accept a `type` key (`"object"`, `"player"`, or
 `"any"`, default `"object"`) to say what kind of thing is being targeted at all — see below.
 
-`Game.SelectTargets`/`Game.ChooseN`'s own filter (not `:SetTarget`'s) additionally accepts a `zone`
-key — a zone name string (`"Hand"`, `"Battlefield"`, ...), same names/casing the TOML fixture format
-uses. Defaults to `"Battlefield"` if omitted, same as before. This is how a mid-resolution ask reaches
-into a player's own hand (CR 701.9's discard, e.g. `Game.ChooseN({ zone = "Hand", controller = "you" },
-n)`) — `:SetTarget`'s own target-requirement filter has no such key; a card's own base "target" is
-always CR 115.2's battlefield-by-default.
+Every filter table — `Game.SelectTargets`/`Game.ChooseN`'s own, and `:SetTarget`/
+`s.target_requirement()`'s — additionally accepts a `zone` key: a zone name string (`"Hand"`,
+`"Battlefield"`, `"Stack"`, ...), same names/casing the TOML fixture format uses. Defaults to
+`"Battlefield"` if omitted, same as before. This is how a mid-resolution ask reaches into a player's
+own hand (CR 701.9's discard, e.g. `Game.ChooseN({ zone = "Hand", controller = "you" }, n)`), and how
+a card's own base "target" reaches onto the stack (CR 701.6a's "counter target spell" — see
+`s.target_requirement()` below and `Game.Ops.Counter` in
+[game-constants.md](game-constants.md#gameops)).
 
 ## A card's own base targeting (Enchant, etc.)
 
