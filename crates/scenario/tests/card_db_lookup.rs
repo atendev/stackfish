@@ -6,7 +6,7 @@
 
 use rusqlite::Connection;
 use stackfish_engine::{CardTypeSet, KeywordSet, PTValue, Subtype};
-use stackfish_scenario::{build_initial_state, ScenarioFile};
+use stackfish_scenario::{build_initial_state, run, ScenarioFile};
 use std::path::{Path, PathBuf};
 
 const FIXTURE_SCHEMA_AND_DATA: &str = "
@@ -45,6 +45,24 @@ const FIXTURE_SCHEMA_AND_DATA: &str = "
 
     INSERT INTO keywords (name) VALUES ('Trample');
     INSERT INTO card_keywords (oracle_id, keyword_id) VALUES ('bear-1', (SELECT id FROM keywords WHERE name = 'Trample'));
+
+    -- `phase5/db-script-operation-fix` regression fixture: a Sorcery whose
+    -- only ability is a plain `s.operation()` (CR 608.2m), the same
+    -- convention Balance's real `card_scripts` row uses. Free cost, no
+    -- `[[cards]]` TOML `script` field anywhere - `db_script_id` is the only
+    -- way this card's `CardDefinition` gets built, which is exactly the path
+    -- that used to leave `effect: None` unregistered.
+    INSERT INTO cards (oracle_id, script_id, name, mana_cost, type_line, oracle_text, has_multiple_faces)
+    VALUES ('bolt-1', 'test_gain_life_sorcery', 'Test Gain Life', '', 'Sorcery', '', 0);
+    INSERT INTO card_scripts (oracle_id, version, script_source, is_active) VALUES (
+        'bolt-1', 1,
+        'local s = {}
+         function s.operation()
+             return Game.Ops.GainLife(3)
+         end
+         return s',
+        1
+    );
     ";
 
 fn write_fixture_db(path: &Path) {
@@ -103,6 +121,83 @@ fn db_script_id_pulls_a_real_card_definition_into_a_scenario() {
     assert!(matches!(definition.power, Some(PTValue::Fixed(2))));
     assert!(matches!(definition.toughness, Some(PTValue::Fixed(2))));
     assert_eq!(definition.keywords, KeywordSet::TRAMPLE);
+
+    std::fs::remove_file(&db_path).ok();
+}
+
+/// `phase5/db-script-operation-fix`: a `db_script_id` card's own
+/// `s.operation()` (CR 608.2m) used to never get wired into
+/// `CardDefinition.effect` at all - `build_initial_state`'s `PendingScript
+/// Operation` collection only checked the TOML-inline `CardSpec.script`
+/// field, which is always `None` for a DB-sourced card, so the spell just
+/// resolved as a silent no-op regardless of what its real script said.
+/// Casts a DB-loaded Sorcery whose entire behavior is `s.operation()`
+/// returning `Game.Ops.GainLife(3)` and confirms the life gain actually
+/// happens - would fail (life stays 20) on the pre-fix code.
+#[test]
+fn db_script_id_cards_own_operation_function_is_registered_and_runs() {
+    let db_path = fixture_db_path();
+    let toml = format!(
+        r#"
+        seed = 1
+        card_db = {db_path:?}
+
+        [[players]]
+        id = 0
+        life = 20
+
+        [[players]]
+        id = 1
+        life = 20
+
+        [[cards]]
+        key = "bolt"
+        db_script_id = "test_gain_life_sorcery"
+
+        [[setup]]
+        player = 0
+        zone = "hand"
+        card = "bolt"
+
+        [[steps]]
+        type = "pass_priority"
+        player = 0
+        [[steps]]
+        type = "pass_priority"
+        player = 1
+        [[steps]]
+        type = "pass_priority"
+        player = 0
+        [[steps]]
+        type = "pass_priority"
+        player = 1
+
+        [[steps]]
+        type = "cast_spell"
+        player = 0
+        card = "bolt"
+        targets = []
+
+        [[steps]]
+        type = "submit_payment"
+        player = 0
+
+        [[steps]]
+        type = "pass_priority"
+        player = 0
+        [[steps]]
+        type = "pass_priority"
+        player = 1
+
+        [[steps]]
+        type = "assert_life"
+        player = 0
+        equals = 23
+        "#
+    );
+    let file: ScenarioFile = toml::from_str(&toml).unwrap();
+    let report = run(&file);
+    assert!(!report.has_hard_failures());
 
     std::fs::remove_file(&db_path).ok();
 }

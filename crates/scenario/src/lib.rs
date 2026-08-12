@@ -509,9 +509,12 @@ pub struct PendingTargetScript {
 /// source's optional `s.target_requirement()` function (`Engine::
 /// build_target_requirement`) to fill the whole field in, once an `Engine`
 /// exists (see `register_script_target_requirement`). Only collected when
-/// `CardSpec.target_requirement` is unset and `CardSpec.script` is set — an
-/// explicit TOML `target_requirement` always wins, unchanged for every
-/// pre-existing fixture.
+/// `CardSpec.target_requirement` is unset and this card resolved to a real
+/// script — either `CardSpec.script` (TOML-inline) or a `db_script_id`
+/// lookup's own `CardDefinition.script_ref` (`phase5/db-script-operation-
+/// fix` — the DB path used to be silently skipped here, reading only
+/// `spec.script`). An explicit TOML `target_requirement` always wins,
+/// unchanged for every pre-existing fixture.
 pub struct PendingScriptTargetRequirement {
     pub object: ObjectId,
     pub source: String,
@@ -524,10 +527,12 @@ pub struct PendingScriptTargetRequirement {
 /// `ScriptRuntime` exists yet at that point. Unlike `target_requirement`,
 /// `CardSpec` has no TOML field for a card's own effect at all (see its own
 /// doc comment - direct Rust struct literal only, until now), so there's no
-/// "does the TOML side already have one" gate to check - every card with a
-/// `script` set gets one of these, and `register_script_operation` simply
-/// leaves `effect: None` unchanged if that script has no `operation()`
-/// function of its own.
+/// "does the TOML side already have one" gate to check - every card that
+/// resolved to a real script (TOML-inline `CardSpec.script`, or a
+/// `db_script_id` lookup's `CardDefinition.script_ref`, same as
+/// `PendingScriptTargetRequirement` above) gets one of these, and
+/// `register_script_operation` simply leaves `effect: None` unchanged if that
+/// script has no `operation()` function of its own.
 pub struct PendingScriptOperation {
     pub object: ObjectId,
     pub source: String,
@@ -1534,6 +1539,19 @@ pub fn build_initial_state(
         next_object_id += 1;
 
         let definition = card_definition_from_spec(card_db.as_ref(), object_id.0, spec);
+        // The real Lua source `s.target_requirement()`/`s.operation()` (CR
+        // 601.2c/702.5a, CR 608.2m) should run against - `spec.script` for a
+        // from-scratch card, or whatever `card_definition_from_spec` just
+        // resolved from the DB for a `db_script_id` one (same
+        // `ScriptReference::Inline` shape either path produces). Reading
+        // `spec.script` directly below this used to skip every `db_script_id`
+        // card outright, silently leaving its `operation()`/
+        // `target_requirement()` unregistered - see this branch's own
+        // `phase5/db-script-operation-fix` note in docs/implementation.
+        let resolved_script: Option<String> = match &definition.script_ref {
+            ScriptReference::Inline(source) if !source.is_empty() => Some(source.clone()),
+            _ => None,
+        };
 
         let owner = PlayerId(entry.player);
         let zone_kind = parse_zone_kind(&entry.zone);
@@ -1607,7 +1625,7 @@ pub fn build_initial_state(
         // TOML `target_requirement` (including the `filter = "script"` case
         // just above) always wins; this only fills the gap when it's unset.
         if spec.target_requirement.is_none() {
-            if let Some(source) = &spec.script {
+            if let Some(source) = &resolved_script {
                 script_target_requirements
                     .push(PendingScriptTargetRequirement { object: object_id, source: source.clone() });
             }
@@ -1615,7 +1633,7 @@ pub fn build_initial_state(
         // CardSpec has no TOML field for a card's own effect at all (unlike
         // target_requirement above) - so there's no "does TOML already have
         // one" gate here, every scripted card gets a chance to declare one.
-        if let Some(source) = &spec.script {
+        if let Some(source) = &resolved_script {
             script_operations.push(PendingScriptOperation { object: object_id, source: source.clone() });
         }
         if let Some(effect_spec) = &spec.continuous_effect {
@@ -2224,12 +2242,27 @@ fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashM
             if let Some(script) = spec.target_requirement.as_ref().and_then(|r| r.script.as_ref()) {
                 register_target_script(&mut engine, card_ids[key], script);
             }
+            // Same `resolved_script` reasoning as `build_initial_state` -
+            // `spec.script` alone misses a `db_script_id` card's real source,
+            // which only lives on the `CardDefinition` this card's own
+            // object already carries post-pregame (`phase5/db-script-
+            // operation-fix`).
+            let resolved_script: Option<String> = match &engine
+                .state()
+                .object(card_ids[key])
+                .unwrap_or_else(|| panic!("card_ids entry for '{key}' has no matching object"))
+                .definition
+                .script_ref
+            {
+                ScriptReference::Inline(source) if !source.is_empty() => Some(source.clone()),
+                _ => None,
+            };
             if spec.target_requirement.is_none() {
-                if let Some(source) = &spec.script {
+                if let Some(source) = &resolved_script {
                     register_script_target_requirement(&mut engine, card_ids[key], source);
                 }
             }
-            if let Some(source) = &spec.script {
+            if let Some(source) = &resolved_script {
                 register_script_operation(&mut engine, card_ids[key], source);
             }
         }
