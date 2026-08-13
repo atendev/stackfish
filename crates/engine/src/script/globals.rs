@@ -912,7 +912,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     let tokens = lua.create_table()?;
     tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
     tokens.set("Food", TokenTag(TokenSpec::Named(NamedToken::Food)))?;
-    // TODO: Game.Tokens.Treasure blocked on coroutines (backlog item 9)
+    tokens.set("Treasure", TokenTag(TokenSpec::Named(NamedToken::Treasure)))?;
     tokens.set(
         "Creature",
         lua.create_function(|_, (subtypes_val, colors_str, power, toughness, opts): (Value, String, i32, i32, Option<mlua::Table>)| {

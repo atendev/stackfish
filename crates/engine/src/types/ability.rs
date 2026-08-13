@@ -687,8 +687,14 @@ pub enum NamedToken {
     Clue,
     /// A Food artifact token with "{2}, Sacrifice this artifact: Gain 3 life."
     Food,
-    // TODO: Treasure ("{T}, Sacrifice this artifact: Add one mana of any color")
-    // blocked on mana-choice player input / coroutines (backlog item 9).
+    /// CR 111.10a: a Treasure artifact token with "{T}, Sacrifice this
+    /// artifact: Add one mana of any color." Uses `AbilityEffect::
+    /// AddManaChoice` (`phase5/mana-add-choice`) - the "blocked on
+    /// coroutines" comment this variant used to carry was stale by the time
+    /// it was checked: that effect already resolves synchronously off the
+    /// `ActivateAbility` action's own `chosen_colors` field, no player-pause
+    /// mechanism needed.
+    Treasure,
 }
 
 /// Full spec for a creature (or artifact creature, enchantment creature, etc.)

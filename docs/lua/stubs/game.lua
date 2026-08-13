@@ -696,6 +696,7 @@ function GameConsumptionTable.LimitedUses(n) end
 ---@class GameTokensTable
 ---@field Clue GameTokensValue
 ---@field Food GameTokensValue
+---@field Treasure GameTokensValue
 local GameTokensTable = {}
 
 ---@param subtypes string|string[]

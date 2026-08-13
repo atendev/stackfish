@@ -2,6 +2,26 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Sacrifice-self cost + Treasure token (`phase5/sacrifice-self-cost`, `phase5/treasure-token`,
+  both merged)**: two small slices found by re-checking stale "blocked on X" comments against
+  current code (the same trap this file's own note below, at "A doc comment blaming a gap...",
+  already names) rather than trusting them. `AdditionalCost::Sacrifice{filter}` could only check
+  type/supertype/subtype/controller, never the paid object's own identity — a "sacrifice this
+  artifact" ability (Clue, Food) could actually be paid by sacrificing any *other* matching
+  artifact instead. Added `AdditionalCost::SacrificeSelf` (mirrors `TapSelf`/`DiscardSelf`,
+  `Game.Costs.SacrificeSelf` on the Lua side) and switched Clue/Food onto it. Also fixed a real,
+  separate bug found while touching the same token builder: Food's `CardDefinition` was missing
+  its `{T}` cost component entirely — CR 111.10b is "{2}, {T}, Sacrifice this token," not just
+  "{2}, Sacrifice." Second slice: `NamedToken::Treasure`/`Game.Tokens.Treasure` (CR 111.10a) —
+  its own "blocked on mana-choice coroutines" comment was stale by the time it was checked:
+  `AbilityEffect::AddManaChoice` (`phase5/mana-add-choice`, merged earlier) already resolves
+  synchronously off the `ActivateAbility` action's own `chosen_colors` field, no coroutine/
+  player-pause mechanism needed at all — confirmed by reading `commands/activate.rs`'s own
+  `AddMana`/`AddManaChoice` arm directly before building anything. Built the same way Clue/Food
+  already are (a hand-built `RegisteredAbility` in `engine/resolve/tokens.rs`, not a
+  Lua-scripted ability) — `TapSelf` + `SacrificeSelf`, no mana cost, `AddManaChoice { count: 1,
+  choices: ColorSet::all() }`.
+
 - **Mass-choice effects (Balance, `phase5/mass-choice-effects`, merged)**: `Game.ChooseN`,
   `Game.Ops.SacrificeChosen`/`DiscardChosen`/`SacrificeRandom`/`DiscardRandom`/`ForEachPlayer` all
   landed — full account in `docs/implementation/12-coroutines.md`'s own entry. Follow-up slice closed
