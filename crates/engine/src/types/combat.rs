@@ -44,4 +44,18 @@ pub struct CombatState {
     /// band). Cleared per-object by the same regeneration/combat-removal
     /// path that already prunes `attackers`/`blocks`.
     pub effect_blocked: Vec<ObjectId>,
+    /// `phase5/automatic-combat-damage`, CR 510.1/510.2: whether combat
+    /// damage has already been assigned+dealt for the *current*
+    /// `Step::FirstStrikeDamage`/`Step::CombatDamage` step - set once
+    /// `commands::execute_assign_combat_damage` actually builds damage
+    /// events (whether reached via the auto-fire attempt `engine::turn`
+    /// makes on entering the step with no real split to choose, or via a
+    /// normal explicit `AssignCombatDamage` submission for a step that
+    /// does need one). Reset to `false` by `advance_turn_step` on every
+    /// transition *into* either step - a game with both a first-strike and
+    /// a regular damage step needs its own flag value for each. Lets a
+    /// redundant explicit `AssignCombatDamage{assignments: vec![]}` after
+    /// the zero-split auto-fire already ran stay a harmless no-op instead
+    /// of double-dealing damage - see that function's own guard.
+    pub damage_assigned_this_step: bool,
 }
