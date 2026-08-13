@@ -286,6 +286,35 @@ function CostModifierBuilder:SetAmount(amount) end
 function CostModifierBuilder:Register() end
 
 -------------------------------------------------------------------------------
+-- Game.CreateLandPlayModifier(c) — CR 305.2 "play an additional land each turn."
+-------------------------------------------------------------------------------
+
+---@class LandPlayModifierBuilder
+local LandPlayModifierBuilder = {}
+
+--- Which player(s) this applies to. Required before :Register().
+---@param value GameLandPlayAffectedValue
+---@return LandPlayModifierBuilder
+function LandPlayModifierBuilder:SetAffected(value) end
+
+--- How many additional land plays this grants (usually 1). Required before :Register().
+---@param additional integer
+---@return LandPlayModifierBuilder
+function LandPlayModifierBuilder:SetAdditional(additional) end
+
+--- Finalizes and registers the modifier. Unlike Game.CreateDrawLimitModifier, multiple
+--- registered LandPlayModifiers stack additively (CR 305.2) rather than the latest one
+--- overriding the rest.
+function LandPlayModifierBuilder:Register() end
+
+---@class GameLandPlayAffectedValue
+---@class GameLandPlayAffectedTable
+---@field You GameLandPlayAffectedValue
+---@field Opponent GameLandPlayAffectedValue
+---@field Any GameLandPlayAffectedValue
+local GameLandPlayAffectedTable = {}
+
+-------------------------------------------------------------------------------
 -- Game.Conditions.* — :SetCondition on a triggered ability. CR 603 trigger-event check.
 -------------------------------------------------------------------------------
 
@@ -736,6 +765,7 @@ function GameTokensTable.CopyOf(objectId, exceptions) end
 ---@field ReplacementPayloads GameReplacementPayloadsTable
 ---@field Consumption GameConsumptionTable
 ---@field Tokens GameTokensTable
+---@field LandPlayAffected GameLandPlayAffectedTable
 local Game = {}
 
 ---@param c ObjectId
@@ -761,6 +791,10 @@ function Game.CreateReplacementEffect(c) end
 ---@param c ObjectId
 ---@return CostModifierBuilder
 function Game.CreateCostModifier(c) end
+
+---@param c ObjectId
+---@return LandPlayModifierBuilder
+function Game.CreateLandPlayModifier(c) end
 
 --- Sugar for CreateStaticAbility/SetLayer(AbilityAdding)/SetEffect(AddKeyword(name))/SetAffected({self_only=true})/Register().
 ---@param source ObjectId

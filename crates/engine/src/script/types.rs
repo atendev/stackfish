@@ -13,7 +13,7 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier};
+use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
 use crate::types::target::TargetFilter;
 
 #[derive(Debug)]
@@ -181,6 +181,12 @@ pub(crate) struct ScriptRegistry {
     /// `GameState.draw_limit_modifiers` by `run_card_script`. Same
     /// placeholder-`controller`/`timestamp` pattern.
     pub(crate) pending_draw_limit_modifiers: Vec<DrawLimitModifier>,
+    /// Same idea as `pending_draw_limit_modifiers`, for `Game.
+    /// CreateLandPlayModifier`'s builder (CR 305.2) — drained into
+    /// `GameState.land_play_modifiers` by `run_card_script`. Placeholder-
+    /// `controller` only (no `timestamp` - see `LandPlayModifier`'s own doc
+    /// comment for why it has none).
+    pub(crate) pending_land_play_modifiers: Vec<LandPlayModifier>,
     /// Backlog item 9: a coroutine `Thread` suspended mid-`invoke_operation`
     /// at a `Game.SelectTargets` call, keyed by the same opaque
     /// `ScriptHandle` space `scripts` uses (shares `next_handle`, kept in a

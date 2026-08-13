@@ -68,16 +68,12 @@ pub(super) fn execute_play_land(
                 .to_string(),
         ));
     }
-    // TODO(CR 305.2): hardcoded against the literal `1` - doesn't
-    // read state.continuous_effects for anything that raises a
-    // player's land-plays-per-turn limit (e.g. "you may play an
-    // additional land each turn"). continuous_effects has no query
-    // API yet (layers.rs is still mostly todo!()) - once it does,
-    // this needs "limit = 1 + sum of applicable continuous
-    // effects" instead of the bare literal below.
+    // CR 305.2: normally one land per turn, raised by any applicable
+    // LandPlayModifier (e.g. "you may play an additional land each turn").
     let already_played =
         *state.lands_played_this_turn.get(&actor).unwrap_or(&0);
-    if already_played >= 1 {
+    let limit = crate::types::player::effective_land_play_limit(&state.land_play_modifiers, actor);
+    if already_played >= limit {
         return Err(CommandError::IllegalAction(
             "actor has already played their land for this turn".to_string(),
         ));

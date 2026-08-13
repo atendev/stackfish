@@ -13,7 +13,7 @@ use crate::types::cost::CostModifier;
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier};
+use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
 use crate::types::target::TargetSpec;
 
 use super::decode::{
@@ -232,6 +232,19 @@ impl ScriptRuntime {
             modifier.timestamp = state.allocate_sequence_no();
         }
         state.draw_limit_modifiers.append(&mut draw_limit_modifiers);
+
+        let mut land_play_modifiers: Vec<LandPlayModifier> =
+            self.registry.borrow_mut().pending_land_play_modifiers.drain(..).collect();
+        for modifier in &mut land_play_modifiers {
+            // Real controller, same reason and same fix as draw_limit_modifiers's
+            // own placeholder above - no timestamp to patch (see
+            // LandPlayModifier's own doc comment for why it has none).
+            modifier.controller = state.object(modifier.source).map(|o| o.controller).expect(
+                "LandPlayModifier's source must already exist in GameState by drain time - \
+                 Game.CreateLandPlayModifier was called with a bogus source id",
+            );
+        }
+        state.land_play_modifiers.append(&mut land_play_modifiers);
         Ok(())
     }
 
