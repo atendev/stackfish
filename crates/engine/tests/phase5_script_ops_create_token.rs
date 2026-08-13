@@ -236,6 +236,99 @@ fn food_token_has_registered_ability() {
     assert!(matches!(abilities[0].effect, Some(AbilityEffect::GainLife(3))));
 }
 
+/// A Treasure token has its activated ability ({T}, Sacrifice → add one mana
+/// of any color) registered immediately when it enters the battlefield.
+#[test]
+fn treasure_token_has_registered_ability() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let card = ObjectId(0);
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            instant_definition(1, "Treasure Maker", AbilityEffect::CreateToken { spec: TokenSpec::Named(NamedToken::Treasure), count: 1 }),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
+    let token_id = bf.contents[0];
+    assert_eq!(engine.state().object(token_id).unwrap().definition.name, "Treasure");
+    let abilities: Vec<_> = engine.state().abilities.iter().filter(|a| a.source == token_id).collect();
+    assert_eq!(abilities.len(), 1, "Treasure has exactly one activated ability");
+    assert!(matches!(
+        abilities[0].effect,
+        Some(AbilityEffect::AddManaChoice { count: 1, choices }) if choices == ColorSet::all()
+    ));
+}
+
+/// The Treasure ability actually adds a chosen color of mana when activated
+/// and paid for - end-to-end, including the CR 602.2b color choice itself.
+#[test]
+fn treasure_ability_adds_chosen_color_mana_when_activated() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+
+    let card = ObjectId(0);
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            instant_definition(1, "Treasure Maker", AbilityEffect::CreateToken { spec: TokenSpec::Named(NamedToken::Treasure), count: 1 }),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    let token_id = engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents[0];
+
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::ActivateAbility {
+                source: token_id,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: vec![Color::Blue],
+                x_value: None,
+            },
+        })
+        .expect("Treasure ability is available");
+
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "Treasure costs {{T}} + sacrifice");
+
+    engine
+        .submit_payment(PaymentPlan {
+            payments: vec![CostPayment::Tap(token_id), CostPayment::Sacrifice(token_id)],
+        })
+        .expect("payment accepted");
+    // CR 605.3b: a mana ability resolves immediately as part of payment,
+    // never via the stack - checked before any further priority pass, since
+    // (unlike Clue/Food) passing both players here would end the phase and
+    // empty the mana pool (CR 500.4) before this assertion ever ran.
+    drain(&mut engine);
+
+    assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "added one blue mana");
+    assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty(), "Treasure was sacrificed");
+}
+
 /// `count: 3` creates three Clue tokens, each with its own registered ability.
 #[test]
 fn create_three_clue_tokens() {

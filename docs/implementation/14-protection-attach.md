@@ -417,7 +417,9 @@ Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a p
 - `sba::collect_illegally_attached_equipment`/`commit_unattach` keeps Equipment on battlefield, unattached in place.
 - Pre-attached battlefield entry (CR 301.5e/301.6, Fortification too) real now — see
   `phase5/attach-entry-equipment-fortification` above.
-- `Game.Tokens.Treasure` deferred — needs coroutine color choice.
+- `Game.Tokens.Treasure` deferred — needs coroutine color choice (later fixed by
+  `phase5/treasure-token`; the coroutine premise was stale, `AddManaChoice` already resolves
+  synchronously).
 
 ## Attach-related keywords
 

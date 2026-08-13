@@ -11,12 +11,10 @@ created with [`Game.Ops.CreateToken(spec, count?)`](game-constants.md#gameops).
 |---|---|---|
 | `Clue` | — | A Clue token ("{2}, Sacrifice this artifact: Draw a card."). |
 | `Food` | — | A Food token ("{2}, {T}, Sacrifice this artifact: You gain 3 life."). |
+| `Treasure` | — | A Treasure token ("{T}, Sacrifice this artifact: Add one mana of any color."). |
 | `Creature(subtypes, colors, power, toughness, opts?)` | see below | A creature token. |
 | `ArtifactCreature(subtypes, colors, power, toughness, opts?)` | same as `Creature` | A creature token that's also an artifact. |
 | `CopyOf(objectId, exceptions?)` | `objectId`: the object to copy. `exceptions`: same table `Game.Ops.BecomeCopy` accepts. | A token that enters as a copy of an existing object (CR 707.10f). |
-
-`Game.Tokens.Treasure` isn't available yet — it needs a mana-color choice, which token creation
-doesn't support yet either.
 
 ## `Creature`/`ArtifactCreature` arguments
 

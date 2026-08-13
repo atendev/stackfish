@@ -317,6 +317,28 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
             modes: Vec::new(),
             mode_choice: ModeChoice::Exactly(1),
         },
+        TokenSpec::Named(NamedToken::Treasure) => CardDefinition {
+            definition_id: 0,
+            name: "Treasure".to_string(),
+            mana_cost: ManaCost { symbols: Vec::new() },
+            color_indicator: None,
+            supertypes: SupertypeSet::empty(),
+            card_types: CardTypeSet::ARTIFACT,
+            subtypes: vec![Subtype("Treasure".to_string())],
+            oracle_text: "{T}, Sacrifice this artifact: Add one mana of any color.".to_string(),
+            power: None,
+            toughness: None,
+            loyalty: None,
+            defense: None,
+            script_ref: ScriptReference::Inline(String::new()),
+            keywords: KeywordSet::empty(),
+            target_requirement: None,
+            alternative_costs: Vec::new(),
+            buyback_cost: None,
+            effect: None,
+            modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
+        },
         TokenSpec::Creature(spec) => {
             let name = spec.name.clone().unwrap_or_else(|| spec.subtypes.join(" "));
             let color_indicator = if spec.colors.is_empty() { None } else { Some(spec.colors) };
@@ -392,6 +414,29 @@ fn register_token_abilities(state: &mut GameState, token_id: ObjectId, spec: &To
                 target: None,
                 operation: ScriptHandle(0),
                 effect: Some(AbilityEffect::GainLife(3)),
+                intervening_if: None,
+            });
+        }
+        TokenSpec::Named(NamedToken::Treasure) => {
+            let id = state.allocate_ability_id();
+            state.abilities.push(RegisteredAbility {
+                modes: Vec::new(),
+                mode_choice: ModeChoice::Exactly(1),
+                id,
+                source: token_id,
+                kind: AbilityKind::Activated,
+                condition: None,
+                // CR 111.10a: "{T}, Sacrifice this token: Add one mana of
+                // any color." - no mana component, just the two additional
+                // costs.
+                cost: Some(CostSpec {
+                    mana: None,
+                    additional: vec![AdditionalCost::TapSelf, AdditionalCost::SacrificeSelf],
+                    alternative: Vec::new(),
+                }),
+                target: None,
+                operation: ScriptHandle(0),
+                effect: Some(AbilityEffect::AddManaChoice { count: 1, choices: ColorSet::all() }),
                 intervening_if: None,
             });
         }

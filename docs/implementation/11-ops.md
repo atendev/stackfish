@@ -86,8 +86,11 @@
   - 45+ `GameObject` struct literal sites needed `is_token: false`.
 - Unresolved:
   - CR 111.7 token cessation (later fixed by token-cessation).
-  - Treasure token blocked on coroutines.
-  - FilterSpec identity gap on Clue/Food sacrifice costs.
+  - Treasure token blocked on coroutines (later fixed by `phase5/treasure-token` — the
+    "blocked on coroutines" premise was stale by the time it was checked, `AddManaChoice`
+    already resolves synchronously off `chosen_colors`).
+  - FilterSpec identity gap on Clue/Food sacrifice costs (later fixed by
+    `phase5/sacrifice-self-cost` — `AdditionalCost::SacrificeSelf`).
 
 ## Slice: script-ops-shuffle (merged)
 
