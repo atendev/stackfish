@@ -1,0 +1,43 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+generic_cost = 2
+colors = ["G"]
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "bear"
+
+[[steps]]
+type = "advance_to_phase"
+phase = "main"
+
+# No floating mana, no lands anywhere - auto_pay has no way to cover {2}{G}
+# and must reject cleanly (StepOutcome::Errored) instead of hanging or
+# mis-paying. The base cast itself is legal (a spell can go on the stack
+# before its cost is paid, CR 601.2a) - it's the auto_pay continuation that
+# fails, so `expect_error` belongs on this same cast_spell step.
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "bear"
+auto_pay = true
+expect_error = true
+
+# The spell is still sitting on the stack, unresolved - auto_pay failing
+# doesn't unwind the cast itself (same as any other unanswered
+# AwaitingPayment pause).
+[[steps]]
+type = "assert_object_zone"
+card = "bear"
+equals = "stack"

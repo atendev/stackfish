@@ -1,0 +1,82 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "shock"
+name = "Test Shock"
+generic_cost = 1
+colors = ["R"]
+types = ["Instant"]
+
+[[cards]]
+key = "mountain"
+name = "Test Mountain"
+types = ["Land"]
+mana_ability = ["R"]
+
+[[cards]]
+key = "wastes"
+name = "Test Wastes"
+types = ["Land"]
+mana_ability = ["C"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "shock"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "mountain"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "wastes"
+
+# Reach a real priority window before casting (CR 601.2a) - same solo-player
+# PreGame -> Main prelude phase5_cast_spell_payment.toml walks by hand;
+# phase5_scenario_shortcuts_advance.toml covers advance_to_phase itself.
+[[steps]]
+type = "advance_to_phase"
+phase = "main"
+
+# Nothing floating - auto_pay must tap both untapped mana sources itself
+# ({1}{R} needs exactly 2 units) and submit the payment, in the same action
+# as the cast.
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "shock"
+auto_pay = true
+
+[[steps]]
+type = "assert_tapped"
+card = "mountain"
+equals = true
+
+[[steps]]
+type = "assert_tapped"
+card = "wastes"
+equals = true
+
+[[steps]]
+type = "assert_object_zone"
+card = "shock"
+equals = "stack"
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "red"
+equals = 0
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "colorless"
+equals = 0

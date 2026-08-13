@@ -1,0 +1,34 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[cards]]
+key = "forest"
+name = "Test Forest"
+types = ["Land"]
+mana_ability = ["G"]
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "forest"
+
+# Shortcut for activate_ability { ability_index: 0, targets: [], chosen_colors: [] }
+# - same ground phase5_activate_ability_mana.toml covers spelled out by hand.
+[[steps]]
+type = "tap_for_mana"
+player = 0
+source = "forest"
+
+[[steps]]
+type = "assert_tapped"
+card = "forest"
+equals = true
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "green"
+equals = 1

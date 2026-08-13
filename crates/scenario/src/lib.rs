@@ -23,6 +23,7 @@
 //! each action's outcome is reported individually.
 
 mod card_templates;
+mod inline_setup;
 
 use std::collections::{HashMap, VecDeque};
 use std::panic::{self, AssertUnwindSafe};
@@ -626,6 +627,13 @@ pub enum ActionSpec {
         #[serde(default)]
         modes: Vec<u32>,
         x_value: Option<u32>,
+        /// Shortcut: if the cast opens a `ProcessState::AwaitingPayment`
+        /// pause, automatically pay it instead of needing a separate
+        /// `submit_payment`/`auto_pay` step - see `chain_auto_pay`'s own doc
+        /// comment for exactly what it will and won't do. Default `false`
+        /// (existing files are unaffected).
+        #[serde(default)]
+        auto_pay: bool,
     },
     ActivateAbility {
         player: u32,
@@ -639,7 +647,23 @@ pub enum ActionSpec {
         /// rather than a second parser.
         #[serde(default)]
         chosen_colors: Vec<String>,
+        /// Same shortcut as `CastSpell::auto_pay` above, for an activated
+        /// ability's own cost.
+        #[serde(default)]
+        auto_pay: bool,
     },
+    /// Shortcut: `ActivateAbility { ability_index: 0, targets: [], chosen_colors: [] }`
+    /// - the extremely common "tap this land for its one mana ability" case.
+    /// Only ever expands to ability index 0, same "one mana ability per
+    /// card" simplification `CardSpec.mana_ability` already takes.
+    TapForMana { player: u32, source: String },
+    /// Shortcut: repeatedly passes priority for whichever player currently
+    /// holds it (no `player` field - it isn't the caller's to choose) until
+    /// `state.phase` matches `phase`. See `run_advance`'s own doc comment
+    /// for exactly what it will and won't push through.
+    AdvanceToPhase { phase: String },
+    /// Same shortcut as `AdvanceToPhase`, for `state.step`.
+    AdvanceToStep { step: String },
     DeclareAttackers {
         player: u32,
         #[serde(default)]
@@ -736,18 +760,23 @@ impl ActionSpec {
             ActionSpec::PlayLand { player, card } => {
                 format!("play_land(player={player}, card={card:?})")
             }
-            ActionSpec::CastSpell { player, card, targets, modes, x_value } => {
+            ActionSpec::CastSpell { player, card, targets, modes, x_value, auto_pay } => {
                 let targets = targets.iter().map(describe_target).collect::<Vec<_>>().join(", ");
                 format!(
-                    "cast_spell(player={player}, card={card:?}, targets=[{targets}], modes={modes:?}, x_value={x_value:?})"
+                    "cast_spell(player={player}, card={card:?}, targets=[{targets}], modes={modes:?}, x_value={x_value:?}, auto_pay={auto_pay})"
                 )
             }
-            ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors } => {
+            ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors, auto_pay } => {
                 let targets = targets.iter().map(describe_target).collect::<Vec<_>>().join(", ");
                 format!(
-                    "activate_ability(player={player}, source={source:?}, ability_index={ability_index}, targets=[{targets}], chosen_colors={chosen_colors:?})"
+                    "activate_ability(player={player}, source={source:?}, ability_index={ability_index}, targets=[{targets}], chosen_colors={chosen_colors:?}, auto_pay={auto_pay})"
                 )
             }
+            ActionSpec::TapForMana { player, source } => {
+                format!("tap_for_mana(player={player}, source={source:?})")
+            }
+            ActionSpec::AdvanceToPhase { phase } => format!("advance_to_phase(phase={phase:?})"),
+            ActionSpec::AdvanceToStep { step } => format!("advance_to_step(step={step:?})"),
             ActionSpec::DeclareAttackers { player, attackers } => {
                 let attackers = attackers
                     .iter()
@@ -1031,16 +1060,22 @@ impl AssertionSpec {
 // Loading
 // ---------------------------------------------------------------------
 
-/// Parses scenario TOML text into a `ScenarioFile`, expanding any
-/// `[[cards]]` entry's `template` field first (`card_templates::expand` -
-/// see that module for what a template is and where they're defined). The
-/// canonical entry point every text-based caller (`load` below,
-/// `run_db_tests`'s per-row parse) should use instead of calling
-/// `toml::from_str::<ScenarioFile>` directly, so template expansion isn't
-/// something each caller has to remember to opt into separately.
+/// Parses scenario TOML text into a `ScenarioFile`, expanding any inline
+/// `[[setup]]` card fields into synthesized `[[cards]]` entries
+/// (`inline_setup::expand`) and then any `[[cards]]` entry's `template`
+/// field (`card_templates::expand` - see that module for what a template is
+/// and where they're defined), in that order. The canonical entry point
+/// every text-based caller (`load` below, `run_db_tests`'s per-row parse)
+/// should use instead of calling `toml::from_str::<ScenarioFile>` directly,
+/// so neither expansion is something each caller has to remember to opt
+/// into separately.
 pub fn parse(text: &str) -> ScenarioFile {
     let mut root: toml::Table =
         toml::from_str(text).unwrap_or_else(|e| panic!("failed to parse scenario TOML: {e}"));
+    // Inline `[[setup]]` card fields first, so a `template` moved over into
+    // a synthesized `[[cards]]` entry still gets expanded normally right
+    // after.
+    inline_setup::expand(&mut root);
     card_templates::expand(&mut root);
     // Round-trips through a string rather than a direct `Table -> ScenarioFile`
     // conversion - keeps this on the same well-worn `toml::from_str` path
@@ -1924,7 +1959,7 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
         ActionSpec::PlayLand { player, card } => {
             (*player, PlayerActionKind::PlayLand { card: resolve_card(card, card_ids) })
         }
-        ActionSpec::CastSpell { player, card, targets, modes, x_value } => (
+        ActionSpec::CastSpell { player, card, targets, modes, x_value, auto_pay: _ } => (
             *player,
             PlayerActionKind::CastSpell {
                 card: resolve_card(card, card_ids),
@@ -1939,7 +1974,7 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                 pay_buyback: false,
             },
         ),
-        ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors } => (
+        ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors, auto_pay: _ } => (
             *player,
             PlayerActionKind::ActivateAbility {
                 source: resolve_card(source, card_ids),
@@ -1949,6 +1984,15 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                     .iter()
                     .map(|s| stackfish_engine::types::mana::parse_color_letter(s).expect("invalid chosen color letter in scenario TOML"))
                     .collect(),
+            },
+        ),
+        ActionSpec::TapForMana { player, source } => (
+            *player,
+            PlayerActionKind::ActivateAbility {
+                source: resolve_card(source, card_ids),
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
             },
         ),
         ActionSpec::DeclareAttackers { player, attackers } => (
@@ -2018,6 +2062,9 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
         ActionSpec::SubmitScriptChoice { .. } => {
             unreachable!("SubmitScriptChoice is handled in run_action_spec, before to_player_action")
         }
+        ActionSpec::AdvanceToPhase { .. } | ActionSpec::AdvanceToStep { .. } => {
+            unreachable!("AdvanceToPhase/AdvanceToStep are handled in run_action_spec, before to_player_action")
+        }
     };
     PlayerAction { player: PlayerId(player), kind }
 }
@@ -2035,6 +2082,245 @@ fn build_payment_plan(mana: &ManaPaymentSpec) -> PaymentPlan {
         // Phyrexian life payment isn't representable in scenario fixtures
         // yet (see CardSpec's own doc comment on this same gap) - always 0.
         PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] }
+    }
+}
+
+// ---------------------------------------------------------------------
+// auto_pay (CastSpell/ActivateAbility shortcut)
+// ---------------------------------------------------------------------
+
+/// Reduces `cost` to "N generic + these exact colored pips" - the only mana
+/// shape a scenario `[[cards]]` entry's `generic_cost`/`colors` fields can
+/// ever build (see `CardSpec`'s own doc comment: no hybrid/Phyrexian/snow
+/// symbol can be expressed in TOML yet). `None` for anything `auto_pay` isn't
+/// prepared to solve - a real `db_script_id` card's hybrid/Phyrexian mana, a
+/// bare `{C}` colorless-atom symbol, or any non-mana `additional`/
+/// `alternative` cost component - so the caller can report a clear "can't
+/// handle this" error instead of mis-paying.
+fn simple_mana_requirement(cost: &CostSpec) -> Option<(u32, Vec<Color>)> {
+    if !cost.additional.is_empty() || !cost.alternative.is_empty() {
+        return None;
+    }
+    let mana = cost.mana.as_ref()?;
+    let mut generic = 0u32;
+    let mut colors = Vec::new();
+    for symbol in &mana.symbols {
+        match symbol {
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(n)) => generic += n,
+            ManaSymbol::Atom(AtomicManaSymbol::Colored(c)) => colors.push(*c),
+            _ => return None,
+        }
+    }
+    Some((generic, colors))
+}
+
+/// A player's floating mana, as a flat `[W, U, B, R, G, Colorless]` tally -
+/// the six plain (non-snow, non-restricted) `ManaPool` fields in one array so
+/// `auto_pay`'s own helpers below can index by color instead of matching on
+/// `Color` at every call site. Snow/restricted mana is ignored entirely -
+/// same "not representable in a scenario fixture yet" gap `CardSpec` already
+/// has, so a real `ManaPool` built from one always has both at zero.
+fn mana_tally(pool: &ManaPool) -> [u32; 6] {
+    [pool.white, pool.blue, pool.black, pool.red, pool.green, pool.colorless]
+}
+
+fn color_slot(color: Color) -> usize {
+    match color {
+        Color::White => 0,
+        Color::Blue => 1,
+        Color::Black => 2,
+        Color::Red => 3,
+        Color::Green => 4,
+    }
+}
+
+fn slot_letter(slot: usize) -> &'static str {
+    ["W", "U", "B", "R", "G", "C"][slot]
+}
+
+/// True once `tally` has at least one unit of every required colored pip,
+/// with enough left over (regardless of color) to cover `generic` too.
+fn tally_covers(tally: &[u32; 6], generic: u32, pip_colors: &[Color]) -> bool {
+    let mut remaining = *tally;
+    for &color in pip_colors {
+        let slot = color_slot(color);
+        if remaining[slot] == 0 {
+            return false;
+        }
+        remaining[slot] -= 1;
+    }
+    remaining.iter().sum::<u32>() >= generic
+}
+
+/// Which of `pip_colors` `tally` can't yet pay on its own - what a tapped
+/// mana source still needs to help with, used by `pick_mana_source` to
+/// prefer a source that actually closes a gap over one that would just add
+/// to an already-satisfied color.
+fn missing_pip_colors(tally: &[u32; 6], pip_colors: &[Color]) -> Vec<Color> {
+    let mut remaining = *tally;
+    let mut missing = Vec::new();
+    for &color in pip_colors {
+        let slot = color_slot(color);
+        if remaining[slot] > 0 {
+            remaining[slot] -= 1;
+        } else {
+            missing.push(color);
+        }
+    }
+    missing
+}
+
+/// Builds the exact flat `units` list `PaymentPlan::validate` expects (CR
+/// 118.13a) from a tally already confirmed (by `tally_covers`) to hold
+/// enough: each colored pip spent as that exact color, `generic` more spent
+/// from whatever's left over afterward (W/U/B/R/G/Colorless, in that fixed
+/// order - an arbitrary but deterministic tie-break, not optimized to
+/// preserve any particular color for a later cost in the same scenario).
+fn units_from_tally(mut tally: [u32; 6], generic: u32, pip_colors: &[Color]) -> Vec<String> {
+    let mut units = Vec::new();
+    for &color in pip_colors {
+        let slot = color_slot(color);
+        tally[slot] -= 1;
+        units.push(slot_letter(slot).to_string());
+    }
+    let mut remaining = generic;
+    for slot in 0..tally.len() {
+        while remaining > 0 && tally[slot] > 0 {
+            tally[slot] -= 1;
+            units.push(slot_letter(slot).to_string());
+            remaining -= 1;
+        }
+    }
+    units
+}
+
+/// Finds one untapped, no-real-cost mana ability `payer` controls that can
+/// help pay the still-`missing` pip colors (or, once every pip is covered,
+/// just contribute toward the generic component) - `(source, ability_index)`
+/// ready to hand straight to `PlayerActionKind::ActivateAbility`.
+/// `ability_index` is this ability's own position among *all* of `source`'s
+/// registered abilities (matching `find_ability`'s `nth`-by-source lookup),
+/// not its position among just the mana ones.
+///
+/// Only ever considers a `CardSpec.mana_ability`-shaped ability - `kind:
+/// Activated, effect: Some(AddMana(_)), cost: None` (the implicit-tap,
+/// no-payment-pause shape `activate.rs` resolves synchronously) - a real
+/// costed mana ability (Treasure/Lotus-Petal-style sacrifice) is left
+/// untapped for a scenario author to handle by hand; see `resolve_auto_pay`'s
+/// own doc comment for why extending this is a TODO rather than done here.
+fn pick_mana_source(
+    state: &GameState,
+    payer: PlayerId,
+    tally: &[u32; 6],
+    pip_colors: &[Color],
+) -> Option<(ObjectId, u32)> {
+    let missing = missing_pip_colors(tally, pip_colors);
+    let mut candidates: Vec<(ObjectId, u32, &Vec<ManaUnit>)> = Vec::new();
+    let mut index_by_source: HashMap<ObjectId, u32> = HashMap::new();
+    for ability in &state.abilities {
+        let index = {
+            let counter = index_by_source.entry(ability.source).or_insert(0);
+            let current = *counter;
+            *counter += 1;
+            current
+        };
+        if ability.kind != AbilityKind::Activated || ability.cost.is_some() {
+            continue;
+        }
+        let Some(AbilityEffect::AddMana(units)) = &ability.effect else { continue };
+        let Some(source_object) = state.object(ability.source) else { continue };
+        if source_object.zone != ZoneKind::Battlefield
+            || source_object.tapped
+            || source_object.controller != payer
+        {
+            continue;
+        }
+        candidates.push((ability.source, index, units));
+    }
+    if let Some(&color) = missing.first() {
+        if let Some((source, index, _)) =
+            candidates.iter().find(|(_, _, units)| units.contains(&ManaUnit::Colored(color)))
+        {
+            return Some((*source, *index));
+        }
+    }
+    candidates.first().map(|(source, index, _)| (*source, *index))
+}
+
+/// The actual auto-pay algorithm: taps untapped no-cost mana sources `payer`
+/// controls until the pool covers `cost`, then returns the exact
+/// `PaymentPlan` to submit. Never touches anything outside `payer`'s own
+/// battlefield mana sources, and never guesses at a cost shape
+/// `simple_mana_requirement` doesn't recognize.
+///
+/// TODO: doesn't tap a real-cost mana ability (Treasure/Lotus-Petal-style) -
+/// `pick_mana_source` skips those entirely, so a scenario relying on one to
+/// fully pay a cost will get a clear "ran out of untapped mana sources"
+/// error here instead of a nested payment being solved automatically.
+fn resolve_auto_pay(engine: &mut Engine, payer: PlayerId, cost: &CostSpec) -> Result<PaymentPlan, String> {
+    let (generic, pip_colors) = simple_mana_requirement(cost).ok_or_else(|| {
+        "auto_pay can't handle this cost shape (hybrid/Phyrexian/snow mana, or a non-mana \
+         additional/alternative cost) - build the payment plan by hand instead"
+            .to_string()
+    })?;
+
+    loop {
+        let tally = mana_tally(&engine
+            .state()
+            .player(payer)
+            .unwrap_or_else(|| panic!("auto_pay: payer {payer:?} has no player state"))
+            .mana_pool);
+        if tally_covers(&tally, generic, &pip_colors) {
+            break;
+        }
+        let Some((source, ability_index)) = pick_mana_source(engine.state(), payer, &tally, &pip_colors) else {
+            let have: u32 = tally.iter().sum();
+            let need = generic + pip_colors.len() as u32;
+            return Err(format!(
+                "auto_pay ran out of untapped mana sources: {have} unit(s) floating, cost needs {need}"
+            ));
+        };
+        let tap = PlayerAction {
+            player: payer,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+            },
+        };
+        if let StepOutcome::Errored(err) = run_action(engine, tap) {
+            return Err(format!("auto_pay failed tapping a mana source: {err}"));
+        }
+    }
+
+    let tally = mana_tally(&engine
+        .state()
+        .player(payer)
+        .unwrap_or_else(|| panic!("auto_pay: payer {payer:?} has no player state"))
+        .mana_pool);
+    let units = units_from_tally(tally, generic, &pip_colors);
+    Ok(build_payment_plan(&ManaPaymentSpec { units }))
+}
+
+/// `CastSpell`/`ActivateAbility`'s own `auto_pay` field: once the base action
+/// has run, if it actually opened a payment pause (`Engine::
+/// pending_payment_cost`), automatically resolve and submit it via
+/// `resolve_auto_pay`/`run_payment` instead of leaving that to a separate
+/// `submit_payment` step. A no-op (returns `outcome` unchanged) if the base
+/// action didn't run cleanly, or didn't open a payment pause at all (a
+/// costless ability, say) - nothing to pay either way.
+fn chain_auto_pay(engine: &mut Engine, payer: PlayerId, outcome: StepOutcome) -> StepOutcome {
+    if !matches!(outcome, StepOutcome::Ran) {
+        return outcome;
+    }
+    let Some((cost, _source)) = engine.pending_payment_cost() else {
+        return outcome;
+    };
+    let cost = cost.clone();
+    match resolve_auto_pay(engine, payer, &cost) {
+        Ok(plan) => run_payment(engine, plan),
+        Err(message) => StepOutcome::Errored(message),
     }
 }
 
@@ -2108,6 +2394,58 @@ fn run_action(engine: &mut Engine, action: PlayerAction) -> StepOutcome {
             return StepOutcome::Errored(format!("{err:?}"));
         }
         drain(engine)
+    }));
+    match result {
+        Ok(outcome) => outcome,
+        Err(payload) => StepOutcome::NotImplemented(panic_message(payload)),
+    }
+}
+
+/// Generous but finite cap on `run_advance`'s own pass loop - a two-player
+/// turn is on the order of 20 priority passes, so this covers dozens of full
+/// turns. Exists purely so a target that's never reached (a typo, or a
+/// scenario missing a setup step the target depends on) fails loudly instead
+/// of hanging the run.
+const MAX_ADVANCE_PASSES: u32 = 2000;
+
+/// Shared driver for `AdvanceToPhase`/`AdvanceToStep`: repeatedly passes
+/// priority for whichever player currently holds it (`state.priority_player`
+/// - never the caller's choice, unlike every other action here) until
+/// `reached` is true. Deliberately doesn't reuse `drain()` - that helper
+/// collapses every pause kind into one `StepOutcome::Ran`, but this loop
+/// needs to tell "still just passing priority" (`AwaitingAction`) apart from
+/// everything else. If a pass ever lands on any other pause - a payment, a
+/// discard, a script choice, `GameOver`, an engine error - it stops
+/// immediately and reports that instead of guessing an answer, same "state
+/// the limitation, don't fake it" stance `resolve_auto_pay` takes for a cost
+/// shape it can't handle.
+fn run_advance(engine: &mut Engine, reached: impl Fn(&GameState) -> bool, label: &str) -> StepOutcome {
+    let result = panic::catch_unwind(AssertUnwindSafe(|| -> StepOutcome {
+        for _ in 0..MAX_ADVANCE_PASSES {
+            if reached(engine.state()) {
+                return StepOutcome::Ran;
+            }
+            let player = engine.state().priority_player;
+            if let Err(err) =
+                engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
+            {
+                return StepOutcome::Errored(format!("{err:?}"));
+            }
+            loop {
+                match engine.step().status {
+                    StepStatus::Progressed => continue,
+                    StepStatus::AwaitingAction { .. } => break,
+                    other => {
+                        return StepOutcome::Errored(format!(
+                            "advance stopped before reaching {label}: engine is now waiting on \
+                             {other:?}, not a plain priority window - pass_priority alone can't \
+                             push through this, handle it explicitly first"
+                        ));
+                    }
+                }
+            }
+        }
+        StepOutcome::Errored(format!("advance did not reach {label} after {MAX_ADVANCE_PASSES} passes"))
     }));
     match result {
         Ok(outcome) => outcome,
@@ -2667,6 +3005,22 @@ fn run_action_spec(
         }
         ActionSpec::SubmitScriptChoice { target, .. } => {
             run_script_choice(engine, resolve_target(target, card_ids))
+        }
+        ActionSpec::AdvanceToPhase { phase } => {
+            let target = parse_phase(phase);
+            run_advance(engine, |state| state.phase == target, &format!("phase {phase:?}"))
+        }
+        ActionSpec::AdvanceToStep { step } => {
+            let target = parse_step(step);
+            run_advance(engine, |state| state.step == target, &format!("step {step:?}"))
+        }
+        ActionSpec::CastSpell { player, auto_pay, .. } => {
+            let outcome = run_action(engine, to_player_action(action_spec, card_ids));
+            if *auto_pay { chain_auto_pay(engine, PlayerId(*player), outcome) } else { outcome }
+        }
+        ActionSpec::ActivateAbility { player, auto_pay, .. } => {
+            let outcome = run_action(engine, to_player_action(action_spec, card_ids));
+            if *auto_pay { chain_auto_pay(engine, PlayerId(*player), outcome) } else { outcome }
         }
         other => run_action(engine, to_player_action(other, card_ids)),
     };

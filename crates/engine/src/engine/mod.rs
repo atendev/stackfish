@@ -14,6 +14,7 @@ use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
 use crate::types::config::GameSettings;
+use crate::types::cost::CostSpec;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ScriptHandle};
@@ -467,6 +468,21 @@ impl Engine {
 
     pub fn state(&self) -> &GameState {
         &self.state
+    }
+
+    /// CR 601.2f-h/605.3b: the cost currently awaiting `submit_payment`, and
+    /// the object it belongs to (`PendingPaymentRequest::source`'s own
+    /// doc comment - the `AdditionalCost::TapSelf` target, not necessarily
+    /// `stack_id`) - `None` outside `ProcessState::AwaitingPayment`. Exposes
+    /// exactly the `CostSpec` `PaymentPlan::validate` itself already checks
+    /// a submitted plan against, so a caller building a plan on the fly (an
+    /// auto-pay convenience, say) has one real source of truth instead of a
+    /// second, potentially-drifting way to re-derive the pending cost.
+    pub fn pending_payment_cost(&self) -> Option<(&CostSpec, ObjectId)> {
+        match &self.process_state {
+            ProcessState::AwaitingPayment { cost, source, .. } => Some((cost, *source)),
+            _ => None,
+        }
     }
 
     /// TODO(script bridge): `state.abilities` should be populated by each
