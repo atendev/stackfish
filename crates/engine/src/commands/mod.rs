@@ -37,7 +37,7 @@ pub(crate) use attach::{
     next_active_player, non_eliminated_players, purge_granted_abilities, remap_abilities, retire_object,
 };
 pub use attach::{propose_attach, AttachProposal};
-pub(crate) use combat::mark_effect_blocked;
+pub(crate) use combat::{execute_assign_combat_damage, mark_effect_blocked};
 pub(crate) use legality::{
     combine_chosen_modes, effective_keywords, is_modal_resolvable,
     legal_target_candidates_for_spec, split_targets_by_requirement, target_is_legal, target_spec_minimums,

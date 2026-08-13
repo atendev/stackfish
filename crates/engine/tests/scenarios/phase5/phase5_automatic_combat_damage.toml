@@ -1,0 +1,175 @@
+#title: Unblocked combat damage is dealt automatically, no assign_combat_damage step needed
+# phase5/automatic-combat-damage, CR 510.1/510.2: a combat damage step with
+# no real split to choose (here, a single unblocked attacker) resolves on
+# its own as the step opens - unlike every pre-existing combat-damage
+# scenario in this repo, this one deliberately has NO assign_combat_damage
+# step at all. Reusing the same Animate Wall Aura shape
+# tests/scenarios/custom/custom_test.toml already established (CR 613.1f's
+# "can attack as though it didn't have defender", via
+# Game.Effects.RemoveKeyword("Defender") on an enchanted_only static
+# ability) just to get a legally-attacking creature onto the battlefield -
+# the actual thing under test is purely the automatic-damage step, not the
+# Aura mechanic itself.
+seed = 42
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "wall"
+name = "Test Wall"
+types = ["Creature"]
+subtypes = ["Wall"]
+keywords = ["Defender"]
+power = 2
+toughness = 4
+
+[[cards]]
+key = "animate_wall"
+name = "Animate Wall"
+types = ["Enchantment"]
+subtypes = ["Aura"]
+script = """
+local s = {}
+
+function s.target_requirement()
+    return {
+        card_types = {"Creature"},
+        subtypes = {"Wall"},
+        count = 1,
+    }
+end
+
+function s.register_abilities(c)
+    local e = Game.CreateStaticAbility(c)
+    e:SetLayer(Game.Layers.AbilityAdding)
+    e:SetEffect(Game.Effects.RemoveKeyword("Defender"))
+    e:SetAffected({ enchanted_only = true })
+    e:Register()
+end
+
+return s
+"""
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "wall"
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "animate_wall"
+
+# Upkeep -> Draw (skipped turn 1) -> Main Phase 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "animate_wall"
+targets = ["wall"]
+
+[[steps]]
+type = "submit_payment"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_object_zone"
+card = "animate_wall"
+equals = "battlefield"
+
+# Beginning of Combat -> Declare Attackers
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "wall", target = 1 },
+]
+
+# Declare blockers (none declared - p1 has nothing to block with) ->
+# combat damage (dealt automatically here, no explicit step for it) -> end
+# of combat -> postcombat main phase. Same 4-pair/8-pass shape every other
+# combat scenario in this repo uses to cross those step boundaries - the
+# difference is entirely in what's absent, not what's present.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assert_phase"
+equals = "main"
+[[steps]]
+type = "assert_step"
+equals = "post_combat_main"
+
+[[steps]]
+type = "assert_tapped"
+card = "wall"
+equals = true
+
+[[steps]]
+type = "assert_life"
+player = 0
+equals = 20
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 18

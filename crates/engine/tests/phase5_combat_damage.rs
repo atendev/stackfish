@@ -74,7 +74,7 @@ fn unblocked_attacker_deals_damage_to_original_target() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state =
-        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new() });
+        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
 
     let mut engine = Engine::new(state);
@@ -105,7 +105,7 @@ fn single_blocker_deals_damage_both_directions() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 5), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));
@@ -130,7 +130,7 @@ fn single_blocker_lethal_both_ways_kills_both_creatures_same_step() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 2), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 2), p1));
@@ -157,7 +157,7 @@ fn double_blocked_attacker_accepts_a_legal_split() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker_a, attacker), (blocker_b, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 5, 10), p0));
     put_on_battlefield(&mut state, permanent(blocker_a, creature_definition("Wall1", 1, 10), p1));
@@ -188,7 +188,7 @@ fn double_blocked_attacker_rejects_an_illegal_split_sum() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker_a, attacker), (blocker_b, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 5, 10), p0));
     put_on_battlefield(&mut state, permanent(blocker_a, creature_definition("Wall1", 1, 10), p1));
@@ -216,7 +216,7 @@ fn double_blocked_attacker_rejects_a_missing_split() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker_a, attacker), (blocker_b, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 5, 10), p0));
     put_on_battlefield(&mut state, permanent(blocker_a, creature_definition("Wall1", 1, 10), p1));
@@ -238,7 +238,7 @@ fn single_blocked_attacker_rejects_a_redundant_split_entry() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 5), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));
@@ -260,7 +260,7 @@ fn zero_power_attacker_assigns_no_damage() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state =
-        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new() });
+        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Sprout", 0, 1), p0));
 
     let mut engine = Engine::new(state);
@@ -276,6 +276,142 @@ fn zero_power_attacker_assigns_no_damage() {
 }
 
 // ---------------------------------------------------------------------
+// Automatic assignment (phase5/automatic-combat-damage, CR 510.1/510.2):
+// a damage step with no real split to choose resolves on its own as the
+// step opens - no `AssignCombatDamage` submission required. Starts each
+// fixture at `Step::DeclareBlockers` (not `Step::CombatDamage` directly,
+// unlike every fixture above) so both players passing priority is what
+// actually drives the real `DeclareBlockers` -> `CombatDamage` engine
+// transition the auto-fire attempt lives on - constructing state already
+// sitting in `Step::CombatDamage` would skip right past the code path
+// under test.
+// ---------------------------------------------------------------------
+
+fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(engine);
+    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(engine)
+}
+
+#[test]
+fn unblocked_attacker_deals_damage_with_no_assign_combat_damage_submission_at_all() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let mut state = combat_damage_state(CombatState {
+        attackers: vec![(attacker, Target::Player(p1))],
+        blocks: Vec::new(),
+        declared_defenders: vec![p1],
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+    });
+    state.step = Step::DeclareBlockers;
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
+
+    let mut engine = Engine::new(state);
+    let status = pass_both(&mut engine, p0, p1);
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { player } if player == p0),
+        "priority reopens normally on Step::CombatDamage afterward - only the assignment itself is automatic"
+    );
+    assert_eq!(engine.state().step, Step::CombatDamage);
+
+    let p1_life = engine.state().players.iter().find(|p| p.player_id == p1).unwrap().life;
+    assert_eq!(p1_life, 17, "damage already landed from just passing priority, no AssignCombatDamage ever submitted");
+    assert!(engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
+}
+
+#[test]
+fn single_non_trample_blocker_also_deals_damage_automatically() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let blocker = ObjectId(1);
+    let mut state = combat_damage_state(CombatState {
+        attackers: vec![(attacker, Target::Player(p1))],
+        blocks: vec![(blocker, attacker)],
+        declared_defenders: vec![p1],
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+    });
+    state.step = Step::DeclareBlockers;
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 5), p0));
+    put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));
+
+    let mut engine = Engine::new(state);
+    pass_both(&mut engine, p0, p1);
+
+    assert_eq!(engine.state().object(attacker).unwrap().damage_marked, 2, "510.1d, dealt automatically");
+    assert_eq!(engine.state().object(blocker).unwrap().damage_marked, 3, "510.1c, dealt automatically");
+}
+
+#[test]
+fn double_blocked_attacker_still_waits_for_a_real_split_after_the_auto_fire_attempt() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let blocker_a = ObjectId(1);
+    let blocker_b = ObjectId(2);
+    let mut state = combat_damage_state(CombatState {
+        attackers: vec![(attacker, Target::Player(p1))],
+        blocks: vec![(blocker_a, attacker), (blocker_b, attacker)],
+        declared_defenders: vec![p1],
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+    });
+    state.step = Step::DeclareBlockers;
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 5, 10), p0));
+    put_on_battlefield(&mut state, permanent(blocker_a, creature_definition("Wall1", 1, 10), p1));
+    put_on_battlefield(&mut state, permanent(blocker_b, creature_definition("Wall2", 1, 10), p1));
+
+    let mut engine = Engine::new(state);
+    let status = pass_both(&mut engine, p0, p1);
+    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "a real split still needs a real submission");
+    assert_eq!(engine.state().object(attacker).unwrap().damage_marked, 0, "auto-fire correctly declined - nothing dealt yet");
+    assert!(!engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
+
+    // The real submission still works exactly as before this slice.
+    assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker_a, 3), (blocker_b, 2)])]);
+    assert_eq!(engine.state().object(blocker_a).unwrap().damage_marked, 3);
+    assert_eq!(engine.state().object(blocker_b).unwrap().damage_marked, 2);
+}
+
+#[test]
+fn redundant_explicit_submission_after_auto_fire_is_a_harmless_noop() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let mut state = combat_damage_state(CombatState {
+        attackers: vec![(attacker, Target::Player(p1))],
+        blocks: Vec::new(),
+        declared_defenders: vec![p1],
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+    });
+    state.step = Step::DeclareBlockers;
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
+
+    let mut engine = Engine::new(state);
+    pass_both(&mut engine, p0, p1);
+    let p1_life_after_auto_fire = engine.state().players.iter().find(|p| p.player_id == p1).unwrap().life;
+    assert_eq!(p1_life_after_auto_fire, 17);
+
+    // Every pre-existing zero-split scenario/test in this repo submits
+    // exactly this, unconditionally, regardless of whether a real split
+    // was ever needed - it must keep being legal and inert rather than
+    // double-dealing damage or erroring.
+    assign_combat_damage(&mut engine, p0, Vec::new());
+    let p1_life_after_redundant_submission =
+        engine.state().players.iter().find(|p| p.player_id == p1).unwrap().life;
+    assert_eq!(p1_life_after_redundant_submission, 17, "no second DamageDealt - damage was already assigned this step");
+}
+
+// ---------------------------------------------------------------------
 // CR 514.2 cleanup
 // ---------------------------------------------------------------------
 
@@ -283,7 +419,7 @@ fn zero_power_attacker_assigns_no_damage() {
 fn damage_marked_is_cleared_entering_cleanup() {
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
-    let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: Vec::new() , bands: Vec::new(), effect_blocked: Vec::new() });
+    let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: Vec::new() , bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false });
     // Non-lethal marked damage (toughness 5, damage 1) - survives to Cleanup
     // so this test isolates the reset itself, not 704.5g.
     let mut object = permanent(creature, creature_definition("Bear", 3, 5), p0);

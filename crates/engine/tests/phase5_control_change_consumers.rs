@@ -154,7 +154,7 @@ fn only_the_new_controller_can_declare_it_as_a_blocker() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: Vec::new(),
-        bands: Vec::new(), effect_blocked: Vec::new(),
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
     });
     state.step = Step::DeclareBlockers;
     let mut engine = Engine::new(state);

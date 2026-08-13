@@ -331,10 +331,22 @@ impl Engine {
                 } else {
                     Step::CombatDamage
                 };
+                // `phase5/automatic-combat-damage`: fresh damage step,
+                // nothing assigned for it yet - resets
+                // resolve_advance_turn_step_state's own auto-fire guard.
+                if let Some(combat) = self.state.combat.as_mut() {
+                    combat.damage_assigned_this_step = false;
+                }
                 false
             }
             (Phase::Combat, Step::FirstStrikeDamage) => {
                 self.state.step = Step::CombatDamage;
+                // `phase5/automatic-combat-damage`: the regular damage
+                // step is its own fresh assignment, independent of
+                // whatever the first-strike step already resolved.
+                if let Some(combat) = self.state.combat.as_mut() {
+                    combat.damage_assigned_this_step = false;
+                }
                 false
             }
             (Phase::Combat, Step::CombatDamage) => {
@@ -554,6 +566,33 @@ impl Engine {
             // backlog item 7a).
             self.log_events(events);
             return self.begin_cleanup_step();
+        }
+
+        // `phase5/automatic-combat-damage`, CR 510.1/510.2: a combat
+        // damage step's turn-based action needs a real player choice only
+        // when some attacker/blocker has 2+ living blockers, a single
+        // trampling blocker, or is a banding-forced multi-attacker
+        // blocker (commands::execute_assign_combat_damage's own
+        // `requires_assignment`) - every other case (unblocked, single
+        // non-trample blocker, or no attackers survive to deal damage
+        // this step) has exactly one legal assignment, so there's nothing
+        // for a player to actually decide. Attempt it here with an empty
+        // split before priority ever opens, same "no player action
+        // needed" contract untap_step above already models for its own
+        // turn-based action - Err (a real split is genuinely needed)
+        // just falls through unchanged to the same explicit-submission
+        // path this step has always used, priority opening exactly as
+        // before. Reusing execute_assign_combat_damage directly (instead
+        // of re-deriving "is a split needed") means this can never drift
+        // from what AssignCombatDamage's own validation considers a real
+        // choice.
+        if matches!(self.state.step, Step::CombatDamage | Step::FirstStrikeDamage) {
+            let active = self.state.active_player;
+            if let Ok(outcome) =
+                commands::execute_assign_combat_damage(&mut self.state, &self.script_runtime, active, Vec::new())
+            {
+                events.extend(outcome.events);
+            }
         }
 
         // CR 603.3/117.3b: route through the real pipeline

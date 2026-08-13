@@ -5,6 +5,6 @@
 mod damage;
 mod declare;
 
-pub(in crate::commands) use damage::execute_assign_combat_damage;
+pub(crate) use damage::execute_assign_combat_damage;
 pub(in crate::commands) use declare::{execute_declare_attackers, execute_declare_bands, execute_declare_blockers};
 pub(crate) use declare::mark_effect_blocked;

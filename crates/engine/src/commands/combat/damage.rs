@@ -14,7 +14,12 @@ use crate::types::turn::{Phase, Step};
 use super::super::legality::{effective_keywords, effective_power, lethal_damage_needed, participates_in_damage_step};
 use super::super::{CommandError, CommandOutcome, PriorityHandoff};
 
-pub(in crate::commands) fn execute_assign_combat_damage(
+// `pub(crate)`, not `pub(in crate::commands)`: `phase5/automatic-combat-
+// damage`'s `engine::turn::resolve_advance_turn_step_state` calls this
+// directly (its own auto-fire attempt on entering the damage step),
+// outside the normal `execute_command` dispatch this was originally
+// scoped to.
+pub(crate) fn execute_assign_combat_damage(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
@@ -38,6 +43,26 @@ pub(in crate::commands) fn execute_assign_combat_damage(
         CommandError::IllegalAction("no attackers have been declared this combat".to_string())
     })?;
     let step = state.step;
+
+    // `phase5/automatic-combat-damage`: this step's damage was already
+    // assigned+dealt - either `engine::turn`'s own auto-fire attempt beat
+    // this call to it (the common case a redundant explicit
+    // `AssignCombatDamage{assignments: vec![]}` submission hits, kept
+    // legal so every pre-existing zero-split call site across the test
+    // suite stays a harmless no-op rather than needing to be deleted), or
+    // this is a genuine second submission for a step that's already done.
+    // CR 510 has no "assign twice" case for a real player to hit either
+    // way, so both collapse to the same no-op rather than distinguishing
+    // them.
+    if combat.damage_assigned_this_step {
+        return Ok(CommandOutcome {
+            events: Vec::new(),
+            broke_pass_chain: true,
+            priority_handoff: PriorityHandoff::Unchanged,
+            requires_payment: None,
+            battlefield_entries: Vec::new(),
+        });
+    }
 
     // CR 510.1a/702.7: a participant that no longer resolves in
     // state.objects (killed by a spell in the priority window before
@@ -502,6 +527,15 @@ pub(in crate::commands) fn execute_assign_combat_damage(
             }
         }
     }
+
+    // `phase5/automatic-combat-damage`: mark this step done so a later
+    // call this same step (auto-fire or a redundant explicit submission)
+    // hits the no-op guard above instead of dealing damage twice.
+    state
+        .combat
+        .as_mut()
+        .expect("checked Some above")
+        .damage_assigned_this_step = true;
 
     // CR 510.2/601.2a: these are proposed events only - engine.rs's
     // ReplacementCheck (CR 614-616) gets a chance to rewrite or
