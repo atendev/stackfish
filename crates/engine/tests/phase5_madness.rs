@@ -421,7 +421,9 @@ fn a_cost_payment_discard_also_triggers_madness() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: outlet, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility { source: outlet, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
+            x_value: None,
+            },
         })
         .expect("p0 controls the outlet and holds priority");
     let status = drain(&mut engine);

@@ -132,7 +132,9 @@ fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: Obj
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
+            x_value: None,
+            },
         })
         .expect("player holds priority");
     let status = drain(engine);

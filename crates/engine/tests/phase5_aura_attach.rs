@@ -469,7 +469,9 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
     engine
         .submit_action(PlayerAction {
             player: p1,
-            kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
+            x_value: None,
+            },
         })
         .unwrap();
     assert!(
@@ -482,7 +484,9 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
+            x_value: None,
+            },
         })
         .unwrap();
     assert!(

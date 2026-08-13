@@ -195,6 +195,7 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");

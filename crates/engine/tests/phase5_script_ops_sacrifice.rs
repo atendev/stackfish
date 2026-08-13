@@ -234,6 +234,7 @@ fn sacrifice_activated_ability_also_works() {
                 ability_index: 0,
                 targets: vec![Target::Object(target)],
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");

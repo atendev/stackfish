@@ -56,7 +56,9 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
         })
         .expect("player holds priority");
 }
@@ -187,6 +189,7 @@ fn reject_when_actor_does_not_hold_priority() {
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .unwrap_err();
@@ -208,6 +211,7 @@ fn reject_nonexistent_ability_index() {
                 ability_index: 1,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .unwrap();
@@ -290,6 +294,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
                 ability_index: 1,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .unwrap();

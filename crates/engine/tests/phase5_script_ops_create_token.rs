@@ -490,6 +490,7 @@ fn clue_ability_draws_a_card_when_activated() {
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("Clue ability is available");
@@ -559,6 +560,7 @@ fn food_ability_gains_life_when_activated() {
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("Food ability is available");

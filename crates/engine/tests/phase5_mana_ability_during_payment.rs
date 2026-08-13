@@ -104,7 +104,9 @@ fn sacrifice_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
 fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId) -> Result<(), ActionError> {
     engine.submit_action(PlayerAction {
         player,
-        kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new() },
+        kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
+        x_value: None,
+        },
     })
 }
 

@@ -25,6 +25,7 @@ pub(super) fn execute_activate_ability(
     ability_index: u32,
     targets: Vec<Target>,
     chosen_colors: Vec<Color>,
+    x_value: Option<u32>,
 ) -> Result<CommandOutcome, CommandError> {
     // CR 602.2a/117.3c: activating an ability follows the same
     // process as casting a spell - the activator must hold priority
@@ -106,6 +107,27 @@ pub(super) fn execute_activate_ability(
         return Err(CommandError::IllegalAction(
             "chosen_colors given but this ability has no mana-color choice to make".to_string(),
         ));
+    }
+
+    // CR 107.3a/107.3k/602.2b: an announced x_value and an {X} in this
+    // ability's own activation cost must agree - both present or both
+    // absent - checked once, up front, before either match arm below
+    // touches `cost` at all. Mirrors CastSpell's own has_x/x_value check
+    // (cast.rs) exactly; CR 107.3k is why this only ever looks at this
+    // ability's own cost, never anything else already on the stack.
+    let cost_has_x = cost.as_ref().and_then(|c| c.mana.as_ref()).is_some_and(|m| m.has_x());
+    match (cost_has_x, x_value) {
+        (true, None) => {
+            return Err(CommandError::IllegalAction(
+                "this ability's cost includes {X} - a value must be announced".to_string(),
+            ));
+        }
+        (false, Some(_)) => {
+            return Err(CommandError::IllegalAction(
+                "an X value was announced but this ability's cost has no {X}".to_string(),
+            ));
+        }
+        _ => {}
     }
 
     match effect {
@@ -198,7 +220,14 @@ pub(super) fn execute_activate_ability(
                 });
             }
 
-            let cost = cost.expect("has_real_cost already confirmed Some");
+            let mut cost = cost.expect("has_real_cost already confirmed Some");
+            // CR 107.3a: substitute the announced X into this mana
+            // ability's own cost before it's ever handed to PaymentPlan -
+            // `cost_has_x` above already guarantees `x_value` is `Some`
+            // whenever this cost actually has an `{X}` to resolve.
+            if let Some(x) = x_value {
+                cost.mana = cost.mana.map(|m| m.resolve_x(x));
+            }
 
             // CR 602.5a/302.6: same TapSelf pre-check the non-mana
             // branch below takes, when this mana ability's own cost
@@ -337,20 +366,28 @@ pub(super) fn execute_activate_ability(
                 &targets,
                 actor,
                 source,
-                // CR 202.3: an activated ability never has an announced X of
-                // its own (`ActivateAbility` has no `x_value` field) - a
-                // `mana_value` filter's own `X` bound resolves as 0.
-                None,
+                // CR 202.3/107.3a: this activation's own announced X, if
+                // any - a `mana_value` filter's own `X` bound (e.g. "target
+                // permanent with mana value X") resolves against exactly
+                // this, same as CastSpell's own call below.
+                x_value,
             )?;
 
             // `None` means "no cost at all" - same empty-CostSpec
             // treatment RegisteredAbility::cost's own doc comment
             // describes.
-            let cost = cost.unwrap_or(CostSpec {
+            let mut cost = cost.unwrap_or(CostSpec {
                 mana: None,
                 additional: Vec::new(),
                 alternative: Vec::new(),
             });
+            // CR 107.3a: substitute the announced X into this ability's own
+            // cost before it's ever handed to PaymentPlan - `cost_has_x`
+            // above already guarantees `x_value` is `Some` whenever this
+            // cost actually has an `{X}` to resolve.
+            if let Some(x) = x_value {
+                cost.mana = cost.mana.map(|m| m.resolve_x(x));
+            }
 
             // CR 602.5a/302.6: a TapSelf cost can't be paid by an
             // already-tapped source, and a creature's own {T}
@@ -391,11 +428,12 @@ pub(super) fn execute_activate_ability(
                 source,
                 source_owner,
                 actor,
-                // TODO: no modes/X value on activated abilities yet.
+                // TODO: no modes on activated abilities yet (CR 700.2b -
+                // RegisteredAbility has no modes field at all).
                 Vec::new(),
                 targets,
                 target_requirement,
-                None,
+                x_value,
                 false,
                 // CR 702.27a: buyback is a spell-only concept - an
                 // activated ability never carries it.

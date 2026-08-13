@@ -159,7 +159,7 @@ calls).
 | `TapPermanents(filter, count)` | `filter`: shared filter-table shape. `count`: how many. | Tap `count` *other* permanents (not the source) matching `filter` — distinct from `TapSelf`. |
 | `ExileFromGraveyard(filter, count)` | `filter`: shared filter-table shape. `count`: how many. | CR 702.138a Escape's "exile N other cards from your graveyard" — same shape as `TapPermanents`, checked against your graveyard instead of the battlefield. No self-exclusion needed: an escaping card has already left the graveyard (moved to the stack) by the time this cost is paid, so it can never be one of its own `count` candidates. |
 | `Life(amount)` | integer | CR 119.4, pay exactly `amount` life. You can't pay more life than you have. |
-| `Mana(cost)` | a mana-cost string, e.g. `"{1}{R}"` | The mana-cost component of the activation cost. Full hybrid/Phyrexian/generic parsing per the normal mana-cost grammar. At most one `Mana(...)` per ability. |
+| `Mana(cost)` | a mana-cost string, e.g. `"{1}{R}"` | The mana-cost component of the activation cost. Full hybrid/Phyrexian/generic parsing per the normal mana-cost grammar. At most one `Mana(...)` per ability. `{X}` is allowed (CR 107.3a/107.3k/602.2b) - the activating player announces a value as part of activation, independent of any other X on the same object or other instance of this ability, resolved into a generic amount before payment the same way a spell's own `{X}` is. |
 
 There's no `Game.Costs.Other` for an unstructured, free-text cost — every cost component has to be
 one of the structured shapes above.

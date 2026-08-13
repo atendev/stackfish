@@ -199,7 +199,7 @@ pub fn execute_command(
                 pay_buyback,
             );
         }
-        PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors } => {
+        PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors, x_value } => {
             return activate::execute_activate_ability(
                 state,
                 script_runtime,
@@ -208,6 +208,7 @@ pub fn execute_command(
                 ability_index,
                 targets,
                 chosen_colors,
+                x_value,
             );
         }
         PlayerActionKind::DeclareAttackers { attackers } => {

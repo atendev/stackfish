@@ -116,6 +116,7 @@ fn activate_and_await_payment(engine: &mut Engine, player: PlayerId, source: Obj
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");

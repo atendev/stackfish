@@ -533,8 +533,8 @@ pub(crate) fn validate_targets(
     source: ObjectId,
     // CR 202.3/107.3a: this cast/activation's own announced X, if any - see
     // `target_is_legal`'s own doc comment. `None` from every caller with no
-    // X concept (`ActivateAbility` has no `x_value` field at all; a
-    // triggered ability's own CR 603.3d target choice never has one either).
+    // X concept (a triggered ability's own CR 603.3d target choice never
+    // has one).
     caster_x_value: Option<u32>,
 ) -> Result<(), CommandError> {
     match requirement {

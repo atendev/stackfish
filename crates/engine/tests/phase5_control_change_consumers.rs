@@ -267,6 +267,7 @@ fn the_new_controller_can_activate_a_gain_controlled_sources_ability() {
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("p0 (the effective controller) should be able to activate it");
@@ -286,6 +287,7 @@ fn the_original_owner_can_no_longer_activate_a_gain_controlled_sources_ability()
             ability_index: 0,
             targets: Vec::new(),
             chosen_colors: Vec::new(),
+            x_value: None,
         },
     });
     match result {
@@ -358,6 +360,7 @@ fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");

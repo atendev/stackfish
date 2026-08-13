@@ -54,7 +54,8 @@
   - `Game.Costs.Mana("{1}{R}")` binding; second call on one builder errors.
 - Unresolved:
   - `{C}` parses but unpayable.
-  - `{X}` on activated abilities has no `x_value` announcement slot.
+  - `{X}` on activated abilities has no `x_value` announcement slot. Closed later by
+    `phase5/x-costs-activated-abilities` — see this file's own entry near the end.
 
 ## Slice: mana-add-choice (merged)
 
@@ -467,3 +468,66 @@
   - Three-levels-deep nesting (a mana ability whose own cost itself requires a mana payment) is
     structurally supported by the `Vec`-based stack but not separately tested — no real card in the
     corpus needs it.
+
+## Slice: X costs on activated abilities (`phase5/x-costs-activated-abilities`)
+
+- Branch `phase5/x-costs-activated-abilities`, off `master` (the concurrent `phase5/scenario-
+  shortcuts` branch was still unmerged at the time, so this slice doesn't build on it).
+- Scope: CR 107.3a/107.3k/602.2b - `PlayerActionKind::ActivateAbility` gains its own `x_value:
+  Option<u32>`, closing the gap this file's own `mana-cost-strings` entry named (`{X}` parsed fine
+  via `ManaCost::parse`/`Game.Costs.Mana`, but nothing above the parser could ever announce or
+  resolve one for an ability - only `CastSpell` had the field). Mirrors `CastSpell`'s existing
+  `has_x`/`resolve_x` contract (`cast.rs`) exactly, on both `activate.rs` cost-resolution paths (the
+  mana-ability real-cost branch and the non-mana stack-pushing branch).
+- Verify: 5 new tests (`phase5_x_costs_activated_ability.rs`), mirroring `phase5_x_costs.rs`'s four
+  `CastSpell` cases (announced X pays a resolved `{X}{R}`; missing announcement on an `{X}` cost is
+  rejected; announcing X against a cost with no `{X}` is rejected; a bare `{X}` with `x_value: 0`
+  still needs an explicit empty `Mana` payment entry per CR 118.5a) plus one new CR 107.3k case:
+  activating the same `{X}`-costed ability twice with two different announced values before either
+  resolves leaves both `StackObject`s on the stack carrying their own independent `x_value`. Full
+  workspace suite green except one pre-existing, unrelated failure (`phase5_beginning_phase.toml`
+  hard-fails identically with this slice's changes stashed out - not touched, not this slice's to
+  fix).
+- Key changes:
+  - `PlayerActionKind::ActivateAbility::x_value: Option<u32>` (new field) - `commands/mod.rs`'s
+    dispatch and `activate.rs`'s `execute_activate_ability` signature both thread it through.
+  - `activate.rs`: one `cost_has_x`/`x_value` agreement check up front (right after the existing
+    `chosen_colors` check), covering every branch including the plain hardcoded-tap mana-ability path
+    that never even builds a `CostSpec` - an announced X against a costless ability is rejected there
+    too, not silently dropped. `ManaCost::resolve_x` is then applied to `cost.mana` in both the real-
+    cost mana-ability branch and the non-mana stack branch, right where `CastSpell`'s own resolution
+    happens. `validate_targets`' `caster_x_value` argument (previously hardcoded `None` with a stale
+    "ActivateAbility has no x_value field" comment) now gets the real announced value, so a
+    `mana_value_equals: "X"` target filter on an ability's own target requirement resolves against it
+    exactly like a spell's does - free reuse, no new plumbing. `StackObject::x_value` (previously
+    always `None` for an ability) is now the real announced value too, for the same CR 608.2b-recheck
+    reuse reason.
+  - `crates/scenario/src/lib.rs`: `ActionSpec::ActivateAbility` gained a matching `x_value:
+    Option<u32>` TOML field (mirrors `ActionSpec::CastSpell::x_value` exactly, including the "no
+    `#[serde(default)]`, `toml` defaults a missing `Option<T>` field to `None` on its own" pattern
+    that field already relied on), threaded through `describe()` and `to_player_action()`.
+  - Stale "ActivateAbility has no x_value field" comments removed from `cast.rs`, `legality.rs`.
+  - Mechanical fallout: `PlayerActionKind::ActivateAbility` gaining a required field broke every
+    existing struct-literal construction - 49 call sites across 37 test files, patched via a small
+    brace-matching script (insert `x_value: None,` before each block's own closing `}`) rather than
+    by hand, then verified with a full `cargo check --workspace --tests`.
+- Deviations from the requirements report given in chat: dropped the planned TOML scenario fixture
+  (`phase5_x_costs_activated_ability.toml`). Unlike `CastSpell`, there's no `[[cards]]` TOML
+  shortcut for a custom-cost (let alone `{X}`-costed) non-mana activated ability - `mana_ability`
+  only ever builds `cost: None`, so demonstrating this specific field on the TOML surface would
+  require embedding a full self-registering Lua `script` card, which tests "can a script register an
+  X-costed ability" (already covered by other script-registration scenarios) far more than it tests
+  the actual new engine behavior the five Rust integration tests already exercise end to end through
+  the real `Engine`. Left as a TODO rather than forced.
+- Unresolved:
+  - Cost-modifier effects (`cost::apply_cost_modifiers`, Goblin Warchief-style) stay spell-only,
+    untouched - pre-existing scope boundary this file's own notes above already name, not extended
+    to X-resolved ability costs by this slice.
+  - Modal activated abilities remain unmodeled (`RegisteredAbility` has no modes field at all), so
+    "X on a modal ability" doesn't apply.
+  - An activated ability's own *effect* text referencing X beyond what already reads
+    `StackObject.x_value` (`CounterAmount::X`, a `mana_value_equals: "X"` target filter) - e.g. a
+    hypothetical "Damage X" or "Draw X cards" as an ability's own primitive effect - stays
+    unmodeled, same pre-existing gap this project's `not-available-yet.md` names generally for
+    effect-text X. Not this slice's job.
+  - No TOML scenario fixture - see Deviations above.

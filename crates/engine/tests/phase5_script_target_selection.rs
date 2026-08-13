@@ -211,6 +211,7 @@ fn play_activate_and_drain(engine: &mut Engine, player: PlayerId, land_in_hand: 
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player controls the land and holds priority");

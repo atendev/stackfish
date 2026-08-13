@@ -58,6 +58,13 @@ pub enum PlayerActionKind {
         /// `AddManaChoice`, and rejects a length mismatch against
         /// `AddManaChoice`'s own `count`.
         chosen_colors: Vec<Color>,
+        /// CR 107.3a/107.3k/602.2b: this activation's own announced X, if
+        /// this ability's activation cost has an `{X}` in it - independent
+        /// of any other X on the same object (107.3k), and of any X
+        /// announced for a different instance of this same ability already
+        /// on the stack. Same "must agree with whether the cost actually
+        /// has an `{X}`" contract as `CastSpell::x_value`.
+        x_value: Option<u32>,
     },
     PlayLand { card: ObjectId },
     PassPriority,

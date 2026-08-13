@@ -368,11 +368,11 @@ pub(super) fn execute_cast_spell(
     // substituted for a generic amount before PaymentPlan::validate
     // ever sees the cost (see ManaCost::resolve_x's own doc comment
     // for why that's enough on its own, no changes needed in
-    // cost.rs). TODO: X on an activated ability's own cost isn't
-    // supported at all yet - ActivateAbility has no x_value field
-    // to announce one with, a real struct gap, not just this check
-    // missing. TODO: X combined with an alternative cost (e.g.
-    // flashback on an X spell) isn't handled - x_value is simply
+    // cost.rs). An activated ability's own cost gets the same
+    // treatment - see activate.rs's `cost_has_x` check
+    // (`phase5/x-costs-activated-abilities`). TODO: X combined with
+    // an alternative cost (e.g. flashback on an X spell) isn't
+    // handled - x_value is simply
     // unchecked in that branch below.
     let (mut cost, exile_on_leaving_stack, escaped) = match alternative {
         Some(AlternativeCost::Replacement { cost, exile_on_leaving_stack, escape, .. }) => {

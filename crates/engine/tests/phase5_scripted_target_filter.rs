@@ -216,6 +216,7 @@ fn play_land_and_activate(
                 ability_index: 0,
                 targets: vec![Target::Object(target)],
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("p0 controls the land and holds priority");
@@ -277,6 +278,7 @@ fn a_player_target_is_rejected_outright_by_a_script_filter() {
                 ability_index: 0,
                 targets: vec![Target::Player(p1)],
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("p0 controls the land and holds priority");

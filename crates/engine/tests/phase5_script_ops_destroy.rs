@@ -255,6 +255,7 @@ fn destroy_ability_works_the_same_as_a_destroy_spell() {
                 ability_index: 0,
                 targets: vec![Target::Object(target)],
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");

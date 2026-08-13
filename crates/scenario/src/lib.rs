@@ -639,6 +639,10 @@ pub enum ActionSpec {
         /// rather than a second parser.
         #[serde(default)]
         chosen_colors: Vec<String>,
+        /// CR 107.3a/602.2b: same X-announcement contract as `CastSpell::
+        /// x_value` above, for an ability whose own activation cost has an
+        /// `{X}` in it.
+        x_value: Option<u32>,
     },
     DeclareAttackers {
         player: u32,
@@ -742,10 +746,10 @@ impl ActionSpec {
                     "cast_spell(player={player}, card={card:?}, targets=[{targets}], modes={modes:?}, x_value={x_value:?})"
                 )
             }
-            ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors } => {
+            ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors, x_value } => {
                 let targets = targets.iter().map(describe_target).collect::<Vec<_>>().join(", ");
                 format!(
-                    "activate_ability(player={player}, source={source:?}, ability_index={ability_index}, targets=[{targets}], chosen_colors={chosen_colors:?})"
+                    "activate_ability(player={player}, source={source:?}, ability_index={ability_index}, targets=[{targets}], chosen_colors={chosen_colors:?}, x_value={x_value:?})"
                 )
             }
             ActionSpec::DeclareAttackers { player, attackers } => {
@@ -1939,7 +1943,7 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                 pay_buyback: false,
             },
         ),
-        ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors } => (
+        ActionSpec::ActivateAbility { player, source, ability_index, targets, chosen_colors, x_value } => (
             *player,
             PlayerActionKind::ActivateAbility {
                 source: resolve_card(source, card_ids),
@@ -1949,6 +1953,7 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                     .iter()
                     .map(|s| stackfish_engine::types::mana::parse_color_letter(s).expect("invalid chosen color letter in scenario TOML"))
                     .collect(),
+                x_value: *x_value,
             },
         ),
         ActionSpec::DeclareAttackers { player, attackers } => (

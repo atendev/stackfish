@@ -212,6 +212,7 @@ fn a_commanders_non_combat_damage_does_not_count() {
                 ability_index: 0,
                 targets: vec![Target::Player(p1)],
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");

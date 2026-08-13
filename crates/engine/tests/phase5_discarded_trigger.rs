@@ -172,7 +172,9 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
     engine
         .submit_action(PlayerAction {
             player: p0,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
+            x_value: None,
+            },
         })
         .expect("player holds priority");
     let status = drain(&mut engine);

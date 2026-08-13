@@ -63,6 +63,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, chosen_colo
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors,
+                x_value: None,
             },
         })
         .expect("player holds priority");

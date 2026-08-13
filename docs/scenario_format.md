@@ -262,6 +262,15 @@ the resolved total exactly like any other generic amount — no special X handli
 side. See `crates/engine/tests/scenarios/phase5/phase5_x_costs.toml` for a full worked example
 (an `{X}{R}` sorcery cast with `x_value = 3`, paid with 3 generic + 1 red).
 
+`activate_ability` takes the same `x_value` field (CR 107.3a/107.3k/602.2b — an ability's own X is
+independent of any other X on the same object, or on another instance of the same ability already
+on the stack), for an ability whose own activation cost has an `{X}` in it. There's no `[[cards]]`
+shortcut that produces one, though — `mana_ability` only ever builds a bare-tap, no-cost ability, so
+an `{X}`-costed activated ability needs a real self-registering Lua `script` (`Game.Costs.Mana`
+allows `{X}` too — see [docs/lua/game-constants.md](lua/game-constants.md#gamecosts)), not a
+`[[cards]]` field. See `crates/engine/tests/phase5_x_costs_activated_ability.rs` for the direct-
+engine equivalent of the worked example above, driven without TOML.
+
 **`power_script`/`toughness_script` (CR 604.3/208.2a, characteristic-defining values):** if set,
 `power`/`toughness` above is ignored for that characteristic — instead `CardDefinition.power`/
 `.toughness` becomes `PTValue::CharacteristicDefining { script: Some(ScriptReference::Inline(...)) }`,
@@ -623,6 +632,7 @@ player = 0
 source = "bear"
 ability_index = 0
 targets = []
+x_value = 0               # optional u32 - see X costs under [[cards]] above
 ```
 
 **Exception (CR 601.2g/605.3a):** if a mana ability's own `source`/`ability_index` resolve to an

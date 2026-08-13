@@ -245,7 +245,9 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
         })
         .expect("player holds priority");
 }
@@ -401,6 +403,7 @@ fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_
                 ability_index: 1,
                 targets: vec![Target::Object(target_b)],
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("player holds priority");

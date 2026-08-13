@@ -159,7 +159,9 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, ability_ind
     engine
         .submit_action(PlayerAction {
             player,
-            kind: PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors: Vec::new() },
+            kind: PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
         })
         .expect("player holds priority");
 }

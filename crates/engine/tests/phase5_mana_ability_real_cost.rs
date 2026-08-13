@@ -284,6 +284,7 @@ fn play_land_self_registered_mana_ability_with_no_cost_resolves_instantly() {
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("p0 controls the land and holds priority");
@@ -324,6 +325,7 @@ fn activated_mana_ability_with_explicit_tap_cost_pauses_for_payment() {
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("p0 controls the rock and holds priority");
@@ -371,6 +373,7 @@ fn activated_mana_ability_with_sacrifice_cost_resolves_without_ever_using_the_st
                 ability_index: 0,
                 targets: Vec::new(),
                 chosen_colors: vec![Color::Blue],
+                x_value: None,
             },
         })
         .expect("p0 controls the rock and holds priority");

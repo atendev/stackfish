@@ -140,6 +140,7 @@ fn play_land_and_activate(p1_life: i32, target: Target) -> Engine {
                 ability_index: 0,
                 targets: vec![target],
                 chosen_colors: Vec::new(),
+                x_value: None,
             },
         })
         .expect("p0 controls the land and holds priority");
