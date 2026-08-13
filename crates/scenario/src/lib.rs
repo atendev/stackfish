@@ -1422,7 +1422,7 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
             // scenario-side follow-up slice.
             mana_value: None,
         },
-        "player" => TargetFilter::Player,
+        "player" => TargetFilter::Player { controller: spec.controller.as_deref().map(parse_filter_controller) },
         "any" => TargetFilter::AnyTarget,
         // Placeholder handle - no Engine/ScriptRuntime exists yet at this
         // point (see PendingTargetScript's own doc comment). Patched with

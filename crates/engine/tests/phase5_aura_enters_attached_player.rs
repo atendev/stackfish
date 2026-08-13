@@ -17,11 +17,13 @@
 //! attach_choice`'s `chosen` parameter all widened from `Vec<ObjectId>`/
 //! `ObjectId` to `Vec<Target>`/`Target`.
 //!
-//! - 1 legal candidate: attaches immediately, no pause (a `PlayerScript`
-//!   opponent-only filter, since a plain `TargetFilter::Player` has no
-//!   controller-restriction field and so always offers *every* player,
-//!   including the searching player's own controller — never exactly one in
-//!   a 2-player game).
+//! - 1 legal candidate: attaches immediately, no pause. Covered two ways: a
+//!   `PlayerScript` opponent-only predicate (`phase5/target-opponent`'s own
+//!   `TargetFilter::Player { controller }` field didn't exist when this test
+//!   was first written, so a scripted predicate was the only way to force
+//!   exactly one candidate), and the built-in `TargetFilter::Player {
+//!   controller: Some(FilterController::Opponent) }` shape that closed that
+//!   gap.
 //! - 2+ legal candidates (CR 303.4f): a plain `TargetFilter::Player` in a
 //!   2-player game offers both players — the real
 //!   `ProcessState::AwaitingEntryAttachChoice` pause, `submit_entry_attach_
@@ -153,7 +155,7 @@ fn engine_with_aura_in_library(aura: ObjectId, card: ObjectId) -> Engine {
     let mut state = two_player_state(vec![aura]);
     state.objects.insert(
         aura,
-        card_object_in(aura, aura_enchant_player_definition(1, "Test Aura", TargetFilter::Player), p0, ZoneKind::Library),
+        card_object_in(aura, aura_enchant_player_definition(1, "Test Aura", TargetFilter::Player { controller: None }), p0, ZoneKind::Library),
     );
     state.objects.insert(
         card,
@@ -179,12 +181,13 @@ fn aura_enchant_opponent_only_with_one_legal_candidate_attaches_immediately_no_p
     let card = ObjectId(2);
     let mut engine = engine_with_aura_in_library(aura, card);
 
-    // A `TargetFilter::Player` has no controller-restriction field at all
-    // (`docs/comp_rules.md` 303.4b's own "you"/"opponent" wording has no
-    // engine-side model here yet) - so it always offers *every* player,
-    // including the searching player's own controller, never exactly one in
-    // a 2-player game. An opponent-only scripted predicate is the only way
-    // to force exactly one legal candidate.
+    // A scripted opponent-only predicate - same outcome the built-in
+    // `TargetFilter::Player { controller: Some(FilterController::Opponent) }`
+    // shape now covers below (`aura_enchant_built_in_opponent_filter_with_
+    // one_legal_candidate_attaches_immediately_no_pause`); kept as its own
+    // test since `TargetFilter::PlayerScript` is still the only way to
+    // express something a flat controller filter can't (e.g. "opponent with
+    // 10 or less life").
     let handle = engine.load_script("return function(player, source, controller, state) return player ~= controller end").expect("predicate should load");
     engine.state_mut().objects.get_mut(&aura).unwrap().definition.target_requirement = Some(TargetSpec::Primitive(TargetRequirement {
         filter: TargetFilter::PlayerScript(handle),
@@ -217,6 +220,42 @@ fn aura_enchant_opponent_only_with_one_legal_candidate_attaches_immediately_no_p
             .any(|e| matches!(e.kind, GameEventKind::AttachedToPlayer { object, player } if object == new_aura.object_id && player == p1)),
         "an AttachedToPlayer event should be logged"
     );
+}
+
+/// Same outcome as the scripted-predicate test above, but via the built-in
+/// `TargetFilter::Player { controller: Some(FilterController::Opponent) }`
+/// shape (`phase5/target-opponent`) instead of a hand-written Lua predicate -
+/// the common "target opponent" case no longer needs a script at all.
+#[test]
+fn aura_enchant_built_in_opponent_filter_with_one_legal_candidate_attaches_immediately_no_pause() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let aura = ObjectId(10);
+    let card = ObjectId(2);
+    let mut engine = engine_with_aura_in_library(aura, card);
+
+    engine.state_mut().objects.get_mut(&aura).unwrap().definition.target_requirement = Some(TargetSpec::Primitive(TargetRequirement {
+        filter: TargetFilter::Player { controller: Some(FilterController::Opponent) },
+        count: 1,
+        up_to: false,
+        at_least: false,
+        exclude_source: false,
+    }));
+
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    let status = pass_both_and_drain(&mut engine, p0, p1);
+    let StepStatus::AwaitingSearchChoice { candidates, .. } = status else {
+        panic!("expected a Search pause, got {status:?}")
+    };
+    assert_eq!(candidates, vec![aura]);
+
+    engine.submit_search_choice(vec![aura]).expect("aura is the only candidate");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "no attach-choice pause with only one legal candidate, got {status:?}");
+
+    let new_aura = find_battlefield_object_named(engine.state(), "Test Aura").expect("the aura entered the battlefield");
+    assert_eq!(new_aura.attached_to_player, Some(p1), "the only legal candidate (the opponent) should be attached automatically");
 }
 
 #[test]

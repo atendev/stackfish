@@ -828,7 +828,12 @@ pub(crate) fn decode_script_choice_request(
 pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError> {
     let kind: Option<String> = table.get("type").map_err(|e| ScriptError::LoadError(e.to_string()))?;
     match kind.as_deref().unwrap_or("object") {
-        "player" => Ok(TargetFilter::Player),
+        "player" => {
+            let controller_name: Option<String> =
+                table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+            let controller = controller_name.map(|name| parse_filter_controller_name(&name)).transpose()?;
+            Ok(TargetFilter::Player { controller })
+        }
         "any" => Ok(TargetFilter::AnyTarget),
         "object" => {
             let controller_name: Option<String> =

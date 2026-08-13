@@ -269,7 +269,18 @@ pub(crate) fn target_is_legal(
         return false;
     }
     match filter {
-        TargetFilter::Player => matches!(target, Target::Player(pid) if state.player(pid).is_some()),
+        TargetFilter::Player { controller } => {
+            let Target::Player(pid) = target else { return false };
+            if state.player(pid).is_none() {
+                return false;
+            }
+            match controller {
+                None => true,
+                Some(FilterController::You) => pid == caster,
+                Some(FilterController::Opponent) => pid != caster,
+                Some(FilterController::Any) => true,
+            }
+        }
         TargetFilter::Object { card_types, excluded_card_types, subtypes, excluded_subtypes, supertypes, excluded_supertypes, controller, zone, mana_value } => {
             let Target::Object(id) = target else { return false };
             let Some(obj) = state.object(id) else { return false };
