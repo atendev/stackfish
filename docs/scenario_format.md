@@ -174,6 +174,9 @@ key = "bear"                # string, referenced by [[setup]]/[[actions]]/[[asse
 name = "Test Bear"
 generic_cost = 1             # u32, default 0 - the whole generic component as one number
 colors = ["G"]                # one entry PER PIP (repeats included), default []
+has_x = false                  # optional, default false - CR 107.3/601.2b, adds a bare {X} symbol
+                                # to the cost (in addition to generic_cost/colors, not instead of
+                                # them - "{X}{R}" is has_x = true, colors = ["R"]) - see X costs below
 types = ["Creature"]          # required unless db_script_id is set - see Card types below
 supertypes = ["Legendary"]     # optional, default [] - see Card types below
 subtypes = ["Human", "Wizard"] # optional, default [] - see Card types below
@@ -245,10 +248,19 @@ docs below) pays this with a *different* shape on purpose — a flat list of lit
 echo of this cost shape, since which mana actually pays the generic component is the payer's
 choice (CR 118.13a), not implied by the cost.
 
-**Simplification:** mana cost is `generic_cost` + `colors`, not a parsed cost string like
-`"{2}{R}"` — no mana-cost-string parser exists anywhere yet. Can't currently express hybrid,
-Phyrexian, or X costs on a test fixture. Extend `CardSpec` in `crates/scenario/src/lib.rs` if a
+**Simplification:** mana cost is `generic_cost` + `colors` (+ optional `has_x`), not a parsed cost
+string like `"{2}{R}"` — no mana-cost-string parser exists anywhere yet. Can't currently express
+hybrid or Phyrexian mana on a test fixture. Extend `CardSpec` in `crates/scenario/src/lib.rs` if a
 scenario needs one of those.
+
+**X costs (CR 107.3/601.2b):** set `has_x = true` on a `[[cards]]` entry to give it a bare `{X}` in
+its mana cost (`generic_cost`/`colors` still express the rest of the cost as usual — `{X}{R}` is
+`has_x = true, colors = ["R"]`). Casting it then requires the `cast_spell` action's `x_value` field
+(see `[[actions]]` below) to announce a value; `ManaCost::resolve_x` substitutes that value in as a
+generic amount before `PaymentPlan::validate` sees the cost, so `submit_payment`'s `mana.units` pays
+the resolved total exactly like any other generic amount — no special X handling on the payment
+side. See `crates/engine/tests/scenarios/phase5/phase5_x_costs.toml` for a full worked example
+(an `{X}{R}` sorcery cast with `x_value = 3`, paid with 3 generic + 1 red).
 
 **`power_script`/`toughness_script` (CR 604.3/208.2a, characteristic-defining values):** if set,
 `power`/`toughness` above is ignored for that characteristic — instead `CardDefinition.power`/
@@ -754,8 +766,10 @@ is also rejected (not a shortcut for "pay nothing and hope") — `units` must be
 spell's own cost has no mana component at all.
 
 **Not yet supported in `mana.units`:** there's no way to express paying with Phyrexian mana (life
-instead of a color), snow mana, or an X-cost payment — `[[cards]]` itself can't express those costs
-either, so a card using any of those can't be paid via this action regardless. Also unsupported:
+instead of a color) or snow mana — `[[cards]]` itself can't express those costs either, so a card
+using either can't be paid via this action regardless. X costs *are* supported (see `has_x` under
+`[[cards]]` above) — `x_value` resolves to a plain generic amount before payment, no special
+handling needed here. Also unsupported:
 additional costs (sacrifice/discard/etc) and alternative costs (flashback/escape) —
 `PaymentPlan::validate` rejects any `CostSpec` that has either set, and nothing in this slice
 constructs one.

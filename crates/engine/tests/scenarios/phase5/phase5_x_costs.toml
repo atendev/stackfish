@@ -1,0 +1,77 @@
+# CR 107.3/601.2b - an {X}{R} sorcery, announced with x_value = 3 and paid
+# with 3 generic (covering the resolved X) + 1 red. Exercises CardSpec.has_x
+# (the mana-cost side) together with cast_spell's pre-existing x_value field
+# and submit_payment's mana.units (the payment side) end to end via TOML -
+# see phase5_x_costs.rs for the same mechanism driven directly against the
+# engine instead.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+mana_pool = { red = 1, colorless = 3 }
+
+[[cards]]
+key = "fireball"
+name = "Test Fireball"
+has_x = true
+colors = ["R"]
+types = ["Sorcery"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "fireball"
+
+# PreGame -> Untap -> Upkeep -> Draw -> Main (sorcery speed needs Phase::Main).
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "fireball"
+x_value = 3
+
+[[steps]]
+type = "submit_payment"
+player = 0
+mana = { units = ["R", "C", "C", "C"] }
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "red"
+equals = 0
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "colorless"
+equals = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "fireball"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_phase"
+equals = "main"
+
+[[steps]]
+type = "assert_step"
+equals = "pre_combat_main"

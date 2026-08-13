@@ -203,3 +203,24 @@
     real card does this and it's untested.
   - No Lua builder for `buyback_cost` — same scope Flashback/Escape's own alternative-cost
     machinery already established.
+
+## Follow-up: scenario X-cost support (small fix, no branch)
+
+- The engine side of {X} (CR 107.3/601.2b — `PlayerActionKind::CastSpell::x_value`,
+  `ManaCost::resolve_x`) has worked since `phase5_x_costs.rs` was written, and `submit_payment`'s
+  flat `mana.units` already pays a resolved X as an ordinary generic amount — but `CardSpec`
+  (`crates/scenario/src/lib.rs`) had no way to put a bare `{X}` into a fixture's own mana cost in
+  the first place, so no TOML scenario could actually reach that path. Only `docs/scenario_format.md`
+  called this out ("Can't currently express hybrid, Phyrexian, or X costs on a test fixture").
+- Fix: `CardSpec.has_x: bool` (`#[serde(default)]`) — adds `ManaSymbol::X` to the built `ManaCost`
+  alongside the existing `generic_cost`/`colors` symbols (`mana_symbols` in `lib.rs` now takes a
+  third `has_x` param). `"{X}{R}"` is `has_x = true, colors = ["R"]`.
+- Verify: new `crates/engine/tests/scenarios/phase5/phase5_x_costs.toml` — an `{X}{R}` sorcery cast
+  with `x_value = 3`, paid with 3 generic + 1 red, resolves to the graveyard with the pool debited to
+  0. Full workspace suite green.
+- `docs/scenario_format.md` updated in the same change: `has_x` documented under `[[cards]]`, a new
+  "X costs" subsection under the mana-cost simplification note, and the `mana.units` "not yet
+  supported" list corrected (X was already payable there — the gap was only on the cost-declaration
+  side).
+- Unresolved: hybrid and Phyrexian mana are still not representable in `CardSpec`'s cost shape —
+  unchanged by this fix, same pre-existing gap the simplification note already names.

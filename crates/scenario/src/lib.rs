@@ -183,10 +183,11 @@ pub struct ManaPoolSpec {
 }
 
 /// Simplified mana cost shape for test fixtures — `generic_cost` + a list of
-/// color letters, rather than parsing a `"{2}{R}"`-style cost string. Real
-/// cost-string parsing doesn't exist anywhere yet; this sidesteps needing
-/// it just to write scenario fixtures. Revisit if scenarios need hybrid/
-/// Phyrexian/X costs — not representable in this shape yet.
+/// color letters + an optional bare `{X}` (`has_x`), rather than parsing a
+/// `"{2}{R}"`-style cost string. Real cost-string parsing doesn't exist
+/// anywhere yet; this sidesteps needing it just to write scenario fixtures.
+/// Revisit if scenarios need hybrid/Phyrexian mana — not representable in
+/// this shape yet.
 #[derive(Deserialize)]
 pub struct CardSpec {
     pub key: String,
@@ -199,6 +200,17 @@ pub struct CardSpec {
     pub generic_cost: u32,
     #[serde(default)]
     pub colors: Vec<String>,
+    /// CR 107.3/601.2b - if true, this card's mana cost gets a bare
+    /// `{X}` symbol (in addition to `generic_cost`/`colors`, not instead of
+    /// them - e.g. `{X}{R}` is `has_x = true, colors = ["R"]`). Casting it
+    /// then requires `PlayerActionKind::CastSpell::x_value` (the `x_value`
+    /// field on a `cast_spell` action) to announce a value, which
+    /// `ManaCost::resolve_x` substitutes in as a generic amount before
+    /// `PaymentPlan::validate` sees the cost - same mechanism
+    /// `phase5_x_costs.rs` exercises directly against the engine, just
+    /// reachable from a scenario fixture now.
+    #[serde(default)]
+    pub has_x: bool,
     /// Required unless `db_script_id` is set.
     #[serde(default)]
     pub types: Vec<String>,
@@ -1105,7 +1117,7 @@ fn card_definition_from_spec(card_db: Option<&CardDb>, placeholder_definition_id
         });
     }
 
-    let symbols = mana_symbols(spec.generic_cost, &spec.colors);
+    let symbols = mana_symbols(spec.generic_cost, &spec.colors, spec.has_x);
     CardDefinition {
         definition_id: placeholder_definition_id,
         name: spec.name.clone(),
@@ -1171,8 +1183,11 @@ fn parse_colors(letters: &[String]) -> ColorSet {
 /// NOT share this helper - a payment is a flat list of literal units (CR
 /// 118.13a's choice), not an echo of the cost's shape. See `parse_mana_unit`
 /// and `build_payment_plan` for that side.
-fn mana_symbols(generic_cost: u32, colors: &[String]) -> Vec<ManaSymbol> {
+fn mana_symbols(generic_cost: u32, colors: &[String], has_x: bool) -> Vec<ManaSymbol> {
     let mut symbols = Vec::new();
+    if has_x {
+        symbols.push(ManaSymbol::X);
+    }
     if generic_cost > 0 {
         symbols.push(ManaSymbol::Atom(AtomicManaSymbol::Generic(generic_cost)));
     }
