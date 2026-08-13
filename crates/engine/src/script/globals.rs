@@ -406,6 +406,10 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // source, no filter table (mirrors TapSelf's own no-argument shape,
     // distinct from the filter-driven Discard binding just below).
     costs.set("DiscardSelf", CostTag(CostComponent::Additional(AdditionalCost::DiscardSelf)))?;
+    // "Sacrifice this permanent" - always the ability's own source, no filter
+    // table (mirrors TapSelf/DiscardSelf's own no-argument shape, distinct
+    // from the filter-driven Sacrifice binding just below).
+    costs.set("SacrificeSelf", CostTag(CostComponent::Additional(AdditionalCost::SacrificeSelf)))?;
     costs.set(
         "Sacrifice",
         lua.create_function(|_, table: Table| {

@@ -478,6 +478,7 @@ function GameOpsTable.BecomeCopy(exceptions) end
 ---@class GameCostsTable
 ---@field TapSelf GameCostsValue         -- always taps the source
 ---@field DiscardSelf GameCostsValue     -- allows activation from Hand
+---@field SacrificeSelf GameCostsValue   -- always sacrifices the source
 local GameCostsTable = {}
 
 ---@param filter FilterTable

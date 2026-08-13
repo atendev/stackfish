@@ -154,6 +154,7 @@ calls).
 |---|---|---|
 | `TapSelf` | — | CR 602.5a, the `{T}` symbol — taps whichever permanent is activating the ability. Always the source, never a choice. |
 | `Sacrifice(filter)` | `filter`: shared filter-table shape | CR 701.20a, sacrifice a permanent you currently control matching `filter`. |
+| `SacrificeSelf` | — | "Sacrifice this permanent" — sacrifices the ability's own source. Always the source, never a choice (mirrors `TapSelf`), unlike `Sacrifice(filter)` above, whose `filter` alone can't pin the payment to a specific object's identity. |
 | `Discard(filter)` | `filter`: shared filter-table shape | Discard a card from your hand matching `filter`. |
 | `DiscardSelf` | — | CR 702.29a Cycling's "Discard this card" — discards the ability's own source. Always the source, never a choice (mirrors `TapSelf`), unlike `Discard(filter)` above. An activated ability whose cost includes this may be activated from `Hand` instead of `Battlefield` (CR 602.1's "unless the ability itself says otherwise" carve-out) — see [activated-abilities.md](activated-abilities.md). |
 | `TapPermanents(filter, count)` | `filter`: shared filter-table shape. `count`: how many. | Tap `count` *other* permanents (not the source) matching `filter` — distinct from `TapSelf`. |
