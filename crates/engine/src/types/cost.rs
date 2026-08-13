@@ -91,6 +91,15 @@ pub enum AdditionalCost {
     /// (`PaymentPlan::validate`'s `source` param), never a filter choice.
     TapSelf,
     Sacrifice { filter: FilterSpec },
+    /// "Sacrifice this permanent" — the `Sacrifice{filter}` sibling `TapSelf`/
+    /// `DiscardSelf` already are to `TapPermanents`/`Discard{filter}`: always
+    /// the ability's own source, never a filter choice. `Sacrifice{filter}`
+    /// alone can't express this — its `filter` only checks type/supertype/
+    /// subtype/controller, never the paid object's identity, so a "sacrifice
+    /// this artifact" ability built on it could be paid by sacrificing any
+    /// *other* matching permanent instead (the gap Clue/Food's own token
+    /// builder carried until this variant existed).
+    SacrificeSelf,
     Discard { filter: FilterSpec },
     /// CR 702.29a Cycling's "Discard this card" — the `Discard` sibling
     /// `TapSelf` already is to `TapPermanents`: always the ability's own
@@ -897,6 +906,21 @@ impl PaymentPlan {
                         return false;
                     }
                     if !filter.matches(obj, controller, payer) {
+                        return false;
+                    }
+                }
+                AdditionalCost::SacrificeSelf => {
+                    let Some(CostPayment::Sacrifice(id)) = payments.next() else { return false };
+                    if *id != source {
+                        return false;
+                    }
+                    let Some(obj) = state.object(*id) else { return false };
+                    // CR 701.20a, same check `Sacrifice{filter}` makes above,
+                    // minus the filter (there's nothing left to match against
+                    // once the id is pinned to source) - same shape
+                    // `DiscardSelf` already takes relative to `Discard{filter}`.
+                    let controller = crate::layers::effective_controller(state, script_runtime, *id);
+                    if obj.zone != ZoneKind::Battlefield || controller != payer {
                         return false;
                     }
                 }

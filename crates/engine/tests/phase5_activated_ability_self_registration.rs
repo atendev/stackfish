@@ -62,6 +62,17 @@ end
 return s
 "#;
 
+const SACRIFICE_SELF_COST: &str = r#"
+local s = {}
+function s.register_abilities(c)
+    local e = Game.CreateActivatedAbility(c)
+    e:AddCost(Game.Costs.SacrificeSelf)
+    e:SetOperation(Game.Ops.GainLife(1))
+    e:Register()
+end
+return s
+"#;
+
 const MANA_COST: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -199,6 +210,26 @@ fn run_card_script_accumulates_multiple_add_cost_calls() {
     assert_eq!(cost.additional.len(), 2);
     assert!(matches!(cost.additional[0], AdditionalCost::TapSelf));
     assert!(matches!(cost.additional[1], AdditionalCost::Sacrifice { .. }));
+}
+
+// ---------------------------------------------------------------------
+// Game.Costs.SacrificeSelf — "Sacrifice this permanent," always the
+// ability's own source (mirrors Game.Costs.TapSelf/DiscardSelf, distinct
+// from the filter-driven Game.Costs.Sacrifice(filter) above).
+// ---------------------------------------------------------------------
+
+#[test]
+fn run_card_script_self_registers_activated_ability_with_sacrifice_self_cost() {
+    let mut state = two_player_state();
+    let bear = ObjectId(0);
+    let definition = bear_definition(SACRIFICE_SELF_COST);
+    state.objects.insert(bear, card_object(bear, definition.clone(), PlayerId(0), ZoneKind::Battlefield));
+
+    let mut runtime = ScriptRuntime::new();
+    runtime.run_card_script(&mut state, &definition, bear).expect("script self-registers cleanly");
+
+    let cost = state.abilities[0].cost.as_ref().expect("AddCost(SacrificeSelf) was called");
+    assert!(matches!(cost.additional.as_slice(), [AdditionalCost::SacrificeSelf]));
 }
 
 // ---------------------------------------------------------------------

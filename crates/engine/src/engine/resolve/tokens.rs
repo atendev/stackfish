@@ -9,7 +9,7 @@ use crate::commands;
 use crate::replacement;
 use crate::types::ability::{AbilityEffect, AbilityKind, NamedToken, RegisteredAbility, TokenSpec};
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, Subtype, SupertypeSet};
-use crate::types::cost::{AdditionalCost, CostSpec, FilterController, FilterSpec};
+use crate::types::cost::{AdditionalCost, CostSpec};
 use crate::types::counter::CounterSet;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -303,7 +303,7 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
             supertypes: SupertypeSet::empty(),
             card_types: CardTypeSet::ARTIFACT,
             subtypes: vec![Subtype("Food".to_string())],
-            oracle_text: "{2}, Sacrifice this artifact: You gain 3 life.".to_string(),
+            oracle_text: "{2}, {T}, Sacrifice this artifact: You gain 3 life.".to_string(),
             power: None,
             toughness: None,
             loyalty: None,
@@ -352,14 +352,6 @@ fn build_token_definition(spec: &TokenSpec) -> CardDefinition {
 /// future slice). Named tokens (Clue, Food) get their sacrifice ability
 /// directly as a Rust-native `RegisteredAbility`.
 fn register_token_abilities(state: &mut GameState, token_id: ObjectId, spec: &TokenSpec, _controller: PlayerId) {
-    let artifact_sacrifice_filter = FilterSpec {
-        card_types: Some(CardTypeSet::ARTIFACT),
-        supertypes: None,
-        subtypes: None,
-        controller: Some(FilterController::You),
-        random: false,
-        extra: None,
-    };
     match spec {
         TokenSpec::Named(NamedToken::Clue) => {
             let id = state.allocate_ability_id();
@@ -370,12 +362,9 @@ fn register_token_abilities(state: &mut GameState, token_id: ObjectId, spec: &To
                 source: token_id,
                 kind: AbilityKind::Activated,
                 condition: None,
-                // TODO: "sacrifice THIS artifact" -- the filter doesn't enforce
-                // identity, only type+controller. Same pre-existing gap as every
-                // other sacrifice-cost site. Blocked on backlog item 9.
                 cost: Some(CostSpec {
                     mana: ManaCost::parse("{2}").ok(),
-                    additional: vec![AdditionalCost::Sacrifice { filter: artifact_sacrifice_filter }],
+                    additional: vec![AdditionalCost::SacrificeSelf],
                     alternative: Vec::new(),
                 }),
                 target: None,
@@ -393,9 +382,11 @@ fn register_token_abilities(state: &mut GameState, token_id: ObjectId, spec: &To
                 source: token_id,
                 kind: AbilityKind::Activated,
                 condition: None,
+                // CR 111.10b: "{2}, {T}, Sacrifice this token: You gain 3
+                // life." - TapSelf was missing entirely until this slice.
                 cost: Some(CostSpec {
                     mana: ManaCost::parse("{2}").ok(),
-                    additional: vec![AdditionalCost::Sacrifice { filter: artifact_sacrifice_filter }],
+                    additional: vec![AdditionalCost::TapSelf, AdditionalCost::SacrificeSelf],
                     alternative: Vec::new(),
                 }),
                 target: None,

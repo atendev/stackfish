@@ -573,6 +573,7 @@ fn food_ability_gains_life_when_activated() {
         .submit_payment(PaymentPlan {
             payments: vec![
                 CostPayment::Mana { units, phyrexian_life: 0 },
+                CostPayment::Tap(token_id),
                 CostPayment::Sacrifice(token_id),
             ],
         })
@@ -582,6 +583,73 @@ fn food_ability_gains_life_when_activated() {
 
     assert_eq!(engine.state().player(p0).unwrap().life, 23, "gained 3 life from Food");
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty(), "Food was sacrificed");
+}
+
+/// CR 111.10f/111.10b: Clue/Food's own "Sacrifice this artifact" can't be
+/// paid by sacrificing a *different* matching artifact — the identity gap
+/// `AdditionalCost::Sacrifice{filter}` alone couldn't close (only
+/// `AdditionalCost::SacrificeSelf` pins the payment to the ability's source).
+#[test]
+fn clue_ability_cannot_be_paid_by_sacrificing_a_different_artifact() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+
+    let card = ObjectId(0);
+    state.objects.insert(
+        card,
+        card_object(
+            card,
+            instant_definition(1, "Investigate", AbilityEffect::CreateToken { spec: TokenSpec::Named(NamedToken::Clue), count: 1 }),
+            p0,
+            ZoneKind::Hand,
+        ),
+    );
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
+    state.players[0].mana_pool = ManaPool { colorless: 2, ..ManaPool::default() };
+
+    let mut engine = Engine::new(state);
+    cast_spell(&mut engine, p0, card);
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    let clue_id = engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents[0];
+
+    // A second artifact the payer also controls - a decoy for the sacrifice.
+    let decoy_id = ObjectId(9001);
+    engine.state_mut().objects.insert(
+        decoy_id,
+        card_object(
+            decoy_id,
+            CardDefinition { definition_id: 2, card_types: CardTypeSet::ARTIFACT, ..instant_definition(2, "Decoy", AbilityEffect::GainLife(0)) },
+            p0,
+            ZoneKind::Battlefield,
+        ),
+    );
+    engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(decoy_id);
+
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::ActivateAbility {
+                source: clue_id,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+                x_value: None,
+            },
+        })
+        .expect("Clue ability is available");
+    drain(&mut engine);
+
+    let units = vec![ManaUnit::Colorless, ManaUnit::Colorless];
+    let result = engine.submit_payment(PaymentPlan {
+        payments: vec![
+            CostPayment::Mana { units, phyrexian_life: 0 },
+            CostPayment::Sacrifice(decoy_id),
+        ],
+    });
+    assert!(result.is_err(), "sacrificing the decoy instead of the Clue itself must be rejected");
 }
 
 /// Creature tokens have no registered abilities — `abilities` stays empty.
