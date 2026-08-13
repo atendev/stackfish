@@ -1,0 +1,184 @@
+# Two attackers, three blockers: one attacker is single-blocked (no choice
+# to make at all - CR 510.1c only needs a chosen split for 2+ blockers),
+# the other is double-blocked with one banding blocker among the two (CR
+# 702.22j flips that one split to the defending player). Confirms the two
+# don't collide into AssignCombatDamage's "two different choosers at once"
+# rejection - the single block contributes no chooser requirement at all,
+# so there's only ever one real chooser this step.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "atk1"
+template = "test_creature_vanilla"
+power = 3
+toughness = 3
+
+[[cards]]
+key = "atk2"
+template = "test_creature_vanilla"
+power = 4
+toughness = 6
+
+[[cards]]
+key = "soleblock"
+template = "test_creature_vanilla"
+power = 1
+toughness = 2
+
+[[cards]]
+key = "bander"
+template = "test_creature_banding"
+power = 1
+toughness = 5
+
+[[cards]]
+key = "plain"
+template = "test_creature_vanilla"
+power = 1
+toughness = 5
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "atk1"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "atk2"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "soleblock"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "bander"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "plain"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "atk1", target = 1 },
+  { attacker = "atk2", target = 1 },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "soleblock", attacker = "atk1" },
+  { blocker = "bander", attacker = "atk2" },
+  { blocker = "plain", attacker = "atk2" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# Only "atk2" needs a submitted split - "atk1" has exactly one blocker, so
+# there's nothing to choose for it (and including it here would be an
+# illegal extra entry, CR 510.1e atomicity).
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "atk2", splits = [
+    { blocker = "bander", amount = 2 },
+    { blocker = "plain", amount = 2 },
+  ] },
+]
+expect_error = true
+
+[[steps]]
+type = "assign_combat_damage"
+player = 1
+assignments = [
+  { attacker = "atk2", splits = [
+    { blocker = "bander", amount = 2 },
+    { blocker = "plain", amount = 2 },
+  ] },
+]
+
+# "atk1" dealt its full power to its lone blocker automatically - no split
+# needed, but real damage still landed.
+[[steps]]
+type = "assert_object_zone"
+card = "soleblock"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "atk1"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "atk2"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bander"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "plain"
+equals = "battlefield"
+
+# Both attackers were blocked - no damage reached the defending player.
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20

@@ -654,6 +654,22 @@ taps). Tapping the attackers and recording them happens immediately, no stack ob
 
 ```toml
 [[actions]]
+type = "declare_bands"
+player = 0
+bands = [["bander", "mate"]]
+```
+
+CR 508.1e/702.22c: groups just-declared attackers into a band, same window as `declare_attackers`
+itself (only during the declare attackers step, only once attackers exist). Each inner list is one
+band, named by card key — a legal band needs either at least one member with banding (plus at most
+one member without), or a "bands with other [quality]" member whose bandmates all share that
+quality; every member must attack the same player/planeswalker/battle. `bands` defaults to `[]`
+(no bands declared this combat, the overwhelmingly common case) if omitted. See
+`crates/engine/tests/scenarios/mechanics/banding/` for worked examples covering band formation,
+CR 702.22h's forced-block propagation, and CR 702.22j/k's damage-split chooser flips.
+
+```toml
+[[actions]]
 type = "declare_blockers"
 player = 1
 blocks = [
@@ -689,17 +705,27 @@ assignments = [
 ]
 ```
 
-CR 510.1/510.2: the active player assigns and deals all combat damage in one turn-based action,
-only during the combat damage step (also exempt from the priority check, same as
-`declare_attackers`/`declare_blockers` above). `assignments` only needs an entry for an attacker
-with **two or more** blockers - this engine's block model is one blocker/one attacker (no banding),
-so an unblocked attacker always sends its full power to its original target, and a single-blocked
-attacker/its lone blocker always send their full power to each other; neither has a real choice to
-submit. An `assignments` entry must cover *exactly* the attackers that are actually double(+)-
-blocked (no extra entries for 0/1-blocker attackers, no missing entries for one that needs a split),
-each `splits` list must name every one of that attacker's blockers exactly once, and the `amount`s
-must sum to exactly the attacker's power (CR 510.1e - an illegal split rejects the whole action,
-nothing gets marked). Damage is marked on creature targets and converted to life loss on player
+CR 510.1/510.2: the active player (or, per CR 702.22j/k below, the defending player) assigns and
+deals all combat damage in one turn-based action, only during the combat damage step (also exempt
+from the priority check, same as `declare_attackers`/`declare_blockers` above). `assignments` only
+needs an entry for an id that actually needs a chosen split: an attacker with **two or more**
+blockers, one blocker with trample (CR 702.19b), or — CR 702.22h/k, once a band is in play — a
+blocker forced onto two or more attackers by band propagation. An unblocked attacker always sends
+its full power to its original target, and a single-blocked attacker/its lone blocker always send
+their full power to each other; neither has a real choice to submit. An `assignments` entry must
+cover *exactly* the ids that need one (no extra entries, no missing ones), each `splits` list must
+name every one of that id's counterparts exactly once, and the `amount`s must sum to exactly that
+id's power (CR 510.1e - an illegal split rejects the whole action, nothing gets marked; a trampling
+attacker may leave some of its power unassigned once every blocker has its own lethal amount — see
+the trample keyword's own doc, `docs/lua/index.md` — but a blocker forced onto multiple attackers
+by banding has no such carve-out, its split must sum to exactly its power every time). The
+`attacker`/`blocker` field names are just labels, not a role check — for a band-forced blocker's own
+split, put the *blocker's* key under `attacker` and the attackers it's blocking under
+`splits[].blocker` (see `crates/engine/tests/scenarios/mechanics/banding/05_declared_block_on_one_member_propagates_to_whole_band.toml`
+for a worked example). CR 510.1c/d's default chooser (each object's own controller) flips per CR
+702.22j/k whenever a `BANDING` creature — or an actual band, via propagation — is involved on the
+*other* side of a given block; see `crates/engine/tests/scenarios/mechanics/banding/` for the full
+set of chooser-flip cases. Damage is marked on creature targets and converted to life loss on player
 targets in the same pass - no damage prevention/replacement check yet (CR 615/616), and damage to a
 planeswalker/battle target doesn't do anything yet (no loyalty/defense-damage path wired up - only
 player and creature targets are functional this slice). See
@@ -901,6 +927,25 @@ equals = "main"
 
 **If `[[steps]]` is non-empty, `[[actions]]` and `[[assertions]]` are ignored.** They cannot be
 mixed in the same file — pick one style per scenario.
+
+**`expect_error` (asserting an action is illegal):** any action step in `[[steps]]` (only
+`[[steps]]` — the legacy `[[actions]]`/`[[assertions]]` split has no way to set it) takes an
+optional `expect_error = true` field, default `false`. It inverts that one step's pass/fail
+polarity: the engine rejecting the action becomes the expected, passing result, and the engine
+accepting it becomes the hard failure instead. For asserting a game rule makes something illegal
+(an invalid band shape, a split submitted by the wrong player, ...) without needing a dedicated
+assertion primitive for every piece of state that would otherwise require inspecting:
+
+```toml
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["bander", "bear1", "bear2"]]   # too many non-banding members - illegal (CR 702.22c)
+expect_error = true
+```
+
+See `crates/engine/tests/scenarios/mechanics/banding/03_band_rejects_two_non_banding_members.toml`
+for a full worked example.
 
 Assertion type names for `[[steps]]` (all take the same fields as their `[[assertions]]`
 equivalents): `assert_life`, `assert_ledger_len`, `assert_object_zone`, `assert_mana_pool`,

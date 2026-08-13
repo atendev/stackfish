@@ -1,0 +1,83 @@
+# CR 508.1e/702.22c: a band allows *at most one* member without banding -
+# one banding creature plus two non-banding creatures is one too many and
+# the whole declaration is rejected.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bander"
+template = "test_creature_banding"
+
+[[cards]]
+key = "bear1"
+template = "test_creature_vanilla"
+
+[[cards]]
+key = "bear2"
+template = "test_creature_vanilla"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bander"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear1"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear2"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bander", target = 1 },
+  { attacker = "bear1", target = 1 },
+  { attacker = "bear2", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["bander", "bear1", "bear2"]]
+expect_error = true
+
+[[steps]]
+type = "assert_step"
+equals = "declare_attackers"

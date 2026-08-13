@@ -1,0 +1,144 @@
+# CR 702.22j: when an attacker is blocked by 2+ creatures and at least one
+# of them has banding, the *defending* player chooses the split instead of
+# the attacking player - the reverse of the ordinary CR 510.1c default. No
+# band involved at all here - this is purely about a banding creature
+# sitting among the blockers.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "attacker"
+template = "test_creature_vanilla"
+power = 4
+toughness = 4
+
+[[cards]]
+key = "bander"
+template = "test_creature_banding"
+power = 1
+toughness = 5
+
+[[cards]]
+key = "plain"
+template = "test_creature_vanilla"
+power = 1
+toughness = 5
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "attacker"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "bander"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "plain"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "attacker", target = 1 },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "bander", attacker = "attacker" },
+  { blocker = "plain", attacker = "attacker" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# The active player no longer chooses this split - one of "attacker"'s
+# blockers has banding.
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "attacker", splits = [
+    { blocker = "bander", amount = 2 },
+    { blocker = "plain", amount = 2 },
+  ] },
+]
+expect_error = true
+
+[[steps]]
+type = "assign_combat_damage"
+player = 1
+assignments = [
+  { attacker = "attacker", splits = [
+    { blocker = "bander", amount = 2 },
+    { blocker = "plain", amount = 2 },
+  ] },
+]
+
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20
+
+[[steps]]
+type = "assert_object_zone"
+card = "attacker"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bander"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "plain"
+equals = "battlefield"

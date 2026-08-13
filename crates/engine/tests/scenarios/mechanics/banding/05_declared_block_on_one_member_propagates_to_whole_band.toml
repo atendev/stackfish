@@ -1,0 +1,151 @@
+# CR 702.22h: once any one band member is directly blocked, every other
+# member of that band becomes blocked by that same creature too - even one
+# that couldn't legally have been blocked directly (here, a flyer with no
+# flying/reach blocker around). The defending player's single ground-legal
+# block ends up covering the entire band, not just the member it named.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "flyer"
+template = "test_creature_banding"
+keywords = ["Banding", "Flying"]
+
+[[cards]]
+key = "ground"
+template = "test_creature_vanilla"
+
+[[cards]]
+key = "wall"
+template = "test_creature_vanilla"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "flyer"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "ground"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "wall"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "flyer", target = 1 },
+  { attacker = "ground", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["flyer", "ground"]]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# "wall" has no flying/reach, so it can only legally block "ground" directly
+# - blocking "flyer" directly would be rejected on its own. CR 702.22h then
+# forces the same block onto "flyer" too, bypassing that restriction.
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "wall", attacker = "ground" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# CR 702.22h/k: "wall" is now blocking 2 attackers (propagation), so its
+# damage needs a chosen split too - omitting it is illegal (510.1e).
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+expect_error = true
+
+# Field names here are just labels (see docs/scenario_format.md) - the
+# "attacker" field holds "wall" (the forced-multi-block *blocker*) and its
+# "splits" list holds the two attackers it's now blocking. Chooser is the
+# active player (p0) per CR 702.22k, since one of the attackers it blocks
+# ("flyer") has banding.
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "wall", splits = [
+    { blocker = "flyer", amount = 1 },
+    { blocker = "ground", amount = 1 },
+  ] },
+]
+
+# The whole band was blocked by "wall" - no damage got through to the
+# defending player at all.
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20
+
+[[steps]]
+type = "assert_object_zone"
+card = "flyer"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "ground"
+equals = "battlefield"
+
+# "wall" took 2 (from flyer) + 2 (from ground) = 4 combat damage against
+# its 2 toughness - a real double-block, not just a label.
+[[steps]]
+type = "assert_object_zone"
+card = "wall"
+equals = "graveyard"

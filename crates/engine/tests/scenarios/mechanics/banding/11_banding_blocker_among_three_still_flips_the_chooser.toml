@@ -1,0 +1,144 @@
+# CR 702.22j applies no matter how many blockers are involved - one
+# banding creature among three blockers is still enough to hand the whole
+# split to the defending player.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "attacker"
+template = "test_creature_vanilla"
+power = 6
+toughness = 6
+
+[[cards]]
+key = "plain1"
+template = "test_creature_vanilla"
+power = 1
+toughness = 5
+
+[[cards]]
+key = "plain2"
+template = "test_creature_vanilla"
+power = 1
+toughness = 5
+
+[[cards]]
+key = "bander"
+template = "test_creature_banding"
+power = 1
+toughness = 5
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "attacker"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "plain1"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "plain2"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "bander"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "attacker", target = 1 },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "plain1", attacker = "attacker" },
+  { blocker = "plain2", attacker = "attacker" },
+  { blocker = "bander", attacker = "attacker" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "attacker", splits = [
+    { blocker = "plain1", amount = 2 },
+    { blocker = "plain2", amount = 2 },
+    { blocker = "bander", amount = 2 },
+  ] },
+]
+expect_error = true
+
+[[steps]]
+type = "assign_combat_damage"
+player = 1
+assignments = [
+  { attacker = "attacker", splits = [
+    { blocker = "plain1", amount = 2 },
+    { blocker = "plain2", amount = 2 },
+    { blocker = "bander", amount = 2 },
+  ] },
+]
+
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20
+
+[[steps]]
+type = "assert_object_zone"
+card = "attacker"
+equals = "battlefield"

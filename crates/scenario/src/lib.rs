@@ -645,6 +645,14 @@ pub enum ActionSpec {
         #[serde(default)]
         attackers: Vec<AttackerSpec>,
     },
+    /// CR 508.1e/702.22c: groups just-declared attackers into bands - see
+    /// `PlayerActionKind::DeclareBands`'s own doc comment for legality. Each
+    /// inner list is one band, named by card key.
+    DeclareBands {
+        player: u32,
+        #[serde(default)]
+        bands: Vec<Vec<String>>,
+    },
     DeclareBlockers {
         player: u32,
         #[serde(default)]
@@ -747,6 +755,14 @@ impl ActionSpec {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("declare_attackers(player={player}, attackers=[{attackers}])")
+            }
+            ActionSpec::DeclareBands { player, bands } => {
+                let bands = bands
+                    .iter()
+                    .map(|band| format!("[{}]", band.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("declare_bands(player={player}, bands=[{bands}])")
             }
             ActionSpec::DeclareBlockers { player, blocks } => {
                 let blocks = blocks
@@ -916,7 +932,19 @@ impl AssertionStepSpec {
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub enum ScenarioStep {
-    Action(ActionSpec),
+    Action {
+        #[serde(flatten)]
+        spec: ActionSpec,
+        /// Inverts this step's pass/fail polarity: the engine rejecting the
+        /// action becomes the expected, passing result, and the engine
+        /// accepting it becomes the hard failure instead. For asserting an
+        /// action is illegal (e.g. an invalid band shape) without a
+        /// dedicated assertion primitive for every piece of state that
+        /// would otherwise require inspecting. Default false (the engine
+        /// rejecting an action is a hard failure, same as always).
+        #[serde(default)]
+        expect_error: bool,
+    },
     Assertion(AssertionStepSpec),
 }
 
@@ -1232,6 +1260,7 @@ fn parse_keywords(names: &[String]) -> KeywordSet {
             "Intimidate" => KeywordSet::INTIMIDATE,
             "Shadow" => KeywordSet::SHADOW,
             "Horsemanship" => KeywordSet::HORSEMANSHIP,
+            "Banding" => KeywordSet::BANDING,
             other => panic!("unknown keyword in scenario file: {other}"),
         };
     }
@@ -1888,6 +1917,15 @@ fn to_player_action(spec: &ActionSpec, card_ids: &HashMap<String, ObjectId>) -> 
                     .collect(),
             },
         ),
+        ActionSpec::DeclareBands { player, bands } => (
+            *player,
+            PlayerActionKind::DeclareBands {
+                bands: bands
+                    .iter()
+                    .map(|band| band.iter().map(|c| resolve_card(c, card_ids)).collect())
+                    .collect(),
+            },
+        ),
         ActionSpec::DeclareBlockers { player, blocks } => (
             *player,
             PlayerActionKind::DeclareBlockers {
@@ -2473,6 +2511,31 @@ pub enum EntryOutcome {
 pub struct EntryReport {
     pub description: String,
     pub outcome: EntryOutcome,
+    /// Mirrors `ScenarioStep::Action`'s own field - always `false` for an
+    /// assertion entry, or an action reached via the legacy `[[actions]]`/
+    /// `[[assertions]]` split (that shape has no way to set it).
+    pub expect_error: bool,
+}
+
+impl EntryReport {
+    /// A "hard" failure is an assertion that actually ran and produced the
+    /// wrong answer, or an action outcome that didn't match what this entry
+    /// expected — the engine rejecting an action outright
+    /// (`StepOutcome::Errored` — per its own doc comment, "real code ran
+    /// and rejected the action on purpose") unless `expect_error` asked for
+    /// exactly that rejection, in which case the reverse (the engine
+    /// accepting it) is the failure instead. An action that's merely
+    /// unimplemented yet (`StepOutcome::Errored`'s sibling
+    /// `StepOutcome::NotImplemented`) is never a hard failure either way -
+    /// expected and shouldn't fail a Phase 4/5 test run.
+    pub fn is_hard_failure(&self) -> bool {
+        match (&self.outcome, self.expect_error) {
+            (EntryOutcome::Assertion(AssertionOutcome::Failed { .. }), _) => true,
+            (EntryOutcome::Action(StepOutcome::Errored(_)), expect_error) => !expect_error,
+            (EntryOutcome::Action(StepOutcome::Ran), expect_error) => expect_error,
+            _ => false,
+        }
+    }
 }
 
 pub struct ScenarioReport {
@@ -2480,21 +2543,8 @@ pub struct ScenarioReport {
 }
 
 impl ScenarioReport {
-    /// A "hard" failure is an assertion that actually ran and produced the
-    /// wrong answer, or an action the engine rejected outright
-    /// (`StepOutcome::Errored` — per its own doc comment, "real code ran
-    /// and rejected the action on purpose") — not an action that's merely
-    /// unimplemented yet (`StepOutcome::Errored`'s sibling
-    /// `StepOutcome::NotImplemented`), which is expected and shouldn't fail
-    /// a Phase 4/5 test run.
     pub fn has_hard_failures(&self) -> bool {
-        self.entries.iter().any(|e| {
-            matches!(
-                &e.outcome,
-                EntryOutcome::Assertion(AssertionOutcome::Failed { .. })
-                    | EntryOutcome::Action(StepOutcome::Errored(_))
-            )
-        })
+        self.entries.iter().any(EntryReport::is_hard_failure)
     }
 }
 
@@ -2525,6 +2575,7 @@ fn run_action_spec(
     engine: &mut Engine,
     card_ids: &mut HashMap<String, ObjectId>,
     action_spec: &ActionSpec,
+    expect_error: bool,
 ) -> EntryReport {
     let ledger_before = engine.state().ledger.len();
     let outcome = match action_spec {
@@ -2552,7 +2603,7 @@ fn run_action_spec(
         other => run_action(engine, to_player_action(other, card_ids)),
     };
     remap_moved_card_ids(card_ids, &engine.state().ledger[ledger_before..]);
-    EntryReport { description: action_spec.describe(), outcome: EntryOutcome::Action(outcome) }
+    EntryReport { description: action_spec.describe(), outcome: EntryOutcome::Action(outcome), expect_error }
 }
 
 pub fn run(file: &ScenarioFile) -> ScenarioReport {
@@ -2586,8 +2637,8 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
     if !file.steps.is_empty() {
         for step in &file.steps {
             match step {
-                ScenarioStep::Action(action_spec) => {
-                    entries.push(run_action_spec(&mut engine, &mut card_ids, action_spec));
+                ScenarioStep::Action { spec: action_spec, expect_error } => {
+                    entries.push(run_action_spec(&mut engine, &mut card_ids, action_spec, *expect_error));
                 }
                 ScenarioStep::Assertion(assertion_step) => {
                     let spec = assertion_step.to_assertion_spec();
@@ -2595,19 +2646,21 @@ pub fn run(file: &ScenarioFile) -> ScenarioReport {
                     entries.push(EntryReport {
                         description: spec.describe(),
                         outcome: EntryOutcome::Assertion(outcome),
+                        expect_error: false,
                     });
                 }
             }
         }
     } else {
         for action_spec in &file.actions {
-            entries.push(run_action_spec(&mut engine, &mut card_ids, action_spec));
+            entries.push(run_action_spec(&mut engine, &mut card_ids, action_spec, false));
         }
         for assertion_spec in &file.assertions {
             let outcome = check_assertion(assertion_spec, engine.state(), &card_ids);
             entries.push(EntryReport {
                 description: assertion_spec.describe(),
                 outcome: EntryOutcome::Assertion(outcome),
+                expect_error: false,
             });
         }
     }

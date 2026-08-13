@@ -1,0 +1,133 @@
+# CR 702.22h, from the declare-blockers legality angle (05 proved the
+# combat-damage outcome; this proves the declaration itself): a defending
+# creature with no flying/reach still can't directly name a flying band
+# member as its block target - that per-pair check runs before any
+# propagation exists. But naming the band's *other*, ground member is fully
+# legal, and CR 702.22h then covers the flyer too - "can block one member"
+# turns out to be enough to block the whole band.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "flyer"
+template = "test_creature_banding"
+keywords = ["Banding", "Flying"]
+
+[[cards]]
+key = "ground"
+template = "test_creature_vanilla"
+
+[[cards]]
+key = "wall"
+template = "test_creature_vanilla"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "flyer"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "ground"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "wall"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "flyer", target = 1 },
+  { attacker = "ground", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["flyer", "ground"]]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# Directly naming the flyer is illegal on its own - "wall" has neither
+# flying nor reach (CR 702.9b) - even though it's in a band. Propagation is
+# a *consequence* of a legal direct block, not a way to make an otherwise
+# illegal one legal.
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "wall", attacker = "flyer" },
+]
+expect_error = true
+
+# Naming the ground member instead is fully legal, and covers the flyer too.
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "wall", attacker = "ground" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "wall", splits = [
+    { blocker = "flyer", amount = 1 },
+    { blocker = "ground", amount = 1 },
+  ] },
+]
+
+# Both band members ended up blocked - no damage reached the defending
+# player, confirming the single legal block covered the whole band.
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20

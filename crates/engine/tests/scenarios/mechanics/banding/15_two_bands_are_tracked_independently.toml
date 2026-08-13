@@ -1,0 +1,170 @@
+# CR 508.1e/702.22c/h: a single declare_bands call can form more than one
+# band in the same combat, and CR 702.22h's propagation stays scoped to
+# whichever band the directly-blocked creature belongs to - blocking one
+# band's member never spills a forced block onto an unrelated band.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "a1"
+template = "test_creature_banding"
+
+[[cards]]
+key = "b1"
+template = "test_creature_vanilla"
+
+[[cards]]
+key = "a2"
+template = "test_creature_banding"
+
+[[cards]]
+key = "b2"
+template = "test_creature_vanilla"
+
+[[cards]]
+key = "blocker1"
+template = "test_creature_vanilla"
+toughness = 3
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "a1"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "b1"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "a2"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "b2"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "blocker1"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "a1", target = 1 },
+  { attacker = "b1", target = 1 },
+  { attacker = "a2", target = 1 },
+  { attacker = "b2", target = 1 },
+]
+
+# Two separate bands in the same declaration.
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["a1", "b1"], ["a2", "b2"]]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# Only the first band gets blocked at all - directly naming "a1" only.
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "blocker1", attacker = "a1" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# "blocker1" is forced onto "b1" too (same band as "a1"), but "a2"/"b2" -
+# the *other* band - are completely untouched, so only "blocker1" needs a
+# submitted split.
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "blocker1", splits = [
+    { blocker = "a1", amount = 1 },
+    { blocker = "b1", amount = 1 },
+  ] },
+]
+
+# Band 1 was fully absorbed by "blocker1" - each of "a1"/"b1" individually
+# has exactly one blocker ("blocker1"), so each deals its own full power
+# (2) to it automatically, same as any single block (CR 510.1c) - 4 total,
+# over "blocker1"'s 3 toughness. Band 2 was completely unblocked: 2 + 2 = 4
+# got through to the defending player instead.
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 16
+
+[[steps]]
+type = "assert_object_zone"
+card = "a1"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "b1"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "a2"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "b2"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "blocker1"
+equals = "graveyard"

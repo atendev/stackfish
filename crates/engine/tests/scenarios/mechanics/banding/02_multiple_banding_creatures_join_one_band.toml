@@ -1,0 +1,108 @@
+# CR 508.1e/702.22c: a band allows *any number* of banding members, plus up
+# to one without banding - two banding creatures and one non-banding
+# creature should all join a single band together.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bander1"
+template = "test_creature_banding"
+
+[[cards]]
+key = "bander2"
+template = "test_creature_banding"
+
+[[cards]]
+key = "mate"
+template = "test_creature_vanilla"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bander1"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bander2"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "mate"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bander1", target = 1 },
+  { attacker = "bander2", target = 1 },
+  { attacker = "mate", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["bander1", "bander2", "mate"]]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = []
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+# All three band members unblocked: 2 + 2 + 2 = 6.
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 14

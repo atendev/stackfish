@@ -1,0 +1,149 @@
+# Baseline: a creature with banding that never joins a band (no
+# declare_bands call at all) plays by the ordinary CR 510.1c rules - a
+# double block still needs a split, and it's still the *attacking* player's
+# choice, same as any vanilla creature. Having banding printed on the
+# attacker itself doesn't flip anything; only a banding creature on the
+# *blocking* side (CR 702.22j) or actual band membership (CR 702.22h/k)
+# changes the default chooser.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bander"
+template = "test_creature_banding"
+power = 5
+toughness = 6
+
+[[cards]]
+key = "wall1"
+template = "test_creature_vanilla"
+power = 2
+toughness = 2
+
+[[cards]]
+key = "wall2"
+template = "test_creature_vanilla"
+power = 1
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bander"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "wall1"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "wall2"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# No declare_bands step at all - "bander" attacks solo, banding keyword
+# unused.
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bander", target = 1 },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "wall1", attacker = "bander" },
+  { blocker = "wall2", attacker = "bander" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# The defending player does NOT get this choice - neither blocker has
+# banding, so the ordinary CR 510.1c default (attacker's own controller)
+# stands.
+[[steps]]
+type = "assign_combat_damage"
+player = 1
+assignments = [
+  { attacker = "bander", splits = [
+    { blocker = "wall1", amount = 3 },
+    { blocker = "wall2", amount = 2 },
+  ] },
+]
+expect_error = true
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "bander", splits = [
+    { blocker = "wall1", amount = 3 },
+    { blocker = "wall2", amount = 2 },
+  ] },
+]
+
+[[steps]]
+type = "assert_object_zone"
+card = "wall1"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "wall2"
+equals = "graveyard"
+
+[[steps]]
+type = "assert_object_zone"
+card = "bander"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20

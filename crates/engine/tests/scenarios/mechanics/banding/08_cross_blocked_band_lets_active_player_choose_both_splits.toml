@@ -1,0 +1,173 @@
+# CR 702.22h's propagation cross-multiplies when a defending player gang-
+# blocks a band with two separate direct blocks: naming one blocker per
+# band member still ends up with *every* member blocked by *every* named
+# blocker (each direct block propagates the same blocker onto the rest of
+# the band). Neither blocker itself has banding, so the chooser for every
+# resulting split - both attacker-side and blocker-side - stays the default
+# (each object's own controller): the active player for the two band
+# members, and *also* the active player for the two blockers, since each
+# blocker now blocks "bander" (which has banding) per CR 702.22k. One
+# player ends up choosing all four splits, not two players choosing two
+# each.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bander"
+template = "test_creature_banding"
+toughness = 10
+
+[[cards]]
+key = "mate"
+template = "test_creature_vanilla"
+toughness = 10
+
+[[cards]]
+key = "block1"
+template = "test_creature_vanilla"
+toughness = 10
+
+[[cards]]
+key = "block2"
+template = "test_creature_vanilla"
+toughness = 10
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bander"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "mate"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "block1"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "block2"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bander", target = 1 },
+  { attacker = "mate", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["bander", "mate"]]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# One blocker per band member - CR 702.22h propagates each onto the other
+# member too, so both end up blocking both.
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "block1", attacker = "bander" },
+  { blocker = "block2", attacker = "mate" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# The defending player does NOT get to choose here, even though these are
+# their own blockers - neither blocker has banding, so the default "each
+# object's own controller" chooser applies per split, and every id in this
+# damage step happens to be controlled by the active player.
+[[steps]]
+type = "assign_combat_damage"
+player = 1
+assignments = [
+  { attacker = "bander", splits = [{ blocker = "block1", amount = 1 }, { blocker = "block2", amount = 1 }] },
+  { attacker = "mate", splits = [{ blocker = "block1", amount = 1 }, { blocker = "block2", amount = 1 }] },
+  { attacker = "block1", splits = [{ blocker = "bander", amount = 1 }, { blocker = "mate", amount = 1 }] },
+  { attacker = "block2", splits = [{ blocker = "bander", amount = 1 }, { blocker = "mate", amount = 1 }] },
+]
+expect_error = true
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "bander", splits = [{ blocker = "block1", amount = 1 }, { blocker = "block2", amount = 1 }] },
+  { attacker = "mate", splits = [{ blocker = "block1", amount = 1 }, { blocker = "block2", amount = 1 }] },
+  { attacker = "block1", splits = [{ blocker = "bander", amount = 1 }, { blocker = "mate", amount = 1 }] },
+  { attacker = "block2", splits = [{ blocker = "bander", amount = 1 }, { blocker = "mate", amount = 1 }] },
+]
+
+# Fully cross-blocked band - no damage reached the defending player.
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20
+
+[[steps]]
+type = "assert_object_zone"
+card = "bander"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "mate"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "block1"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "block2"
+equals = "battlefield"

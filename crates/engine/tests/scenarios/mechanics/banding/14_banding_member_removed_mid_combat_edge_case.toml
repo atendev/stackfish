@@ -1,0 +1,166 @@
+# Edge case: a band member can leave combat mid-step just like any other
+# creature (a removal spell resolving before the combat damage step, CR
+# 610). Nothing in `CombatState.bands`/`attackers` gets rewritten when that
+# happens - the dead id just stops resolving to a real object, and every
+# consumer downstream (declare-blockers propagation, damage assignment)
+# already treats a non-resolving id as "not participating," same as any
+# other creature that died before its combat damage step. No blockers are
+# declared at all here - the point is that the *other*, still-living band
+# member deals its own damage normally, unaffected by its dead bandmate.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "a"
+template = "test_creature_banding"
+
+[[cards]]
+key = "b"
+template = "test_creature_vanilla"
+
+[[cards]]
+key = "removal"
+name = "Test Removal"
+types = ["Instant"]
+script = """
+local s = {}
+function s.operation()
+    return Game.Ops.Destroy
+end
+function s.register_abilities(c)
+end
+return s
+"""
+
+[cards.target_requirement]
+filter = "object"
+card_types = ["Creature"]
+count = 1
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "a"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "b"
+
+[[setup]]
+player = 1
+zone = "hand"
+card = "removal"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "a", target = 1 },
+  { attacker = "b", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["a", "b"]]
+
+# p0 passes so p1 gets a window to act, still inside the declare attackers
+# step (nobody has passed twice in a row yet).
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "cast_spell"
+player = 1
+card = "removal"
+targets = ["a"]
+
+[[steps]]
+type = "submit_payment"
+player = 1
+# "removal" has no mana_cost - still needs an explicit empty plan (CR 118.5a).
+
+# Both players pass in a row - resolves "removal" (destroying "a"), then
+# priority reopens fresh to the active player.
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "a"
+equals = "graveyard"
+
+# One more pair of passes to actually leave the declare attackers step.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = []
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# "a" is dead, so only "b" deals damage this step - no split needed either
+# way ("a" was the band's only other member, and it's gone).
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 18
+
+[[steps]]
+type = "assert_object_zone"
+card = "b"
+equals = "battlefield"

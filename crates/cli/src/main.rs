@@ -100,11 +100,18 @@ fn print_report(report: &stackfish_scenario::ScenarioReport) -> usize {
     let mut hard_failures = 0;
     for (i, entry) in report.entries.iter().enumerate() {
         match &entry.outcome {
+            EntryOutcome::Action(StepOutcome::Ran) if entry.expect_error => {
+                println!("  [{i}] action | FAIL  - {} (expected rejection, but it ran)", entry.description);
+                hard_failures += 1;
+            }
             EntryOutcome::Action(StepOutcome::Ran) => {
                 println!("  [{i}] action | ran   - {}", entry.description);
             }
             EntryOutcome::Action(StepOutcome::NotImplemented(msg)) => {
                 println!("  [{i}] action | not yet implemented - {} ({msg})", entry.description);
+            }
+            EntryOutcome::Action(StepOutcome::Errored(msg)) if entry.expect_error => {
+                println!("  [{i}] action | rejected as expected - {} ({msg})", entry.description);
             }
             EntryOutcome::Action(StepOutcome::Errored(msg)) => {
                 println!("  [{i}] action | ERRORED - {} ({msg})", entry.description);

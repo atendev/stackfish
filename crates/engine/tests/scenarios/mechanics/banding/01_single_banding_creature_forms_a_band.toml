@@ -1,0 +1,120 @@
+# CR 508.1e/702.22c: a band needs one or more attacking creatures with
+# banding, plus up to one attacking creature without banding. The simplest
+# legal shape - one of each - should form a band and then attack normally
+# (unblocked damage from both members reaches the defending player).
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bander"
+template = "test_creature_banding"
+
+[[cards]]
+key = "mate"
+template = "test_creature_vanilla"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bander"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "mate"
+
+# Two players, so every step transition needs both to pass in a row (CR
+# 117.4) - 4 step transitions to reach the declare attackers step:
+# PreGame -> Untap (no priority) -> Upkeep -> Draw (skipped turn 1) ->
+# PreCombatMain -> BeginningOfCombat -> DeclareAttackers, 2 passes each.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "bander", target = 1 },
+  { attacker = "mate", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["bander", "mate"]]
+
+# One more pair of passes to reach the declare blockers step.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = []
+
+# One more pair of passes to reach the combat damage step.
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+[[steps]]
+type = "assert_step"
+equals = "combat_damage"
+
+# Both band members are unblocked - the band formed but changed nothing
+# about ordinary unblocked damage (2 + 2 = 4).
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 16
+
+[[steps]]
+type = "assert_object_zone"
+card = "bander"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "mate"
+equals = "battlefield"

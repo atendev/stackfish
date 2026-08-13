@@ -1,0 +1,151 @@
+# CR 702.22k: a blocker forced onto 2+ attackers by band propagation needs
+# its own damage split chosen - and per 702.22j/k precedence, that's the
+# *active* player's choice whenever one of the attackers it ends up
+# blocking has banding, even though the blocker itself doesn't have
+# banding at all. The trigger is "blocking a creature with banding," not
+# "the blocker has banding."
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "a"
+template = "test_creature_banding"
+power = 1
+toughness = 5
+
+[[cards]]
+key = "b"
+template = "test_creature_banding"
+power = 1
+toughness = 5
+
+[[cards]]
+key = "blocker"
+template = "test_creature_vanilla"
+power = 4
+toughness = 8
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "a"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "b"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "blocker"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "a", target = 1 },
+  { attacker = "b", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["a", "b"]]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# Directly blocking only "a" - CR 702.22h forces "blocker" onto "b" too.
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = [
+  { blocker = "blocker", attacker = "a" },
+]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+# The defending player does NOT choose here - "blocker" itself has no
+# banding, but it's now blocking "a", which does.
+[[steps]]
+type = "assign_combat_damage"
+player = 1
+assignments = [
+  { attacker = "blocker", splits = [
+    { blocker = "a", amount = 3 },
+    { blocker = "b", amount = 1 },
+  ] },
+]
+expect_error = true
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = [
+  { attacker = "blocker", splits = [
+    { blocker = "a", amount = 3 },
+    { blocker = "b", amount = 1 },
+  ] },
+]
+
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 20
+
+[[steps]]
+type = "assert_object_zone"
+card = "a"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "b"
+equals = "battlefield"
+
+[[steps]]
+type = "assert_object_zone"
+card = "blocker"
+equals = "battlefield"

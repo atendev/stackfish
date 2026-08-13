@@ -61,3 +61,17 @@ name = "Test Vanilla Creature"
 types = ["Creature"]
 power = 2
 toughness = 2
+
+[test_creature_flying]
+name = "Test Flying Creature"
+types = ["Creature"]
+keywords = ["Flying"]
+power = 2
+toughness = 2
+
+[test_creature_banding]
+name = "Test Banding Creature"
+types = ["Creature"]
+keywords = ["Banding"]
+power = 2
+toughness = 2

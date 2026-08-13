@@ -1,0 +1,115 @@
+# CR 509.1a: declaring zero blockers is always legal ("declare zero" - same
+# convention plain DeclareBlockers already allows). Same band shape as
+# 05_declared_block_on_one_member_propagates_to_whole_band.toml, but the
+# defending player has a legal blocker and chooses not to use it - the band
+# goes through completely unblocked, no propagation involved at all.
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "flyer"
+template = "test_creature_banding"
+keywords = ["Banding", "Flying"]
+
+[[cards]]
+key = "ground"
+template = "test_creature_vanilla"
+
+[[cards]]
+key = "wall"
+template = "test_creature_vanilla"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "flyer"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "ground"
+
+[[setup]]
+player = 1
+zone = "battlefield"
+card = "wall"
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_attackers"
+player = 0
+attackers = [
+  { attacker = "flyer", target = 1 },
+  { attacker = "ground", target = 1 },
+]
+
+[[steps]]
+type = "declare_bands"
+player = 0
+bands = [["flyer", "ground"]]
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "declare_blockers"
+player = 1
+blocks = []
+
+[[steps]]
+type = "pass_priority"
+player = 0
+[[steps]]
+type = "pass_priority"
+player = 1
+
+[[steps]]
+type = "assign_combat_damage"
+player = 0
+assignments = []
+
+# Fully unblocked band: 2 + 2 = 4.
+[[steps]]
+type = "assert_life"
+player = 1
+equals = 16
+
+[[steps]]
+type = "assert_object_zone"
+card = "wall"
+equals = "battlefield"
