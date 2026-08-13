@@ -161,6 +161,7 @@ pub fn effective_characteristics(
     // add-shape still applies on top of that, same as a real
     // strip-then-regrant interaction (see RemoveAllAbilities's/
     // RemoveKeyword's own doc comments).
+    let mut ignored_keywords = KeywordSet::empty();
     let mut protection_colors = crate::ColorSet::empty();
     let mut protection_card_types = CardTypeSet::empty();
     let mut protection_subtypes: Vec<crate::Subtype> = Vec::new();
@@ -175,6 +176,7 @@ pub fn effective_characteristics(
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
             Some(EffectPrimitive::AddKeyword(added)) => keywords |= added,
             Some(EffectPrimitive::RemoveKeyword(removed)) => keywords &= !removed,
+            Some(EffectPrimitive::IgnoreKeyword(ignored)) => ignored_keywords |= ignored,
             Some(EffectPrimitive::AddProtectionColor(added)) => protection_colors |= added,
             Some(EffectPrimitive::AddProtectionCardType(added)) => protection_card_types |= added,
             Some(EffectPrimitive::AddProtectionSubtype(added)) => {
@@ -213,6 +215,7 @@ pub fn effective_characteristics(
             }
             Some(EffectPrimitive::RemoveAllAbilities) => {
                 keywords = KeywordSet::empty();
+                ignored_keywords = KeywordSet::empty();
                 protection_colors = crate::ColorSet::empty();
                 protection_card_types = CardTypeSet::empty();
                 protection_subtypes = Vec::new();
@@ -340,6 +343,7 @@ pub fn effective_characteristics(
         supertypes,
         subtypes,
         keywords,
+        ignored_keywords,
         protection_colors,
         protection_card_types,
         protection_subtypes,

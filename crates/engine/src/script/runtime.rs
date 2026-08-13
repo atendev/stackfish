@@ -540,6 +540,15 @@ impl ScriptRuntime {
             }
             return Ok(Some(EffectPrimitive::RemoveKeyword(set)));
         }
+        if let Some(t) = result.get::<_, Option<Table>>("ignore_keyword").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let mut set = KeywordSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let Ok(kw) = parse_keyword_name(&name) else { return Ok(None) };
+                set |= kw;
+            }
+            return Ok(Some(EffectPrimitive::IgnoreKeyword(set)));
+        }
         if let Some(t) = result.get::<_, Option<Table>>("add_card_type").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
             let mut set = CardTypeSet::empty();
             for entry in t.sequence_values::<String>() {

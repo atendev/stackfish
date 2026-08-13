@@ -285,19 +285,55 @@ pub enum EffectPrimitive {
     /// its own — see `RemoveAllAbilities` below for the strip-everything
     /// shape, or `RemoveKeyword` below for a scoped removal of just these.
     AddKeyword(KeywordSet),
-    /// Layer 6 (CR 613.1f): removes the listed keyword(s), and only these —
-    /// e.g. "Walls you control can attack as though they didn't have
-    /// defender" (Assault Formation) is `RemoveKeyword(DEFENDER)`. Unlike
-    /// `RemoveAllAbilities`, this never touches protection or any other
-    /// layer-6 field, and never clears keywords outside the listed set —
-    /// the narrower "loses these specific keywords" shape `RemoveAllAbilities`'s
-    /// own doc comment names as deliberately unbuilt there. Folds into
-    /// `layers.rs`'s layer-6 pass at this effect's own CR 613.7 timestamp
-    /// position, same as `AddKeyword` — a later-timestamp `AddKeyword`
-    /// re-adds whatever an earlier `RemoveKeyword` removed (and vice versa),
-    /// the identical "no special CR 613.8a dependency needed" reasoning
-    /// `RemoveAllAbilities` already documents for the same interaction.
+    /// Layer 6 (CR 613.1f): removes the listed keyword(s), and only these.
+    /// Unlike `RemoveAllAbilities`, this never touches protection or any
+    /// other layer-6 field, and never clears keywords outside the listed
+    /// set — the narrower "loses these specific keywords" shape
+    /// `RemoveAllAbilities`'s own doc comment names as deliberately unbuilt
+    /// there. Folds into `layers.rs`'s layer-6 pass at this effect's own CR
+    /// 613.7 timestamp position, same as `AddKeyword` — a later-timestamp
+    /// `AddKeyword` re-adds whatever an earlier `RemoveKeyword` removed (and
+    /// vice versa), the identical "no special CR 613.8a dependency needed"
+    /// reasoning `RemoveAllAbilities` already documents for the same
+    /// interaction.
+    ///
+    /// NOT the right primitive for "can attack as though it didn't have
+    /// defender" (Assault Formation) — that keeps the keyword itself (a
+    /// card checking "has defender" still sees it) and only voids the
+    /// restriction it imposes. An earlier slice modeled Assault Formation
+    /// as `RemoveKeyword(DEFENDER)` anyway; that's a real ruling mismatch,
+    /// not a deliberate approximation — see `IgnoreKeyword` below for the
+    /// correct primitive, added once a real "ignore, don't strip" mechanic
+    /// was actually requested.
     RemoveKeyword(KeywordSet),
+    /// Layer 6 (CR 613.1f, "as though it didn't have [keyword]" text): the
+    /// listed keyword(s) stay present in `EffectiveCharacteristics::keywords`
+    /// — anything checking "does this have [keyword]" still sees it — but
+    /// whatever restriction that keyword imposes is voided for the listed
+    /// bit(s). E.g. Assault Formation's "Walls you control can attack as
+    /// though they didn't have defender" is `IgnoreKeyword(DEFENDER)`:
+    /// unlike `RemoveKeyword(DEFENDER)`, the Wall still *has* defender (CR
+    /// 302.6b's own separate "summoning-sick creature can't attack" rule
+    /// still applies to it, and any other card caring "target creature with
+    /// defender" still targets it) — only CR 702.3b's own can't-attack
+    /// restriction is lifted. Additive union, same fold shape as `AddKeyword`
+    /// (accumulates into its own `EffectiveCharacteristics::
+    /// ignored_keywords` field, separate from `keywords` itself),
+    /// cleared by `RemoveAllAbilities` alongside every other layer-6 field
+    /// (this exemption is itself an ability, same reasoning `RemoveAllAbilities`'s
+    /// own doc comment gives for clearing protection/landwalk too).
+    ///
+    /// Only `KeywordSet::DEFENDER` has a real enforcement call site today
+    /// (`commands::combat::declare`'s attack-declaration check) — `KeywordSet`
+    /// only has the one true self-restriction bit ("can't do X") right now;
+    /// every other bit (Flying/Menace/Fear/Shadow/Horsemanship/...) restricts
+    /// a *blocker's* legality against this object, not this object's own
+    /// actions, a different shape not covered by this primitive. Payload is
+    /// a full `KeywordSet` (not a single `Keyword`) so a future restriction
+    /// bit can reuse this primitive without a new one, same "shape it for
+    /// the general case even though only one bit is wired up yet" posture
+    /// `AddKeyword`/`RemoveKeyword` themselves already take.
+    IgnoreKeyword(KeywordSet),
     /// Layer 6 (CR 613.1/702.16e): grants protection from the listed
     /// color(s) in addition to whatever the object already has protection
     /// from. Union, same shape as `AddKeyword` above — see `EffectiveCharacteristics::
@@ -431,11 +467,12 @@ pub enum EffectPrimitive {
     /// check with this one, same "any one match is enough" posture.
     AddBandsWithOtherSupertype(crate::types::card::SupertypeSet),
     /// Layer 6 (CR 613.1f, ability-removing effects — "~ loses all
-    /// abilities"): resets the running `keywords`, `protection_colors`,
-    /// `protection_card_types`, `protection_subtypes`, `protection_names`,
-    /// `protection_everything`, `protection_players`, `landwalk_subtypes`,
-    /// *and* `bands_with_other_subtypes` accumulators to empty/false at this
-    /// effect's position in `effective_characteristics`'s layer-6 fold —
+    /// abilities"): resets the running `keywords`, `ignored_keywords`,
+    /// `protection_colors`, `protection_card_types`, `protection_subtypes`,
+    /// `protection_names`, `protection_everything`, `protection_players`,
+    /// `landwalk_subtypes`, *and* `bands_with_other_subtypes` accumulators to
+    /// empty/false at this effect's position in `effective_characteristics`'s
+    /// layer-6 fold —
     /// protection is an ability too, regardless of which
     /// quality it names (CR 613.1f names "ability-adding... and
     /// ability-removing effects" together, no carve-out for protection
@@ -1353,6 +1390,18 @@ pub struct EffectiveCharacteristics {
     /// `RemoveAllAbilities` (CR 613.1f "loses all abilities") — see that
     /// primitive's own doc comment.
     pub keywords: KeywordSet,
+    /// CR 613.1f "as though it didn't have [keyword]" text: keyword(s) whose
+    /// *restriction* is voided, unioned with every applicable layer 6
+    /// `EffectPrimitive::IgnoreKeyword`, reset to empty by an
+    /// intervening `RemoveAllAbilities` alongside `keywords` itself. Deliberately
+    /// separate from `keywords` — the keyword bit(s) named here stay set in
+    /// `keywords` too (an "ignore the restriction" grant is not a
+    /// `RemoveKeyword`; see that primitive's own doc comment for the real
+    /// Assault Formation ruling this distinction exists for). A caller
+    /// enforcing a keyword-driven restriction must check both fields: the
+    /// keyword is present in `keywords` AND absent from here for the
+    /// restriction to actually apply.
+    pub ignored_keywords: KeywordSet,
     /// CR 702.16e: colors this object has protection from, unioned with
     /// every applicable layer 6 `EffectPrimitive::AddProtectionColor`. A
     /// separate field from `keywords` rather than another `KeywordSet` bit

@@ -16,7 +16,7 @@ use crate::types::mana::ColorSet;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
-use super::super::legality::{effective_keywords, has_summoning_sickness};
+use super::super::legality::{effective_keywords, has_summoning_sickness, ignored_keywords};
 use super::super::{CommandError, CommandOutcome, PriorityHandoff};
 
 pub(in crate::commands) fn execute_declare_attackers(
@@ -76,10 +76,15 @@ pub(in crate::commands) fn execute_declare_attackers(
             ));
         }
         // CR 302.6b/702.3b: a creature with defender can't attack -
-        // effective_keywords so a granted/removed Defender (e.g.
-        // Assault Formation's RemoveKeyword(Defender)) is respected,
-        // not just the printed keyword.
-        if effective_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER) {
+        // effective_keywords so a granted/removed Defender is respected, not
+        // just the printed keyword. A creature with an applicable
+        // IgnoreKeyword(DEFENDER) grant (e.g. Assault Formation's
+        // "Walls you control can attack as though they didn't have
+        // defender") still has Defender - it's just exempt from the
+        // restriction it imposes, see that primitive's own doc comment.
+        if effective_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
+            && !ignored_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
+        {
             return Err(CommandError::IllegalAction(
                 "a chosen attacker has defender and can't attack".to_string(),
             ));

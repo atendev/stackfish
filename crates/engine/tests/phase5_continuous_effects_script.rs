@@ -137,6 +137,18 @@ fn effect_decodes_remove_keyword() {
 }
 
 #[test]
+fn effect_decodes_ignore_keyword() {
+    let mut runtime = ScriptRuntime::new();
+    let handle = runtime
+        .load_function("return function(source, controller) return { ignore_keyword = { \"Defender\" } } end")
+        .unwrap();
+
+    let state = base_state();
+    let decoded = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
+    assert_eq!(decoded, Some(EffectPrimitive::IgnoreKeyword(KeywordSet::DEFENDER)));
+}
+
+#[test]
 fn effect_decodes_switch_pt() {
     let mut runtime = ScriptRuntime::new();
     let handle =

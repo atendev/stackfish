@@ -85,6 +85,22 @@ pub(crate) fn effective_keywords(state: &GameState, script_runtime: &ScriptRunti
     }
 }
 
+/// CR 613.1f "as though it didn't have [keyword]" text: `id`'s live
+/// `IgnoreKeyword` grants (see that primitive's own doc comment).
+/// A caller enforcing a keyword-driven restriction (today, only the
+/// Defender attack-declaration check) must combine this with
+/// `effective_keywords` above — the keyword still has to be present in
+/// `effective_keywords` (this doesn't imply the keyword itself), just with
+/// its restriction voided if it's also present here. Same missing-`id`
+/// fallback as `effective_keywords`.
+pub(crate) fn ignored_keywords(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> KeywordSet {
+    if state.object(id).is_some() {
+        crate::layers::effective_characteristics(state, script_runtime, id).ignored_keywords
+    } else {
+        KeywordSet::empty()
+    }
+}
+
 /// CR 510.1a/702.7: whether a creature with `keywords` assigns/deals combat
 /// damage during `step` (`FirstStrikeDamage` or `CombatDamage` - any other
 /// `Step` value is unreachable, gated by `AssignCombatDamage`'s own

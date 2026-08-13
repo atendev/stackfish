@@ -351,9 +351,12 @@ fn vigilance_granted_by_a_continuous_effect_prevents_tapping() {
     assert!(!engine.state().object(attacker).unwrap().tapped, "a continuous effect granting Vigilance must skip the tap too");
 }
 
-/// The Assault Formation shape: "Walls you control can attack as though
-/// they didn't have defender." A printed Defender wall, with a
-/// `RemoveKeyword(Defender)` static ability, can attack.
+/// `RemoveKeyword(Defender)` also happens to let a Defender creature attack
+/// (Defender is gone entirely, so there's nothing left to restrict) — but
+/// this is NOT the Assault Formation shape (see `IgnoreKeyword`'s
+/// own doc comment below): a card checking "has defender" would see this
+/// wall as no longer having it, which is wrong for the real card. Kept as a
+/// pure mechanical check of `RemoveKeyword` itself.
 #[test]
 fn remove_keyword_lets_a_printed_defender_creature_attack() {
     let p0 = PlayerId(0);
@@ -423,6 +426,92 @@ fn a_later_remove_keyword_strips_an_earlier_add_keyword() {
     let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
 
     assert!(!effective.keywords.contains(KeywordSet::FLYING), "a later-timestamp removal strips an earlier grant");
+}
+
+// ---------------------------------------------------------------------
+// IgnoreKeyword (CR 613.1f, "as though it didn't have
+// [keyword]" text) - the real Assault Formation shape: "Walls you control
+// can attack as though they didn't have defender." Unlike RemoveKeyword,
+// this must NOT strip Defender itself - only the can't-attack restriction
+// it imposes.
+// ---------------------------------------------------------------------
+
+/// The real Assault Formation shape: a printed Defender wall with an
+/// `IgnoreKeyword(Defender)` static ability can attack - and,
+/// unlike the `RemoveKeyword` case above, still *has* Defender afterward.
+#[test]
+fn ignore_keyword_lets_a_printed_defender_creature_attack() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Wall", 0, 4, KeywordSet::DEFENDER), p0, 0));
+    state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::IgnoreKeyword(KeywordSet::DEFENDER)));
+
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), attacker);
+    assert!(effective.keywords.contains(KeywordSet::DEFENDER), "unlike RemoveKeyword, this wall must still have defender");
+
+    let mut engine = Engine::new(state);
+    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    assert!(
+        matches!(status, StepStatus::AwaitingAction { .. }),
+        "IgnoreKeyword(Defender) must let this wall attack as though it didn't have defender, got {status:?}"
+    );
+}
+
+/// Without a matching `IgnoreKeyword` grant, a printed Defender
+/// creature still can't attack - the exemption has to actually name the
+/// keyword.
+#[test]
+fn defender_creature_still_cannot_attack_without_a_matching_ignore_grant() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let attacker = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(attacker, creature_definition("Wall", 0, 4, KeywordSet::DEFENDER), p0, 0));
+    // Grants an exemption for a different keyword entirely - must not
+    // spuriously lift the Defender restriction.
+    state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::IgnoreKeyword(KeywordSet::VIGILANCE)));
+
+    let mut engine = Engine::new(state);
+    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    assert!(
+        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
+        "an ignore grant for an unrelated keyword must not lift the Defender restriction, got {status:?}"
+    );
+}
+
+#[test]
+fn a_later_remove_all_abilities_clears_an_earlier_ignore_keyword() {
+    let bear = ObjectId(0);
+    let mut state = combat_state();
+    put_on_battlefield(&mut state, permanent(bear, creature_definition("Wall", 0, 4, KeywordSet::empty()), PlayerId(0), 0));
+    state.continuous_effects.push(ContinuousEffect {
+        timestamp: SequenceNo(0),
+        ..self_only_keyword_effect(bear, EffectPrimitive::AddKeyword(KeywordSet::DEFENDER))
+    });
+    state.continuous_effects.push(ContinuousEffect {
+        timestamp: SequenceNo(1),
+        ..self_only_keyword_effect(bear, EffectPrimitive::IgnoreKeyword(KeywordSet::DEFENDER))
+    });
+    state.continuous_effects.push(ContinuousEffect {
+        timestamp: SequenceNo(2),
+        ..self_only_keyword_effect(bear, EffectPrimitive::RemoveAllAbilities)
+    });
+    // Defender re-granted after the strip, but the ignore-restriction grant
+    // is not - so the restriction should apply again.
+    state.continuous_effects.push(ContinuousEffect {
+        timestamp: SequenceNo(3),
+        ..self_only_keyword_effect(bear, EffectPrimitive::AddKeyword(KeywordSet::DEFENDER))
+    });
+
+    let effective = effective_characteristics(&state, &ScriptRuntime::new(), bear);
+
+    assert!(effective.keywords.contains(KeywordSet::DEFENDER), "defender was re-granted after the strip");
+    assert!(
+        !effective.ignored_keywords.contains(KeywordSet::DEFENDER),
+        "RemoveAllAbilities must clear ignored_keywords same as it clears keywords - it wasn't re-granted"
+    );
 }
 
 // ---------------------------------------------------------------------

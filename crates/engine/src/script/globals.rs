@@ -507,6 +507,13 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?,
     )?;
     effects.set(
+        "IgnoreKeyword",
+        lua.create_function(|_, name: String| {
+            let set = parse_keyword_name(&name).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::IgnoreKeyword(set)))
+        })?,
+    )?;
+    effects.set(
         "AddProtectionColor",
         lua.create_function(|_, letter: String| {
             let set = parse_color_letter(&letter).map_err(to_lua_err)?;
