@@ -270,6 +270,15 @@ restrictions.
 `Hexproof`/`Shroud`/`Ward` aren't in the list at all — no `KeywordSet` bit exists for any of them
 yet.
 
+**Combat damage timing (CR 510.1/510.2):** a creature's combat damage is assigned and dealt
+automatically the instant its damage step opens whenever there's exactly one legal outcome
+(unblocked, or blocked by a single non-trampling creature) — no card script or player action is
+needed to make it happen. A real choice only pauses the game when one actually exists: 2+ blockers
+on one attacker, a trampling attacker with at least one blocker, or a blocker forced onto 2+
+attackers by banding. Either way, a `Game.Conditions.DealsDamage` triggered ability (above) fires
+the same regardless of whether the assignment was automatic or chosen — nothing about authoring a
+card script changes here.
+
 ## `Game.Durations.*`
 
 Used with `:SetDuration` on a [static ability](static-abilities.md), or as the `duration` argument
