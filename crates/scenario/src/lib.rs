@@ -939,14 +939,14 @@ impl AssertionStepSpec {
     }
 }
 
-/// One entry in `[[steps]]` — either an action or an assertion. Serde tries
-/// `Action` first (matching any `ActionSpec` type name), then `Assertion`
-/// (matching any `assert_*` type name). No type names overlap between the two.
-#[derive(Deserialize)]
-#[serde(untagged)]
+/// One entry in `[[steps]]` — either an action or an assertion, dispatched on
+/// its own `type` field: `assert_*` goes to `Assertion`, anything else to
+/// `Action`. Hand-rolled instead of `#[serde(untagged)]` because an untagged
+/// enum swallows every variant's real deserialization error and reports only
+/// "data did not match any variant" with no indication of which field was
+/// wrong or on which step — see the `deserialize` impl below for the fix.
 pub enum ScenarioStep {
     Action {
-        #[serde(flatten)]
         spec: ActionSpec,
         /// Inverts this step's pass/fail polarity: the engine rejecting the
         /// action becomes the expected, passing result, and the engine
@@ -955,10 +955,37 @@ pub enum ScenarioStep {
         /// dedicated assertion primitive for every piece of state that
         /// would otherwise require inspecting. Default false (the engine
         /// rejecting an action is a hard failure, same as always).
-        #[serde(default)]
         expect_error: bool,
     },
     Assertion(AssertionStepSpec),
+}
+
+impl<'de> serde::Deserialize<'de> for ScenarioStep {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let value = toml::Value::deserialize(deserializer)?;
+        let step_type = value
+            .get("type")
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| D::Error::custom("scenario step is missing its `type` field"))?
+            .to_string();
+
+        if step_type.starts_with("assert_") {
+            AssertionStepSpec::deserialize(value)
+                .map(ScenarioStep::Assertion)
+                .map_err(|e| D::Error::custom(format!("step `{step_type}`: {e}")))
+        } else {
+            let spec = ActionSpec::deserialize(value.clone())
+                .map_err(|e| D::Error::custom(format!("step `{step_type}`: {e}")))?;
+            let expect_error =
+                value.get("expect_error").and_then(toml::Value::as_bool).unwrap_or(false);
+            Ok(ScenarioStep::Action { spec, expect_error })
+        }
+    }
 }
 
 impl AssertionSpec {
