@@ -240,6 +240,15 @@ impl Engine {
     /// `postcombat_main: bool` this table has to remember to flip - see
     /// turn.rs's `Step` doc for why that field was folded in here instead.
     fn advance_turn_step(&mut self) -> Vec<GameEventKind> {
+        // CR 500.5/106.4: any unspent mana in every player's mana pool
+        // empties as the step or phase being left ends - this fn runs
+        // exactly once per real step transition, so "about to leave the
+        // current step/phase" is true on every call, including the
+        // PreGame -> Beginning/Untap entry (pools start empty anyway).
+        for player in &mut self.state.players {
+            player.mana_pool.empty();
+        }
+
         let phase_before = self.state.phase;
         let starting_new_turn = match (self.state.phase, self.state.step) {
             (Phase::PreGame, _) => {

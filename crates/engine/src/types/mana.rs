@@ -511,6 +511,13 @@ pub enum ManaUnit {
 }
 
 impl ManaPool {
+    /// CR 500.5/106.4: empties the pool as a step or phase ends. Just resets
+    /// to `Default` - every field (including `restricted`) starts at zero/
+    /// empty there, same as a freshly dealt player.
+    pub fn empty(&mut self) {
+        *self = ManaPool::default();
+    }
+
     /// Inverse of `cost::spend` (`cost.rs`) — adds one literal unit instead
     /// of removing one. Used by CR 605 mana abilities, which add exact
     /// units to the pool rather than a `ManaCost`-shaped amount (see

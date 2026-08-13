@@ -324,7 +324,7 @@ fn casting_via_madness_bypasses_sorcery_speed_timing_and_resolves_to_the_graveya
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(0);
-    let mut state = two_player_state(ManaPool { red: 1, ..ManaPool::default() });
+    let mut state = two_player_state(ManaPool::default());
     state.objects.insert(card, card_object(card, madness_bolt_definition(), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
     state.replacement_effects.push(madness_redirect(card));
@@ -347,9 +347,14 @@ fn casting_via_madness_bypasses_sorcery_speed_timing_and_resolves_to_the_graveya
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "the madness {{R}} cost still needs paying, got {status:?}");
 
+    // Floated now, inside the cleanup step's own priority window, rather
+    // than seeded into the pre-cleanup End-step state above - CR 500.5
+    // empties the pool as End ends (`discard_to_cleanup` crosses that
+    // boundary), so mana seeded before it wouldn't survive to pay with here.
+    engine.state_mut().player_mut(p0).unwrap().mana_pool.add_unit(ManaUnit::Colored(Color::Red));
     engine
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::Red)], phyrexian_life: 0 }] })
-        .expect("madness's {R} paid with the 1 red in the pool");
+        .expect("madness's {R} paid with the floated red mana");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
     assert!(engine.state().object(exiled_card).is_none(), "the exiled card left exile to become the spell on the stack");

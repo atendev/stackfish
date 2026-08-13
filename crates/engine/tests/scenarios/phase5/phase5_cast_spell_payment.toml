@@ -1,13 +1,13 @@
-# Cast a real-cost sorcery, pay it for real from a pre-seeded mana pool, and
-# confirm it resolves to the battlefield with the pool correctly debited.
-# Exercises the cast-spell-payment slice's TOML hooks (PlayerSpec.mana_pool,
-# the SubmitPayment action, the ManaPool assertion) end to end.
+# Cast a real-cost sorcery, pay it for real from a freshly-tapped mana
+# source, and confirm it resolves to the battlefield with the pool correctly
+# debited. Exercises the cast-spell-payment slice's TOML hooks (the
+# activate_ability action producing floating mana, the SubmitPayment action,
+# the ManaPool assertion) end to end.
 seed = 1
 
 [[players]]
 id = 0
 life = 20
-mana_pool = { green = 1, colorless = 2 }
 
 [[cards]]
 key = "bear"
@@ -18,10 +18,21 @@ types = ["Creature"]
 power = 2
 toughness = 2
 
+[[cards]]
+key = "manasrc"
+name = "Test Mana Source"
+types = ["Land"]
+mana_ability = ["G", "C", "C"]   # {T}: Add {G}{C}{C} - ability_index = 0
+
 [[setup]]
 player = 0
 zone = "hand"
 card = "bear"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "manasrc"
 
 # A solo player's first PassPriority always counts as "everyone passed"
 # (consecutive_passes >= turn_order.len() == 1), so each of these advances
@@ -39,6 +50,16 @@ player = 0
 [[steps]]
 type = "pass_priority"
 player = 0
+
+# CR 500.5: mana floats only within the step it's produced in, so it's
+# tapped for here, in Main, right before it's spent - not seeded before the
+# pregame passes above, which would have emptied it out again per that rule.
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "manasrc"
+ability_index = 0
+targets = []
 
 [[steps]]
 type = "cast_spell"

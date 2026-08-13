@@ -13,7 +13,6 @@ seed = 1
 [[players]]
 id = 0
 life = 40
-mana_pool = { colorless = 5 }
 
 [[cards]]
 key = "general"
@@ -23,15 +22,22 @@ types = ["Creature"]
 power = 2
 toughness = 2
 
+[[cards]]
+key = "manasrc"
+name = "Test Mana Source"
+types = ["Land"]
+mana_ability = ["C", "C", "C", "C", "C"]   # {T}: Add {C}{C}{C}{C}{C} - ability_index = 0
+
 [[setup]]
 player = 0
 zone = "command"
 card = "general"
 is_commander = true
 
-[[steps]]
-type = "pass_priority"
+[[setup]]
 player = 0
+zone = "battlefield"
+card = "manasrc"
 
 [[steps]]
 type = "pass_priority"
@@ -40,6 +46,19 @@ player = 0
 [[steps]]
 type = "pass_priority"
 player = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+# CR 500.5: mana floats only within the step it's produced in, so it's
+# tapped for here, in Main, right before it's spent.
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "manasrc"
+ability_index = 0
+targets = []
 
 [[steps]]
 type = "cast_spell"

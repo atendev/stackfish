@@ -9,7 +9,6 @@ seed = 1
 [[players]]
 id = 0
 life = 20
-mana_pool = { red = 1, colorless = 3 }
 
 [[cards]]
 key = "fireball"
@@ -18,10 +17,21 @@ has_x = true
 colors = ["R"]
 types = ["Sorcery"]
 
+[[cards]]
+key = "manasrc"
+name = "Test Mana Source"
+types = ["Land"]
+mana_ability = ["R", "C", "C", "C"]   # {T}: Add {R}{C}{C}{C} - ability_index = 0
+
 [[setup]]
 player = 0
 zone = "hand"
 card = "fireball"
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "manasrc"
 
 # PreGame -> Untap -> Upkeep -> Draw -> Main (sorcery speed needs Phase::Main).
 [[steps]]
@@ -35,6 +45,15 @@ player = 0
 [[steps]]
 type = "pass_priority"
 player = 0
+
+# CR 500.5: mana floats only within the step it's produced in, so it's
+# tapped for here, in Main, right before it's spent.
+[[steps]]
+type = "activate_ability"
+player = 0
+source = "manasrc"
+ability_index = 0
+targets = []
 
 [[steps]]
 type = "cast_spell"
