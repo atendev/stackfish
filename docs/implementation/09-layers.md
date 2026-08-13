@@ -791,6 +791,57 @@
   break. Full workspace suite green.
 - Unresolved: none — CR 702.22 has no further known gap.
 
+## Slice: ignore-keyword-restriction (branch open)
+
+- Branch `phase5/ignore-keyword-restriction`.
+- Scope: a real "as though it didn't have [keyword]" mechanic — the object keeps the keyword itself
+  (any card checking "has [keyword]" still sees it), only the *restriction* that keyword imposes is
+  voided. The concrete driver is Assault Formation ("Walls you control can attack as though they
+  didn't have defender") and its ruling: Assault Formation doesn't remove Defender, it just lets the
+  Wall attack.
+- Found while scoping: `keyword-layer-fix-and-remove-keyword`'s own doc comment (above) already names
+  Assault Formation as its `RemoveKeyword(DEFENDER)` worked example — that's a real ruling mismatch,
+  not a deliberate approximation (nobody built a card script against it, so free to fix here with zero
+  breakage). `RemoveKeyword` itself is unchanged and still correct for its own real shape (a genuine
+  "loses this keyword" effect) — its doc comment now explicitly says it's the wrong primitive for the
+  Assault Formation shape and points at the new one.
+- Key changes:
+  - `EffectPrimitive::IgnoreKeyword(KeywordSet)` (`types/effect.rs`) — layer 6, additive
+    union, same fold shape as `AddKeyword` but into its own accumulator, not `keywords` itself.
+  - `EffectiveCharacteristics::ignored_keywords: KeywordSet` — new field, folded in
+    `layers.rs`'s existing layer-6 loop right next to `AddKeyword`/`RemoveKeyword`, cleared by an
+    intervening `RemoveAllAbilities` alongside `keywords` (this exemption is itself an ability, same
+    reasoning `RemoveAllAbilities`'s own doc comment already gives for clearing protection/landwalk).
+  - `commands::legality::ignored_keywords()` — new helper, mirrors `effective_keywords()`
+    exactly (same missing-`id` fallback).
+  - `commands::combat::declare`'s Defender attack-declaration check: illegal only if the keyword is
+    both present in `effective_keywords` AND absent from `ignored_keywords`.
+  - `Game.Effects.IgnoreKeyword(name)` (script/globals.rs) — same `parse_keyword_name`
+    decoder `AddKeyword`/`RemoveKeyword` use; added to `validate_layer_effect_pairing`'s pairing table
+    (builders.rs); `ignore_keyword` added as a recognized key on the script-backed
+    custom-function effect-shape form (`invoke_continuous_effect`, runtime.rs), mirroring
+    `remove_keyword`'s decode exactly.
+  - Docs: `docs/lua/game-constants.md` gained an `IgnoreKeyword` row (and the
+    `RemoveKeyword` row's own description was corrected — it no longer cites Assault Formation, since
+    that was the wrong example); `docs/lua/static-abilities.md`'s script-backed effect-shape table
+    gained `ignore_keyword`.
+- Deliberately narrow: only `KeywordSet::DEFENDER` has a real enforcement call site consulting
+  `ignored_keywords` today — it's the only bit in `KeywordSet` that's a true self-
+  restriction ("this object can't do X"); every other bit (Flying/Menace/Fear/Shadow/Horsemanship/...)
+  restricts a *blocker's* legality against this object, a different shape this primitive doesn't
+  touch. The primitive's payload is a full `KeywordSet` (not a `Defender`-only enum), so a future
+  restriction-shaped keyword can reuse it without a new primitive — same "shape it for the general
+  case even though only one bit is wired up" posture `AddKeyword`/`RemoveKeyword` themselves already
+  took when they were built.
+- Verify: unit-level (`IgnoreKeyword` unions into `ignored_keywords`;
+  `RemoveAllAbilities` clears it same as `keywords`, proven by re-granting Defender but not the
+  ignore-grant after the strip and confirming the restriction reapplies) plus end-to-end combat
+  (`DeclareAttackers`): a Defender wall with the grant can attack AND still has Defender afterward
+  (the actual distinguishing behavior vs. `RemoveKeyword`); a grant naming an unrelated keyword
+  doesn't spuriously lift the restriction; `:Register()` pairing rejection for the wrong layer;
+  script-backed decode. Full workspace suite green.
+- Unresolved: none new.
+
 ## General layer notes
 
 - Layer order in `effective_characteristics`: 3 text (CR 612.6/612.8, `volraths-shapeshifter`/

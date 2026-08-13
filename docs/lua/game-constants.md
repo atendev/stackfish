@@ -174,7 +174,7 @@ effect applies in. Bare values only:
 | `TextChanging` | 3 | `SetName` |
 | `TypeChanging` | 4 | `AddCardType` |
 | `ColorChanging` | 5 | `AddColor` |
-| `AbilityAdding` | 6 | `AddKeyword`, every `AddProtection*`, `AddLandwalk*`, `AddBandsWithOther`, `AddBandsWithOtherSupertype`, `RemoveAllAbilities` |
+| `AbilityAdding` | 6 | `AddKeyword`, `RemoveKeyword`, `IgnoreKeyword`, every `AddProtection*`, `AddLandwalk*`, `AddBandsWithOther`, `AddBandsWithOtherSupertype`, `RemoveAllAbilities` |
 | `PowerToughnessSetting` | 7b | `SetPT` |
 | `PowerToughnessModifying` | 7c | `ModifyPT` |
 | `PowerToughnessSwitching` | 7e | `SwitchPT` |
@@ -196,7 +196,8 @@ layer/effect pair is a real error.
 | `SetPT(power, toughness)` | integers | Overrides power/toughness outright. |
 | `ModifyPT(power, toughness)` | integers (can be negative) | Adds this delta to power/toughness. |
 | `AddKeyword(name)` | keyword name string | Grants a keyword ability. |
-| `RemoveKeyword(name)` | keyword name string | Removes just this keyword's effect — e.g. "Walls you control can attack as though they didn't have defender" is `RemoveKeyword("Defender")`. Doesn't touch protection or any other keyword, unlike `RemoveAllAbilities` below. |
+| `RemoveKeyword(name)` | keyword name string | Removes just this keyword outright — the object no longer has it at all, for any purpose. Doesn't touch protection or any other keyword, unlike `RemoveAllAbilities` below. |
+| `IgnoreKeyword(name)` | keyword name string | The object keeps this keyword (anything checking "has [keyword]" still sees it), but the restriction it imposes is voided — e.g. "Walls you control can attack as though they didn't have defender" (Assault Formation) is `IgnoreKeyword("Defender")`. Today only `"Defender"` has a real enforcement call site (the attack-declaration check) — `KeywordSet`'s other bits don't restrict the object's own actions the same way. |
 | `AddProtectionColor(letter)` | mana-color letter | CR 702.16, protection from that color. |
 | `AddProtectionCardType(name)` | card type name | Protection from that card type (e.g. "protection from artifacts"). |
 | `AddProtectionSubtype(name)` | subtype name | CR 702.16g, protection from that creature type. One call per subtype (write "protection from A and from B" as two separate registered effects). |
@@ -226,10 +227,11 @@ itself a printed keyword — see the
 comparison. Fall back to the longhand `Game.Effects.AddKeyword` form when the target isn't
 self-only or the duration isn't permanent.
 
-### Supported keyword names (`AddKeyword`/`RemoveKeyword`)
+### Supported keyword names (`AddKeyword`/`RemoveKeyword`/`IgnoreKeyword`)
 
-The complete list both `Game.Effects.AddKeyword(name)` and `Game.Effects.RemoveKeyword(name)`
-recognize — anything else is a load-time error, not a silent no-op:
+The complete list `Game.Effects.AddKeyword(name)`, `Game.Effects.RemoveKeyword(name)`, and
+`Game.Effects.IgnoreKeyword(name)` all recognize — anything else is a load-time error,
+not a silent no-op:
 
 | Name | CR | Meaning |
 |---|---|---|

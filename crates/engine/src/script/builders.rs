@@ -58,6 +58,7 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
             | (Layer::ColorChanging, EffectPrimitive::AddColor(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
             | (Layer::AbilityAdding, EffectPrimitive::RemoveKeyword(_))
+            | (Layer::AbilityAdding, EffectPrimitive::IgnoreKeyword(_))
             | (Layer::AbilityAdding, EffectPrimitive::RemoveAllAbilities)
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionColor(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddProtectionCardType(_))
