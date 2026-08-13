@@ -861,6 +861,14 @@ pub enum AssertionSpec {
     /// actually accumulated (and that a non-commander source, or a
     /// commander's non-combat damage, didn't).
     CommanderDamage { player: u32, source_card: String, equals: u32 },
+    /// Checks `CombatState::bands` (CR 508.1e/702.22c) - the way to confirm
+    /// `declare_bands` actually grouped the named cards into one band,
+    /// without needing to infer it indirectly from a damage-split outcome.
+    /// `equals` is the band's full membership (including `card` itself), by
+    /// key, order-independent. `equals = []` asserts `card` is in no band at
+    /// all (either combat has no bands this turn, or `card` isn't in any of
+    /// them).
+    BandMembers { card: String, equals: Vec<String> },
 }
 
 /// Same assertions as `AssertionSpec` but with `assert_` prefixed type names,
@@ -897,6 +905,8 @@ pub enum AssertionStepSpec {
     PlayerCounters { player: u32, kind: String, equals: i32 },
     #[serde(rename = "assert_commander_damage")]
     CommanderDamage { player: u32, source_card: String, equals: u32 },
+    #[serde(rename = "assert_band_members")]
+    BandMembers { card: String, equals: Vec<String> },
 }
 
 impl AssertionStepSpec {
@@ -921,6 +931,9 @@ impl AssertionStepSpec {
             }
             Self::CommanderDamage { player, source_card, equals } => {
                 AssertionSpec::CommanderDamage { player: *player, source_card: source_card.clone(), equals: *equals }
+            }
+            Self::BandMembers { card, equals } => {
+                AssertionSpec::BandMembers { card: card.clone(), equals: equals.clone() }
             }
         }
     }
@@ -979,6 +992,9 @@ impl AssertionSpec {
             }
             AssertionSpec::CommanderDamage { player, source_card, equals } => {
                 format!("commander_damage(player={player}, source_card={source_card:?}) == {equals}")
+            }
+            AssertionSpec::BandMembers { card, equals } => {
+                format!("band_members(card={card:?}) == {equals:?}")
             }
         }
     }
@@ -2498,6 +2514,31 @@ fn check_assertion(
                 AssertionOutcome::Passed
             } else {
                 AssertionOutcome::Failed { expected: equals.to_string(), actual: format!("{actual:?}") }
+            }
+        }
+        AssertionSpec::BandMembers { card, equals } => {
+            let object_id = resolve_card(card, card_ids);
+            let actual_band: Option<Vec<ObjectId>> = state
+                .combat
+                .as_ref()
+                .and_then(|c| c.bands.iter().find(|b| b.contains(&object_id)))
+                .map(|b| {
+                    let mut sorted = b.clone();
+                    sorted.sort();
+                    sorted
+                });
+            let matches = if equals.is_empty() {
+                actual_band.is_none()
+            } else {
+                let mut expected_ids: Vec<ObjectId> =
+                    equals.iter().map(|k| resolve_card(k, card_ids)).collect();
+                expected_ids.sort();
+                actual_band.as_ref() == Some(&expected_ids)
+            };
+            if matches {
+                AssertionOutcome::Passed
+            } else {
+                AssertionOutcome::Failed { expected: format!("{equals:?}"), actual: format!("{actual_band:?}") }
             }
         }
     }

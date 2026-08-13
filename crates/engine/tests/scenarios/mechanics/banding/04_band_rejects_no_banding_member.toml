@@ -71,3 +71,8 @@ expect_error = true
 [[steps]]
 type = "assert_step"
 equals = "declare_attackers"
+
+[[steps]]
+type = "assert_band_members"
+card = "bear1"
+equals = []

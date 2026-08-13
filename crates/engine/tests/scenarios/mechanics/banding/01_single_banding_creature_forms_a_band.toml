@@ -72,6 +72,11 @@ type = "declare_bands"
 player = 0
 bands = [["bander", "mate"]]
 
+[[steps]]
+type = "assert_band_members"
+card = "bander"
+equals = ["bander", "mate"]
+
 # One more pair of passes to reach the declare blockers step.
 [[steps]]
 type = "pass_priority"

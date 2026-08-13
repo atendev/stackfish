@@ -950,7 +950,8 @@ for a full worked example.
 Assertion type names for `[[steps]]` (all take the same fields as their `[[assertions]]`
 equivalents): `assert_life`, `assert_ledger_len`, `assert_object_zone`, `assert_mana_pool`,
 `assert_tapped`, `assert_eliminated`, `assert_phase`, `assert_step`, `assert_active_player`,
-`assert_priority_player`, `assert_hand_size`, `assert_object_counters`, `assert_player_counters`.
+`assert_priority_player`, `assert_hand_size`, `assert_object_counters`, `assert_player_counters`,
+`assert_commander_damage`, `assert_band_members`.
 
 ---
 
@@ -1037,6 +1038,18 @@ equals = 3
 Checks `PlayerState.counters` — the way to confirm Infect gave a player poison counters instead of
 life loss. See `crates/engine/tests/scenarios/phase5_keyword_primitives.toml` for a full worked
 example of both alongside the other keyword primitives.
+
+```toml
+[[assertions]]
+type = "band_members"
+card = "bander"
+equals = ["bander", "mate"]   # card's full band membership, by key, order-independent
+```
+
+Checks `CombatState::bands` (CR 508.1e/702.22c) — confirms `declare_bands` actually grouped the
+named cards into one band, without inferring it indirectly from a damage-split outcome. `equals`
+must list `card`'s complete band membership, including `card` itself. `equals = []` asserts `card`
+is in no band at all (either there are no bands this combat, or `card` isn't in any of them).
 
 ```toml
 [[assertions]]
