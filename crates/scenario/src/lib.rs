@@ -2481,11 +2481,19 @@ pub struct ScenarioReport {
 
 impl ScenarioReport {
     /// A "hard" failure is an assertion that actually ran and produced the
-    /// wrong answer — not an action that's merely unimplemented yet, which
-    /// is expected and shouldn't fail a Phase 4/5 test run.
+    /// wrong answer, or an action the engine rejected outright
+    /// (`StepOutcome::Errored` — per its own doc comment, "real code ran
+    /// and rejected the action on purpose") — not an action that's merely
+    /// unimplemented yet (`StepOutcome::Errored`'s sibling
+    /// `StepOutcome::NotImplemented`), which is expected and shouldn't fail
+    /// a Phase 4/5 test run.
     pub fn has_hard_failures(&self) -> bool {
         self.entries.iter().any(|e| {
-            matches!(&e.outcome, EntryOutcome::Assertion(AssertionOutcome::Failed { .. }))
+            matches!(
+                &e.outcome,
+                EntryOutcome::Assertion(AssertionOutcome::Failed { .. })
+                    | EntryOutcome::Action(StepOutcome::Errored(_))
+            )
         })
     }
 }

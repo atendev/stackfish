@@ -50,7 +50,7 @@ fn run_scenario(path: &std::path::Path) -> ExitCode {
     let hard_failures = print_report(&report);
 
     if hard_failures > 0 {
-        println!("\n{hard_failures} assertion(s) failed.");
+        println!("\n{hard_failures} hard failure(s) (failed assertion or rejected action).");
         ExitCode::FAILURE
     } else {
         println!("\nNo hard failures (unimplemented actions are expected pre-Phase 7).");
@@ -107,7 +107,8 @@ fn print_report(report: &stackfish_scenario::ScenarioReport) -> usize {
                 println!("  [{i}] action | not yet implemented - {} ({msg})", entry.description);
             }
             EntryOutcome::Action(StepOutcome::Errored(msg)) => {
-                println!("  [{i}] action | errored - {} ({msg})", entry.description);
+                println!("  [{i}] action | ERRORED - {} ({msg})", entry.description);
+                hard_failures += 1;
             }
             EntryOutcome::Assertion(AssertionOutcome::Passed) => {
                 println!("  [{i}] assert | PASS  - {}", entry.description);
