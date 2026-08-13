@@ -30,6 +30,15 @@ effect.
 
 `Game.SelectTargets`/`:SetTarget` additionally accept a `type` key (`"object"`, `"player"`, or
 `"any"`, default `"object"`) to say what kind of thing is being targeted at all — see below.
+`type = "player"` honors the shared `controller` key too (e.g. `{ type = "player", controller =
+"opponent" }` for "target opponent") — omit it for a plain "target player" that accepts anyone.
+
+```lua
+-- "Target opponent" - no script needed for this common case.
+function s.target_requirement()
+    return { type = "player", controller = "opponent", count = 1 }
+end
+```
 
 Every filter table — `Game.SelectTargets`/`Game.ChooseN`'s own, and `:SetTarget`/
 `s.target_requirement()`'s — additionally accepts a `zone` key: a zone name string (`"Hand"`,

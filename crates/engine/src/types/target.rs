@@ -105,11 +105,14 @@ pub enum TargetFilter {
         /// every other `Option` field here already uses.
         mana_value: Option<ManaValueRequirement>,
     },
-    /// "target player" / "target opponent". TODO: a controller restriction
-    /// ("target opponent" specifically, vs. "target player" meaning any) is
-    /// not threaded through here yet — this variant always accepts any
-    /// player.
-    Player,
+    /// "target player" / "target opponent" (CR 115.1's player-target shape).
+    /// `controller` narrows which player is legal, relative to the
+    /// caster/activator — same "You"/"Opponent"/"Any" vocabulary `Object`'s
+    /// own `controller` field already uses. `None` means "target player"
+    /// (any player, the pre-existing behavior); `Some(FilterController::
+    /// Opponent)` means "target opponent," a common real-card shape this
+    /// variant couldn't express before.
+    Player { controller: Option<FilterController> },
     /// CR 115.4's "any target" — creature, player, planeswalker, or battle.
     /// TODO: planeswalkers/battles are DESIGN.md non-goals overall, so the
     /// `CardTypeSet` bits are checked here for classification correctness

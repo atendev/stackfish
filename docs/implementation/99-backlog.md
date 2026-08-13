@@ -2,6 +2,19 @@
 
 ## Live TODOs / unresolved gaps
 
+- **"Target opponent" (`phase5/target-opponent`, merged)**: `TargetFilter::Player` used to accept
+  any player unconditionally — "target player" and "target opponent" (CR 115.1) were
+  indistinguishable, a real gap `phase5_aura_enters_attached_player.rs` had already worked around
+  with a hand-written `PlayerScript` predicate rather than a real fix. Widened to `Player {
+  controller: Option<FilterController> }`, same "You"/"Opponent"/"Any" vocabulary `Object`'s own
+  `controller` field already uses — `legality.rs`'s `target_is_legal` already had `caster:
+  PlayerId` in scope, so the check itself was a few lines. Three call sites threaded the new
+  field through: the Lua decoder (`decode_target_filter_table`'s `"player"` arm now reads the same
+  `controller` key the `"object"` arm already did), and the TOML scenario format's own `"player"`
+  case (reused the shared `TargetRequirementSpec.controller` field that already existed for
+  `"object"`). Added a sibling test proving the built-in shape reaches the same "1 legal
+  candidate, no pause" outcome the old scripted-predicate workaround did, without a script.
+
 - **Sacrifice-self cost + Treasure token (`phase5/sacrifice-self-cost`, `phase5/treasure-token`,
   both merged)**: two small slices found by re-checking stale "blocked on X" comments against
   current code (the same trap this file's own note below, at "A doc comment blaming a gap...",

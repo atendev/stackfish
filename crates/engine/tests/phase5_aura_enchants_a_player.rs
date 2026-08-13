@@ -49,7 +49,7 @@ fn aura_enchant_player_definition() -> CardDefinition {
         script_ref: ScriptReference::ByKey("test_enchant_player".to_string()),
         keywords: KeywordSet::empty(),
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Player,
+            filter: TargetFilter::Player { controller: None },
             count: 1,
             up_to: false,
             at_least: false,

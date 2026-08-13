@@ -444,7 +444,9 @@ excluded_subtypes = ["Wall"] # "object" filter only, default [] - CR 601.2c/115/
                          # form, e.g. "target creature that isn't a Wall"; independent of subtypes
 supertypes = ["Legendary"] # "object" filter only, default [] (no supertype restriction) - CR
                          # 205.4a, matches as an intersection against SupertypeSet
-controller = "you"       # "object" filter only, optional: "you" | "opponent" | "any"
+controller = "you"       # "object"/"player" filters only, optional: "you" | "opponent" | "any" -
+                         # on a "player" filter, "opponent" is CR 115.1's "target opponent";
+                         # omitted/"any" is a plain "target player" that accepts anyone
 zone = "battlefield"     # "object" filter only, optional, default: battlefield (CR 115.2)
 count = 1                # u32, required - see above for what it means with up_to/at_least
 up_to = false            # optional, default false - CR 601.2c/115.6 "up to N"

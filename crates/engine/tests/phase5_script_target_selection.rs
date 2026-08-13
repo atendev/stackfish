@@ -321,7 +321,11 @@ fn a_script_calling_select_targets_with_type_player_pauses_with_a_player_filter(
     let ScriptChoiceRequest::SelectTarget { filter, .. } = request else {
         panic!("expected a SelectTarget request")
     };
-    assert_eq!(filter, TargetFilter::Player, "the real filter from the script should have reached the pause");
+    assert_eq!(
+        filter,
+        TargetFilter::Player { controller: None },
+        "the real filter from the script should have reached the pause"
+    );
 }
 
 #[test]

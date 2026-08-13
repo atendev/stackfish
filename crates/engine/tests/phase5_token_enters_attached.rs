@@ -131,7 +131,7 @@ fn aura_source_definition(id: u64, name: &str) -> CardDefinition {
 fn aura_source_enchant_player_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
-            filter: TargetFilter::Player,
+            filter: TargetFilter::Player { controller: None },
             count: 1,
             up_to: false,
             at_least: false,
