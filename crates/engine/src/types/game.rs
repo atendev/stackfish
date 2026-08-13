@@ -7,7 +7,7 @@ use crate::types::effect::{ContinuousEffect, ReplacementEffect};
 use crate::types::event::GameEvent;
 use crate::types::ids::{AbilityId, EventId, ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
-use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, PlayerState};
+use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier, PlayerState};
 use crate::types::stack::StackObject;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
@@ -37,12 +37,14 @@ pub struct GameState {
     /// 117.4).
     pub priority_player: PlayerId,
     pub consecutive_passes: u32,
-    /// CR 305.2: a player can normally play one land per turn (continuous
-    /// effects raising that limit aren't modeled yet — see `PlayLand`'s
-    /// TODO in commands.rs). Keyed by player rather than a single counter
-    /// since CR 305.2a's comparison is per-player ("the number of lands
-    /// they have already played this turn"). Reset to all-zero whenever a
-    /// new turn begins (Beginning/Untap).
+    /// CR 305.2: a player can normally play one land per turn, raised by
+    /// `land_play_modifiers` below (`phase5/land-play-limit`). Keyed by
+    /// player rather than a single counter since CR 305.2a's comparison is
+    /// per-player ("the number of lands they have already played this
+    /// turn"). Reset to all-zero whenever a new turn begins
+    /// (Beginning/Untap) — `land_play_modifiers` itself is not reset here,
+    /// same "persists for as long as its source does" continuous-effect
+    /// posture every other modifier list in this cluster already takes.
     pub lands_played_this_turn: HashMap<PlayerId, u32>,
     /// CR 506-509: `None` outside combat, `Some` from `DeclareAttackers`
     /// onward, cleared at `EndOfCombat` (`engine::Engine::advance_turn_step`)
@@ -94,6 +96,13 @@ pub struct GameState {
     /// reasoning `hand_size_modifiers`/`hand_reveal_modifiers` above already
     /// established; see `DrawLimitModifier`'s own doc comment (types/player.rs).
     pub draw_limit_modifiers: Vec<DrawLimitModifier>,
+    /// CR 305.2 "play an additional land each turn"-style effects — same
+    /// "distinct mechanism from the CR 613 layer system" reasoning
+    /// `draw_limit_modifiers` above already established; see
+    /// `LandPlayModifier`'s own doc comment (types/player.rs) for why this
+    /// one sums instead of taking the latest timestamp. Consulted by
+    /// `commands::execute_play_land` in place of the old hardcoded `1`.
+    pub land_play_modifiers: Vec<LandPlayModifier>,
     /// Every card's registered triggered/activated/static abilities, flat —
     /// same reasoning as `continuous_effects`/`replacement_effects` above.
     pub abilities: Vec<RegisteredAbility>,
@@ -303,6 +312,7 @@ mod tests {
             hand_size_modifiers: Vec::new(),
             hand_reveal_modifiers: Vec::new(),
             draw_limit_modifiers: Vec::new(),
+            land_play_modifiers: Vec::new(),
             abilities: Vec::new(),
             ledger: Vec::new(),
             rng: RngState { seed: 1, draws_consumed: 0 },

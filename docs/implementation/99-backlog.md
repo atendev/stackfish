@@ -2,6 +2,28 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Land-play limit (`phase5/land-play-limit`, merged)**: CR 305.2's "you may play an additional
+  land each turn" effects (Exploration, Azusa, ...) — `commands::execute_play_land` hardcoded its
+  once-per-turn check against a bare literal `1`. The TODO's own excuse ("no continuous-effect
+  query API yet") was stale: `DrawLimitModifier`/`effective_draw_limit` (CR 121.2b) already
+  provides the exact shape needed — a per-player numeric continuous-effect modifier list plus a
+  query function, already wired into a real enforcement choke point (`commands::propose_draw`).
+  Built `LandPlayModifier`/`effective_land_play_limit` as its sibling, **not** a copy: CR 305.2's
+  land-play increases genuinely stack (two Explorations means 3 land plays, not 2 — the max of the
+  two), so `effective_land_play_limit` sums every matching modifier's `additional` rather than
+  taking the latest timestamp the way `effective_draw_limit`/`effective_max_hand_size` do — no
+  `timestamp` field on `LandPlayModifier` at all, since summing needs no tiebreak. Same "no cleanup
+  when the source leaves the battlefield" gap `DrawLimitModifier`/`HandSizeModifier`/
+  `HandRevealModifier` already all share (flagged, not fixed - matches precedent, not a new
+  regression). Lua-facing `Game.CreateLandPlayModifier`/`Game.LandPlayAffected` mirrors
+  `Game.CreateDrawLimitModifier`/`Game.DrawLimitAffected` exactly (`:SetAffected` + `:SetAdditional`
+  instead of `:SetLimit`, same queue-and-drain, placeholder-`controller` convention). Found and
+  flagged, not fixed (out of this slice's scope): none of `Game.CreateHandSizeModifier`/
+  `CreateHandRevealModifier`/`CreateDrawLimitModifier` (this whole player-level-modifier cluster)
+  have ever had a `docs/lua` narrative page or a `docs/lua/stubs/game.lua` entry — a real,
+  pre-existing gap, confirmed by grep before writing anything. Only my own new
+  `LandPlayModifierBuilder` got a stub entry; the three siblings are a separate documentation slice.
+
 - **"Target opponent" (`phase5/target-opponent`, merged)**: `TargetFilter::Player` used to accept
   any player unconditionally — "target player" and "target opponent" (CR 115.1) were
   indistinguishable, a real gap `phase5_aura_enters_attached_player.rs` had already worked around

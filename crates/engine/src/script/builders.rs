@@ -17,7 +17,7 @@ use crate::types::effect::{
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
-use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier};
+use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
@@ -28,8 +28,8 @@ use super::decode::{
 };
 use super::tags::{
     ConsumptionPolicyTag, CostComponent, DrawLimitAffectedTag, DurationTag, EventFilterKind, EventFilterKindTag,
-    HandRevealAffectedTag, HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, RedirectDamageToSourceTag,
-    ReplacementPayloadTag,
+    HandRevealAffectedTag, HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LandPlayAffectedTag,
+    RedirectDamageToSourceTag, ReplacementPayloadTag,
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
@@ -936,6 +936,56 @@ impl UserData for DrawLimitModifierBuilder {
                 // Placeholder - run_card_script's drain step stamps the real
                 // value, same reason StaticAbilityBuilder's own timestamp is.
                 timestamp: SequenceNo(0),
+            });
+            Ok(())
+        });
+    }
+}
+
+/// `Game.CreateLandPlayModifier(c)`'s return value (CR 305.2) — mirrors
+/// `DrawLimitModifierBuilder`'s shape (`:SetAffected` + a magnitude setter,
+/// `:Register()`), same queue-and-drain, placeholder-`controller` convention.
+/// `:SetAdditional` is this builder's `:SetLimit`-equivalent magnitude. No
+/// `timestamp` placeholder to patch at drain time - see `LandPlayModifier`'s
+/// own doc comment for why this mechanism has none.
+pub(crate) struct LandPlayModifierBuilder {
+    pub(crate) source: ObjectId,
+    pub(crate) affected: Option<crate::types::player::LandPlayAffected>,
+    pub(crate) additional: Option<u32>,
+    pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+impl UserData for LandPlayModifierBuilder {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
+            this.affected = Some(value.borrow::<LandPlayAffectedTag>()?.0);
+            Ok(())
+        });
+        methods.add_method_mut("SetAdditional", |_, this, additional: u32| {
+            this.additional = Some(additional);
+            Ok(())
+        });
+        methods.add_method_mut("Register", |_, this, ()| {
+            let affected = this.affected.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetAffected() - a land play modifier needs to know \
+                     which player(s) it affects"
+                        .to_string(),
+                )
+            })?;
+            let additional = this.additional.ok_or_else(|| {
+                mlua::Error::RuntimeError(
+                    "Register() called with no SetAdditional() - a land play modifier needs a magnitude"
+                        .to_string(),
+                )
+            })?;
+            this.registry.borrow_mut().pending_land_play_modifiers.push(LandPlayModifier {
+                source: this.source,
+                // Placeholder - run_card_script's drain step stamps the real
+                // value (see this struct's own doc comment).
+                controller: PlayerId(0),
+                affected,
+                additional,
             });
             Ok(())
         });

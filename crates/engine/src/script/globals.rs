@@ -19,12 +19,12 @@ use crate::types::effect::{
 };
 use crate::types::ids::ObjectId;
 use crate::types::mana::{ManaCost, ManaUnit};
-use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect};
+use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect, LandPlayAffected};
 
 use super::builders::{
     ActivatedAbilityBuilder, CostModifierBuilder, DrawLimitModifierBuilder, HandRevealModifierBuilder,
-    HandSizeModifierBuilder, ManaAbilityBuilder, ReplacementEffectBuilder, StaticAbilityBuilder,
-    TriggeredAbilityBuilder,
+    HandSizeModifierBuilder, LandPlayModifierBuilder, ManaAbilityBuilder, ReplacementEffectBuilder,
+    StaticAbilityBuilder, TriggeredAbilityBuilder,
 };
 use super::decode::{
     decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table, decode_filter_table,
@@ -35,8 +35,8 @@ use super::decode::{
 use super::tags::{
     ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DrawLimitAffectedTag, DurationTag,
     EffectPrimitiveTag, EventFilterKind, EventFilterKindTag, ForEachPlayerTag, HandRevealAffectedTag,
-    HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LayerTag, OncePerTurnTag, OperationTag,
-    RedirectDamageToSourceTag, ReplacementPayloadTag, TokenTag,
+    HandSizeAffectedTag, HandSizeEffectTag, InterveningIfTag, LandPlayAffectedTag, LayerTag, OncePerTurnTag,
+    OperationTag, RedirectDamageToSourceTag, ReplacementPayloadTag, TokenTag,
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
@@ -909,6 +909,27 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     draw_limit_affected.set("Opponent", DrawLimitAffectedTag(DrawLimitAffected::Filter(FilterController::Opponent)))?;
     draw_limit_affected.set("Any", DrawLimitAffectedTag(DrawLimitAffected::Filter(FilterController::Any)))?;
 
+    let create_land_play_modifier = {
+        let registry = Rc::clone(&registry);
+        lua.create_function(move |_, source: u64| {
+            Ok(LandPlayModifierBuilder {
+                source: ObjectId(source),
+                affected: None,
+                additional: None,
+                registry: Rc::clone(&registry),
+            })
+        })?
+    };
+
+    // `Game.LandPlayAffected.*` - which player(s) a `Game.
+    // CreateLandPlayModifier` builder applies to
+    // (`LandPlayModifierBuilder::SetAffected`). No `EnchantedPlayer` entry -
+    // see `LandPlayAffected`'s own doc comment for why.
+    let land_play_affected = lua.create_table()?;
+    land_play_affected.set("You", LandPlayAffectedTag(LandPlayAffected::Filter(FilterController::You)))?;
+    land_play_affected.set("Opponent", LandPlayAffectedTag(LandPlayAffected::Filter(FilterController::Opponent)))?;
+    land_play_affected.set("Any", LandPlayAffectedTag(LandPlayAffected::Filter(FilterController::Any)))?;
+
     let tokens = lua.create_table()?;
     tokens.set("Clue", TokenTag(TokenSpec::Named(NamedToken::Clue)))?;
     tokens.set("Food", TokenTag(TokenSpec::Named(NamedToken::Food)))?;
@@ -1121,6 +1142,8 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     game.set("HandRevealAffected", hand_reveal_affected)?;
     game.set("CreateDrawLimitModifier", create_draw_limit_modifier)?;
     game.set("DrawLimitAffected", draw_limit_affected)?;
+    game.set("CreateLandPlayModifier", create_land_play_modifier)?;
+    game.set("LandPlayAffected", land_play_affected)?;
     game.set("SelectTargets", select_targets)?;
     game.set("MayChoose", may_choose)?;
     game.set("ChooseN", choose_n)?;

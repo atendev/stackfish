@@ -236,6 +236,92 @@ fn play_land_rejects_second_land_same_turn() {
     assert_eq!(engine.state().object(second).unwrap().zone, ZoneKind::Hand, "second land untouched");
 }
 
+/// CR 305.2: a `LandPlayModifier` granting one additional land play lets a
+/// second land through that would otherwise be rejected
+/// (`play_land_rejects_second_land_same_turn` above), and still rejects a
+/// third.
+#[test]
+fn play_land_allows_an_additional_land_with_a_land_play_modifier() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let source = ObjectId(50);
+    state.land_play_modifiers.push(LandPlayModifier {
+        source,
+        controller: p0,
+        affected: LandPlayAffected::Filter(FilterController::You),
+        additional: 1,
+    });
+    let first = ObjectId(0);
+    let second = ObjectId(1);
+    let third = ObjectId(2);
+    for id in [first, second, third] {
+        state.objects.insert(id, card_object(id, land_definition(), p0, ZoneKind::Hand));
+        state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(id);
+    }
+
+    let mut engine = Engine::new(state);
+    for card in [first, second] {
+        engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } }).unwrap();
+        let status = drain(&mut engine);
+        assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected {card:?} to be playable, got {status:?}");
+    }
+
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: third } }).unwrap();
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))), "a 3rd land should still be rejected");
+}
+
+/// CR 305.2's own "additional lands" stack — two separate +1 modifiers grant
+/// 2 extra land plays (3 total), not the max of the two (unlike
+/// `effective_draw_limit`'s "latest wins" resolution for CR 121.2b).
+#[test]
+fn play_land_two_land_play_modifiers_stack_additively() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    state.land_play_modifiers.push(LandPlayModifier {
+        source: ObjectId(50),
+        controller: p0,
+        affected: LandPlayAffected::Filter(FilterController::You),
+        additional: 1,
+    });
+    state.land_play_modifiers.push(LandPlayModifier {
+        source: ObjectId(51),
+        controller: p0,
+        affected: LandPlayAffected::Filter(FilterController::You),
+        additional: 1,
+    });
+    assert_eq!(effective_land_play_limit(&state.land_play_modifiers, p0), 3);
+
+    let lands: Vec<ObjectId> = (0..3).map(ObjectId).collect();
+    for &id in &lands {
+        state.objects.insert(id, card_object(id, land_definition(), p0, ZoneKind::Hand));
+        state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(id);
+    }
+
+    let mut engine = Engine::new(state);
+    for &card in &lands {
+        engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } }).unwrap();
+        let status = drain(&mut engine);
+        assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected {card:?} to be playable, got {status:?}");
+    }
+}
+
+/// A modifier scoped to the opponent doesn't raise this player's own limit.
+#[test]
+fn play_land_opponent_scoped_modifier_does_not_apply_to_you() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    state.land_play_modifiers.push(LandPlayModifier {
+        source: ObjectId(50),
+        controller: p1,
+        affected: LandPlayAffected::Filter(FilterController::You),
+        additional: 1,
+    });
+    assert_eq!(effective_land_play_limit(&state.land_play_modifiers, p0), 1, "p0 isn't the modifier's controller");
+    assert_eq!(effective_land_play_limit(&state.land_play_modifiers, p1), 2, "p1 is");
+}
+
 #[test]
 fn play_land_event_gets_causal_ids() {
     let mut state = two_player_state();

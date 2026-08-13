@@ -298,6 +298,58 @@ pub fn effective_draw_limit(modifiers: &[DrawLimitModifier], player: PlayerId) -
         .map(|m| m.limit)
 }
 
+/// CR 305.2: which player(s) a `LandPlayModifier` affects — same narrowed
+/// `Filter(FilterController)`-only shape `DrawLimitAffected` already takes,
+/// same reasoning (no real card needs an `EnchantedPlayer` form of this
+/// effect either).
+#[derive(Clone, Copy, Debug)]
+pub enum LandPlayAffected {
+    Filter(FilterController),
+}
+
+/// CR 305.2: a static "you may play an additional land each turn"-style
+/// effect (Exploration, Azusa, ...) — same "distinct mechanism from the CR
+/// 613 layer system" reasoning `DrawLimitModifier` and its siblings already
+/// establish. Deliberately **not** shaped like `DrawLimitModifier` despite
+/// looking similar: CR 305.2's land-play increases genuinely *stack* — two
+/// Explorations on the battlefield at once means 3 land plays a turn, not 2
+/// (the max of the two) — so `total_additional_land_plays` below sums every
+/// matching modifier rather than taking the latest timestamp, and there's no
+/// `timestamp` field here at all (nothing to tiebreak when every matching
+/// modifier counts). No cleanup on the source leaving the battlefield either
+/// — same standing, already-accepted gap `DrawLimitModifier`/
+/// `HandSizeModifier`/`HandRevealModifier` all share (none of this cluster
+/// purges on a source's own zone change yet).
+#[derive(Clone, Debug)]
+pub struct LandPlayModifier {
+    pub source: ObjectId,
+    pub controller: PlayerId,
+    pub affected: LandPlayAffected,
+    /// How many *additional* land plays this grants (CR 305.2's own text is
+    /// always "an additional land," i.e. 1, but this is a plain magnitude
+    /// rather than a hardcoded `1` - same "don't hardcode the one real
+    /// number every printed card happens to use" precedent `DrawLimitModifier
+    /// ::limit` already set).
+    pub additional: u32,
+}
+
+/// CR 305.2's effective per-turn land-play limit for `player`: `1 +` the sum
+/// of every applicable `LandPlayModifier::additional` - stacking, unlike
+/// `effective_draw_limit`'s "latest wins" resolution (see `LandPlayModifier`'s
+/// own doc comment for why the two mechanisms diverge despite looking
+/// structurally similar).
+pub fn effective_land_play_limit(modifiers: &[LandPlayModifier], player: PlayerId) -> u32 {
+    1 + modifiers
+        .iter()
+        .filter(|m| match m.affected {
+            LandPlayAffected::Filter(FilterController::You) => player == m.controller,
+            LandPlayAffected::Filter(FilterController::Opponent) => player != m.controller,
+            LandPlayAffected::Filter(FilterController::Any) => true,
+        })
+        .map(|m| m.additional)
+        .sum::<u32>()
+}
+
 /// CR 121.2b's own "this turn" scope: how many cards `player` has drawn so
 /// far in the current turn - bounded by the most recent `GameEventKind::
 /// TurnStarted` in `state.ledger`, same append-only-ledger-scan convention
