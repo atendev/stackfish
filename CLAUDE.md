@@ -27,6 +27,9 @@ Commits should be straight and to the point, but in readable and understandable 
 - Don't delete the branch, as I will manually inspect the code after for changes.
 - If all is good, I will instruct to commit, merge, and push.
 
+## IMPORTANT
+- If we are making changes to the Lua API, you need to check the game stub in the docs to make sure things are updated properly
+
 ## Notes
 Look in the docs folder for the following information:
 - [DESIGN.md](/docs/DESIGN.md) | Bigger design document that should be updated as new things are created.

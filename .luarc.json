@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.4",
+  "workspace.library": ["docs/lua/stubs"],
+  "workspace.checkThirdParty": false,
+  "diagnostics.globals": ["Game"],
+  "diagnostics.disable": ["lowercase-global"],
+  "hint.enable": true
+}

@@ -45,6 +45,8 @@ several abilities.
 - **[Tokens](tokens.md)** — `Game.Tokens.*` token specs and `Game.Ops.CreateToken`.
 - **[Not available yet](not-available-yet.md)** — real gaps, named rather than silently guessed
   at, plus a short how-to for adding a new primitive if you're extending the engine itself.
+- **[VSCode intellisense](vscode-intellisense.md)** — EmmyLua type stub + `.luarc.json` so the
+  Lua extension autocompletes `Game.*` while you write scripts.
 
 ## A few things worth knowing before writing a card
 
