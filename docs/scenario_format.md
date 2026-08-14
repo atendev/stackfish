@@ -599,6 +599,44 @@ the stack once casting is implemented.
 
 **Manual path only.** `[[setup]]` is ignored when `[game]` is present.
 
+### Inline card fields — define and place a card in one entry
+
+A `[[setup]]` entry may carry any `CardSpec` field (the same names as `[[cards]]`, including
+`template`/`db_script_id`) directly, instead of needing a separate `[[cards]]` block for a one-off
+fixture card:
+
+```toml
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "forest"
+template = "test_land_green"
+```
+
+is equivalent to writing out a matching `[[cards]]` entry (`key = "forest"`, same extra fields) by
+hand. Pure TOML-level preprocessing (`inline_setup::expand`, same "done before `CardSpec` is ever
+deserialized" trick `template` itself uses) — moves every non-`SetupEntry` field off the table into
+a synthesized `[[cards]]` entry keyed by this entry's own `card` value, then runs template expansion
+over the result as normal, so a `template` field moved this way still expands correctly. `card` is
+required whenever any inline field is present (it becomes that synthesized card's `key`). A
+`[[setup]]` entry with no extra fields is completely unaffected — every pre-existing scenario file
+keeps working unchanged.
+
+Reusing a `card` key that already has an inline-field-bearing `[[cards]]`/`[[setup]]` entry panics
+with a clear "already exists" message rather than silently overriding it — pick a different key, or
+drop the inline fields and reference the existing `[[cards]]` entry instead.
+
+```toml
+[[setup]]
+player = 0
+zone = "hand"
+card = "bolt"
+db_script_id = "m00003639"
+```
+
+See `crates/scenario/tests/inline_setup_end_to_end.rs` for worked examples of all three inline
+shapes (`template`, hand-written fields, `db_script_id`) plus the key-collision panic.
+
 ## `[[actions]]`
 
 Each entry becomes one `PlayerAction`, run in file order via `Engine::submit_action` + `step()`.
@@ -625,6 +663,7 @@ card = "shock"
 targets = [0]            # see Targets below
 modes = []                # list of u32, default []
 x_value = 0               # optional u32
+auto_pay = false           # optional, default false - see auto_pay below
 ```
 
 ```toml
@@ -635,6 +674,7 @@ source = "bear"
 ability_index = 0
 targets = []
 x_value = 0               # optional u32 - see X costs under [[cards]] above
+auto_pay = false           # optional, default false - see auto_pay below
 ```
 
 **Exception (CR 601.2g/605.3a):** if a mana ability's own `source`/`ability_index` resolve to an
@@ -647,6 +687,86 @@ action that needs it. Nothing else is legal in that window (a second spell, a no
 any other player's ability still get the ordinary "not waiting for a player action" rejection).
 See `crates/engine/tests/phase5_mana_ability_during_payment.rs` for worked examples, including a
 real-cost (Treasure-style) mana ability nesting its own payment pause inside the outer one.
+
+#### `auto_pay`: pay the pending cost inline, no separate `submit_payment` step
+
+`cast_spell`/`activate_ability` both take an optional `auto_pay` field, default `false`. If `true`
+and this action opens a `ProcessState::AwaitingPayment` pause (CR 601.2f-h), the same step resolves
+it automatically instead of needing a following `submit_payment`:
+
+1. Reads the pending cost directly off the engine (`Engine::pending_payment_cost`) and reduces it to
+   "N generic + these exact colored pips" — the only shape a `[[cards]]` entry's `generic_cost`/
+   `colors` fields can ever build. A cost this can't recognize (a real `db_script_id` card's hybrid/
+   Phyrexian/snow mana, a bare `{C}` colorless-atom symbol, or any non-mana `additional`/
+   `alternative` cost component) is rejected with a clear error instead of guessed at — build the
+   `PaymentPlan` by hand (`submit_payment`) for those.
+2. Covers as much of that as it can from whatever's already floating in the payer's mana pool.
+3. For any shortfall, taps untapped battlefield permanents the payer controls that have a
+   registered no-cost mana ability (the `mana_ability` TOML shortcut's shape - see that field's own
+   doc comment) until the cost is covered, or reports exactly how much mana was still missing.
+4. Submits the resulting plan.
+
+```toml
+[[actions]]
+type = "cast_spell"
+player = 0
+card = "bear"
+auto_pay = true
+# no submit_payment step needed - taps whatever untapped mana sources
+# player 0 controls (after spending any already-floating mana first), then
+# pays automatically.
+```
+
+A scenario that pre-seeds enough `mana_pool` gets this for free (`auto_pay` taps nothing, since the
+pool alone already covers the cost) — the same field covers both "already have the mana" and "need
+to tap for it," so there's no separate action for either case.
+
+**Not yet supported:** a real-cost mana ability (Treasure/Lotus-Petal-style sacrifice) is never
+tapped automatically — `auto_pay` only ever activates the implicit-tap, no-payment-pause shape
+`mana_ability` builds; a scenario relying on a costed mana ability to help pay still needs to tap it
+by hand (`activate_ability`/`tap_for_mana`) before the `cast_spell`/`activate_ability` step, or omit
+`auto_pay` and drive `submit_payment` manually. Land selection is a simple first-match greedy pick,
+not optimized to preserve any particular color for a later cost in the same scenario — a test that
+cares which lands get tapped should keep doing that step by hand too. See
+`crates/engine/tests/scenarios/phase5/phase5_scenario_shortcuts_auto_pay_from_pool.toml`,
+`..._auto_pay_taps_lands.toml`, and `..._auto_pay_insufficient.toml` for worked examples of all
+three outcomes (pool alone covers it, lands get tapped, and a clean rejection when neither covers
+the cost).
+
+```toml
+[[actions]]
+type = "tap_for_mana"
+player = 0
+source = "forest"
+```
+
+Shortcut for `activate_ability { ability_index: 0, targets: [], chosen_colors: [] }` — the very
+common "tap this land for its one registered mana ability" case (see `mana_ability` under
+`[[cards]]`). Always ability index 0, same "one mana ability per card" simplification
+`CardSpec.mana_ability` already takes.
+
+```toml
+[[actions]]
+type = "advance_to_phase"
+phase = "combat"
+```
+
+```toml
+[[actions]]
+type = "advance_to_step"
+step = "declare_attackers"
+```
+
+Repeatedly passes priority — for whichever player currently holds it (`state.priority_player`,
+read fresh each time; there's no `player` field, it isn't the caller's choice) — until
+`state.phase`/`state.step` matches the target. Already there → a no-op. Only ever pushes through a
+plain, uneventful priority-passing chain: if a pass ever lands on any pause other than a normal
+priority window (a payment, a discard, a script choice, `GameOver`, an engine error, ...), it stops
+immediately and reports that instead of guessing an answer — handle the pending decision explicitly,
+then resume with another `advance_to_phase`/`advance_to_step` if still needed. Capped at 2000 passes
+(dozens of turns' worth) so a target that's never reached fails loudly instead of hanging the run.
+See `crates/engine/tests/scenarios/phase5/phase5_scenario_shortcuts_advance.toml` (solo player) and
+`..._advance_two_player.toml` (both players' passes driven automatically) for worked examples.
 
 ```toml
 [[actions]]

@@ -1,0 +1,38 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+
+[[players]]
+id = 1
+life = 20
+
+[[cards]]
+key = "bear"
+name = "Grizzly Bears"
+types = ["Creature"]
+power = 2
+toughness = 2
+
+[[setup]]
+player = 0
+zone = "battlefield"
+card = "bear"
+
+# Two players, so every step transition needs both to pass in a row (CR
+# 117.4) - advance_to_step should transparently drive both players' own
+# passes (it reads state.priority_player fresh each time, not a fixed
+# `player` field) rather than needing them spelled out by hand, same ground
+# phase5_combat_declarations.toml covers explicitly.
+[[steps]]
+type = "advance_to_step"
+step = "declare_attackers"
+
+[[steps]]
+type = "assert_step"
+equals = "declare_attackers"
+
+[[steps]]
+type = "assert_active_player"
+equals = 0

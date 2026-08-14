@@ -1,0 +1,57 @@
+seed = 1
+
+[[players]]
+id = 0
+life = 20
+mana_pool = { green = 1, colorless = 2 }
+
+[[cards]]
+key = "shock"
+name = "Test Shock"
+generic_cost = 2
+colors = ["G"]
+types = ["Instant"]
+
+[[setup]]
+player = 0
+zone = "hand"
+card = "shock"
+
+# CR 500.5: floating mana empties at every step transition, so this has to
+# be cast before any pass_priority - the engine already starts in a
+# priority window during Phase::PreGame (Engine::new), and an Instant (only)
+# is legal there regardless of phase. No untapped mana sources exist at all
+# - auto_pay must cover the whole {2}{G} cost from the pre-seeded floating
+# pool alone, in the same action as the cast (no separate
+# submit_payment/auto_pay step, and nothing left to tap).
+[[steps]]
+type = "cast_spell"
+player = 0
+card = "shock"
+auto_pay = true
+
+[[steps]]
+type = "assert_object_zone"
+card = "shock"
+equals = "stack"
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "green"
+equals = 0
+
+[[steps]]
+type = "assert_mana_pool"
+player = 0
+color = "colorless"
+equals = 0
+
+[[steps]]
+type = "pass_priority"
+player = 0
+
+[[steps]]
+type = "assert_object_zone"
+card = "shock"
+equals = "graveyard"
