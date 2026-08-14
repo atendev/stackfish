@@ -88,6 +88,10 @@ fn affected_player_for(event: &GameEventKind, state: &GameState, script_runtime:
                 .object(*id)
                 .map(|_| crate::layers::effective_controller(state, script_runtime, *id))
                 .unwrap_or_else(fallback),
+            // Damage is never dealt to an ability - same defensive fallback
+            // this function's own doc comment already takes for a shape it
+            // can't actually construct.
+            Target::Ability(_) => fallback(),
         },
         GameEventKind::ZoneChange { object, .. } => state
             .object(*object)

@@ -17,9 +17,11 @@ use crate::types::zone::ZoneKind;
 use super::super::{Engine, StepStatus};
 
 impl Engine {
-    /// CR 701.6a: `legal_targets`' first (only — `Counter`'s own
-    /// `TargetRequirement` is always a single `zone: Stack` object) entry is
-    /// another `StackObject`'s `stack_id`. Finds and removes that entry from
+    /// CR 701.6a: `legal_targets`' first (only) entry is another
+    /// `StackObject`'s `stack_id` — a `Target::Object` at `zone: Stack` for
+    /// "counter target spell," or a `Target::Ability` for "counter target
+    /// activated or triggered ability" (CR 113.9, Stifle/Trickbind). Finds
+    /// and removes that entry from
     /// `state.stack` (a plain `Vec`, no dedicated removal primitive existed
     /// for anything but the top - `resolve_stack_top`'s own `pop()` only
     /// ever touches the last element). A countered ability "just stops
@@ -44,7 +46,16 @@ impl Engine {
         legal_targets: &[Target],
         mut events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        if let Some(Target::Object(target_id)) = legal_targets.first().copied() {
+        let target_id = match legal_targets.first().copied() {
+            // CR 113.9: "counter target spell" (Target::Object, zone: Stack)
+            // and "counter target activated or triggered ability"
+            // (Target::Ability) both just resolve to the same stack_id here
+            // - the branch below already dispatches on the found
+            // StackObject's own kind, not on which Target variant named it.
+            Some(Target::Object(id)) | Some(Target::Ability(id)) => Some(id),
+            Some(Target::Player(_)) | None => None,
+        };
+        if let Some(target_id) = target_id {
             if let Some(pos) = self.state.stack.iter().position(|so| so.stack_id == target_id) {
                 let countered = self.state.stack.remove(pos);
                 if matches!(countered.kind, StackEntryKind::Spell) {

@@ -816,7 +816,7 @@ pub(crate) fn decode_script_choice_request(
 /// `Game.SelectTargets`'s filter argument — same flat option-bag shape
 /// `decode_affected_value`/`decode_filter_table` already use for their own
 /// filter tables, plus a `type` discriminator (`"object"` default/`"player"`/
-/// `"any"`) matching the scenario crate's own TOML `target_requirement.filter`
+/// `"any"`/`"ability"`) matching the scenario crate's own TOML `target_requirement.filter`
 /// convention (`crates/scenario/src/lib.rs`'s `build_target_requirement`)
 /// exactly, rather than inventing a second vocabulary. `type` defaults to
 /// `"object"` so every pre-existing script that omits it (this slice's own
@@ -835,6 +835,9 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
             Ok(TargetFilter::Player { controller })
         }
         "any" => Ok(TargetFilter::AnyTarget),
+        // CR 113.9/701.6a: "counter target activated or triggered ability"
+        // (Stifle, Trickbind) - see TargetFilter::Ability's own doc comment.
+        "ability" => Ok(TargetFilter::Ability),
         "object" => {
             let controller_name: Option<String> =
                 table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
@@ -980,7 +983,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
             })
         }
         other => Err(ScriptError::LoadError(format!(
-            "unknown Game.SelectTargets filter type '{other}' - expected object/player/any"
+            "unknown Game.SelectTargets filter type '{other}' - expected object/player/any/ability"
         ))),
     }
 }

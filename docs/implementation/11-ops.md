@@ -412,9 +412,9 @@
   function - `Game.Ops.Counter`, not `Game.Ops.Counter()`, another trap hit and fixed). Full workspace
   suite green, zero new warnings.
 - Unresolved, named rather than guessed at: "counter target activated or triggered ability" (Stifle,
-  Trickbind) - an ability's `StackObject` has no matching `GameObject` for a `TargetFilter::Object` to
-  find, and no ability-shaped target vocabulary exists yet. "Counter unless [that player] pays {X}"
-  (Mana Leak, Condescend) - needs a real mid-resolution payment ask, not built.
+  Trickbind) - closed by `phase5/counter-target-ability`, see that slice's own entry below. "Counter
+  unless [that player] pays {X}" (Mana Leak, Condescend) - needs a real mid-resolution payment ask,
+  still not built.
 
 ## Slice: mana-value-target-filter (same branch, `phase5/counter-target-spell`)
 
@@ -468,3 +468,56 @@
   `mana_value_at_least` keys either (`crates/scenario/src/lib.rs`'s `build_target_requirement` defaults
   the new field to `None`, same "engine/Lua first, TOML follow-up if a fixture ever needs it" posture
   the subtypes/supertypes filter fields took before their own scenario-side follow-up slice).
+
+## Slice: counter-target-ability (`phase5/counter-target-ability`)
+
+- Scope: CR 113.9/701.6a's "counter target activated or triggered ability" (Stifle, Trickbind) - the
+  gap this doc's own earlier "Unresolved" note (above) named and left open. `AbilityEffect::Counter`'s
+  own resolution (`engine/resolve/counter.rs`) was already ability-aware - it dispatches on the found
+  `StackObject`'s own `kind`, not on which `Target` variant named it - so the entire gap was upstream,
+  in getting a legal `Target` for an ability onto `legal_targets` at all: an ability's own `StackObject`
+  has no matching `GameObject` in `state.objects` for `TargetFilter::Object`'s `state.object(id)` lookup
+  to find.
+- New `Target::Ability(ObjectId)` (the ability's own `stack_id`, `types/ids.rs`) and fieldless
+  `TargetFilter::Ability` (`types/target.rs`) - no real card in this corpus narrows by controller or by
+  activated-vs-triggered, unlike `Object`'s wide option-bag. `commands::target_is_legal` gains an
+  `Ability` arm matching `state.stack` directly (not `state.objects`); a `StackEntryKind::Copy` of an
+  activated/triggered ability matches too (CR 707.10 - a copy is that ability for every rules purpose).
+  `legal_target_candidates` gains a third `ability_candidates` source (alongside the pre-existing
+  object/player scans) built from `state.stack`, so cast-time legality actually has real candidates to
+  check against.
+- `resolve_counter_effect` widened its own `legal_targets.first()` match from `Target::Object` alone to
+  `Target::Object(id) | Target::Ability(id)` - both just resolve to the same `stack_id`, since the
+  branch beneath it already dispatches on the found `StackObject`'s own `kind`, not on the `Target`
+  variant.
+- Lua/TOML: `decode_target_filter_table`'s `type` discriminator gains `"ability"` (alongside the
+  pre-existing `"object"`/`"player"`/`"any"`), and the scenario crate's own `TargetRequirementSpec.filter`
+  string gains the matching `"ability"` case - both call sites this vocabulary is shared by
+  (`Game.SelectTargets`/`:SetTarget`/`s.target_requirement()`, and TOML `[cards.target_requirement]`).
+- Ripple: adding a new `Target` variant is an exhaustive-match ripple, not a struct-literal one -
+  `cargo build --workspace` surfaced 15 non-exhaustive-match sites across combat declaration/damage,
+  attach-candidate dispatch (three separate copies: cast-time Aura entry, Search's own entry-attach,
+  token entry-attach), `Game.SelectTargets`'s coroutine-answer encoding, damage-event application,
+  redirect-damage validity, and replacement-effect target matching. Every one of them was either
+  genuinely reachable (declaring an attacker/blocker against an ability - rejected as
+  `CommandError::InvalidTarget`, same treatment an already-illegal target gets) or structurally
+  unreachable given what actually produces a `Target::Ability` today (only `TargetFilter::Ability`'s own
+  candidate scan, and nothing anywhere lets an Aura/Equipment/token/damage/redirect effect target an
+  ability) - the unreachable sites got `unreachable!()`/a defensive `false` matching each function's own
+  existing "total function" posture, not a guess.
+- Verify: 5 new tests (`phase5_counter_target_ability.rs`) - Stifle counters a real activated ability
+  (via the genuine `ActivateAbility` action, not a direct stack push) before its damage resolves, proven
+  through a live `p0` activates -> passes -> `p1` responds with Stifle -> both pass sequence (CR 117.3c:
+  the activator keeps priority until passing, a real trap hit and fixed while writing this test - see
+  this file's own "Mistakes caught" precedent for logging test-writing traps); a directly-constructed
+  `StackEntryKind::TriggeredAbility` is counterable too, with no card ever appearing in either
+  graveyard (only Stifle's own card does, since Stifle itself resolved normally rather than being
+  countered); a spell is rejected as an illegal target for "counter target ability" at cast time; a
+  bogus/nonexistent ability id has no legal target; a `{type = "ability"}` decode test. Full workspace
+  suite green, zero new warnings.
+- Unresolved, named rather than guessed at: Trickbind's second clause, "that ability can't be
+  regenerated," isn't modeled - no mechanism exists to attach a restriction to a since-removed ability
+  instance (the ability itself no longer exists once countered, so this isn't a plain
+  `EventFilter`/`ReplacementPayload` shape like every other regeneration-prevention case). A real design
+  question, out of this slice's scope. "Counter unless [that player] pays {X}" (Mana Leak, Condescend)
+  remains unmodeled too, unchanged by this slice - still needs a real mid-resolution payment ask.

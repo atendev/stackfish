@@ -108,6 +108,11 @@ impl Engine {
                 commands::attach_permanent_to_player(&mut self.state, attaching, player);
                 events_so_far.push(GameEventKind::AttachedToPlayer { object: attaching, player });
             }
+            // `candidates` only ever holds what legal_entry_attach_candidates
+            // produces (Aura/Equipment/Fortification entry targets) - never
+            // Target::Ability, so `chosen` can't be one either (checked
+            // above via candidates.contains).
+            Target::Ability(_) => unreachable!("token attach candidates are never abilities"),
         }
         match self.continue_create_token(&spec, &copy_snapshot, remaining_count, controller, stack_id, events_so_far) {
             std::ops::ControlFlow::Continue(mut events) => {

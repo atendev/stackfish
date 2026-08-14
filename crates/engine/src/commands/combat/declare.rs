@@ -123,6 +123,10 @@ pub(in crate::commands) fn execute_declare_attackers(
                     ));
                 }
             }
+            // CR 506.4/508.1a: an attacker is declared against a player, a
+            // planeswalker, or a battle - never an activated/triggered
+            // ability (nothing in Magic attacks a spell/ability).
+            Target::Ability(_) => return Err(CommandError::InvalidTarget),
         }
     }
 
@@ -323,6 +327,9 @@ pub(in crate::commands) fn execute_declare_blockers(
         Target::Object(target_id) => state.object(*target_id).is_some_and(|_| {
             crate::layers::effective_controller(state, script_runtime, *target_id) == actor
         }),
+        // Structurally unreachable: DeclareAttackers already rejects
+        // Target::Ability (an attacker never targets an ability).
+        Target::Ability(_) => false,
     });
     if !is_defending_player {
         return Err(CommandError::IllegalAction(
@@ -376,6 +383,9 @@ pub(in crate::commands) fn execute_declare_blockers(
             Target::Object(target_id) => state.object(*target_id).is_some_and(|_| {
                 crate::layers::effective_controller(state, script_runtime, *target_id) == actor
             }),
+            // Structurally unreachable: DeclareAttackers already rejects
+            // Target::Ability (an attacker never targets an ability).
+            Target::Ability(_) => false,
         };
         if !attacking_this_defender {
             return Err(CommandError::IllegalAction(

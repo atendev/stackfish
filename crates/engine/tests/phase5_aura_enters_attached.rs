@@ -244,11 +244,13 @@ fn aura_with_two_legal_candidates_pauses_and_resumes_the_search_afterward() {
     sorted.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(p) => p.0 as u64,
+        Target::Ability(id) => id.0,
     });
     let mut expected = vec![Target::Object(bear_a), Target::Object(bear_b)];
     expected.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(p) => p.0 as u64,
+        Target::Ability(id) => id.0,
     });
     assert_eq!(sorted, expected, "both bears are legal enchant targets");
     // The aura is already a real battlefield permanent (unattached) by the

@@ -266,11 +266,13 @@ fn equipment_with_two_legal_creatures_pauses_and_resumes_the_search_afterward() 
     sorted.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(p) => p.0 as u64,
+        Target::Ability(id) => id.0,
     });
     let mut expected = vec![Target::Object(bear_a), Target::Object(bear_b)];
     expected.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(p) => p.0 as u64,
+        Target::Ability(id) => id.0,
     });
     assert_eq!(sorted, expected, "both bears are legal equip targets");
     assert_eq!(engine.state().object(paused_sword).unwrap().zone, ZoneKind::Battlefield);

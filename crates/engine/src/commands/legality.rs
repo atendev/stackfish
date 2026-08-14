@@ -11,6 +11,7 @@ use crate::types::cost::FilterController;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::object::GameObject;
+use crate::types::stack::StackEntryKind;
 use crate::types::target::{ManaValueBound, ManaValueComparison, TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
@@ -409,6 +410,7 @@ pub(crate) fn target_is_legal(
                 }
                 !target_has_protection_from(state, script_runtime, id, source)
             }
+            Target::Ability(_) => false,
         },
         // CR 601.2c/602.2b: `invoke_target_legal`'s real body (script.rs)
         // is the same per-candidate predicate shape `invoke_continuous_affects`
@@ -439,6 +441,26 @@ pub(crate) fn target_is_legal(
             }
             script_runtime.invoke_player_target_legal(*handle, state, pid, source, caster).unwrap_or(false)
         }
+        // CR 113.9/701.6a: "counter target activated or triggered ability" -
+        // matched against state.stack directly (not state.objects, which an
+        // ability's own stack_id never appears in - see TargetFilter::
+        // Ability's own doc comment). A Spell entry is never a legal
+        // candidate here, same disjoint-category split CR 113.9 states.
+        TargetFilter::Ability => {
+            let Target::Ability(stack_id) = target else { return false };
+            state.stack.iter().any(|so| so.stack_id == stack_id && is_ability_stack_entry(&so.kind))
+        }
+    }
+}
+
+/// CR 707.10: a `StackEntryKind::Copy` of an activated/triggered ability is
+/// that ability for targeting purposes too, so this unwraps through any
+/// number of `Copy` layers rather than checking only the outermost kind.
+fn is_ability_stack_entry(kind: &StackEntryKind) -> bool {
+    match kind {
+        StackEntryKind::ActivatedAbility | StackEntryKind::TriggeredAbility => true,
+        StackEntryKind::Copy { of } => is_ability_stack_entry(of),
+        StackEntryKind::Spell => false,
     }
 }
 
@@ -459,8 +481,17 @@ pub(crate) fn legal_target_candidates(
 ) -> Vec<Target> {
     let object_candidates = state.objects.values().map(|obj| Target::Object(obj.object_id));
     let player_candidates = non_eliminated_players(state).into_iter().map(Target::Player);
+    // CR 113.9: an ability's own StackObject has no matching GameObject, so
+    // it needs its own candidate source rather than falling out of
+    // object_candidates above - see TargetFilter::Ability's own doc comment.
+    let ability_candidates = state
+        .stack
+        .iter()
+        .filter(|so| is_ability_stack_entry(&so.kind))
+        .map(|so| Target::Ability(so.stack_id));
     object_candidates
         .chain(player_candidates)
+        .chain(ability_candidates)
         .filter(|&target| {
             // CR 603.3d candidate scan for a *triggered* ability - no
             // PlayerActionKind::CastSpell exists here to have announced an X

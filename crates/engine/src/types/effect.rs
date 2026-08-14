@@ -1260,6 +1260,9 @@ fn redirect_target_still_valid(target: Target, state: &GameState, script_runtime
                 .card_types
                 .intersects(CardTypeSet::CREATURE | CardTypeSet::PLANESWALKER | CardTypeSet::BATTLE)
         }
+        // CR 614.9: nothing redirects damage to an ability - it's never a
+        // legal redirection destination.
+        Target::Ability(_) => false,
     }
 }
 
@@ -1358,6 +1361,11 @@ fn event_target_matches(
             }
             true
         }
+        // Every real call site passes a DamageDealt target (never an
+        // ability, CR 614.9) or a plain Target::Object - never reached in
+        // practice, same defensive-total-function stance this file already
+        // takes elsewhere.
+        Target::Ability(_) => false,
     }
 }
 

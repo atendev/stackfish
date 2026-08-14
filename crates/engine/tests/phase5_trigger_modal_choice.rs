@@ -232,6 +232,7 @@ fn a_single_chosen_mode_with_its_own_target_chains_into_real_target_selection() 
     sorted.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(_) => u64::MAX,
+        Target::Ability(id) => id.0,
     });
     assert_eq!(sorted, vec![Target::Object(reaper), Target::Object(bear)]);
 
