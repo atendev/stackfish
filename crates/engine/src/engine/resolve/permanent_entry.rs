@@ -314,7 +314,10 @@ impl Engine {
                         commands::attach_permanent_to_player(&mut self.state, aura_id, player);
                         events.push(GameEventKind::AttachedToPlayer { object: aura_id, player });
                     }
-                    None => {}
+                    // An Aura's own "enchant" target is always an object or
+                    // a player (CR 303.4) - no real card enchants an
+                    // ability.
+                    Some(Target::Ability(_)) | None => {}
                 }
             }
         }

@@ -320,6 +320,9 @@ pub(crate) fn apply_damage_event(
                 }
             }
         }
+        // CR 702/119: damage is dealt to a permanent or a player, never to
+        // an ability - nothing in Magic deals damage to a spell/ability.
+        Target::Ability(_) => unreachable!("damage is never dealt to an ability"),
     }
 
     // CR 702.15b: Lifelink's life gain happens "in addition to any other

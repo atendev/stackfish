@@ -419,6 +419,10 @@ impl Engine {
                                     commands::attach_permanent_to_player(&mut self.state, new_id, player);
                                     events_so_far.push(GameEventKind::AttachedToPlayer { object: new_id, player });
                                 }
+                                // Attach candidates are only ever objects or
+                                // players (legal_entry_attach_candidates),
+                                // never an ability.
+                                Target::Ability(_) => unreachable!("attach candidates are never abilities"),
                             },
                             _ => {
                                 // CR 303.4f: 2+ legal candidates - the
@@ -484,6 +488,9 @@ impl Engine {
                 commands::attach_permanent_to_player(&mut self.state, attaching, player);
                 events_so_far.push(GameEventKind::AttachedToPlayer { object: attaching, player });
             }
+            // `candidates` only ever holds Object/Player entries (checked
+            // above via candidates.contains).
+            Target::Ability(_) => unreachable!("attach candidates are never abilities"),
         }
         self.process_state =
             self.continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, events_so_far);

@@ -152,6 +152,23 @@ pub enum TargetFilter {
     /// in place of `object`. No protection check here, same as plain
     /// `Player` above — this engine doesn't model player-side protection.
     PlayerScript(ScriptHandle),
+    /// CR 113.9/701.6a: "counter target activated or triggered ability"
+    /// (Stifle, Trickbind) — an ability sitting on the stack, matched
+    /// against `Target::Ability(stack_id)`. Fieldless: no real card in this
+    /// corpus narrows by controller or by activated-vs-triggered, unlike
+    /// `Object`'s wide option-bag.
+    ///
+    /// Distinct from `Object { zone: Some(ZoneKind::Stack), .. }` (the
+    /// existing "counter target spell" shape) rather than folding into it —
+    /// a *spell*'s `StackObject` shares its `stack_id` with a real
+    /// `GameObject` at `zone: Stack` (`commands::cast::execute_cast_spell`),
+    /// but an *ability*'s `StackObject` has no matching `GameObject` at all,
+    /// so there's nothing for `TargetFilter::Object`'s `state.object(id)`
+    /// lookup to find. Checked in `commands::target_is_legal` against
+    /// `state.stack` directly; a `StackEntryKind::Copy` of an activated or
+    /// triggered ability matches too (CR 707.10 — a copy is that ability for
+    /// every rules purpose, including this one).
+    Ability,
 }
 
 /// A number of targets matching `filter`, chosen once for one instance of

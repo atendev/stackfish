@@ -280,11 +280,13 @@ fn aura_enchant_player_with_two_legal_candidates_pauses_and_resumes_the_search_a
     sorted.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(p) => p.0 as u64,
+        Target::Ability(id) => id.0,
     });
     let mut expected = vec![Target::Player(p0), Target::Player(p1)];
     expected.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(p) => p.0 as u64,
+        Target::Ability(id) => id.0,
     });
     assert_eq!(sorted, expected, "a plain enchant-player filter offers every player, including the searcher's own controller");
     assert_eq!(engine.state().object(paused_aura).unwrap().zone, ZoneKind::Battlefield);

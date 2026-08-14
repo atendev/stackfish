@@ -707,6 +707,10 @@ impl ScriptRuntime {
                 answer_table.set("kind", "player").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
                 answer_table.set("id", id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             }
+            Target::Ability(id) => {
+                answer_table.set("kind", "ability").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                answer_table.set("id", id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            }
         }
         let result: Value =
             thread.resume(answer_table).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;

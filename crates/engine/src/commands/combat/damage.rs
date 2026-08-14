@@ -231,6 +231,9 @@ pub(crate) fn execute_assign_combat_damage(
         match target {
             Target::Player(pid) => *pid,
             Target::Object(target_id) => crate::layers::effective_controller(state, script_runtime, *target_id),
+            // Structurally unreachable: DeclareAttackers already rejects
+            // Target::Ability (an attacker never targets an ability).
+            Target::Ability(_) => unreachable!("an attacker's own combat target is never an ability"),
         }
     };
     let mut required_actors: HashSet<PlayerId> = HashSet::new();

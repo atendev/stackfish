@@ -182,6 +182,7 @@ fn two_target_damage_spell_deals_full_amount_to_each_independently() {
     events.sort_by_key(|(t, _)| match t {
         Target::Object(id) => id.0,
         Target::Player(p) => p.0 as u64,
+        Target::Ability(id) => id.0,
     });
     assert_eq!(events, vec![(Target::Object(target_a), 2), (Target::Object(target_b), 2)]);
 }

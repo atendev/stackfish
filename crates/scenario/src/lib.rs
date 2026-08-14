@@ -429,8 +429,10 @@ pub struct ContinuousEffectSpec {
 /// `CardSpec.target_requirement`'s shape — `filter` picks which
 /// `TargetFilter` variant this is: `"object"` (uses `card_types`/
 /// `subtypes`/`controller`/`zone`, CR 115.2's battlefield default applies
-/// when `zone` is unset), `"player"` (any player), or `"any"` (CR 115.4's
-/// "any target" — creature/player/planeswalker/battle). `count`'s meaning
+/// when `zone` is unset), `"player"` (any player), `"any"` (CR 115.4's
+/// "any target" — creature/player/planeswalker/battle), or `"ability"` (CR
+/// 113.9's "counter target activated or triggered ability", Stifle/
+/// Trickbind). `count`'s meaning
 /// depends on `up_to`/`at_least` (mutually exclusive) — see
 /// `TargetRequirement`'s own doc for the full three-way shape (exact/"up to
 /// N"/"N or more", CR 601.2c/115.6).
@@ -1424,13 +1426,16 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
         },
         "player" => TargetFilter::Player { controller: spec.controller.as_deref().map(parse_filter_controller) },
         "any" => TargetFilter::AnyTarget,
+        // CR 113.9/701.6a: "counter target activated or triggered ability"
+        // (Stifle, Trickbind).
+        "ability" => TargetFilter::Ability,
         // Placeholder handle - no Engine/ScriptRuntime exists yet at this
         // point (see PendingTargetScript's own doc comment). Patched with
         // the real loaded handle by register_target_script, once one does.
         "script" => TargetFilter::Script(ScriptHandle(0)),
         other => panic!(
             "unknown target_requirement filter in scenario file: {other} - expected \
-             object/player/any/script"
+             object/player/any/ability/script"
         ),
     };
     stackfish_engine::TargetSpec::Primitive(TargetRequirement {

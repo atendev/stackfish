@@ -207,6 +207,7 @@ fn triggered_ability_pauses_for_a_real_target_choice_and_resolves_against_it() {
     sorted.sort_by_key(|t| match t {
         Target::Object(id) => id.0,
         Target::Player(_) => u64::MAX,
+        Target::Ability(id) => id.0,
     });
     assert_eq!(sorted, vec![Target::Object(reaper), Target::Object(bear)], "both creatures are legal candidates");
     assert_eq!(engine.state().stack.len(), 0, "not pushed yet - still waiting on the choice");

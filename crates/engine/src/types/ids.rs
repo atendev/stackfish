@@ -60,7 +60,9 @@ pub struct CommandId(pub u64);
 pub struct AbilityId(pub u64);
 
 /// Anything that can legally be targeted, attacked, or dealt damage:
-/// permanents/spells/abilities (`Object`) or a player directly (`Player`).
+/// permanents/spells (`Object`) or a player directly (`Player`), plus an
+/// activated/triggered ability on the stack (`Ability`, CR 113.9 — a
+/// distinct target category from `Object`, since it has no `GameObject`).
 /// Battles and planeswalkers are still `Object` — they're `GameObject`s like
 /// any other permanent; `Player` only covers the one addressable thing in
 /// the game that *isn't* a `GameObject`.
@@ -68,6 +70,12 @@ pub struct AbilityId(pub u64);
 pub enum Target {
     Object(ObjectId),
     Player(PlayerId),
+    /// CR 113.9/701.6a: an activated or triggered ability sitting on the
+    /// stack — its own `StackObject::stack_id`. Distinct from `Object`
+    /// because an ability has no matching `GameObject` in `state.objects`
+    /// (only a *spell*'s `StackObject` gets one, at `zone: Stack` — see
+    /// `TargetFilter::Ability`'s own doc comment).
+    Ability(ObjectId),
 }
 
 /// Opaque reference to one loaded Lua callback (a condition/cost/target/
