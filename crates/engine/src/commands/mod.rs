@@ -225,25 +225,18 @@ pub fn execute_command(
         }
         _ => {}
     }
-    // TODO: match command.action (PlayerActionKind) and handle each variant:
-    //   CastSpell is implemented above.
-    //   ActivateAbility (mana-ability case) is implemented above; non-mana
-    //     abilities fall through to todo!() pending the script bridge.
-    //   PassPriority/PlayLand are implemented above (the match arms before
-    //     this comment block) - everything else here is still unimplemented.
-    //   DeclareAttackers/DeclareBlockers are implemented above (declarations
-    //     only - no combat damage resolution, no triggered-ability
-    //     collection beyond the AttackerDeclared/BlockerDeclared events
-    //     themselves, no costs-to-attack/block, no restrictions check).
-    //   SubmitPayment is NOT handled here, deliberately - see
-    //     Engine::submit_payment (engine.rs) and CommandOutcome::
-    //     requires_payment's doc comment above. Payment answers
-    //     ProcessState::AwaitingPayment, a mid-pipeline pause, the same way
-    //     submit_replacement_choice/submit_trigger_order answer their own
-    //     pauses - never goes through submit_action/execute_command at all.
-    //   MakeChoice: generic - depends entirely on what asked for the
-    //     choice. broke_pass_chain = true, priority_handoff = Unchanged.
-    // Every branch ends in returning
-    // Ok(CommandOutcome { events, broke_pass_chain, priority_handoff }).
+    // Every remaining `PlayerActionKind` variant reaching this point is a
+    // should-never-happen case, not a "not implemented yet" one - every
+    // variant `submit_action` actually lets through has its own explicit arm
+    // above (CastSpell, ActivateAbility, PlayLand, PassPriority, MakeChoice,
+    // DeclareAttackers, DeclareBands, DeclareBlockers, AssignCombatDamage):
+    //   SubmitPayment never reaches here at all - Engine::submit_payment
+    //     takes a bare PaymentPlan, not a PlayerActionKind::SubmitPayment
+    //     wrapped in an EngineCommand (see CommandOutcome::requires_payment's
+    //     doc comment above for how a payment pause is actually answered).
+    //   KeepHand/TakeMulligan/BottomCards are rejected by submit_action
+    //     itself before an EngineCommand is ever built - see its own
+    //     "pregame actions use submit_mulligan_decision / submit_bottom_cards"
+    //     error.
     todo!()
 }

@@ -291,12 +291,13 @@ pub enum AbilityEffect {
     /// `ManaValueBound`, threading the casting/resolving spell's own
     /// announced `x_value` through `commands::target_is_legal`).
     ///
-    /// TODO: "counter target activated or triggered ability" (Stifle,
-    /// Trickbind) isn't reachable this slice - an ability's `StackObject` has
-    /// no matching `GameObject` for a `TargetFilter::Object` to find, and no
-    /// ability-shaped target vocabulary exists yet. TODO: "counter unless
-    /// [that player] pays {X}" (Mana Leak, Condescend) needs a real
-    /// mid-resolution payment ask - not built.
+    /// "Counter target activated or triggered ability" (Stifle, Trickbind)
+    /// is real now too, via `Target::Ability`/`TargetFilter::Ability` (CR
+    /// 113.9/701.6a, `phase5/counter-target-ability`) - `resolve_counter_effect`
+    /// accepts either `Target` variant.
+    ///
+    /// TODO: "counter unless [that player] pays {X}" (Mana Leak, Condescend)
+    /// needs a real mid-resolution payment ask - not built.
     Counter,
     /// The `Game.Ops.CreateToken()` primitive — creates one or more token
     /// permanents on the battlefield under the controller's control (CR 111).

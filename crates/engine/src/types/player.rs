@@ -20,9 +20,8 @@ pub struct Emblem {
 }
 
 impl Emblem {
-    pub fn new(_emblem_id: ObjectId, _source: ObjectId, _ability_text: impl Into<String>) -> Self {
-        // TODO: Emblem { emblem_id, source, ability_text: ability_text.into() }.
-        todo!()
+    pub fn new(emblem_id: ObjectId, source: ObjectId, ability_text: impl Into<String>) -> Self {
+        Emblem { emblem_id, source, ability_text: ability_text.into() }
     }
 }
 
@@ -64,13 +63,20 @@ pub struct PlayerState {
 }
 
 impl PlayerState {
-    pub fn new(_player_id: PlayerId, _starting_life: i32) -> Self {
-        // TODO: PlayerState { player_id, life: starting_life, mana_pool:
-        // ManaPool::empty(), counters: CounterSet::new(), emblems: vec![],
-        // commander_damage_taken: vec![], eliminated: false,
-        // drew_from_empty_library: false, mulligans_taken: 0, hand_kept: false,
-        // commander_casts: HashMap::new() }.
-        todo!()
+    pub fn new(player_id: PlayerId, starting_life: i32) -> Self {
+        PlayerState {
+            player_id,
+            life: starting_life,
+            mana_pool: ManaPool::default(),
+            counters: CounterSet::new(),
+            emblems: vec![],
+            commander_damage_taken: vec![],
+            eliminated: false,
+            drew_from_empty_library: false,
+            mulligans_taken: 0,
+            hand_kept: false,
+            commander_casts: std::collections::HashMap::new(),
+        }
     }
 
     pub fn lose_life(&mut self, amount: i32) {

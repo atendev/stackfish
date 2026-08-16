@@ -269,10 +269,10 @@ pub struct GameEvent {
 }
 
 impl GameEvent {
-    pub fn new(_event_id: EventId, _sequence_no: SequenceNo, _kind: GameEventKind) -> Self {
-        // TODO: GameEvent { event_id, sequence_no, kind, caused_by_command: None,
-        // parent_event: None } - caller sets the causal-ref fields after
-        // construction if applicable, or this may need optional params added.
-        todo!()
+    /// Caller sets `caused_by_command`/`parent_event` after construction via
+    /// struct update syntax if this event needs a causal ref, e.g.
+    /// `GameEvent { caused_by_command: Some(id), ..GameEvent::new(...) }`.
+    pub fn new(event_id: EventId, sequence_no: SequenceNo, kind: GameEventKind) -> Self {
+        GameEvent { event_id, sequence_no, kind, caused_by_command: None, parent_event: None }
     }
 }
