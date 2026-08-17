@@ -1092,6 +1092,42 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         .eval()?;
     ops.set("DiscardChosen", discard_chosen)?;
 
+    // `Game.Ops.CastSpell(card, opts)` (CR 601.2/702.85a-style "you may cast
+    // this without paying its mana cost") - same "reshape into a result-table
+    // key, `ScriptRuntime::handle_operation_result` decodes it into an
+    // `OperationOutcome` the engine actually acts on" shape `SacrificeChosen`/
+    // `DiscardChosen` already establish (see `OperationOutcome::PendingCast`'s
+    // own doc comment for why casting can't just mutate `GameState` directly
+    // here either). `opts.targets` takes an array of `Game.SelectTargets`/
+    // `Game.ChooseN` picks (`{kind, id}` tables) for whatever the *cast*
+    // spell's own targets are - gathered by the calling script via its own
+    // prior `Game.SelectTargets` call(s), same "collect picks first, hand
+    // the ids to the real op" two-step `Game.Ops.SacrificeChosen(Game.ChooseN
+    // (...))` already uses. `opts.free` (default `false`) is CR 702.85a's own
+    // "without paying its mana cost" - TODO: hardcodes casting from Exile
+    // when true (see `OperationOutcome::PendingCast`'s own doc comment), so
+    // this only supports Cascade-shaped "free from exile," not an arbitrary
+    // zone.
+    let cast_spell: Function = lua
+        .load(
+            r#"
+            function(card, opts)
+                opts = opts or {}
+                return {
+                    cast_spell = {
+                        card = card,
+                        free = opts.free or false,
+                        modes = opts.modes or {},
+                        targets = opts.targets or {},
+                        x_value = opts.x_value,
+                    }
+                }
+            end
+            "#,
+        )
+        .eval()?;
+    ops.set("CastSpell", cast_spell)?;
+
     // `Game.RegisterKeyword(source, name)` - sugar for the layer-6
     // (AbilityAdding) self-only static ability every printed keyword needs
     // (CR 613.1f). Equivalent to:
