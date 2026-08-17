@@ -133,9 +133,8 @@ pub struct PlayerAction {
 }
 
 impl PlayerAction {
-    pub fn new(_player: PlayerId, _kind: PlayerActionKind) -> Self {
-        // TODO: PlayerAction { player, kind }.
-        todo!()
+    pub fn new(player: PlayerId, kind: PlayerActionKind) -> Self {
+        PlayerAction { player, kind }
     }
 }
 
