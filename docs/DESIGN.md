@@ -103,9 +103,10 @@ adaptation doc, unchanged from the original plan:
 - Cards implemented in Lua, embedded via `mlua`, interpreted (not transpiled to native Rust).
 - Reload requires an engine restart — no hot-reload requirement, so no need for a Lua->Rust
   compilation pipeline.
-- Script API is the friendly surface: `Game.RegisterTriggeredAbility`, `Game.AddContinuousEffect`,
-  `Game.ReplaceEvent`, `Game.CastSpell`, `Game.PayCost`, `Game.SelectTargets`, etc. Script authors
-  should not need Rust familiarity — only the Lua API surface.
+- Script API is the friendly surface: `Game.CreateTriggeredAbility`, `Game.CreateStaticAbility`,
+  `Game.CreateReplacementEffect`, `Game.CastSpell`, `Game.PayCost`, `Game.SelectTargets`, etc. (see
+  `docs/lua/index.md` for the full, current reference). Script authors should not need Rust
+  familiarity — only the Lua API surface.
 - Core responsibilities stay in Rust: legality, timing, hidden information, stack/priority/SBA/
   replacement semantics. Lua only expresses card-specific intent and is asked, never trusted.
 

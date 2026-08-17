@@ -4,10 +4,10 @@
 //!
 //! Registration itself stays Rust-side this slice: `RegisteredAbility` is
 //! pushed directly onto `state.abilities` (via `Engine::load_script` +
-//! a struct literal), not via a card script self-registering through
-//! `Game.RegisterTriggeredAbility` (still `todo!()` - needs the `Game.*` Lua
-//! table bound plus registration-time mutability sorted out, both flagged in
-//! script.rs/script_api.rs).
+//! a struct literal), not via a card script self-registering (`Game.
+//! CreateTriggeredAbility`, built in a later slice once the `Game.*` Lua
+//! table was bound and registration-time mutability was sorted out - see
+//! `script::builders`).
 //!
 //! Design lock-in this slice exercises: "Lua asks, Rust decides" - the
 //! operation script never mutates state itself, it returns a plain table

@@ -485,13 +485,13 @@ impl Engine {
         }
     }
 
-    /// TODO(script bridge): `state.abilities` should be populated by each
-    /// card's script registering itself (see `script_api.rs`'s
-    /// `register_triggered_ability` TODO) as objects enter zones that grant
-    /// abilities. That bridge doesn't exist yet, so callers building a game
-    /// from `CardDefinition`s outside the manual scenario-fixture path (e.g.
-    /// `new_game`) need a way to seed `RegisteredAbility` entries directly.
-    /// Remove once the script bridge lands.
+    /// The real script bridge exists (`run_card_script_for` below, via
+    /// `Game.CreateTriggeredAbility`/`Game.CreateActivatedAbility`/`Game.
+    /// CreateManaAbility`) but only self-registers as an object's own script
+    /// runs on zone entry - callers building a game from `CardDefinition`s
+    /// outside the manual scenario-fixture path (e.g. `new_game`, before
+    /// anything has entered a zone that triggers a script run) still need a
+    /// way to seed `RegisteredAbility` entries directly.
     pub fn state_mut(&mut self) -> &mut GameState {
         &mut self.state
     }
@@ -524,11 +524,11 @@ impl Engine {
     /// Loads a standalone Lua callback (see `ScriptRuntime::load_function`)
     /// into this `Engine`'s script runtime, returning a `ScriptHandle` a
     /// caller can then put on a `RegisteredAbility`'s `condition`/`operation`
-    /// field directly. Stand-in for real card-script self-registration
-    /// (`Game.RegisterTriggeredAbility`, still `todo!()` in script_api.rs) —
-    /// same "no producer exists yet, so the caller wires it up by hand"
-    /// shape `state_mut`'s own doc comment already describes for
-    /// `state.abilities`.
+    /// field directly. For callers hand-building a `RegisteredAbility` via
+    /// `state_mut` rather than through a real card script's own `Game.
+    /// CreateTriggeredAbility`/etc. call — same "no self-registration
+    /// happened, so the caller wires it up by hand" shape `state_mut`'s own
+    /// doc comment already describes for `state.abilities`.
     pub fn load_script(&mut self, source: &str) -> Result<ScriptHandle, ScriptError> {
         self.script_runtime.load_function(source)
     }

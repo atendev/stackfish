@@ -11,8 +11,8 @@
 //! Registration itself is still Rust-side this slice (same as before) - a
 //! `RegisteredAbility` is pushed directly via a struct literal, referencing
 //! handles/specs obtained from `Engine::load_condition`/`Engine::load_operation`,
-//! not via card-script self-registration through `Game.RegisterTriggeredAbility`
-//! (still out of scope, see `script_api.rs`).
+//! not via card-script self-registration (`Game.CreateTriggeredAbility`,
+//! built in a later slice - see `script::builders`).
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;

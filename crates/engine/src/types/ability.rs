@@ -1421,9 +1421,12 @@ pub enum InterveningIfSpec {
     Script(ScriptHandle),
 }
 
-/// A card's registered ability, as set up by its script's `register_abilities`-
-/// equivalent (`Game.RegisterTriggeredAbility` etc — see `script_api.rs`).
-/// Lives in `GameState.abilities` as a flat list (same pattern as
+/// A card's registered ability, as set up by its script's `Game.
+/// CreateTriggeredAbility`/`Game.CreateActivatedAbility`/`Game.
+/// CreateManaAbility` builder (`script::builders`) - `ScriptRuntime::
+/// run_card_script` drains the builder's queued result into `GameState`
+/// with a real allocated id. Lives in `GameState.abilities` as a flat list
+/// (same pattern as
 /// `continuous_effects`/`replacement_effects`), not nested under
 /// `GameObject`, so the engine can scan all registered abilities against an
 /// event/timing window without walking every object first.
