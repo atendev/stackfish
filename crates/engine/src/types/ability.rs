@@ -4,7 +4,7 @@ use crate::types::effect::EffectFilter;
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::mana::{ColorSet, ManaUnit};
+use crate::types::mana::{ColorSet, ManaCost, ManaUnit};
 use crate::types::target::TargetSpec;
 use crate::types::turn::Step;
 use crate::types::zone::ZoneKind;
@@ -296,9 +296,44 @@ pub enum AbilityEffect {
     /// 113.9/701.6a, `phase5/counter-target-ability`) - `resolve_counter_effect`
     /// accepts either `Target` variant.
     ///
-    /// TODO: "counter unless [that player] pays {X}" (Mana Leak, Condescend)
-    /// needs a real mid-resolution payment ask - not built.
+    /// "Counter unless that player pays {X}" (Mana Leak, Condescend) is its
+    /// own sibling variant now - see `CounterUnlessPaid`'s own doc comment.
     Counter,
+    /// CR 701.6a/118.12: "counter target spell unless its controller pays
+    /// `[cost]`" (Mana Leak's fixed `{3}`; Condescend's own `{X}` isn't
+    /// covered - see below). Same target declaration as `Counter` above
+    /// (`s.target_requirement()`, `Target::Object`/`Target::Ability` both
+    /// accepted), plus this one fixed amount. Deliberately a sibling
+    /// variant rather than an `Option<ManaCost>` field on `Counter` itself -
+    /// every existing `Counter` call site (all real cards so far) would
+    /// otherwise need to thread through an always-`None`, same "additive
+    /// sibling, not a widened payload" precedent `ManaUnit`'s
+    /// `RestrictedColored`/`SnowColored` variants already established.
+    ///
+    /// Resolution pauses (`resolve_counter_unless_paid_effect`,
+    /// `ProcessState::AwaitingCounterUnlessPaidChoice`) rather than
+    /// resolving synchronously like `Counter` does - CR 118.12's "if [a
+    /// player] does" is a real mid-resolution decision by a player who
+    /// isn't necessarily this spell/ability's own controller (the
+    /// *targeted* spell's controller, CR 701.6a's own "that player"), same
+    /// "paused, not guessed at" stance `Cascade`/`Madness` already take for
+    /// their own player decisions. `Engine::submit_counter_unless_paid_
+    /// payment`/`decline_counter_unless_paid` (`choice_answers.rs`) are the
+    /// two answers - paying commits real mana immediately (the same
+    /// `PaymentPlan`/`commit_payment` machinery `submit_payment` uses, just
+    /// without a full cast/activation's cost-payment pause shape wrapped
+    /// around it, since declining doesn't unwind anything - CR 601.6 never
+    /// applies here), declining reuses `Counter`'s own removal logic
+    /// (factored into `counter_stack_object`, shared by both).
+    ///
+    /// TODO: Condescend's own "{X}" (an amount announced when *this* spell
+    /// was cast, not a fixed printed number) isn't representable - `ManaCost`
+    /// has no `{X}` symbol support to parse from a Lua string yet, and this
+    /// variant has no way to read the countering spell's own `top.x_value`
+    /// at resolution time either. Mana Leak's fixed-number shape only, same
+    /// "model the shape that exists" stance this codebase repeatedly takes
+    /// (`HandSizeEffect`'s own doc comment names the same convention).
+    CounterUnlessPaid(ManaCost),
     /// The `Game.Ops.CreateToken()` primitive — creates one or more token
     /// permanents on the battlefield under the controller's control (CR 111).
     /// Named tokens (Clue, Food) are fully implemented; Treasure is blocked
