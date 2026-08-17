@@ -145,6 +145,21 @@ pub enum CascadeChoiceError {
     IllegalCast(CommandError),
 }
 
+/// Why `submit_counter_unless_paid_payment`/`decline_counter_unless_paid`
+/// rejected an answer to a pending CR 701.6a/118.12 counter-unless-paid
+/// pause (`AbilityEffect::CounterUnlessPaid`, Mana Leak-style).
+#[derive(Debug)]
+pub enum CounterUnlessPaidError {
+    /// Engine isn't sitting in `ProcessState::AwaitingCounterUnlessPaidChoice`.
+    NotAwaitingChoice,
+    /// The submitted `PaymentPlan` doesn't validate against the pending
+    /// `cost` — the pause is left untouched, same no-partial-payment stance
+    /// `submit_payment`'s own `PaymentError::InvalidPlan` already takes, so
+    /// the caller can retry with a different plan or call `decline_counter_
+    /// unless_paid` instead.
+    InvalidPlan,
+}
+
 /// Why `submit_copy_choice` rejected an answer to a CR 707.6/614.12a "enter
 /// as a copy" choice (Clone itself). No `DuplicateCandidate` variant, unlike
 /// `DevourChoiceError`/`AmplifyChoiceError` — this is "which one, if any,"
@@ -768,6 +783,22 @@ impl Engine {
                 let status = StepStatus::AwaitingCascadeChoice { player, candidate };
                 self.process_state =
                     ProcessState::AwaitingCascadeChoice { player, candidate, exiled, stack_id, events_so_far };
+                status
+            }
+
+            ProcessState::AwaitingCounterUnlessPaidChoice { payer, target_id, cost, stack_id, events_so_far } => {
+                // Nothing to do until decline_counter_unless_paid/
+                // submit_counter_unless_paid_payment answers - same "put the
+                // exact same state back" pattern every other choice-pause
+                // above already uses.
+                let status = StepStatus::AwaitingCounterUnlessPaidChoice { payer, target_id, cost: cost.clone() };
+                self.process_state = ProcessState::AwaitingCounterUnlessPaidChoice {
+                    payer,
+                    target_id,
+                    cost,
+                    stack_id,
+                    events_so_far,
+                };
                 status
             }
 

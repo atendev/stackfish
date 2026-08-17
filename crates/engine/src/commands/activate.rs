@@ -307,6 +307,10 @@ pub(super) fn execute_activate_ability(
         // other here. Listed for exhaustiveness, same reason as
         // ForEachPlayer/SacrificeRandom/DiscardRandom below.
         | Some(AbilityEffect::Counter)
+        // CR 701.6a/118.12: same exhaustiveness-only listing as Counter
+        // just above - no real card grants "counter unless that player
+        // pays" as an activated ability's own effect either.
+        | Some(AbilityEffect::CounterUnlessPaid(_))
         // `phase5/mass-choice-effects`: no real card grants any of these
         // three as an activated ability's own effect yet, but they're
         // recognized primitives that go on the stack the same way as any

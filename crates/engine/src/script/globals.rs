@@ -205,6 +205,18 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // already generically supported by `decode_target_filter_table` - see
     // AbilityEffect::Counter's own doc comment), not a parameter here.
     ops.set("Counter", OperationTag(AbilityEffect::Counter))?;
+    // CR 701.6a/118.12: "counter target spell unless that player pays
+    // [cost]" (Mana Leak's fixed {3}, Condescend's own {X} shape isn't
+    // covered yet - see AbilityEffect::CounterUnlessPaid's own doc comment).
+    // Same target declaration as Counter above, plus the mana-cost string
+    // (Game.Costs.Mana's own ManaCost::parse grammar) that player must pay
+    // to prevent it.
+    let counter_unless_paid = lua.create_function(|_, s: String| {
+        let cost = ManaCost::parse(&s)
+            .map_err(|e| mlua::Error::RuntimeError(format!("Game.Ops.CounterUnlessPaid(\"{s}\"): {}", e.0)))?;
+        Ok(OperationTag(AbilityEffect::CounterUnlessPaid(cost)))
+    })?;
+    ops.set("CounterUnlessPaid", counter_unless_paid)?;
     // `Game.Ops.SacrificeRandom(filter, count)` (`phase5/mass-choice-effects`,
     // CR 701.21 + "at random") - same `EffectFilter` table decode DestroyAll
     // just above uses.

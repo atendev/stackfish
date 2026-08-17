@@ -52,9 +52,11 @@ name.
   `controller`/`self_only` — "destroy all Zombies" or "destroy all nonland permanents" aren't
   expressible via mass destruction yet, only a plain type/controller restriction like Armageddon's
   "destroy all lands." See [game-constants.md](game-constants.md#gameops).
-- **"Counter unless [that player] pays {X}" isn't modeled.** Mana Leak, Condescend — needs a real
-  mid-resolution payment ask. (`Game.Ops.Counter` against a spell, mana-value-restricted spell
-  counters, e.g. Convolute's "mana value 3 or less" or "mana value X," *and* "counter target
-  activated or triggered ability" (Stifle, Trickbind, via `{type = "ability"}` on
-  `:SetTarget`/`target_requirement()`) are all real now — see
-  [game-constants.md](game-constants.md#gameops).)
+- **"Counter unless that player pays {X}" only supports a fixed printed amount.** Mana Leak's own
+  shape (`Game.Ops.CounterUnlessPaid("{3}")`) is real now — see
+  [game-constants.md](game-constants.md#gameops). Condescend's own `{X}` (an amount announced when
+  the *countering* spell itself was cast, not a fixed printed number) isn't representable yet.
+  (`Game.Ops.Counter` against a spell, mana-value-restricted spell counters, e.g. Convolute's "mana
+  value 3 or less" or "mana value X," *and* "counter target activated or triggered ability"
+  (Stifle, Trickbind, via `{type = "ability"}` on `:SetTarget`/`target_requirement()`) are all real
+  now too.)
