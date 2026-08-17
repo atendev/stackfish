@@ -6,8 +6,8 @@
 //!
 //! Deliberately a **mechanism only**, not wired to any real enforcement —
 //! confirmed during scoping that no consumer exists to hook into yet:
-//! `GameObject.visibility`/`VisibilityPolicy::is_visible_to` is itself still
-//! `todo!()` with zero callers, and `script::encode::state_to_lua`/
+//! `GameObject.visibility`/`VisibilityPolicy::is_visible_to` still has zero
+//! callers, and `script::encode::state_to_lua`/
 //! `card_summary_to_lua` don't parameterize by viewer at all — they
 //! structurally never encode hand *contents* for any player, revealed or
 //! not (only a `hand_count`), so there's nothing today for "revealed" to

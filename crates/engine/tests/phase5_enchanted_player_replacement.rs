@@ -23,7 +23,7 @@
 //! owner's library" — already-tested generic machinery, not new plumbing.
 //! "Revealed" isn't modeled: this engine has no per-viewer hidden-information
 //! boundary to reveal from in the first place (`VisibilityPolicy::
-//! is_visible_to` is itself still `todo!()`, no callers).
+//! is_visible_to` still has no callers).
 
 use std::collections::HashMap;
 

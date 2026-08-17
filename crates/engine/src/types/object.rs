@@ -19,13 +19,12 @@ pub struct VisibilityPolicy {
 }
 
 impl VisibilityPolicy {
-    pub fn is_visible_to(&self, _player: PlayerId) -> bool {
-        // TODO: self.public || self.visible_to.contains(&player). Note this
-        // struct only covers the override layer (see doc comment above) -
-        // callers needing the *effective* visibility (zone default plus
-        // this override) need to combine both, probably in GameState/
-        // layers.rs, not here.
-        todo!()
+    /// This struct only covers the override layer (see doc comment above) -
+    /// callers needing the *effective* visibility (zone default plus this
+    /// override) need to combine both, probably in GameState/layers.rs, not
+    /// here.
+    pub fn is_visible_to(&self, player: PlayerId) -> bool {
+        self.public || self.visible_to.contains(&player)
     }
 }
 

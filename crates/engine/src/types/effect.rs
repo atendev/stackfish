@@ -854,9 +854,9 @@ pub enum EventFilter {
     /// substitution to `Library` once the always-`push_bottom` convention
     /// `commit_zone_move` already uses is taken into account. "Revealed" is
     /// left unmodeled — this engine has no per-viewer hidden-information
-    /// boundary at all yet (`VisibilityPolicy::is_visible_to` is itself still
-    /// `todo!()`, no callers — same standing gap `HandRevealModifier`'s own
-    /// doc comment already names), so there is nothing for "revealed" to mean
+    /// boundary at all yet (`VisibilityPolicy::is_visible_to` has no callers
+    /// — same standing gap `HandRevealModifier`'s own doc comment already
+    /// names), so there is nothing for "revealed" to mean
     /// beyond the zone move that already happens either way.
     WouldEnterEnchantedPlayerGraveyard,
 }

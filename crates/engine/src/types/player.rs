@@ -210,7 +210,7 @@ pub enum HandRevealAffected {
 /// `phase5/hand-reveal-modifier`: deliberately a mechanism only, not wired to
 /// any real enforcement — this engine has no consumer that could act on it
 /// yet. `GameObject.visibility`/`VisibilityPolicy::is_visible_to` is the
-/// obvious candidate but is itself still `todo!()` with zero callers, and
+/// obvious candidate but still has zero callers, and
 /// `script::encode::state_to_lua`/`card_summary_to_lua` don't parameterize by
 /// viewer at all — they structurally never encode hand *contents* for any
 /// player, revealed or not (only a `hand_count`), so there's nothing today
