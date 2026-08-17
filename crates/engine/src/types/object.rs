@@ -194,7 +194,6 @@ impl GameObject {
     /// `zone == Battlefield`. A permanent is the only state a `GameObject`
     /// can have continuous effects/static abilities active from (CR 110.1).
     pub fn is_permanent(&self) -> bool {
-        // TODO: self.zone == ZoneKind::Battlefield.
-        todo!()
+        self.zone == ZoneKind::Battlefield
     }
 }
