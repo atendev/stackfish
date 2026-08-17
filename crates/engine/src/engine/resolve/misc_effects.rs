@@ -11,8 +11,9 @@ use std::ops::ControlFlow;
 use crate::commands;
 use crate::script::OperationOutcome;
 use crate::types::ability::{apply_text_box, AbilityEffect, CopyExceptions};
+use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
-use crate::types::ids::Target;
+use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::StackObject;
 use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
@@ -275,7 +276,80 @@ impl Engine {
                         );
                         ControlFlow::Break(StepStatus::Progressed)
                     }
+                    // `Game.Ops.CastSpell`'s own result, with no `ForEachPlayer`
+                    // context (this call site never has one) - see
+                    // `resolve_pending_cast`'s own doc comment.
+                    Ok(OperationOutcome::PendingCast { card, modes, targets, x_value, free }) => {
+                        self.process_state =
+                            self.resolve_pending_cast(card, modes, targets, x_value, free, top.stack_id, top.controller, events);
+                        ControlFlow::Break(StepStatus::Progressed)
+                    }
                 }
+            }
+        }
+    }
+
+    /// Shared tail for `Game.Ops.CastSpell`'s own result (`OperationOutcome::
+    /// PendingCast`) - called both from a standalone operation's immediate
+    /// result (`resolve_misc_or_script_effect` above) and from a resumed
+    /// coroutine's result once it stops yielding (`settle_script_operation_
+    /// outcome`, `each_player.rs` - e.g. a script that calls `Game.
+    /// SelectTargets` first to pick the cast's own targets, then returns
+    /// `Game.Ops.CastSpell(...)` once resumed with the answer). Same
+    /// synthetic-`PlayerActionKind::CastSpell`-via-`commands::execute_command`
+    /// shape `Engine::submit_cascade_cast`/`submit_madness_cast` already
+    /// establish for their own Rust-driven equivalents (see those two
+    /// methods' `choice_answers.rs` bodies) - unlike those two, every caller
+    /// here runs *inside* an already-active pipeline run (this whole
+    /// resolution is itself `resolve_stack_top`'s own tail, whether directly
+    /// or via a resumed coroutine), so `self.pipeline_context` - already set
+    /// for this pass by `resolve_stack_top` itself - is deliberately left
+    /// untouched, unlike the two Rust-driven callers (each a fresh top-level
+    /// entry point answering a raised pause, not a nested call).
+    ///
+    /// TODO: a script-requested cast that turns out illegal (bad target,
+    /// wrong zone, ...) is silently dropped - same "script error swallowed"
+    /// gap `resolve_misc_or_script_effect`'s own TODO above already flags
+    /// for `invoke_operation`'s `Err(_)` arm - no path back to the script to
+    /// report why the cast didn't happen.
+    pub(super) fn resolve_pending_cast(
+        &mut self,
+        card: ObjectId,
+        modes: Vec<u32>,
+        targets: Vec<Target>,
+        x_value: Option<u32>,
+        free: bool,
+        stack_id: ObjectId,
+        controller: PlayerId,
+        events_so_far: Vec<GameEventKind>,
+    ) -> ProcessState {
+        self.state.pending_timing_bypass = Some(card);
+        if free {
+            self.state.pending_free_cast = Some(card);
+        }
+        let command_id = self.allocate_command_id();
+        let command = EngineCommand {
+            command_id,
+            actor: controller,
+            action: PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost: None, pay_buyback: false },
+        };
+        match commands::execute_command(&mut self.state, &self.script_runtime, command) {
+            Ok(outcome) => {
+                let mut events_so_far = events_so_far;
+                events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+                events_so_far.extend(outcome.events);
+                self.pending_payment = outcome.requires_payment;
+                if outcome.broke_pass_chain {
+                    self.state.consecutive_passes = 0;
+                }
+                ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
+            }
+            Err(_err) => {
+                self.state.pending_timing_bypass = None;
+                self.state.pending_free_cast = None;
+                let mut final_events: std::collections::VecDeque<GameEventKind> = events_so_far.into();
+                final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
+                ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() }
             }
         }
     }

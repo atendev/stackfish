@@ -138,6 +138,24 @@ impl Engine {
                     self.advance_or_finish_each_player(stack_id, events_so_far, each_player)
                 }
             },
+            // `Game.Ops.CastSpell`'s own result reached after a resumed
+            // coroutine stops yielding (e.g. `Game.SelectTargets` first,
+            // then `Game.Ops.CastSpell(...)` once resumed) - see
+            // `resolve_pending_cast`'s own doc comment (`misc_effects.rs`)
+            // for the shared execute_command-based logic.
+            //
+            // TODO: not `ForEachPlayer`-aware - a per-player cast request
+            // mid-loop (`each_player: Some(_)`) isn't a supported combination
+            // yet (no real card needs "each player may cast a card" today,
+            // same "named, not silently wrong" stance `PendingZoneMoves`'
+            // own batching support didn't need until a real card forced it);
+            // falls through to `advance_or_finish_each_player` as if this
+            // player's own invocation had returned `Finished` instead,
+            // silently skipping the requested cast rather than performing it.
+            OperationOutcome::PendingCast { card, modes, targets, x_value, free } => match each_player {
+                None => self.resolve_pending_cast(card, modes, targets, x_value, free, stack_id, controller, events_so_far),
+                Some(_) => self.advance_or_finish_each_player(stack_id, events_so_far, each_player),
+            },
         }
     }
 

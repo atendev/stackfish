@@ -1,23 +1,34 @@
-//! `Game.CastSpell`/`Game.PayCost` — the two functions below are called
-//! *from* a card's Lua setup or operation callback, asking the engine to do
-//! something on the script's behalf; the engine still decides legality
-//! (DESIGN.md: "Lua asks, Rust decides"). Neither is bound into the Lua
-//! `Game` table yet — real, still-open gaps.
+//! `Game.PayCost` — the function below is called *from* a card's Lua setup
+//! or operation callback, asking the engine to do something on the script's
+//! behalf; the engine still decides legality (DESIGN.md: "Lua asks, Rust
+//! decides"). Not bound into the Lua `Game` table yet — a real, still-open
+//! gap.
 //!
-//! This file originally sketched a third category too — ability/continuous-
-//! effect/replacement-effect registration and target selection
-//! (`Game.RegisterTriggeredAbility`/`Game.AddContinuousEffect`/
-//! `Game.ReplaceEvent`/`Game.SelectTargets`) — but that's since been built
-//! for real via a different mechanism: `script::builders`' fluent
-//! `Game.Create*Ability`/`Game.CreateReplacementEffect` builders
-//! (`ScriptRuntime::run_card_script` drains their queued results into
-//! `GameState` with a real allocated id/timestamp) and `script::globals`'
-//! coroutine-based `Game.SelectTargets` (a literal `coroutine.yield` Lua
-//! closure — the synchronous `Vec<Target>` shape this file once sketched
-//! couldn't have worked at all, since mlua 0.9 without the `async` feature
-//! can't suspend from inside a Rust-bound closure). See those two modules,
-//! not this file, for how a card actually registers an ability or asks for
-//! a target today.
+//! This file originally sketched three other categories too, none of which
+//! still belong here:
+//! - Ability/continuous-effect/replacement-effect registration and target
+//!   selection (`Game.RegisterTriggeredAbility`/`Game.AddContinuousEffect`/
+//!   `Game.ReplaceEvent`/`Game.SelectTargets`) — built for real via a
+//!   different mechanism: `script::builders`' fluent `Game.Create*Ability`/
+//!   `Game.CreateReplacementEffect` builders (`ScriptRuntime::run_card_script`
+//!   drains their queued results into `GameState` with a real allocated
+//!   id/timestamp) and `script::globals`' coroutine-based `Game.SelectTargets`
+//!   (a literal `coroutine.yield` Lua closure — the synchronous `Vec<Target>`
+//!   shape this file once sketched couldn't have worked at all, since mlua
+//!   0.9 without the `async` feature can't suspend from inside a Rust-bound
+//!   closure).
+//! - `Game.CastSpell` — built for real as `Game.Ops.CastSpell` (`script::
+//!   globals`), decoded into `OperationOutcome::PendingCast` and carried out
+//!   by `engine::resolve::misc_effects::resolve_pending_cast`. Same "outcome
+//!   describes, engine acts" split `Game.Ops.SacrificeChosen`/`DiscardChosen`
+//!   already established — this file's own synchronous `&mut GameState`
+//!   signature could never have worked either, for the same structural
+//!   reason `Game.SelectTargets` couldn't: casting needs `commands::
+//!   execute_command`'s full pipeline (payment pause, replacement checks,
+//!   ...), which no function bound directly on `GameState` has access to.
+//!
+//! See those modules, not this file, for how a card actually registers an
+//! ability, asks for a target, or casts a spell today.
 //!
 //! TODO(keyword-name -> primitive/ability mapping layer, not built yet):
 //! `types::card::KeywordSet` covers the CR 702 keywords that change how an
@@ -40,22 +51,7 @@
 use crate::commands::CommandError;
 use crate::types::cost::PaymentPlan;
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, PlayerId};
-
-/// `Game.CastSpell` — a script requesting the engine cast a spell on a
-/// player's behalf (e.g. "you may cast target spell card from exile
-/// without paying its mana cost"), not the normal player-initiated path
-/// (`PlayerActionKind::CastSpell`). Still goes through the same legality
-/// checks; `free` skips the mana cost specifically — other additional
-/// costs still apply unless the card's own effect says otherwise.
-pub fn cast_spell(_state: &mut GameState, _card: ObjectId, _controller: PlayerId, _free: bool) -> Result<(), CommandError> {
-    // TODO: build the equivalent of a CastSpell EngineCommand (modes/
-    // targets/x_value need defaults or params - "cast target spell" effects
-    // usually specify these themselves, so this signature is likely
-    // incomplete) and run it through commands::execute_command, skipping
-    // mana cost collection if free.
-    todo!()
-}
+use crate::types::ids::PlayerId;
 
 /// `Game.PayCost`.
 pub fn pay_cost(_state: &mut GameState, _payer: PlayerId, _plan: PaymentPlan) -> Result<(), CommandError> {

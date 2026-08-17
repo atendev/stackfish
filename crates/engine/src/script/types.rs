@@ -112,11 +112,28 @@ pub enum ScriptZoneMoveKind {
 /// `engine`), so this variant hands the *request* back up instead of trying
 /// to perform it itself, the same "outcome describes, engine acts" split
 /// `NeedsChoice` already established.
+/// `PendingCast` (CR 601.2/702.85a-style "you may cast this without paying
+/// its mana cost") is `Game.Ops.CastSpell(card, opts)`'s own result-table
+/// shape (`{ cast_spell = {...} }`), same "outcome describes, engine acts"
+/// split `PendingZoneMoves` already established — casting needs
+/// `commands::execute_command`'s full pipeline (payment pause, replacement
+/// checks, ...), which `ScriptRuntime` has no access to. Follows the same
+/// synthetic-`PlayerActionKind::CastSpell`-via-`execute_command` shape
+/// `Engine::submit_cascade_cast`/`submit_madness_cast` already established
+/// for their own (non-scripted) equivalents — `engine::resolve::misc_effects
+/// ::resolve_misc_or_script_effect` is this variant's only consumer, and
+/// mirrors those two methods' own command-building/pause-folding logic.
+/// `free` (CR 702.85a's own "without paying its mana cost") reuses
+/// `GameState::pending_free_cast`, which hardcodes `from_zone: Exile` (see
+/// that field's own doc comment) — TODO: a script wanting "cast this for
+/// free from a zone other than exile" isn't representable yet, same
+/// limitation Cascade's own free cast already has.
 #[derive(Debug)]
 pub enum OperationOutcome {
     Finished,
     NeedsChoice { thread: ScriptHandle, request: ScriptChoiceRequest },
     PendingZoneMoves(Vec<(ScriptZoneMoveKind, Vec<ObjectId>)>),
+    PendingCast { card: ObjectId, modes: Vec<u32>, targets: Vec<Target>, x_value: Option<u32>, free: bool },
 }
 
 /// Shared, interior-mutable store for loaded Lua callbacks plus whatever a

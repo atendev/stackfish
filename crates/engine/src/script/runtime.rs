@@ -17,8 +17,8 @@ use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifi
 use crate::types::target::TargetSpec;
 
 use super::decode::{
-    decode_condition_value, decode_operation_value, decode_script_choice_request, decode_target_requirement_table,
-    parse_card_type_name, parse_color_string, parse_keyword_name,
+    decode_condition_value, decode_operation_value, decode_script_choice_request, decode_target_pick,
+    decode_target_requirement_table, parse_card_type_name, parse_color_string, parse_keyword_name,
 };
 use super::encode::{event_to_lua, state_to_lua};
 use super::globals::bind_game_globals;
@@ -809,6 +809,30 @@ impl ScriptRuntime {
         }
         if !moves.is_empty() {
             return Ok(OperationOutcome::PendingZoneMoves(moves));
+        }
+        // `Game.Ops.CastSpell(card, opts)` (`globals.rs`) returns
+        // `{ cast_spell = { card, free, modes, targets, x_value } }` - same
+        // "hand the request back up rather than perform it here" split
+        // `sacrifice_chosen`/`discard_chosen` above already establish
+        // (casting needs `commands::execute_command`'s full pipeline, which
+        // this `ScriptRuntime` has no access to - see `OperationOutcome::
+        // PendingCast`'s own doc comment). Checked after, not combined with,
+        // the zone-move keys above - no real card needs "cast a spell and
+        // also sacrifice something" in one operation, so this takes
+        // priority rather than trying to represent both in one outcome.
+        let cast_spell: Option<Table> =
+            result.get("cast_spell").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        if let Some(cast_spell) = cast_spell {
+            let card: u64 = cast_spell.get("card").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let free: bool = cast_spell.get("free").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let modes: Vec<u32> = cast_spell.get("modes").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let x_value: Option<u32> =
+                cast_spell.get("x_value").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let target_picks: Vec<Table> =
+                cast_spell.get("targets").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            let targets =
+                target_picks.iter().map(decode_target_pick).collect::<Result<Vec<Target>, ScriptError>>()?;
+            return Ok(OperationOutcome::PendingCast { card: ObjectId(card), modes, targets, x_value, free });
         }
         Ok(OperationOutcome::Finished)
     }

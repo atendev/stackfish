@@ -11,7 +11,7 @@ use crate::types::card::{CardTypeSet, KeywordSet, Subtype, SupertypeSet};
 use crate::types::counter::CounterKind;
 use crate::types::cost::{FilterController, FilterSpec};
 use crate::types::effect::{AffectedFilter, EffectFilter, EffectPayload, LandwalkQuality, Layer};
-use crate::types::ids::{ObjectId, ScriptHandle};
+use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{Color, ColorSet, ManaUnit};
 use crate::types::target::{ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement};
 use crate::types::zone::ZoneKind;
@@ -810,6 +810,24 @@ pub(crate) fn decode_script_choice_request(
         }
         "may_choose" => Ok(ScriptChoiceRequest::MayChoose),
         other => Err(ScriptError::RuntimeError(format!("unknown script choice request op '{other}'"))),
+    }
+}
+
+/// Decodes one `{kind, id}` picked-target table — the same shape
+/// `ScriptRuntime::resume_operation`'s own encode side produces as the
+/// answer to a `Game.SelectTargets`/`Game.ChooseN` yield (`kind` one of
+/// `"object"`/`"player"`/`"ability"`). Used by `Game.Ops.CastSpell`'s
+/// `opts.targets` decode (`handle_operation_result`) to turn a script's
+/// already-picked targets (gathered via its own prior `Game.SelectTargets`/
+/// `Game.ChooseN` calls) back into a real `Target`.
+pub(crate) fn decode_target_pick(table: &Table) -> Result<Target, ScriptError> {
+    let kind: String = table.get("kind").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    let id: u64 = table.get("id").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+    match kind.as_str() {
+        "object" => Ok(Target::Object(ObjectId(id))),
+        "player" => Ok(Target::Player(PlayerId(id as u32))),
+        "ability" => Ok(Target::Ability(ObjectId(id))),
+        other => Err(ScriptError::RuntimeError(format!("unknown target pick kind '{other}'"))),
     }
 }
 
