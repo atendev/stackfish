@@ -1,5 +1,6 @@
 use crate::types::card::CardDefinition;
 use crate::types::counter::CounterSet;
+use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, SequenceNo};
 use crate::types::zone::ZoneKind;
 
@@ -168,27 +169,51 @@ pub struct GameObject {
 }
 
 impl GameObject {
+    /// Builds a brand-new object (`lineage: None` — a zone-change successor
+    /// that needs to carry lineage forward doesn't go through this
+    /// constructor, it clones/struct-updates the prior `GameObject`
+    /// instead). `controller` defaults to `owner` (CR 110.2).
+    /// `controlled_since_turn` reads `state.turn_number` live rather than
+    /// taking a bare `u32`, so a caller can't pass a stale value.
+    /// `visibility` defaults to fully public for a battlefield object, and
+    /// visible only to `owner` for anything else — the ordinary zone-default
+    /// case; a caller with a real per-object exception (e.g. a face-down
+    /// permanent) overrides `visibility` on the result.
     pub fn new(
-        _object_id: ObjectId,
-        _definition: CardDefinition,
-        _owner: PlayerId,
-        _zone: ZoneKind,
-        _timestamp: SequenceNo,
+        object_id: ObjectId,
+        definition: CardDefinition,
+        owner: PlayerId,
+        zone: ZoneKind,
+        timestamp: SequenceNo,
+        state: &GameState,
     ) -> Self {
-        // TODO: controller defaults to owner at creation (CR 110.2);
-        // lineage: ObjectLineage { previous: None } for a brand-new object
-        // (vs. a zone-change successor, which needs a different
-        // constructor or a lineage param - not covered by this signature
-        // yet); tapped/flipped/face_down/phased_out: false; damage_marked:
-        // 0; deathtouched: false; counters: CounterSet::new(); attachments: empty;
-        // attached_to: None; controlled_since_turn: needs the current
-        // GameState.turn_number, which this signature has no way to read -
-        // this constructor will need a turn_number param (or a &GameState)
-        // before it can set this field correctly; visibility: needs a
-        // sensible default tied to `zone`'s default (e.g. fully public if
-        // zone == Battlefield, owner-only otherwise) - VisibilityPolicy
-        // doesn't have a zone-aware constructor yet, may need one.
-        todo!()
+        let public = zone == ZoneKind::Battlefield;
+        GameObject {
+            object_id,
+            lineage: ObjectLineage { previous: None },
+            definition,
+            copiable_override: None,
+            owner,
+            controller: owner,
+            zone,
+            tapped: false,
+            flipped: false,
+            face_down: false,
+            phased_out: false,
+            damage_marked: 0,
+            deathtouched: false,
+            counters: CounterSet::new(),
+            attachments: Vec::new(),
+            attached_to: None,
+            attached_to_player: None,
+            timestamp,
+            controlled_since_turn: state.turn_number,
+            is_token: false,
+            is_commander: false,
+            visibility: VisibilityPolicy { public, visible_to: if public { Vec::new() } else { vec![owner] } },
+            copy_generation: 0,
+            entered_via_escape: false,
+        }
     }
 
     /// `zone == Battlefield`. A permanent is the only state a `GameObject`

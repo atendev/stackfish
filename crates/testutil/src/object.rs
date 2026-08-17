@@ -1,9 +1,11 @@
 use stackfish_engine::*;
 
 /// A fresh, untapped, unmodified `GameObject` wrapping `definition`, owned
-/// and controlled by `owner`, sitting in `zone`. `GameObject::new` is still
-/// `todo!()` in the engine itself, so every test that needs an object builds
-/// one by hand — this is that hand-built literal, in one place.
+/// and controlled by `owner`, sitting in `zone`. Deliberately not built via
+/// `GameObject::new` — that constructor needs a `&GameState` (for
+/// `controlled_since_turn`) and derives `visibility` from `zone`, neither of
+/// which most fixtures want to fuss with; this helper always sets
+/// `controlled_since_turn: 0` and fully public `visibility`, in one place.
 pub fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
     GameObject {
         object_id: id,

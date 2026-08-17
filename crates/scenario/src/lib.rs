@@ -5,11 +5,13 @@
 //! Deliberately does NOT call the engine's own inherent constructors
 //! (`GameObject::new`, `PlayerState::new`, `Zone::new`, etc) to build the
 //! initial state — it builds `GameState`/`GameObject`/`PlayerState`/`Zone`
-//! via direct struct literals instead, since their fields are `pub`. That
-//! keeps this tool independent of which inherent-method bodies have been
-//! filled in yet (`GameObject::new` is still `todo!()` as of this writing),
-//! and means setup+assertions (no actions) already runs for real today, with
-//! zero panics, as a baseline smoke test of the Phase 1 data model.
+//! via direct struct literals instead, since their fields are `pub`. Partly
+//! bootstrapping (`GameObject::new` now takes `&GameState` itself, which
+//! doesn't exist yet while this tool is still assembling the very first
+//! one), partly to keep this tool independent of which inherent-method
+//! bodies have been filled in yet — and means setup+assertions (no actions)
+//! already runs for real today, with zero panics, as a baseline smoke test
+//! of the Phase 1 data model.
 //!
 //! Two exceptions, implemented for real (not `todo!()`) because nothing
 //! else can construct them — `CounterSet`/`Engine` both have a private
