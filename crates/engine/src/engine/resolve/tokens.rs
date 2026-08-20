@@ -189,10 +189,8 @@ impl Engine {
             }
             register_token_abilities(&mut self.state, token_id, spec, controller);
             if matches!(spec, TokenSpec::CopyOf(_, _)) {
-                // TODO: a script error here is silently dropped,
-                // same gap every other run_card_script call site
-                // in this file already flags.
-                let _ = self.script_runtime.run_card_script(&mut self.state, &token_def, token_id);
+                let result = self.script_runtime.run_card_script(&mut self.state, &token_def, token_id);
+                self.record_script_error(token_id, &token_def.script_ref, result);
             }
             // Checked after self-registration above
             // so a `CopyOf` token's freshly re-run

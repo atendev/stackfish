@@ -385,10 +385,8 @@ impl Engine {
         }
         commands::remap_abilities(&mut self.state, stack_id, new_id);
         if let Some(definition) = definition_for_script {
-            // TODO: a script error here is silently dropped, same gap
-            // ResolveStackTop's operation-invocation path already flags (no
-            // error surface from ResolveStackTop back to a StepStatus yet).
-            let _ = self.script_runtime.run_card_script(&mut self.state, &definition, new_id);
+            let result = self.script_runtime.run_card_script(&mut self.state, &definition, new_id);
+            self.record_script_error(new_id, &definition.script_ref, result);
         }
 
         Some(GameEventKind::ZoneChange {

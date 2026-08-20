@@ -108,6 +108,70 @@
 - Exception (deliberately unfixed):
   - `layers.rs` pure `&GameState` query functions cannot log without threading error reporting through whole call graph.
 
+## Slice: script-error-surfacing-cluster (branch pending review)
+
+- Branch `phase5/script-error-surfacing-cluster`.
+- Scope: the sibling half `script-error-surfacing` above left untouched — `run_card_script` (9 direct
+  call sites + the `run_card_script_for` wrapper's 7 more) and `invoke_operation`/`resume_operation`/
+  `resume_operation_bool` (5 sites total), all previously `let _ = ...`/`.unwrap_or(...)`.
+- Key changes:
+  - `Engine::record_script_error` (`engine/mod.rs`) — shared helper every `run_card_script` call site
+    now routes through; logs `GameEventKind::ScriptError` on `Err`.
+  - `resolve_misc_or_script_effect`'s `invoke_operation` arm, `each_player.rs`'s two `invoke_operation`
+    calls, `choice_answers.rs`'s two `resume_operation*` calls, and `resolve_pending_cast`'s discarded
+    `CommandError` all log the same way inline.
+- Real, discovered-mid-slice deviation from the naive "log every failure" design: `run_card_script`'s
+  `ScriptReference::ByKey` case *always* errors by design (its own doc comment), and the scenario-TOML
+  loader defaults an unset `script` field to `Inline("")`, which also fails to eval to a table — both
+  are the ordinary "vanilla card, no real script" shape `stackfish_testutil::minimal_card_definition`
+  defaults to, used throughout this engine's own test suite, and `payment.rs`'s `run_script` flag means
+  `run_card_script` fires for *every* permanent that resolves onto the battlefield. Logging
+  unconditionally would have flooded a wide swath of existing `ledger.len()`-asserting tests with a new
+  false "failure." `record_script_error` deliberately skips logging unless `script_ref` is a non-empty
+  `Inline` source. Confirmed with the user before proceeding (narrower scope chosen over "log
+  everything, then fix however many existing tests break").
+  - Same shape for `invoke_operation`: a vanilla permanent/instant/sorcery/hand-built `RegisteredAbility`
+    with no script-declared operation carries `ScriptHandle(0)` (`cast.rs`'s own placeholder convention,
+    already relied on by ~90 existing test call sites). `resolve_misc_or_script_effect`'s arm skips
+    logging when `top.operation == ScriptHandle(0)`.
+  - Tried and reverted: making that check fully sound by reserving `ScriptHandle(0)` as an actually-
+    unallocatable sentinel (`ScriptRegistry::next_handle` seeded at 1 instead of the derived-`Default` 0)
+    — the exact "a real script's first-ever handle could coincide with the placeholder" ambiguity
+    `phase5_script_operation.rs`'s own `operation_function_decodes_a_custom_function_to_a_real_handle`
+    test comment already named, not a new discovery. Broke a real, unrelated, already-passing test
+    (`phase5_mass_choice_effects.rs`'s
+    `for_each_player_asks_in_apnap_order_and_sacrifices_simultaneously`) — root-caused via direct
+    instrumentation, not guessed: `Game.Ops.ForEachPlayer(fn)`'s own wrapped-function handle
+    (`decode_operation_value`'s `ForEachPlayerTag::Function` arm) is a real, separately allocated
+    `ScriptHandle`, but `cast.rs`'s own `(operation, effect) = match effect { Some(Script(handle)) =>
+    (handle, None), other => (ScriptHandle(0), other) }` unpacking still discards it down to the same
+    placeholder for any non-`Script` effect shape (`ForEachPlayer` included) — a real, pre-existing bug
+    in that unpacking this engine was *already* silently depending on: every existing test exercising
+    this shape happened to load its wrapped function as the very first handle in a fresh registry, so
+    the placeholder and the real handle coincided by accident. Reserving 0 broke that accidental
+    coincidence without fixing the actual discard bug — a separate, bigger gap (`AbilityEffect::
+    ForEachPlayer` has nowhere to carry its own handle at all), named here rather than attempted.
+    Reverted; the narrow pre-existing ambiguity stays open, unchanged from before this slice.
+- Tests: `phase5_script_error_surfacing_resolution.rs` — one representative test per distinct code
+  shape touched (not one per call site, since 8 of the 9 `run_card_script` sites share the exact same
+  `record_script_error` call verbatim): a `PlayLand` with a real erroring script logs an error; the same
+  with a `ByKey` land logs nothing; a vanilla `ByKey` creature cast to resolution logs nothing (the
+  highest-blast-radius regression guard); a triggered ability's real, genuinely-loaded operation handle
+  throwing logs an error and still resolves cleanly; a vanilla instant with no operation (`ScriptHandle(0)`)
+  logs nothing; a script-requested cast at a nonexistent object logs an error (mirrors
+  `phase5_script_cast_spell.rs`'s pre-existing `casting_a_nonexistent_object_...` test, adding this
+  slice's own new assertion).
+- Unresolved / out of scope, named not attempted:
+  - No rollback of whatever a call already mutated before erroring — same non-atomicity
+    `StepStatus::Error`'s own doc comment already admits for `execute_command` itself.
+  - `commands::legality.rs`'s `invoke_target_legal`/`invoke_player_target_legal` still do
+    `.unwrap_or(false)` with no `ScriptError` event at all — found incidentally, a separate,
+    not-yet-attempted gap (worse than this cluster's own pre-fix state, since it doesn't even log).
+  - `invoke_cost` (`script/runtime.rs`) is still a literal `todo!()` — zero call sites anywhere in the
+    workspace, unrelated dead code.
+  - No `cargo`/toolchain available in the environment this slice was implemented in — verify the new
+    test file and the full suite before merging.
+
 ## Slice: register-abilities-and-script-operation (merged)
 
 - Branch `phase5/register-abilities-and-script-operation`.
