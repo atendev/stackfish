@@ -13,7 +13,7 @@ use crate::script::OperationOutcome;
 use crate::types::ability::{apply_text_box, AbilityEffect, CopyExceptions};
 use crate::types::command::{EngineCommand, PlayerActionKind};
 use crate::types::event::GameEventKind;
-use crate::types::ids::{ObjectId, PlayerId, Target};
+use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::stack::StackObject;
 use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
@@ -85,11 +85,8 @@ impl Engine {
                 });
                 if became_copy {
                     commands::purge_granted_abilities(&mut self.state, source_id);
-                    // TODO: a script error here is silently
-                    // dropped, same gap every other
-                    // run_card_script call site in this file
-                    // already flags.
-                    let _ = self.script_runtime.run_card_script(&mut self.state, &snapshot, source_id);
+                    let result = self.script_runtime.run_card_script(&mut self.state, &snapshot, source_id);
+                    self.record_script_error(source_id, &snapshot.script_ref, result);
                     // CR 707.9a: Vesuvan Doppelganger's own
                     // "except it has [linked upkeep
                     // ability]" - see
@@ -186,13 +183,10 @@ impl Engine {
                     }
                     commands::purge_granted_abilities(&mut self.state, a_id);
                     commands::purge_granted_abilities(&mut self.state, b_id);
-                    // TODO: a script error here is
-                    // silently dropped, same gap
-                    // every other run_card_script
-                    // call site in this file already
-                    // flags.
-                    let _ = self.script_runtime.run_card_script(&mut self.state, &a_new, a_id);
-                    let _ = self.script_runtime.run_card_script(&mut self.state, &b_new, b_id);
+                    let a_result = self.script_runtime.run_card_script(&mut self.state, &a_new, a_id);
+                    self.record_script_error(a_id, &a_new.script_ref, a_result);
+                    let b_result = self.script_runtime.run_card_script(&mut self.state, &b_new, b_id);
+                    self.record_script_error(b_id, &b_new.script_ref, b_result);
 
                     events.push(GameEventKind::TextBoxesExchanged { a: a_id, b: b_id });
                 }
@@ -231,11 +225,49 @@ impl Engine {
             }
             Some(AbilityEffect::Script(_)) => ControlFlow::Continue(events),
             _ => {
-                // TODO: a script error here is silently
-                // dropped - no path from ResolveStackTop
-                // back to a StepStatus error exists for a
-                // mid-resolution script failure yet.
-                match self.script_runtime.invoke_operation(top.operation, &mut self.state, top.source, top.controller) {
+                // A script error here is logged as a GameEventKind::
+                // ScriptError rather than silently dropped - no path from
+                // ResolveStackTop back to a StepStatus error exists for a
+                // mid-resolution script failure, so the resolving spell/
+                // ability still falls through to StackObjectResolved/
+                // ReplacementCheck as though its effect ran (unchanged
+                // fallback), but the failure is now visible in the ledger.
+                // Skipped for `ScriptHandle(0)` - `cast.rs`'s own
+                // `(operation, effect) = match effect { Some(Script(handle))
+                // => (handle, None), other => (ScriptHandle(0), other) }`
+                // uses it as "nothing real bound to it," the placeholder
+                // every permanent/vanilla spell and every hand-built
+                // RegisteredAbility with no script operation carries;
+                // logging there would be a guaranteed false "failure" for
+                // the overwhelmingly common case rather than a real script
+                // bug. Not a fully reserved sentinel, though - confirmed by
+                // a real regression while building this slice:
+                // `Game.Ops.ForEachPlayer(fn)`'s own wrapped-function
+                // handle (`decode_operation_value`'s `ForEachPlayerTag::
+                // Function` arm) is a genuinely different, separately
+                // allocated handle that `cast.rs`'s match above still
+                // discards down to this same `ScriptHandle(0)` (a real,
+                // pre-existing bug in that unpacking, not something this
+                // slice attempts to fix) - so a `ForEachPlayer`-wrapped
+                // custom function is *always* invoked through
+                // `each_player.rs`'s own path, never reaches here, and this
+                // guard's only real gap is the narrow, pre-existing
+                // ambiguity `phase5_script_operation.rs`'s own
+                // `operation_function_decodes_a_custom_function_to_a_real_handle`
+                // test comment already named: a plain (non-`ForEachPlayer`)
+                // custom-function operation that happens to be the very
+                // first script handle a fresh `ScriptRuntime` ever allocates
+                // would coincidentally read as this same placeholder if it
+                // errors. Narrower and pre-existing, not introduced here.
+                let outcome = self.script_runtime.invoke_operation(top.operation, &mut self.state, top.source, top.controller);
+                if let Err(ref e) = outcome {
+                    if top.operation != ScriptHandle(0) {
+                        self.log_events(vec![GameEventKind::ScriptError {
+                            message: format!("operation script error on source {:?}: {e:?}", top.source),
+                        }]);
+                    }
+                }
+                match outcome {
                     Ok(OperationOutcome::Finished) | Err(_) => ControlFlow::Continue(events),
                     // Backlog item 9: the script called
                     // Game.SelectTargets and yielded mid-
@@ -307,11 +339,13 @@ impl Engine {
     /// untouched, unlike the two Rust-driven callers (each a fresh top-level
     /// entry point answering a raised pause, not a nested call).
     ///
-    /// TODO: a script-requested cast that turns out illegal (bad target,
-    /// wrong zone, ...) is silently dropped - same "script error swallowed"
-    /// gap `resolve_misc_or_script_effect`'s own TODO above already flags
-    /// for `invoke_operation`'s `Err(_)` arm - no path back to the script to
-    /// report why the cast didn't happen.
+    /// A script-requested cast that turns out illegal (bad target, wrong
+    /// zone, ...) is logged as a `GameEventKind::ScriptError` rather than
+    /// silently dropped - same fallback `resolve_misc_or_script_effect`'s
+    /// own `invoke_operation` arm takes. There's still no path back to the
+    /// script itself to report why the cast didn't happen (`OperationOutcome
+    /// ::PendingCast` is fire-and-forget); this only makes the failure
+    /// observable in the ledger.
     pub(super) fn resolve_pending_cast(
         &mut self,
         card: ObjectId,
@@ -344,9 +378,12 @@ impl Engine {
                 }
                 ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
             }
-            Err(_err) => {
+            Err(err) => {
                 self.state.pending_timing_bypass = None;
                 self.state.pending_free_cast = None;
+                self.log_events(vec![GameEventKind::ScriptError {
+                    message: format!("script-requested cast failed on source {stack_id:?}: {err:?}"),
+                }]);
                 let mut final_events: std::collections::VecDeque<GameEventKind> = events_so_far.into();
                 final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
                 ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() }

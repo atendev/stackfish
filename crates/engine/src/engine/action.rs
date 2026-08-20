@@ -171,8 +171,10 @@ impl Engine {
         // registry), so it just reports which ids became new
         // battlefield permanents; this is the "one place performs
         // the side effect" half, same split priority_handoff/broke_pass_chain
-        // already use. TODO: a script error here is silently
-        // dropped, same gap ResolveStackTop's own call flags.
+        // already use. A script error here is logged as a
+        // GameEventKind::ScriptError (record_script_error) rather than
+        // silently dropped - see its own doc comment for the "no rollback"
+        // caveat.
         //
         // CR 603.6d/614.1c: `battlefield_entries` is only ever
         // populated by `PlayLand` (a hand->battlefield move) as of
@@ -193,7 +195,8 @@ impl Engine {
         // generalized to a non-land battlefield-entry producer.
         for object_id in &outcome.battlefield_entries {
             if let Some(definition) = self.state.object(*object_id).map(|o| o.definition.clone()) {
-                let _ = self.script_runtime.run_card_script(&mut self.state, &definition, *object_id);
+                let result = self.script_runtime.run_card_script(&mut self.state, &definition, *object_id);
+                self.record_script_error(*object_id, &definition.script_ref, result);
             }
             let counter_events = replacement::apply_enters_battlefield_modifiers(
                 &mut self.state,

@@ -88,10 +88,14 @@ impl Engine {
             sacrifice_ids: Vec::new(),
             discard_ids: Vec::new(),
         };
-        let outcome = self
-            .script_runtime
-            .invoke_operation(each_player.operation, &mut self.state, each_player.source, first_player)
-            .unwrap_or(OperationOutcome::Finished);
+        let result =
+            self.script_runtime.invoke_operation(each_player.operation, &mut self.state, each_player.source, first_player);
+        if let Err(ref e) = result {
+            self.log_events(vec![GameEventKind::ScriptError {
+                message: format!("operation script error on source {:?}: {e:?}", each_player.source),
+            }]);
+        }
+        let outcome = result.unwrap_or(OperationOutcome::Finished);
         self.process_state =
             self.settle_script_operation_outcome(outcome, top.stack_id, first_player, events, Some(each_player));
         ControlFlow::Break(StepStatus::Progressed)
@@ -185,10 +189,14 @@ impl Engine {
             ];
             return self.chain_pending_zone_moves(moves, ScriptedZoneMoveThen::StackResolution { stack_id }, events_so_far);
         };
-        let outcome = self
-            .script_runtime
-            .invoke_operation(loop_state.operation, &mut self.state, loop_state.source, next_player)
-            .unwrap_or(OperationOutcome::Finished);
+        let result =
+            self.script_runtime.invoke_operation(loop_state.operation, &mut self.state, loop_state.source, next_player);
+        if let Err(ref e) = result {
+            self.log_events(vec![GameEventKind::ScriptError {
+                message: format!("operation script error on source {:?}: {e:?}", loop_state.source),
+            }]);
+        }
+        let outcome = result.unwrap_or(OperationOutcome::Finished);
         self.settle_script_operation_outcome(outcome, stack_id, next_player, events_so_far, Some(loop_state))
     }
 }

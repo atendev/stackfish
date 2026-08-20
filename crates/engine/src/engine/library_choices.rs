@@ -331,7 +331,8 @@ impl Engine {
                         .push_bottom(new_id);
                     self.state.objects.insert(new_id, new_object);
                     commands::remap_abilities(&mut self.state, card, new_id);
-                    let _ = self.script_runtime.run_card_script(&mut self.state, &definition_for_script, new_id);
+                    let result = self.script_runtime.run_card_script(&mut self.state, &definition_for_script, new_id);
+                    self.record_script_error(new_id, &definition_for_script.script_ref, result);
                     events_so_far.push(GameEventKind::ZoneChange {
                         object: new_id,
                         from: ZoneKind::Library,

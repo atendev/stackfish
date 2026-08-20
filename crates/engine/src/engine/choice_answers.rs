@@ -186,10 +186,13 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        let outcome = self
-            .script_runtime
-            .resume_operation(thread, &mut self.state, controller, chosen)
-            .unwrap_or(OperationOutcome::Finished);
+        let result = self.script_runtime.resume_operation(thread, &mut self.state, controller, chosen);
+        if let Err(ref e) = result {
+            self.log_events(vec![GameEventKind::ScriptError {
+                message: format!("operation script error on source {stack_id:?}: {e:?}"),
+            }]);
+        }
+        let outcome = result.unwrap_or(OperationOutcome::Finished);
         self.process_state = self.settle_script_operation_outcome(outcome, stack_id, controller, events_so_far, each_player);
         Ok(())
     }
@@ -216,10 +219,13 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        let outcome = self
-            .script_runtime
-            .resume_operation_bool(thread, &mut self.state, controller, chosen)
-            .unwrap_or(OperationOutcome::Finished);
+        let result = self.script_runtime.resume_operation_bool(thread, &mut self.state, controller, chosen);
+        if let Err(ref e) = result {
+            self.log_events(vec![GameEventKind::ScriptError {
+                message: format!("operation script error on source {stack_id:?}: {e:?}"),
+            }]);
+        }
+        let outcome = result.unwrap_or(OperationOutcome::Finished);
         self.process_state = self.settle_script_operation_outcome(outcome, stack_id, controller, events_so_far, each_player);
         Ok(())
     }
@@ -771,10 +777,8 @@ impl Engine {
                     obj.copy_generation += 1;
                 }
                 commands::purge_granted_abilities(&mut self.state, object);
-                // TODO: a script error here is silently dropped, same gap
-                // every other run_card_script call site in this file
-                // already flags.
-                let _ = self.script_runtime.run_card_script(&mut self.state, &snapshot, object);
+                let result = self.script_runtime.run_card_script(&mut self.state, &snapshot, object);
+                self.record_script_error(object, &snapshot.script_ref, result);
                 events_so_far.push(GameEventKind::BecameCopy { object, copied });
 
                 // CR 707.9e: a second copy effect was just applied to

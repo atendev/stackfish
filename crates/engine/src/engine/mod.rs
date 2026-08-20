@@ -13,6 +13,7 @@ use crate::commands::{CommandError, PendingPaymentRequest};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
+use crate::types::card::ScriptReference;
 use crate::types::config::GameSettings;
 use crate::types::cost::CostSpec;
 use crate::types::event::{GameEvent, GameEventKind};
@@ -532,7 +533,52 @@ impl Engine {
     /// rather than something this method attempts.
     pub(in crate::engine) fn run_card_script_for(&mut self, object_id: ObjectId) {
         if let Some(definition) = self.state.object(object_id).map(|o| o.definition.clone()) {
-            let _ = self.script_runtime.run_card_script(&mut self.state, &definition, object_id);
+            let result = self.script_runtime.run_card_script(&mut self.state, &definition, object_id);
+            self.record_script_error(object_id, &definition.script_ref, result);
+        }
+    }
+
+    /// Logs a `run_card_script` failure as a `GameEventKind::ScriptError`
+    /// ledger event instead of silently dropping it (the "a script error
+    /// here is silently dropped" gap named across `engine/action.rs`,
+    /// `engine/choice_answers.rs`, `engine/payment.rs`, `engine/resolve/
+    /// tokens.rs`, `engine/resolve/misc_effects.rs`, `engine/
+    /// library_choices.rs`). Mirrors the exact message convention
+    /// `triggers::collect_triggers`'s own `invoke_condition` call already
+    /// established for a script error — the caller's existing conservative
+    /// fallback (proceed as though nothing happened) is unchanged; this
+    /// only makes a *real* failure observable in the ledger rather than
+    /// invisible. No rollback of whatever the call already mutated is
+    /// attempted — same non-atomicity `StepStatus::Error`'s own doc comment
+    /// already admits for `execute_command` itself.
+    ///
+    /// Deliberately skips logging when `script_ref` is `ByKey` or an empty
+    /// `Inline` source — `run_card_script`'s own doc comment documents
+    /// `ByKey` as *always* erroring in this engine ("real integration is
+    /// expected to always hand this engine an already-resolved `Inline`
+    /// source"), and the scenario-TOML loader defaults an unset `script`
+    /// field to `Inline("")`, which fails to eval to a table the same way.
+    /// Both are the ordinary, deliberate shape of a "vanilla card, no real
+    /// script" fixture used throughout this engine's own test suite (e.g.
+    /// `stackfish_testutil::minimal_card_definition`'s `ByKey` default) —
+    /// not a real script bug, and every permanent that resolves onto the
+    /// battlefield runs through here (`payment.rs`'s `run_script` flag), so
+    /// logging unconditionally would flood the ledger with a "failure" for
+    /// nearly every existing fixture rather than surfacing the genuine
+    /// "a real script threw" case this cluster is actually about.
+    pub(in crate::engine) fn record_script_error<T>(
+        &mut self,
+        source: ObjectId,
+        script_ref: &ScriptReference,
+        result: Result<T, ScriptError>,
+    ) {
+        let has_real_script = matches!(script_ref, ScriptReference::Inline(s) if !s.is_empty());
+        if has_real_script {
+            if let Err(e) = result {
+                self.log_events(vec![GameEventKind::ScriptError {
+                    message: format!("card script error on source {source:?}: {e:?}"),
+                }]);
+            }
         }
     }
 
