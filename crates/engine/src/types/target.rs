@@ -185,11 +185,6 @@ pub enum TargetFilter {
 ///   legal candidates the caster actually submits, same as every other
 ///   shape (`commands::validate_targets` never enumerates "all possible
 ///   legal targets" itself).
-///
-/// TODO: a spell/ability with more than one distinct "target" word (e.g.
-/// "target creature and target player") needs more than one
-/// `TargetRequirement`, plural — not modeled; this is exactly one
-/// requirement per spell/ability.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TargetRequirement {
     pub filter: TargetFilter,

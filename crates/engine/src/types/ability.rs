@@ -372,11 +372,6 @@ pub enum AbilityEffect {
     /// 701.22b: `n == 0` (or an empty library) is a no-op — no pause, no
     /// event, same "no scry event occurs" text this rule states explicitly.
     ///
-    /// TODO: CR 701.22d ("whenever a player scries" trigger) — the resulting
-    /// `GameEventKind::CardsScried` event already reaches `CollectTriggers`,
-    /// but no `ConditionPrimitive::Scries` exists yet to match it (extends
-    /// backlog item 7, same "primitive ships before its own trigger
-    /// condition" precedent `Damage`/`DrawCards` already set).
     /// TODO: CR 701.22c (simultaneous multi-player scry, APNAP ordering) —
     /// single-player-effect shape only, same narrowing every prior slice
     /// takes.
@@ -388,8 +383,6 @@ pub enum AbilityEffect {
     /// new `ObjectId` per card), same convention `submit_discard` already
     /// established. CR 701.25c: `n == 0` is a no-op, same as `Scry`.
     ///
-    /// TODO: CR 701.25d ("whenever a player surveils" trigger) — same
-    /// deferred-condition gap as `Scry`'s own TODO above.
     /// TODO: CR 701.25b ("look at additional cards while you surveil") not
     /// modeled — always exactly `n` cards.
     Surveil(u32),
