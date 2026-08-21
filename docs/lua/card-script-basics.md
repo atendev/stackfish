@@ -213,6 +213,8 @@ by which specific object ends up carrying it:
 |---|---|---|
 | `target_requirement()` | An Aura's "Enchant [quality]" line, or any other spell's own base targeting (CR 601.2c/702.5a) | [targeting-and-choices.md](targeting-and-choices.md#a-cards-own-base-targeting-enchant-etc) |
 | `operation()` | A plain spell's own resolution effect (CR 608.2m) — Armageddon's "Destroy all lands," Shock's "deals 2 damage to any target" | below |
+| `alternative_costs()` | Flashback/escape-style alternative costs (CR 601.2b) | below |
+| `buyback_cost()` | Buyback's optional additional cost (CR 702.27a) | below |
 
 Both are genuinely optional — the overwhelming majority of cards need neither (a creature with
 only triggered/static abilities has no base target and no spell-level effect of its own to
@@ -256,6 +258,71 @@ return s
 A card with no `operation()` function at all keeps the pre-existing default: its effect can only
 be a Rust-native primitive supplied some other way (direct construction today; TOML has no field
 for this either — see [scenario_format.md](../scenario_format.md)).
+
+#### Writing `alternative_costs()`
+
+CR 601.2b's alternative costs — Flashback (CR 702.34a), Escape (CR 702.138a), and anything else
+built the same way — as a card's own base data, same "called once, no `GameState`/`ObjectId`"
+timing as `target_requirement()`/`operation()` above. Returns an **array**: a card can grant more
+than one alternative cost (each selectable independently when casting — see
+[targeting-and-choices.md](targeting-and-choices.md)'s cast-time announcement, same "announced at
+cast time" pattern `{X}` uses).
+
+```lua
+-- Flashback {R}: cast from the graveyard, exiled instead of going anywhere else once it leaves the stack.
+function s.alternative_costs()
+    return {
+        {
+            description = "Flashback {R}",
+            from_zone = "Graveyard",
+            costs = { Game.Costs.Mana("{R}") },
+            exile_on_leaving_stack = true,
+        },
+    }
+end
+```
+
+Each entry is a table:
+
+- `description` (required) — plain text, not mechanically enforced, but real (not silently
+  defaulted) so an announcement/UI has something to show.
+- `from_zone` (required) — a zone name string (`"Graveyard"`, `"Exile"`, ...) — the zone the card
+  must actually be in for this alternative to apply. This is also the permission grant itself
+  (CR 601.2b): declaring `from_zone = "Graveyard"` is what lets the card be cast from there at all.
+- `costs` (required) — an array of [`Game.Costs.*`](game-constants.md#gamecosts) values, the exact
+  same vocabulary [activated-abilities.md](activated-abilities.md#methods)'s `:AddCost` accepts.
+  `Game.Costs.Mana(...)` may appear at most once per entry (same rule `:AddCost` already enforces
+  for an activated ability's cost). Escape's own "exile N other cards from your graveyard" is
+  `Game.Costs.ExileFromGraveyard({ ... }, n)` alongside a mana component:
+
+  ```lua
+  costs = { Game.Costs.Mana("{2}{B}"), Game.Costs.ExileFromGraveyard({}, 4) }
+  ```
+- `exile_on_leaving_stack` (optional, default `false`) — CR 702.34a: exiled instead of its normal
+  destination the next time it leaves the stack, whether resolving or fizzling.
+- `escape` (optional, default `false`) — `true` only for an Escape-shaped alternative cost; this is
+  the only thing that structurally distinguishes "cast from a graveyard with an escape ability"
+  from any other graveyard-cast alternative cost (both share `from_zone = "Graveyard"`).
+
+A card with no `alternative_costs()` function at all keeps the pre-existing default: no alternative
+costs at all, same as the overwhelming majority of real cards.
+
+#### Writing `buyback_cost()`
+
+CR 702.27a Buyback's optional additional cost — paid *in addition to* whatever cost already
+applies (usually the printed mana cost), never a replacement for it, so it's a single flat
+mana-cost string rather than the fuller `costs` array `alternative_costs()` uses:
+
+```lua
+function s.buyback_cost()
+    return "{2}"
+end
+```
+
+Parsed directly via the same mana-cost grammar [`Game.Costs.Mana(...)`](game-constants.md#gamecosts)
+itself uses — a malformed string (e.g. `"not a cost"`) is a real load error, not a silently-ignored
+buyback. A card with no `buyback_cost()` function at all keeps the pre-existing default: no
+buyback cost, same as the overwhelming majority of real cards.
 
 ## Hidden information
 

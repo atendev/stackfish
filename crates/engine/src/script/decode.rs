@@ -9,7 +9,7 @@ use mlua::{Function, Lua, Table, Value};
 use crate::types::ability::{AbilityEffect, ConditionSpec, CopyExceptions, CounterAmount};
 use crate::types::card::{CardTypeSet, KeywordSet, Subtype, SupertypeSet};
 use crate::types::counter::CounterKind;
-use crate::types::cost::{FilterController, FilterSpec};
+use crate::types::cost::{AlternativeCost, CostSpec, FilterController, FilterSpec};
 use crate::types::effect::{AffectedFilter, EffectFilter, EffectPayload, LandwalkQuality, Layer};
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{Color, ColorSet, ManaUnit};
@@ -141,6 +141,58 @@ pub(crate) fn decode_cost_component_value(value: Value) -> Result<CostComponent,
             other.type_name()
         ))),
     }
+}
+
+/// `ScriptRuntime::build_alternative_costs`'s per-entry table decoder — one
+/// `s.alternative_costs()` return-table entry becomes one
+/// `AlternativeCost::Replacement`. `costs` accumulates the same way
+/// `ActivatedAbilityBuilder::AddCost` does (one `Game.Costs.*` value per
+/// array entry, via `decode_cost_component_value` above) rather than
+/// inventing a second cost-table shape — `Game.Costs.Mana` may appear at
+/// most once, same "an activated ability has only one mana-cost component"
+/// rule `AddCost` already enforces. `from_zone` reuses `parse_zone_kind_name`
+/// below. `exile_on_leaving_stack`/`escape` default to `false` when omitted —
+/// the overwhelming majority of `Replacement` alternatives (anything that
+/// isn't Flashback/Escape) need neither.
+pub(crate) fn decode_alternative_cost_table(table: Table) -> Result<AlternativeCost, ScriptError> {
+    let description: String = table.get("description").map_err(|e| {
+        ScriptError::LoadError(format!("alternative_costs() entry missing required 'description': {e}"))
+    })?;
+    let from_zone_name: String = table.get("from_zone").map_err(|e| {
+        ScriptError::LoadError(format!("alternative_costs() entry missing required 'from_zone': {e}"))
+    })?;
+    let from_zone = parse_zone_kind_name(&from_zone_name)?;
+    let exile_on_leaving_stack: bool = table
+        .get::<_, Option<bool>>("exile_on_leaving_stack")
+        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+        .unwrap_or(false);
+    let escape: bool = table
+        .get::<_, Option<bool>>("escape")
+        .map_err(|e| ScriptError::LoadError(e.to_string()))?
+        .unwrap_or(false);
+
+    let costs_table: Table = table.get("costs").map_err(|e| {
+        ScriptError::LoadError(format!("alternative_costs() entry missing required 'costs': {e}"))
+    })?;
+    let mut cost = CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() };
+    for entry in costs_table.sequence_values::<Value>() {
+        let value = entry.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        match decode_cost_component_value(value)? {
+            CostComponent::Additional(additional) => cost.additional.push(additional),
+            CostComponent::Mana(mana) => {
+                if cost.mana.is_some() {
+                    return Err(ScriptError::LoadError(
+                        "alternative_costs() entry's costs contains Game.Costs.Mana(...) more \
+                         than once - an alternative cost has only one mana-cost component"
+                            .to_string(),
+                    ));
+                }
+                cost.mana = Some(mana);
+            }
+        }
+    }
+
+    Ok(AlternativeCost::Replacement { description, cost, from_zone, exile_on_leaving_stack, escape })
 }
 
 /// `ActivatedAbilityBuilder`'s `:AddCost`/`Game.Costs.Sacrifice`/`Discard`/
