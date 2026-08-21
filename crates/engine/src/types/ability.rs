@@ -336,14 +336,13 @@ pub enum AbilityEffect {
     CounterUnlessPaid(ManaCost),
     /// The `Game.Ops.CreateToken()` primitive — creates one or more token
     /// permanents on the battlefield under the controller's control (CR 111).
-    /// Named tokens (Clue, Food) are fully implemented; Treasure is blocked
-    /// on mana-choice coroutines (backlog item 9). Creature tokens support
-    /// arbitrary subtypes, colors, P/T, keywords, and optional additional
-    /// card types (Artifact, Enchantment) and supertypes (Legendary).
+    /// Named tokens (Clue, Food, Treasure) are fully implemented. Creature
+    /// tokens support arbitrary subtypes, colors, P/T, keywords, and
+    /// optional additional card types (Artifact, Enchantment) and
+    /// supertypes (Legendary).
     ///
-    /// TODO: CR 111.7 — tokens that leave the battlefield cease to exist;
-    /// enforcement deferred (tokens currently go to graveyard like normal
-    /// permanents). Blocked on a zone-watch hook in SBA/replacement layer.
+    /// CR 111.7 — tokens that leave the battlefield cease to exist, enforced
+    /// via `sba::collect_ceasing_tokens`.
     CreateToken { spec: TokenSpec, count: u32 },
     /// The `Game.Ops.Shuffle()` primitive — the resolving `StackObject`'s
     /// controller shuffles their own library (CR 701.19b: "a player who
@@ -1177,13 +1176,14 @@ pub enum ConditionPrimitive {
 // "is this exact object")~~ - done, DiesMatching/LeavesBattlefieldMatching
 // above (phase5/trigger-completeness-cleanup slice).
 //
-// TODO(trigger system completeness, backlog item 7): once-per-turn/
-// intervening-if legality (CR 603.2-603.3) is still untouched. Untap-step
-// events still can't trigger anything (CR 502.4 grants no priority there, so
-// there's no window to place a trigger before) and Cleanup's own
-// CleanupSbaCheck flow still doesn't run collect_triggers at all (a second,
-// differently-shaped fix, left for its own slice - see
-// docs/implementation.md's backlog item 7a).
+// Once-per-turn (ConditionSpec::PrimitiveOncePerTurn, CR 603.2h) and
+// intervening-if legality (InterveningIfSpec, CR 603.3) are both real now.
+// TODO(trigger system completeness, backlog item 7): untap-step events still
+// can't trigger anything (CR 502.4 grants no priority there, so there's no
+// window to place a trigger before) and Cleanup's own CleanupSbaCheck flow
+// still doesn't run collect_triggers at all (a second, differently-shaped
+// fix, left for its own slice - see docs/implementation.md's backlog item
+// 7a).
 
 impl ConditionPrimitive {
     /// Zero Lua VM calls — evaluated directly against the event that's being

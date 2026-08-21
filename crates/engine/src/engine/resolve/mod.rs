@@ -690,10 +690,9 @@ impl Engine {
             // snapshot of another object's copiable values
             // (see `TokenSpec::CopyOf`'s own doc comment),
             // abilities and all, so its self-registration
-            // does need to run. TODO: CR 111.7 cessation
-            // (tokens leaving the battlefield should cease
-            // to exist) is not enforced — blocked on a
-            // zone-watch SBA hook (future slice).
+            // does need to run. CR 111.7 cessation (tokens
+            // leaving the battlefield cease to exist) is
+            // enforced now too, via sba::collect_ceasing_tokens.
             //
             // `apply_enters_battlefield_modifiers` is real
             // now too, the 4th of the four real to-

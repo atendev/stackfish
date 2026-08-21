@@ -110,8 +110,7 @@ pub struct GameObject {
     /// upkeep at every untap-step/control-change site to avoid drifting.
     pub controlled_since_turn: u32,
     /// True for token permanents (CR 111). Tokens that leave the battlefield
-    /// should cease to exist (CR 111.7), but enforcement is a TODO — they
-    /// currently move to zones like normal cards until that SBA hook exists.
+    /// cease to exist (CR 111.7) via `sba::collect_ceasing_tokens`.
     pub is_token: bool,
     /// CR 903.3: this specific card is a player's designated commander — an
     /// attribute of the card/object itself, not its `CardDefinition` (a
