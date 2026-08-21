@@ -137,12 +137,13 @@ impl Eq for FullTextOverride {}
 /// Layers 4/5 (CR 613.1) don't have CR-defined sublayers the way layer 7
 /// does (CR 613.3 only lettered-sublayers layers 3, 4, 6, and 7 — and layer
 /// 4's own lettered sublayers are about control-changing-vs-not, not
-/// modeled here) — `AddCardType`/`AddColor` below are each a single
-/// primitive per layer, which is faithful to the rule, not a simplification
-/// of it. Narrowed to additive-only this slice (CR 305.7/205's "gains/loses
-/// types"-style text, in the common "in addition to its other types" shape)
-/// — a full overwrite ("loses all other types/colors") isn't modeled; see
-/// `EffectPrimitive`'s own TODO for that.
+/// modeled here) — every layer-4/5 primitive below (`AddCardType`/
+/// `SetCardTypes`/`AddColor`/`SetColors`/`AddSupertype`/`AddSubtype`) folds
+/// into one sequential per-layer pass in `layers::effective_characteristics`,
+/// applied in timestamp order — CR 613.1d groups card-type/subtype/
+/// supertype changes into layer 4 together (not separate layers), and CR
+/// 205.4b's "supertypes are independent of card type/subtype" is modeled as
+/// three separate fields folded by that same one pass, not three layers.
 ///
 /// Dependency system (CR 613.6-613.8): `layers::order_by_dependency`
 /// reorders a layer's effects around real CR 613.8a dependency (today, only
@@ -188,18 +189,10 @@ pub enum Layer {
 /// further evaluation" vs. "falls back to the script bridge" split. See
 /// `Layer`'s own doc comment for the layers with no primitive yet.
 ///
-/// TODO(overwrite shapes): `SetCardTypes(CardTypeSet)`/`SetColors(ColorSet)`
-/// — the full "loses all other types/colors" overwrite (mirrors `SetPT`'s
-/// override semantics for layer 7b) — aren't modeled yet. `AddCardType`/
-/// `AddColor` below only cover the additive "in addition to its other
-/// types/colors" shape, deferred per the pre-slice scoping discussion (see
-/// docs/implementation.md).
-///
-/// TODO(supertypes/subtypes): gaining a supertype (e.g. "becomes
-/// legendary") or a creature subtype (e.g. "becomes an Elemental in
-/// addition to its other types") isn't modeled — `EffectiveCharacteristics.
-/// supertypes`/`.subtypes` stay a straight `CardDefinition` copy. Natural
-/// next extension of the same `AddCardType` pattern once needed.
+/// `SetCardTypes`/`SetColors` (the full "loses all other types/colors"
+/// overwrite, mirroring `SetPT`'s override semantics for layer 7b) and
+/// `AddSupertype`/`AddSubtype` are real now too (`phase5/layer-overwrite-
+/// types-colors`) — see each variant's own doc comment.
 /// CR 702.14a: a landwalk grant's "[type]" when it's more than a bare land
 /// type — "the card type land plus any combination of land types, card
 /// types, and/or supertypes." All specified fields must hold simultaneously
@@ -505,13 +498,46 @@ pub enum EffectPrimitive {
     /// card type(s) in addition to whatever the object already has — e.g.
     /// "target land becomes a 3/3 Elemental creature in addition to its
     /// other types" is this primitive (for the type-changing half) plus a
-    /// `SetPT` (layer 7b) for the 3/3. Union, never removes a type — see
-    /// this enum's own overwrite TODO above.
+    /// `SetPT` (layer 7b) for the 3/3. Union, never removes a type.
     AddCardType(CardTypeSet),
+    /// Layer 4 (CR 613.1a, "becomes" text): sets the object's card types
+    /// outright, overriding whatever came before this layer — same
+    /// override-not-additive shape `SetPT`/`SetName`/`GainControl` already
+    /// establish (a later-timestamp `SetCardTypes` replaces an earlier
+    /// one's result entirely; it doesn't stack with an earlier `AddCardType`
+    /// in the same layer, since both fold into the same running `card_types`
+    /// value in timestamp order — see `layers::effective_characteristics`'s
+    /// own layer-4 fold). CR 205.1a's own carve-out (an object with the
+    /// Instant or Sorcery type retains that type through a card-type
+    /// overwrite) isn't modeled — no real card in this corpus needs it,
+    /// named rather than silently narrowed.
+    SetCardTypes(CardTypeSet),
     /// Layer 5 (CR 613.1, general "gains colors" text): grants the listed
     /// color(s) in addition to whatever the object already has — e.g.
     /// "enchanted creature is also red". Union, never removes a color.
     AddColor(ColorSet),
+    /// Layer 5 (CR 613.1a, "becomes" text): sets the object's colors
+    /// outright, same override-not-additive shape `SetCardTypes` above
+    /// establishes for layer 4.
+    SetColors(ColorSet),
+    /// Layer 4 (CR 613.1d/205.4b: supertypes are an independent category
+    /// from card types/subtypes, but still evaluated in this same layer):
+    /// grants the listed supertype(s) in addition to whatever the object
+    /// already has — e.g. "target permanent becomes legendary." Union,
+    /// never removes a supertype (CR 205.4b: "when an object gains ... a
+    /// supertype, it retains any other supertypes it had"). Additive-only,
+    /// the natural extension of `AddCardType`'s own shape — no
+    /// `SetSupertypes` full-overwrite variant, since no real card needs one.
+    AddSupertype(SupertypeSet),
+    /// Layer 4 (CR 613.1d, same layer as card types/supertypes): grants the
+    /// listed subtype(s) in addition to whatever the object already has —
+    /// e.g. "target creature becomes an Elemental in addition to its other
+    /// types" (CR 205.1b). Appends only subtypes not already present, never
+    /// removes one. CR 205.3d's own "can't gain a subtype that doesn't
+    /// correspond to one of the object's [card] types" isn't validated here
+    /// — same trust-the-script posture every other script-authored
+    /// primitive in this engine already takes.
+    AddSubtype(Vec<Subtype>),
     /// Layer 7e (CR 613.4d): swaps the object's current power and toughness
     /// — takes whatever value 7b/7c already produced for power and applies
     /// it to toughness, and vice versa. A toggle, not a value, so no fields.
@@ -1378,20 +1404,22 @@ fn event_target_matches(
 pub struct EffectiveCharacteristics {
     pub name: String,
     pub mana_cost: ManaCost,
-    /// Base (`color_indicator`, see `layers.rs`'s own stopgap note on that)
-    /// unioned with every applicable layer 5 `EffectPrimitive::AddColor`.
-    /// No layer removes a color yet (see `EffectPrimitive`'s overwrite
-    /// TODO).
+    /// Base (`color_indicator`, see `layers.rs`'s own stopgap note on that),
+    /// folded against every applicable layer 5 `EffectPrimitive::AddColor`/
+    /// `SetColors` in timestamp order (`AddColor` unions in, `SetColors`
+    /// overwrites outright — see each variant's own doc comment).
     pub colors: ColorSet,
-    /// Base (`CardDefinition.card_types`) unioned with every applicable
-    /// layer 4 `EffectPrimitive::AddCardType`. No layer removes a type yet
-    /// (see `EffectPrimitive`'s overwrite TODO).
+    /// Base (`CardDefinition.card_types`), folded against every applicable
+    /// layer 4 `EffectPrimitive::AddCardType`/`SetCardTypes` in timestamp
+    /// order (`AddCardType` unions in, `SetCardTypes` overwrites outright).
     pub card_types: CardTypeSet,
-    /// Straight `CardDefinition` copy — no layer touches supertypes yet
-    /// (see `EffectPrimitive`'s supertypes/subtypes TODO).
+    /// Base (`CardDefinition.supertypes`) unioned with every applicable
+    /// layer 4 `EffectPrimitive::AddSupertype`. No layer removes a
+    /// supertype (CR 205.4b).
     pub supertypes: SupertypeSet,
-    /// Straight `CardDefinition` copy — no layer touches subtypes yet (see
-    /// `EffectPrimitive`'s supertypes/subtypes TODO).
+    /// Base (`CardDefinition.subtypes`) extended with every applicable
+    /// layer 4 `EffectPrimitive::AddSubtype` (duplicates skipped). No layer
+    /// removes a subtype.
     pub subtypes: Vec<Subtype>,
     /// Base (`CardDefinition.keywords`) unioned with every applicable layer
     /// 6 `EffectPrimitive::AddKeyword`, reset to empty by an intervening

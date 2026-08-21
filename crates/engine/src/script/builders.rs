@@ -55,7 +55,11 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
         (layer, effect),
         (Layer::TextChanging, EffectPrimitive::SetName(_))
             | (Layer::TypeChanging, EffectPrimitive::AddCardType(_))
+            | (Layer::TypeChanging, EffectPrimitive::SetCardTypes(_))
+            | (Layer::TypeChanging, EffectPrimitive::AddSupertype(_))
+            | (Layer::TypeChanging, EffectPrimitive::AddSubtype(_))
             | (Layer::ColorChanging, EffectPrimitive::AddColor(_))
+            | (Layer::ColorChanging, EffectPrimitive::SetColors(_))
             | (Layer::AbilityAdding, EffectPrimitive::AddKeyword(_))
             | (Layer::AbilityAdding, EffectPrimitive::RemoveKeyword(_))
             | (Layer::AbilityAdding, EffectPrimitive::IgnoreKeyword(_))

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use mlua::{Function, Lua, Table, Thread, ThreadStatus, Value};
 
 use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
-use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference};
+use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, Subtype, SupertypeSet};
 use crate::types::cost::CostModifier;
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::game::GameState;
@@ -17,8 +17,8 @@ use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifi
 use crate::types::target::TargetSpec;
 
 use super::decode::{
-    decode_condition_value, decode_operation_value, decode_script_choice_request, decode_target_pick,
-    decode_target_requirement_table, parse_card_type_name, parse_color_string, parse_keyword_name,
+    decode_condition_value, decode_operation_value, decode_script_choice_request, decode_subtypes, decode_target_pick,
+    decode_target_requirement_table, parse_card_type_name, parse_color_string, parse_keyword_name, parse_supertype_name,
 };
 use super::encode::{event_to_lua, state_to_lua};
 use super::globals::bind_game_globals;
@@ -484,7 +484,11 @@ impl ScriptRuntime {
     /// - `modify_pt = {power=.., toughness=..}` -> `ModifyPT`
     /// - `add_keyword = {"Flying", ...}` -> `AddKeyword`
     /// - `add_card_type = {"Creature", ...}` -> `AddCardType`
+    /// - `set_card_types = {"Creature", ...}` -> `SetCardTypes`
     /// - `add_color = "WU"` -> `AddColor`
+    /// - `set_colors = "WU"` -> `SetColors`
+    /// - `add_supertype = {"Legendary", ...}` -> `AddSupertype`
+    /// - `add_subtype = "Elemental"` or `{"Elf", "Warrior"}` -> `AddSubtype`
     /// - `switch_pt = true` -> `SwitchPT`
     /// - `remove_all_abilities = true` -> `RemoveAllAbilities`
     /// - `double_pt = {power=.., toughness=..}` (bools) -> `DoublePT` — no
@@ -571,9 +575,35 @@ impl ScriptRuntime {
             }
             return Ok(Some(EffectPrimitive::AddCardType(set)));
         }
+        if let Some(t) = result.get::<_, Option<Table>>("set_card_types").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let mut set = CardTypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let Ok(ct) = parse_card_type_name(&name) else { return Ok(None) };
+                set |= ct;
+            }
+            return Ok(Some(EffectPrimitive::SetCardTypes(set)));
+        }
         if let Some(letters) = result.get::<_, Option<String>>("add_color").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
             let Ok(set) = parse_color_string(&letters) else { return Ok(None) };
             return Ok(Some(EffectPrimitive::AddColor(set)));
+        }
+        if let Some(letters) = result.get::<_, Option<String>>("set_colors").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let Ok(set) = parse_color_string(&letters) else { return Ok(None) };
+            return Ok(Some(EffectPrimitive::SetColors(set)));
+        }
+        if let Some(t) = result.get::<_, Option<Table>>("add_supertype").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let mut set = SupertypeSet::empty();
+            for entry in t.sequence_values::<String>() {
+                let name = entry.map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let Ok(st) = parse_supertype_name(&name) else { return Ok(None) };
+                set |= st;
+            }
+            return Ok(Some(EffectPrimitive::AddSupertype(set)));
+        }
+        if let Some(v) = result.get::<_, Option<Value>>("add_subtype").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
+            let Ok(names) = decode_subtypes(v) else { return Ok(None) };
+            return Ok(Some(EffectPrimitive::AddSubtype(names.into_iter().map(Subtype).collect())));
         }
         if let Some(true) = result.get::<_, Option<bool>>("switch_pt").map_err(|e| ScriptError::RuntimeError(e.to_string()))? {
             return Ok(Some(EffectPrimitive::SwitchPT));

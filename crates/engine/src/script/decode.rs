@@ -359,6 +359,29 @@ pub(crate) fn decode_subtypes(val: Value) -> Result<Vec<String>, ScriptError> {
     }
 }
 
+/// Same "string or table" shape as `decode_subtypes`, for `Game.Effects.
+/// SetCardTypes` specifically — unlike `AddCardType`'s single-name-at-a-time
+/// convention (safe since additive composition across several registered
+/// static abilities works fine), a "set" overwrite must express its whole
+/// resulting type line in one call (e.g. "becomes an artifact creature" is
+/// two card types set together) - two separate `SetCardTypes` registrations
+/// wouldn't compose, the later one would just wipe out the earlier one's
+/// result entirely (see `layers::effective_characteristics`'s own layer-4
+/// fold).
+pub(crate) fn decode_card_type_names(val: Value) -> Result<Vec<String>, ScriptError> {
+    match val {
+        Value::String(s) => Ok(vec![s.to_str().map_err(|e| ScriptError::LoadError(e.to_string()))?.to_string()]),
+        Value::Table(t) => {
+            let mut out = Vec::new();
+            for pair in t.sequence_values::<String>() {
+                out.push(pair.map_err(|e| ScriptError::LoadError(e.to_string()))?);
+            }
+            Ok(out)
+        }
+        _ => Err(ScriptError::LoadError("card types must be a string or table".to_string())),
+    }
+}
+
 /// Parses a WUBRG letter string like `"WU"` or `""` into a `ColorSet`.
 pub(crate) fn parse_color_string(colors: &str) -> Result<ColorSet, ScriptError> {
     let mut out = ColorSet::empty();
