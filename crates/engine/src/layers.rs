@@ -134,19 +134,38 @@ pub fn effective_characteristics(
         }
     }
 
-    // Layer 4: additive only (CR 613.1, general "gains types" text) - see
-    // EffectPrimitive::AddCardType's doc comment for the deferred overwrite
-    // shape.
+    // Layer 4 (CR 613.1d): card-type/supertype/subtype changes all fold into
+    // this one timestamp-ordered pass, same "one layer, several primitives"
+    // shape layer 6 below already establishes. AddCardType/AddSupertype
+    // union in; AddSubtype appends only what's not already present;
+    // SetCardTypes overwrites `card_types` outright (CR 613.1a) - since this
+    // is one sequential loop over the running `card_types` value, a
+    // SetCardTypes after an earlier AddCardType wipes it, while an
+    // AddCardType after an earlier SetCardTypes stacks on top, both correct
+    // per CR 613.7's plain timestamp order with no extra bookkeeping needed.
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::TypeChanging) {
-        if let Some(EffectPrimitive::AddCardType(added)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
-            card_types |= added;
+        match resolve_primitive(effect, state, script_runtime, obj.controller) {
+            Some(EffectPrimitive::AddCardType(added)) => card_types |= added,
+            Some(EffectPrimitive::SetCardTypes(new_types)) => card_types = new_types,
+            Some(EffectPrimitive::AddSupertype(added)) => supertypes |= added,
+            Some(EffectPrimitive::AddSubtype(added)) => {
+                for subtype in added {
+                    if !subtypes.contains(&subtype) {
+                        subtypes.push(subtype);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
-    // Layer 5: additive only, same shape as layer 4 above.
+    // Layer 5 (CR 613.1e): same shape as layer 4 above - AddColor unions in,
+    // SetColors overwrites outright (CR 613.1a).
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::ColorChanging) {
-        if let Some(EffectPrimitive::AddColor(added)) = resolve_primitive(effect, state, script_runtime, obj.controller) {
-            colors |= added;
+        match resolve_primitive(effect, state, script_runtime, obj.controller) {
+            Some(EffectPrimitive::AddColor(added)) => colors |= added,
+            Some(EffectPrimitive::SetColors(new_colors)) => colors = new_colors,
+            _ => {}
         }
     }
 

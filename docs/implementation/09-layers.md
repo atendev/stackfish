@@ -842,6 +842,50 @@
   script-backed decode. Full workspace suite green.
 - Unresolved: none new.
 
+## Slice: layer-overwrite-types-colors (branch pending review)
+
+- Branch `phase5/layer-overwrite-types-colors`.
+- Scope: the overwrite half of layers 4/5 `layer-engine-types-colors` deliberately left additive-only
+  (CR 613.1a's "becomes" shape) — `SetCardTypes`/`SetColors`, mirroring `SetPT`'s override-not-additive
+  semantics — plus supertype/subtype grants (`AddSupertype`/`AddSubtype`, CR 613.1d/205.1b/205.4b),
+  which per CR 613.1d fold into the same layer-4 pass as card types, not a separate layer (a
+  correction to the framing this slice started with — supertypes/subtypes were originally assumed to
+  need their own layer concept).
+- Key changes:
+  - `EffectPrimitive::{SetCardTypes(CardTypeSet), SetColors(ColorSet), AddSupertype(SupertypeSet),
+    AddSubtype(Vec<Subtype>)}` (`types/effect.rs`).
+  - `layers.rs`'s existing layer-4/5 loops widened from a single `if let` into a `match` with the new
+    arms, still one sequential timestamp-ordered pass per layer (same shape layer 6 already
+    established for its own several primitives) — a later `SetCardTypes`/`SetColors` wipes out an
+    earlier `AddCardType`/`AddColor` in the same layer; the reverse order stacks on top; both fall out
+    for free from the loop already folding one running value in timestamp order, no new bookkeeping.
+  - Lua: `Game.Effects.{SetCardTypes, SetColors, AddSupertype, AddSubtype}` (globals.rs);
+    `set_card_types`/`set_colors`/`add_supertype`/`add_subtype` as recognized keys on the script-backed
+    custom-function effect-shape form (`invoke_continuous_effect`, runtime.rs);
+    `validate_layer_effect_pairing` (builders.rs) gained the new pairs.
+  - `decode_card_type_names` (script/decode.rs) — new, mirrors `decode_subtypes`'s "string or table"
+    shape. `SetCardTypes`/`SetColors` deliberately diverge from `AddCardType`/`AddColor`'s established
+    single-value-per-call convention: an overwrite has to express its whole final result in one call
+    (two separate `SetCardTypes` registrations wouldn't compose — the later one just wipes the earlier
+    one's result), unlike an addition, which composes safely across several registered effects.
+  - Docs: `docs/lua/static-abilities.md`'s script-backed effect-shape table and
+    `docs/lua/game-constants.md`'s `Game.Layers.*`/`Game.Effects.*` tables all gained the four new rows.
+- Deliberately narrowed, named rather than attempted:
+  - CR 205.1a's own carve-out (an object with the Instant or Sorcery card type retains that type
+    through a card-type overwrite) isn't modeled — no real card in this corpus needs it.
+  - CR 205.3d ("can't gain a subtype that doesn't correspond to one of the object's card types") isn't
+    validated — same trust-the-script posture every other script-authored primitive here already takes.
+  - No `SetSupertypes`/`SetSubtypes` full-overwrite shape — only the additive `Add*` form, matching the
+    original TODO's own framing ("natural next extension of the additive pattern"); no real card needs
+    a supertype/subtype *removal* shape.
+- Verify: `phase5_layer_engine_type_color_overwrite.rs`, 9 new tests (overwrite-vs-additive sequencing
+  in both directions, supertype/subtype union with dedup, a real consumer proof — the CR 704.5j legend
+  rule, which already read supertypes through the layer engine specifically to future-proof for this,
+  now actually recognizes a script-granted Legendary — and one full Lua round-trip through a real card
+  script exercising all four new tags at once). Full workspace suite green except one pre-existing,
+  already-confirmed-unrelated scenario failure (`phase5_beginning_phase.toml`, reproduces identically
+  on master with none of this slice's changes present).
+
 ## General layer notes
 
 - Layer order in `effective_characteristics`: 3 text (CR 612.6/612.8, `volraths-shapeshifter`/

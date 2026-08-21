@@ -27,10 +27,10 @@ use super::builders::{
     StaticAbilityBuilder, TriggeredAbilityBuilder,
 };
 use super::decode::{
-    decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table, decode_filter_table,
-    decode_landwalk_quality, decode_subtypes, parse_card_type_name, parse_color_letter, parse_color_string,
-    parse_counter_kind_name, parse_filter_controller_name, parse_keyword_name, parse_mana_unit_letter,
-    parse_supertype_name, parse_zone_kind_name,
+    decode_card_type_names, decode_copy_exceptions, decode_creature_token_opts, decode_effect_filter_table,
+    decode_filter_table, decode_landwalk_quality, decode_subtypes, parse_card_type_name, parse_color_letter,
+    parse_color_string, parse_counter_kind_name, parse_filter_controller_name, parse_keyword_name,
+    parse_mana_unit_letter, parse_supertype_name, parse_zone_kind_name,
 };
 use super::tags::{
     ConditionTag, ConsumptionPolicyTag, CostComponent, CostTag, DrawLimitAffectedTag, DurationTag,
@@ -581,11 +581,40 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?,
     )?;
     effects.set(
+        "SetCardTypes",
+        lua.create_function(|_, val: Value| {
+            let names = decode_card_type_names(val).map_err(to_lua_err)?;
+            let mut set = CardTypeSet::empty();
+            for name in names {
+                set |= parse_card_type_name(&name).map_err(to_lua_err)?;
+            }
+            Ok(EffectPrimitiveTag(EffectPrimitive::SetCardTypes(set)))
+        })?,
+    )?;
+    effects.set(
         "AddColor",
         lua.create_function(|_, letter: String| {
             let set = parse_color_letter(&letter).map_err(to_lua_err)?;
             Ok(EffectPrimitiveTag(EffectPrimitive::AddColor(set)))
         })?,
+    )?;
+    effects.set(
+        "SetColors",
+        lua.create_function(|_, letters: String| {
+            let set = parse_color_string(&letters).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::SetColors(set)))
+        })?,
+    )?;
+    effects.set(
+        "AddSupertype",
+        lua.create_function(|_, name: String| {
+            let set = parse_supertype_name(&name).map_err(to_lua_err)?;
+            Ok(EffectPrimitiveTag(EffectPrimitive::AddSupertype(set)))
+        })?,
+    )?;
+    effects.set(
+        "AddSubtype",
+        lua.create_function(|_, name: String| Ok(EffectPrimitiveTag(EffectPrimitive::AddSubtype(vec![Subtype(name)]))))?,
     )?;
     effects.set("SwitchPT", EffectPrimitiveTag(EffectPrimitive::SwitchPT))?;
     effects.set("RemoveAllAbilities", EffectPrimitiveTag(EffectPrimitive::RemoveAllAbilities))?;

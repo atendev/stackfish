@@ -175,8 +175,8 @@ effect applies in. Bare values only:
 | Name | CR layer | Pairs with (`Game.Effects.*`) |
 |---|---|---|
 | `TextChanging` | 3 | `SetName` |
-| `TypeChanging` | 4 | `AddCardType` |
-| `ColorChanging` | 5 | `AddColor` |
+| `TypeChanging` | 4 | `AddCardType`, `SetCardTypes`, `AddSupertype`, `AddSubtype` |
+| `ColorChanging` | 5 | `AddColor`, `SetColors` |
 | `AbilityAdding` | 6 | `AddKeyword`, `RemoveKeyword`, `IgnoreKeyword`, every `AddProtection*`, `AddLandwalk*`, `AddBandsWithOther`, `AddBandsWithOtherSupertype`, `RemoveAllAbilities` |
 | `PowerToughnessSetting` | 7b | `SetPT` |
 | `PowerToughnessModifying` | 7c | `ModifyPT` |
@@ -212,7 +212,11 @@ layer/effect pair is a real error.
 | `AddBandsWithOther(subtype)` | subtype name | CR 702.22b/c, "bands with other [subtype]." |
 | `AddBandsWithOtherSupertype(name)` | supertype name (`"Basic"`/`"Legendary"`/`"Snow"`/`"World"`) | CR 702.22c/m, the historic "bands with other Legends" wording — supertype form of the above. |
 | `AddCardType(name)` | card type name | Adds a card type (additive only — can't remove one). |
+| `SetCardTypes(names)` | card type name, or a table of them, e.g. `{"Artifact", "Creature"}` | CR 613.1a, sets the card types outright — overrides whatever came before this layer entirely, unlike `AddCardType`. Must express the full resulting type line in one call (can't be composed across several registered effects the way `AddCardType` can, since a later `SetCardTypes` wipes out an earlier one's result). |
 | `AddColor(letter)` | mana-color letter | Adds a color (additive only). |
+| `SetColors(letters)` | color-letter string, e.g. `"WU"` | CR 613.1a, sets the colors outright — same override (not additive) semantics as `SetCardTypes`. |
+| `AddSupertype(name)` | supertype name (`"Basic"`/`"Legendary"`/`"Snow"`/`"World"`) | CR 613.1d/205.4b, grants a supertype in addition to whatever the object already has (e.g. "becomes legendary"). Additive only — no supertype-removing shape exists. |
+| `AddSubtype(name)` | subtype name | CR 613.1d/205.1b, grants a subtype in addition to whatever the object already has (e.g. "becomes an Elemental in addition to its other types"). Additive only. |
 | `SwitchPT` | — | Swaps power and toughness. |
 | `RemoveAllAbilities` | — | CR 613.1f, strips every keyword and protection quality accumulated so far. A later effect with a higher timestamp that re-adds something still applies on top. |
 

@@ -112,7 +112,11 @@ keys:
 | `remove_keyword` | `{ "Defender", ... }` | `Game.Effects.RemoveKeyword` |
 | `ignore_keyword` | `{ "Defender", ... }` | `Game.Effects.IgnoreKeyword` |
 | `add_card_type` | `{ "Creature", ... }` | `Game.Effects.AddCardType` |
+| `set_card_types` | `{ "Creature", ... }` | `Game.Effects.SetCardTypes` |
 | `add_color` | a color-letter string, e.g. `"WU"` | `Game.Effects.AddColor` |
+| `set_colors` | a color-letter string, e.g. `"WU"` | `Game.Effects.SetColors` |
+| `add_supertype` | `{ "Legendary", ... }` | `Game.Effects.AddSupertype` |
+| `add_subtype` | `"Elemental"` or `{ "Elf", "Warrior" }` | `Game.Effects.AddSubtype` |
 | `switch_pt` | `true` | `Game.Effects.SwitchPT` |
 | `remove_all_abilities` | `true` | `Game.Effects.RemoveAllAbilities` |
 | `double_pt` | `{ power = true/false, toughness = true/false }` | no `Game.Effects.*` tag exists for this yet — the function form is currently the only way to double power and/or toughness |

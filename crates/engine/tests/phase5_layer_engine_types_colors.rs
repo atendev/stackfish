@@ -2,9 +2,10 @@
 //! B — layers 4 (`TypeChanging`) and 5 (`ColorChanging`), additive only (CR
 //! 613.3: layers 4/5 have no CR-defined lettered sublayers the way layer 7
 //! does, so a single `AddCardType`/`AddColor` primitive per layer is
-//! faithful to the rule, not a simplification of it). See `layers.rs`'s own
-//! doc comment for why the overwrite shape (`SetCardTypes`/`SetColors`) and
-//! supertypes/subtypes stay unbuilt.
+//! faithful to the rule, not a simplification of it). The overwrite shape
+//! (`SetCardTypes`/`SetColors`) and supertype/subtype grants
+//! (`AddSupertype`/`AddSubtype`) are covered by the sibling file
+//! `phase5_layer_engine_type_color_overwrite.rs` instead of here.
 //!
 //! Same "`ContinuousEffect`s built directly via struct literal" bootstrap
 //! pattern as `phase5_layer_engine_basics.rs` — no `Game.AddContinuousEffect`
