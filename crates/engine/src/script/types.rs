@@ -10,7 +10,7 @@ use mlua::RegistryKey;
 use crate::types::ability::RegisteredAbility;
 use crate::types::cost::CostModifier;
 use crate::types::effect::{ContinuousEffect, ReplacementEffect};
-use crate::types::event::GameEvent;
+use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
@@ -128,12 +128,40 @@ pub enum ScriptZoneMoveKind {
 /// that field's own doc comment) — TODO: a script wanting "cast this for
 /// free from a zone other than exile" isn't representable yet, same
 /// limitation Cascade's own free cast already has.
+/// `PendingDraw` (`draw_cards = N` on the returned table) is `Game.Ops.
+/// DrawCards(n)`'s own custom-function-return equivalent — same "outcome
+/// describes, engine acts" split, since the real pipeline
+/// (`Engine::continue_draw_cards`) needs `&mut Engine` (touches
+/// `self.departed_triggered_abilities`/`self.run_card_script_for`/the
+/// ledger) and can itself pause for a CR 616.1 ordering choice when 2+
+/// replacement effects compete for the same draw (a Words-of-Wind-style
+/// redirect) - `ScriptRuntime` has access to neither. `player` is always
+/// whichever `controller` the call this outcome came from was invoked
+/// with, same as `gain_life` - a custom function can't make a *different*
+/// player draw.
+/// `PendingEvents` (`deal_damage`/`add_counters` on the returned table) is
+/// lighter than the other three - `resolve_damage_effect`/
+/// `resolve_counters_effect` (the primitive-tag fast path's own resolvers)
+/// are pure event-builders that push `DamageDealt`/`CounterAdded` onto the
+/// resolution's own accumulated event list and let the *existing*
+/// `ReplacementCheck`/`CommitEvents` pipeline apply CR 615/616
+/// prevention/replacement and deathtouch/wither/infect/lifelink generically
+/// - same "hand back a constructed event, not a request" shape
+/// `commands::apply_copy_additional_counters` already established for CR
+/// 707.9e's own additional-counter exception. No pause of its own, so the
+/// caller just folds these into its own `events`/`events_so_far` and
+/// continues - correct whether or not this call happened inside a
+/// `Game.Ops.ForEachPlayer` loop, since neither CR 615/616 nor CR 613 ask
+/// for cross-player simultaneity the way CR 101.4 does for sacrifice/
+/// discard.
 #[derive(Debug)]
 pub enum OperationOutcome {
     Finished,
     NeedsChoice { thread: ScriptHandle, request: ScriptChoiceRequest },
     PendingZoneMoves(Vec<(ScriptZoneMoveKind, Vec<ObjectId>)>),
     PendingCast { card: ObjectId, modes: Vec<u32>, targets: Vec<Target>, x_value: Option<u32>, free: bool },
+    PendingDraw { amount: u32 },
+    PendingEvents(Vec<GameEventKind>),
 }
 
 /// Shared, interior-mutable store for loaded Lua callbacks plus whatever a

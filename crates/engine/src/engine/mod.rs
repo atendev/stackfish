@@ -895,13 +895,13 @@ impl Engine {
                 status
             }
 
-            ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far, each_player } => {
+            ProcessState::AwaitingScriptChoice { thread, request, stack_id, source, controller, events_so_far, each_player } => {
                 // Nothing to do until submit_script_choice answers - same
                 // "put the exact same state back" pattern every other
                 // choice-pause above already uses.
                 let status = StepStatus::AwaitingScriptChoice { player: controller, request: request.clone() };
                 self.process_state = ProcessState::AwaitingScriptChoice {
-                    thread, request, stack_id, controller, events_so_far, each_player,
+                    thread, request, stack_id, source, controller, events_so_far, each_player,
                 };
                 status
             }

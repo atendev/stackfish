@@ -5,11 +5,12 @@
 Real, named gaps — don't spend time trying these, they aren't silently working under a different
 name.
 
-- **Custom operation functions only support `gain_life`.** A card whose operation is written as a
-  custom function (rather than a `Game.Ops.*` tag) can currently only express "gain N life" via
-  its returned table. Every other effect shape (`damage`, `counters`, `draw_cards`, ...) is only
-  reachable through the `Game.Ops.*` tag form for now. See
-  [card-script-basics.md](card-script-basics.md#writing-an-operation).
+- **Custom operation functions don't support pump/type-changing effect shapes.** `gain_life`,
+  `draw_cards`, `deal_damage`, `add_counters`, `sacrifice_chosen`/`discard_chosen`, and `cast_spell`
+  are all real return-table keys now — see
+  [targeting-and-choices.md](targeting-and-choices.md#drawing-dealing-damage-and-adding-counters).
+  A P/T pump or a type/color-changing effect is still only reachable through the `Game.Ops.*`/
+  `Game.Effects.*` tag form, not a custom function's return table.
 - **Restricted mana beyond a card-type filter** — `Game.Ops.AddRestrictedMana` covers CR 106.11's
   "spend this mana only to cast [card type] spells" (Mishra's Workshop) only. Object-specific
   restrictions ("only to cast the exiled card") and ability-activation restrictions aren't modeled —

@@ -108,7 +108,7 @@
 - Exception (deliberately unfixed):
   - `layers.rs` pure `&GameState` query functions cannot log without threading error reporting through whole call graph.
 
-## Slice: script-error-surfacing-cluster (branch pending review)
+## Slice: script-error-surfacing-cluster (merged)
 
 - Branch `phase5/script-error-surfacing-cluster`.
 - Scope: the sibling half `script-error-surfacing` above left untouched — `run_card_script` (9 direct
@@ -233,7 +233,7 @@
 - Unresolved: the mass-destroy (`DestroyAll`-with-filter) `AbilityEffect` primitive Armageddon
   itself still needs is out of scope here, by design — a separate next slice.
 
-## Slice: trigger-target-lua-exposure (branch open)
+## Slice: trigger-target-lua-exposure (merged)
 
 - Branch `phase5/trigger-target-lua-exposure`.
 - Scope: `Game.CreateTriggeredAbility(c)` gains a real `:SetTarget(table | function)` method —
@@ -262,6 +262,65 @@
 - Unresolved: CR 601.2c multi-word targets from this builder (same narrowing
   `ActivatedAbilityBuilder` already has). Mode declaration from Lua (named above, a separate,
   bigger gap). `:SetCost` stays unbound (triggered abilities have no activation cost concept).
+
+## Slice: operation-result-draw-damage-counters (merged)
+
+- Branch `phase5/operation-result-draw-damage-counters`.
+- Scope: `ScriptRuntime::handle_operation_result`'s own long-standing TODO — a custom-function
+  `s.operation()` could only return `gain_life`/`sacrifice_chosen`/`discard_chosen`/`cast_spell` on
+  its result table. Added `draw_cards`, `deal_damage`, `add_counters`.
+- Key changes:
+  - `OperationOutcome::PendingDraw { amount: u32 }` — `draw_cards = N` hands back a real pausing
+    request, same shape `PendingZoneMoves`/`PendingCast` already establish, since the real pipeline
+    (`Engine::continue_draw_cards`) needs `&mut Engine` and can itself pause for a CR 616.1 ordering
+    choice (2+ replacement effects competing for one draw).
+  - `OperationOutcome::PendingEvents(Vec<GameEventKind>)` — `deal_damage`/`add_counters` are lighter:
+    both resolvers on the primitive-tag fast path (`resolve_damage_effect`/`resolve_counters_effect`)
+    are pure event-builders, so `handle_operation_result` builds the same `DamageDealt`/
+    `CounterAdded` events directly and hands them back to be folded into the caller's own
+    `events`/`events_so_far` — no new pausing continuation needed, same "return a constructed event"
+    shape `commands::apply_copy_additional_counters` already established for CR 707.9e.
+  - `handle_operation_result`/`invoke_operation`/`resume_operation`/`resume_operation_bool` all gained
+    a `source: ObjectId` parameter (needed to build `DamageDealt{source, ..}`) — `invoke_operation`
+    already had it in scope, `resume_operation`/`resume_operation_bool` didn't.
+  - `ProcessState::AwaitingScriptChoice` gained a `source: ObjectId` field so a coroutine that yields
+    once via `Game.SelectTargets` and *then* returns `deal_damage`/`add_counters` on resume still has
+    a source to build the event from — small ripple, 2 real construction sites.
+  - Both real `OperationOutcome` consumers (`Engine::settle_script_operation_outcome` in
+    `each_player.rs`, `resolve_misc_or_script_effect` in `misc_effects.rs`) gained the two new match
+    arms. `PendingEvents` behaves identically whether or not it's inside a `Game.Ops.ForEachPlayer`
+    loop (neither CR 615/616 nor CR 613 need cross-player simultaneity the way CR 101.4 does for
+    sacrifice/discard); `PendingDraw` inside a `ForEachPlayer` loop punts to `advance_or_finish_each_
+    player` (same "not `ForEachPlayer`-aware yet" narrowing `PendingCast` already takes, and for the
+    same reason — `continue_draw_cards` finishes the *whole* resolution when its own queue drains,
+    wrong for just one player's turn in a loop with others still remaining).
+  - Docs: `docs/lua/card-script-basics.md`'s "Writing an operation" section and
+    `docs/lua/not-available-yet.md`'s stale "only `gain_life`" bullet both updated;
+    `docs/lua/targeting-and-choices.md` gained a new "Drawing, dealing damage, and adding counters"
+    section with the full table shapes.
+- Deliberately narrowed, named rather than attempted:
+  - No `Game.Ops.*`/`Game.Effects.*` convenience wrapper for `deal_damage`/`add_counters` — a script
+    builds the raw `{ deal_damage = {...} }` table directly (`target` reuses the exact tagged-table
+    shape `Game.SelectTargets`/`Game.ChooseN` already return, so a picked target passes straight
+    through with no reshaping). `sacrifice_chosen`/`discard_chosen` do have `Game.Ops.SacrificeChosen`/
+    `DiscardChosen` wrappers, but those exist because assembling a `Game.ChooseN` result list into the
+    right shape is non-trivial; no comparable ergonomic gap exists here yet, and no real card demands
+    one — a reasonable, narrow follow-up if one ever does.
+  - CR 601.2d "divide damage as you choose" — still not modeled, inherited from
+    `resolve_damage_effect`'s own pre-existing constraint.
+  - `draw_cards` always draws for `controller` — no way to make a different player draw (matches
+    `gain_life`'s identical existing limitation).
+  - `PendingDraw` inside a `ForEachPlayer` loop (named above) — no real card needs "each player draws
+    a card via a custom function" today.
+- Verify: `phase5_operation_result_draw_damage_counters.rs`, 6 new tests — draw_cards resolves for
+  real (hand/library counts); draw_cards still pauses for a CR 616.1 ordering choice with two
+  competing replacement effects (mirrors `phase5_replaceable_scripted_draw.rs`'s own primitive-tag
+  test, proving the script-declared path shares the identical pipeline); deal_damage resolves through
+  the real pipeline (a genuine `DamageDealt` ledger event, not just a marker); add_counters applies a
+  real counter; one return table combining both; and a resumed-coroutine test (yields via
+  `Game.SelectTargets`, then returns `deal_damage` once resumed) proving the new `source` threading
+  through `AwaitingScriptChoice` actually works end to end. Full workspace suite green except the
+  same pre-existing, already-confirmed-unrelated `phase5_beginning_phase.toml` scenario failure.
 
 ## General notes
 

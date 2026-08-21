@@ -11,6 +11,7 @@ use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, Subtype, SupertypeSet};
 use crate::types::cost::CostModifier;
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
+use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
@@ -18,7 +19,8 @@ use crate::types::target::TargetSpec;
 
 use super::decode::{
     decode_condition_value, decode_operation_value, decode_script_choice_request, decode_subtypes, decode_target_pick,
-    decode_target_requirement_table, parse_card_type_name, parse_color_string, parse_keyword_name, parse_supertype_name,
+    decode_target_requirement_table, parse_card_type_name, parse_color_string, parse_counter_kind_name,
+    parse_keyword_name, parse_supertype_name,
 };
 use super::encode::{event_to_lua, state_to_lua};
 use super::globals::bind_game_globals;
@@ -701,7 +703,7 @@ impl ScriptRuntime {
         let result: Value = thread
             .resume((source.0, controller.0, snapshot))
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        self.handle_operation_result(thread, result, state, controller)
+        self.handle_operation_result(thread, result, state, source, controller)
     }
 
     /// Resumes a `Game.SelectTargets` suspension (`OperationOutcome::
@@ -719,10 +721,18 @@ impl ScriptRuntime {
     /// player answer is possible the script needs an explicit way to tell
     /// them apart rather than trusting its own memory of which filter it
     /// asked for.
+    ///
+    /// `source` (new alongside `PendingDraw`/`PendingEvents`): a resumed
+    /// operation can still return `deal_damage`/`add_counters` after
+    /// yielding once, which needs the original operation's own source
+    /// object to build a real `GameEventKind` — carried through the pause
+    /// by `ProcessState::AwaitingScriptChoice.source` rather than re-derived
+    /// (nothing about a suspended coroutine remembers it on its own).
     pub fn resume_operation(
         &self,
         thread_handle: ScriptHandle,
         state: &mut GameState,
+        source: ObjectId,
         controller: PlayerId,
         answer: Target,
     ) -> Result<OperationOutcome, ScriptError> {
@@ -744,7 +754,7 @@ impl ScriptRuntime {
         }
         let result: Value =
             thread.resume(answer_table).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        self.handle_operation_result(thread, result, state, controller)
+        self.handle_operation_result(thread, result, state, source, controller)
     }
 
     /// Resumes a `Game.MayChoose` suspension (backlog item 9a, CR 608.2d)
@@ -758,13 +768,14 @@ impl ScriptRuntime {
         &self,
         thread_handle: ScriptHandle,
         state: &mut GameState,
+        source: ObjectId,
         controller: PlayerId,
         answer: bool,
     ) -> Result<OperationOutcome, ScriptError> {
         let thread = self.thread(thread_handle)?;
         let result: Value =
             thread.resume(answer).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-        self.handle_operation_result(thread, result, state, controller)
+        self.handle_operation_result(thread, result, state, source, controller)
     }
 
     /// Shared tail for `invoke_operation`/`resume_operation`: `thread`
@@ -775,15 +786,15 @@ impl ScriptRuntime {
     /// `invoke_operation` always had, same strictness (a non-table return
     /// from a finished operation is a real error, not silently ignored —
     /// matches the old `function.call::<_, Table>()`'s own typed-return
-    /// strictness exactly). TODO(more effect shapes): draw_cards/
-    /// deal_damage/add_counters/etc need their own `result.get::<_,
-    /// Option<_>>("...")` + apply arm here as real cards need them, same
-    /// pre-existing gap this function always had.
+    /// strictness exactly). `draw_cards`/`deal_damage`/`add_counters` are
+    /// real now too (`phase5/operation-result-draw-damage-counters`) — see
+    /// `OperationOutcome::PendingDraw`/`PendingEvents`'s own doc comments.
     fn handle_operation_result(
         &self,
         thread: Thread,
         result: Value,
         state: &mut GameState,
+        source: ObjectId,
         controller: PlayerId,
     ) -> Result<OperationOutcome, ScriptError> {
         if thread.status() == ThreadStatus::Resumable {
@@ -803,10 +814,6 @@ impl ScriptRuntime {
                 result.type_name()
             )));
         };
-        // TODO(more effect shapes): gain_life/sacrifice_chosen/discard_chosen
-        // are the only keys wired so far - draw_cards/deal_damage/
-        // add_counters/etc need their own `result.get::<_, Option<_>>("...")`
-        // + apply arm here as real cards need them.
         let gain_life: Option<i32> =
             result.get("gain_life").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         if let Some(amount) = gain_life {
@@ -839,6 +846,53 @@ impl ScriptRuntime {
         }
         if !moves.is_empty() {
             return Ok(OperationOutcome::PendingZoneMoves(moves));
+        }
+        // `draw_cards = N` -> `OperationOutcome::PendingDraw` - see that
+        // variant's own doc comment for why this can't be a direct
+        // `&mut GameState` mutation the way `gain_life` above is.
+        let draw_cards: Option<u32> =
+            result.get("draw_cards").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        if let Some(amount) = draw_cards {
+            return Ok(OperationOutcome::PendingDraw { amount });
+        }
+        // `deal_damage = { { target = {kind=.., id=..}, amount = N }, ... }`
+        // / `add_counters = { { target = {kind=.., id=..}, counter = "...",
+        // amount = N }, ... } }` -> `OperationOutcome::PendingEvents` - both
+        // keys read unconditionally (not else-if), same "can combine in one
+        // table" convention `sacrifice_chosen`/`discard_chosen` above
+        // already establish. Neither pauses - see that variant's own doc
+        // comment for why these are pure event-builders rather than a
+        // pausing request like `PendingDraw`/`PendingZoneMoves`.
+        let mut pending_events = Vec::new();
+        let deal_damage: Option<Vec<Table>> =
+            result.get("deal_damage").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        if let Some(entries) = deal_damage {
+            for entry in entries {
+                let target_table: Table = entry.get("target").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let target = decode_target_pick(&target_table)?;
+                let amount: u32 = entry.get("amount").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                pending_events.push(GameEventKind::DamageDealt { source, target, amount, is_combat_damage: false });
+            }
+        }
+        let add_counters: Option<Vec<Table>> =
+            result.get("add_counters").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        if let Some(entries) = add_counters {
+            for entry in entries {
+                let target_table: Table = entry.get("target").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let Target::Object(object) = decode_target_pick(&target_table)? else {
+                    // CR 613 counters only ever sit on an object, same
+                    // "skip a Target::Player" stance resolve_counters_effect
+                    // (the primitive-tag fast path's own resolver) already
+                    // takes.
+                    continue;
+                };
+                let counter: String = entry.get("counter").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                let amount: i32 = entry.get("amount").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+                pending_events.push(GameEventKind::CounterAdded { object, kind: parse_counter_kind_name(&counter), amount });
+            }
+        }
+        if !pending_events.is_empty() {
+            return Ok(OperationOutcome::PendingEvents(pending_events));
         }
         // `Game.Ops.CastSpell(card, opts)` (`globals.rs`) returns
         // `{ cast_spell = { card, free, modes, targets, x_value } }` - same
