@@ -96,8 +96,14 @@ impl Engine {
             }]);
         }
         let outcome = result.unwrap_or(OperationOutcome::Finished);
-        self.process_state =
-            self.settle_script_operation_outcome(outcome, top.stack_id, first_player, events, Some(each_player));
+        self.process_state = self.settle_script_operation_outcome(
+            outcome,
+            top.stack_id,
+            top.source,
+            first_player,
+            events,
+            Some(each_player),
+        );
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -115,15 +121,37 @@ impl Engine {
         &mut self,
         outcome: OperationOutcome,
         stack_id: ObjectId,
+        source: ObjectId,
         controller: PlayerId,
         events_so_far: Vec<GameEventKind>,
         mut each_player: Option<EachPlayerLoop>,
     ) -> ProcessState {
         match outcome {
             OperationOutcome::NeedsChoice { thread, request } => {
-                ProcessState::AwaitingScriptChoice { thread, request, stack_id, controller, events_so_far, each_player }
+                ProcessState::AwaitingScriptChoice { thread, request, stack_id, source, controller, events_so_far, each_player }
             }
             OperationOutcome::Finished => self.advance_or_finish_each_player(stack_id, events_so_far, each_player),
+            // `deal_damage`/`add_counters` - no pause of its own (see
+            // `OperationOutcome::PendingEvents`'s own doc comment), so this
+            // works the same whether or not we're inside a `ForEachPlayer`
+            // loop: fold the constructed events into the running list and
+            // continue exactly as if this player's own invocation had
+            // returned `Finished`.
+            OperationOutcome::PendingEvents(new_events) => {
+                let mut events_so_far = events_so_far;
+                events_so_far.extend(new_events);
+                self.advance_or_finish_each_player(stack_id, events_so_far, each_player)
+            }
+            // `draw_cards` - TODO: not `ForEachPlayer`-aware, same narrowing
+            // `PendingCast` below already takes and for the same reason
+            // (`continue_draw_cards` finishes the *whole* resolution when
+            // its own queue drains, wrong if this is only one player's turn
+            // in a loop with others still remaining) - no real card needs
+            // "each player draws a card via a custom function" today.
+            OperationOutcome::PendingDraw { amount } => match each_player {
+                None => self.continue_draw_cards(amount, controller, stack_id, events_so_far),
+                Some(_) => self.advance_or_finish_each_player(stack_id, events_so_far, each_player),
+            },
             // CR 101.4: a mid-loop player's sacrifice_chosen/discard_chosen
             // answer is folded into the loop's own running totals, not
             // moved yet - see EachPlayerLoop's own doc comment for why.
@@ -197,6 +225,7 @@ impl Engine {
             }]);
         }
         let outcome = result.unwrap_or(OperationOutcome::Finished);
-        self.settle_script_operation_outcome(outcome, stack_id, next_player, events_so_far, Some(loop_state))
+        let source = loop_state.source;
+        self.settle_script_operation_outcome(outcome, stack_id, source, next_player, events_so_far, Some(loop_state))
     }
 }

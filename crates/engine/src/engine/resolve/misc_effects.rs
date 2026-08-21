@@ -286,10 +286,28 @@ impl Engine {
                             thread,
                             request,
                             stack_id: top.stack_id,
+                            source: top.source,
                             controller: top.controller,
                             events_so_far: events,
                             each_player: None,
                         };
+                        ControlFlow::Break(StepStatus::Progressed)
+                    }
+                    // `deal_damage`/`add_counters` - no pause, so the
+                    // constructed events just fold straight into this
+                    // resolution's own accumulated list and continue
+                    // exactly as `Finished` does.
+                    Ok(OperationOutcome::PendingEvents(new_events)) => {
+                        let mut events = events;
+                        events.extend(new_events);
+                        ControlFlow::Continue(events)
+                    }
+                    // `draw_cards`, with no `ForEachPlayer` context (this
+                    // call site never has one) - same real pipeline
+                    // Game.Ops.DrawCards(n)'s own primitive-tag fast path
+                    // uses (resolve_draw_cards_effect).
+                    Ok(OperationOutcome::PendingDraw { amount }) => {
+                        self.process_state = self.continue_draw_cards(amount, top.controller, top.stack_id, events);
                         ControlFlow::Break(StepStatus::Progressed)
                     }
                     // `phase5/mass-choice-effects`: a standalone (not

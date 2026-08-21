@@ -848,11 +848,17 @@ pub enum ProcessState {
     /// own doc comment for what `submit_script_choice`/`submit_script_may_
     /// choice` do differently once `controller`'s own answer resumes the
     /// thread. `None` (every pre-existing pause shape) behaves exactly as
-    /// before.
+    /// before. `source` (`phase5/operation-result-draw-damage-counters`) is
+    /// the operation's own source object — needed so a resumed coroutine
+    /// can still return `deal_damage`/`add_counters` after yielding once
+    /// (`ScriptRuntime::resume_operation`/`resume_operation_bool` need it
+    /// to build a real `GameEventKind`, and nothing about a suspended
+    /// coroutine remembers its own source on its own).
     AwaitingScriptChoice {
         thread: ScriptHandle,
         request: ScriptChoiceRequest,
         stack_id: ObjectId,
+        source: ObjectId,
         controller: PlayerId,
         events_so_far: Vec<GameEventKind>,
         each_player: Option<EachPlayerLoop>,

@@ -842,7 +842,7 @@
   script-backed decode. Full workspace suite green.
 - Unresolved: none new.
 
-## Slice: layer-overwrite-types-colors (branch pending review)
+## Slice: layer-overwrite-types-colors (merged)
 
 - Branch `phase5/layer-overwrite-types-colors`.
 - Scope: the overwrite half of layers 4/5 `layer-engine-types-colors` deliberately left additive-only

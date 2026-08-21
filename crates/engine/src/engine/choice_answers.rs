@@ -180,20 +180,21 @@ impl Engine {
         {
             return Err(ScriptChoiceError::InvalidCandidate);
         }
-        let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, events_so_far, each_player, .. } =
+        let ProcessState::AwaitingScriptChoice { thread, stack_id, source, controller, events_so_far, each_player, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
 
-        let result = self.script_runtime.resume_operation(thread, &mut self.state, controller, chosen);
+        let result = self.script_runtime.resume_operation(thread, &mut self.state, source, controller, chosen);
         if let Err(ref e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
                 message: format!("operation script error on source {stack_id:?}: {e:?}"),
             }]);
         }
         let outcome = result.unwrap_or(OperationOutcome::Finished);
-        self.process_state = self.settle_script_operation_outcome(outcome, stack_id, controller, events_so_far, each_player);
+        self.process_state =
+            self.settle_script_operation_outcome(outcome, stack_id, source, controller, events_so_far, each_player);
         Ok(())
     }
 
@@ -213,20 +214,21 @@ impl Engine {
         let ScriptChoiceRequest::MayChoose = request else {
             return Err(ScriptChoiceError::WrongRequestKind);
         };
-        let ProcessState::AwaitingScriptChoice { thread, stack_id, controller, events_so_far, each_player, .. } =
+        let ProcessState::AwaitingScriptChoice { thread, stack_id, source, controller, events_so_far, each_player, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
 
-        let result = self.script_runtime.resume_operation_bool(thread, &mut self.state, controller, chosen);
+        let result = self.script_runtime.resume_operation_bool(thread, &mut self.state, source, controller, chosen);
         if let Err(ref e) = result {
             self.log_events(vec![GameEventKind::ScriptError {
                 message: format!("operation script error on source {stack_id:?}: {e:?}"),
             }]);
         }
         let outcome = result.unwrap_or(OperationOutcome::Finished);
-        self.process_state = self.settle_script_operation_outcome(outcome, stack_id, controller, events_so_far, each_player);
+        self.process_state =
+            self.settle_script_operation_outcome(outcome, stack_id, source, controller, events_so_far, each_player);
         Ok(())
     }
 

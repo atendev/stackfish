@@ -248,6 +248,52 @@ end)
 A single return table can set both `sacrifice_chosen` and `discard_chosen` — build one manually if an
 operation needs to do both in the same turn (see `Game.Ops.ForEachPlayer`'s own example below).
 
+## Drawing, dealing damage, and adding counters
+
+A custom operation function can return `draw_cards`, `deal_damage`, and/or `add_counters` on its
+result table — the same "describe what happened, the engine applies it for real" split every other
+key on this page already uses:
+
+```lua
+e:SetOperation(function(source, controller)
+    return { draw_cards = 2 }
+end)
+```
+
+`draw_cards = N` goes through the exact same replaceable draw pipeline `Game.Ops.DrawCards(n)`'s
+primitive form uses (CR 121/616.1) — a redirect effect ("draw a card instead") still applies, and
+two or more competing replacement effects on the same draw still pause for a real ordering choice.
+Always draws for `controller` — there's no way for an operation to make a *different* player draw.
+
+```lua
+e:SetOperation(function(source, controller)
+    local chosen = Game.SelectTargets({ card_types = { "Creature" } })
+    return { deal_damage = { { target = chosen, amount = 3 } } }
+end)
+```
+
+`deal_damage`'s value is a list of `{ target = { kind = "object"|"player", id = n }, amount = N }`
+entries — `target` is the exact same tagged-table shape `Game.SelectTargets`/`Game.ChooseN` already
+return, so a picked target can be passed straight through with no reshaping. Each entry becomes a
+real `DamageDealt` event, going through the normal replacement/prevention pipeline (CR 615/616) and
+applying Deathtouch/Wither/Infect/Lifelink exactly like combat damage or `Game.Ops.Damage` already
+do — not just a marker. CR 601.2d "divide as you choose" still isn't modeled — each listed target
+takes its full `amount` independently.
+
+```lua
+e:SetOperation(function(source, controller)
+    return { add_counters = { { target = { kind = "object", id = some_id }, counter = "PlusOnePlusOne", amount = 1 } } }
+end)
+```
+
+`add_counters`'s value is a list of `{ target, counter, amount }` entries — `counter` is a counter
+kind name (`"PlusOnePlusOne"`, `"MinusOneMinusOne"`, `"Loyalty"`, `"Poison"`, `"Energy"`,
+`"Experience"`, `"Charge"`, or any other string for a custom counter kind). Object targets only — a
+player target is silently skipped, same as every other CR 613 counter-adding shape in this engine.
+
+All three keys can be combined in one return table alongside `gain_life`/`sacrifice_chosen`/
+`discard_chosen` — every key is read unconditionally, not an `if`/`else if`.
+
 ## Sacrificing/discarding at random
 
 `Game.Ops.SacrificeRandom(filter, count)`/`Game.Ops.DiscardRandom(filter, count)` (CR 701.9b/CR "at

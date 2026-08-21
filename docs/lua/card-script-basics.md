@@ -131,10 +131,15 @@ end
 ```
 
 Called with `(source, controller)` — no `event` parameter (an operation isn't re-checking whether
-it should run; that's the condition's job). **`gain_life` is currently the only key recognized on
-the returned table.** Every other effect shape (damage, counters, pump, drawing cards, ...) is
-reachable only via the `Game.Ops.*` primitive form for now, not via a custom function's return
-table — see [not-available-yet.md](not-available-yet.md).
+it should run; that's the condition's job). Recognized keys on the returned table: `gain_life`,
+`draw_cards`, `deal_damage`, `add_counters`, `sacrifice_chosen`/`discard_chosen` (see
+[Choosing N objects/cards mid-resolution](targeting-and-choices.md#choosing-n-objectscards-mid-resolution)),
+and `cast_spell` (see [Casting a spell from a script](targeting-and-choices.md)). `draw_cards`/
+`deal_damage`/`add_counters` go through the exact same replacement-checked/prevention/lifelink
+pipeline the `Game.Ops.*` primitive forms use — see
+[Drawing, dealing damage, and adding counters](targeting-and-choices.md#drawing-dealing-damage-and-adding-counters)
+for the full table shapes. Pump/type-changing effects are still reachable only via the `Game.Ops.*`
+primitive form — see [not-available-yet.md](not-available-yet.md).
 
 ## Full worked example
 
