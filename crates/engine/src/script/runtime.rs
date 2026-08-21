@@ -9,18 +9,19 @@ use mlua::{Function, Lua, Table, Thread, ThreadStatus, Value};
 
 use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, Subtype, SupertypeSet};
-use crate::types::cost::CostModifier;
+use crate::types::cost::{AlternativeCost, CostModifier};
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
+use crate::types::mana::ManaCost;
 use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
 use crate::types::target::TargetSpec;
 
 use super::decode::{
-    decode_condition_value, decode_operation_value, decode_script_choice_request, decode_subtypes, decode_target_pick,
-    decode_target_requirement_table, parse_card_type_name, parse_color_string, parse_counter_kind_name,
-    parse_keyword_name, parse_supertype_name,
+    decode_alternative_cost_table, decode_condition_value, decode_operation_value, decode_script_choice_request,
+    decode_subtypes, decode_target_pick, decode_target_requirement_table, parse_card_type_name, parse_color_string,
+    parse_counter_kind_name, parse_keyword_name, parse_supertype_name,
 };
 use super::encode::{event_to_lua, state_to_lua};
 use super::globals::bind_game_globals;
@@ -362,6 +363,62 @@ impl ScriptRuntime {
         let mut registry = self.registry.borrow_mut();
         let decoded = decode_operation_value(&self.lua, &mut registry, value)?;
         Ok(Some(decoded))
+    }
+
+    /// CR 601.2b's alternative costs (flashback/escape-style) a card grants,
+    /// as declared by its own script, via the optional
+    /// `s.alternative_costs()` module convention — another sibling to
+    /// `s.register_abilities(c)`/`s.target_requirement()`/`s.operation()`.
+    /// Called once per `CardDefinition` build, no `GameState`/`ObjectId`
+    /// involved — same reasoning `build_target_requirement`'s own doc
+    /// comment gives: an alternative cost is fixed text needed before the
+    /// card's own `CardDefinition` exists as a finished value, not something
+    /// that varies by which specific object ends up carrying it.
+    ///
+    /// `alternative_costs()` takes no arguments and returns an array of
+    /// entry tables (`{ description = "...", from_zone = "Graveyard", costs
+    /// = { Game.Costs.Mana("{R}"), ... }, exile_on_leaving_stack = bool,
+    /// escape = bool }`) — see `decode_alternative_cost_table`'s own doc
+    /// comment for the per-entry shape. Returning more than one entry is
+    /// real and selectable: `PlayerActionKind::CastSpell::alternative_cost`
+    /// is already an `Option<usize>` index into the resulting `Vec`, not a
+    /// single flag. A card with no `alternative_costs()` function at all
+    /// (the overwhelming majority) returns `Ok(Vec::new())` — same "empty"
+    /// default `CardDefinition::alternative_costs`'s own doc comment already
+    /// documents.
+    pub fn build_alternative_costs(&self, source: &str) -> Result<Vec<AlternativeCost>, ScriptError> {
+        let module: Table =
+            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> =
+            module.get("alternative_costs").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else { return Ok(Vec::new()) };
+        let table: Table = function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        table
+            .sequence_values::<Table>()
+            .map(|entry| decode_alternative_cost_table(entry.map_err(|e| ScriptError::LoadError(e.to_string()))?))
+            .collect()
+    }
+
+    /// CR 702.27a Buyback's additional cost, as declared by its own script,
+    /// via the optional `s.buyback_cost()` module convention — same "called
+    /// once per `CardDefinition` build" timing as `build_alternative_costs`
+    /// above. Returns a plain mana-cost string parsed via `ManaCost::parse`
+    /// directly (the same parser `Game.Costs.Mana(...)` itself calls) rather
+    /// than routing through `Game.Costs.*` — `CardDefinition.buyback_cost`
+    /// is always a flat `ManaCost` (see its own doc comment for why: every
+    /// real Buyback card is a flat mana amount), so the extra indirection
+    /// would buy nothing here. A card with no `buyback_cost()` function at
+    /// all (the overwhelming majority) returns `Ok(None)`.
+    pub fn build_buyback_cost(&self, source: &str) -> Result<Option<ManaCost>, ScriptError> {
+        let module: Table =
+            self.lua.load(source).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let function: Option<Function> =
+            module.get("buyback_cost").map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Some(function) = function else { return Ok(None) };
+        let value: String = function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        let mana = ManaCost::parse(&value)
+            .map_err(|e| ScriptError::LoadError(format!("buyback_cost(): {}", e.0)))?;
+        Ok(Some(mana))
     }
 
     /// Real body: builds a minimal Lua argument set from `ctx` and calls the

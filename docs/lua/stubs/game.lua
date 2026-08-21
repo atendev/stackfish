@@ -113,13 +113,26 @@
 ---@field additional_types? string[]
 ---@field additional_supertypes? string[]
 
--- The `s.register_abilities`/`s.target_requirement`/`s.operation` shape every card script
--- module returns. Not a real global — write your own `local s = {}` matching this shape.
--- See docs/lua/card-script-basics.md.
+-- CR 601.2b: one entry of `s.alternative_costs()`'s returned array — decodes to one
+-- AlternativeCost::Replacement. `costs` is the same Game.Costs.* vocabulary
+-- ActivatedAbilityBuilder:AddCost accepts (Game.Costs.Mana(...) at most once per entry).
+-- See docs/lua/card-script-basics.md#writing-alternative_costs.
+---@class AlternativeCostEntry
+---@field description string             -- required, plain text (not mechanically enforced)
+---@field from_zone string                -- required, e.g. "Graveyard" — also the permission grant
+---@field costs GameCostsValue[]          -- required
+---@field exile_on_leaving_stack? boolean -- default false; CR 702.34a Flashback
+---@field escape? boolean                 -- default false; true only for CR 702.138 Escape
+
+-- The `s.register_abilities`/`s.target_requirement`/`s.operation`/`s.alternative_costs`/
+-- `s.buyback_cost` shape every card script module returns. Not a real global — write your own
+-- `local s = {}` matching this shape. See docs/lua/card-script-basics.md.
 ---@class CardScript
 ---@field register_abilities? fun(c: ObjectId)
 ---@field target_requirement? fun(): TargetRequirementTable
 ---@field operation? fun(): OperationResultTable|GameOpsValue
+---@field alternative_costs? fun(): AlternativeCostEntry[]
+---@field buyback_cost? fun(): string    -- a mana-cost string, e.g. "{2}" — parsed via Game.Costs.Mana's grammar
 
 -------------------------------------------------------------------------------
 -- Opaque sentinel value types — each is a bare tag or the result of a factory

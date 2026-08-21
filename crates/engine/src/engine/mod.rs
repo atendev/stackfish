@@ -640,6 +640,24 @@ impl Engine {
         self.script_runtime.build_operation(source)
     }
 
+    /// A card's own alternative costs (flashback/escape-style, CR 601.2b), as
+    /// declared by its script's optional `alternative_costs()` function — see
+    /// `ScriptRuntime::build_alternative_costs`'s own doc comment for the
+    /// full convention.
+    pub fn build_alternative_costs(
+        &self,
+        source: &str,
+    ) -> Result<Vec<crate::types::cost::AlternativeCost>, ScriptError> {
+        self.script_runtime.build_alternative_costs(source)
+    }
+
+    /// A card's own Buyback cost (CR 702.27a), as declared by its script's
+    /// optional `buyback_cost()` function — see `ScriptRuntime::
+    /// build_buyback_cost`'s own doc comment for the full convention.
+    pub fn build_buyback_cost(&self, source: &str) -> Result<Option<crate::types::mana::ManaCost>, ScriptError> {
+        self.script_runtime.build_buyback_cost(source)
+    }
+
     /// Diagnostic for tests/replay tooling: whether `pipeline_context` is
     /// currently set. Should be `false` whenever `process_state` is
     /// `PriorityWindow` - `end_pipeline_run` is the only place that clears
