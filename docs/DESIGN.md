@@ -104,7 +104,7 @@ adaptation doc, unchanged from the original plan:
 - Reload requires an engine restart — no hot-reload requirement, so no need for a Lua->Rust
   compilation pipeline.
 - Script API is the friendly surface: `Game.CreateTriggeredAbility`, `Game.CreateStaticAbility`,
-  `Game.CreateReplacementEffect`, `Game.Ops.CastSpell`, `Game.PayCost`, `Game.SelectTargets`, etc.
+  `Game.CreateReplacementEffect`, `Game.Ops.CastSpell`, `Game.SelectTargets`, etc.
   (see `docs/lua/index.md` for the full, current reference). Script authors should not need Rust
   familiarity — only the Lua API surface.
 - Core responsibilities stay in Rust: legality, timing, hidden information, stack/priority/SBA/

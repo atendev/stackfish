@@ -1,11 +1,6 @@
-//! `Game.PayCost` — the function below is called *from* a card's Lua setup
-//! or operation callback, asking the engine to do something on the script's
-//! behalf; the engine still decides legality (DESIGN.md: "Lua asks, Rust
-//! decides"). Not bound into the Lua `Game` table yet — a real, still-open
-//! gap.
-//!
-//! This file originally sketched three other categories too, none of which
-//! still belong here:
+//! This file originally sketched four Lua-callable functions for a card's
+//! script to ask the engine to do something on its behalf (DESIGN.md: "Lua
+//! asks, Rust decides"). None of the four still belong here:
 //! - Ability/continuous-effect/replacement-effect registration and target
 //!   selection (`Game.RegisterTriggeredAbility`/`Game.AddContinuousEffect`/
 //!   `Game.ReplaceEvent`/`Game.SelectTargets`) — built for real via a
@@ -26,9 +21,24 @@
 //!   reason `Game.SelectTargets` couldn't: casting needs `commands::
 //!   execute_command`'s full pipeline (payment pause, replacement checks,
 //!   ...), which no function bound directly on `GameState` has access to.
+//! - `Game.PayCost` — never had a real caller, and never got bound into the
+//!   Lua `Game` table at all. Every real "ask a player to pay a cost mid-
+//!   resolution, or something happens instead" case this engine has built
+//!   (CR 118.12/118.12a's "unless paid" template — Mana Leak/Condescend/Ward
+//!   via `UnlessPaidConsequence::Counter`, Echo via `SacrificeSelf`) got its
+//!   own dedicated pause and `Engine::submit_unless_paid_payment`/
+//!   `decline_unless_paid` pair instead, validating a `PaymentPlan` against
+//!   a real `CostSpec` and committing via `commands::commit_payment`
+//!   directly — the exact thing this file's own dead `pay_cost` stub wanted
+//!   to generalize, confirmed twice now (Ward, then independently Echo) to
+//!   need no generic Lua-facing primitive. Removed rather than implemented,
+//!   same "confirmed zero real callers, deleted rather than guessed at"
+//!   precedent `phase5/stack-owner-and-dead-stubs` already set for this
+//!   file's Phase-3-era siblings.
 //!
 //! See those modules, not this file, for how a card actually registers an
-//! ability, asks for a target, or casts a spell today.
+//! ability, asks for a target, casts a spell, or pays a mid-resolution cost
+//! today.
 //!
 //! TODO(keyword-name -> primitive/ability mapping layer, not built yet):
 //! `types::card::KeywordSet` covers the CR 702 keywords that change how an
@@ -47,17 +57,3 @@
 //! far, not fine once real card data flows through here. See
 //! `KeywordSet`'s own doc comment for the primitive/sugar split this table
 //! would need to encode.
-
-use crate::commands::CommandError;
-use crate::types::cost::PaymentPlan;
-use crate::types::game::GameState;
-use crate::types::ids::PlayerId;
-
-/// `Game.PayCost`.
-pub fn pay_cost(_state: &mut GameState, _payer: PlayerId, _plan: PaymentPlan) -> Result<(), CommandError> {
-    // TODO: validate plan against whatever CostSpec it's paying (not a
-    // parameter here - needs one added, PaymentPlan::validate takes a
-    // &CostSpec and this function doesn't have one to pass it), commit if
-    // valid via the same path SubmitPayment uses in commands.rs.
-    todo!()
-}
