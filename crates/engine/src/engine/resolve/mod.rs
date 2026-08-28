@@ -526,12 +526,12 @@ impl Engine {
             // AbilityEffect::Counter's own doc comment and
             // counter::resolve_counter_effect for the full shape.
             Some(AbilityEffect::Counter) => self.resolve_counter_effect(legal_targets, events),
-            // CR 701.6a/118.12: pauses for a real mid-resolution payment
+            // CR 118.12/118.12a: pauses for a real mid-resolution payment
             // decision instead of resolving synchronously - see
-            // AbilityEffect::CounterUnlessPaid's own doc comment and
-            // counter::resolve_counter_unless_paid_effect for the full shape.
-            Some(AbilityEffect::CounterUnlessPaid(cost)) => {
-                self.resolve_counter_unless_paid_effect(top.stack_id, legal_targets, cost, events)
+            // AbilityEffect::UnlessPaid's own doc comment and
+            // counter::resolve_unless_paid_effect for the full shape.
+            Some(AbilityEffect::UnlessPaid { cost, otherwise }) => {
+                self.resolve_unless_paid_effect(top, legal_targets, cost, otherwise, events)
             }
             // CR 701.9b: same "count candidates drawn without replacement
             // via next_rng" shape as SacrificeRandom above, from the

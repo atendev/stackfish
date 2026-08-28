@@ -2,12 +2,14 @@ use super::*;
 use super::triggers_pipeline::is_permutation;
 use crate::replacement;
 use crate::triggers::PendingTrigger;
+use crate::types::cost::{CostPayment, PaymentPlan};
 use crate::types::counter::CounterSet;
 use crate::types::effect::ConsumptionPolicy;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, Target};
-use crate::types::mana::ManaPool;
+use crate::types::mana::{ManaPool, ManaUnit};
 use crate::types::player::PlayerState;
 use crate::types::turn::Step;
+use crate::types::zone::ZoneKind;
 use std::collections::{HashMap, VecDeque};
 
 fn minimal_state() -> GameState {
@@ -330,4 +332,169 @@ fn attach_choice_surfaces_via_step_and_a_valid_answer_attaches_and_resumes() {
     assert_eq!(engine.state().object(aura).unwrap().attached_to, Some(candidate_a));
     assert!(engine.state().object(candidate_a).unwrap().attachments.contains(&aura));
     assert!(!engine.state().object(candidate_b).unwrap().attachments.contains(&aura));
+}
+
+// ---------------------------------------------------------------------
+// CR 101.4/118.12 AwaitingUnlessPaidChoice's own payer_queue - dormant as
+// of this slice (see AbilityEffect::UnlessPaid's own doc comment): both
+// real producers (Ward, Echo) only ever build a single-element queue, so
+// no real card/Lua path can reach a longer one yet. Same posture
+// AwaitingAttachChoice's own tests above already take - the pause is
+// driven directly rather than through a real card/spell pipeline.
+// ---------------------------------------------------------------------
+
+fn multi_player_state(n: u32) -> GameState {
+    let ids: Vec<PlayerId> = (0..n).map(PlayerId).collect();
+    GameState {
+        players: ids
+            .iter()
+            .map(|&player_id| PlayerState {
+                player_id,
+                life: 20,
+                mana_pool: ManaPool::default(),
+                counters: CounterSet::new(),
+                emblems: Vec::new(),
+                commander_damage_taken: Vec::new(),
+                eliminated: false,
+                drew_from_empty_library: false,
+                mulligans_taken: 0,
+                hand_kept: false,
+                commander_casts: std::collections::HashMap::new(),
+            })
+            .collect(),
+        turn_order: ids.clone(),
+        active_player: ids[0],
+        ..minimal_state()
+    }
+}
+
+fn one_generic_cost() -> crate::types::cost::CostSpec {
+    crate::types::cost::CostSpec::mana_only(crate::types::mana::ManaCost::parse("{1}").expect("valid mana cost"))
+}
+
+fn unless_paid_choice(
+    payer_queue: VecDeque<PlayerId>,
+    source: ObjectId,
+    stack_id: ObjectId,
+) -> ProcessState {
+    ProcessState::AwaitingUnlessPaidChoice {
+        payer_queue,
+        cost: one_generic_cost(),
+        otherwise: crate::types::ability::UnlessPaidConsequence::SacrificeSelf,
+        target_id: None,
+        source,
+        stack_id,
+        events_so_far: Vec::new(),
+    }
+}
+
+#[test]
+fn decline_unless_paid_advances_the_queue_without_dispatching_otherwise() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let p2 = PlayerId(2);
+    let source = ObjectId(0);
+    let mut state = multi_player_state(3);
+    state.objects.insert(source, dummy_object(source, p0));
+    let mut engine = Engine::new(state);
+    engine.process_state = unless_paid_choice(VecDeque::from([p0, p1, p2]), source, ObjectId(99));
+
+    engine.decline_unless_paid(p0).expect("p0 is the current front");
+    let ProcessState::AwaitingUnlessPaidChoice { payer_queue, .. } = &engine.process_state else {
+        panic!("must still be awaiting - 2 candidates left");
+    };
+    assert_eq!(payer_queue.front(), Some(&p1));
+    assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield, "otherwise must not fire early");
+}
+
+#[test]
+fn decline_unless_paid_rejects_a_payer_not_at_the_front_of_the_queue() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let source = ObjectId(0);
+    let mut state = multi_player_state(2);
+    state.objects.insert(source, dummy_object(source, p0));
+    let mut engine = Engine::new(state);
+    engine.process_state = unless_paid_choice(VecDeque::from([p0, p1]), source, ObjectId(99));
+
+    let err = engine.decline_unless_paid(p1).unwrap_err();
+    assert!(matches!(err, UnlessPaidError::NotCurrentPayer));
+    let ProcessState::AwaitingUnlessPaidChoice { payer_queue, .. } = &engine.process_state else {
+        panic!("a rejected answer must not have consumed the pending state");
+    };
+    assert_eq!(payer_queue.front(), Some(&p0), "unanswered - the queue is untouched");
+}
+
+#[test]
+fn submit_unless_paid_payment_rejects_a_payer_not_at_the_front_of_the_queue() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let source = ObjectId(0);
+    let mut state = multi_player_state(2);
+    state.objects.insert(source, dummy_object(source, p0));
+    state.players[1].mana_pool.colorless = 1;
+    let mut engine = Engine::new(state);
+    engine.process_state = unless_paid_choice(VecDeque::from([p0, p1]), source, ObjectId(99));
+
+    let plan = PaymentPlan { payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colorless], phyrexian_life: 0 }] };
+    let err = engine.submit_unless_paid_payment(p1, plan).unwrap_err();
+    assert!(matches!(err, UnlessPaidError::NotCurrentPayer));
+    assert_eq!(engine.state().player(p1).unwrap().mana_pool.colorless, 1, "no deduction on a rejected submission");
+}
+
+#[test]
+fn all_candidates_declining_dispatches_otherwise_only_once_the_queue_is_empty() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let p2 = PlayerId(2);
+    let source = ObjectId(0);
+    let stack_id = ObjectId(99);
+    let mut state = multi_player_state(3);
+    state.objects.insert(source, dummy_object(source, p0));
+    let mut engine = Engine::new(state);
+    engine.process_state = unless_paid_choice(VecDeque::from([p0, p1, p2]), source, stack_id);
+
+    engine.decline_unless_paid(p0).expect("p0 is the current front");
+    assert!(matches!(engine.process_state, ProcessState::AwaitingUnlessPaidChoice { .. }), "2 candidates left");
+    engine.decline_unless_paid(p1).expect("p1 is the current front");
+    assert!(matches!(engine.process_state, ProcessState::AwaitingUnlessPaidChoice { .. }), "1 candidate left");
+    assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield, "otherwise must not fire early");
+
+    engine.decline_unless_paid(p2).expect("p2 is the current front");
+    loop {
+        match engine.step().status {
+            StepStatus::Progressed => continue,
+            _ => break,
+        }
+    }
+    assert!(engine.state().object(source).is_none(), "otherwise finally fires once every candidate has declined");
+    let resolved = engine
+        .state()
+        .ledger
+        .iter()
+        .any(|e| matches!(e.kind, GameEventKind::StackObjectResolved { stack_id: sid } if sid == stack_id));
+    assert!(resolved);
+}
+
+#[test]
+fn a_later_candidate_paying_stops_the_queue_before_otherwise_fires() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let p2 = PlayerId(2);
+    let source = ObjectId(0);
+    let stack_id = ObjectId(99);
+    let mut state = multi_player_state(3);
+    state.objects.insert(source, dummy_object(source, p0));
+    state.players[2].mana_pool.colorless = 1;
+    let mut engine = Engine::new(state);
+    engine.process_state = unless_paid_choice(VecDeque::from([p0, p1, p2]), source, stack_id);
+
+    engine.decline_unless_paid(p0).expect("p0 is the current front");
+    engine.decline_unless_paid(p1).expect("p1 is the current front");
+    let plan = PaymentPlan { payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colorless], phyrexian_life: 0 }] };
+    engine.submit_unless_paid_payment(p2, plan).expect("p2 can afford {1}");
+
+    assert!(matches!(engine.process_state, ProcessState::ReplacementCheck { .. }));
+    assert_eq!(engine.state().player(p2).unwrap().mana_pool.colorless, 0, "p2's mana was actually spent");
+    assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield, "otherwise never fires - p2 paid");
 }

@@ -10,7 +10,7 @@ use mlua::{AnyUserData, Function, Lua, Table, Value};
 
 use crate::types::ability::{
     AbilityEffect, ConditionPrimitive, CreatureTokenSpec, InterveningIfPrimitive, NamedToken, SearchDestination,
-    TokenSpec,
+    TokenSpec, UnlessPaidConsequence,
 };
 use crate::types::card::{CardTypeSet, Subtype};
 use crate::types::cost::{AdditionalCost, CostModifierTarget, CostSpec, FilterController};
@@ -207,14 +207,19 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     ops.set("Counter", OperationTag(AbilityEffect::Counter))?;
     // CR 701.6a/118.12: "counter target spell unless that player pays
     // [cost]" (Mana Leak's fixed {3}, Condescend's own {X} shape isn't
-    // covered yet - see AbilityEffect::CounterUnlessPaid's own doc comment).
-    // Same target declaration as Counter above, plus the mana-cost string
-    // (Game.Costs.Mana's own ManaCost::parse grammar) that player must pay
-    // to prevent it.
+    // covered yet - see AbilityEffect::UnlessPaid/UnlessPaidConsequence's
+    // own doc comments). Same target declaration as Counter above, plus the
+    // mana-cost string (Game.Costs.Mana's own ManaCost::parse grammar) that
+    // player must pay to prevent it. Lua-facing name kept stable across the
+    // `CounterUnlessPaid`->`UnlessPaid` generalization - from a card
+    // author's perspective this is still exactly "counter unless paid."
     let counter_unless_paid = lua.create_function(|_, s: String| {
         let cost = ManaCost::parse(&s)
             .map_err(|e| mlua::Error::RuntimeError(format!("Game.Ops.CounterUnlessPaid(\"{s}\"): {}", e.0)))?;
-        Ok(OperationTag(AbilityEffect::CounterUnlessPaid(cost)))
+        Ok(OperationTag(AbilityEffect::UnlessPaid {
+            cost: CostSpec::mana_only(cost),
+            otherwise: UnlessPaidConsequence::Counter,
+        }))
     })?;
     ops.set("CounterUnlessPaid", counter_unless_paid)?;
     // `Game.Ops.SacrificeRandom(filter, count)` (`phase5/mass-choice-effects`,

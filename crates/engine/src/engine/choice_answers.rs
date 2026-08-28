@@ -3,26 +3,26 @@
 //! Devour, CR 702.38a Amplify, CR 700.2e modal, and CR 707.6/614.12a copy —
 //! split out of `engine.rs`.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use crate::commands;
 use crate::engine_context::PipelineContext;
 use crate::replacement::{self, ReplacementOutcome};
 use crate::script::{OperationOutcome, ScriptChoiceRequest};
-use crate::types::ability::{AbilityEffect, CopyExceptions};
+use crate::types::ability::{AbilityEffect, CopyExceptions, UnlessPaidConsequence};
 use crate::types::command::{EngineCommand, PlayerActionKind};
-use crate::types::cost::{AlternativeCost, CostSpec, PaymentPlan};
+use crate::types::cost::{AlternativeCost, PaymentPlan};
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, Target};
+use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::{
-    AmplifyChoiceError, AttachChoiceError, CascadeChoiceError, CopyChoiceError, CounterUnlessPaidError,
-    DevourChoiceError, Engine, MadnessChoiceError, ModeChoiceError, ProcessState, ReplacementResumeTarget,
-    ScriptChoiceError, ScriptedZoneMoveKind, ScriptedZoneMoveThen,
+    AmplifyChoiceError, AttachChoiceError, CascadeChoiceError, CopyChoiceError, DevourChoiceError, Engine,
+    MadnessChoiceError, ModeChoiceError, ProcessState, ReplacementResumeTarget, ScriptChoiceError,
+    ScriptedZoneMoveKind, ScriptedZoneMoveThen, UnlessPaidError,
 };
 
 /// CR 707.9a/e: applies whatever "additional effect" exceptions
@@ -548,36 +548,40 @@ impl Engine {
         Ok(())
     }
 
-    /// Answers a pending CR 701.6a/118.12 counter-unless-paid choice raised
-    /// by `StepStatus::AwaitingCounterUnlessPaidChoice` with "yes, I pay" —
-    /// validates `plan` against the pending mana-only `cost` (`CostSpec::
-    /// mana_only`, same shape `PaymentPlan::validate` already checks
-    /// elsewhere) and, if it covers the cost, commits it immediately via
-    /// `commands::commit_payment` - the same mana-deduction primitive
-    /// `submit_payment` itself uses, just without that method's own
-    /// cast/activation-shaped pause wrapped around it (CR 601.6 never
-    /// applies here - declining doesn't unwind anything, see `Engine::
-    /// decline_counter_unless_paid`'s own doc comment). The targeted spell/
-    /// ability survives; only this `CounterUnlessPaid` ability/spell's own
-    /// resolution finishes (`StackObjectResolved`). On an invalid plan, the
-    /// pause is left untouched (`PaymentError::InvalidPlan`'s own "no
-    /// partial payment" stance) so the caller can retry or call
-    /// `decline_counter_unless_paid` instead.
-    pub fn submit_counter_unless_paid_payment(&mut self, plan: PaymentPlan) -> Result<(), CounterUnlessPaidError> {
-        let ProcessState::AwaitingCounterUnlessPaidChoice { payer, cost, stack_id, .. } = &self.process_state else {
-            return Err(CounterUnlessPaidError::NotAwaitingChoice);
+    /// Answers a pending CR 118.12/118.12a "unless paid" choice raised by
+    /// `StepStatus::AwaitingUnlessPaidChoice` with "yes, I pay" — `payer`
+    /// must be the current front of `payer_queue` (only whoever is
+    /// currently being asked may answer; a queue is always a single
+    /// element for this slice's two real producers, but the check is real
+    /// regardless of length). Validates `plan` against the pending `cost`
+    /// and, if it covers the cost, commits it immediately via `commands::
+    /// commit_payment` - the same mana-deduction primitive `submit_payment`
+    /// itself uses, just without that method's own cast/activation-shaped
+    /// pause wrapped around it (CR 601.6 never applies here - declining
+    /// doesn't unwind anything, see `Engine::decline_unless_paid`'s own doc
+    /// comment). `otherwise` never fires; only this `UnlessPaid` ability/
+    /// spell's own resolution finishes (`StackObjectResolved`). On an
+    /// invalid plan, the pause is left untouched (`PaymentError::
+    /// InvalidPlan`'s own "no partial payment" stance) so the caller can
+    /// retry or call `decline_unless_paid` instead.
+    pub fn submit_unless_paid_payment(&mut self, payer: PlayerId, plan: PaymentPlan) -> Result<(), UnlessPaidError> {
+        let ProcessState::AwaitingUnlessPaidChoice { payer_queue, cost, stack_id, .. } = &self.process_state else {
+            return Err(UnlessPaidError::NotAwaitingChoice);
         };
-        let payer = *payer;
-        let cost_spec = CostSpec::mana_only(cost.clone());
-        // `source` (for AdditionalCost::TapSelf) is meaningless for a
-        // mana-only cost - stack_id is a harmless placeholder, same
-        // convention PendingPaymentRequest::source's own doc comment
-        // already documents for a spell's own cast (nothing in a mana-only
-        // CostSpec ever reads it).
-        if !plan.validate(&cost_spec, &self.state, &self.script_runtime, payer, *stack_id) {
-            return Err(CounterUnlessPaidError::InvalidPlan);
+        if payer_queue.front() != Some(&payer) {
+            return Err(UnlessPaidError::NotCurrentPayer);
         }
-        let ProcessState::AwaitingCounterUnlessPaidChoice { stack_id, mut events_so_far, .. } =
+        let cost = cost.clone();
+        let stack_id = *stack_id;
+        // `source` (for AdditionalCost::TapSelf) is `stack_id` here, same
+        // harmless-placeholder convention `PendingPaymentRequest::source`'s
+        // own doc comment already documents for a spell's own cast - every
+        // real `cost` built by this slice's two producers is mana-only, so
+        // nothing actually reads it.
+        if !plan.validate(&cost, &self.state, &self.script_runtime, payer, stack_id) {
+            return Err(UnlessPaidError::InvalidPlan);
+        }
+        let ProcessState::AwaitingUnlessPaidChoice { mut events_so_far, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
@@ -590,24 +594,74 @@ impl Engine {
         Ok(())
     }
 
-    /// Answers a pending CR 701.6a/118.12 counter-unless-paid choice with
-    /// "no" (or the payer simply never intends to pay) — `target_id` is
-    /// actually countered, via the same `counter_stack_object` removal
-    /// `resolve_counter_effect`'s own unconditional case uses. Not a CR
-    /// 601.6 unwind (nothing about *this* `CounterUnlessPaid` spell/ability's
-    /// own cast is undone) - only the targeted object leaves the stack.
-    pub fn decline_counter_unless_paid(&mut self) -> Result<(), CounterUnlessPaidError> {
-        if !matches!(self.process_state, ProcessState::AwaitingCounterUnlessPaidChoice { .. }) {
-            return Err(CounterUnlessPaidError::NotAwaitingChoice);
+    /// Answers a pending CR 118.12/118.12a "unless paid" choice with "no"
+    /// (or the current front of `payer_queue` simply never intends to pay)
+    /// — `payer` must match that front, same check `submit_unless_paid_
+    /// payment` makes. Pops the front; if `payer_queue` still has
+    /// candidates left, re-raises the same pause for the next one (nothing
+    /// else changes). Once the queue is empty, dispatches `otherwise`:
+    /// `Counter` reuses the same `counter_stack_object` removal
+    /// `resolve_counter_effect`'s own unconditional case uses;
+    /// `SacrificeSelf` reuses the exact `continue_scripted_zone_move`/
+    /// `ScriptedZoneMoveThen::StackResolution` pipeline `resolve_sacrifice_
+    /// effect` itself delegates to (a bare `StackObject` isn't available
+    /// here — this ability's own `top` was already popped off `state.stack`
+    /// before this pause was ever raised — but `resolve_sacrifice_effect`
+    /// only ever reads `top.stack_id` off it, already captured directly as
+    /// this pause's own `stack_id`, so calling `continue_scripted_zone_move`
+    /// directly needs nothing else). Neither branch is a CR 601.6 unwind -
+    /// nothing about *this* `UnlessPaid` spell/ability's own cast/activation
+    /// is undone, only `otherwise`'s own consequence happens.
+    pub fn decline_unless_paid(&mut self, payer: PlayerId) -> Result<(), UnlessPaidError> {
+        let ProcessState::AwaitingUnlessPaidChoice { payer_queue, .. } = &self.process_state else {
+            return Err(UnlessPaidError::NotAwaitingChoice);
+        };
+        if payer_queue.front() != Some(&payer) {
+            return Err(UnlessPaidError::NotCurrentPayer);
         }
-        let ProcessState::AwaitingCounterUnlessPaidChoice { target_id, stack_id, mut events_so_far, .. } =
-            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        let ProcessState::AwaitingUnlessPaidChoice {
+            mut payer_queue,
+            cost,
+            otherwise,
+            target_id,
+            source,
+            stack_id,
+            mut events_so_far,
+        } = std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
             unreachable!("checked above");
         };
-        self.counter_stack_object(target_id, &mut events_so_far);
-        events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
-        self.process_state = ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+        payer_queue.pop_front();
+        if !payer_queue.is_empty() {
+            self.process_state = ProcessState::AwaitingUnlessPaidChoice {
+                payer_queue,
+                cost,
+                otherwise,
+                target_id,
+                source,
+                stack_id,
+                events_so_far,
+            };
+            return Ok(());
+        }
+        match otherwise {
+            UnlessPaidConsequence::Counter => {
+                if let Some(target_id) = target_id {
+                    self.counter_stack_object(target_id, &mut events_so_far);
+                }
+                events_so_far.push(GameEventKind::StackObjectResolved { stack_id });
+                self.process_state =
+                    ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() };
+            }
+            UnlessPaidConsequence::SacrificeSelf => {
+                self.process_state = self.continue_scripted_zone_move(
+                    ScriptedZoneMoveKind::Sacrifice,
+                    VecDeque::from([source]),
+                    ScriptedZoneMoveThen::StackResolution { stack_id },
+                    events_so_far,
+                );
+            }
+        }
         Ok(())
     }
 

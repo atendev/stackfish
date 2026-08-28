@@ -146,18 +146,21 @@ pub enum CascadeChoiceError {
     IllegalCast(CommandError),
 }
 
-/// Why `submit_counter_unless_paid_payment`/`decline_counter_unless_paid`
-/// rejected an answer to a pending CR 701.6a/118.12 counter-unless-paid
-/// pause (`AbilityEffect::CounterUnlessPaid`, Mana Leak-style).
+/// Why `submit_unless_paid_payment`/`decline_unless_paid` rejected an answer
+/// to a pending CR 118.12/118.12a "unless paid" pause
+/// (`AbilityEffect::UnlessPaid` — Ward/Mana Leak/Echo-style).
 #[derive(Debug)]
-pub enum CounterUnlessPaidError {
-    /// Engine isn't sitting in `ProcessState::AwaitingCounterUnlessPaidChoice`.
+pub enum UnlessPaidError {
+    /// Engine isn't sitting in `ProcessState::AwaitingUnlessPaidChoice`.
     NotAwaitingChoice,
+    /// The submitting player isn't the current front of `payer_queue` — only
+    /// whoever is currently being asked may answer.
+    NotCurrentPayer,
     /// The submitted `PaymentPlan` doesn't validate against the pending
     /// `cost` — the pause is left untouched, same no-partial-payment stance
     /// `submit_payment`'s own `PaymentError::InvalidPlan` already takes, so
-    /// the caller can retry with a different plan or call `decline_counter_
-    /// unless_paid` instead.
+    /// the caller can retry with a different plan or call
+    /// `decline_unless_paid` instead.
     InvalidPlan,
 }
 
@@ -850,16 +853,22 @@ impl Engine {
                 status
             }
 
-            ProcessState::AwaitingCounterUnlessPaidChoice { payer, target_id, cost, stack_id, events_so_far } => {
-                // Nothing to do until decline_counter_unless_paid/
-                // submit_counter_unless_paid_payment answers - same "put the
-                // exact same state back" pattern every other choice-pause
-                // above already uses.
-                let status = StepStatus::AwaitingCounterUnlessPaidChoice { payer, target_id, cost: cost.clone() };
-                self.process_state = ProcessState::AwaitingCounterUnlessPaidChoice {
-                    payer,
-                    target_id,
+            ProcessState::AwaitingUnlessPaidChoice { payer_queue, cost, otherwise, target_id, source, stack_id, events_so_far } => {
+                // Nothing to do until decline_unless_paid/
+                // submit_unless_paid_payment answers - same "put the exact
+                // same state back" pattern every other choice-pause above
+                // already uses. `payer_queue` is never empty while this
+                // pause is live - decline_unless_paid dispatches `otherwise`
+                // and leaves ProcessState instead of re-raising once it
+                // would go empty.
+                let payer = *payer_queue.front().expect("payer_queue is never empty while paused");
+                let status = StepStatus::AwaitingUnlessPaidChoice { payer, cost: cost.clone(), otherwise: otherwise.clone() };
+                self.process_state = ProcessState::AwaitingUnlessPaidChoice {
+                    payer_queue,
                     cost,
+                    otherwise,
+                    target_id,
+                    source,
                     stack_id,
                     events_so_far,
                 };

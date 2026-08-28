@@ -4,7 +4,7 @@ use crate::types::effect::EffectFilter;
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::mana::{ColorSet, ManaCost, ManaUnit};
+use crate::types::mana::{ColorSet, ManaUnit};
 use crate::types::target::TargetSpec;
 use crate::types::turn::Step;
 use crate::types::zone::ZoneKind;
@@ -18,6 +18,34 @@ pub enum AbilityKind {
     Triggered,
     Activated,
     Static,
+}
+
+/// CR 118.12/118.12a's "[do something] unless [a player does something
+/// else]" template, shared by every "pay or else" keyword rather than each
+/// getting its own bespoke pause. `AbilityEffect::UnlessPaid`'s `cost` reuses
+/// the ordinary `CostSpec` vocabulary (any real cost shape, not just mana —
+/// CR 118.12 places no such restriction), validated/committed via the exact
+/// same `PaymentPlan`/`commit_payment` machinery `submit_payment` itself
+/// uses. `otherwise` names which of a small, deliberately closed set of
+/// consequences fires once every candidate payer declines in turn
+/// (`ProcessState::AwaitingUnlessPaidChoice`'s own `payer_queue`, built in CR
+/// 101.4 APNAP order — a single-candidate queue for both variants below,
+/// since neither Ward nor Echo ever asks anyone but one fixed player; the
+/// queue shape exists so a future "any player may pay" keyword doesn't need
+/// a second mechanism, not because either real card here needs more than
+/// one candidate) — grown by hand as a real new keyword needs a new shape,
+/// same "narrow now, widen on the next real card" posture this codebase
+/// takes throughout (see `99-backlog.md`).
+#[derive(Clone, Debug)]
+pub enum UnlessPaidConsequence {
+    /// CR 701.6a/118.12 (Mana Leak, Condescend) + CR 702.21a (Ward): counter
+    /// whatever this ability's own target names — same removal
+    /// (`counter_stack_object`) `AbilityEffect::Counter` already uses.
+    Counter,
+    /// CR 702.30a (Echo): sacrifice the permanent whose ability this is —
+    /// reuses `resolve_sacrifice_effect` against this ability's own source,
+    /// no target of its own.
+    SacrificeSelf,
 }
 
 /// Structural stand-in for an ability's effect when no script bridge exists
@@ -296,35 +324,36 @@ pub enum AbilityEffect {
     /// 113.9/701.6a, `phase5/counter-target-ability`) - `resolve_counter_effect`
     /// accepts either `Target` variant.
     ///
-    /// "Counter unless that player pays {X}" (Mana Leak, Condescend) is its
-    /// own sibling variant now - see `CounterUnlessPaid`'s own doc comment.
+    /// "Counter unless that player pays {X}" (Mana Leak, Condescend) is
+    /// `UnlessPaid { otherwise: UnlessPaidConsequence::Counter, .. }`'s own
+    /// shape now — see that type's own doc comment.
     Counter,
-    /// CR 701.6a/118.12: "counter target spell unless its controller pays
-    /// `[cost]`" (Mana Leak's fixed `{3}`; Condescend's own `{X}` isn't
-    /// covered - see below). Same target declaration as `Counter` above
+    /// CR 118.12/118.12a's general "[do something] unless [a player does
+    /// something else]" template — see `UnlessPaidConsequence`'s own doc
+    /// comment for the full shape shared across every real keyword built on
+    /// it (`Counter`: CR 701.6a/118.12 Mana Leak/Condescend + CR 702.21a
+    /// Ward; `SacrificeSelf`: CR 702.30a Echo). Same target declaration as
+    /// plain `Counter` above when `otherwise` is `Counter`
     /// (`s.target_requirement()`, `Target::Object`/`Target::Ability` both
-    /// accepted), plus this one fixed amount. Deliberately a sibling
-    /// variant rather than an `Option<ManaCost>` field on `Counter` itself -
-    /// every existing `Counter` call site (all real cards so far) would
-    /// otherwise need to thread through an always-`None`, same "additive
-    /// sibling, not a widened payload" precedent `ManaUnit`'s
-    /// `RestrictedColored`/`SnowColored` variants already established.
+    /// accepted); `SacrificeSelf` declares no target at all.
     ///
-    /// Resolution pauses (`resolve_counter_unless_paid_effect`,
-    /// `ProcessState::AwaitingCounterUnlessPaidChoice`) rather than
-    /// resolving synchronously like `Counter` does - CR 118.12's "if [a
-    /// player] does" is a real mid-resolution decision by a player who
-    /// isn't necessarily this spell/ability's own controller (the
-    /// *targeted* spell's controller, CR 701.6a's own "that player"), same
-    /// "paused, not guessed at" stance `Cascade`/`Madness` already take for
-    /// their own player decisions. `Engine::submit_counter_unless_paid_
-    /// payment`/`decline_counter_unless_paid` (`choice_answers.rs`) are the
-    /// two answers - paying commits real mana immediately (the same
+    /// Resolution pauses (`resolve_unless_paid_effect`, `ProcessState::
+    /// AwaitingUnlessPaidChoice`) rather than resolving synchronously like
+    /// plain `Counter` does - CR 118.12's "if [a player] does" is a real
+    /// mid-resolution decision by a player who isn't necessarily this
+    /// ability's own controller (Ward's targeting player, not Ward's own
+    /// controller), same "paused, not guessed at" stance `Cascade`/`Madness`
+    /// already take for their own player decisions. `Engine::submit_
+    /// unless_paid_payment`/`decline_unless_paid` (`choice_answers.rs`) are
+    /// the two answers - paying commits the real cost immediately (the same
     /// `PaymentPlan`/`commit_payment` machinery `submit_payment` uses, just
     /// without a full cast/activation's cost-payment pause shape wrapped
     /// around it, since declining doesn't unwind anything - CR 601.6 never
-    /// applies here), declining reuses `Counter`'s own removal logic
-    /// (factored into `counter_stack_object`, shared by both).
+    /// applies here); declining advances `payer_queue` and, once it's
+    /// empty, dispatches `otherwise` (`Counter` reuses `counter_stack_object`
+    /// directly; `SacrificeSelf` reuses `resolve_sacrifice_effect` against
+    /// this ability's own source, via the existing `ScriptedZoneMoveThen::
+    /// StackResolution` tail — no new continuation shape needed for either).
     ///
     /// TODO: Condescend's own "{X}" (an amount announced when *this* spell
     /// was cast, not a fixed printed number) isn't representable - `ManaCost`
@@ -333,7 +362,13 @@ pub enum AbilityEffect {
     /// at resolution time either. Mana Leak's fixed-number shape only, same
     /// "model the shape that exists" stance this codebase repeatedly takes
     /// (`HandSizeEffect`'s own doc comment names the same convention).
-    CounterUnlessPaid(ManaCost),
+    ///
+    /// TODO: `payer_queue` is only ever built as a single-element queue by
+    /// this slice's own two real producers (Ward: the targeted player;
+    /// Echo: the controller) - a real "any player may pay" or "each
+    /// opponent may pay independently" keyword isn't wired from Lua/TOML
+    /// yet, named here rather than guessed at (see `99-backlog.md`).
+    UnlessPaid { cost: CostSpec, otherwise: UnlessPaidConsequence },
     /// The `Game.Ops.CreateToken()` primitive — creates one or more token
     /// permanents on the battlefield under the controller's control (CR 111).
     /// Named tokens (Clue, Food, Treasure) are fully implemented. Creature

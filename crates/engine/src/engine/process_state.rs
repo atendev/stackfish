@@ -11,13 +11,13 @@ use crate::replacement;
 use crate::sba;
 use crate::script::ScriptChoiceRequest;
 use crate::triggers::PendingTrigger;
-use crate::types::ability::{AbilityEffect, CopyExceptions, SearchDestination, TokenSpec};
+use crate::types::ability::{AbilityEffect, CopyExceptions, SearchDestination, TokenSpec, UnlessPaidConsequence};
 use crate::types::card::{CardDefinition, ModeChoice, SpellMode};
 use crate::types::command::PlayerAction;
 use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
-use crate::types::mana::{ColorSet, ManaCost};
+use crate::types::mana::ColorSet;
 use crate::types::stack::StackObject;
 use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
@@ -134,15 +134,17 @@ pub enum StepStatus {
     /// branch is a full nested cast" shape `AwaitingMadnessChoice` above
     /// already established.
     AwaitingCascadeChoice { player: PlayerId, candidate: Option<ObjectId> },
-    /// CR 701.6a/118.12 (`AbilityEffect::CounterUnlessPaid`, Mana Leak-style):
-    /// `payer` (the *targeted* spell/ability's own controller, not
-    /// necessarily this resolving spell's) may call `Engine::
-    /// submit_counter_unless_paid_payment` with a `PaymentPlan` covering
-    /// `cost` to save `target_id` from being countered, or `Engine::
-    /// decline_counter_unless_paid` to let the counter happen. Same "not a
-    /// `Vec<ObjectId>` candidate choice, a real yes/no decision" shape
-    /// `AwaitingMadnessChoice`/`AwaitingCascadeChoice` already establish.
-    AwaitingCounterUnlessPaidChoice { payer: PlayerId, target_id: ObjectId, cost: ManaCost },
+    /// CR 118.12/118.12a (`AbilityEffect::UnlessPaid`) — see that type's own
+    /// doc comment for the full shape shared by Ward/Mana Leak/Echo. `payer`
+    /// (the front of `ProcessState::AwaitingUnlessPaidChoice`'s own
+    /// `payer_queue` — always a single fixed player for both real producers
+    /// this slice builds) may call `Engine::submit_unless_paid_payment`
+    /// with a `PaymentPlan` covering `cost` to stop `otherwise` from
+    /// happening, or `Engine::decline_unless_paid` to advance the queue (or,
+    /// once empty, trigger it). Same "not a `Vec<ObjectId>` candidate
+    /// choice, a real yes/no decision" shape `AwaitingMadnessChoice`/
+    /// `AwaitingCascadeChoice` already establish.
+    AwaitingUnlessPaidChoice { payer: PlayerId, cost: CostSpec, otherwise: UnlessPaidConsequence },
     /// CR 707.6/614.12a (Clone itself): `replacement::pending_copy_choice`
     /// found a registered `EntersAsCopy` effect on `object` (already a real
     /// battlefield permanent by this point) with 1+ creatures on the
@@ -771,18 +773,29 @@ pub enum ProcessState {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// CR 701.6a/118.12 (`AbilityEffect::CounterUnlessPaid`): paused right
-    /// where `resolve_counter_unless_paid_effect` would otherwise have
-    /// counter-or-not resolved synchronously the way plain `Counter` does -
-    /// `target_id` is the *targeted* `StackObject`'s own `stack_id` (not
-    /// `stack_id` below, which is this `CounterUnlessPaid` ability/spell's
-    /// own), `payer` its controller. `stack_id`/`events_so_far` are this
-    /// resolution's own paused-progress state, same role they play on
-    /// `AwaitingCascadeChoice`/`AwaitingMadnessChoice` above.
-    AwaitingCounterUnlessPaidChoice {
-        payer: PlayerId,
-        target_id: ObjectId,
-        cost: ManaCost,
+    /// CR 118.12/118.12a (`AbilityEffect::UnlessPaid`) — see that type's own
+    /// doc comment for the shared shape. `payer_queue` is built in CR 101.4
+    /// APNAP order when this pause is first raised (a single-element queue
+    /// for both of this slice's real producers); `Engine::
+    /// submit_unless_paid_payment` only accepts a plan from whoever is at
+    /// its front, and `Engine::decline_unless_paid` pops that front and
+    /// either re-raises this same pause for the next candidate or, once the
+    /// queue is empty, dispatches `otherwise`. `target_id` (the *targeted*
+    /// `StackObject`'s own `stack_id`, not `stack_id` below) is only
+    /// meaningful when `otherwise` is `Counter`; `source` (only meaningful
+    /// for `SacrificeSelf`) is this ability's own source object — both
+    /// resolved once up front rather than re-derived on every candidate's
+    /// answer, same "resolve legal_targets once, not on every resume" stance
+    /// `AwaitingCascadeChoice`'s own `candidate` already takes. `stack_id`/
+    /// `events_so_far` are this resolution's own paused-progress state, same
+    /// role they play on `AwaitingCascadeChoice`/`AwaitingMadnessChoice`
+    /// above.
+    AwaitingUnlessPaidChoice {
+        payer_queue: VecDeque<PlayerId>,
+        cost: CostSpec,
+        otherwise: UnlessPaidConsequence,
+        target_id: Option<ObjectId>,
+        source: ObjectId,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },

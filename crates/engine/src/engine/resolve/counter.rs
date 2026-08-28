@@ -1,5 +1,5 @@
-//! `resolve_ability_effect`'s `Counter`/`CounterUnlessPaid` arms (CR 701.6a/
-//! 118.12) — see `AbilityEffect::Counter`/`CounterUnlessPaid`'s own doc
+//! `resolve_ability_effect`'s `Counter`/`UnlessPaid` arms (CR 701.6a/
+//! 118.12) — see `AbilityEffect::Counter`/`UnlessPaid`'s own doc
 //! comments in `types/ability.rs` for the full shape and named TODOs. Unlike
 //! every other single-target arm in this subdirectory, the object this
 //! mutates isn't reached through `legal_targets`'s usual "battlefield object,
@@ -7,11 +7,13 @@
 //! still-present `StackObject` living in `state.stack` itself, found and
 //! removed by matching `stack_id` directly.
 
+use std::collections::VecDeque;
 use std::ops::ControlFlow;
 
+use crate::types::ability::UnlessPaidConsequence;
+use crate::types::cost::CostSpec;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, Target};
-use crate::types::mana::ManaCost;
 use crate::types::stack::{StackEntryKind, StackObject};
 use crate::types::zone::ZoneKind;
 
@@ -20,7 +22,7 @@ use super::super::{Engine, ProcessState, StepStatus};
 impl Engine {
     /// `legal_targets`' first (only) entry, resolved to the `StackObject`'s
     /// own `stack_id` it names - shared by `resolve_counter_effect` and
-    /// `resolve_counter_unless_paid_effect` (CR 113.9: `Target::Object` at
+    /// `resolve_unless_paid_effect` (CR 113.9: `Target::Object` at
     /// `zone: Stack` for "counter target spell," `Target::Ability` for
     /// "counter target activated or triggered ability," Stifle/Trickbind -
     /// both just name the same `stack_id` here, downstream code dispatches
@@ -38,9 +40,9 @@ impl Engine {
     /// `resolve_stack_top`'s own `pop()` only ever touches the last
     /// element), pushing the resulting `Countered`/`ZoneChange` event(s)
     /// onto `events`. Shared tail for `resolve_counter_effect` (unconditional
-    /// CR 701.6a) and `decline_counter_unless_paid` (CR 118.12's "if [the
-    /// player] doesn't" branch) - same removal either way, only *how* this
-    /// point was reached differs.
+    /// CR 701.6a) and `decline_unless_paid`'s own `Counter` dispatch (CR
+    /// 118.12's "if [the player] doesn't" branch) - same removal either way,
+    /// only *how* this point was reached differs.
     ///
     /// A countered ability "just stops existing"
     /// (`StackEntryKind::ActivatedAbility`/`TriggeredAbility` - same as a
@@ -59,10 +61,10 @@ impl Engine {
     /// no-op - a structural impossibility for `resolve_counter_effect` (CR
     /// 608.2b's own recheck in `resolve_stack_top` would have already
     /// fizzled the Counter spell itself instead of reaching this far), but a
-    /// real, reachable case for `decline_counter_unless_paid`: nothing stops
-    /// the targeted spell from itself resolving/fizzling/being countered by
-    /// something else while this engine sits paused on
-    /// `AwaitingCounterUnlessPaidChoice`. TODO: that's not actually
+    /// real, reachable case for `decline_unless_paid`'s own `Counter`
+    /// dispatch: nothing stops the targeted spell from itself resolving/
+    /// fizzling/being countered by something else while this engine sits
+    /// paused on `AwaitingUnlessPaidChoice`. TODO: that's not actually
     /// preventable yet (no re-legality-check on resume), named here rather
     /// than guessed at.
     pub(in crate::engine) fn counter_stack_object(&mut self, target_id: ObjectId, events: &mut Vec<GameEventKind>) {
@@ -92,39 +94,57 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// CR 701.6a/118.12: pauses on `ProcessState::AwaitingCounterUnlessPaidChoice`
-    /// instead of resolving synchronously - see `AbilityEffect::
-    /// CounterUnlessPaid`'s own doc comment for why this needs a real
-    /// mid-resolution pause (the payer is the *targeted* spell/ability's own
-    /// controller, not necessarily this resolving spell's). No legal target
-    /// (already fizzled via `target_is_legal` upstream, or this ability's
-    /// own target was never validly assigned) is a silent no-op, same stance
-    /// `resolve_counter_effect` above already takes for its own defensive
-    /// case - nothing to ask a payer about if there's no target at all.
-    pub(super) fn resolve_counter_unless_paid_effect(
+    /// CR 118.12/118.12a: pauses on `ProcessState::AwaitingUnlessPaidChoice`
+    /// instead of resolving synchronously - see `AbilityEffect::UnlessPaid`/
+    /// `UnlessPaidConsequence`'s own doc comments for the full shape shared
+    /// across every real keyword built on this. `payer_queue` is a single
+    /// element for both real producers here (`Counter`: the *targeted*
+    /// spell/ability's own controller, not necessarily this resolving
+    /// ability's; `SacrificeSelf`: this ability's own controller) - see
+    /// `UnlessPaidConsequence`'s own doc comment for why the queue shape
+    /// exists anyway. `Counter` with no legal target (already fizzled via
+    /// `target_is_legal` upstream, or this ability's own target was never
+    /// validly assigned) is a silent no-op, same stance `resolve_counter_
+    /// effect` above already takes for its own defensive case - nothing to
+    /// ask a payer about if there's no target at all.
+    pub(super) fn resolve_unless_paid_effect(
         &mut self,
-        stack_id: ObjectId,
+        top: &StackObject,
         legal_targets: &[Target],
-        cost: &ManaCost,
+        cost: &CostSpec,
+        otherwise: &UnlessPaidConsequence,
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        let Some(target_id) = Self::counter_target_id(legal_targets) else {
-            return ControlFlow::Continue(events);
+        let (target_id, payer) = match otherwise {
+            UnlessPaidConsequence::Counter => {
+                let Some(target_id) = Self::counter_target_id(legal_targets) else {
+                    return ControlFlow::Continue(events);
+                };
+                // Structurally the same "already left the stack"
+                // defensiveness counter_stack_object's own doc comment
+                // names - shouldn't happen this early (target_is_legal
+                // already rechecked it), but there's no StackObject to read
+                // a controller off if it somehow did.
+                let Some(payer) =
+                    self.state.stack.iter().find(|so| so.stack_id == target_id).map(|so| so.controller)
+                else {
+                    return ControlFlow::Continue(events);
+                };
+                (Some(target_id), payer)
+            }
+            // CR 702.30a Echo: "unless you pay" - always this ability's own
+            // controller, no target at all.
+            UnlessPaidConsequence::SacrificeSelf => (None, top.controller),
         };
-        // Structurally the same "already left the stack" defensiveness
-        // counter_stack_object's own doc comment names - shouldn't happen
-        // this early (target_is_legal already rechecked it), but there's no
-        // StackObject to read a controller off if it somehow did.
-        let Some(payer) = self.state.stack.iter().find(|so| so.stack_id == target_id).map(|so| so.controller) else {
-            return ControlFlow::Continue(events);
-        };
-        self.process_state = ProcessState::AwaitingCounterUnlessPaidChoice {
-            payer,
-            target_id,
+        self.process_state = ProcessState::AwaitingUnlessPaidChoice {
+            payer_queue: VecDeque::from([payer]),
             cost: cost.clone(),
-            stack_id,
+            otherwise: otherwise.clone(),
+            target_id,
+            source: top.source,
+            stack_id: top.stack_id,
             events_so_far: events,
         };
-        ControlFlow::Break(StepStatus::AwaitingCounterUnlessPaidChoice { payer, target_id, cost: cost.clone() })
+        ControlFlow::Break(StepStatus::AwaitingUnlessPaidChoice { payer, cost: cost.clone(), otherwise: otherwise.clone() })
     }
 }
