@@ -142,9 +142,10 @@ adaptation doc, unchanged from the original plan:
 - [x] Player-input-mid-script: resolved for target selection (`Game.SelectTargets`) via real Lua
       coroutines (`Lua::create_thread`/`Thread::resume`, yield/resume spanning `Engine::step()`
       calls) — see `docs/implementation/05-script-bridge.md`'s script-coroutines slice and
-      `docs/lua/targeting-and-choices.md`'s "Asking the player for a target mid-resolution". Still
-      open: modal spells (a different, non-script mechanism) — see
-      `docs/lua/not-available-yet.md`.
+      `docs/lua/targeting-and-choices.md`'s "Asking the player for a target mid-resolution". CR
+      700.2's modal-spell cluster (a-i) is closed — see `99-backlog.md`'s Targeting entry. Still
+      open: a modal *triggered* ability's own mode declaration (CR 603.3c) has no Lua builder yet
+      — see `docs/lua/not-available-yet.md`.
 - [ ] Snapshot/checkpoint strategy for the event ledger — replaying from event 0 every time you
       want state at event N works for v1, may need periodic snapshots later for performance. Not
       a v1 concern.

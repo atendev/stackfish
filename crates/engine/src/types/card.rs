@@ -308,11 +308,14 @@ pub struct CardDefinition {
     /// `commands::CastSpell`'s own doc comment for how 2+ chosen modes
     /// combine (CR 700.2d, `phase5/modal-multi-mode`).
     ///
-    /// TODO: CR 700.2i (pawprint mode budgets) is still unimplemented. CR
-    /// 700.2h (a mode's own additional cost) is real now too — see
-    /// `SpellMode::additional_cost`. CR 700.2e (another player chooses) is
-    /// real now too, narrowly — see `ModeChoice::ExactlyChosenByOpponent`'s
-    /// own doc comment.
+    /// CR 700.2i (pawprint mode budgets) is real now too — see
+    /// `ModeChoice::PawprintBudget`. TODO: the scenario TOML wiring
+    /// (`build_mode_choice`/`SpellModeSpec`) only ever produces count-based
+    /// variants, so a pawprint-budgeted mode still can't be expressed as a
+    /// scenario fixture. CR 700.2h (a mode's own additional cost) is real
+    /// now too — see `SpellMode::additional_cost`. CR 700.2e (another player
+    /// chooses) is real now too, narrowly — see
+    /// `ModeChoice::ExactlyChosenByOpponent`'s own doc comment.
     /// TODO: CR 700.2b (a modal *activated/triggered* ability, as opposed
     /// to a modal spell) is untouched — `RegisteredAbility` has no `modes`
     /// field of its own yet.
