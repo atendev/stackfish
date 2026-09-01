@@ -244,7 +244,16 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     //     Indestructible-granting (layer 6): now real, via
     //     layers::effective_characteristics - see collect_dying_creatures's own
     //     doc comment. Combat-damage power and blocking-legality keyword
-    //     checks (commands.rs) are NOT wired to the layer engine yet.
+    //     checks are wired to the layer engine too (confirmed stale: this
+    //     was true early on, but commands::combat::damage/declare have
+    //     called effective_power/effective_keywords - both backed by
+    //     layers::effective_characteristics - throughout, not raw
+    //     GameObject.definition fields; see 09-layers.md's own note on the
+    //     slice that audited and closed every remaining raw-field access,
+    //     and phase5_layer_engine_consumers.rs's own
+    //     a_modify_pt_boost_increases_combat_damage_dealt/
+    //     granted_flying_via_continuous_effect_still_enforces_blocking_legality
+    //     tests, both currently passing).
     //   - regeneration (CR 614.8/701.19): done, via the phase5/regeneration
     //     slice (docs/implementation.md) - CR 704.5g destruction only
     //     (deathtouch included), gated by DyingCandidate::is_destroy so a
