@@ -309,10 +309,9 @@ pub struct CardDefinition {
     /// combine (CR 700.2d, `phase5/modal-multi-mode`).
     ///
     /// CR 700.2i (pawprint mode budgets) is real now too — see
-    /// `ModeChoice::PawprintBudget`. TODO: the scenario TOML wiring
-    /// (`build_mode_choice`/`SpellModeSpec`) only ever produces count-based
-    /// variants, so a pawprint-budgeted mode still can't be expressed as a
-    /// scenario fixture. CR 700.2h (a mode's own additional cost) is real
+    /// `ModeChoice::PawprintBudget`. The scenario TOML wiring
+    /// (`CardSpec::mode_pawprint_budget`/`SpellModeSpec::pawprint_weight`)
+    /// is real too now. CR 700.2h (a mode's own additional cost) is real
     /// now too — see `SpellMode::additional_cost`. CR 700.2e (another player
     /// chooses) is real now too, narrowly — see
     /// `ModeChoice::ExactlyChosenByOpponent`'s own doc comment.

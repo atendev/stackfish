@@ -349,6 +349,17 @@ pub struct CardSpec {
     /// this field existed still parses unchanged.
     #[serde(default)]
     pub mode_repeatable: bool,
+    /// CR 700.2i's pawprint-budget shape (e.g. Fickle Fiend/Kolaghan's
+    /// Command-style "choose modes with combined pawprint value N or
+    /// less") - when set, `build_mode_choice` returns `ModeChoice::
+    /// PawprintBudget` and ignores `mode_count`/`mode_up_to`/
+    /// `mode_repeatable` entirely (meaningless for this shape - no real
+    /// card combines pawprint budgets with any of them, same narrowing
+    /// `ModeChoice::PawprintBudget`'s own doc comment already takes).
+    /// `None` (the default) keeps every pre-existing count-based fixture
+    /// parsing unchanged.
+    #[serde(default)]
+    pub mode_pawprint_budget: Option<u32>,
 }
 
 fn default_mode_count() -> u32 {
@@ -366,6 +377,13 @@ fn default_mode_count() -> u32 {
 pub struct SpellModeSpec {
     #[serde(default)]
     pub target_requirement: Option<TargetRequirementSpec>,
+    /// CR 700.2i: this mode's own printed pawprint ({P}) weight, only
+    /// meaningful alongside `CardSpec.mode_pawprint_budget` - same
+    /// "meaningless (0) until needed" convention `SpellMode::pawprint_
+    /// weight` itself documents. Defaults to `0` so every scenario fixture
+    /// written before this field existed still parses unchanged.
+    #[serde(default)]
+    pub pawprint_weight: u32,
 }
 
 /// `CardSpec.continuous_effect`'s shape — `layer` picks which of the layer
@@ -1496,22 +1514,19 @@ fn build_spell_modes(specs: &[SpellModeSpec]) -> Vec<SpellMode> {
             // same pre-existing gap CardSpec itself has for the top-level
             // card's own additional costs (no TOML representation at all).
             additional_cost: None,
-            // TODO(CR 700.2i): no TOML field for a mode's own pawprint
-            // weight, or a `mode_choice = "pawprint_budget"` shape on
-            // CardSpec, yet - `build_mode_choice` below only ever produces
-            // count-based ModeChoice variants. Meaningless (0) until a
-            // scenario fixture needs one; proven via direct Rust
-            // construction only, same posture other Lua/TOML-inaccessible
-            // ModeChoice variants (`*ChosenByOpponent`) already took.
-            pawprint_weight: 0,
+            pawprint_weight: m.pawprint_weight,
         })
         .collect()
 }
 
-/// `CardSpec.mode_count`/`mode_up_to`/`mode_repeatable` -> `ModeChoice` (CR
-/// 700.2d). Meaningless (but still read, for a consistent default) when
-/// `CardSpec.modes` is empty.
+/// `CardSpec.mode_count`/`mode_up_to`/`mode_repeatable`/
+/// `mode_pawprint_budget` -> `ModeChoice` (CR 700.2d/700.2i). Meaningless
+/// (but still read, for a consistent default) when `CardSpec.modes` is
+/// empty.
 fn build_mode_choice(spec: &CardSpec) -> ModeChoice {
+    if let Some(budget) = spec.mode_pawprint_budget {
+        return ModeChoice::PawprintBudget(budget);
+    }
     match (spec.mode_up_to, spec.mode_repeatable) {
         (false, false) => ModeChoice::Exactly(spec.mode_count),
         (true, false) => ModeChoice::UpTo(spec.mode_count),
