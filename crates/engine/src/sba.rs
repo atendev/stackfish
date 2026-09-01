@@ -250,8 +250,13 @@ pub fn check_state_based_actions(state: &mut GameState, script_runtime: &ScriptR
     //     (deathtouch included), gated by DyingCandidate::is_destroy so a
     //     704.5f zero-toughness or 704.5k world-rule death (neither is
     //     "destroy") can't be saved by a shield. The scripted `Destroy`
-    //     script op still doesn't check for one - named follow-up, that
-    //     slice's own UNRESOLVED list.
+    //     script op checks for one too now (confirmed stale: this was
+    //     phase5/regeneration's own named follow-up, closed for free once
+    //     phase5/destroy-ordering-choice threaded `is_destroy` through
+    //     continue_scripted_zone_move's own apply_replacements call - see
+    //     phase5_destroy_ordering_choice.rs's own
+    //     destroy_spell_choosing_the_regeneration_shield_saves_the_creature
+    //     test).
     //   - planeswalker loyalty 0 (704.5i - not v1 scope per DESIGN.md), and
     //     the rest of 704.5 - no prerequisite subsystem exists yet.
 }
