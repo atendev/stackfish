@@ -238,6 +238,14 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::DiscardRandom { filter, count }))
     })?;
     ops.set("DiscardRandom", discard_random)?;
+    // `Game.Ops.Discard(count)` (CR 701.9/701.9b, `phase5/discard-target-
+    // player`) - "target player discards `count` card(s)," that player's
+    // own choice. The target itself comes from `s.target_requirement()`
+    // (a single `TargetFilter::Player`), not a parameter here, same
+    // convention `Counter`/`UnlessPaid` both already use for their own
+    // targets.
+    let discard = lua.create_function(|_, count: u32| Ok(OperationTag(AbilityEffect::Discard { count })))?;
+    ops.set("Discard", discard)?;
     // `Game.Ops.ForEachPlayer(x)` (CR 101.4) - `x` is either a real per-card
     // Lua function (registered into the script registry right away, same
     // registration `decode_operation_value`'s own `Value::Function` arm does

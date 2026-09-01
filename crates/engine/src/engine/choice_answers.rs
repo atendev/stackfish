@@ -20,9 +20,9 @@ use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::{
-    AmplifyChoiceError, AttachChoiceError, CascadeChoiceError, CopyChoiceError, DevourChoiceError, Engine,
-    MadnessChoiceError, ModeChoiceError, ProcessState, ReplacementResumeTarget, ScriptChoiceError,
-    ScriptedZoneMoveKind, ScriptedZoneMoveThen, UnlessPaidError,
+    AmplifyChoiceError, AttachChoiceError, CascadeChoiceError, CopyChoiceError, DevourChoiceError,
+    DiscardChoiceError, Engine, MadnessChoiceError, ModeChoiceError, ProcessState, ReplacementResumeTarget,
+    ScriptChoiceError, ScriptedZoneMoveKind, ScriptedZoneMoveThen, UnlessPaidError,
 };
 
 /// CR 707.9a/e: applies whatever "additional effect" exceptions
@@ -662,6 +662,33 @@ impl Engine {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// Answers a pending CR 701.9/701.9b targeted-discard choice raised by
+    /// `StepStatus::AwaitingDiscardChoice` — `player` must be the one this
+    /// pause is actually asking (the *targeted* player, not necessarily this
+    /// resolving ability's own controller), and `chosen` must be one of
+    /// `candidates` (that player's own current hand). Delegates the actual
+    /// zone move to `discard::continue_targeted_discard` — see that
+    /// method's own doc comment for the full propose/replacement-check/
+    /// commit shape, including CR 616.1 and CR 702.35a Madness handling.
+    pub fn submit_discard_choice(&mut self, player: PlayerId, chosen: ObjectId) -> Result<(), DiscardChoiceError> {
+        let ProcessState::AwaitingDiscardChoice { player: awaiting, candidates, .. } = &self.process_state else {
+            return Err(DiscardChoiceError::NotAwaitingChoice);
+        };
+        if player != *awaiting {
+            return Err(DiscardChoiceError::NotCurrentPlayer);
+        }
+        if !candidates.contains(&chosen) {
+            return Err(DiscardChoiceError::InvalidCandidate);
+        }
+        let ProcessState::AwaitingDiscardChoice { player, remaining_count, stack_id, events_so_far, .. } =
+            std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
+        else {
+            unreachable!("checked above");
+        };
+        self.process_state = self.continue_targeted_discard(chosen, player, remaining_count, stack_id, events_so_far);
         Ok(())
     }
 

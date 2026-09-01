@@ -82,6 +82,20 @@ pub enum AttachChoiceError {
     InvalidCandidate,
 }
 
+/// Why `submit_discard_choice` rejected an answer to a pending CR
+/// 701.9/701.9b targeted-discard choice (`AbilityEffect::Discard`).
+#[derive(Debug)]
+pub enum DiscardChoiceError {
+    /// Engine isn't sitting in `ProcessState::AwaitingDiscardChoice`.
+    NotAwaitingChoice,
+    /// The submitting player isn't the one this pause is actually asking -
+    /// only the targeted player may answer their own discard choice.
+    NotCurrentPlayer,
+    /// `chosen` wasn't one of the offered `candidates` (that player's own
+    /// current hand).
+    InvalidCandidate,
+}
+
 /// Why `submit_devour_choice` rejected an answer to a CR 702.82a Devour
 /// choice.
 #[derive(Debug)]
@@ -872,6 +886,16 @@ impl Engine {
                     stack_id,
                     events_so_far,
                 };
+                status
+            }
+
+            ProcessState::AwaitingDiscardChoice { player, candidates, remaining_count, stack_id, events_so_far } => {
+                // Nothing to do until submit_discard_choice answers - same
+                // "put the exact same state back" pattern every other
+                // choice-pause above already uses.
+                let status = StepStatus::AwaitingDiscardChoice { player, candidates: candidates.clone(), remaining_count };
+                self.process_state =
+                    ProcessState::AwaitingDiscardChoice { player, candidates, remaining_count, stack_id, events_so_far };
                 status
             }
 

@@ -724,6 +724,34 @@ pub enum AbilityEffect {
     /// `SacrificeRandom`, mirroring CR 701.17b's mill precedent. Resolved
     /// via `continue_scripted_zone_move(Discard, ...)`.
     DiscardRandom { filter: EffectFilter, count: u32 },
+    /// CR 701.9/701.9b's default shape — "target player discards `count`
+    /// card(s)," where *that player* (not this ability's own controller)
+    /// chooses which. The target itself is declared the ordinary way
+    /// (`s.target_requirement()`, a single `TargetFilter::Player`, same
+    /// vocabulary "target opponent" already uses) — narrowed to a single
+    /// target this slice, same "single word first" posture `Counter`/
+    /// `UnlessPaid` both started with. Distinct from both `DiscardRandom`
+    /// above (no choice at all) and `Game.Ops.DiscardChosen` (a script
+    /// result-table key answered by *this ability's own controller* via
+    /// `Game.ChooseN` — see `engine::resolve::discard`'s own module doc
+    /// comment) - this is the one CR 701.9b shape where the discarding
+    /// player themselves picks, which needed a real new mid-resolution
+    /// pause (`ProcessState::AwaitingDiscardChoice`, `Engine::
+    /// submit_discard_choice`) rather than reusing either existing
+    /// mechanism. One card is asked for, resolved, and (if `count` says
+    /// so) asked for again — hand contents are re-read fresh before each
+    /// ask, same "recompute, don't cache" stance `Game.ChooseN` already
+    /// takes for its own repeated picks. An empty hand at any point ends
+    /// the effect early (CR 701.9's own "nothing to discard" silent case),
+    /// same posture `Counter`/`Sacrifice` already take for a target that's
+    /// no longer there.
+    ///
+    /// TODO: "discard your hand" (an unbounded count, not a fixed number)
+    /// isn't representable - `count: u32` covers Mind Rot's fixed "two
+    /// cards," not this open-ended shape. TODO: multi-target-word ("target
+    /// player discards a card and target player discards a card") isn't
+    /// supported - single target only, same narrowing named above.
+    Discard { count: u32 },
 }
 
 /// Where `AbilityEffect::Search`'s found cards go — narrowed to the two
