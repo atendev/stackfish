@@ -34,7 +34,13 @@ pub struct PlayerState {
     pub emblems: Vec<Emblem>,
     /// Commander-specific: cumulative combat damage taken from each commander
     /// source. 21+ from a single source means this player loses (CR 903.10a).
-    pub commander_damage_taken: Vec<(ObjectId, u32)>,
+    /// Keyed by `CardDefinition.name` rather than `ObjectId` - same reasoning
+    /// `commander_casts`' own doc comment gives: CR 400.7 mints a new id
+    /// every cast (and every CR 903.9a return), so an id can't track "the
+    /// same commander" across a cast/die/return/recast cycle the way a
+    /// card's name can. Partner commanders get independent entries
+    /// automatically, since they have different names.
+    pub commander_damage_taken: Vec<(String, u32)>,
     pub eliminated: bool,
     /// CR 704.5b/120.3: set by `commands::propose_draw` when a draw is
     /// attempted against an empty (or missing) library zone. Once `true`,
@@ -92,9 +98,12 @@ impl PlayerState {
 
     /// Commander damage from a single source reaching 21 means this player
     /// loses (CR 903.10a) — exposed as a query so the SBA loop can check it
-    /// without duplicating the threshold elsewhere.
-    pub fn commander_damage_from(&self, source: ObjectId) -> u32 {
-        self.commander_damage_taken.iter().find(|(s, _)| *s == source).map(|(_, n)| *n).unwrap_or(0)
+    /// without duplicating the threshold elsewhere. Takes the commander's
+    /// own name (see `commander_damage_taken`'s own doc comment for why),
+    /// not an `ObjectId` - a caller holding a live object still needs one
+    /// lookup (`object.definition.name`) to get there.
+    pub fn commander_damage_from(&self, source_name: &str) -> u32 {
+        self.commander_damage_taken.iter().find(|(s, _)| s == source_name).map(|(_, n)| *n).unwrap_or(0)
     }
 }
 

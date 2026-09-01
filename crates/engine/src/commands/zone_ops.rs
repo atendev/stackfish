@@ -270,20 +270,19 @@ pub(crate) fn apply_damage_event(
             // (life loss below, or poison via infect) - a parallel tracking
             // system, not a redirect of the life-loss/poison branching, so
             // this runs unconditionally before that branch rather than
-            // inside either arm of it. TODO: keyed by this specific
-            // ObjectId, which changes across a CR 903.9a return
-            // (cast/die/return/recast) - a recast commander's damage count
-            // resets to 0 under this key instead of accumulating against
-            // "the same commander" the way CR 903.10a's own text means it.
-            // Pre-existing field (item 10's slice), not changed here - see
-            // docs/implementation.md's phase5/commander-damage slice notes
-            // for why this was deliberately left as-is rather than widened
-            // to name-keying like PlayerState::commander_casts.
+            // inside either arm of it. Keyed by name, not ObjectId - see
+            // PlayerState::commander_damage_taken's own doc comment for why
+            // (mirrors commander_casts' own already-solved identity
+            // problem); the name is read here, before source_is_commander's
+            // own borrow of `state` ends, so it survives into the
+            // `player_mut` borrow below.
             if is_combat_damage && source_is_commander && amount > 0 {
-                if let Some(player) = state.player_mut(pid) {
-                    match player.commander_damage_taken.iter_mut().find(|(s, _)| *s == source) {
-                        Some((_, total)) => *total += amount,
-                        None => player.commander_damage_taken.push((source, amount)),
+                if let Some(name) = state.object(source).map(|o| o.definition.name.clone()) {
+                    if let Some(player) = state.player_mut(pid) {
+                        match player.commander_damage_taken.iter_mut().find(|(s, _)| *s == name) {
+                            Some((_, total)) => *total += amount,
+                            None => player.commander_damage_taken.push((name, amount)),
+                        }
                     }
                 }
             }

@@ -95,7 +95,7 @@ fn unblocked_commander_attacker_accumulates_commander_damage() {
     assign_combat_damage(&mut engine, p0, Vec::new());
 
     let p1_state = engine.state().players.iter().find(|p| p.player_id == p1).unwrap();
-    assert_eq!(p1_state.commander_damage_from(commander), 5);
+    assert_eq!(p1_state.commander_damage_from("General"), 5);
     assert_eq!(p1_state.life, 35, "life loss still happens normally alongside the commander-damage count");
 }
 
@@ -118,8 +118,8 @@ fn two_commanders_attacking_the_same_player_track_independently() {
     assign_combat_damage(&mut engine, p0, Vec::new());
 
     let p1_state = engine.state().players.iter().find(|p| p.player_id == p1).unwrap();
-    assert_eq!(p1_state.commander_damage_from(general), 4);
-    assert_eq!(p1_state.commander_damage_from(admiral), 6);
+    assert_eq!(p1_state.commander_damage_from("General"), 4);
+    assert_eq!(p1_state.commander_damage_from("Admiral"), 6);
     assert_eq!(p1_state.life, 30);
 }
 
@@ -169,7 +169,7 @@ fn commander_combat_damage_still_accumulates_under_infect() {
     // of the same number, so it still accumulates the full amount.
     assert_eq!(p1_state.life, 40, "infect redirects to poison, no life loss");
     assert_eq!(p1_state.counters.count(&CounterKind::Poison), 4);
-    assert_eq!(p1_state.commander_damage_from(commander), 4);
+    assert_eq!(p1_state.commander_damage_from("Plague General"), 4);
 }
 
 #[test]
@@ -253,5 +253,141 @@ fn commander_damage_reaching_21_ends_the_game() {
 
     assert!(matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p0), "got {status:?}");
     let p1_state = engine.state().players.iter().find(|p| p.player_id == p1).unwrap();
-    assert_eq!(p1_state.commander_damage_from(commander), 21);
+    assert_eq!(p1_state.commander_damage_from("General"), 21);
+}
+
+// ---------------------------------------------------------------------
+// CR 903.9a recast identity: commander_damage_taken is keyed by name, not
+// ObjectId (see PlayerState::commander_damage_taken's own doc comment) -
+// a commander that deals damage, dies, returns to the command zone, and is
+// recast under a fresh CR 400.7 id must still accumulate against the same
+// total, not reset to 0 under a new key. Neither hit below (15, then
+// another 15 once recast - the same card, same power, unblocked both
+// times) is individually lethal at the CR 903.10a threshold - only the
+// combined 30 crosses 21, so this test can only pass if the two hits are
+// genuinely combined under one key despite three different ObjectIds
+// across the test (commander_v1 -> commander_v2 in the command zone ->
+// commander_v3 back on the battlefield).
+// ---------------------------------------------------------------------
+
+#[test]
+fn commander_damage_survives_a_death_return_and_recast() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let commander_v1 = ObjectId(0);
+    let mut state = GameState {
+        players: vec![PlayerState { life: 40, ..player_state(p0) }, PlayerState { life: 40, ..player_state(p1) }],
+        phase: Phase::Combat,
+        step: Step::CombatDamage,
+        combat: Some(CombatState {
+            attackers: vec![(commander_v1, Target::Player(p1))],
+            blocks: Vec::new(),
+            declared_defenders: vec![p1],
+            bands: Vec::new(),
+            effect_blocked: Vec::new(),
+            damage_assigned_this_step: false,
+        }),
+        last_active_turn_number: HashMap::from([(p0, 1), (p1, 0)]),
+        ..base_two_player_state(zones(
+            p0,
+            p1,
+            &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Command, ZoneKind::Battlefield, ZoneKind::Exile],
+        ))
+    };
+    put_on_battlefield(&mut state, permanent(commander_v1, creature_definition("General", 15, 15, KeywordSet::empty()), p0, true));
+
+    let mut engine = Engine::new(state);
+    assign_combat_damage(&mut engine, p0, Vec::new());
+    let p1_state = engine.state().players.iter().find(|p| p.player_id == p1).unwrap();
+    assert_eq!(p1_state.commander_damage_from("General"), 15);
+    assert_eq!(p1_state.life, 25);
+
+    // Simulate the commander dying (not exercising real destruction here -
+    // phase5_sba_basics.rs/phase5_combat_damage.rs already cover that; this
+    // test is about the identity tracking once it's in the graveyard) and
+    // clear combat/return to a normal main phase so a fresh cast is legal.
+    let mut dead = engine.state_mut().objects.remove(&commander_v1).unwrap();
+    engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(commander_v1);
+    dead.zone = ZoneKind::Graveyard;
+    engine.state_mut().zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(commander_v1);
+    engine.state_mut().objects.insert(commander_v1, dead);
+    engine.state_mut().combat = None;
+    engine.state_mut().phase = Phase::Main;
+    engine.state_mut().step = Step::PreCombatMain;
+    engine.state_mut().priority_player = p0;
+
+    // CR 903.9a: a commander freshly in the graveyard pauses the very next
+    // SBA pass for the owner's return choice.
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    let status = drain(&mut engine);
+    assert!(
+        matches!(status, StepStatus::AwaitingCommanderReturnChoice { player, commander } if player == p0 && commander == commander_v1),
+        "got {status:?}"
+    );
+    engine.submit_commander_return_choice(true).unwrap();
+    drain(&mut engine);
+    let commander_v2 = engine.state().zone(ZoneKind::Command, Some(p0)).unwrap().contents[0];
+    assert_ne!(commander_v2, commander_v1, "CR 400.7 - the return itself already minted a new id");
+    // The PassPriority above genuinely went through once the pause cleared,
+    // handing priority to p1 - force it back to p0 rather than threading a
+    // second real pass through (this test isn't about priority handoff).
+    engine.state_mut().priority_player = p0;
+
+    // Recast from the command zone - commander_casts["General"] is still 0
+    // (commander_v1 was placed directly on the battlefield above, never
+    // actually cast), so this recast's own cost stays {0}, no commander tax.
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::CastSpell {
+                card: commander_v2,
+                modes: Vec::new(),
+                targets: Vec::new(),
+                x_value: None,
+                alternative_cost: None,
+                pay_buyback: false,
+            },
+        })
+        .expect("player holds priority, commander is castable from the command zone");
+    let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "got {status:?}");
+    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    drain(&mut engine);
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(&mut engine);
+    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    drain(&mut engine);
+
+    let commander_v3 = engine
+        .state()
+        .zone(ZoneKind::Battlefield, None)
+        .unwrap()
+        .contents
+        .iter()
+        .copied()
+        .find(|&id| engine.state().object(id).is_some_and(|o| o.is_commander))
+        .expect("the recast commander resolved onto the battlefield under yet another new id");
+    assert_ne!(commander_v3, commander_v2, "CR 400.7 - casting itself already minted a new id");
+    assert_ne!(commander_v3, commander_v1);
+
+    // Second combat, second hit - the same 15-power card, unblocked again,
+    // deliberately non-lethal on its own (15 < 21) at the CR 903.10a
+    // threshold.
+    engine.state_mut().phase = Phase::Combat;
+    engine.state_mut().step = Step::CombatDamage;
+    engine.state_mut().combat = Some(CombatState {
+        attackers: vec![(commander_v3, Target::Player(p1))],
+        blocks: Vec::new(),
+        declared_defenders: vec![p1],
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+    });
+    let status = assign_combat_damage(&mut engine, p0, Vec::new());
+
+    // 15 + 15 = 30 >= 21 - only reachable if both hits accumulated under
+    // the same key despite three different ObjectIds across this test.
+    assert!(matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p0), "got {status:?}");
+    let p1_state = engine.state().players.iter().find(|p| p.player_id == p1).unwrap();
+    assert_eq!(p1_state.commander_damage_from("General"), 30);
 }
