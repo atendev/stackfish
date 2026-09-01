@@ -2394,6 +2394,7 @@ fn drain(engine: &mut Engine) -> StepOutcome {
             | StepStatus::AwaitingMadnessChoice { .. }
             | StepStatus::AwaitingCascadeChoice { .. }
             | StepStatus::AwaitingUnlessPaidChoice { .. }
+            | StepStatus::AwaitingDiscardChoice { .. }
             | StepStatus::AwaitingSearchDevourChoice { .. }
             | StepStatus::AwaitingSearchAmplifyChoice { .. }
             | StepStatus::AwaitingCopyChoice { .. }

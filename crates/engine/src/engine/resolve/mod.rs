@@ -24,7 +24,9 @@
 //! - `destruction`: the always-pausing zone-move arms — `Sacrifice`,
 //!   `Destroy`, `DestroyAll`, `Exile`, `SacrificeRandom`.
 //! - `discard`: `DiscardRandom` (`phase5/mass-choice-effects`) — CR 701.9's
-//!   discard verb had no resolution-time producer at all before this slice.
+//!   discard verb had no resolution-time producer at all before this slice
+//!   — and `Discard` (`phase5/discard-target-player`, CR 701.9b's default
+//!   "the targeted player chooses" shape).
 //! - `each_player`: `ForEachPlayer` (`phase5/mass-choice-effects`, CR 101.4)
 //!   — re-invokes a script function once per player in APNAP order.
 //! - `library_effects`: the library-touching arms — `DrawCards`, `Shuffle`,
@@ -539,6 +541,11 @@ impl Engine {
             // battlefield - see AbilityEffect::DiscardRandom's own doc
             // comment.
             Some(AbilityEffect::DiscardRandom { filter, count }) => self.resolve_discard_random_effect(top, filter, *count),
+            // CR 701.9/701.9b: pauses for the *targeted* player's own real
+            // mid-resolution choice instead of resolving synchronously -
+            // see AbilityEffect::Discard's own doc comment and
+            // discard::resolve_discard_effect for the full shape.
+            Some(AbilityEffect::Discard { count }) => self.resolve_discard_effect(top, legal_targets, *count, events),
             // CR 101.4: invokes top.operation (a real script function
             // handle, not the usual ScriptHandle(0) placeholder - see
             // AbilityEffect::ForEachPlayer's own doc comment) once per

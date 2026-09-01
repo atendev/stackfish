@@ -145,6 +145,13 @@ pub enum StepStatus {
     /// choice, a real yes/no decision" shape `AwaitingMadnessChoice`/
     /// `AwaitingCascadeChoice` already establish.
     AwaitingUnlessPaidChoice { payer: PlayerId, cost: CostSpec, otherwise: UnlessPaidConsequence },
+    /// CR 701.9/701.9b (`AbilityEffect::Discard`): `player` (the *targeted*
+    /// player, not necessarily this resolving ability's own controller) may
+    /// call `Engine::submit_discard_choice` with one of `candidates` (their
+    /// own current hand) to discard it - `remaining_count` more picks are
+    /// still owed after this one. See `ProcessState::AwaitingDiscardChoice`'s
+    /// own doc comment for the full shape.
+    AwaitingDiscardChoice { player: PlayerId, candidates: Vec<ObjectId>, remaining_count: u32 },
     /// CR 707.6/614.12a (Clone itself): `replacement::pending_copy_choice`
     /// found a registered `EntersAsCopy` effect on `object` (already a real
     /// battlefield permanent by this point) with 1+ creatures on the
@@ -482,6 +489,25 @@ pub enum ReplacementResumeTarget {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
+    /// Reached from `ResolveStackTop`'s `AbilityEffect::Discard` arm (CR
+    /// 701.9/701.9b) once `player` has already answered `Engine::
+    /// submit_discard_choice` for the currently-in-flight card - same
+    /// per-pick shape `ScriptedDraw` has (a choice-driven queue inside a
+    /// resolving spell/ability, not a pre-built batch), except each pick
+    /// needs a real player choice first (which `ScriptedDraw`'s own "always
+    /// the library's current top" shape never does), so this only ever
+    /// carries the choice *after* it's been made - the choice itself lives
+    /// on `ProcessState::AwaitingDiscardChoice`, a separate pause.
+    /// `remaining_count` is how many more discards (after the one this
+    /// pause represents) `player` still owes; `events_so_far` carries the
+    /// resolving ability's own tail, same role `ScriptedDraw`'s own field
+    /// plays.
+    TargetedDiscard {
+        player: PlayerId,
+        remaining_count: u32,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+    },
     /// CR 614/616.1: reached from `permanent_entry::resolve_permanent_entry`'s
     /// own would-be-Battlefield redirect proposal — two or more registered
     /// `ReplaceZoneDestination` effects both matching the same entering
@@ -796,6 +822,21 @@ pub enum ProcessState {
         otherwise: UnlessPaidConsequence,
         target_id: Option<ObjectId>,
         source: ObjectId,
+        stack_id: ObjectId,
+        events_so_far: Vec<GameEventKind>,
+    },
+    /// CR 701.9/701.9b (`AbilityEffect::Discard`): `player` (the *targeted*
+    /// player) may call `Engine::submit_discard_choice` with one of
+    /// `candidates` (their own current hand, re-derived fresh before every
+    /// pick rather than cached - `Game.ChooseN`'s own repeated-pick
+    /// convention) to discard it. `remaining_count` is how many more picks
+    /// `player` still owes after this one - `0` means this is the last.
+    /// `stack_id`/`events_so_far` are this resolution's own paused-progress
+    /// state, same role they play on every other choice pause above.
+    AwaitingDiscardChoice {
+        player: PlayerId,
+        candidates: Vec<ObjectId>,
+        remaining_count: u32,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },

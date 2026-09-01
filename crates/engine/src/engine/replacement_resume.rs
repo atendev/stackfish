@@ -82,6 +82,8 @@ impl Engine {
             // CR 614.8: a scripted DrawCards(n) ability is also just a draw,
             // not destruction.
             ReplacementResumeTarget::ScriptedDraw { .. } => false,
+            // CR 614.8: a targeted CR 701.9 discard isn't destruction either.
+            ReplacementResumeTarget::TargetedDiscard { .. } => false,
             // CR 614.8: a would-be Battlefield destination redirect is a
             // ZoneChange proposal, never a destroy proposal - same reasoning
             // as ReplacementCheck above (this is that exact same kind of
@@ -249,6 +251,38 @@ impl Engine {
                             resume: ReplacementResumeTarget::ScriptedDraw {
                                 remaining,
                                 player,
+                                stack_id,
+                                events_so_far,
+                            },
+                        }
+                    }
+                }
+            }
+            ReplacementResumeTarget::TargetedDiscard { player, remaining_count, stack_id, events_so_far } => {
+                match outcome {
+                    ReplacementOutcome::Resolved(event) => {
+                        // CR 702.35a: same Madness-compatibility as every
+                        // other real discard producer - see
+                        // discard::continue_targeted_discard's own doc
+                        // comment.
+                        let madness = replacement::madness_marker_event(&self.state, &event);
+                        let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
+                        self.departed_triggered_abilities.extend(departed);
+                        if let Some(kind) = madness {
+                            self.log_events(vec![kind]);
+                        }
+                        self.state.ledger.push(committed);
+                        self.finish_or_continue_discard(player, remaining_count, stack_id, events_so_far)
+                    }
+                    ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
+                        ProcessState::AwaitingReplacementChoice {
+                            affected_player,
+                            pending_event: event,
+                            candidates,
+                            excluded,
+                            resume: ReplacementResumeTarget::TargetedDiscard {
+                                player,
+                                remaining_count,
                                 stack_id,
                                 events_so_far,
                             },

@@ -319,6 +319,10 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::ForEachPlayer(_))
         | Some(AbilityEffect::SacrificeRandom { .. })
         | Some(AbilityEffect::DiscardRandom { .. })
+        // CR 701.9/701.9b: same exhaustiveness-only listing as Counter/
+        // UnlessPaid above - no real card grants a targeted discard as an
+        // activated ability's own effect either.
+        | Some(AbilityEffect::Discard { .. })
         | Some(AbilityEffect::Counters { .. })
         | Some(AbilityEffect::Pump { .. })
         | Some(AbilityEffect::GainControl(_))
