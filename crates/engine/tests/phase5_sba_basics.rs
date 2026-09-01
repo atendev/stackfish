@@ -363,28 +363,29 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
 
 // ---------------------------------------------------------------------
 // CR 903.10a: a player dealt 21+ combat damage from a single commander
-// source loses. Real check, but currently unreachable through actual
-// gameplay - nothing in this engine increments commander_damage_taken yet
-// (no "is this object a commander" concept exists - backlog item 11's job).
-// Testable only via a hand-built PlayerState fixture until then.
+// source loses. `commander_damage_taken` is keyed by the commander's own
+// name, not ObjectId (see PlayerState::commander_damage_taken's own doc
+// comment for why) - real combat damage accumulation is exercised end to
+// end in phase5_commander_damage.rs; these are the SBA-threshold-only unit
+// tests, via a hand-built PlayerState fixture.
 // ---------------------------------------------------------------------
 
 #[test]
 fn commander_damage_from_finds_the_matching_source_or_zero() {
     let mut player = player_state(PlayerId(0));
-    let commander = ObjectId(0);
-    player.commander_damage_taken.push((commander, 15));
+    let commander = "Test Commander";
+    player.commander_damage_taken.push((commander.to_string(), 15));
 
     assert_eq!(player.commander_damage_from(commander), 15);
-    assert_eq!(player.commander_damage_from(ObjectId(1)), 0);
+    assert_eq!(player.commander_damage_from("Some Other Commander"), 0);
 }
 
 #[test]
 fn twenty_commander_damage_is_untouched() {
     let mut state = base_state();
     let p0 = PlayerId(0);
-    let commander = ObjectId(0);
-    state.player_mut(p0).unwrap().commander_damage_taken.push((commander, 20));
+    let commander = "Test Commander";
+    state.player_mut(p0).unwrap().commander_damage_taken.push((commander.to_string(), 20));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
@@ -396,8 +397,8 @@ fn twenty_commander_damage_is_untouched() {
 fn twenty_one_commander_damage_eliminates() {
     let mut state = base_state();
     let p0 = PlayerId(0);
-    let commander = ObjectId(0);
-    state.player_mut(p0).unwrap().commander_damage_taken.push((commander, 21));
+    let commander = "Test Commander";
+    state.player_mut(p0).unwrap().commander_damage_taken.push((commander.to_string(), 21));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
 
