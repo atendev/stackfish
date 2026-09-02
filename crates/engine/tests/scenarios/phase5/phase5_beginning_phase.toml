@@ -136,13 +136,10 @@ player = 1
 
 # Cleanup -> Untap (turn 2, no priority window, auto-chains) -> Upkeep ->
 # Draw. Rotates active_player to p1 as part of the Cleanup transition, so
-# priority opens to p1 first from here on, not p0.
-[[steps]]
-type = "pass_priority"
-player = 0
-[[steps]]
-type = "pass_priority"
-player = 1
+# priority opens to p1 first from here on, not p0 - Upkeep's own pass
+# exchange is just p1 then p0, one pair, not the usual "active player
+# first" two pairs (this step's own priority window already carried over
+# from the auto-chain, it doesn't reopen at p0).
 [[steps]]
 type = "pass_priority"
 player = 1

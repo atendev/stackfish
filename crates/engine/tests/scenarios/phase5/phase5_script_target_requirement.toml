@@ -139,6 +139,7 @@ type = "cast_spell"
 player = 0
 card = "aura_b"
 targets = ["land"]
+expect_error = true
 
 [[steps]]
 type = "assert_object_zone"

@@ -143,6 +143,7 @@ type = "cast_spell"
 player = 0
 card = "bolt_b"
 targets = ["weak"]
+expect_error = true
 
 [[steps]]
 type = "assert_object_zone"

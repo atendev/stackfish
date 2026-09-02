@@ -89,15 +89,9 @@ player = 0
 type = "pass_priority"
 player = 1
 
-# Upkeep -> Draw
-[[steps]]
-type = "pass_priority"
-player = 0
-[[steps]]
-type = "pass_priority"
-player = 1
-
-# Draw -> PreCombatMain
+# Upkeep -> PreCombatMain (CR 103.8a/500.7: turn 1's Draw step is skipped
+# entirely, no priority window for it either - only one pair needed here,
+# not two)
 [[steps]]
 type = "pass_priority"
 player = 0
@@ -121,23 +115,9 @@ player = 0
 type = "pass_priority"
 player = 1
 
-# DeclareAttackers -> DeclareBlockers
-[[steps]]
-type = "pass_priority"
-player = 0
-[[steps]]
-type = "pass_priority"
-player = 1
-
-# DeclareBlockers -> CombatDamage
-[[steps]]
-type = "pass_priority"
-player = 0
-[[steps]]
-type = "pass_priority"
-player = 1
-
-# CombatDamage -> EndOfCombat
+# DeclareAttackers -> EndOfCombat (CR 508.1d/509.1: no creatures were
+# declared as attackers, so DeclareBlockers and CombatDamage are both
+# skipped entirely - only one pair needed here, not three)
 [[steps]]
 type = "pass_priority"
 player = 0

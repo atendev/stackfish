@@ -48,6 +48,7 @@ player = 0
 type = "play_land"
 player = 0
 card = "bear"
+expect_error = true
 
 [[steps]]
 type = "cast_spell"
@@ -55,6 +56,7 @@ player = 0
 card = "shock"
 targets = [1, "bear"]
 modes = []
+expect_error = true
 
 [[steps]]
 type = "activate_ability"
@@ -62,6 +64,7 @@ player = 0
 source = "bear"
 ability_index = 0
 targets = []
+expect_error = true
 
 [[steps]]
 type = "declare_attackers"
@@ -69,6 +72,7 @@ player = 0
 attackers = [
   { attacker = "bear", target = 1 },
 ]
+expect_error = true
 
 [[steps]]
 type = "declare_blockers"
@@ -76,12 +80,14 @@ player = 1
 blocks = [
   { blocker = "bear", attacker = "bear" },
 ]
+expect_error = true
 
 [[steps]]
 type = "make_choice"
 player = 0
 description = "choose a player"
 selection = [1]
+expect_error = true
 
 [[steps]]
 type = "assert_ledger_len"
