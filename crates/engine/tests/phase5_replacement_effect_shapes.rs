@@ -263,7 +263,7 @@ fn lua_registered_prevent_damage_stops_real_combat_damage_from_landing() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature_definition("Bear", 3, 3), p0));
     let shield_definition = creature_definition("Ward", 0, 1, PREVENT_DAMAGE_TO_YOU_ONE_SHOT);
@@ -350,7 +350,7 @@ fn lua_registered_limited_uses_one_shield_stops_protecting_after_first_use() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature_definition("Bear", 3, 3), p0));
     let shield_definition = creature_definition("Ward", 0, 1, LIMITED_USES_SHIELD);

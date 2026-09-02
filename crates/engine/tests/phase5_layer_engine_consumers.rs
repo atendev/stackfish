@@ -123,7 +123,7 @@ fn a_modify_pt_boost_increases_combat_damage_dealt() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state =
-        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false });
+        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new() });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0, 0));
     state.continuous_effects.push(ContinuousEffect {
         source: attacker,
@@ -148,7 +148,7 @@ fn without_the_boost_the_same_attacker_only_deals_its_printed_power() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state =
-        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false });
+        combat_damage_state(CombatState { attackers: vec![(attacker, Target::Player(p1))], blocks: Vec::new(), declared_defenders: vec![p1] , bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new() });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0, 0));
 
     let mut engine = Engine::new(state);

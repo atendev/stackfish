@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::types::ids::{ObjectId, PlayerId, Target};
 
 /// Transient combat-tracking state (CR 506-509), `None` outside combat.
@@ -58,4 +60,20 @@ pub struct CombatState {
     /// the zero-split auto-fire already ran stay a harmless no-op instead
     /// of double-dealing damage - see that function's own guard.
     pub damage_assigned_this_step: bool,
+    /// CR 510.1c/d + 702.22j/k: splits already validated and submitted by
+    /// *an* actor for the current damage step, keyed by the attacker/blocker
+    /// each split belongs to - accumulated across possibly-multiple
+    /// `AssignCombatDamage` calls the same way `blocks`/`declared_defenders`
+    /// above already accumulate across multiple `DeclareBlockers` calls.
+    /// Needed because a single damage step can require splits chosen by two
+    /// *different* players at once (e.g. a plain multi-blocked attacker,
+    /// chosen by its own controller, alongside a separate Banding-blocked
+    /// attacker in the same combat, chosen by the defending player instead)
+    /// - each required actor submits only their own share in one call;
+    /// `commands::execute_assign_combat_damage` only actually builds and
+    /// deals damage once every id needing a split is covered here (CR
+    /// 510.2: still one simultaneous batch, not per-actor). Cleared
+    /// alongside `damage_assigned_this_step` on every transition into a
+    /// fresh damage step.
+    pub pending_damage_splits: HashMap<ObjectId, Vec<(ObjectId, u32)>>,
 }

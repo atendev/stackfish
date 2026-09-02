@@ -252,7 +252,7 @@ fn combat_damage_from_a_matching_name_is_prevented_by_protection() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Progenitus", 3, 3), p0, ZoneKind::Battlefield));
     put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Ward", 0, 5), p1, ZoneKind::Battlefield));
@@ -275,7 +275,7 @@ fn combat_damage_from_a_non_matching_name_still_lands() {
         attackers: vec![(attacker, Target::Player(p1))],
         blocks: vec![(blocker, attacker)],
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Bear", 3, 3), p0, ZoneKind::Battlefield));
     put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Ward", 0, 5), p1, ZoneKind::Battlefield));

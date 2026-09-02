@@ -334,8 +334,15 @@ impl Engine {
                 // `phase5/automatic-combat-damage`: fresh damage step,
                 // nothing assigned for it yet - resets
                 // resolve_advance_turn_step_state's own auto-fire guard.
+                // `pending_damage_splits` (phase5/banding-two-actor-
+                // damage-split) resets alongside it - any partial splits
+                // from a step that never fully resolved (shouldn't happen
+                // in practice, since both steps grant priority before
+                // advancing) don't leak into a different step's own
+                // assignment.
                 if let Some(combat) = self.state.combat.as_mut() {
                     combat.damage_assigned_this_step = false;
+                    combat.pending_damage_splits.clear();
                 }
                 false
             }
@@ -346,6 +353,7 @@ impl Engine {
                 // whatever the first-strike step already resolved.
                 if let Some(combat) = self.state.combat.as_mut() {
                     combat.damage_assigned_this_step = false;
+                    combat.pending_damage_splits.clear();
                 }
                 false
             }
