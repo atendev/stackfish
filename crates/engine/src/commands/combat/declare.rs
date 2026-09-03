@@ -154,7 +154,7 @@ pub(in crate::commands) fn execute_declare_attackers(
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
-        damage_assigned_this_step: false,
+        damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
 
     return Ok(CommandOutcome {

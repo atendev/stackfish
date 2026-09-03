@@ -328,7 +328,7 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
         attackers: vec![(infector, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     let mut object = creature(infector, p0, 3, 0);
     // 10 power - a single unblocked hit is enough to reach the 10-poison

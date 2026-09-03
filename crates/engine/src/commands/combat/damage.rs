@@ -236,9 +236,14 @@ pub(crate) fn execute_assign_combat_damage(
             Target::Ability(_) => unreachable!("an attacker's own combat target is never an ability"),
         }
     };
-    let mut required_actors: HashSet<PlayerId> = HashSet::new();
+    // CR 510.1c/d/702.22j/k: which player chooses *each* id's own split -
+    // a map, not just a set, since two different ids in the same step can
+    // legitimately have two different choosers (a plain multi-blocked
+    // attacker chosen by its own controller, alongside a separate
+    // Banding-blocked attacker chosen by the defending player instead).
+    let mut required_actor_by_id: HashMap<ObjectId, PlayerId> = HashMap::new();
     for id in &requires_assignment {
-        let actor = if let Some(blockers) = blockers_by_attacker.get(id) {
+        let actor_for_id = if let Some(blockers) = blockers_by_attacker.get(id) {
             let banding_blocker = blockers
                 .iter()
                 .any(|b| effective_keywords(state, script_runtime, *b).contains(KeywordSet::BANDING))
@@ -259,38 +264,58 @@ pub(crate) fn execute_assign_combat_damage(
                 None => crate::layers::effective_controller(state, script_runtime, *id),
             }
         };
-        required_actors.insert(actor);
+        required_actor_by_id.insert(*id, actor_for_id);
     }
-    if required_actors.len() > 1 {
+    // Splits some other actor already submitted this step (CR 508.5a's
+    // "declared_defenders" precedent for the identical "this turn-based
+    // action can need input from more than one player" shape) - cloned
+    // rather than borrowed, so nothing below needs to juggle a `state.
+    // combat` borrow alongside the many `effective_*(state, ...)` calls
+    // still to come.
+    let already_submitted = combat.pending_damage_splits.clone();
+    let still_needed: HashSet<ObjectId> =
+        requires_assignment.iter().copied().filter(|id| !already_submitted.contains_key(id)).collect();
+    // This actor's own remaining share - not the whole step's
+    // `requires_assignment` (that may include ids a *different* actor is
+    // the chooser for, submitted separately) and not ids some earlier
+    // call already covered.
+    let this_actors_ids: HashSet<ObjectId> = still_needed
+        .iter()
+        .copied()
+        .filter(|id| required_actor_by_id.get(id) == Some(&actor))
+        .collect();
+    if requires_assignment.is_empty() {
+        // No split needed at all this step - same turn-based-action
+        // convention DeclareAttackers/DeclareBlockers use, active player
+        // only (matches every pre-existing zero-split test).
+        if actor != state.active_player {
+            return Err(CommandError::IllegalAction(
+                "actor is not the player who chooses this combat damage step's split(s)"
+                    .to_string(),
+            ));
+        }
+    } else if this_actors_ids.is_empty() {
         return Err(CommandError::IllegalAction(
-            "this combat damage step needs splits chosen by two different players at \
-             once (e.g. a plain multi-block plus a separate banding-blocked attacker) - \
-             not yet supported, see AssignCombatDamage's own doc comment"
-                .to_string(),
-        ));
-    }
-    // No split needed at all this step - same turn-based-action
-    // convention DeclareAttackers/DeclareBlockers use, active
-    // player only (matches every pre-existing zero-split test).
-    let required_actor = required_actors.into_iter().next().unwrap_or(state.active_player);
-    if actor != required_actor {
-        return Err(CommandError::IllegalAction(
-            "actor is not the player who chooses this combat damage step's split(s)"
+            "actor is not the player who chooses any of this combat damage step's still-\
+             pending split(s) (either not a chooser at all this step, or already submitted \
+             their own share)"
                 .to_string(),
         ));
     }
 
-    // CR 510.1e atomicity: `assignments` must cover exactly the
-    // set that needs one - no extra (nothing to split for an
-    // attacker with 0, or 1 non-trampling, blocker; nothing to split
-    // for a blocker blocking only 1 attacker), no missing (the
-    // engine can't guess a split).
+    // CR 510.1e atomicity, now scoped to *this actor's own* share rather
+    // than the whole step: `assignments` must cover exactly the ids this
+    // actor is the chooser for and hasn't already submitted - no extra, no
+    // missing, and none belonging to a different required actor (that
+    // player's own share is submitted in its own separate call).
     let submitted: HashSet<ObjectId> = assignments.iter().map(|(id, _)| *id).collect();
-    if submitted != requires_assignment {
+    if submitted != this_actors_ids {
         return Err(CommandError::IllegalAction(
-            "assignments must cover exactly the attackers and blockers that need a \
-             chosen split (two or more blockers on an attacker, one blocker with \
-             trample, or a blocker forced onto two or more attackers by banding)"
+            "assignments must cover exactly this actor's own share of the attackers and \
+             blockers that need a chosen split this step (two or more blockers on an \
+             attacker, one blocker with trample, or a blocker forced onto two or more \
+             attackers by banding) - a different required actor's own share, if any, is \
+             submitted in a separate call"
                 .to_string(),
         ));
     }
@@ -404,8 +429,35 @@ pub(crate) fn execute_assign_combat_damage(
         }
     }
 
-    let assignment_map: HashMap<ObjectId, &Vec<(ObjectId, u32)>> =
-        assignments.iter().map(|(id, splits)| (*id, splits)).collect();
+    // Merge this actor's now-validated share into the accumulator - CR
+    // 508.5a's `declared_defenders` precedent, applied to a real payload
+    // instead of a bare "who's gone" marker.
+    {
+        let combat_mut = state.combat.as_mut().expect("checked Some above");
+        for (id, splits) in assignments {
+            combat_mut.pending_damage_splits.insert(id, splits);
+        }
+    }
+    let combat_ref = state.combat.as_ref().expect("checked Some above");
+    if combat_ref.pending_damage_splits.len() < requires_assignment.len() {
+        // Still waiting on a different required actor's own share this
+        // step - CR 510.2's simultaneous damage can't be dealt until
+        // everyone's chosen, but this actor's own split is genuinely
+        // recorded (a real turn-based action, not a no-op).
+        return Ok(CommandOutcome {
+            events: Vec::new(),
+            broke_pass_chain: true,
+            priority_handoff: PriorityHandoff::Unchanged,
+            requires_payment: None,
+            battlefield_entries: Vec::new(),
+        });
+    }
+    // Everyone required has now submitted - clone out of the accumulator
+    // (rather than borrowing) so state.combat is free to be mutably
+    // re-borrowed below (damage_assigned_this_step/clearing the
+    // accumulator) without fighting this map's own borrows, which live
+    // through the whole assign-and-deal pass just below.
+    let assignment_map: HashMap<ObjectId, Vec<(ObjectId, u32)>> = combat_ref.pending_damage_splits.clone();
 
     // CR 510.1b/c/d + 510.2: assign and deal in the same pass - no
     // priority window between them.
@@ -468,7 +520,7 @@ pub(crate) fn execute_assign_combat_damage(
                 // already confirmed every blocker got its lethal
                 // amount whenever this remainder is nonzero).
                 let mut assigned_to_blockers = 0u32;
-                for (blocker, amount) in assignment_map[attacker] {
+                for (blocker, amount) in &assignment_map[attacker] {
                     assigned_to_blockers += *amount;
                     if *amount > 0 {
                         events.push(GameEventKind::DamageDealt {
@@ -518,7 +570,7 @@ pub(crate) fn execute_assign_combat_damage(
                 is_combat_damage: true,
             });
         } else {
-            for (attacker, amount) in assignment_map[blocker] {
+            for (attacker, amount) in &assignment_map[blocker] {
                 if *amount > 0 {
                     events.push(GameEventKind::DamageDealt {
                         source: *blocker,
@@ -533,12 +585,13 @@ pub(crate) fn execute_assign_combat_damage(
 
     // `phase5/automatic-combat-damage`: mark this step done so a later
     // call this same step (auto-fire or a redundant explicit submission)
-    // hits the no-op guard above instead of dealing damage twice.
-    state
-        .combat
-        .as_mut()
-        .expect("checked Some above")
-        .damage_assigned_this_step = true;
+    // hits the no-op guard above instead of dealing damage twice. Also
+    // clears the now-fully-consumed accumulator, same as
+    // `damage_assigned_this_step` itself, both reset again on the next
+    // real transition into a fresh damage step (engine/turn.rs).
+    let combat_mut = state.combat.as_mut().expect("checked Some above");
+    combat_mut.damage_assigned_this_step = true;
+    combat_mut.pending_damage_splits.clear();
 
     // CR 510.2/601.2a: these are proposed events only - engine.rs's
     // ReplacementCheck (CR 614-616) gets a chance to rewrite or

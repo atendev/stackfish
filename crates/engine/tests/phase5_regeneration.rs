@@ -248,7 +248,7 @@ fn a_regenerating_attacker_is_removed_from_combat() {
         attackers: vec![(bear, Target::Player(p1))],
         blocks: Vec::new(),
         declared_defenders: vec![p1],
-        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false,
+        bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
 
     progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));

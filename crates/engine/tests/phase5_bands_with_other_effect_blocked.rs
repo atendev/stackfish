@@ -345,7 +345,7 @@ fn effect_blocked_attacker_with_no_trample_deals_no_damage() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: vec![attacker],
-        damage_assigned_this_step: false,
+        damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Bear", 3, 3, KeywordSet::empty()), p0));
 
@@ -366,7 +366,7 @@ fn effect_blocked_trampler_deals_full_power_per_702_19d() {
         declared_defenders: vec![p1],
         bands: Vec::new(),
         effect_blocked: vec![attacker],
-        damage_assigned_this_step: false,
+        damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Rampager", 5, 5, KeywordSet::TRAMPLE), p0));
 
