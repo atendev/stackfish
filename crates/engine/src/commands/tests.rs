@@ -8,11 +8,15 @@ use crate::types::effect::{
     AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
     EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
+use crate::types::cost::FilterController;
 use crate::types::game::GameState;
 use crate::types::game::RngState;
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo};
 use crate::types::mana::ManaPool;
-use crate::types::player::PlayerState;
+use crate::types::player::{
+    DrawLimitAffected, DrawLimitModifier, HandRevealAffected, HandRevealModifier, HandSizeAffected, HandSizeEffect,
+    HandSizeModifier, LandPlayAffected, LandPlayModifier, PlayerState,
+};
 use crate::types::turn::{Phase, Step};
 
 fn minimal_state() -> GameState {
@@ -115,6 +119,39 @@ fn dummy_replacement_effect(source: ObjectId) -> ReplacementEffect {
     }
 }
 
+fn dummy_hand_size_modifier(source: ObjectId) -> HandSizeModifier {
+    HandSizeModifier {
+        source,
+        controller: PlayerId(0),
+        affected: HandSizeAffected::Filter(FilterController::You),
+        effect: HandSizeEffect::SetTo(3),
+        timestamp: SequenceNo(0),
+    }
+}
+
+fn dummy_hand_reveal_modifier(source: ObjectId) -> HandRevealModifier {
+    HandRevealModifier {
+        source,
+        controller: PlayerId(0),
+        affected: HandRevealAffected::Filter(FilterController::You),
+        timestamp: SequenceNo(0),
+    }
+}
+
+fn dummy_draw_limit_modifier(source: ObjectId) -> DrawLimitModifier {
+    DrawLimitModifier {
+        source,
+        controller: PlayerId(0),
+        affected: DrawLimitAffected::Filter(FilterController::You),
+        limit: 1,
+        timestamp: SequenceNo(0),
+    }
+}
+
+fn dummy_land_play_modifier(source: ObjectId) -> LandPlayModifier {
+    LandPlayModifier { source, controller: PlayerId(0), affected: LandPlayAffected::Filter(FilterController::You), additional: 1 }
+}
+
 #[test]
 fn retire_object_purges_only_the_retired_source() {
     let mut state = minimal_state();
@@ -124,6 +161,14 @@ fn retire_object_purges_only_the_retired_source() {
     state.continuous_effects.push(dummy_continuous_effect(ObjectId(2)));
     state.replacement_effects.push(dummy_replacement_effect(ObjectId(1)));
     state.replacement_effects.push(dummy_replacement_effect(ObjectId(2)));
+    state.hand_size_modifiers.push(dummy_hand_size_modifier(ObjectId(1)));
+    state.hand_size_modifiers.push(dummy_hand_size_modifier(ObjectId(2)));
+    state.hand_reveal_modifiers.push(dummy_hand_reveal_modifier(ObjectId(1)));
+    state.hand_reveal_modifiers.push(dummy_hand_reveal_modifier(ObjectId(2)));
+    state.draw_limit_modifiers.push(dummy_draw_limit_modifier(ObjectId(1)));
+    state.draw_limit_modifiers.push(dummy_draw_limit_modifier(ObjectId(2)));
+    state.land_play_modifiers.push(dummy_land_play_modifier(ObjectId(1)));
+    state.land_play_modifiers.push(dummy_land_play_modifier(ObjectId(2)));
 
     let departed = retire_object(&mut state, ObjectId(1));
 
@@ -151,4 +196,12 @@ fn retire_object_purges_only_the_retired_source() {
         ObjectId(2),
         "ObjectId(2)'s replacement effect must survive untouched"
     );
+    assert_eq!(state.hand_size_modifiers.len(), 1, "only ObjectId(1)'s hand size modifier should be purged");
+    assert_eq!(state.hand_size_modifiers[0].source, ObjectId(2));
+    assert_eq!(state.hand_reveal_modifiers.len(), 1, "only ObjectId(1)'s hand reveal modifier should be purged");
+    assert_eq!(state.hand_reveal_modifiers[0].source, ObjectId(2));
+    assert_eq!(state.draw_limit_modifiers.len(), 1, "only ObjectId(1)'s draw limit modifier should be purged");
+    assert_eq!(state.draw_limit_modifiers[0].source, ObjectId(2));
+    assert_eq!(state.land_play_modifiers.len(), 1, "only ObjectId(1)'s land play modifier should be purged");
+    assert_eq!(state.land_play_modifiers[0].source, ObjectId(2));
 }

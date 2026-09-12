@@ -375,3 +375,73 @@ fn a_turn_based_draw_is_skipped_once_the_limit_was_already_met_this_turn() {
     );
     assert!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.is_empty(), "no card actually landed in the real hand zone from this step");
 }
+
+/// "Test Destroy Permanent: Destroy target permanent." — used only to force
+/// a real `commands::retire_object` call on the modifier's own source.
+fn destroy_permanent_definition() -> CardDefinition {
+    CardDefinition {
+        definition_id: 30,
+        name: "Test Destroy Permanent".to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::INSTANT,
+        subtypes: Vec::new(),
+        oracle_text: "Destroy target permanent.".to_string(),
+        power: None,
+        toughness: None,
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::ByKey("test_destroy_permanent".to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: None, subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            count: 1,
+            up_to: false, at_least: false,
+            exclude_source: false,
+        })),
+        alternative_costs: Vec::new(),
+        buyback_cost: None,
+        effect: Some(AbilityEffect::Destroy),
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+    }
+}
+
+/// CR 611.3b: a static ability's continuous effect only applies while its
+/// source remains on the battlefield — `phase5/modifier-source-cleanup`.
+#[test]
+fn a_draw_limit_modifier_is_purged_once_its_source_leaves_the_battlefield() {
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let source = ObjectId(0);
+    state.objects.insert(source, card_object(source, ward_definition(""), p0, ZoneKind::Battlefield));
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
+    state.draw_limit_modifiers.push(DrawLimitModifier {
+        source,
+        controller: p0,
+        affected: DrawLimitAffected::Filter(FilterController::You),
+        limit: 1,
+        timestamp: SequenceNo(0),
+    });
+    let removal = ObjectId(1);
+    state.objects.insert(removal, card_object(removal, destroy_permanent_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(removal);
+
+    assert_eq!(effective_draw_limit(&state.draw_limit_modifiers, p0), Some(1), "the modifier is live before its source is destroyed");
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::CastSpell { card: removal, modes: Vec::new(), targets: vec![Target::Object(source)], x_value: None, alternative_cost: None, pay_buyback: false },
+        })
+        .expect("p0 holds priority, spell is in hand");
+    pay_free_and_drain(&mut engine);
+    pass_both_and_drain(&mut engine, p0, p1);
+
+    assert!(engine.state().object(source).is_none(), "the source ward was destroyed");
+    assert!(engine.state().draw_limit_modifiers.is_empty(), "the modifier must be purged along with its source");
+    assert_eq!(effective_draw_limit(&engine.state().draw_limit_modifiers, p0), None, "back to no draw limit at all");
+}
