@@ -331,10 +331,11 @@ pub enum LandPlayAffected {
 /// (the max of the two) — so `total_additional_land_plays` below sums every
 /// matching modifier rather than taking the latest timestamp, and there's no
 /// `timestamp` field here at all (nothing to tiebreak when every matching
-/// modifier counts). No cleanup on the source leaving the battlefield either
-/// — same standing, already-accepted gap `DrawLimitModifier`/
-/// `HandSizeModifier`/`HandRevealModifier` all share (none of this cluster
-/// purges on a source's own zone change yet).
+/// modifier counts). `commands::retire_object` purges this list (and its
+/// `DrawLimitModifier`/`HandSizeModifier`/`HandRevealModifier` siblings) by
+/// `source` once the granting permanent leaves the battlefield (CR 611.3b:
+/// a static ability's continuous effect only applies while its source
+/// remains on the battlefield) — `phase5/modifier-source-cleanup`.
 #[derive(Clone, Debug)]
 pub struct LandPlayModifier {
     pub source: ObjectId,

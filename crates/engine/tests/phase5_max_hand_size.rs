@@ -200,3 +200,91 @@ fn opponent_scoped_modifier_does_not_affect_its_own_controller() {
         "an Opponent-scoped modifier must not affect its own controller's cleanup, got {status:?}"
     );
 }
+
+/// "Test Destroy Permanent: Destroy target permanent." — used only to force
+/// a real `commands::retire_object` call on the modifier's own source.
+fn destroy_permanent_definition() -> CardDefinition {
+    CardDefinition {
+        definition_id: 30,
+        name: "Test Destroy Permanent".to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::INSTANT,
+        subtypes: Vec::new(),
+        oracle_text: "Destroy target permanent.".to_string(),
+        power: None,
+        toughness: None,
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::ByKey("test_destroy_permanent".to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: None, subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            count: 1,
+            up_to: false, at_least: false,
+            exclude_source: false,
+        })),
+        alternative_costs: Vec::new(),
+        buyback_cost: None,
+        effect: Some(AbilityEffect::Destroy),
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+    }
+}
+
+/// CR 611.3b: a static ability's continuous effect only applies while its
+/// source remains on the battlefield — the plain `Filter(FilterController)`
+/// shape this file exercises had zero liveness check before
+/// `phase5/modifier-source-cleanup` (unlike `EnchantedPlayer`'s own
+/// already-self-healing `state.object(m.source).is_some_and(...)` check).
+#[test]
+fn a_filter_scoped_hand_size_modifier_is_purged_once_its_source_leaves_the_battlefield() {
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let mut state = GameState {
+        step: Step::PreCombatMain,
+        last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
+        ..base_two_player_state(stackfish_testutil::zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Battlefield, ZoneKind::Graveyard]))
+    };
+    let source = ObjectId(0);
+    let source_object = GameObject { controlled_since_turn: 1, ..card_object(source, vanilla_card(source, p0).definition, p0, ZoneKind::Battlefield) };
+    state.objects.insert(source, source_object);
+    state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
+    state.hand_size_modifiers.push(HandSizeModifier {
+        source,
+        controller: p0,
+        affected: HandSizeAffected::Filter(FilterController::You),
+        effect: HandSizeEffect::SetTo(3),
+        timestamp: SequenceNo(0),
+    });
+    let removal = ObjectId(1);
+    state.objects.insert(removal, card_object(removal, destroy_permanent_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(removal);
+
+    assert_eq!(effective_max_hand_size(&state, &state.hand_size_modifiers, p0, 7), Some(3), "the modifier is live before its source is destroyed");
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::CastSpell { card: removal, modes: Vec::new(), targets: vec![Target::Object(source)], x_value: None, alternative_cost: None, pay_buyback: false },
+        })
+        .expect("p0 holds priority, spell is in hand");
+    let status = step_until_pause(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }));
+    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    step_until_pause(&mut engine);
+    pass(&mut engine, p0);
+    step_until_pause(&mut engine);
+    pass(&mut engine, p1);
+    step_until_pause(&mut engine);
+
+    assert!(engine.state().object(source).is_none(), "the source creature was destroyed");
+    assert!(engine.state().hand_size_modifiers.is_empty(), "the modifier must be purged along with its source");
+    assert_eq!(
+        effective_max_hand_size(engine.state(), &engine.state().hand_size_modifiers, p0, 7),
+        Some(7),
+        "back to the base maximum hand size"
+    );
+}

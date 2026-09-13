@@ -12,10 +12,12 @@
   land-play increases genuinely stack (two Explorations means 3 land plays, not 2 — the max of the
   two), so `effective_land_play_limit` sums every matching modifier's `additional` rather than
   taking the latest timestamp the way `effective_draw_limit`/`effective_max_hand_size` do — no
-  `timestamp` field on `LandPlayModifier` at all, since summing needs no tiebreak. Same "no cleanup
-  when the source leaves the battlefield" gap `DrawLimitModifier`/`HandSizeModifier`/
-  `HandRevealModifier` already all share (flagged, not fixed - matches precedent, not a new
-  regression). Lua-facing `Game.CreateLandPlayModifier`/`Game.LandPlayAffected` mirrors
+  `timestamp` field on `LandPlayModifier` at all, since summing needs no tiebreak. The "no cleanup
+  when the source leaves the battlefield" gap this cluster shared with `DrawLimitModifier`/
+  `HandSizeModifier`/`HandRevealModifier` is closed now too (`phase5/modifier-source-cleanup`) — see
+  `docs/implementation/04-sba.md`'s own entry; `commands::retire_object` purges all four lists by
+  `source` the same way it already purged `state.abilities`/`continuous_effects`/
+  `replacement_effects`. Lua-facing `Game.CreateLandPlayModifier`/`Game.LandPlayAffected` mirrors
   `Game.CreateDrawLimitModifier`/`Game.DrawLimitAffected` exactly (`:SetAffected` + `:SetAdditional`
   instead of `:SetLimit`, same queue-and-drain, placeholder-`controller` convention). Found and
   flagged, not fixed (out of this slice's scope): none of `Game.CreateHandSizeModifier`/

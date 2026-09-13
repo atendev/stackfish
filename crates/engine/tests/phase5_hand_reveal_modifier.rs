@@ -191,3 +191,81 @@ fn two_independent_reveal_sources_never_conflict() {
     state.hand_reveal_modifiers.retain(|m| m.source != aura);
     assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "still revealed via the remaining Filter-based source");
 }
+
+/// "Test Destroy Permanent: Destroy target permanent." — used only to force
+/// a real `commands::retire_object` call on the modifier's own source.
+fn destroy_permanent_definition() -> CardDefinition {
+    CardDefinition {
+        definition_id: 30,
+        name: "Test Destroy Permanent".to_string(),
+        mana_cost: ManaCost { symbols: Vec::new() },
+        color_indicator: None,
+        supertypes: SupertypeSet::empty(),
+        card_types: CardTypeSet::INSTANT,
+        subtypes: Vec::new(),
+        oracle_text: "Destroy target permanent.".to_string(),
+        power: None,
+        toughness: None,
+        loyalty: None,
+        defense: None,
+        script_ref: ScriptReference::ByKey("test_destroy_permanent".to_string()),
+        keywords: KeywordSet::empty(),
+        target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
+            filter: TargetFilter::Object { mana_value: None, excluded_card_types: None, excluded_subtypes: None, card_types: None, subtypes: None, supertypes: None, excluded_supertypes: None, controller: None, zone: None },
+            count: 1,
+            up_to: false, at_least: false,
+            exclude_source: false,
+        })),
+        alternative_costs: Vec::new(),
+        buyback_cost: None,
+        effect: Some(AbilityEffect::Destroy),
+        modes: Vec::new(),
+        mode_choice: ModeChoice::Exactly(1),
+    }
+}
+
+/// CR 611.3b: a static ability's continuous effect only applies while its
+/// source remains on the battlefield — `phase5/modifier-source-cleanup`.
+#[test]
+fn a_hand_reveal_modifier_is_purged_once_its_source_leaves_the_battlefield() {
+    use stackfish_engine::engine::{Engine, StepStatus};
+
+    let mut state = two_player_state();
+    let p0 = PlayerId(0);
+    let p1 = PlayerId(1);
+    let aura = ObjectId(0);
+    let mut aura_obj = card_object(aura, aura_definition(""), p1, ZoneKind::Battlefield);
+    aura_obj.attached_to_player = Some(p0);
+    put_on_battlefield(&mut state, aura_obj);
+    state.hand_reveal_modifiers.push(HandRevealModifier {
+        source: aura,
+        controller: p1,
+        affected: HandRevealAffected::EnchantedPlayer,
+        timestamp: SequenceNo(0),
+    });
+    let removal = ObjectId(1);
+    state.objects.insert(removal, card_object(removal, destroy_permanent_definition(), p0, ZoneKind::Hand));
+    state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(removal);
+
+    assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "the modifier is live before its source is destroyed");
+
+    let mut engine = Engine::new(state);
+    engine
+        .submit_action(PlayerAction {
+            player: p0,
+            kind: PlayerActionKind::CastSpell { card: removal, modes: Vec::new(), targets: vec![Target::Object(aura)], x_value: None, alternative_cost: None, pay_buyback: false },
+        })
+        .expect("p0 holds priority, spell is in hand");
+    let status = stackfish_testutil::drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }));
+    engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
+    stackfish_testutil::drain(&mut engine);
+    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
+    stackfish_testutil::drain(&mut engine);
+    engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
+    stackfish_testutil::drain(&mut engine);
+
+    assert!(engine.state().object(aura).is_none(), "the source Aura was destroyed");
+    assert!(engine.state().hand_reveal_modifiers.is_empty(), "the modifier must be purged along with its source");
+    assert!(!is_hand_revealed(engine.state(), &engine.state().hand_reveal_modifiers, p0), "no longer revealed once the source is gone");
+}
