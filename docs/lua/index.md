@@ -32,6 +32,7 @@ several abilities.
 | [Mana abilities](mana-abilities.md) | `Game.CreateManaAbility(c)` | "{T}: Add {C}"-style abilities | CR 605 |
 | [Replacement effects](replacement-effects.md) | `Game.CreateReplacementEffect(c)` | "If this would X, Y instead" effects | CR 614/615/616 |
 | [Cost modifiers](cost-modifiers.md) | `Game.CreateCostModifier(c)` | "Spells you cast cost {N} more/less" | CR 601.2f |
+| [Player modifiers](player-modifiers.md) | `Game.CreateHandSizeModifier(c)`, `CreateHandRevealModifier(c)`, `CreateDrawLimitModifier(c)`, `CreateLandPlayModifier(c)` | Player-level rules: hand size, hand reveal, draw limit, extra land plays | CR 402.2/701.20a/121.2b/305.2 |
 
 ## Cross-cutting mechanisms
 
