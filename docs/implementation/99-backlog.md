@@ -19,12 +19,9 @@
   `source` the same way it already purged `state.abilities`/`continuous_effects`/
   `replacement_effects`. Lua-facing `Game.CreateLandPlayModifier`/`Game.LandPlayAffected` mirrors
   `Game.CreateDrawLimitModifier`/`Game.DrawLimitAffected` exactly (`:SetAffected` + `:SetAdditional`
-  instead of `:SetLimit`, same queue-and-drain, placeholder-`controller` convention). Found and
-  flagged, not fixed (out of this slice's scope): none of `Game.CreateHandSizeModifier`/
-  `CreateHandRevealModifier`/`CreateDrawLimitModifier` (this whole player-level-modifier cluster)
-  have ever had a `docs/lua` narrative page or a `docs/lua/stubs/game.lua` entry — a real,
-  pre-existing gap, confirmed by grep before writing anything. Only my own new
-  `LandPlayModifierBuilder` got a stub entry; the three siblings are a separate documentation slice.
+  instead of `:SetLimit`, same queue-and-drain, placeholder-`controller` convention). The doc gap this slice flagged (no `docs/lua` page or
+  `stubs/game.lua` entry for the hand-size/hand-reveal/draw-limit builders) is closed now
+  (`phase5/player-modifier-lua-docs`): `docs/lua/player-modifiers.md` covers all four builders.
 
 - **"Target opponent" (`phase5/target-opponent`, merged)**: `TargetFilter::Player` used to accept
   any player unconditionally — "target player" and "target opponent" (CR 115.1) were

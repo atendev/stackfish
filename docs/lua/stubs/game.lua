@@ -299,6 +299,96 @@ function CostModifierBuilder:SetAmount(amount) end
 function CostModifierBuilder:Register() end
 
 -------------------------------------------------------------------------------
+-- Game.CreateHandSizeModifier(c) — CR 402.2 "no maximum hand size" / "maximum hand size is N."
+-------------------------------------------------------------------------------
+
+---@class HandSizeModifierBuilder
+local HandSizeModifierBuilder = {}
+
+--- Which player(s) this applies to. Required before :Register().
+---@param value GameHandSizeAffectedValue
+---@return HandSizeModifierBuilder
+function HandSizeModifierBuilder:SetAffected(value) end
+
+--- What the modifier does. Required before :Register().
+---@param value GameHandSizeEffectValue
+---@return HandSizeModifierBuilder
+function HandSizeModifierBuilder:SetEffect(value) end
+
+--- Finalizes and registers the modifier. If several apply to the same player, the one with the
+--- latest timestamp wins outright (no stacking).
+function HandSizeModifierBuilder:Register() end
+
+---@class GameHandSizeAffectedValue
+---@class GameHandSizeAffectedTable
+---@field You GameHandSizeAffectedValue
+---@field Opponent GameHandSizeAffectedValue
+---@field Any GameHandSizeAffectedValue
+---@field EnchantedPlayer GameHandSizeAffectedValue  -- CR 303.4m, the player this Aura is attached to
+local GameHandSizeAffectedTable = {}
+
+---@class GameHandSizeEffectValue
+---@class GameHandSizeEffectsTable
+---@field NoMaximum GameHandSizeEffectValue
+local GameHandSizeEffectsTable = {}
+
+---@param n integer
+---@return GameHandSizeEffectValue
+function GameHandSizeEffectsTable.SetTo(n) end
+
+-------------------------------------------------------------------------------
+-- Game.CreateHandRevealModifier(c) — CR 701.20a "plays with their hand revealed."
+-------------------------------------------------------------------------------
+
+---@class HandRevealModifierBuilder
+local HandRevealModifierBuilder = {}
+
+--- Which player(s) this applies to. Required before :Register().
+---@param value GameHandRevealAffectedValue
+---@return HandRevealModifierBuilder
+function HandRevealModifierBuilder:SetAffected(value) end
+
+--- Finalizes and registers the modifier. NOTE: nothing enforces this yet — the engine has no
+--- per-viewer visibility boundary for it to change (see docs/lua/player-modifiers.md).
+function HandRevealModifierBuilder:Register() end
+
+---@class GameHandRevealAffectedValue
+---@class GameHandRevealAffectedTable
+---@field You GameHandRevealAffectedValue
+---@field Opponent GameHandRevealAffectedValue
+---@field Any GameHandRevealAffectedValue
+---@field EnchantedPlayer GameHandRevealAffectedValue
+local GameHandRevealAffectedTable = {}
+
+-------------------------------------------------------------------------------
+-- Game.CreateDrawLimitModifier(c) — CR 121.2b "can't draw more than N cards each turn."
+-------------------------------------------------------------------------------
+
+---@class DrawLimitModifierBuilder
+local DrawLimitModifierBuilder = {}
+
+--- Which player(s) this applies to. Required before :Register().
+---@param value GameDrawLimitAffectedValue
+---@return DrawLimitModifierBuilder
+function DrawLimitModifierBuilder:SetAffected(value) end
+
+--- Maximum cards drawn per turn. Required before :Register().
+---@param limit integer
+---@return DrawLimitModifierBuilder
+function DrawLimitModifierBuilder:SetLimit(limit) end
+
+--- Finalizes and registers the modifier. If several apply to the same player, the one with the
+--- latest timestamp wins outright (no stacking).
+function DrawLimitModifierBuilder:Register() end
+
+---@class GameDrawLimitAffectedValue
+---@class GameDrawLimitAffectedTable
+---@field You GameDrawLimitAffectedValue
+---@field Opponent GameDrawLimitAffectedValue
+---@field Any GameDrawLimitAffectedValue
+local GameDrawLimitAffectedTable = {}
+
+-------------------------------------------------------------------------------
 -- Game.CreateLandPlayModifier(c) — CR 305.2 "play an additional land each turn."
 -------------------------------------------------------------------------------
 
@@ -779,6 +869,10 @@ function GameTokensTable.CopyOf(objectId, exceptions) end
 ---@field Consumption GameConsumptionTable
 ---@field Tokens GameTokensTable
 ---@field LandPlayAffected GameLandPlayAffectedTable
+---@field HandSizeAffected GameHandSizeAffectedTable
+---@field HandSizeEffects GameHandSizeEffectsTable
+---@field HandRevealAffected GameHandRevealAffectedTable
+---@field DrawLimitAffected GameDrawLimitAffectedTable
 local Game = {}
 
 ---@param c ObjectId
@@ -808,6 +902,18 @@ function Game.CreateCostModifier(c) end
 ---@param c ObjectId
 ---@return LandPlayModifierBuilder
 function Game.CreateLandPlayModifier(c) end
+
+---@param c ObjectId
+---@return HandSizeModifierBuilder
+function Game.CreateHandSizeModifier(c) end
+
+---@param c ObjectId
+---@return HandRevealModifierBuilder
+function Game.CreateHandRevealModifier(c) end
+
+---@param c ObjectId
+---@return DrawLimitModifierBuilder
+function Game.CreateDrawLimitModifier(c) end
 
 --- Sugar for CreateStaticAbility/SetLayer(AbilityAdding)/SetEffect(AddKeyword(name))/SetAffected({self_only=true})/Register().
 ---@param source ObjectId
