@@ -437,6 +437,7 @@ local GameLandPlayAffectedTable = {}
 ---@field DiscardsCard GameConditionsValue                  -- "whenever you discard a card"
 ---@field EachDiscardsCard GameConditionsValue              -- any player discards
 ---@field Discarded GameConditionsValue                     -- "when this card is discarded" (self-referential)
+---@field Cast GameConditionsValue                          -- CR 601.2i, "when you cast this spell" (registers only while on the stack)
 ---@field Scries GameConditionsValue                        -- CR 701.22d, "whenever you scry"
 ---@field EachScries GameConditionsValue                    -- any player scries
 ---@field Surveils GameConditionsValue                      -- CR 701.25d, "whenever you surveil"

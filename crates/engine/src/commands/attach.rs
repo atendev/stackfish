@@ -42,12 +42,24 @@ pub(crate) fn find_ability_by_id(state: &GameState, id: AbilityId) -> Option<&Re
 /// CR 400.7: abilities belong to their object and travel with it across zone
 /// changes. Every zone change mints a new `ObjectId`; call this to keep
 /// `state.abilities` in sync so ability lookups by source id don't go stale.
+///
+/// Only abilities *not* registered by `run_card_script` are carried over
+/// (see `GameState::script_ability_ids`). A script-registered ability is
+/// dropped instead: the script is re-run for the zone the object lands in
+/// (hand, stack, battlefield), so carrying the old registration forward would
+/// leave the new object with two copies of everything the script declares.
 pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: ObjectId) {
-    for ability in state.abilities.iter_mut() {
-        if ability.source == old_id {
-            ability.source = new_id;
+    let script_ids = &mut state.script_ability_ids;
+    state.abilities.retain_mut(|ability| {
+        if ability.source != old_id {
+            return true;
         }
-    }
+        if script_ids.remove(&ability.id) {
+            return false;
+        }
+        ability.source = new_id;
+        true
+    });
 }
 
 /// Removes `old_id` from `state.objects` and purges any `RegisteredAbility`,
@@ -102,7 +114,14 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
 /// its pre-copy identity, so the two don't end up stacked (CR 707.2a: "it
 /// doesn't wind up with two values of each ability").
 pub(crate) fn purge_granted_abilities(state: &mut GameState, id: ObjectId) {
-    state.abilities.retain(|a| a.source != id);
+    let script_ids = &mut state.script_ability_ids;
+    state.abilities.retain(|a| {
+        if a.source != id {
+            return true;
+        }
+        script_ids.remove(&a.id);
+        false
+    });
     state.continuous_effects.retain(|e| e.source != id);
     state.replacement_effects.retain(|r| r.source != id);
 }
@@ -460,10 +479,12 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
         }
     }
     let mut departed_triggered = Vec::new();
+    let script_ids = &mut state.script_ability_ids;
     state.abilities.retain(|a| {
         if a.source != old_id {
             return true;
         }
+        script_ids.remove(&a.id);
         if a.kind == AbilityKind::Triggered {
             departed_triggered.push(a.clone());
         }

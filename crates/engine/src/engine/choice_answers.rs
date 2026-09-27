@@ -445,7 +445,7 @@ impl Engine {
 
         self.pipeline_context =
             Some(PipelineContext { since_ledger, caused_by_command: Some(command_id), parent_event: None });
-        self.pending_payment = outcome.requires_payment;
+        self.set_pending_payment(outcome.requires_payment);
         if outcome.broke_pass_chain {
             self.state.consecutive_passes = 0;
         }
@@ -540,7 +540,7 @@ impl Engine {
 
         self.pipeline_context =
             Some(PipelineContext { since_ledger, caused_by_command: Some(command_id), parent_event: None });
-        self.pending_payment = outcome.requires_payment;
+        self.set_pending_payment(outcome.requires_payment);
         if outcome.broke_pass_chain {
             self.state.consecutive_passes = 0;
         }

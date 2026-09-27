@@ -555,6 +555,36 @@ impl Engine {
         }
     }
 
+    /// Stores `request` as `pending_payment`, and - if it's a spell that was
+    /// just put on the stack - runs its card script for the stack zone first.
+    /// CR 601.2a: a spell's abilities (e.g. Cascade's "when you cast this
+    /// spell") exist from the moment it's on the stack, before it ever
+    /// resolves, so a script must be able to self-register them here. Safe to
+    /// run in addition to the hand-entry and battlefield-entry runs: every
+    /// script-registered ability is dropped again by
+    /// `commands::remap_abilities` on the next zone change, and
+    /// `run_card_script` never lets a non-battlefield run register a static
+    /// effect, replacement effect or modifier.
+    ///
+    /// The one funnel for all four real `CastSpell` producers (the normal
+    /// action, Madness, Cascade, and a script-requested cast). An activated
+    /// ability shares `PaymentResolution::StackObject`, so the stack entry's
+    /// own kind is what gates this.
+    pub(in crate::engine) fn set_pending_payment(&mut self, request: Option<PendingPaymentRequest>) {
+        if let Some(request) = &request {
+            let is_spell = matches!(request.on_paid, crate::commands::PaymentResolution::StackObject)
+                && self
+                    .state
+                    .stack
+                    .iter()
+                    .any(|s| s.stack_id == request.stack_id && matches!(s.kind, crate::StackEntryKind::Spell));
+            if is_spell {
+                self.run_card_script_for(request.stack_id);
+            }
+        }
+        self.pending_payment = request;
+    }
+
     /// Logs a `run_card_script` failure as a `GameEventKind::ScriptError`
     /// ledger event instead of silently dropping it (the "a script error
     /// here is silently dropped" gap named across `engine/action.rs`,

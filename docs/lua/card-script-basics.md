@@ -20,7 +20,7 @@ return s
 ```
 
 `register_abilities(c)` is called with the card's own object id every time the card becomes a new
-object on the battlefield (see [Registration timing](#registration-timing) below). Inside it, you
+object in a zone where it can have abilities (see [Registration timing](#registration-timing) below). Inside it, you
 build and register one or more abilities/effects using the `Game.Create*` constructors — see
 [index.md](index.md#registering-an-ability-one-page-per-kind) for the full list. A single card can
 register more than one ability by calling a constructor more than once:
@@ -187,18 +187,42 @@ return s
 
 ## Registration timing
 
-A card's script re-runs — every time, unconditionally — whenever it becomes a *new* object on the
-battlefield: when it's played from hand as a land, and when a spell resolves and becomes a
-permanent. This matches the rule that an object which changes zones becomes a new object with no
-memory of its previous existence: whatever the previous object had registered (abilities,
-continuous effects, replacement effects) is torn down once that object is gone, so a card that
-returns to the battlefield later gets a genuinely fresh registration, not a stale leftover from
-before.
+A card's script re-runs — every time, unconditionally — whenever the card becomes a *new* object in
+a zone where it can have abilities. This matches the rule that an object which changes zones becomes
+a new object with no memory of its previous existence: whatever the previous object had registered is
+torn down once that object is gone, so a card that returns later gets a genuinely fresh registration,
+never a stale leftover or a second copy. `register_abilities(c)` is therefore called with a different
+`c` each time, and **which registrations take effect depends on the zone `c` is in**:
 
-Abilities keyed off a zone *other than* the battlefield (a cast trigger, a graveyard-based ability
-like flashback) aren't covered by this — self-registration only runs at the two "entering the
-battlefield" points above. This applies uniformly to every registration kind (triggered, static,
-activated, replacement, cost modifier) — not just triggered abilities.
+| Zone `c` enters | What registers |
+|---|---|
+| **Hand** (draw, opening hand, tutor) | Triggered and activated abilities (this is how a hand-only ability like Cycling exists). Static abilities, replacement effects, cost modifiers and [player modifiers](player-modifiers.md) are ignored — they don't function from hand. |
+| **Stack** (the moment a spell is cast, CR 601.2a) | Only triggers whose condition is [`Game.Conditions.Cast`](game-constants.md#gameconditions). Everything else is ignored until the permanent exists. |
+| **Battlefield** (a land played, a spell resolving, a token created) | Everything except `Cast` triggers. |
+
+All script-registered abilities are dropped again when the object leaves that zone — the script is
+simply run again for the next one.
+
+```lua
+-- Cascade-style: "When you cast this spell, gain 3 life." Exists only while the spell is on the
+-- stack; the "enters" trigger below only exists once it's a permanent.
+function s.register_abilities(c)
+    local cast = Game.CreateTriggeredAbility(c)
+    cast:SetCondition(Game.Conditions.Cast)
+    cast:SetOperation(Game.Ops.GainLife(3))
+    cast:Register()
+
+    local etb = Game.CreateTriggeredAbility(c)
+    etb:SetCondition(Game.Conditions.Enters)
+    etb:SetOperation(Game.Ops.GainLife(1))
+    etb:Register()
+end
+```
+
+Not covered: an ability that functions from the graveyard or exile (flashback-style), or a static
+effect that must work off the battlefield (a characteristic-defining ability, CR 604.3, or a spell's
+own cost reduction) — self-registration never runs for those zones or keeps those registrations, so
+no such script-declared shape exists yet.
 
 ### The two functions that *aren't* battlefield-timed
 

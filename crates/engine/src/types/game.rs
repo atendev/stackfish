@@ -176,6 +176,15 @@ pub struct GameState {
     /// "additional effect" exception is the same underlying question against
     /// the same counter, with no consumer of any kind in this engine yet.
     pub linked_ability_generation: std::collections::HashMap<AbilityId, u32>,
+    /// Ids of every `RegisteredAbility` that `ScriptRuntime::run_card_script`
+    /// itself registered, as opposed to one built directly (a token's
+    /// hand-built Clue ability, a copy effect's granted trigger, a test
+    /// fixture). `commands::remap_abilities` drops these on a zone change
+    /// instead of carrying them to the new `ObjectId`: the script is re-run
+    /// for whichever zone the object lands in, so carrying the old
+    /// registration forward would register everything twice. A side set
+    /// rather than a field on `RegisteredAbility` (~160 construction sites).
+    pub script_ability_ids: std::collections::HashSet<AbilityId>,
     /// CR 702.35b: one-shot timing-restriction waiver, set immediately
     /// before `Engine::submit_madness_cast` queues its synthetic `CastSpell`
     /// command and consumed (`.take()`) by `commands::cast::execute_cast_spell`'s
@@ -323,6 +332,7 @@ mod tests {
             once_per_turn_triggered: std::collections::HashSet::new(),
             commander_return_offered: std::collections::HashSet::new(),
             linked_ability_generation: std::collections::HashMap::new(),
+            script_ability_ids: std::collections::HashSet::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
         };

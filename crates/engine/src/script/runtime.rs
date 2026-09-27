@@ -7,11 +7,12 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Thread, ThreadStatus, Value};
 
-use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
+use crate::types::ability::{AbilityEffect, AbilityKind, ConditionPrimitive, ConditionSpec, RegisteredAbility};
 use crate::types::card::{CardDefinition, CardTypeSet, KeywordSet, ScriptReference, Subtype, SupertypeSet};
 use crate::types::cost::{AlternativeCost, CostModifier};
 use crate::types::effect::{ContinuousEffect, EffectPrimitive, ReplacementEffect};
 use crate::types::event::GameEventKind;
+use crate::types::zone::ZoneKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::ManaCost;
@@ -159,14 +160,57 @@ impl ScriptRuntime {
 
         let mut registered: Vec<RegisteredAbility> =
             self.registry.borrow_mut().pending_triggered.drain(..).collect();
+        // CR 601.2a: on the stack, the only script-declared abilities that
+        // exist yet are the ones that trigger off *being cast* ("when you
+        // cast this spell"). Anything else - an ETB trigger, say - only
+        // functions once the permanent is on the battlefield; registering it
+        // now would let it fire off the cast's own events. And the reverse:
+        // a `Cast` trigger has nothing left to match once the spell has left
+        // the stack, so it isn't re-registered in any other zone.
+        let source_zone = state.object(source).map(|o| o.zone);
+        let is_cast_trigger = |a: &RegisteredAbility| {
+            a.kind == AbilityKind::Triggered
+                && matches!(a.condition, Some(ConditionSpec::Primitive(ConditionPrimitive::Cast)))
+        };
+        if source_zone == Some(ZoneKind::Stack) {
+            registered.retain(|a| is_cast_trigger(a));
+        } else {
+            registered.retain(|a| !is_cast_trigger(a));
+        }
         for ability in &mut registered {
             // Real id (AbilityId's own doc comment) - the builder itself has
             // no &mut GameState to allocate one from inside a Lua callback,
             // same reason the static-effect timestamp below is stamped here
             // too.
             ability.id = state.allocate_ability_id();
+            state.script_ability_ids.insert(ability.id);
         }
         state.abilities.append(&mut registered);
+
+        // CR 113.6/604.2: a static ability, replacement effect or player-level
+        // modifier only functions while its source is on the battlefield.
+        // This script may also run for a card in hand (a hand-only ability
+        // like Cycling) or on the stack (a "when you cast this spell"
+        // trigger), where those registrations must not take effect - and
+        // would otherwise be left behind under a dead id once the card moves
+        // on, still being counted. Triggered/activated abilities above are
+        // kept in every zone: they carry their own zone requirement (and are
+        // dropped again by `commands::remap_abilities` on the next move).
+        // TODO: CR 604.3 characteristic-defining abilities and abilities that
+        // "function in any zone" (e.g. a spell's own cost reduction) are
+        // discarded off the battlefield too - no such script-registered
+        // shape exists yet to need the exception.
+        let on_battlefield = source_zone.map_or(true, |z| z == ZoneKind::Battlefield);
+        if !on_battlefield {
+            let mut registry = self.registry.borrow_mut();
+            registry.pending_static.clear();
+            registry.pending_replacement.clear();
+            registry.pending_cost_modifiers.clear();
+            registry.pending_hand_size_modifiers.clear();
+            registry.pending_hand_reveal_modifiers.clear();
+            registry.pending_draw_limit_modifiers.clear();
+            registry.pending_land_play_modifiers.clear();
+        }
 
         let mut static_effects: Vec<ContinuousEffect> =
             self.registry.borrow_mut().pending_static.drain(..).collect();
