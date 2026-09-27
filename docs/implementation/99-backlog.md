@@ -2,6 +2,34 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Script registration idempotence (`phase5/script-registration-idempotence`)**: closes the gap
+  Cascade's own entry below names ("making `register_abilities(c)` genuinely safe to call more than
+  once per object"). Scoping found it was already live, not just a cast-time hazard: a card whose script
+  ran on hand entry (draw/opening hand/tutor) and was then played registered every ability **twice**
+  (`commands::remap_abilities` carried the hand-time abilities to the new id, then battlefield entry
+  registered a fresh set), and every non-ability registration (static/replacement effect, cost/land-play/
+  hand-size/... modifier) took effect *while the card was still in hand* and was left behind under the
+  dead hand id afterwards — a drawn Exploration granted an extra land drop from hand and kept it
+  after being played. Confirmed with a probe (`land_play_modifiers.len() == 2` after one play) before
+  changing anything. Fix, deliberately without touching the ~400 `RegisteredAbility`/effect/modifier
+  struct-literal sites: `GameState::script_ability_ids` (a side set of the `AbilityId`s
+  `run_card_script` minted); `remap_abilities` drops those instead of carrying them (hand-built
+  abilities — tokens' Clue/Food, copy-granted triggers, test fixtures — still carry, so nothing that
+  relied on remap changed); `retire_object`/`purge_granted_abilities` prune the set too.
+  `run_card_script` now gates by the source's zone: off the battlefield, static/replacement/modifier
+  registrations are discarded (CR 113.6); on the stack, only `Cast`-condition triggers register
+  (CR 601.2a); off the stack, `Cast` triggers are discarded (nothing left to match). The stack-time
+  run is `Engine::set_pending_payment`, the single funnel for all four real `CastSpell` producers
+  (normal action, Madness, Cascade, script-requested cast) - the alternative to the reverted
+  `CommandOutcome::stack_entries` field, with no 13-site struct ripple. `Game.Conditions.Cast` was
+  already Lua-exposed but undocumented; it is documented now, so a card script can declare its own
+  Cascade-style cast trigger. Behavior change to know about: a script-registered ability no longer
+  survives a zone change by carrying over — the script re-runs for the destination zone instead.
+  Tests: `phase5_script_registration_idempotence.rs` (4). Left open: CR 604.3 characteristic-defining
+  abilities and other "functions in any zone" statics are now discarded off the battlefield (marked
+  TODO in `run_card_script`; no script-registered shape needs the exception yet), and abilities that
+  function from graveyard/exile still have no script-registration point at all (flashback-style).
+
 - **Land-play limit (`phase5/land-play-limit`, merged)**: CR 305.2's "you may play an additional
   land each turn" effects (Exploration, Azusa, ...) — `commands::execute_play_land` hardcoded its
   once-per-turn check against a bare literal `1`. The TODO's own excuse ("no continuous-effect

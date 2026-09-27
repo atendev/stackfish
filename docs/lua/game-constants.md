@@ -23,6 +23,7 @@ matching event.
 | Name | Meaning |
 |---|---|
 | `Enters` | CR 603, "when this enters the battlefield." |
+| `Cast` | CR 601.2i/702.85a, "when you cast this spell" (self-referential). Registers only while the spell is on the stack — see [Registration timing](card-script-basics.md#registration-timing). |
 | `Always` | No filter — matches every event. Write this explicitly for an unconditional trigger; don't rely on a typo/`nil` meaning the same thing. |
 | `DealsDamage` | CR 603.2, "whenever this deals damage" — matches any damage this object deals, combat or otherwise. |
 | `IsDealtDamage` | "Whenever this is dealt damage." Object targets only — a player being dealt damage never satisfies this. |

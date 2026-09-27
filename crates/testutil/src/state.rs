@@ -51,6 +51,7 @@ pub fn two_player_state(zones: Vec<Zone>) -> GameState {
         once_per_turn_triggered: std::collections::HashSet::new(),
         commander_return_offered: std::collections::HashSet::new(),
         linked_ability_generation: std::collections::HashMap::new(),
+        script_ability_ids: std::collections::HashSet::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
     }
@@ -93,6 +94,7 @@ pub fn single_player_state(player: PlayerId, zones: Vec<Zone>) -> GameState {
         once_per_turn_triggered: std::collections::HashSet::new(),
         commander_return_offered: std::collections::HashSet::new(),
         linked_ability_generation: std::collections::HashMap::new(),
+        script_ability_ids: std::collections::HashSet::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
     }

@@ -217,7 +217,7 @@ impl Engine {
         // command's own outcome) rather than inferred later, since
         // CommitEvents has no way to know "was this a CastSpell"
         // without it.
-        self.pending_payment = outcome.requires_payment;
+        self.set_pending_payment(outcome.requires_payment);
 
         // engine.rs owns state.priority_player entirely now -
         // execute_command just reports intent (CommandOutcome::
