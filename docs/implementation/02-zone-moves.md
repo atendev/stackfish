@@ -150,9 +150,8 @@
   - CR 702.138c/d ("escapes with [counters/ability]," linked to "if this permanent escaped") — no
     provenance tracking exists anywhere in this engine for "was this permanent cast via escape";
     would need a new linked-ability mechanism, a separate and bigger piece.
-  - No Lua builder for `AlternativeCost::Replacement` itself (the escape/flashback declaration) —
-    same scope Flashback's own (undocumented) slice already established; only `Game.Costs.
-    ExileFromGraveyard` (the cost component) has Lua exposure.
+  - ~~No Lua builder for `AlternativeCost::Replacement` itself~~ — closed by `phase5/script-alternative-costs`:
+    a card script declares it via `s.alternative_costs()` (see `docs/lua/card-script-basics.md`).
 
 ## Slice: buyback-additional-cost (merged)
 
@@ -201,8 +200,7 @@
 - Unresolved, named not silently dropped:
   - Buyback combined with an alternative cost or a modal spell — not blocked structurally, but no
     real card does this and it's untested.
-  - No Lua builder for `buyback_cost` — same scope Flashback/Escape's own alternative-cost
-    machinery already established.
+  - ~~No Lua builder for `buyback_cost`~~ — closed by `phase5/script-alternative-costs`: `s.buyback_cost()`.
 
 ## Follow-up: scenario X-cost support (small fix, no branch)
 

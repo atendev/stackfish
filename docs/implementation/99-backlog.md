@@ -169,9 +169,8 @@
   nothing else in these tests allocates an id first), same "no Lua wiring proven
   this slice" posture Escape/Madness/Flashback/Buyback already take for their own
   Lua-inaccessible pieces. Making `register_abilities(c)` genuinely safe to call
-  more than once per object (or having `move_resolving_spell` purge-then-
-  reregister instead of remap-then-reregister) is a real, separate, bigger gap —
-  named here rather than attempted.
+  more than once per object was a real, separate, bigger gap — closed since by
+  `phase5/script-registration-idempotence` (see the entry at the top of this file).
 
   Also touched, incidentally: fixed a real pre-existing bug in `execute_cast_spell`
   surfaced by Cascade being the first-ever `from_zone: Exile` alternative-cost
@@ -222,13 +221,13 @@
   alternative-cost `from_zone` is per-player - true for Flashback/Escape's own
   `Graveyard`, but Exile (like Battlefield) is a shared zone, so casting from exile
   panicked-then-errored ("actor has no such zone") until this slice's own test exercised
-  it, the first real `from_zone: Exile` producer. No Lua builder for `AlternativeCost::
-  Replacement` itself — same scope every prior alternative-cost slice (Flashback/Escape/
-  Buyback) already left unclosed; tests use direct `CardDefinition`/`RegisteredAbility`/
-  `ReplacementEffect` construction. Effect-driven discards ("target player discards a
-  card," e.g. Mind Rot) still aren't a real producer in this engine at all — a
-  pre-existing, separate gap, unaffected by this slice - Madness is exercisable today via
-  cleanup hand-size discard and a cost-payment `Discard`, both proven end to end in
+  it, the first real `from_zone: Exile` producer. Lua builder for `AlternativeCost::
+  Replacement` is closed since (`phase5/script-alternative-costs`, `s.alternative_costs()`); this
+  slice's own tests still use direct `CardDefinition`/`RegisteredAbility`/`ReplacementEffect`
+  construction. Effect-driven discards ("target player discards a card," e.g. Mind Rot) are a real
+  producer now too (`phase5/discard-target-player`, `Game.Ops.Discard(count)`) - each targeted
+  discard is a replacement-checked Hand->Graveyard move, so Madness applies to it. Madness is also
+  exercisable via cleanup hand-size discard and a cost-payment `Discard`, both proven end to end in
   `phase5_madness.rs`.
 
 - **Buyback (CR 702.27)**: real now (`phase5/buyback-additional-cost`) — `CardDefinition.
@@ -241,8 +240,8 @@
   concatenation in `commands::cast::execute_cast_spell`. Per CR 702.27a's own narrower wording (vs.
   Flashback's 702.34a), the redirect is checked only on normal resolution, never on the CR 608.2b
   fizzle path. Still unmodeled: Buyback combined with an alternative cost or a modal spell (no real
-  card does this); no Lua builder for `buyback_cost` (same scope Flashback/Escape's own alternative-
-  cost machinery already established).
+  card does this). The Lua builder for `buyback_cost` is closed since (`phase5/script-alternative-costs`,
+  `s.buyback_cost()`).
 
 - **Escape (CR 702.138)**: real now (`phase5/escape-alternative-cost`) — `AdditionalCost::
   ExileFromGraveyard`/`CostPayment::Exile`, the same N-distinct-payments shape `TapPermanents`

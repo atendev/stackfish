@@ -546,6 +546,12 @@ function GameOpsTable.DiscardChosen(list) end
 ---@return GameOpsValue
 function GameOpsTable.SacrificeRandom(filter, count) end
 
+--- CR 701.9/701.9b, "target player discards count card(s)" (Mind Rot). The targeted player chooses.
+--- The target comes from s.target_requirement() (a single player target), not from an argument.
+---@param count integer
+---@return GameOpsValue
+function GameOpsTable.Discard(count) end
+
 --- CR 701.9b, random discard from the resolving ability's controller's hand.
 ---@param filter FilterTable
 ---@param count integer
