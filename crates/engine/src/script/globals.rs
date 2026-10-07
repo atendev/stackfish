@@ -221,6 +221,23 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::ReturnAllToHand { filter, zone }))
     })?;
     ops.set("ReturnAllToHand", return_all_to_hand)?;
+    ops.set("ExileSelf", OperationTag(AbilityEffect::ExileSelf))?;
+    // CR 406.2: `zone` defaults to "Battlefield"; only the zones
+    // `ScriptedZoneMoveKind::Exile` accepts as a source are allowed.
+    let exile_all = lua.create_function(|_, (table, zone): (Table, Option<String>)| {
+        let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+        let zone = match zone {
+            None => ZoneKind::Battlefield,
+            Some(name) => match crate::script::decode::parse_zone_kind_name(&name).map_err(to_lua_err)? {
+                z @ (ZoneKind::Battlefield | ZoneKind::Graveyard) => z,
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!("ExileAll zone must be \"Battlefield\" or \"Graveyard\", got {other:?}")))
+                }
+            },
+        };
+        Ok(OperationTag(AbilityEffect::ExileAll { filter, zone }))
+    })?;
+    ops.set("ExileAll", exile_all)?;
     // CR 701.6a: "counter target spell" - the target is declared the usual
     // way via `s.target_requirement()` (a filter with `zone = "Stack"`,
     // already generically supported by `decode_target_filter_table` - see

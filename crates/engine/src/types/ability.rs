@@ -308,6 +308,21 @@ pub enum AbilityEffect {
     /// triggers. `filter.controller` is read off the object's controller,
     /// which equals its owner for any object outside the battlefield.
     ReturnAllToHand { filter: EffectFilter, zone: ZoneKind },
+    /// The `Game.Ops.ExileSelf` primitive - "exile this card from your
+    /// graveyard" (CR 406.2). No target: the resolving ability's own source
+    /// goes through `ScriptedZoneMoveKind::Exile`. A source that already
+    /// changed zones is a new object (CR 400.7), so the effect does nothing.
+    /// TODO(CR 610.3): no "until it leaves the battlefield" return and no
+    /// face-down exile (CR 406.3) yet.
+    ExileSelf,
+    /// The `Game.Ops.ExileAll(filter, zone)` primitive - "exile all
+    /// creatures" / "exile all cards from graveyards" (CR 406.2, CR 601.2c).
+    /// Collects every object in `zone` (Battlefield or Graveyard; across
+    /// every player's graveyard) matching `filter` and hands the list to
+    /// `ScriptedZoneMoveKind::Exile`, so the moves are simultaneous,
+    /// replacement-checked and fire departed triggers.
+    /// TODO: Hand and Library sources (`accepts_source_zone` rejects them).
+    ExileAll { filter: EffectFilter, zone: ZoneKind },
     /// The `Game.Ops.Counter()` primitive (CR 701.6a) — "counter target
     /// spell." The target is a `Target::Object` referring to another
     /// `StackObject`'s own `stack_id` (a spell on the stack already has a

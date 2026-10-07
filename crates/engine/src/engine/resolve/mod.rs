@@ -528,6 +528,8 @@ impl Engine {
             // CR 400.3: untargeted siblings of ReturnToHand.
             Some(AbilityEffect::ReturnSelfToHand) => self.resolve_return_self_to_hand_effect(top),
             Some(AbilityEffect::ReturnAllToHand { filter, zone }) => self.resolve_return_all_to_hand_effect(top, filter, *zone),
+            Some(AbilityEffect::ExileSelf) => self.resolve_exile_self_effect(top),
+            Some(AbilityEffect::ExileAll { filter, zone }) => self.resolve_exile_all_effect(top, filter, *zone),
             // CR 701.6a: removes the *targeted* StackObject (a different
             // stack_id than top.stack_id) from state.stack directly - see
             // AbilityEffect::Counter's own doc comment and

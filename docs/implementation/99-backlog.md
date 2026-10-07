@@ -2,6 +2,18 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Untargeted exile (`phase5/untargeted-exile`)**: `AbilityEffect::ExileSelf` (`Game.Ops.ExileSelf`, bare
+  tag) exiles the resolving ability's own source; `AbilityEffect::ExileAll { filter, zone }`
+  (`Game.Ops.ExileAll(filter, zone?)`) exiles every `matches_effect_filter` object in the Battlefield or
+  every graveyard. Both feed `continue_scripted_zone_move(Exile)`, so replacement checks, departed
+  triggers, token cessation and `reset_for_new_object` are inherited. `resolve_return_all_to_hand_effect`
+  and the new exile-all share one `objects_in_zone_matching` collector. A stale source id does nothing
+  (CR 400.7). Zone arg rejects Hand/Library/Stack/Exile (`Exile` can't source from them). Tests:
+  `phase5_untargeted_exile.rs` (12), including the redirect-by-replacement test the bounce slice lacked
+  (the exile path is shared, so it covers both). Left open: "until leaves the battlefield" exile (CR 610.3),
+  face-down exile, hand/library as a source. Test-harness note: a replacement effect's `source` must be a real
+  object in the state, or `event_target_matches` never matches.
+
 - **Untargeted return to hand (`phase5/untargeted-return-to-hand`)**: `AbilityEffect::ReturnSelfToHand`
   (`Game.Ops.ReturnSelfToHand`, a bare tag like `Destroy`) moves the resolving ability's own source;
   `AbilityEffect::ReturnAllToHand { filter, zone }` (`Game.Ops.ReturnAllToHand(filter, zone?)`) moves every

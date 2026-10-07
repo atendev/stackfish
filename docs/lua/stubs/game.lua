@@ -592,6 +592,18 @@ function GameOpsTable.DestroyAll(filter) end
 ---@return GameOpsValue
 function GameOpsTable.ReturnAllToHand(filter, zone) end
 
+--- CR 406.2/400.7: "exile this card from your graveyard". No target; exiles the ability's own source from the
+--- battlefield or a graveyard. Does nothing if the source already changed zones.
+---@type GameOpsValue
+GameOpsTable.ExileSelf = nil
+
+--- CR 406.2/601.2c: "exile all creatures" / "exile all cards from graveyards". No targets. Every object in
+--- `zone` matching `filter` is exiled simultaneously.
+---@param filter table  same shape as DestroyAll's filter (`controller` is read off the object's controller)
+---@param zone? string  "Battlefield" (default) or "Graveyard" (every player's)
+---@return GameOpsValue
+function GameOpsTable.ExileAll(filter, zone) end
+
 --- CR 701.21, pairs with Game.ChooseN(...) then SacrificeChosen(chosen).
 ---@param list TargetResult[]
 ---@return GameOpsValue
