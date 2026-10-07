@@ -40,6 +40,8 @@ fn parse_one(name: &str) -> Option<KeywordSet> {
         "Shadow" => KeywordSet::SHADOW,
         "Horsemanship" => KeywordSet::HORSEMANSHIP,
         "Banding" => KeywordSet::BANDING,
+        "Hexproof" => KeywordSet::HEXPROOF,
+        "Shroud" => KeywordSet::SHROUD,
         "Can't be regenerated" => KeywordSet::CANT_BE_REGENERATED,
         _ => return None,
     })
@@ -53,6 +55,12 @@ mod tests {
     fn recognized_keywords_set_bits() {
         let set = parse(&["Flying".to_string(), "Trample".to_string()]);
         assert_eq!(set, KeywordSet::FLYING | KeywordSet::TRAMPLE);
+    }
+
+    #[test]
+    fn hexproof_and_shroud_set_bits() {
+        let set = parse(&["Hexproof".to_string(), "Shroud".to_string()]);
+        assert_eq!(set, KeywordSet::HEXPROOF | KeywordSet::SHROUD);
     }
 
     #[test]

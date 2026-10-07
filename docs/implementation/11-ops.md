@@ -534,8 +534,8 @@
   producers; `GameEventKind::Tapped`/`Untapped` themselves were not changed.
 - `commands/activate.rs`: the six variants join the non-mana activated-ability list, so they go on the stack.
   Not added to `is_modal_resolvable`/`resolve_modal_effect` (kept out of scope).
-- `All` forms use the raw `object.controller` through `matches_effect_filter` (hexproof is absent from the engine;
-  CR 601.2c means these don't target anyway).
+- `All` forms use the raw `object.controller` through `matches_effect_filter` (CR 601.2c: these don't
+  target, so hexproof and shroud, added in `phase5/hexproof-shroud`, don't stop them).
 - Verify: `phase5_tap_untap_effects.rs` (22): flip/no-op for each of Tap/Untap, fizzle on a target that left
   (CR 608.2b), summoning sickness irrelevant (CR 302.6), an Icy Manipulator script end to end (cost tap, then
   target tap, events in order), self forms including a stale source (CR 400.7), all forms (controller filter,

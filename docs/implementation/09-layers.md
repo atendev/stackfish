@@ -25,6 +25,7 @@
 - Verify: 4 new tests, 193 total, 0 failed.
 - Key changes:
   - `commands::effective_power(state, id)` and `effective_keywords(state, id)` helpers.
+  - Hexproof/Shroud (`phase5/hexproof-shroud`) are plain layer 6 keyword bits: `target_is_legal` reads them from `effective_characteristics`, so `AddKeyword`/`RemoveKeyword`/`RemoveAllAbilities` already work on them with no layer change.
   - `DeclareBlockers` and `AssignCombatDamage` use layer engine.
   - Also fixed Lifelink/Wither/Infect/Deathtouch keyword reads in damage application.
 - Unresolved:

@@ -13,7 +13,7 @@ use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
-use super::legality::target_is_legal;
+use super::legality::attachment_target_is_legal;
 
 /// Looks up the `ability_index`th ability registered to `source` — any
 /// kind, in registration order (the order entries were pushed onto
@@ -308,7 +308,9 @@ pub(crate) fn legal_aura_entry_candidates(
         // CR 202.3: an Aura's own "Enchant [quality]" restriction has no X
         // context at all (not a live cast/resolution, just a card
         // definition's own base filter) - `None` is a real no-op.
-        .filter(|&target| target_is_legal(state, script_runtime, target, &req.filter, controller, aura_source, req.exclude_source, None))
+        .filter(|&target| {
+            attachment_target_is_legal(state, script_runtime, target, &req.filter, controller, aura_source, req.exclude_source, None)
+        })
         .collect()
 }
 

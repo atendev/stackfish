@@ -246,7 +246,82 @@ fn target_has_protection_from(
         || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name)
 }
 
+/// CR 702.11b/702.18a: whether `id` can't be chosen as a target by a spell
+/// or ability controlled by `caster`, because of hexproof or shroud.
+/// Shroud stops every `caster`, its own controller included. Hexproof only
+/// stops a `caster` who isn't the permanent's controller (CR 702.11b "your
+/// opponents"). "Opponent" here means any player other than the permanent's
+/// `layers::effective_controller`, compared against `caster` rather than a
+/// source object's controller, so the check also works for a trigger or
+/// ability whose source object is gone. The keywords are read from
+/// `effective_characteristics`, so a layer 6 grant or removal counts.
+///
+/// Only permanents are covered (CR 702.11b/702.18a say "permanent"): a
+/// hexproof card in a graveyard, or a hexproof spell on the stack, is still
+/// targetable.
+///
+/// TODO(CR 702.11d-g): "hexproof from [quality]" isn't modeled.
+/// TODO(CR 702.11c/702.18a): players can't have hexproof or shroud.
+/// TODO(CR 702.11e): nothing consumes `ignored_keywords` here, so "can
+/// target as though it didn't have hexproof" isn't expressible yet.
+/// TODO: no team model, so "opponent" means "any other player."
+fn target_blocked_by_hexproof_or_shroud(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    id: ObjectId,
+    caster: PlayerId,
+) -> bool {
+    let Some(obj) = state.object(id) else { return false };
+    if obj.zone != ZoneKind::Battlefield {
+        return false;
+    }
+    let keywords = crate::layers::effective_characteristics(state, script_runtime, id).keywords;
+    if !keywords.intersects(KeywordSet::HEXPROOF | KeywordSet::SHROUD) {
+        return false;
+    }
+    keywords.contains(KeywordSet::SHROUD)
+        || crate::layers::effective_controller(state, script_runtime, id) != caster
+}
+
+/// Full target legality for a spell or ability that targets (cast,
+/// activation, trigger candidate scan, CR 608.2b recheck): the filter, the
+/// protection check and the hexproof/shroud check. Attachment legality
+/// that isn't targeting uses `attachment_target_is_legal` instead.
 pub(crate) fn target_is_legal(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    target: Target,
+    filter: &TargetFilter,
+    caster: PlayerId,
+    source: ObjectId,
+    exclude_source: bool,
+    caster_x_value: Option<u32>,
+) -> bool {
+    target_is_legal_impl(state, script_runtime, target, filter, caster, source, exclude_source, caster_x_value, true)
+}
+
+/// `target_is_legal` without the hexproof/shroud check, for the callers that
+/// ask "is this a legal thing to be attached to" rather than "may this
+/// spell or ability target it": the CR 704.5m/704.5n state-based action
+/// rechecks of an already-attached Aura or Equipment, and the CR 303.4f
+/// candidate scan for an Aura entering the battlefield without being cast.
+/// An Aura permanent doesn't target (CR 115.1b) and attachment by SBA or
+/// entry isn't targeting, so hexproof and shroud don't apply. Protection
+/// still does (CR 702.16d), so it stays in.
+pub(crate) fn attachment_target_is_legal(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    target: Target,
+    filter: &TargetFilter,
+    caster: PlayerId,
+    source: ObjectId,
+    exclude_source: bool,
+    caster_x_value: Option<u32>,
+) -> bool {
+    target_is_legal_impl(state, script_runtime, target, filter, caster, source, exclude_source, caster_x_value, false)
+}
+
+fn target_is_legal_impl(
     state: &GameState,
     script_runtime: &ScriptRuntime,
     target: Target,
@@ -261,6 +336,8 @@ pub(crate) fn target_is_legal(
     // recheck, a triggered-ability candidate scan) resolves as `0`, same as
     // "no X announced" — see `ManaValueBound::X`'s own doc comment.
     caster_x_value: Option<u32>,
+    // `false` skips CR 702.11b/702.18a; see `attachment_target_is_legal`.
+    enforce_targetability: bool,
 ) -> bool {
     // CR 115.4/"another target": the source is never a legal candidate for
     // a requirement that says so, regardless of what the rest of `filter`
@@ -391,6 +468,9 @@ pub(crate) fn target_is_legal(
             if target_has_protection_from(state, script_runtime, id, source) {
                 return false;
             }
+            if enforce_targetability && target_blocked_by_hexproof_or_shroud(state, script_runtime, id, caster) {
+                return false;
+            }
             true
         }
         // CR 115.4: creature, player, planeswalker, or battle only - no
@@ -409,6 +489,8 @@ pub(crate) fn target_is_legal(
                     return false;
                 }
                 !target_has_protection_from(state, script_runtime, id, source)
+                    && !(enforce_targetability
+                        && target_blocked_by_hexproof_or_shroud(state, script_runtime, id, caster))
             }
             Target::Ability(_) => false,
         },
@@ -427,6 +509,9 @@ pub(crate) fn target_is_legal(
                 return false;
             }
             if target_has_protection_from(state, script_runtime, id, source) {
+                return false;
+            }
+            if enforce_targetability && target_blocked_by_hexproof_or_shroud(state, script_runtime, id, caster) {
                 return false;
             }
             script_runtime.invoke_target_legal(*handle, state, id, source, caster).unwrap_or(false)

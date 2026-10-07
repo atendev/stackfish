@@ -187,6 +187,27 @@ bitflags! {
         /// its own field/`EffectPrimitive` rather than a plain bit here,
         /// and isn't modeled yet.
         const BANDING       = 1 << 20;
+        /// CR 702.11b - this permanent can't be the target of spells or
+        /// abilities its controller's opponents control. Enforced in
+        /// `commands::target_is_legal` (cast, activation, trigger
+        /// candidate scan and the CR 608.2b resolution recheck), read
+        /// through `layers::effective_characteristics` so a granted or
+        /// removed keyword counts. Doesn't stop untargeted effects
+        /// (CR 601.2c), and doesn't make an attached Aura or Equipment fall
+        /// off (those SBA checks skip it, unlike protection's CR 702.16d).
+        ///
+        /// TODO(CR 702.11d-g): "hexproof from [quality]" needs a
+        /// parameter (which quality), so like Landwalk and "bands with
+        /// other" it can't be a plain bit and isn't modeled.
+        /// TODO(CR 702.11c): no hexproof on players; players have no
+        /// keyword set here.
+        const HEXPROOF      = 1 << 21;
+        /// CR 702.18a - this permanent can't be the target of any spell or
+        /// ability, including its own controller's. Same enforcement and
+        /// exclusions as `HEXPROOF`.
+        ///
+        /// TODO(CR 702.18a): no shroud on players.
+        const SHROUD        = 1 << 22;
     }
 }
 
