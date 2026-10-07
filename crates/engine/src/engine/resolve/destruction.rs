@@ -135,8 +135,40 @@ impl Engine {
         filter: &EffectFilter,
         zone: ZoneKind,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        let targets: VecDeque<ObjectId> = self
-            .state
+        let targets = self.objects_in_zone_matching(top, filter, zone);
+        self.process_state =
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
+    /// CR 406.2/400.7: `Game.Ops.ExileSelf()` - the resolving ability's own
+    /// source. Same stale-id behavior as `resolve_return_self_to_hand_effect`.
+    pub(super) fn resolve_exile_self_effect(&mut self, top: &StackObject) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let targets: VecDeque<ObjectId> = VecDeque::from([top.source]);
+        self.process_state =
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
+    /// CR 406.2/601.2c: `Game.Ops.ExileAll(filter, zone)` - every object in
+    /// `zone` matching `filter`, moved simultaneously through
+    /// `ScriptedZoneMoveKind::Exile`.
+    pub(super) fn resolve_exile_all_effect(
+        &mut self,
+        top: &StackObject,
+        filter: &EffectFilter,
+        zone: ZoneKind,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let targets = self.objects_in_zone_matching(top, filter, zone);
+        self.process_state =
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
+    /// Every object in any zone of `kind` (all players' graveyards for
+    /// `Graveyard`) that `filter` matches relative to the resolving ability.
+    fn objects_in_zone_matching(&self, top: &StackObject, filter: &EffectFilter, zone: ZoneKind) -> VecDeque<ObjectId> {
+        self.state
             .zones
             .iter()
             .filter(|z| z.kind == zone)
@@ -146,10 +178,7 @@ impl Engine {
                     .object(*id)
                     .is_some_and(|object| matches_effect_filter(filter, object, top.source, top.controller))
             })
-            .collect();
-        self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
-        ControlFlow::Break(StepStatus::Progressed)
+            .collect()
     }
 
     /// CR 701.21 (Sacrifice) + "at random" — `Game.Ops.SacrificeRandom(filter,
