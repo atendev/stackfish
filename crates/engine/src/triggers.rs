@@ -144,6 +144,12 @@ pub fn collect_triggers(
                 continue;
             }
         }
+        // CR 113.6: a `:SetFunctionsFrom(zone)` ability only triggers while
+        // its source is actually in that zone (defensive - it is also
+        // deregistered when the source leaves).
+        if state.ability_function_zones.get(&ability.id).is_some_and(|z| *z != source_object.zone) {
+            continue;
+        }
         let controller = source_object.controller;
 
         let (matched, once_per_turn) = match &ability.condition {

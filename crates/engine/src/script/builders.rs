@@ -183,11 +183,34 @@ pub(crate) struct TriggeredAbilityBuilder {
     /// comment. Set via `:SetInterveningIf(Game.InterveningIf.*)`, orthogonal
     /// to `condition` above (the trigger-event check).
     pub(crate) intervening_if: Option<InterveningIfSpec>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_method`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
+}
+
+/// `:SetFunctionsFrom("Graveyard")` (CR 113.6): declares the one zone this
+/// ability functions from, instead of the default. Shared by the triggered
+/// and activated builders. An ability declaring a zone is registered only
+/// while its source is in that zone, and is dropped when it leaves.
+fn function_zone_name(name: &str) -> Result<ZoneKind, mlua::Error> {
+    let zone = super::decode::parse_zone_kind_name(name).map_err(to_lua_err)?;
+    match zone {
+        ZoneKind::Graveyard | ZoneKind::Exile => Ok(zone),
+        // TODO: Hand/Stack/Library/Command-zone abilities. Hand abilities
+        // (Cycling) are still recognized by cost shape in `commands::activate`,
+        // and only graveyard/exile have a script-registration point.
+        other => Err(mlua::Error::RuntimeError(format!(
+            "SetFunctionsFrom only supports \"Graveyard\" or \"Exile\" today, got {other:?}"
+        ))),
+    }
 }
 
 impl UserData for TriggeredAbilityBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("SetCondition", |lua, this, value: Value| {
             let mut registry = this.registry.borrow_mut();
             let spec = decode_condition_value(lua, &mut registry, value).map_err(to_lua_err)?;
@@ -270,7 +293,14 @@ impl UserData for TriggeredAbilityBuilder {
                 effect,
                 intervening_if: this.intervening_if.clone(),
             };
-            this.registry.borrow_mut().pending_triggered.push(ability);
+            {
+                let mut registry = this.registry.borrow_mut();
+                if let Some(zone) = this.function_zone {
+                    let index = registry.pending_triggered.len();
+                    registry.pending_function_zones.push((index, zone));
+                }
+                registry.pending_triggered.push(ability);
+            }
             Ok(())
         });
     }
@@ -317,11 +347,17 @@ pub(crate) struct ActivatedAbilityBuilder {
     pub(crate) cost: CostSpec,
     pub(crate) target: Option<TargetFilter>,
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
 impl UserData for ActivatedAbilityBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("AddCost", |_, this, value: Value| {
             match decode_cost_component_value(value).map_err(to_lua_err)? {
                 CostComponent::Additional(additional) => this.cost.additional.push(additional),
@@ -388,7 +424,14 @@ impl UserData for ActivatedAbilityBuilder {
                 effect,
                 intervening_if: None,
             };
-            this.registry.borrow_mut().pending_triggered.push(ability);
+            {
+                let mut registry = this.registry.borrow_mut();
+                if let Some(zone) = this.function_zone {
+                    let index = registry.pending_triggered.len();
+                    registry.pending_function_zones.push((index, zone));
+                }
+                registry.pending_triggered.push(ability);
+            }
             Ok(())
         });
     }

@@ -2,6 +2,25 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Graveyard/exile script registration (`phase5/graveyard-exile-script-registration`)**: closes the
+  "no script-registration point for graveyard/exile abilities" gap the idempotence slice left. Scoping
+  found 15+ separate graveyard/exile producers (death, discard, mill, resolution, exile costs, ...), so
+  instead of hooking each, `Engine::sync_off_battlefield_scripts` sweeps once at the top of
+  `resolve_collect_triggers_state` and runs the script of every graveyard/exile object not yet in
+  `GameState::off_battlefield_scripts_run` (sorted by id for deterministic ability ids; pruned by
+  `retire_object`). A script declares the zone with `:SetFunctionsFrom("Graveyard"|"Exile")` on the
+  triggered/activated builders; the zone lives in `GameState::ability_function_zones` (side map, same
+  reason as `script_ability_ids`: ~400 `RegisteredAbility` literals) via `ScriptRegistry::
+  pending_function_zones` (index-parallel to `pending_triggered`). `run_card_script` keeps a declared
+  ability only while the source is in its zone, and discards every *undeclared* ability in
+  graveyard/exile (an ETB trigger must not go live there). `commands::activate` and `collect_triggers`
+  honor the declared zone; `remap_abilities`/`retire_object`/`purge_granted_abilities` prune the map.
+  Tests: `phase5_graveyard_exile_script_registration.rs` (9). Left open: statics/replacement effects/
+  modifiers that function from graveyard/exile (Anger-style) - still discarded off the battlefield
+  (TODO in `run_card_script`); `:SetFunctionsFrom` rejects Hand/Stack/etc. (hand abilities stay
+  cost-shape detected); a card entering the graveyard mid-batch registers at the next trigger-collection
+  pass, so its own ability can't react to events in that same batch; CR 604.3 CDAs unchanged.
+
 - **Script registration idempotence (`phase5/script-registration-idempotence`)**: closes the gap
   Cascade's own entry below names ("making `register_abilities(c)` genuinely safe to call more than
   once per object"). Scoping found it was already live, not just a cast-time hazard: a card whose script
@@ -28,7 +47,7 @@
   Tests: `phase5_script_registration_idempotence.rs` (4). Left open: CR 604.3 characteristic-defining
   abilities and other "functions in any zone" statics are now discarded off the battlefield (marked
   TODO in `run_card_script`; no script-registered shape needs the exception yet), and abilities that
-  function from graveyard/exile still have no script-registration point at all (flashback-style).
+  function from graveyard/exile now do (`phase5/graveyard-exile-script-registration`, entry above).
 
 - **Land-play limit (`phase5/land-play-limit`, merged)**: CR 305.2's "you may play an additional
   land each turn" effects (Exploration, Azusa, ...) — `commands::execute_play_land` hardcoded its

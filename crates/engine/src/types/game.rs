@@ -185,6 +185,20 @@ pub struct GameState {
     /// registration forward would register everything twice. A side set
     /// rather than a field on `RegisteredAbility` (~160 construction sites).
     pub script_ability_ids: std::collections::HashSet<AbilityId>,
+    /// Zone a script-registered ability declared it functions from
+    /// (`:SetFunctionsFrom("Graveyard")`, CR 113.6 - "abilities that function
+    /// from a zone other than the battlefield"). Absent means the default
+    /// (battlefield, or whichever zone the pre-existing cost-shape checks
+    /// imply, e.g. Cycling's hand). A side map rather than a
+    /// `RegisteredAbility` field for the same ~400-construction-site reason
+    /// `script_ability_ids` is a side set; pruned alongside it.
+    pub ability_function_zones: std::collections::HashMap<AbilityId, ZoneKind>,
+    /// Objects currently in the graveyard or exile whose card script has
+    /// already been run for that zone (`Engine::sync_off_battlefield_scripts`).
+    /// Every graveyard/exile producer (death, discard, mill, resolution, ...)
+    /// would otherwise need its own hook; sweeping once per trigger-collection
+    /// pass covers them all. Entries are pruned by `commands::retire_object`.
+    pub off_battlefield_scripts_run: std::collections::HashSet<ObjectId>,
     /// CR 702.35b: one-shot timing-restriction waiver, set immediately
     /// before `Engine::submit_madness_cast` queues its synthetic `CastSpell`
     /// command and consumed (`.take()`) by `commands::cast::execute_cast_spell`'s
@@ -333,6 +347,8 @@ mod tests {
             commander_return_offered: std::collections::HashSet::new(),
             linked_ability_generation: std::collections::HashMap::new(),
             script_ability_ids: std::collections::HashSet::new(),
+            ability_function_zones: std::collections::HashMap::new(),
+            off_battlefield_scripts_run: std::collections::HashSet::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
         };

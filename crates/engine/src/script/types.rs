@@ -189,6 +189,11 @@ pub(crate) struct ScriptRegistry {
     /// `ActivatedAbilityBuilder` — the drain doesn't care about
     /// `AbilityKind`, so there's no need for a second, kind-specific queue.
     pub(crate) pending_triggered: Vec<RegisteredAbility>,
+    /// `(index into pending_triggered, zone)` for each queued ability that
+    /// declared `:SetFunctionsFrom(zone)` - a parallel list rather than a
+    /// `RegisteredAbility` field (see `GameState::ability_function_zones`).
+    /// Drained together with `pending_triggered`.
+    pub(crate) pending_function_zones: Vec<(usize, crate::types::zone::ZoneKind)>,
     /// Same idea as `pending_triggered`, for `Game.CreateStaticAbility`'s
     /// builder (CR 604/611) — drained into `GameState.continuous_effects` by
     /// `run_card_script`. `timestamp` on each queued `ContinuousEffect` is a
