@@ -43,7 +43,7 @@ recognized by their `DiscardSelf` cost, and no other zone has a registration poi
 exists only while its source is in that zone: it registers when the card enters it, is dropped when
 the card leaves, and can only be activated/triggers from there. Abilities that don't call this keep
 the default — they never register for a card in the graveyard or exile, so an ETB trigger in the same
-script stays dormant there. Statics, replacement effects and modifiers can't be declared this way yet.
+script stays dormant there. Statics, replacement effects and modifiers accept it too (see their own pages).
 
 **`:SetOperation(value)`** — what the ability does. `value` is a
 [`Game.Ops.*`](game-constants.md#gameops) tag or a custom function — see

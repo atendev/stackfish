@@ -2,6 +2,20 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Graveyard/exile statics (`phase5/graveyard-exile-static-functions`)**: closes the "statics/
+  replacement effects/modifiers that function from graveyard/exile (Anger-style)" gap the previous
+  entry left. `:SetFunctionsFrom("Graveyard"|"Exile")` is now on `StaticAbilityBuilder`,
+  `ReplacementEffectBuilder` and the five modifier builders (cost/hand-size/hand-reveal/draw-limit/
+  land-play) through the same `function_zone_name` helper. Unlike triggered/activated abilities these
+  have no `AbilityId`, so no side map: each `pending_*` queue became `Vec<(T, Option<ZoneKind>)>` and
+  `run_card_script` filters with one `take_functioning` helper (declared zone == source zone, undeclared
+  == battlefield) instead of the old blanket `clear()` off the battlefield. No new cleanup: a zone
+  change mints a new id (CR 400.7), so `retire_object`'s purge-by-source already removes the effect.
+  Tests: `phase5_graveyard_exile_static_functions.rs` (10). Left open: CR 604.3 CDAs/"functions in any
+  zone" statics still discarded off the battlefield (TODO in `run_card_script`); no test card exercises
+  a `SetCondition` ("as long as you control a Mountain") on a graveyard static - the condition gate is
+  the existing one, unchanged; Hand/Stack zones still rejected.
+
 - **Graveyard/exile script registration (`phase5/graveyard-exile-script-registration`)**: closes the
   "no script-registration point for graveyard/exile abilities" gap the idempotence slice left. Scoping
   found 15+ separate graveyard/exile producers (death, discard, mill, resolution, exile costs, ...), so
@@ -15,9 +29,7 @@
   ability only while the source is in its zone, and discards every *undeclared* ability in
   graveyard/exile (an ETB trigger must not go live there). `commands::activate` and `collect_triggers`
   honor the declared zone; `remap_abilities`/`retire_object`/`purge_granted_abilities` prune the map.
-  Tests: `phase5_graveyard_exile_script_registration.rs` (9). Left open: statics/replacement effects/
-  modifiers that function from graveyard/exile (Anger-style) - still discarded off the battlefield
-  (TODO in `run_card_script`); `:SetFunctionsFrom` rejects Hand/Stack/etc. (hand abilities stay
+  Tests: `phase5_graveyard_exile_script_registration.rs` (9). Left open: `:SetFunctionsFrom` rejects Hand/Stack/etc. (hand abilities stay
   cost-shape detected); a card entering the graveyard mid-batch registers at the next trigger-collection
   pass, so its own ability can't react to events in that same batch; CR 604.3 CDAs unchanged.
 

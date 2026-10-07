@@ -200,13 +200,13 @@ pub(crate) struct ScriptRegistry {
     /// placeholder (`SequenceNo(0)`) until drain time, since the builder has
     /// no `&mut GameState` to call `allocate_sequence_no()` from inside a Lua
     /// callback — the drain step stamps the real value.
-    pub(crate) pending_static: Vec<ContinuousEffect>,
+    pub(crate) pending_static: Vec<(ContinuousEffect, Option<crate::types::zone::ZoneKind>)>,
     /// Same idea as `pending_static`, for `Game.CreateReplacementEffect`'s
     /// builder (CR 614/701.19b) — drained into `GameState.replacement_effects`
     /// by `run_card_script`. Unlike `pending_static`'s `ContinuousEffect`, a
     /// `ReplacementEffect` has no `timestamp` field to stamp at drain time —
     /// nothing about CR 613.7 ordering applies to it.
-    pub(crate) pending_replacement: Vec<ReplacementEffect>,
+    pub(crate) pending_replacement: Vec<(ReplacementEffect, Option<crate::types::zone::ZoneKind>)>,
     /// Same idea as `pending_static`, for `Game.CreateCostModifier`'s builder
     /// (CR 601.2f) — drained into `GameState.cost_modifiers` by
     /// `run_card_script`. `controller` on each queued `CostModifier` is a
@@ -214,29 +214,29 @@ pub(crate) struct ScriptRegistry {
     /// `&GameState` to read this source's live controller from inside a Lua
     /// callback, same reason `pending_static`'s `timestamp` is a placeholder
     /// too. The drain step resolves the real value there instead.
-    pub(crate) pending_cost_modifiers: Vec<CostModifier>,
+    pub(crate) pending_cost_modifiers: Vec<(CostModifier, Option<crate::types::zone::ZoneKind>)>,
     /// Same idea as `pending_cost_modifiers`, for `Game.CreateHandSizeModifier`'s
     /// builder (CR 402.2) — drained into `GameState.hand_size_modifiers` by
     /// `run_card_script`. `controller` on each queued `HandSizeModifier` is a
     /// placeholder (`PlayerId(0)`) until drain time, same reason and same
     /// fix as `pending_cost_modifiers`'s own placeholder `controller`.
-    pub(crate) pending_hand_size_modifiers: Vec<HandSizeModifier>,
+    pub(crate) pending_hand_size_modifiers: Vec<(HandSizeModifier, Option<crate::types::zone::ZoneKind>)>,
     /// Same idea as `pending_hand_size_modifiers`, for `Game.
     /// CreateHandRevealModifier`'s builder (CR 701.20a/303.4m) — drained
     /// into `GameState.hand_reveal_modifiers` by `run_card_script`. Same
     /// placeholder-`controller`/`timestamp` pattern.
-    pub(crate) pending_hand_reveal_modifiers: Vec<HandRevealModifier>,
+    pub(crate) pending_hand_reveal_modifiers: Vec<(HandRevealModifier, Option<crate::types::zone::ZoneKind>)>,
     /// Same idea as `pending_hand_reveal_modifiers`, for `Game.
     /// CreateDrawLimitModifier`'s builder (CR 121.2b) — drained into
     /// `GameState.draw_limit_modifiers` by `run_card_script`. Same
     /// placeholder-`controller`/`timestamp` pattern.
-    pub(crate) pending_draw_limit_modifiers: Vec<DrawLimitModifier>,
+    pub(crate) pending_draw_limit_modifiers: Vec<(DrawLimitModifier, Option<crate::types::zone::ZoneKind>)>,
     /// Same idea as `pending_draw_limit_modifiers`, for `Game.
     /// CreateLandPlayModifier`'s builder (CR 305.2) — drained into
     /// `GameState.land_play_modifiers` by `run_card_script`. Placeholder-
     /// `controller` only (no `timestamp` - see `LandPlayModifier`'s own doc
     /// comment for why it has none).
-    pub(crate) pending_land_play_modifiers: Vec<LandPlayModifier>,
+    pub(crate) pending_land_play_modifiers: Vec<(LandPlayModifier, Option<crate::types::zone::ZoneKind>)>,
     /// Backlog item 9: a coroutine `Thread` suspended mid-`invoke_operation`
     /// at a `Game.SelectTargets` call, keyed by the same opaque
     /// `ScriptHandle` space `scripts` uses (shares `next_handle`, kept in a

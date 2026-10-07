@@ -192,6 +192,11 @@ function TriggeredAbilityBuilder:Register() end
 ---@class StaticAbilityBuilder
 local StaticAbilityBuilder = {}
 
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Graveyard"|"Exile"
+---@return StaticAbilityBuilder
+function StaticAbilityBuilder:SetFunctionsFrom(zoneName) end
+
 --- CR 613 layer this effect applies in. Required before :Register().
 ---@param value GameLayersValue
 ---@return StaticAbilityBuilder
@@ -268,6 +273,11 @@ function ManaAbilityBuilder:Register() end
 ---@class ReplacementEffectBuilder
 local ReplacementEffectBuilder = {}
 
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Graveyard"|"Exile"
+---@return ReplacementEffectBuilder
+function ReplacementEffectBuilder:SetFunctionsFrom(zoneName) end
+
 --- Table-only — no scripted-predicate form. Default: no filter (applies to source only via defaults below).
 ---@param value ReplacementAffectedTable
 ---@return ReplacementEffectBuilder
@@ -296,6 +306,11 @@ function ReplacementEffectBuilder:Register() end
 ---@class CostModifierBuilder
 local CostModifierBuilder = {}
 
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Graveyard"|"Exile"
+---@return CostModifierBuilder
+function CostModifierBuilder:SetFunctionsFrom(zoneName) end
+
 --- Which spells this modifies. Required before :Register().
 ---@param value FilterTable
 ---@return CostModifierBuilder
@@ -316,6 +331,11 @@ function CostModifierBuilder:Register() end
 
 ---@class HandSizeModifierBuilder
 local HandSizeModifierBuilder = {}
+
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Graveyard"|"Exile"
+---@return HandSizeModifierBuilder
+function HandSizeModifierBuilder:SetFunctionsFrom(zoneName) end
 
 --- Which player(s) this applies to. Required before :Register().
 ---@param value GameHandSizeAffectedValue
@@ -355,6 +375,11 @@ function GameHandSizeEffectsTable.SetTo(n) end
 ---@class HandRevealModifierBuilder
 local HandRevealModifierBuilder = {}
 
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Graveyard"|"Exile"
+---@return HandRevealModifierBuilder
+function HandRevealModifierBuilder:SetFunctionsFrom(zoneName) end
+
 --- Which player(s) this applies to. Required before :Register().
 ---@param value GameHandRevealAffectedValue
 ---@return HandRevealModifierBuilder
@@ -378,6 +403,11 @@ local GameHandRevealAffectedTable = {}
 
 ---@class DrawLimitModifierBuilder
 local DrawLimitModifierBuilder = {}
+
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Graveyard"|"Exile"
+---@return DrawLimitModifierBuilder
+function DrawLimitModifierBuilder:SetFunctionsFrom(zoneName) end
 
 --- Which player(s) this applies to. Required before :Register().
 ---@param value GameDrawLimitAffectedValue
@@ -406,6 +436,11 @@ local GameDrawLimitAffectedTable = {}
 
 ---@class LandPlayModifierBuilder
 local LandPlayModifierBuilder = {}
+
+--- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
+---@param zoneName "Graveyard"|"Exile"
+---@return LandPlayModifierBuilder
+function LandPlayModifierBuilder:SetFunctionsFrom(zoneName) end
 
 --- Which player(s) this applies to. Required before :Register().
 ---@param value GameLandPlayAffectedValue

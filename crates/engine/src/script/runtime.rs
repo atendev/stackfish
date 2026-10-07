@@ -218,24 +218,31 @@ impl ScriptRuntime {
         // on, still being counted. Triggered/activated abilities above are
         // kept in every zone: they carry their own zone requirement (and are
         // dropped again by `commands::remap_abilities` on the next move).
+        // CR 113.6: an ability that declared `:SetFunctionsFrom(zone)` is kept
+        // only while its source is in that zone (Anger-style graveyard
+        // statics); an undeclared one only on the battlefield.
         // TODO: CR 604.3 characteristic-defining abilities and abilities that
         // "function in any zone" (e.g. a spell's own cost reduction) are
         // discarded off the battlefield too - no such script-registered
         // shape exists yet to need the exception.
         let on_battlefield = source_zone.map_or(true, |z| z == ZoneKind::Battlefield);
-        if !on_battlefield {
-            let mut registry = self.registry.borrow_mut();
-            registry.pending_static.clear();
-            registry.pending_replacement.clear();
-            registry.pending_cost_modifiers.clear();
-            registry.pending_hand_size_modifiers.clear();
-            registry.pending_hand_reveal_modifiers.clear();
-            registry.pending_draw_limit_modifiers.clear();
-            registry.pending_land_play_modifiers.clear();
+        fn take_functioning<T>(
+            queue: &mut Vec<(T, Option<ZoneKind>)>,
+            source_zone: Option<ZoneKind>,
+            on_battlefield: bool,
+        ) -> Vec<T> {
+            queue
+                .drain(..)
+                .filter(|(_, declared)| match declared {
+                    Some(zone) => source_zone == Some(*zone),
+                    None => on_battlefield,
+                })
+                .map(|(item, _)| item)
+                .collect()
         }
 
         let mut static_effects: Vec<ContinuousEffect> =
-            self.registry.borrow_mut().pending_static.drain(..).collect();
+            take_functioning(&mut self.registry.borrow_mut().pending_static, source_zone, on_battlefield);
         for effect in &mut static_effects {
             // Real timestamp (CR 613.7 ordering) - the builder itself has no
             // &mut GameState to allocate one from inside a Lua callback (see
@@ -245,11 +252,11 @@ impl ScriptRuntime {
         state.continuous_effects.append(&mut static_effects);
 
         let mut replacement_effects: Vec<ReplacementEffect> =
-            self.registry.borrow_mut().pending_replacement.drain(..).collect();
+            take_functioning(&mut self.registry.borrow_mut().pending_replacement, source_zone, on_battlefield);
         state.replacement_effects.append(&mut replacement_effects);
 
         let mut cost_modifiers: Vec<CostModifier> =
-            self.registry.borrow_mut().pending_cost_modifiers.drain(..).collect();
+            take_functioning(&mut self.registry.borrow_mut().pending_cost_modifiers, source_zone, on_battlefield);
         for modifier in &mut cost_modifiers {
             // Real controller (CostModifierBuilder's own doc comment) - the
             // builder itself has no &GameState to read this source's live
@@ -262,7 +269,7 @@ impl ScriptRuntime {
         state.cost_modifiers.append(&mut cost_modifiers);
 
         let mut hand_size_modifiers: Vec<HandSizeModifier> =
-            self.registry.borrow_mut().pending_hand_size_modifiers.drain(..).collect();
+            take_functioning(&mut self.registry.borrow_mut().pending_hand_size_modifiers, source_zone, on_battlefield);
         for modifier in &mut hand_size_modifiers {
             // Real controller and timestamp (HandSizeModifierBuilder's own
             // doc comment) - the builder itself has no &GameState to read
@@ -277,7 +284,7 @@ impl ScriptRuntime {
         state.hand_size_modifiers.append(&mut hand_size_modifiers);
 
         let mut hand_reveal_modifiers: Vec<HandRevealModifier> =
-            self.registry.borrow_mut().pending_hand_reveal_modifiers.drain(..).collect();
+            take_functioning(&mut self.registry.borrow_mut().pending_hand_reveal_modifiers, source_zone, on_battlefield);
         for modifier in &mut hand_reveal_modifiers {
             // Real controller and timestamp, same reason and same fix as
             // hand_size_modifiers's own placeholders just above.
@@ -290,7 +297,7 @@ impl ScriptRuntime {
         state.hand_reveal_modifiers.append(&mut hand_reveal_modifiers);
 
         let mut draw_limit_modifiers: Vec<DrawLimitModifier> =
-            self.registry.borrow_mut().pending_draw_limit_modifiers.drain(..).collect();
+            take_functioning(&mut self.registry.borrow_mut().pending_draw_limit_modifiers, source_zone, on_battlefield);
         for modifier in &mut draw_limit_modifiers {
             // Real controller and timestamp, same reason and same fix as
             // hand_size_modifiers's own placeholders above.
@@ -303,7 +310,7 @@ impl ScriptRuntime {
         state.draw_limit_modifiers.append(&mut draw_limit_modifiers);
 
         let mut land_play_modifiers: Vec<LandPlayModifier> =
-            self.registry.borrow_mut().pending_land_play_modifiers.drain(..).collect();
+            take_functioning(&mut self.registry.borrow_mut().pending_land_play_modifiers, source_zone, on_battlefield);
         for modifier in &mut land_play_modifiers {
             // Real controller, same reason and same fix as draw_limit_modifiers's
             // own placeholder above - no timestamp to patch (see
