@@ -172,7 +172,7 @@ function TriggeredAbilityBuilder:SetInterveningIf(value) end
 
 --- CR 113.6: the ability functions from "Graveyard" or "Exile" instead of the battlefield.
 --- Registers only while the source is in that zone. Other zone names are an error.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetFunctionsFrom(zoneName) end
 
@@ -193,7 +193,7 @@ function TriggeredAbilityBuilder:Register() end
 local StaticAbilityBuilder = {}
 
 --- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return StaticAbilityBuilder
 function StaticAbilityBuilder:SetFunctionsFrom(zoneName) end
 
@@ -241,7 +241,7 @@ function ActivatedAbilityBuilder:AddCost(value) end
 
 --- CR 113.6: the ability functions from "Graveyard" or "Exile" instead of the battlefield.
 --- Registers only while the source is in that zone. Other zone names are an error.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetFunctionsFrom(zoneName) end
 
@@ -280,7 +280,7 @@ function ManaAbilityBuilder:Register() end
 local ReplacementEffectBuilder = {}
 
 --- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return ReplacementEffectBuilder
 function ReplacementEffectBuilder:SetFunctionsFrom(zoneName) end
 
@@ -313,7 +313,7 @@ function ReplacementEffectBuilder:Register() end
 local CostModifierBuilder = {}
 
 --- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return CostModifierBuilder
 function CostModifierBuilder:SetFunctionsFrom(zoneName) end
 
@@ -339,7 +339,7 @@ function CostModifierBuilder:Register() end
 local HandSizeModifierBuilder = {}
 
 --- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return HandSizeModifierBuilder
 function HandSizeModifierBuilder:SetFunctionsFrom(zoneName) end
 
@@ -382,7 +382,7 @@ function GameHandSizeEffectsTable.SetTo(n) end
 local HandRevealModifierBuilder = {}
 
 --- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return HandRevealModifierBuilder
 function HandRevealModifierBuilder:SetFunctionsFrom(zoneName) end
 
@@ -411,7 +411,7 @@ local GameHandRevealAffectedTable = {}
 local DrawLimitModifierBuilder = {}
 
 --- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return DrawLimitModifierBuilder
 function DrawLimitModifierBuilder:SetFunctionsFrom(zoneName) end
 
@@ -444,7 +444,7 @@ local GameDrawLimitAffectedTable = {}
 local LandPlayModifierBuilder = {}
 
 --- Registers only while the source is in that zone (CR 113.6); without it, only on the battlefield.
----@param zoneName "Graveyard"|"Exile"
+---@param zoneName "Hand"|"Graveyard"|"Exile"
 ---@return LandPlayModifierBuilder
 function LandPlayModifierBuilder:SetFunctionsFrom(zoneName) end
 
@@ -542,6 +542,7 @@ function GameInterveningIfTable.ControlsAtLeast(filter, count) end
 ---@field Destroy GameOpsValue                  -- CR 701.8; indestructible unaffected
 ---@field Sacrifice GameOpsValue                 -- CR 701.17, target-based (vs. Game.Costs.Sacrifice)
 ---@field Exile GameOpsValue                     -- CR 701.18; battlefield targets only
+---@field ReturnToHand GameOpsValue                -- CR 400.3; battlefield targets only, to the owner's hand
 ---@field Counter GameOpsValue                   -- CR 701.6a, counters a spell target (zone="Stack")
 ---@field Regenerate GameOpsValue                -- CR 701.19a, one-shot shield
 ---@field Shuffle GameOpsValue

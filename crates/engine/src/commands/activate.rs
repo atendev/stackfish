@@ -303,6 +303,7 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::DestroyAll(_))
         | Some(AbilityEffect::Sacrifice)
         | Some(AbilityEffect::Exile)
+        | Some(AbilityEffect::ReturnToHand)
         // CR 701.6a: no real card grants Counter as an activated ability's
         // own effect (Stifle-style "counter target activated/triggered
         // ability" is a different, unbuilt targeting shape - see

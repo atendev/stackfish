@@ -664,6 +664,65 @@ impl Engine {
                 };
                 self.state.ledger.push(committed);
             }
+            // CR 400.3: a permanent returned to hand goes to its owner's
+            // hand. Retires the old id (purging its abilities, collecting its
+            // departed triggers like Exile) and clears battlefield-only state
+            // on the fresh object - it is a new object (CR 400.7), not the
+            // permanent with its counters/damage/attachments. The card's
+            // hand abilities register on the next sweep
+            // (`sync_off_battlefield_scripts`).
+            ScriptedZoneMoveKind::Bounce => {
+                let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = final_event else {
+                    unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
+                };
+                let last_known_info = last_known_info
+                    .expect("continue_scripted_zone_move always proposes with last_known_info populated");
+                let owner = last_known_info.owner;
+                let new_id = self.state.allocate_object_id();
+                let mut new_object = last_known_info.clone();
+                new_object.object_id = new_id;
+                new_object.lineage = ObjectLineage { previous: Some(old_id) };
+                new_object.zone = to;
+                new_object.timestamp = self.state.allocate_sequence_no();
+                new_object.controller = owner;
+                new_object.tapped = false;
+                new_object.damage_marked = 0;
+                new_object.deathtouched = false;
+                new_object.counters = crate::types::counter::CounterSet::new();
+                new_object.attachments = Vec::new();
+                new_object.attached_to = None;
+                new_object.attached_to_player = None;
+                new_object.copiable_override = None;
+
+                if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
+                    zone.remove(old_id);
+                }
+                let departed = commands::retire_object(&mut self.state, old_id);
+                self.departed_triggered_abilities.extend(departed);
+                let to_owner = match to {
+                    ZoneKind::Exile | ZoneKind::Battlefield => None,
+                    _ => Some(owner),
+                };
+                if let Some(zone) = self.state.zone_mut(to, to_owner) {
+                    zone.push_bottom(new_id);
+                }
+                self.state.objects.insert(new_id, new_object);
+
+                let event_id = self.state.allocate_event_id();
+                let sequence_no = self.state.allocate_sequence_no();
+                self.state.ledger.push(GameEvent {
+                    event_id,
+                    sequence_no,
+                    kind: GameEventKind::ZoneChange {
+                        object: new_id,
+                        from: ZoneKind::Battlefield,
+                        to,
+                        last_known_info: Some(last_known_info),
+                    },
+                    caused_by_command: None,
+                    parent_event: None,
+                });
+            }
             // CR 701.9a (`phase5/mass-choice-effects`): moves a card off a
             // player's Hand rather than a permanent off the Battlefield —
             // can't reuse `sba::commit_death`/`commit_death_or_regeneration`
@@ -767,7 +826,11 @@ impl Engine {
                     continue;
                 }
             }
-            let to = if kind == ScriptedZoneMoveKind::Exile { ZoneKind::Exile } else { ZoneKind::Graveyard };
+            let to = match kind {
+                ScriptedZoneMoveKind::Exile => ZoneKind::Exile,
+                ScriptedZoneMoveKind::Bounce => ZoneKind::Hand,
+                _ => ZoneKind::Graveyard,
+            };
             let proposed = GameEventKind::ZoneChange { object: id, from, to, last_known_info: Some(last_known_info) };
             // CR 614.8: only Destroy is genuine destruction - a regeneration
             // shield can intercept it and only it (Sacrifice/Exile are each

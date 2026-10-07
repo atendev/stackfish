@@ -97,6 +97,25 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
+    /// CR 400.3: `Game.Ops.ReturnToHand()` - moves each legal battlefield
+    /// target to its owner's hand. Mirrors `resolve_exile_effect`.
+    pub(super) fn resolve_return_to_hand_effect(
+        &mut self,
+        top: &StackObject,
+        legal_targets: &[Target],
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let targets: VecDeque<ObjectId> = legal_targets
+            .iter()
+            .filter_map(|t| match t {
+                Target::Object(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        self.process_state =
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
     /// CR 701.21 (Sacrifice) + "at random" — `Game.Ops.SacrificeRandom(filter,
     /// count)`. Draws via `pick_sacrifice_random_ids` below, then hands the
     /// result straight to `continue_scripted_zone_move` for the single-player

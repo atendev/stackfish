@@ -235,12 +235,12 @@ pub(crate) struct TriggeredAbilityBuilder {
 fn function_zone_name(name: &str) -> Result<ZoneKind, mlua::Error> {
     let zone = super::decode::parse_zone_kind_name(name).map_err(to_lua_err)?;
     match zone {
-        ZoneKind::Graveyard | ZoneKind::Exile => Ok(zone),
-        // TODO: Hand/Stack/Library/Command-zone abilities. Hand abilities
-        // (Cycling) are still recognized by cost shape in `commands::activate`,
-        // and only graveyard/exile have a script-registration point.
+        ZoneKind::Hand | ZoneKind::Graveyard | ZoneKind::Exile => Ok(zone),
+        // TODO: Stack/Library/Command-zone abilities. Hand abilities written
+        // before this existed (Cycling) are still also recognized by cost
+        // shape in `commands::activate`.
         other => Err(mlua::Error::RuntimeError(format!(
-            "SetFunctionsFrom only supports \"Graveyard\" or \"Exile\" today, got {other:?}"
+            "SetFunctionsFrom only supports \"Hand\", \"Graveyard\" or \"Exile\" today, got {other:?}"
         ))),
     }
 }
