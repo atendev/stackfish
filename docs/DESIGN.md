@@ -40,6 +40,9 @@ request). Replace the YGO rules kernel entirely with an MTG-native one per the a
 - `Game.Ops.ForEachPlayer` (`phase5/mass-choice-effects`): APNAP applied to effect *resolution* too
   (CR 101.4's "each player ..." shape, not just trigger placement) - `triggers::apnap_player_order`
   is the one shared rotation both use
+- `Game.Ops.Tap`/`Untap`/`TapSelf`/`UntapSelf`/`TapAll`/`UntapAll` (`phase5/tap-untap-effects`): status flips
+  (CR 701.26) mutate `tapped` in place and push `Tapped`/`Untapped` only on a real flip, like the tap-cost,
+  attack and untap-step producers; they are not replacement-checked yet
 - Structured cost/payment system
 
 ### Step-able core (replay requirement)

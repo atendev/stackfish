@@ -33,6 +33,11 @@ name.
 - **Only zone changes are visible to a condition.** A condition wanting to check a damage event,
   life change, or tap/untap event will always see `nil` for `event` — see
   [card-script-basics.md](card-script-basics.md#writing-a-condition).
+- **No "becomes tapped" / "becomes untapped" condition.** `Game.Ops.Tap`/`Untap` and the self/all
+  forms emit real `Tapped`/`Untapped` events (only on a real flip, CR 603.2e), but no
+  `Game.Conditions.*` entry listens for them yet, so a card like Frozen Shade-style "whenever this
+  becomes tapped" can't be scripted. There is also no replacement hook for "would become tapped/untapped"
+  and no stun counters (CR 122.1d), so an untap always succeeds.
 - **Modal spells ("choose one —") aren't driven by a card script at all.** The mode is chosen
   before the spell goes on the stack, as part of casting it — a fundamentally different mechanism
   from the mid-resolution `Game.SelectTargets`/`Game.MayChoose` asks documented in

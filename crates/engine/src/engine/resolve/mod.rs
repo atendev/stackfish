@@ -530,6 +530,15 @@ impl Engine {
             Some(AbilityEffect::ReturnAllToHand { filter, zone }) => self.resolve_return_all_to_hand_effect(top, filter, *zone),
             Some(AbilityEffect::ExileSelf) => self.resolve_exile_self_effect(top),
             Some(AbilityEffect::ExileAll { filter, zone }) => self.resolve_exile_all_effect(top, filter, *zone),
+            // CR 701.26: synchronous tap/untap. Each flips `tapped` in
+            // place and pushes the event only on a real flip - see
+            // AbilityEffect::Tap's own doc comment.
+            Some(AbilityEffect::Tap) => self.resolve_tap_effect(legal_targets, true, events),
+            Some(AbilityEffect::Untap) => self.resolve_tap_effect(legal_targets, false, events),
+            Some(AbilityEffect::TapSelf) => self.resolve_tap_self_effect(top, true, events),
+            Some(AbilityEffect::UntapSelf) => self.resolve_tap_self_effect(top, false, events),
+            Some(AbilityEffect::TapAll { filter }) => self.resolve_tap_all_effect(top, filter, true, events),
+            Some(AbilityEffect::UntapAll { filter }) => self.resolve_tap_all_effect(top, filter, false, events),
             // CR 701.6a: removes the *targeted* StackObject (a different
             // stack_id than top.stack_id) from state.stack directly - see
             // AbilityEffect::Counter's own doc comment and

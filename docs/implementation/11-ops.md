@@ -521,3 +521,27 @@
   `EventFilter`/`ReplacementPayload` shape like every other regeneration-prevention case). A real design
   question, out of this slice's scope. "Counter unless [that player] pays {X}" (Mana Leak, Condescend)
   remains unmodeled too, unchanged by this slice - still needs a real mid-resolution payment ask.
+
+## Slice: tap-untap-effects (branch `phase5/tap-untap-effects`)
+
+- `AbilityEffect::{Tap, Untap, TapSelf, UntapSelf, TapAll { filter }, UntapAll { filter }}` and the matching
+  `Game.Ops.*` entries (`script/globals.rs`). The four bare tags take no argument; `TapAll`/`UntapAll` take only
+  an `EffectFilter` table decoded by `decode_effect_filter_table`, with no zone argument (CR 110.5d).
+- Resolvers live in `engine/resolve/direct_effects.rs` (`resolve_tap_effect`, `resolve_tap_self_effect`,
+  `resolve_tap_all_effect`) and share `Engine::flip_tapped(id, tap, &mut events)`: it flips `tapped` only on a
+  battlefield object currently in the opposite state and pushes `Tapped`/`Untapped` only then (CR 701.26a/b,
+  603.2e). Direct mutation plus an already-happened event, the same shape as the tap-cost/attack/untap-step
+  producers; `GameEventKind::Tapped`/`Untapped` themselves were not changed.
+- `commands/activate.rs`: the six variants join the non-mana activated-ability list, so they go on the stack.
+  Not added to `is_modal_resolvable`/`resolve_modal_effect` (kept out of scope).
+- `All` forms use the raw `object.controller` through `matches_effect_filter` (hexproof is absent from the engine;
+  CR 601.2c means these don't target anyway).
+- Verify: `phase5_tap_untap_effects.rs` (22): flip/no-op for each of Tap/Untap, fizzle on a target that left
+  (CR 608.2b), summoning sickness irrelevant (CR 302.6), an Icy Manipulator script end to end (cost tap, then
+  target tap, events in order), self forms including a stale source (CR 400.7), all forms (controller filter,
+  already-tapped skipped without an event, protection doesn't stop an untargeted tap, no match, graveyard cards
+  untouched), combat (a tapped creature can't be declared as a blocker, an untapped one can, untapping a declared
+  attacker keeps it in combat and it still deals damage, CR 506.4b/509.1a), and Lua decode/error cases.
+- Open: see the `phase5/tap-untap-effects` entry in [99-backlog](99-backlog.md) (becomes-tapped condition, tap
+  replacements/stun counters, "can't untap" query).
+

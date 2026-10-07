@@ -2,6 +2,23 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Tap and untap effects (`phase5/tap-untap-effects`)**: `AbilityEffect::{Tap, Untap, TapSelf, UntapSelf,
+  TapAll { filter }, UntapAll { filter }}` (`Game.Ops.Tap`/`Untap`/`TapSelf`/`UntapSelf` bare tags,
+  `Game.Ops.TapAll(filter)`/`UntapAll(filter)`). Targeted forms act on the resolving ability's legal object
+  targets, self forms on `top.source`, `All` forms on every `matches_effect_filter` battlefield object (no zone
+  argument: only permanents have tapped status, CR 110.5d). All six are synchronous (`resolve/direct_effects.rs`,
+  one shared `flip_tapped`) and never pause. CR 701.26a/b: only an untapped permanent taps and only a tapped one
+  untaps, so a no-op flip changes nothing and pushes no event (CR 603.2e). Convention: the `tapped` flag is set
+  in place and the `Tapped`/`Untapped` event pushed as already happened, like the tap-cost, attack and
+  untap-step producers (not applied in `CommitEvents` like `Counters`). `All` filters read the raw
+  `object.controller`; only `untap_step` resolves the layered controller. A stale source id does nothing (CR
+  400.7). Tapping never touches `CombatState` (CR 506.4b). Tests: `phase5_tap_untap_effects.rs` (22). Left open:
+  no Lua `becomes tapped`/`becomes untapped` condition (events exist, `ConditionPrimitive` has none, CR
+  603.2e); no "would become tapped/untapped" replacement event and no stun counters (CR 122.1d, 614), so an
+  untap always succeeds; no "can't be tapped"/"doesn't untap" query (CR 614.17); `phased_out` not modeled; not
+  usable as a mode of a multi-mode spell (`is_modal_resolvable` left unchanged). Test-harness note: there is no
+  hexproof in the engine, so the "all effects don't target" test uses protection from everything.
+
 - **Untargeted exile (`phase5/untargeted-exile`)**: `AbilityEffect::ExileSelf` (`Game.Ops.ExileSelf`, bare
   tag) exiles the resolving ability's own source; `AbilityEffect::ExileAll { filter, zone }`
   (`Game.Ops.ExileAll(filter, zone?)`) exiles every `matches_effect_filter` object in the Battlefield or
