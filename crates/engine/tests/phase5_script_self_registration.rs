@@ -352,7 +352,17 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
 
     cast_and_resolve(&mut engine, first);
     assert_eq!(engine.state().player(p0).unwrap().life, 21, "first creature's own self-registered ability fired");
-    assert_eq!(engine.state().abilities.len(), 1, "only one ability registered so far");
+    // The second creature still sits in hand, so its script has also run (hand
+    // sweep) - count only abilities whose source is on the battlefield.
+    let on_battlefield = |engine: &Engine| {
+        engine
+            .state()
+            .abilities
+            .iter()
+            .filter(|a| engine.state().object(a.source).is_some_and(|o| o.zone == ZoneKind::Battlefield))
+            .count()
+    };
+    assert_eq!(on_battlefield(&engine), 1, "only one ability registered so far");
 
     cast_and_resolve(&mut engine, second);
     assert_eq!(
@@ -360,7 +370,7 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
         22,
         "second creature's own self-registered ability fired exactly once - no cross-firing, no double-firing"
     );
-    assert_eq!(engine.state().abilities.len(), 2, "each creature registered its own distinct ability");
+    assert_eq!(on_battlefield(&engine), 2, "each creature registered its own distinct ability");
     assert!(engine.state().stack.is_empty());
 }
 
