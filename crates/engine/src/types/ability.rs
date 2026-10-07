@@ -288,8 +288,26 @@ pub enum AbilityEffect {
     /// read from the object at resolution, and the target filter's `zone`
     /// is what lets a script aim at a graveyard card.
     ///
-    /// TODO: no untargeted "return all"/"return this" forms yet.
+    /// The untargeted forms are `ReturnSelfToHand` and `ReturnAllToHand`.
     ReturnToHand,
+    /// The `Game.Ops.ReturnSelfToHand` primitive - "return this card from
+    /// your graveyard to your hand" (CR 400.3). No target: the resolving
+    /// ability's own source is the object moved, through the same
+    /// `ScriptedZoneMoveKind::Bounce` pipeline `ReturnToHand` uses. If the
+    /// source has left the zone it was in when the ability went on the stack
+    /// it is a new object (CR 400.7), the old id no longer resolves, and the
+    /// effect does nothing - not a fizzle, since nothing was targeted.
+    ReturnSelfToHand,
+    /// The `Game.Ops.ReturnAllToHand(filter, zone)` primitive - "return all
+    /// creatures to their owners' hands" / "return all creature cards from
+    /// your graveyard to your hand" (CR 400.3, CR 601.2c's "all"-effects
+    /// don't target). Collects every object in `zone` (Battlefield,
+    /// Graveyard or Exile; across every player's graveyard) matching
+    /// `filter` and hands the list to `ScriptedZoneMoveKind::Bounce`, so the
+    /// moves are simultaneous, replacement-checked and fire departed
+    /// triggers. `filter.controller` is read off the object's controller,
+    /// which equals its owner for any object outside the battlefield.
+    ReturnAllToHand { filter: EffectFilter, zone: ZoneKind },
     /// The `Game.Ops.Counter()` primitive (CR 701.6a) — "counter target
     /// spell." The target is a `Target::Object` referring to another
     /// `StackObject`'s own `stack_id` (a spell on the stack already has a

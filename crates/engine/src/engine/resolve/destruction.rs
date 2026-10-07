@@ -116,6 +116,42 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
+    /// CR 400.3/400.7: `Game.Ops.ReturnSelfToHand()` - the resolving
+    /// ability's own source. A source that already left its zone has a new
+    /// id, so the lookup in `continue_scripted_zone_move` finds nothing.
+    pub(super) fn resolve_return_self_to_hand_effect(&mut self, top: &StackObject) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let targets: VecDeque<ObjectId> = VecDeque::from([top.source]);
+        self.process_state =
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
+    /// CR 400.3/601.2c: `Game.Ops.ReturnAllToHand(filter, zone)` - every
+    /// object in `zone` (all players' graveyards for `Graveyard`) matching
+    /// `filter`. Mirrors `resolve_destroy_all_effect`.
+    pub(super) fn resolve_return_all_to_hand_effect(
+        &mut self,
+        top: &StackObject,
+        filter: &EffectFilter,
+        zone: ZoneKind,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let targets: VecDeque<ObjectId> = self
+            .state
+            .zones
+            .iter()
+            .filter(|z| z.kind == zone)
+            .flat_map(|z| z.contents.iter().copied())
+            .filter(|id| {
+                self.state
+                    .object(*id)
+                    .is_some_and(|object| matches_effect_filter(filter, object, top.source, top.controller))
+            })
+            .collect();
+        self.process_state =
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
     /// CR 701.21 (Sacrifice) + "at random" — `Game.Ops.SacrificeRandom(filter,
     /// count)`. Draws via `pick_sacrifice_random_ids` below, then hands the
     /// result straight to `continue_scripted_zone_move` for the single-player

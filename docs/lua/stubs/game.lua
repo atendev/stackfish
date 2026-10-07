@@ -543,6 +543,7 @@ function GameInterveningIfTable.ControlsAtLeast(filter, count) end
 ---@field Sacrifice GameOpsValue                 -- CR 701.17, target-based (vs. Game.Costs.Sacrifice)
 ---@field Exile GameOpsValue                     -- CR 701.18; battlefield or graveyard targets
 ---@field ReturnToHand GameOpsValue                -- CR 400.3; battlefield/graveyard/exile targets, to the owner's hand
+---@field ReturnSelfToHand GameOpsValue            -- CR 400.3; the ability's own source ("return this card from your graveyard"); no-op if it already left its zone
 ---@field Counter GameOpsValue                   -- CR 701.6a, counters a spell target (zone="Stack")
 ---@field Regenerate GameOpsValue                -- CR 701.19a, one-shot shield
 ---@field Shuffle GameOpsValue
@@ -583,6 +584,13 @@ function GameOpsTable.Damage(amount) end
 ---@param filter { card_types?: string[], controller?: string, self_only?: boolean }
 ---@return GameOpsValue
 function GameOpsTable.DestroyAll(filter) end
+
+--- CR 400.3/601.2c: "return all creatures to their owners' hands" / "return all creature cards from your
+--- graveyard to your hand". No targets. Every object in `zone` matching `filter` moves to its owner's hand.
+---@param filter table  same shape as DestroyAll's filter (`controller` is read off the object's controller)
+---@param zone? string  "Battlefield" (default), "Graveyard" (every player's) or "Exile"
+---@return GameOpsValue
+function GameOpsTable.ReturnAllToHand(filter, zone) end
 
 --- CR 701.21, pairs with Game.ChooseN(...) then SacrificeChosen(chosen).
 ---@param list TargetResult[]

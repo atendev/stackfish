@@ -19,6 +19,7 @@ use crate::types::effect::{
 };
 use crate::types::ids::ObjectId;
 use crate::types::mana::{ManaCost, ManaUnit};
+use crate::types::zone::ZoneKind;
 use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect, LandPlayAffected};
 
 use super::builders::{
@@ -201,6 +202,25 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     ops.set("Sacrifice", OperationTag(AbilityEffect::Sacrifice))?;
     ops.set("Exile", OperationTag(AbilityEffect::Exile))?;
     ops.set("ReturnToHand", OperationTag(AbilityEffect::ReturnToHand))?;
+    ops.set("ReturnSelfToHand", OperationTag(AbilityEffect::ReturnSelfToHand))?;
+    // CR 400.3: `zone` defaults to "Battlefield"; only the zones
+    // `ScriptedZoneMoveKind::Bounce` accepts as a source are allowed.
+    let return_all_to_hand = lua.create_function(|_, (table, zone): (Table, Option<String>)| {
+        let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+        let zone = match zone {
+            None => ZoneKind::Battlefield,
+            Some(name) => match crate::script::decode::parse_zone_kind_name(&name).map_err(to_lua_err)? {
+                z @ (ZoneKind::Battlefield | ZoneKind::Graveyard | ZoneKind::Exile) => z,
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "ReturnAllToHand zone must be \"Battlefield\", \"Graveyard\" or \"Exile\", got {other:?}"
+                    )))
+                }
+            },
+        };
+        Ok(OperationTag(AbilityEffect::ReturnAllToHand { filter, zone }))
+    })?;
+    ops.set("ReturnAllToHand", return_all_to_hand)?;
     // CR 701.6a: "counter target spell" - the target is declared the usual
     // way via `s.target_requirement()` (a filter with `zone = "Stack"`,
     // already generically supported by `decode_target_filter_table` - see
