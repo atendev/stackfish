@@ -67,8 +67,9 @@ the effect is `Game.Effects.AddSubtype` in `Game.Layers.TypeChanging` or `AddCol
 `Game.Layers.ColorChanging`, it uses `:SetAffected({ self_only = true })`, and it has no `:SetCondition`,
 `:SetDuration` or `:SetFunctionsFrom`. A power/toughness CDA is not written this way — it's the card
 definition's `CharacteristicDefining` P/T value. The effect registers whenever the card's script runs
-for a zone (draw, cast, battlefield entry, graveyard/exile); it is not re-registered after a bounce to
-hand, and not in the library.
+for a zone (hand, library, cast, battlefield entry, graveyard/exile) — an engine sweep runs the script for
+any card found in hand, library, graveyard or exile, so it registers however the card got there. Not the
+command zone.
 
 ## Filter table
 

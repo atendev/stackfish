@@ -550,13 +550,16 @@ impl Engine {
     /// rather than something this method attempts.
     pub(in crate::engine) fn run_card_script_for(&mut self, object_id: ObjectId) {
         if let Some(definition) = self.state.object(object_id).map(|o| o.definition.clone()) {
+            // Marks the run done so `sync_off_battlefield_scripts` doesn't
+            // register the same abilities a second time for this id.
+            self.state.off_battlefield_scripts_run.insert(object_id);
             let result = self.script_runtime.run_card_script(&mut self.state, &definition, object_id);
             self.record_script_error(object_id, &definition.script_ref, result);
         }
     }
 
-    /// CR 113.6: runs the card script of every object sitting in a graveyard
-    /// or exile that hasn't had it run yet, so an ability declared with
+    /// CR 113.6/604.3: runs the card script of every object sitting in a hand,
+    /// library, graveyard or exile that hasn't had it run yet, so an ability declared with
     /// `:SetFunctionsFrom("Graveyard"/"Exile")` registers. Called at the start
     /// of trigger collection (`resolve_collect_triggers_state`) rather than at
     /// each graveyard/exile producer - death, discard, mill, spell resolution
@@ -573,13 +576,17 @@ impl Engine {
             .state
             .objects
             .values()
-            .filter(|o| matches!(o.zone, crate::ZoneKind::Graveyard | crate::ZoneKind::Exile))
+            .filter(|o| {
+                matches!(
+                    o.zone,
+                    crate::ZoneKind::Hand | crate::ZoneKind::Library | crate::ZoneKind::Graveyard | crate::ZoneKind::Exile
+                )
+            })
             .map(|o| o.object_id)
             .filter(|id| !self.state.off_battlefield_scripts_run.contains(id))
             .collect();
         pending.sort();
         for id in pending {
-            self.state.off_battlefield_scripts_run.insert(id);
             self.run_card_script_for(id);
         }
     }

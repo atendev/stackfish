@@ -188,7 +188,7 @@ impl ScriptRuntime {
             let keep = match declared {
                 Some(zone) => source_zone == Some(zone),
                 None if source_zone == Some(ZoneKind::Stack) => is_cast_trigger(&ability),
-                None if matches!(source_zone, Some(ZoneKind::Graveyard | ZoneKind::Exile)) => false,
+                None if matches!(source_zone, Some(ZoneKind::Graveyard | ZoneKind::Exile | ZoneKind::Library)) => false,
                 None => !is_cast_trigger(&ability),
             };
             if keep {
@@ -226,8 +226,8 @@ impl ScriptRuntime {
         // TODO: "functions in any zone" statics that aren't CDAs (e.g. a
         // spell's own cost reduction) are still discarded off the
         // battlefield - no such script-registered shape exists yet. A CDA only
-        // registers where a script run happens: not after a bounce to hand,
-        // and not in the library or command zone (see backlog).
+        // registers where a script run happens: hand, library, graveyard,
+        // exile and battlefield today, not the command zone (see backlog).
         let on_battlefield = source_zone.map_or(true, |z| z == ZoneKind::Battlefield);
         fn take_functioning<T>(
             queue: &mut Vec<(T, Option<ZoneKind>)>,

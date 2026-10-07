@@ -2,6 +2,18 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Hand/library script registration (`phase5/hand-library-script-registration`)**: `Engine::
+  sync_off_battlefield_scripts` sweeps Hand and Library too (was Graveyard/Exile), so a CDA or hand-only
+  ability registers for a card that arrived by any producer (redirected death, mulligan return, fixture),
+  once. `run_card_script_for` marks the id in `off_battlefield_scripts_run` so the draw/opening-hand/tutor
+  producers and the sweep never double-register. `run_card_script` now discards undeclared abilities in
+  the Library like Graveyard/Exile (Hand still keeps triggered/activated ones, as before). Behavior note:
+  fixture hand cards now have scripts run too (`phase5_script_self_registration` counts battlefield-source
+  abilities). Tests: `phase5_hand_library_script_registration.rs` (6). Left open: **no bounce/return-to-hand
+  verb exists** (`Game.Ops.ReturnToHand` or a `ScriptedZoneMoveKind::Bounce`) - the engine has no way to
+  return a permanent to hand except a replacement-redirected death; its own slice. Library cards are all
+  scripted once on the first trigger-collection pass (one eval per card); command zone still unswept.
+
 - **Characteristic-defining statics (`phase5/characteristic-defining-statics`)**: closes the CR 604.3
   gap the last three entries left. `StaticAbilityBuilder:SetCharacteristicDefining()` marks a
   `Game.CreateStaticAbility` as a CDA; `run_card_script` registers it in every zone instead of filtering it
@@ -13,8 +25,8 @@
   `retire_object` purges, the next script run re-registers. Also folds in the Anger "as long as you control
   a Mountain" test: a graveyard-declared static with `SetCondition(ControlsAtLeast(...))` registers once
   and tracks the board live. Tests: `phase5_characteristic_defining_statics.rs` (7). Left open: a CDA only
-  registers where a script run happens - not after a bounce to hand (no run on that path), not in the
-  library or command zone, and not outside the game; layer-4 *card type* and color-identity CDAs
+  registers where a script run happens - hand/library are covered by `phase5/hand-library-script-registration`
+  now; still not the command zone or outside the game; layer-4 *card type* and color-identity CDAs
   (`color_identity.rs` TODO) aren't covered (604.3a lists only colors/subtypes/P/T); "functions in any
   zone" statics that aren't CDAs (a spell's own cost reduction) are still discarded off the battlefield.
 
