@@ -286,9 +286,10 @@ scripted toughness dying to CR 704.5g's lethal-damage SBA).
 **`keywords` (CR 702):** printed keyword abilities, by name, parsed into a `KeywordSet` bitmask —
 only the primitives that change how an existing engine checkpoint behaves, not the full ~140-entry
 CR 702 catalog. Supported: `Flying`, `Reach`, `Menace`, `Vigilance`, `Haste`, `Defender`, `Flash`,
-`Deathtouch`, `Indestructible`, `Lifelink`, `Wither`, `Infect`. Trample, First/Double Strike,
-Hexproof/Shroud/Protection/Ward aren't modeled yet (see `docs/implementation.md`'s
-keyword-primitives slice notes for why). Keywords that are really sugar for an activated/triggered
+`Deathtouch`, `Indestructible`, `Lifelink`, `Wither`, `Infect`, `FirstStrike`, `DoubleStrike`,
+`Trample`, `Fear`, `Intimidate`, `Shadow`, `Horsemanship`, `Banding`, `Hexproof`, `Shroud`. An
+unknown name panics. Protection is granted through a continuous effect, not this list, and Ward
+isn't modeled. Keywords that are really sugar for an activated/triggered
 ability (Cycling, Persist, ...) don't belong in this list at all — use `mana_ability` above for a
 mana ability, or extend `CardSpec` for anything else, since no keyword-name -> ability mapping
 exists yet.

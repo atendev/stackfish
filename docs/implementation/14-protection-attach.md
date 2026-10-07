@@ -19,6 +19,17 @@ Protection from player uses the protected object's own controller as the referen
 
 Only CR 702.16b (Enchant/Equip) remains open — needs attach machinery, not a protection-specific gap.
 
+## Hexproof and Shroud vs attachment (`phase5/hexproof-shroud`)
+
+`target_is_legal` now also rejects hexproof/shroud (`target_blocked_by_hexproof_or_shroud`). The
+attachment-legality callers use `attachment_target_is_legal` instead, a sibling that skips that
+check but keeps protection: both `sba.rs` Aura rechecks (`collect_illegally_attached_auras`), the
+Equipment recheck (`collect_illegally_attached_equipment`), and `attach::legal_aura_entry_candidates`
+(CR 303.4f entry). An Aura permanent doesn't target (CR 115.1b), and SBA or entry attachment isn't
+targeting, so a hexproof or shroud creature keeps its Auras and Equipment. Protection still
+unattaches them (CR 702.16d). Casting an Aura spell and activating Equip do target, so they go
+through the full `target_is_legal`.
+
 ## Aura attach (CR 303.4)
 
 - `GameObject.attached_to`/`attachments` bidirectional; `commands::attach_permanent` is the sole writer.

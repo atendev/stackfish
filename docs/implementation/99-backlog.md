@@ -2,6 +2,29 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Hexproof and Shroud (`phase5/hexproof-shroud`)**: `KeywordSet::HEXPROOF` (CR 702.11b) and
+  `KeywordSet::SHROUD` (CR 702.18a), accepted by `AddKeyword`/`RemoveKeyword`/`IgnoreKeyword` (`"Hexproof"`,
+  `"Shroud"`), the scenario `keywords` list and the carddb keyword table. `target_is_legal` rejects a
+  battlefield object whose effective keywords (through `layers::effective_characteristics`, so a granted or
+  removed keyword counts) include Shroud, or Hexproof when `caster` isn't the object's effective controller.
+  That covers cast, activation (Equip too), the CR 603.3d trigger candidate scan, `Game.SelectTargets` and the
+  CR 608.2b resolution recheck. The `Object`, `AnyTarget` and `Script` arms check it; players are untouched.
+  New `attachment_target_is_legal` is the same logic without the hexproof/shroud check, used by the two `sba.rs`
+  Aura rechecks, the Equipment recheck and `legal_aura_entry_candidates` (CR 303.4f), so a hexproof or shroud
+  creature keeps its Auras and Equipment (an Aura permanent doesn't target, CR 115.1b) while protection still
+  unattaches them (CR 702.16d). Untargeted effects (`DestroyAll`, `TapAll`, `ExileAll`, `*Self`) never call it
+  (CR 601.2c). Tests: `phase5_hexproof_shroud.rs` (28), a carddb unit test and
+  `crates/scenario/tests/hexproof_shroud_keywords.rs` (2). Left open: no hexproof/shroud on players (CR
+  702.11c); no "hexproof from [quality]" (CR 702.11d-g, needs a parameter); nothing reads `ignored_keywords`, so
+  "can be the target as though it didn't have hexproof" (CR 702.11e) isn't expressible; no team model, so
+  "opponent" is any other player. Recommended next slice: `phase5/ward` (CR 702.21), which needs a
+  "becomes the target" event/trigger and a cost parameter, then `AbilityEffect::UnlessPaid` for the counter;
+  it can't be a `KeywordSet` bit. Known bug, not fixed here: `engine/choice_answers.rs:179` passes the
+  resolving `stack_id` as the `source` argument of `target_is_legal` for a `Game.SelectTargets` answer. For an
+  activated or triggered ability that id isn't a real object, so the protection-from-source lookup silently
+  finds nothing. Hexproof and shroud use `caster`, so they aren't affected. Test-harness note: attach by
+  setting `attached_to` and the host's `attachments` directly, then call `check_state_based_actions`.
+
 - **Tap and untap effects (`phase5/tap-untap-effects`)**: `AbilityEffect::{Tap, Untap, TapSelf, UntapSelf,
   TapAll { filter }, UntapAll { filter }}` (`Game.Ops.Tap`/`Untap`/`TapSelf`/`UntapSelf` bare tags,
   `Game.Ops.TapAll(filter)`/`UntapAll(filter)`). Targeted forms act on the resolving ability's legal object
@@ -16,8 +39,9 @@
   no Lua `becomes tapped`/`becomes untapped` condition (events exist, `ConditionPrimitive` has none, CR
   603.2e); no "would become tapped/untapped" replacement event and no stun counters (CR 122.1d, 614), so an
   untap always succeeds; no "can't be tapped"/"doesn't untap" query (CR 614.17); `phased_out` not modeled; not
-  usable as a mode of a multi-mode spell (`is_modal_resolvable` left unchanged). Test-harness note: there is no
-  hexproof in the engine, so the "all effects don't target" test uses protection from everything.
+  usable as a mode of a multi-mode spell (`is_modal_resolvable` left unchanged). Test-harness note: this slice's
+  "all effects don't target" test uses protection from everything because hexproof didn't exist yet; hexproof
+  and shroud are real now (`phase5/hexproof-shroud`), and `phase5_hexproof_shroud.rs` has the `TapAll` cases.
 
 - **Untargeted exile (`phase5/untargeted-exile`)**: `AbilityEffect::ExileSelf` (`Game.Ops.ExileSelf`, bare
   tag) exiles the resolving ability's own source; `AbilityEffect::ExileAll { filter, zone }`

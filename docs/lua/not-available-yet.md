@@ -52,6 +52,14 @@ name.
   target isn't available — see [replacement-effects.md](replacement-effects.md).
 - **Protection from an attached Aura/Equipment.** CR 702.16b — attaching works, but doesn't grant
   protection on its own yet.
+- **Hexproof and Shroud work only on permanents, in their plain forms.** `"Hexproof"` and
+  `"Shroud"` are real keywords (see [game-constants.md](game-constants.md#supported-keyword-names-addkeywordremovekeywordignorekeyword)).
+  Not available: hexproof/shroud on a player ("You have hexproof"), "hexproof from [quality]",
+  and "can be the target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is
+  accepted but nothing reads it). "Opponent" means any other player; there is no team model.
+- **No `Ward`.** It needs a "becomes the target of a spell or ability" trigger and a cost
+  parameter, so it can't be a plain keyword name. `Game.Ops.CounterUnlessPaid` covers the "counter unless
+  that player pays" half.
 - **Enchanting/equipping a player** isn't modeled — attachment only ever targets a permanent.
 - **`Game.Ops.DestroyAll`'s filter has no `subtypes`/exclusion keys.** Only `card_types`/
   `controller`/`self_only` — "destroy all Zombies" or "destroy all nonland permanents" aren't

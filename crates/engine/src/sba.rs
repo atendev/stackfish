@@ -578,8 +578,10 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
 /// CR 704.5m/303.4c: every battlefield Aura (`commands::is_aura`) that's
 /// either not attached to anything (object or player), or whose attachment
 /// no longer names a legal target - `CardDefinition.target_requirement`'s
-/// own filter re-checked fresh via `commands::target_is_legal`, the same
-/// function CR 608.2b's own resolution-time recheck already uses, so a
+/// own filter re-checked fresh via `commands::attachment_target_is_legal`,
+/// which is `target_is_legal` minus the hexproof/shroud check (an Aura
+/// permanent doesn't target, CR 115.1b, so those keywords don't make it
+/// fall off; protection still does), so a
 /// target that left the battlefield, changed characteristics, *or gained
 /// protection from this very Aura since it attached* (closing the one piece
 /// of CR 702.16's Enchant "DEBT" restriction the protection slices couldn't
@@ -623,7 +625,7 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
             let illegal = match (o.attached_to, o.attached_to_player) {
                 (None, None) => true,
                 (Some(target_id), None) => match &o.definition.target_requirement {
-                    Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::target_is_legal(
+                    Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::attachment_target_is_legal(
                         state,
                         script_runtime,
                         crate::types::ids::Target::Object(target_id),
@@ -640,7 +642,7 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
                     let eliminated = state.player(player).map(|p| p.eliminated).unwrap_or(true);
                     eliminated
                         || match &o.definition.target_requirement {
-                            Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::target_is_legal(
+                            Some(crate::types::target::TargetSpec::Primitive(req)) => !commands::attachment_target_is_legal(
                                 state,
                                 script_runtime,
                                 crate::types::ids::Target::Player(player),
@@ -750,7 +752,7 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
         .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_equipment(&o.definition))
         .filter_map(|o| {
             let target_id = o.attached_to?;
-            let illegal = !commands::target_is_legal(
+            let illegal = !commands::attachment_target_is_legal(
                 state,
                 script_runtime,
                 crate::types::ids::Target::Object(target_id),

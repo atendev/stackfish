@@ -689,3 +689,28 @@
 - Unresolved, confirmed narrowed rather than a gap in disguise: no repeatable pawprint-budget modes
   and no CR 700.2e "chosen by opponent" combination — no real card combines either with this shape.
   CR 700.2i itself has no further known gap after this slice.
+
+## Slice: hexproof-shroud (pending review)
+
+- `KeywordSet::HEXPROOF` (`1 << 21`, CR 702.11b) and `KeywordSet::SHROUD` (`1 << 22`, CR 702.18a).
+  Parsed by `script/decode.rs::parse_keyword_name` (so `AddKeyword`/`RemoveKeyword`/`IgnoreKeyword`
+  take them), the scenario `parse_keywords` and the carddb `keywords::parse_one`.
+- `commands/legality.rs`: `target_blocked_by_hexproof_or_shroud(state, runtime, id, caster)` reads
+  `layers::effective_characteristics(..).keywords`, so a layer 6 grant or removal counts. Shroud blocks
+  every caster. Hexproof blocks a caster that isn't `layers::effective_controller(id)`. Only battlefield
+  objects are checked (CR 702.11b/702.18a say "permanent"). It uses `caster`, not `source`'s controller,
+  so it works when the source object is gone.
+- `target_is_legal` became a thin wrapper over `target_is_legal_impl(.., enforce_targetability: true)`.
+  The check sits in the `Object`, `AnyTarget` and `Script` arms, after the protection check. `Player`,
+  `PlayerScript` and `Ability` arms are unchanged. `attachment_target_is_legal` is the same impl with
+  `false`; see `14-protection-attach.md` for its four callers.
+- Every existing `target_is_legal` call site picks the check up with no change: cast/activate
+  `validate_targets`, the CR 603.3d candidate scan, `Game.SelectTargets` answers, and both CR 608.2b
+  resolution rechecks (`resolve/mod.rs`, `resolve/misc_effects.rs`).
+- Untargeted effects never call `target_is_legal`, so `DestroyAll`/`TapAll`/`ExileAll` and the `*Self`
+  forms ignore both keywords (CR 601.2c).
+- Verify: `phase5_hexproof_shroud.rs` (28), plus `hexproof_and_shroud_set_bits` in
+  `crates/carddb/src/keywords.rs` and `crates/scenario/tests/hexproof_shroud_keywords.rs` (2).
+- Left open: hexproof/shroud on players (CR 702.11c), "hexproof from [quality]" (CR 702.11d-g), nothing
+  consumes `ignored_keywords` for "as though it didn't have hexproof" (CR 702.11e), no team model for
+  "opponent", Ward (see `99-backlog.md`).

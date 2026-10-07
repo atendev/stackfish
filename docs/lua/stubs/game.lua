@@ -755,12 +755,12 @@ function GameCostsTable.Mana(cost) end
 -------------------------------------------------------------------------------
 
 --- Valid keyword-name strings for AddKeyword/RemoveKeyword/IgnoreKeyword. Not supported:
---- Banding (direct), Hexproof/Shroud/Ward.
+--- Banding (direct), Ward. IgnoreKeyword("Hexproof") is stored but nothing reads it yet.
 ---@alias KeywordName
 ---| "Flying" | "Reach" | "Menace" | "Vigilance" | "Haste" | "Defender" | "Flash"
 ---| "Deathtouch" | "Indestructible" | "Lifelink" | "Wither" | "Infect"
 ---| "FirstStrike" | "DoubleStrike" | "Trample" | "Fear" | "Intimidate"
----| "Shadow" | "Horsemanship" | "CantBeRegenerated"
+---| "Shadow" | "Horsemanship" | "Hexproof" | "Shroud" | "CantBeRegenerated"
 
 ---@class GameEffectsTable
 ---@field AddProtectionEverything GameEffectsValue

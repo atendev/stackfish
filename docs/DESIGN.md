@@ -112,6 +112,9 @@ adaptation doc, unchanged from the original plan:
   familiarity — only the Lua API surface.
 - Core responsibilities stay in Rust: legality, timing, hidden information, stack/priority/SBA/
   replacement semantics. Lua only expresses card-specific intent and is asked, never trusted.
+  Target legality is one such responsibility: protection, hexproof and shroud are enforced in
+  `commands::target_is_legal`, so a script can grant or remove the keyword but never decides
+  whether a target is legal.
 
 ## Multiplayer / Commander
 

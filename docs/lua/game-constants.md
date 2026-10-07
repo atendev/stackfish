@@ -274,6 +274,8 @@ not a silent no-op:
 | `"Intimidate"` | 702.13 | Evasion — can't be blocked except by artifact creatures and/or creatures sharing a color with it. |
 | `"Shadow"` | 702.28 | Can only block/be blocked by other Shadow creatures. |
 | `"Horsemanship"` | 702.31 | Can't be blocked by creatures without Horsemanship. |
+| `"Hexproof"` | 702.11b | This permanent can't be the target of spells or abilities its controller's opponents control. Its own controller can still target it. |
+| `"Shroud"` | 702.18a | This permanent can't be the target of any spell or ability, including its controller's. |
 | `"CantBeRegenerated"` | 701.19c | Not a true CR 702 keyword — an internal status flag ("this permanent can't have a regeneration shield created for it"), granted the same way as any other keyword. |
 
 **Not grantable via `AddKeyword`:** Banding (CR 702.22) exists as a real `KeywordSet` bit
@@ -287,8 +289,20 @@ gate which combat damage step a creature deals damage in, Trample lets excess le
 to the defending player, and Fear/Intimidate/Shadow/Horsemanship are all checked as real blocking
 restrictions.
 
-`Hexproof`/`Shroud`/`Ward` aren't in the list at all — no `KeywordSet` bit exists for any of them
-yet.
+**Hexproof and Shroud** are checked wherever a target is chosen or rechecked: casting, activating,
+a triggered ability's target choice, `Game.SelectTargets`, and the check when a spell or ability
+resolves (CR 608.2b). The check reads the permanent's current keywords, so a granted `"Hexproof"`
+works, and `RemoveKeyword("Hexproof")` or `RemoveAllAbilities` turns it off. They apply only to
+permanents on the battlefield. They don't stop anything that doesn't target (`DestroyAll`, `TapAll`,
+`ExileAll`, `ReturnAllToHand`, the `*Self` forms; CR 601.2c). They also don't make an attached Aura
+or Equipment fall off, and they don't stop an Aura from entering the battlefield attached to a
+permanent: attaching that way isn't targeting. Protection does (CR 702.16d). Not modeled:
+hexproof/shroud on a player (CR 702.11c), "hexproof from [quality]" (CR 702.11d), and "can be the
+target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is stored but nothing reads
+it yet).
+
+`Ward` isn't in the list: it needs a "becomes the target" trigger and a cost, so it can't be a
+plain keyword bit.
 
 **Combat damage timing (CR 510.1/510.2):** a creature's combat damage is assigned and dealt
 automatically the instant its damage step opens whenever there's exactly one legal outcome

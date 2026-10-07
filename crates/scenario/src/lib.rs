@@ -1365,6 +1365,8 @@ fn parse_keywords(names: &[String]) -> KeywordSet {
             "Shadow" => KeywordSet::SHADOW,
             "Horsemanship" => KeywordSet::HORSEMANSHIP,
             "Banding" => KeywordSet::BANDING,
+            "Hexproof" => KeywordSet::HEXPROOF,
+            "Shroud" => KeywordSet::SHROUD,
             other => panic!("unknown keyword in scenario file: {other}"),
         };
     }
