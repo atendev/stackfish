@@ -302,6 +302,21 @@ pub enum ScriptedZoneMoveKind {
 }
 
 impl ScriptedZoneMoveKind {
+    /// Whether an object currently in `zone` is a legal source for this kind.
+    /// Most kinds have exactly their `from_zone()`; `Exile` and `Bounce` take
+    /// whatever zone the target actually sits in (battlefield or graveyard,
+    /// plus exile for `Bounce`), so "return target card from a graveyard" and
+    /// "exile target card from a graveyard" resolve against the real zone.
+    pub(in crate::engine) fn accepts_source_zone(self, zone: ZoneKind) -> bool {
+        match self {
+            ScriptedZoneMoveKind::Exile => matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard),
+            ScriptedZoneMoveKind::Bounce => {
+                matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard | ZoneKind::Exile)
+            }
+            other => zone == other.from_zone(),
+        }
+    }
+
     /// Which zone `Engine::continue_scripted_zone_move` should find each
     /// queued id sitting in before it'll propose a move for it — Battlefield
     /// for every permanent-facing verb, Hand for `Discard` alone (CR 701.9a).

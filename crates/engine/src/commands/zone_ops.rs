@@ -115,6 +115,9 @@ pub(crate) fn commit_zone_move(state: &mut GameState, event: GameEventKind) -> (
     new_object.lineage = ObjectLineage { previous: Some(old_id) };
     new_object.zone = to;
     new_object.timestamp = state.allocate_sequence_no();
+    if from == ZoneKind::Battlefield {
+        new_object.reset_for_new_object();
+    }
 
     let from_owner = match from {
         ZoneKind::Battlefield | ZoneKind::Exile => None,

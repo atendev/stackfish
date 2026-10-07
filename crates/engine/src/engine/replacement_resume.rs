@@ -617,7 +617,7 @@ impl Engine {
                 self.state.ledger.push(event);
             }
             ScriptedZoneMoveKind::Exile => {
-                let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = final_event else {
+                let GameEventKind::ZoneChange { object: old_id, from, to, last_known_info, .. } = final_event else {
                     unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
                 };
                 let last_known_info = last_known_info.expect(
@@ -630,8 +630,13 @@ impl Engine {
                 new_object.lineage = ObjectLineage { previous: Some(old_id) };
                 new_object.zone = to;
                 new_object.timestamp = self.state.allocate_sequence_no();
+                new_object.reset_for_new_object();
 
-                if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
+                let from_owner = match from {
+                    ZoneKind::Battlefield | ZoneKind::Exile => None,
+                    _ => Some(owner),
+                };
+                if let Some(zone) = self.state.zone_mut(from, from_owner) {
                     zone.remove(old_id);
                 }
                 let departed = commands::retire_object(&mut self.state, old_id);
@@ -655,7 +660,7 @@ impl Engine {
                     sequence_no,
                     kind: GameEventKind::ZoneChange {
                         object: new_id,
-                        from: ZoneKind::Battlefield,
+                        from,
                         to,
                         last_known_info: Some(last_known_info),
                     },
@@ -672,7 +677,7 @@ impl Engine {
             // hand abilities register on the next sweep
             // (`sync_off_battlefield_scripts`).
             ScriptedZoneMoveKind::Bounce => {
-                let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = final_event else {
+                let GameEventKind::ZoneChange { object: old_id, from, to, last_known_info, .. } = final_event else {
                     unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
                 };
                 let last_known_info = last_known_info
@@ -684,17 +689,13 @@ impl Engine {
                 new_object.lineage = ObjectLineage { previous: Some(old_id) };
                 new_object.zone = to;
                 new_object.timestamp = self.state.allocate_sequence_no();
-                new_object.controller = owner;
-                new_object.tapped = false;
-                new_object.damage_marked = 0;
-                new_object.deathtouched = false;
-                new_object.counters = crate::types::counter::CounterSet::new();
-                new_object.attachments = Vec::new();
-                new_object.attached_to = None;
-                new_object.attached_to_player = None;
-                new_object.copiable_override = None;
+                new_object.reset_for_new_object();
 
-                if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
+                let from_owner = match from {
+                    ZoneKind::Battlefield | ZoneKind::Exile => None,
+                    _ => Some(owner),
+                };
+                if let Some(zone) = self.state.zone_mut(from, from_owner) {
                     zone.remove(old_id);
                 }
                 let departed = commands::retire_object(&mut self.state, old_id);
@@ -715,7 +716,7 @@ impl Engine {
                     sequence_no,
                     kind: GameEventKind::ZoneChange {
                         object: new_id,
-                        from: ZoneKind::Battlefield,
+                        from,
                         to,
                         last_known_info: Some(last_known_info),
                     },
@@ -808,9 +809,10 @@ impl Engine {
         then: ScriptedZoneMoveThen,
         trailing: Vec<GameEventKind>,
     ) -> ProcessState {
-        let from = kind.from_zone();
         while let Some(id) = remaining.pop_front() {
-            let Some(last_known_info) = self.state.object(id).filter(|obj| obj.zone == from).cloned() else {
+            let Some(last_known_info) =
+                self.state.object(id).filter(|obj| kind.accepts_source_zone(obj.zone)).cloned()
+            else {
                 // Target already left its expected zone (or never resolved)
                 // - nothing to move, same "skip rather than guess" stance
                 // every other arm here takes.
@@ -831,6 +833,7 @@ impl Engine {
                 ScriptedZoneMoveKind::Bounce => ZoneKind::Hand,
                 _ => ZoneKind::Graveyard,
             };
+            let from = last_known_info.zone;
             let proposed = GameEventKind::ZoneChange { object: id, from, to, last_known_info: Some(last_known_info) };
             // CR 614.8: only Destroy is genuine destruction - a regeneration
             // shield can intercept it and only it (Sacrifice/Exile are each

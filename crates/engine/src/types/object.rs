@@ -168,6 +168,29 @@ pub struct GameObject {
 }
 
 impl GameObject {
+    /// CR 400.7: a zone move makes a new object with no memory of the old
+    /// one, so battlefield-only state (tapped, damage, counters, attachments,
+    /// copy effects, face/phase state) is dropped, and CR 108.4's "a card not
+    /// on the battlefield or stack is controlled by its owner" applies.
+    /// Called on the *new* object only - the event's last-known info is a
+    /// separate clone, so look-back triggers still see the old state.
+    pub(crate) fn reset_for_new_object(&mut self) {
+        self.controller = self.owner;
+        self.tapped = false;
+        self.flipped = false;
+        self.face_down = false;
+        self.phased_out = false;
+        self.damage_marked = 0;
+        self.deathtouched = false;
+        self.counters = crate::types::counter::CounterSet::new();
+        self.attachments = Vec::new();
+        self.attached_to = None;
+        self.attached_to_player = None;
+        self.copiable_override = None;
+        self.copy_generation = 0;
+        self.entered_via_escape = false;
+    }
+
     /// Builds a brand-new object (`lineage: None` — a zone-change successor
     /// that needs to carry lineage forward doesn't go through this
     /// constructor, it clones/struct-updates the prior `GameObject`

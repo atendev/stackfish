@@ -973,6 +973,7 @@ pub(crate) fn commit_death(state: &mut GameState, event: GameEventKind) -> (Game
     new_object.lineage = ObjectLineage { previous: Some(old_id) };
     new_object.zone = to;
     new_object.timestamp = state.allocate_sequence_no();
+    new_object.reset_for_new_object();
 
     if let Some(zone) = state.zone_mut(ZoneKind::Battlefield, None) {
         zone.remove(old_id);

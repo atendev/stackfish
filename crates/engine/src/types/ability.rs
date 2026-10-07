@@ -283,9 +283,12 @@ pub enum AbilityEffect {
     /// triggers. The card goes to its *owner's* hand, and a token that is
     /// returned ceases to exist (CR 111.7/704.5d, the existing SBA).
     ///
-    /// TODO: battlefield targets only - returning a card from a graveyard or
-    /// exile to hand needs the resolution-time source zone `Exile` also
-    /// lacks. No untargeted "return all"/"return this" forms yet.
+    /// The target may sit on the battlefield, in a graveyard or in exile
+    /// (`ScriptedZoneMoveKind::accepts_source_zone`) - the source zone is
+    /// read from the object at resolution, and the target filter's `zone`
+    /// is what lets a script aim at a graveyard card.
+    ///
+    /// TODO: no untargeted "return all"/"return this" forms yet.
     ReturnToHand,
     /// The `Game.Ops.Counter()` primitive (CR 701.6a) — "counter target
     /// spell." The target is a `Target::Object` referring to another
