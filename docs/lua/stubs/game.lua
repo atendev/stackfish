@@ -544,6 +544,10 @@ function GameInterveningIfTable.ControlsAtLeast(filter, count) end
 ---@field Exile GameOpsValue                     -- CR 701.18; battlefield or graveyard targets
 ---@field ReturnToHand GameOpsValue                -- CR 400.3; battlefield/graveyard/exile targets, to the owner's hand
 ---@field ReturnSelfToHand GameOpsValue            -- CR 400.3; the ability's own source ("return this card from your graveyard"); no-op if it already left its zone
+---@field Tap GameOpsValue                        -- CR 701.26a; taps the ability's target; no-op (no event) if already tapped
+---@field Untap GameOpsValue                      -- CR 701.26b; untaps the ability's target; no-op (no event) if already untapped
+---@field TapSelf GameOpsValue                    -- CR 701.26a; taps the ability's own source; no-op if it already left the battlefield
+---@field UntapSelf GameOpsValue                  -- CR 701.26b; untaps the ability's own source
 ---@field Counter GameOpsValue                   -- CR 701.6a, counters a spell target (zone="Stack")
 ---@field Regenerate GameOpsValue                -- CR 701.19a, one-shot shield
 ---@field Shuffle GameOpsValue
@@ -603,6 +607,17 @@ GameOpsTable.ExileSelf = nil
 ---@param zone? string  "Battlefield" (default) or "Graveyard" (every player's)
 ---@return GameOpsValue
 function GameOpsTable.ExileAll(filter, zone) end
+
+--- CR 701.26a/601.2c: "tap all creatures your opponents control". No targets (hexproof/protection don't stop it).
+--- Taps every untapped battlefield permanent matching `filter`. Battlefield only (CR 110.5d), so no zone argument.
+---@param filter table  same shape as DestroyAll's filter (`controller` is read off the raw controller field)
+---@return GameOpsValue
+function GameOpsTable.TapAll(filter) end
+
+--- CR 701.26b/601.2c: "untap all creatures you control". Mirror of TapAll.
+---@param filter table  same shape as DestroyAll's filter
+---@return GameOpsValue
+function GameOpsTable.UntapAll(filter) end
 
 --- CR 701.21, pairs with Game.ChooseN(...) then SacrificeChosen(chosen).
 ---@param list TargetResult[]

@@ -308,6 +308,14 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::ReturnAllToHand { .. })
         | Some(AbilityEffect::ExileSelf)
         | Some(AbilityEffect::ExileAll { .. })
+        // CR 701.26: tap/untap goes on the stack like any other
+        // non-mana effect (Icy Manipulator's own ability does).
+        | Some(AbilityEffect::Tap)
+        | Some(AbilityEffect::Untap)
+        | Some(AbilityEffect::TapSelf)
+        | Some(AbilityEffect::UntapSelf)
+        | Some(AbilityEffect::TapAll { .. })
+        | Some(AbilityEffect::UntapAll { .. })
         // CR 701.6a: no real card grants Counter as an activated ability's
         // own effect (Stifle-style "counter target activated/triggered
         // ability" is a different, unbuilt targeting shape - see

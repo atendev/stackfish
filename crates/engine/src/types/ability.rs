@@ -323,6 +323,50 @@ pub enum AbilityEffect {
     /// replacement-checked and fire departed triggers.
     /// TODO: Hand and Library sources (`accepts_source_zone` rejects them).
     ExileAll { filter: EffectFilter, zone: ZoneKind },
+    /// The `Game.Ops.Tap` primitive - "tap target artifact, creature, or
+    /// land" (CR 701.26a). Taps every legal object target of the resolving
+    /// ability. Only an untapped battlefield permanent changes (CR 701.26a,
+    /// CR 110.5d); tapping a tapped permanent does nothing, and no
+    /// `GameEventKind::Tapped` is pushed for it, so a later "becomes tapped"
+    /// trigger can't fire on a no-op (CR 603.2e). The flag is set directly
+    /// and the event pushed as already happened (the convention the
+    /// tap-cost, attack and untap-step producers use), not applied in
+    /// `CommitEvents` like `Counters`. Tapping never touches `CombatState`
+    /// (CR 506.4b). Untargeted siblings: `TapSelf`, `TapAll`.
+    /// TODO(CR 614): no "would become tapped" replacement event exists, so
+    /// the flip is not replacement-checked.
+    /// TODO(CR 603.2e): events are emitted, but there is no Lua
+    /// `becomes tapped` condition yet (`ConditionPrimitive` has none).
+    Tap,
+    /// The `Game.Ops.Untap` primitive - "untap target creature" (CR
+    /// 701.26b). Mirror of `Tap`: only a tapped battlefield permanent
+    /// changes, and `GameEventKind::Untapped` is pushed only on a real flip.
+    /// TODO(CR 122.1d, CR 614): no stun counters and no "would become
+    /// untapped" replacement event, so an untap always succeeds.
+    /// TODO(CR 603.2e): no Lua `becomes untapped` condition yet.
+    Untap,
+    /// The `Game.Ops.TapSelf` primitive - "tap this permanent" (CR 701.26a).
+    /// No target: the resolving ability's own source. A source that already
+    /// left the battlefield is a new object (CR 400.7), so the old id no
+    /// longer resolves and nothing happens. Same flip rules and TODOs as
+    /// `Tap`.
+    TapSelf,
+    /// The `Game.Ops.UntapSelf` primitive - "untap this permanent" (CR
+    /// 701.26b). Mirror of `TapSelf`; same TODOs as `Untap`.
+    UntapSelf,
+    /// The `Game.Ops.TapAll(filter)` primitive - "tap all creatures your
+    /// opponents control" (CR 701.26a, CR 601.2c's "all"-effects don't
+    /// target, so hexproof and protection don't stop it). Collects every
+    /// battlefield object matching `filter` and taps those that are
+    /// untapped. Battlefield only: tapped status exists only there (CR
+    /// 110.5d), so there is no zone argument. `filter.controller` is read
+    /// off the raw `object.controller` like every other `matches_effect_filter`
+    /// caller; the untap step alone resolves the layered controller.
+    /// Same TODOs as `Tap`.
+    TapAll { filter: EffectFilter },
+    /// The `Game.Ops.UntapAll(filter)` primitive - "untap all creatures you
+    /// control" (CR 701.26b). Mirror of `TapAll`; same TODOs as `Untap`.
+    UntapAll { filter: EffectFilter },
     /// The `Game.Ops.Counter()` primitive (CR 701.6a) — "counter target
     /// spell." The target is a `Target::Object` referring to another
     /// `StackObject`'s own `stack_id` (a spell on the stack already has a

@@ -1,7 +1,8 @@
 //! `resolve_ability_effect`'s synchronous-only `AbilityEffect` arms — the
 //! ones that mutate `GameState`/push events and fall straight through to the
 //! shared tail, never pausing mid-resolution: `Modal`, `GainLife`, `Damage`,
-//! `Counters`, `Pump`, `GainControl`, `Regenerate`. `Modal` belongs here
+//! `Counters`, `Pump`, `GainControl`, `Regenerate`, and the tap/untap family
+//! (`Tap`, `Untap`, `TapSelf`, `UntapSelf`, `TapAll`, `UntapAll`). `Modal` belongs here
 //! since it's a miniature re-implementation of these same six kinds inline
 //! (see its own doc comment below).
 
@@ -11,13 +12,14 @@ use crate::commands;
 use crate::types::ability::AbilityEffect;
 use crate::types::card::KeywordSet;
 use crate::types::effect::{
-    AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter, EffectPayload,
-    EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
+    matches_effect_filter, AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter,
+    EffectPayload, EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
 };
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
-use crate::types::ids::Target;
+use crate::types::ids::{ObjectId, Target};
 use crate::types::stack::StackObject;
+use crate::types::zone::ZoneKind;
 
 use super::super::{Engine, StepStatus};
 
@@ -165,6 +167,83 @@ impl Engine {
         for target in legal_targets {
             let Target::Object(id) = target else { continue };
             events.push(GameEventKind::CounterAdded { object: *id, kind: kind.clone(), amount });
+        }
+        ControlFlow::Continue(events)
+    }
+
+    /// CR 701.26a/b: flips `id` to `tap` (true = tapped) if it is a
+    /// battlefield permanent currently in the opposite state, and pushes the
+    /// matching `Tapped`/`Untapped` event. Anything else is a no-op with no
+    /// event ("only untapped permanents can be tapped", "only tapped
+    /// permanents can be untapped"; CR 110.5d: cards off the battlefield
+    /// have no tapped status), so a later "becomes tapped" trigger can't fire
+    /// on a no-op (CR 603.2e).
+    fn flip_tapped(&mut self, id: ObjectId, tap: bool, events: &mut Vec<GameEventKind>) {
+        let Some(object) = self.state.object_mut(id) else { return };
+        if object.zone != ZoneKind::Battlefield || object.tapped == tap {
+            return;
+        }
+        object.tapped = tap;
+        events.push(if tap { GameEventKind::Tapped { object: id } } else { GameEventKind::Untapped { object: id } });
+    }
+
+    /// CR 701.26: `Game.Ops.Tap` / `Game.Ops.Untap` - every legal object
+    /// target of the resolving ability. A `Target::Player` is skipped, same
+    /// stance as `Counters`/`Pump`.
+    pub(super) fn resolve_tap_effect(
+        &mut self,
+        legal_targets: &[Target],
+        tap: bool,
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        for target in legal_targets {
+            let Target::Object(id) = target else { continue };
+            self.flip_tapped(*id, tap, &mut events);
+        }
+        ControlFlow::Continue(events)
+    }
+
+    /// CR 701.26/400.7: `Game.Ops.TapSelf` / `Game.Ops.UntapSelf` - the
+    /// ability's own source. A source that already left the battlefield is a
+    /// new object, so the stale id finds nothing.
+    pub(super) fn resolve_tap_self_effect(
+        &mut self,
+        top: &StackObject,
+        tap: bool,
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        self.flip_tapped(top.source, tap, &mut events);
+        ControlFlow::Continue(events)
+    }
+
+    /// CR 701.26/601.2c: `Game.Ops.TapAll(filter)` / `UntapAll(filter)` -
+    /// every battlefield object matching `filter`, no targets. `filter` is
+    /// matched against the raw `controller` field (see
+    /// `matches_effect_filter`), not the layer-resolved one.
+    pub(super) fn resolve_tap_all_effect(
+        &mut self,
+        top: &StackObject,
+        filter: &EffectFilter,
+        tap: bool,
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let ids: Vec<ObjectId> = self
+            .state
+            .zone(ZoneKind::Battlefield, None)
+            .map(|zone| {
+                zone.contents
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        self.state
+                            .object(*id)
+                            .is_some_and(|object| matches_effect_filter(filter, object, top.source, top.controller))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for id in ids {
+            self.flip_tapped(id, tap, &mut events);
         }
         ControlFlow::Continue(events)
     }

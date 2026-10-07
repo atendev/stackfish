@@ -238,6 +238,22 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::ExileAll { filter, zone }))
     })?;
     ops.set("ExileAll", exile_all)?;
+    // CR 701.26: tap/untap. Battlefield only (CR 110.5d), so the `All`
+    // forms take just the filter, no zone argument.
+    ops.set("Tap", OperationTag(AbilityEffect::Tap))?;
+    ops.set("Untap", OperationTag(AbilityEffect::Untap))?;
+    ops.set("TapSelf", OperationTag(AbilityEffect::TapSelf))?;
+    ops.set("UntapSelf", OperationTag(AbilityEffect::UntapSelf))?;
+    let tap_all = lua.create_function(|_, table: Table| {
+        let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::TapAll { filter }))
+    })?;
+    ops.set("TapAll", tap_all)?;
+    let untap_all = lua.create_function(|_, table: Table| {
+        let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+        Ok(OperationTag(AbilityEffect::UntapAll { filter }))
+    })?;
+    ops.set("UntapAll", untap_all)?;
     // CR 701.6a: "counter target spell" - the target is declared the usual
     // way via `s.target_requirement()` (a filter with `zone = "Stack"`,
     // already generically supported by `decode_target_filter_table` - see
