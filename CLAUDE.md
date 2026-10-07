@@ -28,6 +28,7 @@ Commits should be straight and to the point, but in readable and understandable 
 - If all is good, I will instruct to commit, merge, and push.
 
 ## IMPORTANT
+- Always use the unslop skill
 - If we are making changes to the Lua API, you need to check the game stub in the docs to make sure things are updated properly
 
 ## Notes
