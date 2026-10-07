@@ -582,11 +582,17 @@ pub(crate) struct StaticAbilityBuilder {
     /// `Permanent` (this builder's original, only behavior before this
     /// field existed) when never called.
     pub(crate) duration: EffectDuration,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
 impl UserData for StaticAbilityBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("SetLayer", |_, this, value: Value| {
             this.layer = Some(decode_layer_value(value).map_err(to_lua_err)?);
             Ok(())
@@ -663,7 +669,7 @@ impl UserData for StaticAbilityBuilder {
                 duration: this.duration.clone(),
                 condition: this.condition.clone(),
             };
-            this.registry.borrow_mut().pending_static.push(continuous_effect);
+            this.registry.borrow_mut().pending_static.push((continuous_effect, this.function_zone));
             Ok(())
         });
     }
@@ -707,11 +713,17 @@ pub(crate) struct ReplacementEffectBuilder {
     pub(crate) event_kind: EventFilterKind,
     pub(crate) payload: ReplacementPayload,
     pub(crate) consumption: ConsumptionPolicy,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
 impl UserData for ReplacementEffectBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("SetAffected", |_, this, table: Table| {
             this.affected = decode_effect_filter_table(&table).map_err(to_lua_err)?;
             Ok(())
@@ -756,7 +768,7 @@ impl UserData for ReplacementEffectBuilder {
                 spec: ReplacementSpec::Primitive { filter, payload: this.payload.clone() },
                 consumption: this.consumption,
             };
-            this.registry.borrow_mut().pending_replacement.push(replacement_effect);
+            this.registry.borrow_mut().pending_replacement.push((replacement_effect, this.function_zone));
             Ok(())
         });
     }
@@ -792,11 +804,17 @@ pub(crate) struct CostModifierBuilder {
     pub(crate) filter: Option<FilterSpec>,
     pub(crate) amount: Option<i32>,
     pub(crate) target: CostModifierTarget,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
 impl UserData for CostModifierBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("SetFilter", |_, this, table: Table| {
             this.filter = Some(decode_filter_table(table).map_err(to_lua_err)?);
             Ok(())
@@ -823,7 +841,7 @@ impl UserData for CostModifierBuilder {
                         .to_string(),
                 )
             })?;
-            this.registry.borrow_mut().pending_cost_modifiers.push(CostModifier {
+            this.registry.borrow_mut().pending_cost_modifiers.push((CostModifier {
                 source: this.source,
                 // Placeholder - run_card_script's drain step stamps the real
                 // value (see this struct's own doc comment).
@@ -831,7 +849,7 @@ impl UserData for CostModifierBuilder {
                 filter,
                 target: this.target,
                 amount,
-            });
+            }, this.function_zone));
             Ok(())
         });
     }
@@ -851,11 +869,17 @@ pub(crate) struct HandSizeModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<crate::types::player::HandSizeAffected>,
     pub(crate) effect: Option<crate::types::player::HandSizeEffect>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
 impl UserData for HandSizeModifierBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
             this.affected = Some(value.borrow::<HandSizeAffectedTag>()?.0);
             Ok(())
@@ -878,7 +902,7 @@ impl UserData for HandSizeModifierBuilder {
                         .to_string(),
                 )
             })?;
-            this.registry.borrow_mut().pending_hand_size_modifiers.push(HandSizeModifier {
+            this.registry.borrow_mut().pending_hand_size_modifiers.push((HandSizeModifier {
                 source: this.source,
                 // Placeholder - run_card_script's drain step stamps the real
                 // value (see this struct's own doc comment).
@@ -888,7 +912,7 @@ impl UserData for HandSizeModifierBuilder {
                 // Placeholder - run_card_script's drain step stamps the real
                 // value, same reason StaticAbilityBuilder's own timestamp is.
                 timestamp: SequenceNo(0),
-            });
+            }, this.function_zone));
             Ok(())
         });
     }
@@ -903,11 +927,17 @@ impl UserData for HandSizeModifierBuilder {
 pub(crate) struct HandRevealModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<crate::types::player::HandRevealAffected>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
 impl UserData for HandRevealModifierBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
             this.affected = Some(value.borrow::<HandRevealAffectedTag>()?.0);
             Ok(())
@@ -920,7 +950,7 @@ impl UserData for HandRevealModifierBuilder {
                         .to_string(),
                 )
             })?;
-            this.registry.borrow_mut().pending_hand_reveal_modifiers.push(HandRevealModifier {
+            this.registry.borrow_mut().pending_hand_reveal_modifiers.push((HandRevealModifier {
                 source: this.source,
                 // Placeholder - run_card_script's drain step stamps the real
                 // value (see this struct's own doc comment).
@@ -929,7 +959,7 @@ impl UserData for HandRevealModifierBuilder {
                 // Placeholder - run_card_script's drain step stamps the real
                 // value, same reason StaticAbilityBuilder's own timestamp is.
                 timestamp: SequenceNo(0),
-            });
+            }, this.function_zone));
             Ok(())
         });
     }
@@ -946,11 +976,17 @@ pub(crate) struct DrawLimitModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<crate::types::player::DrawLimitAffected>,
     pub(crate) limit: Option<u32>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
 impl UserData for DrawLimitModifierBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
             this.affected = Some(value.borrow::<DrawLimitAffectedTag>()?.0);
             Ok(())
@@ -973,7 +1009,7 @@ impl UserData for DrawLimitModifierBuilder {
                         .to_string(),
                 )
             })?;
-            this.registry.borrow_mut().pending_draw_limit_modifiers.push(DrawLimitModifier {
+            this.registry.borrow_mut().pending_draw_limit_modifiers.push((DrawLimitModifier {
                 source: this.source,
                 // Placeholder - run_card_script's drain step stamps the real
                 // value (see this struct's own doc comment).
@@ -983,7 +1019,7 @@ impl UserData for DrawLimitModifierBuilder {
                 // Placeholder - run_card_script's drain step stamps the real
                 // value, same reason StaticAbilityBuilder's own timestamp is.
                 timestamp: SequenceNo(0),
-            });
+            }, this.function_zone));
             Ok(())
         });
     }
@@ -999,11 +1035,17 @@ pub(crate) struct LandPlayModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<crate::types::player::LandPlayAffected>,
     pub(crate) additional: Option<u32>,
+    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
 
 impl UserData for LandPlayModifierBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("SetFunctionsFrom", |_, this, name: String| {
+            this.function_zone = Some(function_zone_name(&name)?);
+            Ok(())
+        });
         methods.add_method_mut("SetAffected", |_, this, value: mlua::AnyUserData| {
             this.affected = Some(value.borrow::<LandPlayAffectedTag>()?.0);
             Ok(())
@@ -1026,14 +1068,14 @@ impl UserData for LandPlayModifierBuilder {
                         .to_string(),
                 )
             })?;
-            this.registry.borrow_mut().pending_land_play_modifiers.push(LandPlayModifier {
+            this.registry.borrow_mut().pending_land_play_modifiers.push((LandPlayModifier {
                 source: this.source,
                 // Placeholder - run_card_script's drain step stamps the real
                 // value (see this struct's own doc comment).
                 controller: PlayerId(0),
                 affected,
                 additional,
-            });
+            }, this.function_zone));
             Ok(())
         });
     }

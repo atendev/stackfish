@@ -24,6 +24,12 @@ return s
 
 ## Methods
 
+**`:SetFunctionsFrom(zoneName)`** — CR 113.6, for an effect that functions from a zone other than the
+battlefield (Anger: "as long as this card is in your graveyard..."). `zoneName` is `"Graveyard"` or
+`"Exile"`. The effect exists only while its source is in that zone and is removed when the card leaves
+it; without this call it only functions on the battlefield. See
+[triggered-abilities.md](triggered-abilities.md#methods) for the shared behavior.
+
 **`:SetAffected(table)`** — which objects this effect watches for. A plain table:
 `{ controller = "you"|"opponent"|"any", card_types = {...}, self_only = true }`, every key
 optional. Unlike static abilities, this one only accepts a plain table — no scripted predicate

@@ -828,6 +828,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 }),
                 condition: None,
                 duration: EffectDuration::Permanent,
+                function_zone: None,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -850,6 +851,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 event_kind: EventFilterKind::WouldDie,
                 payload: ReplacementPayload::Regenerate,
                 consumption: ConsumptionPolicy::Repeatable,
+                function_zone: None,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -889,6 +891,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 filter: None,
                 amount: None,
                 target: CostModifierTarget::Generic,
+                function_zone: None,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -901,6 +904,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 source: ObjectId(source),
                 affected: None,
                 effect: None,
+                function_zone: None,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -928,7 +932,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     let create_hand_reveal_modifier = {
         let registry = Rc::clone(&registry);
         lua.create_function(move |_, source: u64| {
-            Ok(HandRevealModifierBuilder { source: ObjectId(source), affected: None, registry: Rc::clone(&registry) })
+            Ok(HandRevealModifierBuilder { source: ObjectId(source), affected: None, function_zone: None, registry: Rc::clone(&registry) })
         })?
     };
 
@@ -951,6 +955,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 source: ObjectId(source),
                 affected: None,
                 limit: None,
+                function_zone: None,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -972,6 +977,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 source: ObjectId(source),
                 affected: None,
                 additional: None,
+                function_zone: None,
                 registry: Rc::clone(&registry),
             })
         })?
