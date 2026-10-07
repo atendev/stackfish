@@ -2,6 +2,17 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Zone-move reset + graveyard/exile sources (`phase5/zone-move-reset-and-graveyard-return`)**: new
+  `GameObject::reset_for_new_object` (CR 400.7/108.4: clears tapped/damage/counters/attachments/copy state,
+  controller = owner) is called on the new object by `sba::commit_death`, `commit_zone_move` (battlefield
+  departures), the Exile and Bounce arms, and reanimation (its inline copy was replaced). Last-known info
+  is a separate clone, so look-back triggers are unaffected. `ScriptedZoneMoveKind::accepts_source_zone`
+  lets `Exile` take battlefield/graveyard targets and `ReturnToHand` battlefield/graveyard/exile, reading
+  the real zone at resolution; the commit arms use the event's `from`. Tests: `phase5_zone_move_reset.rs`
+  (6). Left open: untargeted forms ("return this card from your graveyard", "return all"), hand/library
+  as a source, and the spell-to-graveyard / library / hand moves still clone without a reset (they carry no
+  battlefield state). The "older arms don't reset" note in the `phase5/return-to-hand` entry is closed.
+
 - **Return to hand + `SetFunctionsFrom("Hand")` (`phase5/return-to-hand`)**: `AbilityEffect::ReturnToHand` /
   `Game.Ops.ReturnToHand()` (targeted, Exile-shaped) through a new `ScriptedZoneMoveKind::Bounce`
   (Battlefield -> owner's Hand, replacement-checked, departed triggers collected). The commit arm clears

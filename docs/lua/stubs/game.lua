@@ -541,8 +541,8 @@ function GameInterveningIfTable.ControlsAtLeast(filter, count) end
 ---@class GameOpsTable
 ---@field Destroy GameOpsValue                  -- CR 701.8; indestructible unaffected
 ---@field Sacrifice GameOpsValue                 -- CR 701.17, target-based (vs. Game.Costs.Sacrifice)
----@field Exile GameOpsValue                     -- CR 701.18; battlefield targets only
----@field ReturnToHand GameOpsValue                -- CR 400.3; battlefield targets only, to the owner's hand
+---@field Exile GameOpsValue                     -- CR 701.18; battlefield or graveyard targets
+---@field ReturnToHand GameOpsValue                -- CR 400.3; battlefield/graveyard/exile targets, to the owner's hand
 ---@field Counter GameOpsValue                   -- CR 701.6a, counters a spell target (zone="Stack")
 ---@field Regenerate GameOpsValue                -- CR 701.19a, one-shot shield
 ---@field Shuffle GameOpsValue

@@ -8,7 +8,7 @@
 
 use std::ops::ControlFlow;
 
-use crate::types::counter::{CounterKind, CounterSet};
+use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
 use crate::types::ids::ObjectLineage;
 use crate::types::stack::StackObject;
@@ -48,32 +48,13 @@ impl Engine {
         new_object.object_id = new_id;
         new_object.lineage = ObjectLineage { previous: Some(graveyard_id) };
         new_object.zone = ZoneKind::Battlefield;
-        // CR 800.4a: returns under its *owner's* control, not whoever
-        // controlled it when it died (matters for a stolen creature).
-        new_object.controller = owner;
+        // CR 400.7: a new object has no memory of its previous incarnation's
+        // tapped/damage/counters/attachments; CR 800.4a: it returns under its
+        // *owner's* control, not whoever controlled it when it died.
+        new_object.reset_for_new_object();
         new_object.timestamp = self.state.allocate_sequence_no();
         // CR 302.6/602.5a: a freshly entering permanent is summoning sick.
         new_object.controlled_since_turn = self.state.turn_number;
-        // CR 400.7: a new object has no memory of its previous
-        // incarnation's tapped/damage/counters/attachments - unlike
-        // `Engine::move_resolving_spell`/`sba::commit_death`'s own clones
-        // (whose source object was never meaningfully tapped/damaged/
-        // countered/attached in the first place, on the stack or freshly
-        // dead), the graveyard object cloned here really can carry those
-        // over from the moment it died, so they need an explicit reset.
-        new_object.tapped = false;
-        new_object.flipped = false;
-        new_object.face_down = false;
-        new_object.phased_out = false;
-        new_object.damage_marked = 0;
-        new_object.deathtouched = false;
-        new_object.counters = CounterSet::new();
-        new_object.attachments = Vec::new();
-        new_object.attached_to = None;
-        new_object.attached_to_player = None;
-        new_object.copiable_override = None;
-        new_object.copy_generation = 0;
-        new_object.entered_via_escape = false;
 
         if let Some(zone) = self.state.zone_mut(ZoneKind::Graveyard, Some(owner)) {
             zone.remove(graveyard_id);
