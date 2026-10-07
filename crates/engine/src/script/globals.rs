@@ -200,6 +200,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     ops.set("DestroyAll", destroy_all)?;
     ops.set("Sacrifice", OperationTag(AbilityEffect::Sacrifice))?;
     ops.set("Exile", OperationTag(AbilityEffect::Exile))?;
+    ops.set("ReturnToHand", OperationTag(AbilityEffect::ReturnToHand))?;
     // CR 701.6a: "counter target spell" - the target is declared the usual
     // way via `s.target_requirement()` (a filter with `zone = "Stack"`,
     // already generically supported by `decode_target_filter_table` - see

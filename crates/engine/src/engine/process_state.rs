@@ -297,6 +297,8 @@ pub enum ScriptedZoneMoveKind {
     Sacrifice,
     Exile,
     Discard,
+    /// CR 400.3: Battlefield -> owner's Hand (`AbilityEffect::ReturnToHand`).
+    Bounce,
 }
 
 impl ScriptedZoneMoveKind {
@@ -306,7 +308,10 @@ impl ScriptedZoneMoveKind {
     pub(in crate::engine) fn from_zone(self) -> ZoneKind {
         match self {
             ScriptedZoneMoveKind::Discard => ZoneKind::Hand,
-            ScriptedZoneMoveKind::Destroy | ScriptedZoneMoveKind::Sacrifice | ScriptedZoneMoveKind::Exile => {
+            ScriptedZoneMoveKind::Destroy
+            | ScriptedZoneMoveKind::Sacrifice
+            | ScriptedZoneMoveKind::Exile
+            | ScriptedZoneMoveKind::Bounce => {
                 ZoneKind::Battlefield
             }
         }

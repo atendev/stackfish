@@ -22,7 +22,7 @@ modifier it registered is removed.
 
 ## Functioning from another zone
 
-Every builder here accepts `:SetFunctionsFrom("Graveyard"|"Exile")` (CR 113.6): the modifier exists only while
+Every builder here accepts `:SetFunctionsFrom("Hand"|"Graveyard"|"Exile")` (CR 113.6): the modifier exists only while
 its source is in that zone and is removed when the card leaves it. Without it, only on the battlefield.
 
 ## Which player is affected

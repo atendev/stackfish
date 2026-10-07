@@ -38,8 +38,9 @@ since gone false simply doesn't resolve).
 
 **`:SetFunctionsFrom(zoneName)`** — CR 113.6, for an ability that functions from a zone other than
 the battlefield, e.g. "{2}{B}: Return this card from your graveyard to your hand." `zoneName` is
-`"Graveyard"` or `"Exile"` (anything else is a script error — hand abilities like Cycling are
-recognized by their `DiscardSelf` cost, and no other zone has a registration point yet). The ability
+`"Hand"`, `"Graveyard"` or `"Exile"` (anything else is a script error; Stack, Library and Command have no
+registration point yet). Hand abilities written without it, like Cycling, are still recognized by their
+`DiscardSelf` cost. The ability
 exists only while its source is in that zone: it registers when the card enters it, is dropped when
 the card leaves, and can only be activated/triggers from there. Abilities that don't call this keep
 the default — they never register for a card in the graveyard or exile, so an ETB trigger in the same

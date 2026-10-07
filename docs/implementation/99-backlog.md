@@ -2,6 +2,20 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Return to hand + `SetFunctionsFrom("Hand")` (`phase5/return-to-hand`)**: `AbilityEffect::ReturnToHand` /
+  `Game.Ops.ReturnToHand()` (targeted, Exile-shaped) through a new `ScriptedZoneMoveKind::Bounce`
+  (Battlefield -> owner's Hand, replacement-checked, departed triggers collected). The commit arm clears
+  counters/damage/tapped/attachments/copy override and sets controller to owner on the fresh object; the
+  hand/library sweep then registers its hand abilities/CDA (first real end-to-end use of
+  `phase5/hand-library-script-registration`). `:SetFunctionsFrom` now accepts `"Hand"` on every builder;
+  activate/trigger/register paths already honored a declared zone. Cost-shape Cycling detection kept as a
+  fallback. Tests: `phase5_return_to_hand.rs` (10); `a_hand_function_zone_is_still_a_clear_error` became
+  the Stack equivalent. Left open: battlefield targets only (no graveyard/exile -> hand), no untargeted
+  "return all"/"return this", no replacement-redirect test of the bounce itself (generic path, shared
+  with Exile), Stack/Library/Command still rejected by `SetFunctionsFrom`. The older Exile/Sacrifice/Destroy
+  arms still don't reset counters/tapped/damage on the new object (pre-existing; only matters for a
+  card later returned from the graveyard/exile).
+
 - **Hand/library script registration (`phase5/hand-library-script-registration`)**: `Engine::
   sync_off_battlefield_scripts` sweeps Hand and Library too (was Graveyard/Exile), so a CDA or hand-only
   ability registers for a card that arrived by any producer (redirected death, mulligan return, fixture),
@@ -9,9 +23,8 @@
   producers and the sweep never double-register. `run_card_script` now discards undeclared abilities in
   the Library like Graveyard/Exile (Hand still keeps triggered/activated ones, as before). Behavior note:
   fixture hand cards now have scripts run too (`phase5_script_self_registration` counts battlefield-source
-  abilities). Tests: `phase5_hand_library_script_registration.rs` (6). Left open: **no bounce/return-to-hand
-  verb exists** (`Game.Ops.ReturnToHand` or a `ScriptedZoneMoveKind::Bounce`) - the engine has no way to
-  return a permanent to hand except a replacement-redirected death; its own slice. Library cards are all
+  abilities). Tests: `phase5_hand_library_script_registration.rs` (6). Left open: the bounce verb
+  it named is done in `phase5/return-to-hand`. Library cards are all
   scripted once on the first trigger-collection pass (one eval per card); command zone still unswept.
 
 - **Characteristic-defining statics (`phase5/characteristic-defining-statics`)**: closes the CR 604.3

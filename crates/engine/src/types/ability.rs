@@ -275,6 +275,18 @@ pub enum AbilityEffect {
     /// at resolution time; deferred as a named follow-up. No fields — a
     /// toggle, not a value, same shape as `Destroy`.
     Exile,
+    /// The `Game.Ops.ReturnToHand()` primitive - "return target permanent to
+    /// its owner's hand" (CR 400.3). Same shape as `Exile`: the resolving
+    /// `StackObject`'s chosen battlefield targets are moved through
+    /// `continue_scripted_zone_move` (`ScriptedZoneMoveKind::Bounce`), so the
+    /// move is replacement-checked (CR 614) and fires leaves-the-battlefield
+    /// triggers. The card goes to its *owner's* hand, and a token that is
+    /// returned ceases to exist (CR 111.7/704.5d, the existing SBA).
+    ///
+    /// TODO: battlefield targets only - returning a card from a graveyard or
+    /// exile to hand needs the resolution-time source zone `Exile` also
+    /// lacks. No untargeted "return all"/"return this" forms yet.
+    ReturnToHand,
     /// The `Game.Ops.Counter()` primitive (CR 701.6a) — "counter target
     /// spell." The target is a `Target::Object` referring to another
     /// `StackObject`'s own `stack_id` (a spell on the stack already has a

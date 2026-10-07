@@ -247,8 +247,8 @@ fn a_graveyard_declared_modifier_registers_with_the_real_controller() {
 }
 
 #[test]
-fn a_hand_function_zone_is_still_a_clear_error() {
-    let mut state = state_with(ZoneKind::Graveyard, &haste_static(r#"e:SetFunctionsFrom("Hand")"#));
+fn a_stack_function_zone_is_still_a_clear_error() {
+    let mut state = state_with(ZoneKind::Graveyard, &haste_static(r#"e:SetFunctionsFrom("Stack")"#));
     let definition = state.object(SOURCE).unwrap().definition.clone();
     assert!(ScriptRuntime::new().run_card_script(&mut state, &definition, SOURCE).is_err());
     assert!(state.continuous_effects.is_empty());
