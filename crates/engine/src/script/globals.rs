@@ -828,6 +828,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 }),
                 condition: None,
                 duration: EffectDuration::Permanent,
+                characteristic_defining: false,
                 function_zone: None,
                 registry: Rc::clone(&registry),
             })

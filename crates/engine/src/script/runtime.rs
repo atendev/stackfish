@@ -221,10 +221,13 @@ impl ScriptRuntime {
         // CR 113.6: an ability that declared `:SetFunctionsFrom(zone)` is kept
         // only while its source is in that zone (Anger-style graveyard
         // statics); an undeclared one only on the battlefield.
-        // TODO: CR 604.3 characteristic-defining abilities and abilities that
-        // "function in any zone" (e.g. a spell's own cost reduction) are
-        // discarded off the battlefield too - no such script-registered
-        // shape exists yet to need the exception.
+        // CR 604.3 characteristic-defining statics (`:SetCharacteristicDefining()`)
+        // bypass this filter below.
+        // TODO: "functions in any zone" statics that aren't CDAs (e.g. a
+        // spell's own cost reduction) are still discarded off the
+        // battlefield - no such script-registered shape exists yet. A CDA only
+        // registers where a script run happens: not after a bounce to hand,
+        // and not in the library or command zone (see backlog).
         let on_battlefield = source_zone.map_or(true, |z| z == ZoneKind::Battlefield);
         fn take_functioning<T>(
             queue: &mut Vec<(T, Option<ZoneKind>)>,
@@ -241,8 +244,18 @@ impl ScriptRuntime {
                 .collect()
         }
 
-        let mut static_effects: Vec<ContinuousEffect> =
-            take_functioning(&mut self.registry.borrow_mut().pending_static, source_zone, on_battlefield);
+        // CR 604.3: a characteristic-defining ability functions in all zones,
+        // so it bypasses the zone filter every other static goes through.
+        let mut static_effects: Vec<ContinuousEffect> = {
+            let mut registry = self.registry.borrow_mut();
+            let (cda, other): (Vec<_>, Vec<_>) =
+                registry.pending_static.drain(..).partition(|(_, _, characteristic_defining)| *characteristic_defining);
+            let mut kept: Vec<ContinuousEffect> = cda.into_iter().map(|(effect, _, _)| effect).collect();
+            let mut zoned: Vec<(ContinuousEffect, Option<ZoneKind>)> =
+                other.into_iter().map(|(effect, zone, _)| (effect, zone)).collect();
+            kept.extend(take_functioning(&mut zoned, source_zone, on_battlefield));
+            kept
+        };
         for effect in &mut static_effects {
             // Real timestamp (CR 613.7 ordering) - the builder itself has no
             // &mut GameState to allocate one from inside a Lua callback (see

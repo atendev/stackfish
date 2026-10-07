@@ -87,6 +87,46 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
     }
 }
 
+/// CR 604.3a's criteria for a characteristic-defining ability, as far as a
+/// `Game.CreateStaticAbility` builder can express them: it defines the object's
+/// own colors or subtypes (power/toughness CDAs live on `CardDefinition`'s
+/// `PTValue::CharacteristicDefining`, not here), affects only itself, and
+/// isn't conditional. Criterion (2)/(4) (printed on the card, not granted by
+/// itself) hold by construction - a script's own `register_abilities` is the
+/// card's printed text.
+fn validate_characteristic_defining(
+    layer: Layer,
+    effect: &EffectPayload,
+    affected: &AffectedFilter,
+    has_condition: bool,
+    function_zone: Option<ZoneKind>,
+    duration: &EffectDuration,
+) -> Result<(), ScriptError> {
+    let err = |why: &str| ScriptError::LoadError(format!("SetCharacteristicDefining: {why} (CR 604.3a)"));
+    let defines_color_or_subtype = matches!(
+        (layer, effect),
+        (Layer::TypeChanging, EffectPayload::Primitive(EffectPrimitive::AddSubtype(_)))
+            | (Layer::ColorChanging, EffectPayload::Primitive(EffectPrimitive::AddColor(_)))
+            | (Layer::ColorChanging, EffectPayload::Primitive(EffectPrimitive::SetColors(_)))
+    );
+    if !defines_color_or_subtype {
+        return Err(err("only AddSubtype (layer 4) and AddColor/SetColors (layer 5) can define a characteristic"));
+    }
+    if !matches!(affected, AffectedFilter::Primitive(filter) if filter.self_only) {
+        return Err(err("it must affect only its own source - use SetAffected({ self_only = true })"));
+    }
+    if has_condition {
+        return Err(err("it can't set a characteristic only if a condition is met"));
+    }
+    if function_zone.is_some() {
+        return Err(err("it already functions in every zone - don't combine with SetFunctionsFrom"));
+    }
+    if !matches!(duration, EffectDuration::Permanent) {
+        return Err(err("it can't have a limited duration"));
+    }
+    Ok(())
+}
+
 /// `EventFilter`'s per-shape payload pairing (`types/effect.rs`'s own
 /// `ReplacementPayload` doc comment) — same "reject a bad pairing at
 /// `:Register()` time" stance `validate_layer_effect_pairing` above already
@@ -583,6 +623,9 @@ pub(crate) struct StaticAbilityBuilder {
     /// field existed) when never called.
     pub(crate) duration: EffectDuration,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
+    /// CR 604.3: set via `:SetCharacteristicDefining()`. Validated at
+    /// `:Register()` against CR 604.3a - see `validate_characteristic_defining`.
+    pub(crate) characteristic_defining: bool,
     pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
 }
@@ -644,6 +687,12 @@ impl UserData for StaticAbilityBuilder {
             this.duration = value.borrow::<DurationTag>()?.0.clone();
             Ok(())
         });
+        // CR 604.3: marks this static as a characteristic-defining ability, so
+        // it functions in every zone instead of only the battlefield.
+        methods.add_method_mut("SetCharacteristicDefining", |_, this, ()| {
+            this.characteristic_defining = true;
+            Ok(())
+        });
         methods.add_method_mut("Register", |_, this, ()| {
             let layer = this.layer.ok_or_else(|| {
                 mlua::Error::RuntimeError(
@@ -658,6 +707,17 @@ impl UserData for StaticAbilityBuilder {
                 )
             })?;
             validate_layer_effect_pairing(layer, &effect).map_err(to_lua_err)?;
+            if this.characteristic_defining {
+                validate_characteristic_defining(
+                    layer,
+                    &effect,
+                    &this.affected,
+                    this.condition.is_some(),
+                    this.function_zone,
+                    &this.duration,
+                )
+                .map_err(to_lua_err)?;
+            }
             let continuous_effect = ContinuousEffect {
                 source: this.source,
                 layer,
@@ -669,7 +729,7 @@ impl UserData for StaticAbilityBuilder {
                 duration: this.duration.clone(),
                 condition: this.condition.clone(),
             };
-            this.registry.borrow_mut().pending_static.push((continuous_effect, this.function_zone));
+            this.registry.borrow_mut().pending_static.push((continuous_effect, this.function_zone, this.characteristic_defining));
             Ok(())
         });
     }
