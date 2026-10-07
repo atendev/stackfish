@@ -2,6 +2,22 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Characteristic-defining statics (`phase5/characteristic-defining-statics`)**: closes the CR 604.3
+  gap the last three entries left. `StaticAbilityBuilder:SetCharacteristicDefining()` marks a
+  `Game.CreateStaticAbility` as a CDA; `run_card_script` registers it in every zone instead of filtering it
+  to the battlefield (the static queue's tuple grew a `bool`; the other six queues are unchanged).
+  `:Register()` enforces CR 604.3a via `validate_characteristic_defining`: only `AddSubtype` (layer 4) and
+  `AddColor`/`SetColors` (layer 5), `self_only`, no condition, no limited duration, no `SetFunctionsFrom`.
+  Power/toughness CDAs were already real and zone-independent via `PTValue::CharacteristicDefining` on the
+  definition (`invoke_cda`), so they're out of scope. No new cleanup or sweep - zone change mints a new id,
+  `retire_object` purges, the next script run re-registers. Also folds in the Anger "as long as you control
+  a Mountain" test: a graveyard-declared static with `SetCondition(ControlsAtLeast(...))` registers once
+  and tracks the board live. Tests: `phase5_characteristic_defining_statics.rs` (7). Left open: a CDA only
+  registers where a script run happens - not after a bounce to hand (no run on that path), not in the
+  library or command zone, and not outside the game; layer-4 *card type* and color-identity CDAs
+  (`color_identity.rs` TODO) aren't covered (604.3a lists only colors/subtypes/P/T); "functions in any
+  zone" statics that aren't CDAs (a spell's own cost reduction) are still discarded off the battlefield.
+
 - **Graveyard/exile statics (`phase5/graveyard-exile-static-functions`)**: closes the "statics/
   replacement effects/modifiers that function from graveyard/exile (Anger-style)" gap the previous
   entry left. `:SetFunctionsFrom("Graveyard"|"Exile")` is now on `StaticAbilityBuilder`,

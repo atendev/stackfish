@@ -200,7 +200,9 @@ pub(crate) struct ScriptRegistry {
     /// placeholder (`SequenceNo(0)`) until drain time, since the builder has
     /// no `&mut GameState` to call `allocate_sequence_no()` from inside a Lua
     /// callback — the drain step stamps the real value.
-    pub(crate) pending_static: Vec<(ContinuousEffect, Option<crate::types::zone::ZoneKind>)>,
+    /// Third element: `:SetCharacteristicDefining()` (CR 604.3), which makes
+    /// the effect function in every zone.
+    pub(crate) pending_static: Vec<(ContinuousEffect, Option<crate::types::zone::ZoneKind>, bool)>,
     /// Same idea as `pending_static`, for `Game.CreateReplacementEffect`'s
     /// builder (CR 614/701.19b) — drained into `GameState.replacement_effects`
     /// by `run_card_script`. Unlike `pending_static`'s `ContinuousEffect`, a

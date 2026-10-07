@@ -207,6 +207,12 @@ function StaticAbilityBuilder:SetLayer(value) end
 ---@return StaticAbilityBuilder
 function StaticAbilityBuilder:SetEffect(value) end
 
+--- Marks this as a characteristic-defining ability (CR 604.3): it functions in every zone, not just the
+--- battlefield. CR 604.3a restricts it to AddSubtype (layer 4) or AddColor/SetColors (layer 5), with
+--- SetAffected({ self_only = true }), no SetCondition, no SetDuration and no SetFunctionsFrom.
+---@return StaticAbilityBuilder
+function StaticAbilityBuilder:SetCharacteristicDefining() end
+
 --- Which objects this effect applies to. Omit ⇒ applies to every object.
 ---@param value AffectedFilterTable|AffectsPredicateFn
 ---@return StaticAbilityBuilder
