@@ -2,6 +2,18 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Untargeted return to hand (`phase5/untargeted-return-to-hand`)**: `AbilityEffect::ReturnSelfToHand`
+  (`Game.Ops.ReturnSelfToHand`, a bare tag like `Destroy`) moves the resolving ability's own source;
+  `AbilityEffect::ReturnAllToHand { filter, zone }` (`Game.Ops.ReturnAllToHand(filter, zone?)`) moves every
+  `matches_effect_filter` object in the Battlefield, every graveyard or Exile. Both feed
+  `continue_scripted_zone_move(Bounce)`, so replacement checks, departed triggers, token cessation and
+  `reset_for_new_object` are inherited. A source that already left its zone has a new id and the self form
+  does nothing (CR 400.7). Zone arg rejects anything `Bounce` can't source from. Tests:
+  `phase5_untargeted_return.rs` (12). Left open: no test redirects the bounce with a replacement effect
+  (generic path shared with Exile); hand/library as a source; other untargeted verbs (exile all, etc.).
+  Test-harness note: fixture battlefield cards need `run_card_script` by hand (the off-battlefield sweep
+  skips them), with one shared `ScriptRuntime` so ability ids don't collide.
+
 - **Zone-move reset + graveyard/exile sources (`phase5/zone-move-reset-and-graveyard-return`)**: new
   `GameObject::reset_for_new_object` (CR 400.7/108.4: clears tapped/damage/counters/attachments/copy state,
   controller = owner) is called on the new object by `sba::commit_death`, `commit_zone_move` (battlefield

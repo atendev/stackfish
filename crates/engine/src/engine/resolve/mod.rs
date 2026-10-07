@@ -525,6 +525,9 @@ impl Engine {
             Some(AbilityEffect::Exile) => self.resolve_exile_effect(top, legal_targets),
             // CR 400.3: same target-driven shape as Exile above.
             Some(AbilityEffect::ReturnToHand) => self.resolve_return_to_hand_effect(top, legal_targets),
+            // CR 400.3: untargeted siblings of ReturnToHand.
+            Some(AbilityEffect::ReturnSelfToHand) => self.resolve_return_self_to_hand_effect(top),
+            Some(AbilityEffect::ReturnAllToHand { filter, zone }) => self.resolve_return_all_to_hand_effect(top, filter, *zone),
             // CR 701.6a: removes the *targeted* StackObject (a different
             // stack_id than top.stack_id) from state.stack directly - see
             // AbilityEffect::Counter's own doc comment and
