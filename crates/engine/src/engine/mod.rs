@@ -555,6 +555,35 @@ impl Engine {
         }
     }
 
+    /// CR 113.6: runs the card script of every object sitting in a graveyard
+    /// or exile that hasn't had it run yet, so an ability declared with
+    /// `:SetFunctionsFrom("Graveyard"/"Exile")` registers. Called at the start
+    /// of trigger collection (`resolve_collect_triggers_state`) rather than at
+    /// each graveyard/exile producer - death, discard, mill, spell resolution
+    /// and exile effects all commit zone moves through different paths, and a
+    /// sweep covers every one of them (and fixture-placed cards) without a
+    /// per-site hook. Every pipeline run passes through trigger collection
+    /// before priority is given, so the ability exists before it can be used.
+    /// Undeclared abilities are discarded by `run_card_script` in these zones,
+    /// so a card with none costs one script evaluation and is then marked done.
+    pub(in crate::engine) fn sync_off_battlefield_scripts(&mut self) {
+        // Sorted: `objects` iteration order isn't deterministic, and each run
+        // allocates ability ids.
+        let mut pending: Vec<ObjectId> = self
+            .state
+            .objects
+            .values()
+            .filter(|o| matches!(o.zone, crate::ZoneKind::Graveyard | crate::ZoneKind::Exile))
+            .map(|o| o.object_id)
+            .filter(|id| !self.state.off_battlefield_scripts_run.contains(id))
+            .collect();
+        pending.sort();
+        for id in pending {
+            self.state.off_battlefield_scripts_run.insert(id);
+            self.run_card_script_for(id);
+        }
+    }
+
     /// Stores `request` as `pending_payment`, and - if it's a spell that was
     /// just put on the stack - runs its card script for the stack zone first.
     /// CR 601.2a: a spell's abilities (e.g. Cascade's "when you cast this

@@ -50,11 +50,13 @@ pub(crate) fn find_ability_by_id(state: &GameState, id: AbilityId) -> Option<&Re
 /// leave the new object with two copies of everything the script declares.
 pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: ObjectId) {
     let script_ids = &mut state.script_ability_ids;
+    let function_zones = &mut state.ability_function_zones;
     state.abilities.retain_mut(|ability| {
         if ability.source != old_id {
             return true;
         }
         if script_ids.remove(&ability.id) {
+            function_zones.remove(&ability.id);
             return false;
         }
         ability.source = new_id;
@@ -115,11 +117,13 @@ pub(crate) fn remap_abilities(state: &mut GameState, old_id: ObjectId, new_id: O
 /// doesn't wind up with two values of each ability").
 pub(crate) fn purge_granted_abilities(state: &mut GameState, id: ObjectId) {
     let script_ids = &mut state.script_ability_ids;
+    let function_zones = &mut state.ability_function_zones;
     state.abilities.retain(|a| {
         if a.source != id {
             return true;
         }
         script_ids.remove(&a.id);
+        function_zones.remove(&a.id);
         false
     });
     state.continuous_effects.retain(|e| e.source != id);
@@ -479,12 +483,15 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
         }
     }
     let mut departed_triggered = Vec::new();
+    state.off_battlefield_scripts_run.remove(&old_id);
     let script_ids = &mut state.script_ability_ids;
+    let function_zones = &mut state.ability_function_zones;
     state.abilities.retain(|a| {
         if a.source != old_id {
             return true;
         }
         script_ids.remove(&a.id);
+        function_zones.remove(&a.id);
         if a.kind == AbilityKind::Triggered {
             departed_triggered.push(a.clone());
         }

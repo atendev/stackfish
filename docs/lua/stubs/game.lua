@@ -170,6 +170,12 @@ function TriggeredAbilityBuilder:SetCondition(value) end
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetInterveningIf(value) end
 
+--- CR 113.6: the ability functions from "Graveyard" or "Exile" instead of the battlefield.
+--- Registers only while the source is in that zone. Other zone names are an error.
+---@param zoneName "Graveyard"|"Exile"
+---@return TriggeredAbilityBuilder
+function TriggeredAbilityBuilder:SetFunctionsFrom(zoneName) end
+
 --- What this ability does when it resolves. Required before :Register().
 ---@param value GameOpsValue|OperationFn
 ---@return TriggeredAbilityBuilder
@@ -221,6 +227,12 @@ local ActivatedAbilityBuilder = {}
 ---@param value GameCostsValue
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:AddCost(value) end
+
+--- CR 113.6: the ability functions from "Graveyard" or "Exile" instead of the battlefield.
+--- Registers only while the source is in that zone. Other zone names are an error.
+---@param zoneName "Graveyard"|"Exile"
+---@return ActivatedAbilityBuilder
+function ActivatedAbilityBuilder:SetFunctionsFrom(zoneName) end
 
 --- What this ability does when it resolves. Required before :Register().
 ---@param value GameOpsValue|OperationFn

@@ -39,6 +39,15 @@ cost — that distinction matters if you're later checking whether the ability h
 **`:SetTarget(value)`** — gives the ability a real target. See [Targeting](#targeting) below.
 Optional — omitting it keeps the ability targetless.
 
+**`:SetFunctionsFrom(zoneName)`** — CR 113.6, for an ability that functions from a zone other than
+the battlefield, e.g. "{2}{B}: Return this card from your graveyard to your hand." `zoneName` is
+`"Graveyard"` or `"Exile"` (anything else is a script error — hand abilities like Cycling are
+recognized by their `DiscardSelf` cost, and no other zone has a registration point yet). The ability
+exists only while its source is in that zone: it registers when the card enters it, is dropped when
+the card leaves, and can only be activated/triggers from there. Abilities that don't call this keep
+the default — they never register for a card in the graveyard or exile, so an ETB trigger in the same
+script stays dormant there. Statics, replacement effects and modifiers can't be declared this way yet.
+
 **`:Register()`** — finalizes and queues the ability. Requires `:SetOperation`.
 
 ## Targeting

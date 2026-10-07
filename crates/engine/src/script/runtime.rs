@@ -158,8 +158,13 @@ impl ScriptRuntime {
             .call::<_, ()>(source.0)
             .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
 
-        let mut registered: Vec<RegisteredAbility> =
-            self.registry.borrow_mut().pending_triggered.drain(..).collect();
+        let (queued, function_zones) = {
+            let mut registry = self.registry.borrow_mut();
+            let queued: Vec<RegisteredAbility> = registry.pending_triggered.drain(..).collect();
+            let zones: std::collections::HashMap<usize, ZoneKind> =
+                registry.pending_function_zones.drain(..).collect();
+            (queued, zones)
+        };
         // CR 601.2a: on the stack, the only script-declared abilities that
         // exist yet are the ones that trigger off *being cast* ("when you
         // cast this spell"). Anything else - an ETB trigger, say - only
@@ -167,23 +172,40 @@ impl ScriptRuntime {
         // now would let it fire off the cast's own events. And the reverse:
         // a `Cast` trigger has nothing left to match once the spell has left
         // the stack, so it isn't re-registered in any other zone.
+        //
+        // CR 113.6: an ability that declared `:SetFunctionsFrom(zone)` exists
+        // only while its source is in that zone. An undeclared one never
+        // functions from the graveyard or exile.
         let source_zone = state.object(source).map(|o| o.zone);
         let is_cast_trigger = |a: &RegisteredAbility| {
             a.kind == AbilityKind::Triggered
                 && matches!(a.condition, Some(ConditionSpec::Primitive(ConditionPrimitive::Cast)))
         };
-        if source_zone == Some(ZoneKind::Stack) {
-            registered.retain(|a| is_cast_trigger(a));
-        } else {
-            registered.retain(|a| !is_cast_trigger(a));
+        let mut registered: Vec<RegisteredAbility> = Vec::new();
+        let mut declared_zones: Vec<Option<ZoneKind>> = Vec::new();
+        for (index, ability) in queued.into_iter().enumerate() {
+            let declared = function_zones.get(&index).copied();
+            let keep = match declared {
+                Some(zone) => source_zone == Some(zone),
+                None if source_zone == Some(ZoneKind::Stack) => is_cast_trigger(&ability),
+                None if matches!(source_zone, Some(ZoneKind::Graveyard | ZoneKind::Exile)) => false,
+                None => !is_cast_trigger(&ability),
+            };
+            if keep {
+                registered.push(ability);
+                declared_zones.push(declared);
+            }
         }
-        for ability in &mut registered {
+        for (ability, declared) in registered.iter_mut().zip(declared_zones) {
             // Real id (AbilityId's own doc comment) - the builder itself has
             // no &mut GameState to allocate one from inside a Lua callback,
             // same reason the static-effect timestamp below is stamped here
             // too.
             ability.id = state.allocate_ability_id();
             state.script_ability_ids.insert(ability.id);
+            if let Some(zone) = declared {
+                state.ability_function_zones.insert(ability.id, zone);
+            }
         }
         state.abilities.append(&mut registered);
 

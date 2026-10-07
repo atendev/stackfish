@@ -804,6 +804,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 target: None,
                 operation: None,
                 intervening_if: None,
+                function_zone: None,
                 registry: Rc::clone(&registry),
             })
         })?
@@ -862,6 +863,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                 cost: CostSpec { mana: None, additional: Vec::new(), alternative: Vec::new() },
                 target: None,
                 operation: None,
+                function_zone: None,
                 registry: Rc::clone(&registry),
             })
         })?

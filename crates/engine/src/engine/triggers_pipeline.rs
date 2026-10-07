@@ -145,6 +145,7 @@ impl Engine {
     /// surfaced along the way, then groups the result APNAP order
     /// (`triggers::group_apnap`) ready for `PutTriggersApnap`.
     pub(super) fn resolve_collect_triggers_state(&mut self, since: usize) -> StepStatus {
+        self.sync_off_battlefield_scripts();
         let mut pending = Vec::new();
         let mut script_errors = Vec::new();
         for event in &self.state.ledger[since..] {

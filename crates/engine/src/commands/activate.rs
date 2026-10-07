@@ -73,12 +73,16 @@ pub(super) fn execute_activate_ability(
     let requires_hand = cost
         .as_ref()
         .is_some_and(|c| c.additional.iter().any(|a| matches!(a, AdditionalCost::DiscardSelf)));
-    let required_zone = if requires_hand { ZoneKind::Hand } else { ZoneKind::Battlefield };
+    // CR 113.6: a script-declared `:SetFunctionsFrom(zone)` ability overrides
+    // both (`GameState::ability_function_zones`).
+    let declared_zone = state.ability_function_zones.get(&ability.id).copied();
+    let required_zone = declared_zone
+        .unwrap_or(if requires_hand { ZoneKind::Hand } else { ZoneKind::Battlefield });
     if source_object.zone != required_zone {
-        return Err(CommandError::IllegalAction(if requires_hand {
-            "source is not in hand".to_string()
-        } else {
-            "source is not on the battlefield".to_string()
+        return Err(CommandError::IllegalAction(match required_zone {
+            ZoneKind::Hand => "source is not in hand".to_string(),
+            ZoneKind::Battlefield => "source is not on the battlefield".to_string(),
+            other => format!("source is not in the {other:?} zone"),
         }));
     }
 
