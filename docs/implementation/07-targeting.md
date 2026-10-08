@@ -714,3 +714,21 @@
 - Left open: hexproof/shroud on players (CR 702.11c), "hexproof from [quality]" (CR 702.11d-g), nothing
   consumes `ignored_keywords` for "as though it didn't have hexproof" (CR 702.11e), no team model for
   "opponent", Ward (see `99-backlog.md`).
+
+## Slice: lua-array-target-spec (branch `phase5/fight-bite`)
+
+- Scope: a card script can now declare two or more "target" words. `s.target_requirement()` may return an array of
+  requirement tables, which decodes to `TargetSpec::Multiple`. Before this, only Rust-built cards could have one;
+  `phase5_exchange_of_words.rs` builds it by hand.
+- `script/decode.rs`: `decode_target_spec_table` wraps `decode_target_requirement_table`. A table with no array part
+  decodes to `Primitive` exactly as before (this includes a table with `count`). A non-empty sequence of tables
+  decodes entry by entry, and a one-entry sequence is the same single word, so it returns `Primitive`. An empty
+  table, a table mixing array entries with other keys (or with gaps), and an entry that is not a table are
+  `ScriptError::LoadError`s with a message naming the problem.
+- `ScriptRuntime::build_target_requirement` calls it. `Engine::build_target_requirement` and the scenario loader's
+  `register_script_target_requirement` pass the resulting `TargetSpec` through without matching on its variant, so
+  they needed no change. `register_target_script` (the TOML `filter = "script"` placeholder) only patches a
+  `Primitive` and is unaffected.
+- Not changed: `:SetTarget` on triggered and activated abilities still builds one `Primitive` with count 1, and the
+  scenario TOML `[cards.target_requirement]` is still one table. Both are open.
+- Verify: the Lua decode cases in `phase5_fight_bite.rs`.

@@ -48,6 +48,14 @@ name.
   its cards one after another, not as one simultaneous event. Hand and library sources are not
   supported. Persist and Undying use `Game.Ops.ReturnSelfWithCounter`, which still skips
   replacement checks and entry modifiers.
+- **Fight and bite have narrow target shapes.** `Game.Ops.Fight`/`Bite` work with a two-entry
+  `s.target_requirement()` array, a `count = 2` entry (Fight only) or a single `count = 1` entry
+  (the ability's source is the first creature). Not available: "fights up to one target creature"
+  (`up_to`/`at_least` entries), "fights each creature", damage equal to something other than power,
+  and a two-word target spec on a triggered or activated ability (`:SetTarget` builds one word). A
+  self-source fight or a bite whose creature left the battlefield does nothing instead of using
+  last known information (CR 608.2h). Neither op can be one mode of a multi-mode spell, and a
+  scenario TOML `[cards.target_requirement]` cannot declare two words (use the script array form).
 - **Modal spells ("choose one —") aren't driven by a card script at all.** The mode is chosen
   before the spell goes on the stack, as part of casting it — a fundamentally different mechanism
   from the mid-resolution `Game.SelectTargets`/`Game.MayChoose` asks documented in

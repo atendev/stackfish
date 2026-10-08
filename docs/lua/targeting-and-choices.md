@@ -145,6 +145,45 @@ end
 
 `count`/`up_to`/`at_least`/`exclude_source` still sit alongside `filter` as sibling keys either way.
 
+### Two-target spells (fight and bite)
+
+A spell with two distinct "target" words returns an array of requirement tables, one per word, in
+card order. Each entry is the same table shape as the single form above. The engine builds one
+`TargetSpec::Multiple` from it, and the caster submits the targets in the same order (the first
+target for the first entry, the second for the second). Each entry is checked on its own, so the same
+creature can be picked for two entries when both filters allow it.
+
+```lua
+-- Prey Upon: "Target creature you control fights target creature you don't control."
+function s.target_requirement()
+    return {
+        { card_types = { "Creature" }, controller = "you", count = 1 },
+        { card_types = { "Creature" }, controller = "opponent", count = 1 },
+    }
+end
+function s.operation()
+    return Game.Ops.Fight
+end
+```
+
+```lua
+-- Bite: "Target creature you control deals damage equal to its power to target creature you don't control."
+function s.operation()
+    return Game.Ops.Bite   -- same two-entry target_requirement as above
+end
+```
+
+The return value must be either one requirement table (anything with no array part, as before) or a
+plain non-empty array of requirement tables. An empty table, a table that mixes array entries with
+keys such as `count`, an array with gaps, and an array entry that is not a table are all load
+errors. A one-entry array is the same single word as a bare table.
+
+An ability (not a spell) can also use `Fight` or `Bite` with a normal single `:SetTarget`. The
+ability's own source is then the first creature, for example "When this creature enters, it fights
+target creature you don't control" (a triggered ability) or "{1}: This creature fights target
+creature you don't control" (an activated one). A triggered or activated ability cannot declare two
+target words yet, because `:SetTarget` builds a single requirement.
+
 ## Scripted targeting predicates
 
 For a legality check the plain filter table can't express (e.g. "target creature with power 4 or

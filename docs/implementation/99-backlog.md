@@ -2,6 +2,29 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Fight and bite (`phase5/fight-bite`)**: `AbilityEffect::{Fight, Bite}` (`Game.Ops.Fight`, `Game.Ops.Bite`, bare
+  tags). One resolver, `resolve_fight_effect` (`resolve/direct_effects.rs`), with a `mutual` flag. The creatures come
+  from the target spec: a two-word `TargetSpec::Multiple` (first acts on second, read from `modal_chunk_legals`),
+  one count-2 word (Fight only), or one count-1 word (the ability's `top.source` is the first creature). Each
+  creature is the source of its own `DamageDealt` event (`is_combat_damage: false`, CR 701.14d), so the existing
+  `apply_damage_event` and replacement pipeline give deathtouch, lifelink, wither, infect, protection prevention and
+  "deals damage" triggers with no second pipeline. Power comes from `commands::effective_power` (now `pub(crate)`),
+  both amounts are fixed before either event is pushed, and power 0 or less pushes no event. Fighting itself is one
+  event of twice the power (CR 701.14c); a bite on itself deals its power once. CR 701.14b: a creature that left the
+  battlefield, stopped being a creature or became an illegal target means neither deals damage, and the spell is
+  not counted as fizzled while any target is still legal. Also new: `s.target_requirement()` may return an array of
+  requirement tables, which builds `TargetSpec::Multiple` (`decode_target_spec_table`); an empty table, a mixed
+  table and a non-table entry are load errors. `Engine::build_target_requirement` and the scenario loader needed no
+  change. Tests: `phase5_fight_bite.rs` (49). Left open: **TODO(CR 608.2h)** a self-source fight or a bite whose
+  creature left the battlefield does nothing instead of using last known information for its power; no "fights up
+  to one target creature" (`up_to`/`at_least` words), no "fights each creature", no damage based on something other
+  than power; not usable as a mode of a multi-mode spell (`is_modal_resolvable` unchanged); a triggered or
+  activated ability cannot declare two target words (`:SetTarget` builds one `Primitive`, count 1), so "target
+  creature you control fights target creature you don't control" works as a spell only; the scenario TOML
+  `[cards.target_requirement]` cannot declare two words (use the script array form); a two-word spec where either
+  word is `up_to` or `at_least` does nothing; damage to planeswalkers and battles keeps the existing TODO in
+  `apply_damage_event`. A Fight or Bite whose pair is a `Multiple` with more than two words does nothing.
+
 - **Reanimation (`phase5/reanimation`)**: `AbilityEffect::{ReturnToBattlefield { control, tapped },
   ReturnAllToBattlefield { filter, zone, control, tapped }}` (`Game.Ops.ReturnToBattlefield(opts?)`,
   `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)`, both call-form) and `EntryControl { You, Owner }`

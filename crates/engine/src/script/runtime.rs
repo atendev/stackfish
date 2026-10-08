@@ -21,7 +21,7 @@ use crate::types::target::TargetSpec;
 
 use super::decode::{
     decode_alternative_cost_table, decode_condition_value, decode_operation_value, decode_script_choice_request,
-    decode_subtypes, decode_target_pick, decode_target_requirement_table, parse_card_type_name, parse_color_string,
+    decode_subtypes, decode_target_pick, decode_target_spec_table, parse_card_type_name, parse_color_string,
     parse_counter_kind_name, parse_keyword_name, parse_supertype_name,
 };
 use super::encode::{event_to_lua, state_to_lua};
@@ -360,9 +360,11 @@ impl ScriptRuntime {
     /// `count`/`up_to`/`at_least`/`exclude_source` as sibling keys —
     /// identical shape to the scenario crate's own TOML
     /// `[cards.target_requirement]` table (`TargetRequirementSpec`), just
-    /// Lua-authored. A card with no `target_requirement` function at all
-    /// (the overwhelming majority) returns `Ok(None)` — same "requires no
-    /// targets" default `CardDefinition::target_requirement`'s own doc
+    /// Lua-authored. A plain array of such tables instead declares one
+    /// requirement per distinct "target" word (`TargetSpec::Multiple`, see
+    /// `decode_target_spec_table`). A card with no `target_requirement`
+    /// function at all (the overwhelming majority) returns `Ok(None)` — same
+    /// "requires no targets" default `CardDefinition::target_requirement`'s own doc
     /// comment already documents.
     ///
     /// `&self`, not `&mut self`, and re-evaluates `source` fresh rather than
@@ -380,8 +382,7 @@ impl ScriptRuntime {
         let table: Table =
             function.call(()).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
         let mut registry = self.registry.borrow_mut();
-        let requirement = decode_target_requirement_table(&self.lua, &mut registry, table)?;
-        Ok(Some(TargetSpec::Primitive(requirement)))
+        Ok(Some(decode_target_spec_table(&self.lua, &mut registry, table)?))
     }
 
     /// CR 608.2m: a plain spell's own resolution effect (Armageddon's

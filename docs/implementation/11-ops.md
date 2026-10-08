@@ -597,3 +597,28 @@
 - Verify: `phase5_reanimation.rs` (44).
 - Open: see the `phase5/reanimation` entry in [99-backlog](99-backlog.md).
 
+
+## Slice: fight-bite (branch `phase5/fight-bite`)
+
+- `AbilityEffect::{Fight, Bite}`, bare tags (`Game.Ops.Fight`, `Game.Ops.Bite`) in `script/globals.rs`. No fields; the
+  creatures come from the ability's target spec.
+- One resolver, `resolve_fight_effect` in `resolve/direct_effects.rs`, with a `mutual` flag (`true` for `Fight`).
+  It reads the per-word legal chunks (`modal_chunk_legals`, built for any `TargetSpec::Multiple`) so an illegal
+  word leaves an empty chunk and the whole effect does nothing (CR 701.14b). Pairing: two exact count-1 words (first
+  acts on second); one count-2 `Primitive` (Fight only, `legal_targets` must still hold both); one count-1
+  `Primitive` (the ability's `top.source` is the first creature). Every other shape does nothing.
+- Both creatures must still be creatures on the battlefield (`layers::effective_characteristics`). Amounts come from
+  `commands::effective_power` (widened from `pub(in crate::commands)` to `pub(crate)` and re-exported), are fixed
+  before any event is pushed, and a power of 0 or less pushes no event. Each event is `DamageDealt { source:
+  <creature>, is_combat_damage: false }`, so the existing replacement check and `apply_damage_event` handle
+  deathtouch, lifelink (once per event), wither, infect, protection prevention and "deals damage" triggers. No
+  second damage pipeline.
+- A creature fighting itself (same creature chosen for both words) takes one event of twice its power (CR 701.14c).
+  A bite on itself deals its power once.
+- Protection and hexproof gained after targeting make a target illegal at resolution, so the fight does nothing
+  (this is the CR 608.2b path, not damage prevention). Protection a creature already had when targeted prevents only
+  the damage from sources with the protected quality (CR 702.16e), through the normal replacement check.
+- `commands/activate.rs`: both variants join the non-mana activated-ability list. `is_modal_resolvable` is
+  unchanged, so neither op can be combined as one mode of a multi-mode spell.
+- Verify: `phase5_fight_bite.rs` (49).
+- Open: see the `phase5/fight-bite` entry in [99-backlog](99-backlog.md).

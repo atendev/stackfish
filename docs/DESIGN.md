@@ -49,6 +49,12 @@ request). Replace the YGO rules kernel entirely with an MTG-native one per the a
   `ZoneChange` (`ScriptedZoneMoveKind::Mill`, committed through `commit_zone_move`); `LoseLife` is the first
   resolution-time producer of `LifeChanged`; `SacrificeSelf` reuses the `Sacrifice` path with a CR 701.21a control
   check
+- `Game.Ops.Fight`/`Bite` (`phase5/fight-bite`): pairwise damage between two creatures (CR 701.14). The pair comes
+  from the target spec (two-word `Multiple`, one count-2 word for Fight, or the ability source plus one count-1
+  target). Each creature is the source of its own `DamageDealt` event (not combat damage), so the existing
+  `apply_damage_event` and replacement pipeline give deathtouch, lifelink, wither, infect, protection and
+  prevention for free; both amounts are read before either event is pushed. `s.target_requirement()` may now
+  return an array, which builds `TargetSpec::Multiple`
 - `Game.Ops.ReturnToBattlefield`/`ReturnAllToBattlefield` (`phase5/reanimation`): graveyard or exile to
   battlefield through `ScriptedZoneMoveKind::Reanimate { controller, tapped }`. The entry is replacement-checked,
   then `commit_reanimate` gives the card the treatment a resolving permanent spell gets (new object, card script,

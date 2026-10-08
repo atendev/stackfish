@@ -19,7 +19,7 @@
 //! variant to a themed helper in a sibling file — see each sibling's own
 //! module doc comment for which cluster it owns:
 //! - `direct_effects`: the synchronous-only arms (never pause mid-
-//!   resolution) — `Modal`, `GainLife`, `LoseLife`, `Damage`, `Counters`, `Pump`,
+//!   resolution) — `Modal`, `GainLife`, `LoseLife`, `Damage`, `Fight`, `Bite`, `Counters`, `Pump`,
 //!   `GainControl`, `Regenerate`.
 //! - `destruction`: the always-pausing zone-move arms — `Sacrifice`,
 //!   `Destroy`, `DestroyAll`, `Exile`, `SacrificeRandom`.
@@ -719,6 +719,11 @@ impl Engine {
             // Target::Object targets is a silent no-op - no
             // partner to exchange with.
             Some(AbilityEffect::ExchangeTextBoxes) => self.resolve_exchange_text_boxes_effect(top, events),
+            // CR 701.14: fight (mutual) and bite (one-sided) damage between
+            // two creatures. Reads the per-word legal chunks, not the
+            // flattened list, to keep the pairing.
+            Some(AbilityEffect::Fight) => self.resolve_fight_effect(top, legal_targets, modal_chunk_legals, true, events),
+            Some(AbilityEffect::Bite) => self.resolve_fight_effect(top, legal_targets, modal_chunk_legals, false, events),
             // CR 111: create one or more token permanents on
             // the battlefield under the controller's control.
             // Named tokens (Clue, Food) get their activated

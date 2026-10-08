@@ -782,6 +782,60 @@ pub enum AbilityEffect {
     /// one needs - see `TargetSpec::Multiple`'s own doc comment on why
     /// role-differentiated multi-word effects need bespoke handling).
     ExchangeTextBoxes,
+    /// The `Game.Ops.Fight` primitive (CR 701.14) - two creatures each deal
+    /// damage equal to their power to the other. No fields; the creatures
+    /// come from the resolving ability's own target spec, and the spec's
+    /// shape picks who fights whom:
+    ///
+    /// - `TargetSpec::Multiple` with two exact count-1 words ("target
+    ///   creature you control fights target creature you don't control"):
+    ///   the first word's creature fights the second word's creature. The
+    ///   two words may hold the same creature, which then fights itself.
+    /// - one `TargetSpec::Primitive` with count 2 ("two target creatures
+    ///   fight each other"): the two chosen creatures fight.
+    /// - one `TargetSpec::Primitive` with count 1 ("it fights target
+    ///   creature"): the ability's own source fights the target.
+    ///
+    /// Any other shape does nothing. Each creature deals damage as the
+    /// SOURCE of its own `GameEventKind::DamageDealt` (`is_combat_damage:
+    /// false`, CR 701.14d), so deathtouch, lifelink, wither, infect,
+    /// protection, prevention and replacement effects and "deals damage"
+    /// triggers all see the creature, not the spell. Both amounts are read
+    /// through the layer engine and fixed before either event is pushed, so
+    /// the damage is simultaneous and state-based actions run only
+    /// afterward. A creature with power 0 or less deals no damage and
+    /// emits no event. A creature that fights itself takes one event of
+    /// twice its power (CR 701.14c).
+    ///
+    /// CR 701.14b: if either creature is gone, no longer a creature, or an
+    /// illegal target at resolution, neither deals damage. The spell or
+    /// ability still counts as resolved (not fizzled) while at least one
+    /// target is legal.
+    ///
+    /// TODO(CR 608.2h): a self-source fight whose source has left the
+    /// battlefield does nothing instead of using last known information.
+    /// TODO: no "fights up to one target creature" (an `up_to`/`at_least`
+    /// word), no "fights each creature", and not usable as a mode of a
+    /// multi-mode spell (`commands::is_modal_resolvable` is unchanged).
+    Fight,
+    /// The `Game.Ops.Bite` primitive - the one-sided cousin of `Fight`:
+    /// "target creature you control deals damage equal to its power to
+    /// target creature you don't control." Not a fight (CR 701.14 never
+    /// applies), so the first creature takes no damage back. No fields.
+    /// Target shapes: a `TargetSpec::Multiple` of two exact count-1 words
+    /// (first word deals, second word receives), or one count-1
+    /// `TargetSpec::Primitive` (the ability's own source deals the damage
+    /// to the target). A count-2 word has no sensible dealer and does
+    /// nothing. The damage is a single `DamageDealt` event from the first
+    /// creature (`is_combat_damage: false`), so every keyword and
+    /// prevention effect that applies to `Fight` damage applies here too.
+    /// The dealer must still be a creature on the battlefield at
+    /// resolution and power 0 or less deals no damage.
+    ///
+    /// TODO(CR 608.2h): a dealer that has left the battlefield does
+    /// nothing instead of using last known information for its power.
+    /// Same other limits as `Fight`.
+    Bite,
     /// CR 700.2d — 2+ chosen modes of a modal spell/ability, combined.
     /// `commands::execute_command`'s `CastSpell` arm builds this only when
     /// `modes.len() >= 2`; a single chosen mode still uses that mode's own
