@@ -578,3 +578,22 @@
   is Mill in the current comp rules). Other stale citations were left alone.
 - Verify: `phase5_mill_lose_life_sacrifice_self.rs` (32).
 - Open: see the `phase5/mill-lose-life-sacrifice-self` entry in [99-backlog](99-backlog.md).
+
+## Slice: reanimation (branch `phase5/reanimation`)
+
+- `AbilityEffect::{ReturnToBattlefield { control, tapped }, ReturnAllToBattlefield { filter, zone, control, tapped }}`
+  and `EntryControl { You, Owner }`. Lua: `Game.Ops.ReturnToBattlefield(opts?)` and
+  `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)`, both call-form functions in `script/globals.rs`.
+  `opts` is `{ control = "You"|"Owner", tapped = boolean }`, decoded by `decode_entry_options`, which rejects
+  unknown keys and values. `zone` defaults to Graveyard and accepts Graveyard or Exile.
+- The resolvers are in `resolve/destruction.rs` next to the bounce and exile ones. The targeted form takes the
+  legal object targets, the all-form reuses `objects_in_zone_matching`. `reanimate_kind` maps `EntryControl::You`
+  to the resolving ability's controller and `Owner` to `None`.
+- `script/decode.rs`: `decode_operation_value` rejects an uncalled `Game.Ops.*` function (`SetOperation(
+  Game.Ops.ReturnToBattlefield)`) with "must be called". Before this a bare function was registered as a custom
+  script function and failed at resolution. The check applies to every call-form op (`Mill`, `ExileAll`, ...).
+- `commands/activate.rs`: both variants join the non-mana activated-ability list. `is_modal_resolvable` is
+  unchanged.
+- Verify: `phase5_reanimation.rs` (44).
+- Open: see the `phase5/reanimation` entry in [99-backlog](99-backlog.md).
+

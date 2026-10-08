@@ -679,3 +679,19 @@
   a green-field gap needing a "simultaneous entry" producer this engine doesn't have anywhere, not a
   wiring gap this slice could close. Devour/Amplify via `PlayLand`/`CreateToken` — see Scope above, both
   named TODOs rather than silent gaps.
+
+## Slice: reanimation entry (branch `phase5/reanimation`)
+
+- A graveyard or exile to battlefield move is the second producer of a `WouldMoveZone(_, Battlefield)` proposal
+  that is not a resolving spell. `ScriptedZoneMoveKind::Reanimate` proposes the `ZoneChange` through
+  `apply_replacements`, so `ReplaceZoneDestination` redirects and CR 616.1 ordering pauses work with no new
+  matching code. The pause resumes through `ReplacementResumeTarget::ScriptedZoneMove`, which carries the rest of
+  the batch.
+- Redirect filters read the object's controller. The reanimate loop writes the entering player there just before
+  the check and `commit_reanimate` resets it to the owner afterwards (see 02-zone-moves).
+- After the move, `apply_enters_battlefield_modifiers` runs with `from` set to the real source zone and no colors
+  spent. Enters tapped, enters with counters, Bloodthirst and Escape counters therefore apply to a reanimated card.
+- Copy, Devour and Amplify choices are not raised here. Their pauses (`AwaitingCopyChoice`,
+  `AwaitingDevourChoice`, `AwaitingAmplifyChoice`) carry a stack id and resume spell resolution, so a reanimated
+  card with one of those effects enters as itself. See the backlog entry.
+

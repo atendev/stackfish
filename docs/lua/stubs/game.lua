@@ -621,6 +621,23 @@ GameOpsTable.ExileSelf = nil
 ---@return GameOpsValue
 function GameOpsTable.ExileAll(filter, zone) end
 
+--- CR 110.2a/400.7: "return target creature card from a graveyard to the battlefield". Declare the target with a
+--- `zone = "Graveyard"` (or "Exile") filter. Replacement-checked, then the card enters as a new object with its
+--- script run, enters-tapped/enters-with-counters effects applied and its enters triggers firing. Instants and
+--- sorceries stay put (CR 400.4a). An Aura with one legal host enters attached; with none (or, TODO, two or more)
+--- it stays in the graveyard. Must be called: `Game.Ops.ReturnToBattlefield()`, passing it bare is a script error.
+---@param opts? { control?: "You"|"Owner", tapped?: boolean }  control defaults to "You" (the effect's controller)
+---@return GameOpsValue
+function GameOpsTable.ReturnToBattlefield(opts) end
+
+--- CR 601.2c/110.2a: "return all creature cards from all graveyards to the battlefield". No targets. Same entry
+--- steps as ReturnToBattlefield, applied to each matching card in turn. Must be called.
+---@param filter table  same shape as DestroyAll's filter (`controller` is read off the object's controller)
+---@param zone? string  "Graveyard" (default, every player's) or "Exile"
+---@param opts? { control?: "You"|"Owner", tapped?: boolean }
+---@return GameOpsValue
+function GameOpsTable.ReturnAllToBattlefield(filter, zone, opts) end
+
 --- CR 701.26a/601.2c: "tap all creatures your opponents control". No targets (hexproof/protection don't stop it).
 --- Taps every untapped battlefield permanent matching `filter`. Battlefield only (CR 110.5d), so no zone argument.
 ---@param filter table  same shape as DestroyAll's filter (`controller` is read off the raw controller field)

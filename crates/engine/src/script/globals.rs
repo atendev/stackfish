@@ -9,7 +9,7 @@ use std::rc::Rc;
 use mlua::{AnyUserData, Function, Lua, Table, Value};
 
 use crate::types::ability::{
-    AbilityEffect, ConditionPrimitive, CreatureTokenSpec, InterveningIfPrimitive, NamedToken, SearchDestination,
+    AbilityEffect, ConditionPrimitive, CreatureTokenSpec, EntryControl, InterveningIfPrimitive, NamedToken, SearchDestination,
     TokenSpec, UnlessPaidConsequence,
 };
 use crate::types::card::{CardTypeSet, Subtype};
@@ -232,6 +232,33 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         Ok(OperationTag(AbilityEffect::ReturnAllToHand { filter, zone }))
     })?;
     ops.set("ReturnAllToHand", return_all_to_hand)?;
+    // CR 110.2a/400.7: reanimation. Both are call-form ops: `opts` is an
+    // optional `{ control = "You" | "Owner", tapped = bool }` table.
+    let return_to_battlefield = lua.create_function(|_, opts: Option<Table>| {
+        let (control, tapped) = decode_entry_options(opts, "ReturnToBattlefield")?;
+        Ok(OperationTag(AbilityEffect::ReturnToBattlefield { control, tapped }))
+    })?;
+    ops.set("ReturnToBattlefield", return_to_battlefield)?;
+    // `zone` defaults to "Graveyard"; only the zones
+    // `ScriptedZoneMoveKind::Reanimate` accepts as a source are allowed.
+    let return_all_to_battlefield =
+        lua.create_function(|_, (table, zone, opts): (Table, Option<String>, Option<Table>)| {
+            let filter = decode_effect_filter_table(&table).map_err(to_lua_err)?;
+            let zone = match zone {
+                None => ZoneKind::Graveyard,
+                Some(name) => match crate::script::decode::parse_zone_kind_name(&name).map_err(to_lua_err)? {
+                    z @ (ZoneKind::Graveyard | ZoneKind::Exile) => z,
+                    other => {
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "ReturnAllToBattlefield zone must be \"Graveyard\" or \"Exile\", got {other:?}"
+                        )))
+                    }
+                },
+            };
+            let (control, tapped) = decode_entry_options(opts, "ReturnAllToBattlefield")?;
+            Ok(OperationTag(AbilityEffect::ReturnAllToBattlefield { filter, zone, control, tapped }))
+        })?;
+    ops.set("ReturnAllToBattlefield", return_all_to_battlefield)?;
     ops.set("ExileSelf", OperationTag(AbilityEffect::ExileSelf))?;
     // CR 406.2: `zone` defaults to "Battlefield"; only the zones
     // `ScriptedZoneMoveKind::Exile` accepts as a source are allowed.
@@ -1315,4 +1342,36 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     game.set("MayChoose", may_choose)?;
     game.set("ChooseN", choose_n)?;
     lua.globals().set("Game", game)
+}
+
+/// Decodes the `{ control = "You" | "Owner", tapped = bool }` options table
+/// of the reanimation ops. Defaults are CR 110.2a's "under your control" and
+/// untapped; an unknown key or value is a script error so typos don't pass.
+fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(EntryControl, bool)> {
+    let mut control = EntryControl::You;
+    let mut tapped = false;
+    let Some(opts) = opts else { return Ok((control, tapped)) };
+    for pair in opts.pairs::<String, mlua::Value>() {
+        let (key, value) = pair?;
+        match (key.as_str(), value) {
+            ("control", mlua::Value::String(name)) => {
+                control = match name.to_str()?.to_ascii_lowercase().as_str() {
+                    "you" => EntryControl::You,
+                    "owner" => EntryControl::Owner,
+                    other => {
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "{op_name} control must be \"You\" or \"Owner\", got {other:?}"
+                        )))
+                    }
+                };
+            }
+            ("tapped", mlua::Value::Boolean(flag)) => tapped = flag,
+            (other, _) => {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "{op_name} option {other:?} is unknown or has the wrong type (expected control = \"You\"|\"Owner\", tapped = boolean)"
+                )))
+            }
+        }
+    }
+    Ok((control, tapped))
 }

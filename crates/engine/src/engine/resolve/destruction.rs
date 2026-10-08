@@ -12,6 +12,7 @@
 use std::collections::VecDeque;
 use std::ops::ControlFlow;
 
+use crate::types::ability::EntryControl;
 use crate::types::effect::{matches_effect_filter, EffectFilter};
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::ids::{ObjectId, PlayerId, Target};
@@ -180,6 +181,52 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
+    /// CR 110.2a/400.7: `Game.Ops.ReturnToBattlefield(opts?)` - moves each
+    /// legal graveyard or exile target onto the battlefield through
+    /// `ScriptedZoneMoveKind::Reanimate`. A `Target::Player` is skipped.
+    pub(super) fn resolve_return_to_battlefield_effect(
+        &mut self,
+        top: &StackObject,
+        legal_targets: &[Target],
+        control: EntryControl,
+        tapped: bool,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let targets: VecDeque<ObjectId> = legal_targets
+            .iter()
+            .filter_map(|t| match t {
+                Target::Object(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        self.process_state = self.continue_scripted_zone_move(
+            reanimate_kind(top, control, tapped),
+            targets,
+            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+            Vec::new(),
+        );
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
+    /// CR 601.2c/110.2a: `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)`
+    /// - every object in `zone` matching `filter`, no targets.
+    pub(super) fn resolve_return_all_to_battlefield_effect(
+        &mut self,
+        top: &StackObject,
+        filter: &EffectFilter,
+        zone: ZoneKind,
+        control: EntryControl,
+        tapped: bool,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let targets = self.objects_in_zone_matching(top, filter, zone);
+        self.process_state = self.continue_scripted_zone_move(
+            reanimate_kind(top, control, tapped),
+            targets,
+            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+            Vec::new(),
+        );
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
     /// Every object in any zone of `kind` (all players' graveyards for
     /// `Graveyard`) that `filter` matches relative to the resolving ability.
     fn objects_in_zone_matching(&self, top: &StackObject, filter: &EffectFilter, zone: ZoneKind) -> VecDeque<ObjectId> {
@@ -277,4 +324,14 @@ impl Engine {
         }
         chosen
     }
+}
+
+/// CR 110.2a: `You` enters under the resolving ability's controller; `Owner`
+/// leaves the controller unset so each card enters under its own owner.
+fn reanimate_kind(top: &StackObject, control: EntryControl, tapped: bool) -> ScriptedZoneMoveKind {
+    let controller = match control {
+        EntryControl::You => Some(top.controller),
+        EntryControl::Owner => None,
+    };
+    ScriptedZoneMoveKind::Reanimate { controller, tapped }
 }

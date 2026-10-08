@@ -438,3 +438,11 @@ through the full `target_is_legal`.
 - `Fear`, `Intimidate`, `Shadow`, `Horsemanship` added as evasion keywords in `DeclareBlockers`.
 - `KeywordSet` widened to `u32` to fit new bits.
 - `Landwalk` and `Banding` still open; Flanking/Rampage are triggered abilities, not blocking restrictions.
+
+## Aura entry by reanimation (`phase5/reanimation`)
+
+- `commit_reanimate` uses `legal_aura_entry_candidates` (the hexproof-free `attachment_target_is_legal`) before the
+  Aura moves. Exactly one legal host attaches it (`Attached` or `AttachedToPlayer`); none leaves it in the
+  graveyard (CR 303.4g). Two or more also leave it there for now: the controller's host choice (CR 303.4f) needs
+  an entry-attach pause that doesn't depend on a stack object or a search. Equipment and other permanents enter
+  unattached through this path.

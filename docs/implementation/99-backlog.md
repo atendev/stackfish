@@ -2,6 +2,33 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Reanimation (`phase5/reanimation`)**: `AbilityEffect::{ReturnToBattlefield { control, tapped },
+  ReturnAllToBattlefield { filter, zone, control, tapped }}` (`Game.Ops.ReturnToBattlefield(opts?)`,
+  `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)`, both call-form) and `EntryControl { You, Owner }`
+  (CR 110.2a, default `You`). They feed the new `ScriptedZoneMoveKind::Reanimate { controller, tapped }`
+  (Graveyard or Exile source, read at resolution). The proposed `ZoneChange` is replacement-checked, so redirects and
+  CR 616.1 ordering pauses work. `commit_reanimate` then builds the new object, runs the card script and calls
+  `apply_enters_battlefield_modifiers` (enters tapped, enters with counters, Bloodthirst, Escape counters). Enters
+  triggers fire off the ledger event. Instants and sorceries stay put (CR 400.4a). An Aura with exactly one legal
+  host enters attached (CR 303.4f); with none it stays (CR 303.4g). `commit_scripted_zone_move` now returns the
+  entry events (`CounterAdded`, `Attached`) that its two callers add to `trailing`. Temporary mutation: before the
+  replacement check the loop writes the entering player onto the graveyard object's `controller` so entry filters
+  see them. `commit_reanimate` resets it to the owner first on every path (redirect, Aura skip, answered ordering
+  pause); an instant or sorcery skip and a stale target never get the write. Tests: `phase5_reanimation.rs` (44).
+  Also fixed: a bare `SetOperation(Game.Ops.Mill)` (any call-form op passed uncalled) now fails with "must be
+  called" instead of registering as a custom function. Left open: **Aura with several legal hosts** (CR 303.4f)
+  stays in the graveyard because there is no entry-attach pause outside a stack object or a search; Clone, Devour
+  and Amplify choices (CR 707.6, 702.82a, 702.38a) are not raised, so such a card enters as itself; no "enters with
+  an additional counter" option (CR 122.6), no "enters attacking" (CR 508.4), no "under target opponent's control",
+  no "may", no Zombify-style haste or end-step exile rider; no hand or library source; the all-form enters cards
+  one after another, not as one simultaneous event (CR 603.6a, 614.12), so an earlier arrival can affect a later
+  one; not usable as a mode of a multi-mode spell (`is_modal_resolvable` unchanged). **Persist/Undying divergence**:
+  `ReturnSelfWithCounter` is untouched and still logs its `ZoneChange` straight to the ledger, with no replacement
+  check and no `apply_enters_battlefield_modifiers`; a reanimated card gets both. Folding Persist/Undying onto
+  `Reanimate` (controller `None`, plus one counter) is possible later. Test-harness note: a replacement effect's
+  `source` must be a real object in the state, and two simultaneous enters triggers for one controller pause on
+  `AwaitingTriggerOrderChoice`.
+
 - **Mill, lose life and sacrifice self (`phase5/mill-lose-life-sacrifice-self`)**: `AbilityEffect::{Mill(u32),
   LoseLife(u32), SacrificeSelf}` (`Game.Ops.Mill(n)`, `Game.Ops.LoseLife(n)`, `Game.Ops.SacrificeSelf` bare tag).
   `Mill` and `LoseLife` share one variant for "you" and "target player": no declared target spec means the
