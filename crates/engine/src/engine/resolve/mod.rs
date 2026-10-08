@@ -19,7 +19,7 @@
 //! variant to a themed helper in a sibling file — see each sibling's own
 //! module doc comment for which cluster it owns:
 //! - `direct_effects`: the synchronous-only arms (never pause mid-
-//!   resolution) — `Modal`, `GainLife`, `Damage`, `Counters`, `Pump`,
+//!   resolution) — `Modal`, `GainLife`, `LoseLife`, `Damage`, `Counters`, `Pump`,
 //!   `GainControl`, `Regenerate`.
 //! - `destruction`: the always-pausing zone-move arms — `Sacrifice`,
 //!   `Destroy`, `DestroyAll`, `Exile`, `SacrificeRandom`.
@@ -640,6 +640,14 @@ impl Engine {
             Some(AbilityEffect::DrawCards(amount)) => {
                 self.resolve_draw_cards_effect(top, *amount, events)
             }
+            // CR 701.17a/b: the affected player is the controller when
+            // the ability declared no target spec, else the first legal
+            // player target - see AbilityEffect::Mill's own doc comment.
+            Some(AbilityEffect::Mill(amount)) => self.resolve_mill_effect(top, legal_targets, *amount, events),
+            // CR 119.3: same player selection as Mill above. Synchronous.
+            Some(AbilityEffect::LoseLife(amount)) => self.resolve_lose_life_effect(top, legal_targets, *amount, events),
+            // CR 701.21a: untargeted sibling of Sacrifice above.
+            Some(AbilityEffect::SacrificeSelf) => self.resolve_sacrifice_self_effect(top),
             // CR 701.19b: no target, always top.controller
             // (same "controller only" shape DrawCards/
             // GainLife use). shuffle_library already mutates

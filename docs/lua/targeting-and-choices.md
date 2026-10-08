@@ -336,8 +336,8 @@ once every player (including one whose own body never asked anything, because th
 the minimum) has been invoked. A replacement effect reading the battlefield mid-loop still sees every
 permanent that's *about to* leave, not one that already has.
 
-`Game.Ops.ForEachPlayer` also accepts a bare `Game.Ops.SacrificeRandom`/`DiscardRandom` value
-directly, with no wrapper function at all — CR 701.9b/701.21's "at random" shape has no player choice
+`Game.Ops.ForEachPlayer` also accepts a bare `Game.Ops.SacrificeRandom`/`DiscardRandom`/`Mill`/
+`LoseLife` value directly, with no wrapper function at all — CR 701.9b/701.21's "at random" shape has no player choice
 to make, so there's no need for a script to run per player:
 
 ```lua
@@ -351,9 +351,15 @@ Every player's own random picks are drawn first and merged into one batch before
 move, same simultaneity guarantee as the function shape above — with no coroutine involved at all,
 this resolves in a single synchronous step (no `AwaitingScriptChoice` pause ever happens). Handing
 `Game.Ops.ForEachPlayer` any other `Game.Ops.*` value directly (anything other than
-`SacrificeRandom`/`DiscardRandom`) is a load-time error, not a silent no-op — wrap it in a function
+`SacrificeRandom`/`DiscardRandom`/`Mill`/`LoseLife`) is a load-time error, not a silent no-op — wrap it in a function
 instead if it needs to run per player (e.g. `Game.Ops.ForEachPlayer(function(s, c) return
 Game.Ops.GainLife(1) end)`).
+
+`Game.Ops.ForEachPlayer(Game.Ops.Mill(2))` ("each player mills two cards") and
+`Game.Ops.ForEachPlayer(Game.Ops.LoseLife(1))` ("each player loses 1 life") work the same way. Every
+player's top cards are merged into one mill batch, and life loss is applied to each player in APNAP
+order with one `LifeChanged` event per player. Inside this wrapper they always hit every player and
+ignore the ability's own target.
 
 ## What these can't do yet
 
@@ -363,5 +369,5 @@ Game.Ops.GainLife(1) end)`).
   Choosing a mode for a modal spell ("choose one —") happens before the spell even goes on the
   stack, as part of casting it — a different mechanism entirely, and not something a card script
   drives (see [not-available-yet.md](not-available-yet.md)).
-- `Game.Ops.ForEachPlayer`'s bare-tag shape only accepts `SacrificeRandom`/`DiscardRandom` — no
+- `Game.Ops.ForEachPlayer`'s bare-tag shape only accepts `SacrificeRandom`/`DiscardRandom`/`Mill`/`LoseLife` — no
   other `Game.Ops.*` primitive can be applied per-player without a wrapping function.

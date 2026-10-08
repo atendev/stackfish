@@ -73,3 +73,12 @@ name.
   value 3 or less" or "mana value X," *and* "counter target activated or triggered ability"
   (Stifle, Trickbind, via `{type = "ability"}` on `:SetTarget`/`target_requirement()`) are all real
   now too.)
+- **Mill and life loss have no trigger or replacement hooks.** `Game.Ops.Mill` and `Game.Ops.LoseLife`
+  work (see [game-constants.md](game-constants.md#gameops)), but no `Game.Conditions.*` entry listens
+  for "whenever a card is milled" or "whenever you lose life", and there is no "would lose life"
+  replacement or "can't lose life" restriction (CR 119.8). `Game.Ops.GainLife`, damage to a player and
+  lifelink do not emit the `LifeChanged` event `LoseLife` emits. There is no way to act on "the milled
+  card" (CR 701.17c/d), no mill as a cost, no dredge and no rad counters.
+- **Echo's sacrifice does not check control.** `Game.Ops.SacrificeSelf` checks that the ability's
+  controller still controls the permanent (CR 701.21a). The sacrifice an unpaid Echo trigger makes
+  does not make that check yet.

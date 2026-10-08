@@ -299,6 +299,11 @@ pub enum ScriptedZoneMoveKind {
     Discard,
     /// CR 400.3: Battlefield -> owner's Hand (`AbilityEffect::ReturnToHand`).
     Bounce,
+    /// CR 701.17a: Library -> owner's Graveyard (`AbilityEffect::Mill`).
+    /// Committed through `commands::commit_zone_move`, not the Discard arm,
+    /// so a replacement that rewrites the destination (to Exile) still
+    /// lands in the right zone.
+    Mill,
 }
 
 impl ScriptedZoneMoveKind {
@@ -323,6 +328,7 @@ impl ScriptedZoneMoveKind {
     pub(in crate::engine) fn from_zone(self) -> ZoneKind {
         match self {
             ScriptedZoneMoveKind::Discard => ZoneKind::Hand,
+            ScriptedZoneMoveKind::Mill => ZoneKind::Library,
             ScriptedZoneMoveKind::Destroy
             | ScriptedZoneMoveKind::Sacrifice
             | ScriptedZoneMoveKind::Exile

@@ -78,6 +78,13 @@ pub enum AbilityEffect {
     /// `n` life, no script invocation needed. Mirrors the hand-written
     /// `{ gain_life = n }` Lua operation table from the prior slice, just
     /// resolved on the Rust side instead of via `ScriptRuntime::invoke_operation`.
+    ///
+    /// A negative `n` makes the controller lose life (CR 119.3), and that
+    /// still works, but `LoseLife` is the intended spelling: it can target a
+    /// player and it pushes a `LifeChanged` event, which this variant never
+    /// does. TODO: `GainLife` itself pushes no `LifeChanged` event (CR
+    /// 119.9's "gains life" trigger and CR 119.10's replacement have nothing
+    /// to listen to yet).
     GainLife(i32),
     /// The `Game.Ops.Damage(n)` primitive — deals exactly `n` damage to the
     /// resolving `StackObject`'s first chosen target (CR 608.2m). Unlike
@@ -244,8 +251,62 @@ pub enum AbilityEffect {
     /// because `ReplacementPayload::ReplaceZoneDestination` only rewrites `to`,
     /// not the destination hand's owner.
     DrawCards(u32),
+    /// The `Game.Ops.Mill(n)` primitive (CR 701.17a) - the affected player puts
+    /// the top `n` cards of their library into their graveyard. One variant
+    /// covers "you mill N" and "target player mills N", chosen by whether the
+    /// ability DECLARED a target spec (`StackObject::target_requirement`):
+    /// - no target spec: the affected player is the ability's controller;
+    /// - a target spec: the affected player is the first legal
+    ///   `Target::Player` at resolution. If the declared player target is
+    ///   gone or illegal, or the spec chose no targets ("up to one target
+    ///   player"), nothing happens. There is never a fallback to the
+    ///   controller.
+    ///
+    /// CR 701.17b: milling more cards than the library holds mills as many as
+    /// possible, and an empty library mills nothing. Milling is not drawing,
+    /// so it never sets `drew_from_empty_library` and never causes the CR
+    /// 704.5b loss. The batch is the top `min(n, library size)` cards, read
+    /// once up front (front of the library zone is the top), and moved through
+    /// `ScriptedZoneMoveKind::Mill`: each card is its own proposed
+    /// `ZoneChange { Library -> Graveyard }`, run through `apply_replacements`
+    /// (so a Leyline of the Void style redirect applies, and a CR 616.1
+    /// ordering choice pauses mid-mill) and committed with
+    /// `commands::commit_zone_move`, which gives each card a new `ObjectId`
+    /// (CR 400.7) and the destination zone's own owner lookup.
+    ///
+    /// TODO: no `Game.Conditions.*` entry for "whenever a card is milled" (the
+    /// `ZoneChange` event exists, nothing listens for the Library to
+    /// Graveyard pair).
+    /// TODO: no way to act on "the milled card" (CR 701.17c/d), no mill as a
+    /// cost (CR 701.17b's cost clause), no dredge (CR 702.52) and no rad
+    /// counters (CR 728).
+    /// TODO: a replacement that changes how many cards a mill moves is not
+    /// modeled, since the batch is fixed before the first card moves.
+    /// TODO: `Modal` can't combine this effect (`is_modal_resolvable`).
+    Mill(u32),
+    /// The `Game.Ops.LoseLife(n)` primitive (CR 119.3) - the affected player
+    /// loses `n` life. Player selection is the same as `Mill`: the
+    /// controller when the ability declared no target spec, otherwise the
+    /// first legal `Target::Player` (no controller fallback when that target
+    /// is gone). `Player::lose_life` subtracts without clamping, so a total of
+    /// 0 or less is left for the CR 704.5a state-based action. `n == 0`
+    /// changes nothing and pushes no event.
+    ///
+    /// Pushes `GameEventKind::LifeChanged { player, delta: -n }`, already
+    /// applied to state like the `Tapped` events, and is the first
+    /// resolution-time producer of that event (cost payment is the other).
+    ///
+    /// TODO: nothing consumes `LifeChanged` - no "whenever you lose life"
+    /// condition and no "would lose life" replacement event (CR 614).
+    /// TODO: no "can't lose life" restriction (CR 119.8).
+    /// TODO: damage to a player (CR 120.3a), `GainLife` and lifelink do not
+    /// push `LifeChanged`.
+    /// TODO: no "lose life equal to X" computed amount, and no Two-Headed
+    /// Giant team life total (CR 119.4a).
+    /// TODO: `Modal` can't combine this effect (`is_modal_resolvable`).
+    LoseLife(u32),
     /// The `Game.Ops.Sacrifice()` primitive — sacrifices the resolving
-    /// `StackObject`'s first chosen target from the battlefield (CR 701.17).
+    /// `StackObject`'s first chosen target from the battlefield (CR 701.21a).
     /// Unlike `Destroy`, indestructibility does **not** prevent sacrifice (CR
     /// 702.12b is Destroy-specific). The implementation is identical to the
     /// `Destroy` arm minus the indestructibility check: proposes
@@ -258,9 +319,28 @@ pub enum AbilityEffect {
     ///
     /// TODO: "sacrifice a permanent you control" (player chooses at resolution,
     /// no targeting) requires Lua coroutines — blocked on backlog item 9.
-    /// TODO: self-sacrifice ("sacrifice this permanent," no target) is a useful
-    /// but distinct shape deferred as a named follow-up.
+    /// The untargeted self form is `SacrificeSelf`.
     Sacrifice,
+    /// The `Game.Ops.SacrificeSelf` primitive - "sacrifice this permanent"
+    /// (CR 701.21a), the plain effect form of the cost-side
+    /// `AdditionalCost::SacrificeSelf`. No target: the resolving ability's own
+    /// source goes through `ScriptedZoneMoveKind::Sacrifice`, the same
+    /// replacement-checked Battlefield to graveyard move `Sacrifice` uses, so
+    /// indestructible does not stop it, regeneration cannot intercept it and
+    /// Dies/LeavesBattlefield triggers fire.
+    ///
+    /// CR 701.21a: a player can't sacrifice a permanent they don't control.
+    /// Nothing targeted the source, so the resolver checks it directly: if
+    /// the source is still on the battlefield but its effective controller is
+    /// no longer the ability's controller, nothing happens. A source that
+    /// already left is a new object (CR 400.7), the old id no longer
+    /// resolves, and the effect does nothing.
+    ///
+    /// TODO: `UnlessPaidConsequence::SacrificeSelf` (Echo) goes through
+    /// `resolve_sacrifice_effect` and does not make this controller check.
+    /// TODO: "sacrifice a permanent you control" with a player choice still
+    /// needs a choice pause (see `Sacrifice`).
+    SacrificeSelf,
     /// The `Game.Ops.Exile()` primitive — exiles the resolving `StackObject`'s
     /// first chosen target from the battlefield (CR 701.18). Unlike `Destroy`,
     /// exile ignores indestructibility entirely (CR 702.12b is Destroy-only).
@@ -784,7 +864,14 @@ pub enum AbilityEffect {
     /// the function shape, for free, since there's no per-player commit
     /// point to even consider skipping.
     ///
-    /// TODO: only `SacrificeRandom`/`DiscardRandom` are accepted as a bare
+    /// `Mill(n)` and `LoseLife(n)` are accepted as bare tags too ("each player
+    /// mills N", "each player loses N life"): every player's top N library
+    /// ids are merged into one `ScriptedZoneMoveKind::Mill` batch, and life
+    /// loss is applied per player in APNAP order with one `LifeChanged` event
+    /// each. Inside this wrapper they always act on each player and never
+    /// read the ability's own target spec.
+    ///
+    /// TODO: only `SacrificeRandom`/`DiscardRandom`/`Mill`/`LoseLife` are accepted as a bare
     /// tag (checked in the `Game.Ops.ForEachPlayer` Lua binding itself, a
     /// loud load-time error otherwise) — no real card needs any other
     /// `Game.Ops.*` primitive applied per-player without a script function

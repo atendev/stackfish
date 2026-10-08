@@ -1,7 +1,7 @@
 //! `resolve_ability_effect`'s synchronous-only `AbilityEffect` arms — the
 //! ones that mutate `GameState`/push events and fall straight through to the
 //! shared tail, never pausing mid-resolution: `Modal`, `GainLife`, `Damage`,
-//! `Counters`, `Pump`, `GainControl`, `Regenerate`, and the tap/untap family
+//! `Counters`, `Pump`, `GainControl`, `Regenerate`, `LoseLife`, and the tap/untap family
 //! (`Tap`, `Untap`, `TapSelf`, `UntapSelf`, `TapAll`, `UntapAll`). `Modal` belongs here
 //! since it's a miniature re-implementation of these same six kinds inline
 //! (see its own doc comment below).
@@ -17,11 +17,27 @@ use crate::types::effect::{
 };
 use crate::types::counter::CounterKind;
 use crate::types::event::GameEventKind;
-use crate::types::ids::{ObjectId, Target};
+use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::StackObject;
 use crate::types::zone::ZoneKind;
 
 use super::super::{Engine, StepStatus};
+
+/// Which player a `Mill`/`LoseLife` acts on. Decided by whether the ability
+/// declared a target spec, not by whether `legal_targets` is empty: with no
+/// spec the player is the controller ("you mill 2"); with a spec it is the
+/// first legal `Target::Player` ("target player mills 2"), and `None` when
+/// that target is gone or the spec chose nothing, so a target that became
+/// illegal never turns into a controller effect.
+pub(super) fn affected_player(top: &StackObject, legal_targets: &[Target]) -> Option<PlayerId> {
+    if top.target_requirement.is_none() {
+        return Some(top.controller);
+    }
+    legal_targets.iter().find_map(|t| match t {
+        Target::Player(player) => Some(*player),
+        _ => None,
+    })
+}
 
 impl Engine {
     /// CR 700.2d — 2+ chosen modes, combined. See `AbilityEffect::Modal`'s
@@ -137,6 +153,36 @@ impl Engine {
             player.gain_life(amount);
         }
         ControlFlow::Continue(events)
+    }
+
+    /// CR 119.3: `Game.Ops.LoseLife(n)`. Subtracts `n` from the affected
+    /// player (see `affected_player`) without clamping, and pushes a
+    /// `LifeChanged` event already applied to state. Zero life lost is not a
+    /// life change, so it pushes nothing.
+    pub(super) fn resolve_lose_life_effect(
+        &mut self,
+        top: &StackObject,
+        legal_targets: &[Target],
+        amount: u32,
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        if let Some(player) = affected_player(top, legal_targets) {
+            self.lose_life_now(player, amount, &mut events);
+        }
+        ControlFlow::Continue(events)
+    }
+
+    /// Applies one life loss and records it. Shared with
+    /// `ForEachPlayer { LoseLife }`.
+    pub(in crate::engine) fn lose_life_now(&mut self, player: PlayerId, amount: u32, events: &mut Vec<GameEventKind>) {
+        let delta = i32::try_from(amount).unwrap_or(i32::MAX);
+        if delta == 0 {
+            return;
+        }
+        if let Some(p) = self.state.player_mut(player) {
+            p.lose_life(delta);
+            events.push(GameEventKind::LifeChanged { player, delta: -delta });
+        }
     }
 
     pub(super) fn resolve_damage_effect(

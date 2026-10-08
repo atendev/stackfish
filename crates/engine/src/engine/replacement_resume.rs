@@ -737,6 +737,16 @@ impl Engine {
             // triggers key off the `ZoneChange` event this pushes, the same
             // generic trigger-collection path every other zone move already
             // feeds, not anything special-cased here.
+            // CR 701.17a: Library -> Graveyard (or wherever a replacement
+            // sent it). `commit_zone_move` derives each zone's owner lookup
+            // from the zone kind, so a redirect to the shared Exile zone
+            // lands correctly, unlike the Discard arm below which hardcodes
+            // `Some(owner)` for the destination.
+            ScriptedZoneMoveKind::Mill => {
+                let (event, departed) = commands::commit_zone_move(&mut self.state, final_event);
+                self.departed_triggered_abilities.extend(departed);
+                self.state.ledger.push(event);
+            }
             ScriptedZoneMoveKind::Discard => {
                 let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = final_event else {
                     unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");

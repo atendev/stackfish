@@ -43,6 +43,12 @@ request). Replace the YGO rules kernel entirely with an MTG-native one per the a
 - `Game.Ops.Tap`/`Untap`/`TapSelf`/`UntapSelf`/`TapAll`/`UntapAll` (`phase5/tap-untap-effects`): status flips
   (CR 701.26) mutate `tapped` in place and push `Tapped`/`Untapped` only on a real flip, like the tap-cost,
   attack and untap-step producers; they are not replacement-checked yet
+- `Game.Ops.Mill`/`LoseLife`/`SacrificeSelf` (`phase5/mill-lose-life-sacrifice-self`): `Mill` and `LoseLife` pick the
+  controller when the ability declares no target spec and the first legal player target when it does (never a
+  fallback when that target is gone). Mill moves each card as a replacement-checked Library to Graveyard
+  `ZoneChange` (`ScriptedZoneMoveKind::Mill`, committed through `commit_zone_move`); `LoseLife` is the first
+  resolution-time producer of `LifeChanged`; `SacrificeSelf` reuses the `Sacrifice` path with a CR 701.21a control
+  check
 - Structured cost/payment system
 
 ### Step-able core (replay requirement)

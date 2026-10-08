@@ -2,6 +2,31 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Mill, lose life and sacrifice self (`phase5/mill-lose-life-sacrifice-self`)**: `AbilityEffect::{Mill(u32),
+  LoseLife(u32), SacrificeSelf}` (`Game.Ops.Mill(n)`, `Game.Ops.LoseLife(n)`, `Game.Ops.SacrificeSelf` bare tag).
+  `Mill` and `LoseLife` share one variant for "you" and "target player": no declared target spec means the
+  controller, a declared spec means the first legal `Target::Player`, and a target that is gone or never chosen
+  (an "up to one" spec) means nothing happens, never a controller fallback (`direct_effects::affected_player`).
+  Mill adds `ScriptedZoneMoveKind::Mill` and commits through `commands::commit_zone_move`, so each card is a
+  replacement-checked Library to Graveyard move (Leyline of the Void style redirects work, CR 616.1 ordering
+  pauses mid-mill) and a redirect to the shared Exile zone lands correctly. Milling more than the library holds
+  mills what exists (CR 701.17b) and is not a draw, so CR 704.5b never applies. `LoseLife` subtracts without
+  clamping and pushes `LifeChanged { delta: -n }`, the first resolution-time producer of that event.
+  `SacrificeSelf` uses the `Sacrifice` zone-move path (indestructible irrelevant, not destruction, Dies triggers
+  fire, a stale source does nothing) and checks `effective_controller == top.controller` (CR 701.21a).
+  `ForEachPlayer` accepts `Mill` and `LoseLife` as bare tags (a small kind-plus-ids merge, no restructure). The
+  stale CR 701.17 citation for sacrifice was fixed to 701.21a in the `Sacrifice` doc comment, the
+  `game-constants.md` row and the stub only. Tests: `phase5_mill_lose_life_sacrifice_self.rs` (32). Left open:
+  no "whenever a card is milled" or "whenever you lose life" condition (nothing consumes `LifeChanged`); no
+  "would lose life" replacement and no "can't lose life" (CR 119.8); `GainLife`, damage to a player and lifelink
+  still push no `LifeChanged`; no "the milled card" follow-up (CR 701.17c/d), mill as a cost, dredge or rad
+  counters; a replacement that changes how many cards a mill moves isn't modeled (the batch is fixed first); no
+  computed "lose life equal to X"; no team life (CR 119.4a); not usable as a mode of a multi-mode spell
+  (`is_modal_resolvable` unchanged). Echo's `UnlessPaidConsequence::SacrificeSelf` still goes through
+  `resolve_sacrifice_effect` and does not make the CR 701.21a control check. Other stale CR 701.17/701.20
+  sacrifice citations elsewhere in the repo were not swept. Test-harness note: a replacement effect's `source`
+  must be a real object in the state, and `submit_replacement_choice` names the candidate by that source id.
+
 - **Hexproof and Shroud (`phase5/hexproof-shroud`)**: `KeywordSet::HEXPROOF` (CR 702.11b) and
   `KeywordSet::SHROUD` (CR 702.18a), accepted by `AddKeyword`/`RemoveKeyword`/`IgnoreKeyword` (`"Hexproof"`,
   `"Shroud"`), the scenario `keywords` list and the carddb keyword table. `target_is_legal` rejects a

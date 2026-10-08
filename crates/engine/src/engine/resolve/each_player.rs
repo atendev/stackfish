@@ -52,13 +52,18 @@ impl Engine {
         if let Some(inner) = wrapped {
             let mut all_players: VecDeque<PlayerId> = VecDeque::from([first_player]);
             all_players.extend(order);
+            // LoseLife has no zone move: it applies per player below and the
+            // `Sacrifice` kind here only drives an empty queue to the shared
+            // `StackResolution` tail.
             let kind = match inner.as_ref() {
-                AbilityEffect::SacrificeRandom { .. } => ScriptedZoneMoveKind::Sacrifice,
+                AbilityEffect::SacrificeRandom { .. } | AbilityEffect::LoseLife(_) => ScriptedZoneMoveKind::Sacrifice,
                 AbilityEffect::DiscardRandom { .. } => ScriptedZoneMoveKind::Discard,
+                AbilityEffect::Mill(_) => ScriptedZoneMoveKind::Mill,
                 _ => unreachable!(
-                    "Game.Ops.ForEachPlayer's Lua binding only ever accepts SacrificeRandom/DiscardRandom as a bare tag"
+                    "Game.Ops.ForEachPlayer's Lua binding only ever accepts SacrificeRandom/DiscardRandom/Mill/LoseLife as a bare tag"
                 ),
             };
+            let mut events = events;
             let mut ids: VecDeque<ObjectId> = VecDeque::new();
             for player in all_players {
                 let picked = match inner.as_ref() {
@@ -67,6 +72,11 @@ impl Engine {
                     }
                     AbilityEffect::DiscardRandom { filter, count } => {
                         self.pick_discard_random_ids(top.source, player, filter, *count)
+                    }
+                    AbilityEffect::Mill(n) => self.top_of_library_ids(player, *n),
+                    AbilityEffect::LoseLife(n) => {
+                        self.lose_life_now(player, *n, &mut events);
+                        VecDeque::new()
                     }
                     _ => unreachable!("checked above"),
                 };
