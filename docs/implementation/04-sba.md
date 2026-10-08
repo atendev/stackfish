@@ -257,3 +257,11 @@
   the effective query reverts to its base value. Plus a `commands::tests` unit test extending
   `retire_object_purges_only_the_retired_source` to cover all four lists directly. Full workspace
   suite green.
+
+## Note: mill and life loss against the SBAs (`phase5/mill-lose-life-sacrifice-self`)
+
+- Mill is not a draw. `Game.Ops.Mill` never sets `PlayerState.drew_from_empty_library`, so milling an empty library
+  does not trigger the CR 704.5b loss. Only a draw attempt does.
+- `Game.Ops.LoseLife` leaves life unclamped (`Player::lose_life` subtracts), and the existing CR 704.5a check ends the
+  game for a player at 0 or less life. The test `losing_the_last_life_loses_the_game_and_life_is_not_clamped` covers
+  it.

@@ -38,6 +38,21 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
+    /// CR 701.21a: `Game.Ops.SacrificeSelf` - the resolving ability's own
+    /// source, through the same `ScriptedZoneMoveKind::Sacrifice` pipeline.
+    /// A stale id does nothing (CR 400.7). A source still on the battlefield
+    /// under someone else's control is not sacrificed either: a player can't
+    /// sacrifice a permanent they don't control, and nothing targeted it.
+    pub(super) fn resolve_sacrifice_self_effect(&mut self, top: &StackObject) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let on_battlefield = self.state.object(top.source).is_some_and(|o| o.zone == ZoneKind::Battlefield);
+        let controlled = !on_battlefield
+            || crate::layers::effective_controller(&self.state, &self.script_runtime, top.source) == top.controller;
+        let targets: VecDeque<ObjectId> = if controlled { VecDeque::from([top.source]) } else { VecDeque::new() };
+        self.process_state =
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Sacrifice, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
     pub(super) fn resolve_destroy_effect(
         &mut self,
         top: &StackObject,

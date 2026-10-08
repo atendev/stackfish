@@ -302,6 +302,11 @@ pub(super) fn execute_activate_ability(
         // same as Shuffle just below.
         | Some(AbilityEffect::DestroyAll(_))
         | Some(AbilityEffect::Sacrifice)
+        // CR 701.21a: untargeted self form, goes on the stack like Sacrifice.
+        | Some(AbilityEffect::SacrificeSelf)
+        // CR 701.17a/119.3: Mill and LoseLife are ordinary stack effects too.
+        | Some(AbilityEffect::Mill(_))
+        | Some(AbilityEffect::LoseLife(_))
         | Some(AbilityEffect::Exile)
         | Some(AbilityEffect::ReturnToHand)
         | Some(AbilityEffect::ReturnSelfToHand)

@@ -540,7 +540,8 @@ function GameInterveningIfTable.ControlsAtLeast(filter, count) end
 
 ---@class GameOpsTable
 ---@field Destroy GameOpsValue                  -- CR 701.8; indestructible unaffected
----@field Sacrifice GameOpsValue                 -- CR 701.17, target-based (vs. Game.Costs.Sacrifice)
+---@field Sacrifice GameOpsValue                 -- CR 701.21a, target-based (vs. Game.Costs.Sacrifice)
+---@field SacrificeSelf GameOpsValue             -- CR 701.21a; sacrifices the ability's own source; no-op if it left or changed controller
 ---@field Exile GameOpsValue                     -- CR 701.18; battlefield or graveyard targets
 ---@field ReturnToHand GameOpsValue                -- CR 400.3; battlefield/graveyard/exile targets, to the owner's hand
 ---@field ReturnSelfToHand GameOpsValue            -- CR 400.3; the ability's own source ("return this card from your graveyard"); no-op if it already left its zone
@@ -574,10 +575,22 @@ function GameOpsTable.AddManaChoice(count, colors) end
 ---@return GameOpsAddManaValue
 function GameOpsTable.AddRestrictedMana(letter, cardType, count) end
 
---- CR 119.
+--- CR 119. A negative amount loses life, but prefer LoseLife (it can target a player and emits LifeChanged).
 ---@param amount integer
 ---@return GameOpsValue
 function GameOpsTable.GainLife(amount) end
+
+--- CR 119.3. The controller loses `amount` life, or the declared player target does (a declared target that is
+--- gone means nothing happens). Pushes a LifeChanged event. A negative amount is an error.
+---@param amount integer
+---@return GameOpsValue
+function GameOpsTable.LoseLife(amount) end
+
+--- CR 701.17a/b. The controller mills `n` cards, or the declared player target does (a declared target that is
+--- gone means nothing happens). Each card is a replacement-checked Library to Graveyard move. Not a draw.
+---@param n integer
+---@return GameOpsValue
+function GameOpsTable.Mill(n) end
 
 --- CR 608.2m. Unsigned, single fixed target; goes through the normal damage pipeline.
 ---@param amount integer
@@ -647,7 +660,7 @@ function GameOpsTable.Discard(count) end
 ---@return GameOpsValue
 function GameOpsTable.DiscardRandom(filter, count) end
 
---- CR 101.4 (APNAP), active player first. `x` may be a function or a bare SacrificeRandom/DiscardRandom value.
+--- CR 101.4 (APNAP), active player first. `x` may be a function or a bare SacrificeRandom/DiscardRandom/Mill/LoseLife value.
 ---@param x (fun(source: ObjectId, controller: PlayerId, state: StateSnapshot): OperationResultTable|GameOpsValue)|GameOpsValue
 ---@return GameOpsValue
 function GameOpsTable.ForEachPlayer(x) end

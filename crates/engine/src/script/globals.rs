@@ -200,6 +200,17 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     })?;
     ops.set("DestroyAll", destroy_all)?;
     ops.set("Sacrifice", OperationTag(AbilityEffect::Sacrifice))?;
+    // CR 701.21a: "sacrifice this permanent" - no target, always the source.
+    ops.set("SacrificeSelf", OperationTag(AbilityEffect::SacrificeSelf))?;
+    // CR 701.17a: `n` cards from the top of a library to its owner's
+    // graveyard. The player is the controller unless the ability declares a
+    // player target (`s.target_requirement()`), then that player.
+    let mill = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::Mill(n))))?;
+    ops.set("Mill", mill)?;
+    // CR 119.3: same player selection as Mill. A negative `n` is a Lua error;
+    // use `GainLife` for signed amounts.
+    let lose_life = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::LoseLife(n))))?;
+    ops.set("LoseLife", lose_life)?;
     ops.set("Exile", OperationTag(AbilityEffect::Exile))?;
     ops.set("ReturnToHand", OperationTag(AbilityEffect::ReturnToHand))?;
     ops.set("ReturnSelfToHand", OperationTag(AbilityEffect::ReturnSelfToHand))?;
@@ -324,18 +335,21 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
                     .borrow::<OperationTag>()
                     .map_err(|_| {
                         mlua::Error::RuntimeError(
-                            "Game.Ops.ForEachPlayer expects a function or a Game.Ops.SacrificeRandom/DiscardRandom \
+                            "Game.Ops.ForEachPlayer expects a function or a Game.Ops.SacrificeRandom/DiscardRandom/Mill/LoseLife \
                              value"
                                 .to_string(),
                         )
                     })?
                     .clone();
                 match &tag.0 {
-                    AbilityEffect::SacrificeRandom { .. } | AbilityEffect::DiscardRandom { .. } => {
+                    AbilityEffect::SacrificeRandom { .. }
+                    | AbilityEffect::DiscardRandom { .. }
+                    | AbilityEffect::Mill(_)
+                    | AbilityEffect::LoseLife(_) => {
                         Ok(ForEachPlayerTag::Static(tag.0.clone()))
                     }
                     _ => Err(mlua::Error::RuntimeError(
-                        "Game.Ops.ForEachPlayer can only wrap a function or a bare SacrificeRandom/DiscardRandom \
+                        "Game.Ops.ForEachPlayer can only wrap a function or a bare SacrificeRandom/DiscardRandom/Mill/LoseLife \
                          value directly - wrap any other Game.Ops.* primitive in a function instead"
                             .to_string(),
                     )),

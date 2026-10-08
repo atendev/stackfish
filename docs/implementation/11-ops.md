@@ -545,3 +545,36 @@
 - Open: see the `phase5/tap-untap-effects` entry in [99-backlog](99-backlog.md) (becomes-tapped condition, tap
   replacements/stun counters, "can't untap" query).
 
+
+## Slice: mill-lose-life-sacrifice-self (branch `phase5/mill-lose-life-sacrifice-self`)
+
+- `AbilityEffect::{Mill(u32), LoseLife(u32), SacrificeSelf}` and `Game.Ops.Mill(n)`, `Game.Ops.LoseLife(n)`,
+  `Game.Ops.SacrificeSelf` (a bare tag), registered in `script/globals.rs`. The negative `LoseLife` argument is
+  rejected by the `u32` Lua conversion.
+- Player selection for `Mill` and `LoseLife` is `direct_effects::affected_player`. It looks at whether the
+  ability declared a target spec (`top.target_requirement`), not at whether `legal_targets` is empty. No spec means
+  the controller. A spec means the first legal `Target::Player`, or nobody (so a no-op) if that target is gone or an
+  "up to one" spec chose none. There is never a fallback to the controller. A target that is illegal for every chosen
+  target already fizzles upstream (CR 608.2b).
+- `Mill` adds `ScriptedZoneMoveKind::Mill` (`from_zone` is Library). `Engine::resolve_mill_effect`
+  (`resolve/library_effects.rs`) reads the top `min(n, library size)` ids once (`top_of_library_ids`) and hands
+  them to `continue_scripted_zone_move`, so each card is replacement-checked and a CR 616.1 ordering choice
+  pauses through the existing `ReplacementResumeTarget::ScriptedZoneMove`. `commit_scripted_zone_move`'s Mill arm
+  calls `commands::commit_zone_move` (not the Discard arm, which hardcodes `Some(owner)` for the destination, so a
+  redirect to the shared Exile zone would lose the card). An empty library or zero count moves nothing and sets no
+  `drew_from_empty_library` (CR 704.5b needs a draw).
+- `LoseLife` (`resolve_lose_life_effect`, `lose_life_now`) calls `Player::lose_life` and pushes
+  `LifeChanged { player, delta: -n }` already applied, like the `Tapped` events. Nothing pushes it for 0.
+- `SacrificeSelf` (`resolve_sacrifice_self_effect` in `resolve/destruction.rs`) queues `top.source` into
+  `ScriptedZoneMoveKind::Sacrifice`, the same path as `Sacrifice`. If the source is still on the battlefield but
+  `layers::effective_controller` is not `top.controller`, it queues nothing (CR 701.21a). A stale id is skipped by
+  `continue_scripted_zone_move`.
+- `ForEachPlayer` accepts `Mill` and `LoseLife` as bare tags. This was a small change in
+  `resolve_for_each_player_effect`: `Mill` merges each player's `top_of_library_ids` into the single batch, and
+  `LoseLife` applies per player in APNAP order and drives an empty queue to the shared tail.
+- `commands/activate.rs`: the three variants join the non-mana activated-ability list. `is_modal_resolvable` is
+  unchanged.
+- Rule-number fix: the `Sacrifice` doc comment, the `Game.Ops.Sacrifice` row and the stub now cite CR 701.21a (701.17
+  is Mill in the current comp rules). Other stale citations were left alone.
+- Verify: `phase5_mill_lose_life_sacrifice_self.rs` (32).
+- Open: see the `phase5/mill-lose-life-sacrifice-self` entry in [99-backlog](99-backlog.md).
