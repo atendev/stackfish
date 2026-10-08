@@ -361,6 +361,9 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::BecomeCopy(_))
         | Some(AbilityEffect::Attach)
         | Some(AbilityEffect::ExchangeTextBoxes)
+        // CR 701.14: fight and the one-sided bite are ordinary stack effects.
+        | Some(AbilityEffect::Fight)
+        | Some(AbilityEffect::Bite)
         // CR 700.2b (a modal activated/triggered ability) is still
         // unmodeled - RegisteredAbility has no modes field, so this
         // variant can't actually originate from an ability today.

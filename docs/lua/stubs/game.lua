@@ -129,7 +129,7 @@
 -- `local s = {}` matching this shape. See docs/lua/card-script-basics.md.
 ---@class CardScript
 ---@field register_abilities? fun(c: ObjectId)
----@field target_requirement? fun(): TargetRequirementTable
+---@field target_requirement? fun(): TargetRequirementTable|TargetRequirementTable[]  -- an array declares one entry per "target" word, in card order (Prey Upon)
 ---@field operation? fun(): OperationResultTable|GameOpsValue
 ---@field alternative_costs? fun(): AlternativeCostEntry[]
 ---@field buyback_cost? fun(): string    -- a mana-cost string, e.g. "{2}" — parsed via Game.Costs.Mana's grammar
@@ -554,6 +554,8 @@ function GameInterveningIfTable.ControlsAtLeast(filter, count) end
 ---@field Shuffle GameOpsValue
 ---@field Attach GameOpsValue                    -- auto-enforces sorcery-speed
 ---@field ExchangeTextBoxes GameOpsValue         -- operates on ability's first two targets
+---@field Fight GameOpsValue                     -- CR 701.14; two creatures deal damage equal to power to each other; pairing from the target spec (2 entries, one count=2 entry, or source + one target)
+---@field Bite GameOpsValue                      -- one-sided: first creature deals damage equal to its power to the second; not a fight
 local GameOpsTable = {}
 
 --- CR 605. `letter`: W/U/B/R/G/C. `count` default 1.

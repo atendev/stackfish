@@ -122,7 +122,7 @@ pub(in crate::commands) fn participates_in_damage_step(keywords: KeywordSet, ste
 /// value — same "skip rather than guess" contract `effective_characteristics`
 /// itself already documents, just reachable without risking its
 /// panic-on-missing-id path.
-pub(in crate::commands) fn effective_power(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> Option<i32> {
+pub(crate) fn effective_power(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> Option<i32> {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).power
     } else {

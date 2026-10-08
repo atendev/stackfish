@@ -508,6 +508,13 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // (a `TargetSpec::Multiple` of exactly two entries), not values passed
     // here.
     ops.set("ExchangeTextBoxes", OperationTag(AbilityEffect::ExchangeTextBoxes))?;
+    // `Game.Ops.Fight` (CR 701.14) and `Game.Ops.Bite` (one-sided) - bare tags
+    // like `Destroy`/`ExchangeTextBoxes`. The creatures come from the
+    // ability's own target spec: two words (first fights/bites second), one
+    // count-2 word (Fight only), or one count-1 word (the source is the
+    // first creature).
+    ops.set("Fight", OperationTag(AbilityEffect::Fight))?;
+    ops.set("Bite", OperationTag(AbilityEffect::Bite))?;
     // `Game.Ops.MadnessCastOrDiscard` (CR 702.35a) - no arguments, same
     // toggle shape as `Game.Ops.Attach`/`ExchangeTextBoxes`; the exiled card
     // is located via `ObjectLineage` off the triggered ability's own source,

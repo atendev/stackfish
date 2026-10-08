@@ -13,7 +13,7 @@ use crate::types::cost::{AlternativeCost, CostSpec, FilterController, FilterSpec
 use crate::types::effect::{AffectedFilter, EffectFilter, EffectPayload, LandwalkQuality, Layer};
 use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::mana::{Color, ColorSet, ManaUnit};
-use crate::types::target::{ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement};
+use crate::types::target::{ManaValueBound, ManaValueComparison, ManaValueRequirement, TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::tags::{
@@ -1163,6 +1163,65 @@ pub(crate) fn decode_target_requirement_table(
         None => decode_target_filter_table(table)?,
     };
     Ok(TargetRequirement { filter, count, up_to, at_least, exclude_source })
+}
+
+/// `ScriptRuntime::build_target_requirement`'s whole-return decoder:
+/// either one requirement table (any table with no array part, decoded
+/// exactly as `decode_target_requirement_table` always did, into
+/// `TargetSpec::Primitive`) or a sequence of requirement tables, one per
+/// distinct "target" word in card order (`TargetSpec::Multiple`, e.g. "target
+/// creature you control fights target creature you don't control"). A
+/// one-entry sequence is the same single word as a bare table, so it decodes
+/// to `Primitive` too.
+///
+/// Rejected with a clear error: an empty table, a table that mixes array
+/// entries with other keys (such as `count`), a sequence with gaps, and a
+/// sequence entry that is not a table.
+pub(crate) fn decode_target_spec_table(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    table: Table,
+) -> Result<TargetSpec, ScriptError> {
+    let array_len = table.raw_len();
+    let mut key_count = 0usize;
+    for pair in table.clone().pairs::<Value, Value>() {
+        pair.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        key_count += 1;
+    }
+    if key_count == 0 {
+        return Err(ScriptError::LoadError(
+            "target_requirement() returned an empty table - return one requirement table, or a \
+             non-empty array of requirement tables"
+                .to_string(),
+        ));
+    }
+    if array_len == 0 {
+        return Ok(TargetSpec::Primitive(decode_target_requirement_table(lua, registry, table)?));
+    }
+    if key_count != array_len {
+        return Err(ScriptError::LoadError(
+            "target_requirement() returned a table that mixes array entries with other keys (or \
+             has gaps) - return either one requirement table or a plain array of requirement \
+             tables"
+                .to_string(),
+        ));
+    }
+    let mut requirements = Vec::with_capacity(array_len);
+    for index in 1..=array_len {
+        let entry: Value = table.get(index).map_err(|e| ScriptError::LoadError(e.to_string()))?;
+        let Value::Table(entry) = entry else {
+            return Err(ScriptError::LoadError(format!(
+                "target_requirement() array entry {index} must be a requirement table, got {}",
+                entry.type_name()
+            )));
+        };
+        requirements.push(decode_target_requirement_table(lua, registry, entry)?);
+    }
+    if requirements.len() == 1 {
+        Ok(TargetSpec::Primitive(requirements.remove(0)))
+    } else {
+        Ok(TargetSpec::Multiple(requirements))
+    }
 }
 
 /// `ActivatedAbilityBuilder::SetTarget`'s argument decoder — a `Value`

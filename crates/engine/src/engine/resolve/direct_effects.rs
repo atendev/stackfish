@@ -1,7 +1,7 @@
 //! `resolve_ability_effect`'s synchronous-only `AbilityEffect` arms — the
 //! ones that mutate `GameState`/push events and fall straight through to the
 //! shared tail, never pausing mid-resolution: `Modal`, `GainLife`, `Damage`,
-//! `Counters`, `Pump`, `GainControl`, `Regenerate`, `LoseLife`, and the tap/untap family
+//! `Fight`, `Bite`, `Counters`, `Pump`, `GainControl`, `Regenerate`, `LoseLife`, and the tap/untap family
 //! (`Tap`, `Untap`, `TapSelf`, `UntapSelf`, `TapAll`, `UntapAll`). `Modal` belongs here
 //! since it's a miniature re-implementation of these same six kinds inline
 //! (see its own doc comment below).
@@ -10,7 +10,8 @@ use std::ops::ControlFlow;
 
 use crate::commands;
 use crate::types::ability::AbilityEffect;
-use crate::types::card::KeywordSet;
+use crate::types::card::{CardTypeSet, KeywordSet};
+use crate::types::target::TargetSpec;
 use crate::types::effect::{
     matches_effect_filter, AffectedFilter, ConsumptionPolicy, ContinuousEffect, EffectDuration, EffectFilter,
     EffectPayload, EffectPrimitive, EventFilter, Layer, ReplacementEffect, ReplacementPayload, ReplacementSpec,
@@ -199,6 +200,96 @@ impl Engine {
                 amount,
                 is_combat_damage: false,
             });
+        }
+        ControlFlow::Continue(events)
+    }
+
+    /// CR 701.14 fight / bite: `Game.Ops.Fight` (`mutual: true`) and
+    /// `Game.Ops.Bite` (`mutual: false`). See `AbilityEffect::Fight` for the
+    /// three target-spec shapes that pick the two creatures.
+    ///
+    /// The pair comes from the per-word legal chunks (`modal_chunk_legals`)
+    /// for a two-word spec, so an illegal word leaves its chunk empty and
+    /// the whole effect does nothing (CR 701.14b). A single word uses the
+    /// flattened `legal_targets`, which only holds the still-legal picks.
+    /// Both creatures must still be creatures on the battlefield. Each
+    /// amount is read through the layer engine before any event is pushed,
+    /// then the events go out together so the damage is simultaneous and
+    /// every keyword reads the creature as the damage source.
+    pub(super) fn resolve_fight_effect(
+        &mut self,
+        top: &StackObject,
+        legal_targets: &[Target],
+        modal_chunk_legals: &[Vec<Target>],
+        mutual: bool,
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let object_of = |target: &Target| match target {
+            Target::Object(id) => Some(*id),
+            _ => None,
+        };
+        let pair: Option<(ObjectId, ObjectId)> = match &top.target_requirement {
+            Some(TargetSpec::Multiple(reqs)) if reqs.len() == 2 => {
+                match (modal_chunk_legals.first().map(Vec::as_slice), modal_chunk_legals.get(1).map(Vec::as_slice)) {
+                    (Some([first]), Some([second])) => object_of(first).zip(object_of(second)),
+                    _ => None,
+                }
+            }
+            Some(TargetSpec::Primitive(req)) if !req.up_to && !req.at_least => match (req.count, legal_targets) {
+                // "Two target creatures fight each other." A bite has no
+                // dealer in this shape.
+                (2, [first, second]) if mutual => object_of(first).zip(object_of(second)),
+                // "It fights / deals damage to target creature": the
+                // ability's own source is the first creature.
+                (1, [target]) => object_of(target).map(|id| (top.source, id)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some((first, second)) = pair else { return ControlFlow::Continue(events) };
+
+        // CR 701.14b: both must still be creatures on the battlefield.
+        let is_creature_on_battlefield = |id: ObjectId| {
+            self.state.object(id).is_some_and(|object| object.zone == ZoneKind::Battlefield)
+                && crate::layers::effective_characteristics(&self.state, &self.script_runtime, id)
+                    .card_types
+                    .contains(CardTypeSet::CREATURE)
+        };
+        if !is_creature_on_battlefield(first) || !is_creature_on_battlefield(second) {
+            return ControlFlow::Continue(events);
+        }
+
+        // Both amounts are fixed before any event goes out. Power of 0 or
+        // less, or an unresolved power, deals no damage (CR 120.8).
+        let power_of = |id: ObjectId| {
+            commands::effective_power(&self.state, &self.script_runtime, id).filter(|power| *power > 0).map(|power| power as u32)
+        };
+        let first_power = power_of(first);
+        let second_power = power_of(second);
+
+        let mut push_damage = |source: ObjectId, target: ObjectId, amount: u32| {
+            events.push(GameEventKind::DamageDealt {
+                source,
+                target: Target::Object(target),
+                amount,
+                is_combat_damage: false,
+            });
+        };
+        if first == second {
+            // CR 701.14c: fighting itself is one event of twice its power.
+            // Bite never doubles: it is a single damage instance.
+            if let Some(power) = first_power {
+                push_damage(first, first, if mutual { power * 2 } else { power });
+            }
+        } else {
+            if let Some(power) = first_power {
+                push_damage(first, second, power);
+            }
+            if mutual {
+                if let Some(power) = second_power {
+                    push_damage(second, first, power);
+                }
+            }
         }
         ControlFlow::Continue(events)
     }
