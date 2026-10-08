@@ -49,6 +49,12 @@ request). Replace the YGO rules kernel entirely with an MTG-native one per the a
   `ZoneChange` (`ScriptedZoneMoveKind::Mill`, committed through `commit_zone_move`); `LoseLife` is the first
   resolution-time producer of `LifeChanged`; `SacrificeSelf` reuses the `Sacrifice` path with a CR 701.21a control
   check
+- `Game.Ops.ReturnToBattlefield`/`ReturnAllToBattlefield` (`phase5/reanimation`): graveyard or exile to
+  battlefield through `ScriptedZoneMoveKind::Reanimate { controller, tapped }`. The entry is replacement-checked,
+  then `commit_reanimate` gives the card the treatment a resolving permanent spell gets (new object, card script,
+  `apply_enters_battlefield_modifiers`, Aura host). CR 110.2a picks the controller (`EntryControl::You` default).
+  The graveyard object's `controller` is written temporarily so entry filters see the entering player and reset to
+  the owner on every path that does not enter. Persist and Undying keep their narrower `ReturnSelfWithCounter` path
 - Structured cost/payment system
 
 ### Step-able core (replay requirement)

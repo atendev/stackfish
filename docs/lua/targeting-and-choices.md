@@ -47,7 +47,17 @@ Every filter table — `Game.SelectTargets`/`Game.ChooseN`'s own, and `:SetTarge
 own hand (CR 701.9's discard, e.g. `Game.ChooseN({ zone = "Hand", controller = "you" }, n)`), and how
 a card's own base "target" reaches onto the stack (CR 701.6a's "counter target spell" — see
 `s.target_requirement()` below and `Game.Ops.Counter` in
-[game-constants.md](game-constants.md#gameops)).
+[game-constants.md](game-constants.md#gameops)). A graveyard or exile `zone` is also how a card
+aims at a card there, for example Reanimate's "target creature card in a graveyard":
+
+```lua
+function s.target_requirement()
+    return { zone = "Graveyard", card_types = { "Creature" }, count = 1 }
+end
+function s.operation()
+    return Game.Ops.ReturnToBattlefield()   -- the call parentheses are required
+end
+```
 
 An object filter also accepts up to one of `mana_value_equals`/`mana_value_at_most`/
 `mana_value_at_least` (CR 202.3, e.g. Convolute's "mana value 3 or less" or "counter target spell

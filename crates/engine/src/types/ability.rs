@@ -48,6 +48,15 @@ pub enum UnlessPaidConsequence {
     SacrificeSelf,
 }
 
+/// CR 110.2a: which player controls a permanent an effect puts onto the
+/// battlefield. `You` is the default ("under your control", the controller of
+/// the resolving spell or ability); `Owner` is "under its owner's control".
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EntryControl {
+    You,
+    Owner,
+}
+
 /// Structural stand-in for an ability's effect when no script bridge exists
 /// to actually run one (every `RegisteredAbility` still needs `operation` —
 /// this is narrower: just enough to model CR 605's mana abilities, the one
@@ -403,6 +412,55 @@ pub enum AbilityEffect {
     /// replacement-checked and fire departed triggers.
     /// TODO: Hand and Library sources (`accepts_source_zone` rejects them).
     ExileAll { filter: EffectFilter, zone: ZoneKind },
+    /// The `Game.Ops.ReturnToBattlefield(opts?)` primitive - "return target
+    /// creature card from a graveyard to the battlefield" (Reanimate, Animate
+    /// Dead's non-Aura half, Zombify, Unburial Rites). Every legal object
+    /// target of the resolving ability moves through
+    /// `ScriptedZoneMoveKind::Reanimate`, so each entry is a replacement-
+    /// checked `ZoneChange` (CR 614/616: "if a creature would enter, exile it
+    /// instead", ordering pauses) and then gets the entry treatment a
+    /// resolving permanent spell gets: a fresh CR 400.7 object, summoning
+    /// sick, its card script run so its abilities register, and the
+    /// `apply_enters_battlefield_modifiers` family (enters tapped, enters
+    /// with counters, Bloodthirst, Escape counters). Enters-the-battlefield
+    /// triggers fire off the ledger `ZoneChange`.
+    ///
+    /// `control` is CR 110.2a: the permanent enters under the controller of
+    /// the effect ([`EntryControl::You`], the default) unless the effect says
+    /// otherwise ([`EntryControl::Owner`], "under its owner's control").
+    /// `tapped` puts it onto the battlefield tapped. The source zone is read
+    /// from the object at resolution (graveyard or exile).
+    ///
+    /// An instant or sorcery card stays where it is (CR 400.4a). An Aura
+    /// with exactly one legal host enters attached to it (CR 303.4f); one
+    /// with none stays put (CR 303.4g). Tokens never get here (CR 111.7).
+    ///
+    /// Untargeted sibling: `ReturnAllToBattlefield`. Persist and Undying use
+    /// the separate `ReturnSelfWithCounter`, which skips replacement checks.
+    /// TODO(CR 303.4f): an Aura with two or more legal hosts needs the
+    /// controller to choose one. There is no non-stack entry-attach pause
+    /// yet, so such an Aura stays in the graveyard (the "Aura with several
+    /// hosts" TODO).
+    /// TODO(CR 707.6, 702.82a, 702.38a, 614.12a): Clone-style "enters as a
+    /// copy", Devour and Amplify need a choice pause that isn't tied to a
+    /// stack object. A reanimated card with one of these enters as itself.
+    /// TODO(CR 122.6): no "enters with an additional counter" option.
+    /// TODO(CR 508.4): no "enters attacking" or "enters blocking" option.
+    /// TODO: no "under target opponent's control" and no "may" return.
+    ReturnToBattlefield { control: EntryControl, tapped: bool },
+    /// The `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)` primitive
+    /// - "return all creature cards from all graveyards to the battlefield"
+    /// (Rise of the Dark Realms, Living Death's return half; CR 601.2c: "all"
+    /// effects don't target). Collects every object in `zone` (Graveyard,
+    /// across every player's graveyard, or Exile) matching `filter` and hands
+    /// the list to `ScriptedZoneMoveKind::Reanimate`, so each entry behaves
+    /// exactly as it does for `ReturnToBattlefield`. `filter.controller` is
+    /// read off the object's controller, which is its owner outside the
+    /// battlefield.
+    /// TODO: entries are processed one after another, not as one simultaneous
+    /// event, so an earlier arrival's replacement effect can affect a later
+    /// one's entry (CR 603.6a, 614.12 want one simultaneous batch).
+    ReturnAllToBattlefield { filter: EffectFilter, zone: ZoneKind, control: EntryControl, tapped: bool },
     /// The `Game.Ops.Tap` primitive - "tap target artifact, creature, or
     /// land" (CR 701.26a). Taps every legal object target of the resolving
     /// ability. Only an untapped battlefield permanent changes (CR 701.26a,

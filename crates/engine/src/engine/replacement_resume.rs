@@ -12,9 +12,10 @@ use crate::replacement::{self, ReplacementOutcome};
 use crate::sba::{self, SbaOutcome};
 use crate::script::ScriptZoneMoveKind;
 use crate::types::ability::RegisteredAbility;
-use crate::types::card::KeywordSet;
+use crate::types::card::{CardTypeSet, KeywordSet};
+use crate::types::mana::ColorSet;
 use crate::types::event::{GameEvent, GameEventKind};
-use crate::types::ids::{ObjectId, ObjectLineage, PlayerId};
+use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, Target};
 use crate::types::zone::ZoneKind;
 
 use super::{
@@ -127,9 +128,9 @@ impl Engine {
                     }
                 }
             },
-            ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, then, trailing } => match outcome {
+            ReplacementResumeTarget::ScriptedZoneMove { kind, remaining, then, mut trailing } => match outcome {
                 ReplacementOutcome::Resolved(event) => {
-                    self.commit_scripted_zone_move(kind, event);
+                    trailing.extend(self.commit_scripted_zone_move(kind, event));
                     self.continue_scripted_zone_move(kind, remaining, then, trailing)
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
@@ -603,7 +604,12 @@ impl Engine {
     /// pre-`ScriptedZoneMove` Exile arm's own body) since its destination is
     /// the shared Exile zone (`owner: None`), not a per-player zone
     /// `commit_death`'s `zone_mut(to, Some(owner))` call assumes.
-    fn commit_scripted_zone_move(&mut self, kind: ScriptedZoneMoveKind, final_event: GameEventKind) {
+    ///
+    /// Returns events owed to the caller's `trailing` list. Only `Reanimate`
+    /// produces any (`CounterAdded` from enters-with-counters effects and the
+    /// `Attached` event of an entering Aura); every other kind returns none.
+    fn commit_scripted_zone_move(&mut self, kind: ScriptedZoneMoveKind, final_event: GameEventKind) -> Vec<GameEventKind> {
+        let mut entry_events = Vec::new();
         match kind {
             ScriptedZoneMoveKind::Destroy => {
                 for (event, departed) in sba::commit_death_or_regeneration(&mut self.state, final_event) {
@@ -747,6 +753,11 @@ impl Engine {
                 self.departed_triggered_abilities.extend(departed);
                 self.state.ledger.push(event);
             }
+            // CR 110.2a/400.7/614.12: Graveyard or Exile -> Battlefield, or
+            // wherever a replacement sent it.
+            ScriptedZoneMoveKind::Reanimate { controller, tapped } => {
+                entry_events = self.commit_reanimate(final_event, controller, tapped);
+            }
             ScriptedZoneMoveKind::Discard => {
                 let GameEventKind::ZoneChange { object: old_id, to, last_known_info, .. } = final_event else {
                     unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
@@ -788,6 +799,127 @@ impl Engine {
                 self.state.ledger.push(committed);
             }
         }
+        entry_events
+    }
+
+    /// `ScriptedZoneMoveKind::Reanimate`'s commit: puts a returned card onto
+    /// the battlefield the way a resolving permanent spell lands there
+    /// (`Engine::continue_permanent_entry`), minus the stack-bound Copy,
+    /// Devour and Amplify pauses (TODO on `AbilityEffect::ReturnToBattlefield`).
+    ///
+    /// `final_event` is the replacement-checked `ZoneChange`. If a
+    /// replacement rewrote `to`, the card goes there instead and nothing
+    /// battlefield-specific runs. The graveyard object's `controller` was
+    /// set temporarily by `continue_scripted_zone_move` so entry replacement
+    /// filters see the entering player; this function resets it to the owner
+    /// first, on every path, including an Aura that stays put.
+    fn commit_reanimate(
+        &mut self,
+        final_event: GameEventKind,
+        controller: Option<PlayerId>,
+        tapped: bool,
+    ) -> Vec<GameEventKind> {
+        let GameEventKind::ZoneChange { object: old_id, to, .. } = &final_event else {
+            unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
+        };
+        let (old_id, to) = (*old_id, *to);
+        // CR 108.4a: undo the temporary controller write.
+        if let Some(object) = self.state.object_mut(old_id) {
+            object.controller = object.owner;
+        }
+        if to != ZoneKind::Battlefield {
+            let (event, departed) = commands::commit_zone_move(&mut self.state, final_event);
+            self.departed_triggered_abilities.extend(departed);
+            self.state.ledger.push(event);
+            return Vec::new();
+        }
+        let GameEventKind::ZoneChange { from, last_known_info, .. } = final_event else {
+            unreachable!("checked above");
+        };
+        let last_known_info =
+            last_known_info.expect("continue_scripted_zone_move always proposes with last_known_info populated");
+        let owner = last_known_info.owner;
+        let entering_controller = controller.unwrap_or(owner);
+
+        // CR 303.4f/g: an Aura picks its host before it enters. One legal
+        // host attaches; none leaves it where it is. TODO(CR 303.4f): two or
+        // more hosts need a controller choice and also leave it where it is
+        // (the "Aura with several hosts" TODO on `AbilityEffect::
+        // ReturnToBattlefield`).
+        let mut attach_to = None;
+        if commands::is_aura(&last_known_info.definition) {
+            let hosts = commands::legal_aura_entry_candidates(
+                &self.state,
+                &self.script_runtime,
+                &last_known_info.definition,
+                entering_controller,
+                old_id,
+            );
+            match hosts.as_slice() {
+                [only] => attach_to = Some(*only),
+                _ => return Vec::new(),
+            }
+        }
+
+        let new_id = self.state.allocate_object_id();
+        let mut new_object = last_known_info.clone();
+        new_object.object_id = new_id;
+        new_object.lineage = ObjectLineage { previous: Some(old_id) };
+        new_object.zone = ZoneKind::Battlefield;
+        new_object.timestamp = self.state.allocate_sequence_no();
+        // CR 400.7: no memory of the old object (also resets controller to
+        // the owner and `entered_via_escape`), then CR 110.2a's controller.
+        new_object.reset_for_new_object();
+        new_object.controller = entering_controller;
+        new_object.tapped = tapped;
+        // CR 302.6: summoning sick.
+        new_object.controlled_since_turn = self.state.turn_number;
+
+        let from_owner = if from == ZoneKind::Exile { None } else { Some(owner) };
+        if let Some(zone) = self.state.zone_mut(from, from_owner) {
+            zone.remove(old_id);
+        }
+        let departed = commands::retire_object(&mut self.state, old_id);
+        self.departed_triggered_abilities.extend(departed);
+        if let Some(zone) = self.state.zone_mut(ZoneKind::Battlefield, None) {
+            zone.push_bottom(new_id);
+        }
+        self.state.objects.insert(new_id, new_object);
+
+        let event_id = self.state.allocate_event_id();
+        let sequence_no = self.state.allocate_sequence_no();
+        self.state.ledger.push(GameEvent {
+            event_id,
+            sequence_no,
+            kind: GameEventKind::ZoneChange {
+                object: new_id,
+                from,
+                to: ZoneKind::Battlefield,
+                last_known_info: Some(last_known_info),
+            },
+            caused_by_command: None,
+            parent_event: None,
+        });
+
+        // The card's script registers its abilities and its own entry
+        // replacement effects (CR 113.6h, 614.12), then the modifier family
+        // reads them. Sunburst gets no colors: nothing was cast (CR 702.44b).
+        self.run_card_script_for(new_id);
+        let mut entry_events =
+            replacement::apply_enters_battlefield_modifiers(&mut self.state, &self.script_runtime, new_id, from, ColorSet::empty());
+
+        match attach_to {
+            Some(Target::Object(host)) => {
+                commands::attach_permanent(&mut self.state, new_id, host);
+                entry_events.push(GameEventKind::Attached { object: new_id, attached_to: host });
+            }
+            Some(Target::Player(player)) => {
+                commands::attach_permanent_to_player(&mut self.state, new_id, player);
+                entry_events.push(GameEventKind::AttachedToPlayer { object: new_id, player });
+            }
+            Some(Target::Ability(_)) | None => {}
+        }
+        entry_events
     }
 
     /// Drains `remaining` scripted zone-move targets one at a time — CR
@@ -817,7 +949,7 @@ impl Engine {
         kind: ScriptedZoneMoveKind,
         mut remaining: VecDeque<ObjectId>,
         then: ScriptedZoneMoveThen,
-        trailing: Vec<GameEventKind>,
+        mut trailing: Vec<GameEventKind>,
     ) -> ProcessState {
         while let Some(id) = remaining.pop_front() {
             let Some(last_known_info) =
@@ -828,6 +960,20 @@ impl Engine {
                 // every other arm here takes.
                 continue;
             };
+            if let ScriptedZoneMoveKind::Reanimate { controller, .. } = kind {
+                // CR 400.4a: an instant or sorcery that would enter the
+                // battlefield stays in its previous zone.
+                if last_known_info.definition.card_types.intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY) {
+                    continue;
+                }
+                // Temporary: entry replacement filters read the object's
+                // controller, so the entering player is written onto the
+                // card now. `commit_reanimate` resets it to the owner.
+                let entering = controller.unwrap_or(last_known_info.owner);
+                if let Some(object) = self.state.object_mut(id) {
+                    object.controller = entering;
+                }
+            }
             if kind == ScriptedZoneMoveKind::Destroy {
                 // CR 702.12b: an indestructible permanent can't be destroyed
                 // at all - not a replacement effect, checked up front.
@@ -841,6 +987,7 @@ impl Engine {
             let to = match kind {
                 ScriptedZoneMoveKind::Exile => ZoneKind::Exile,
                 ScriptedZoneMoveKind::Bounce => ZoneKind::Hand,
+                ScriptedZoneMoveKind::Reanimate { .. } => ZoneKind::Battlefield,
                 _ => ZoneKind::Graveyard,
             };
             let from = last_known_info.zone;
@@ -851,7 +998,7 @@ impl Engine {
             let is_destroy = kind == ScriptedZoneMoveKind::Destroy;
             match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, is_destroy) {
                 ReplacementOutcome::Resolved(final_event) => {
-                    self.commit_scripted_zone_move(kind, final_event);
+                    trailing.extend(self.commit_scripted_zone_move(kind, final_event));
                 }
                 ReplacementOutcome::NeedsOrderingChoice { affected_player, event, candidates, excluded, .. } => {
                     return ProcessState::AwaitingReplacementChoice {

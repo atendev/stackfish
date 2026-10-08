@@ -5,6 +5,12 @@
 //! rules citation and the deliberate narrowing (no CR 616 entry-redirect
 //! support, no `apply_enters_battlefield_modifiers` family interaction —
 //! no real Persist/Undying card needs either).
+//!
+//! The general graveyard-to-battlefield effects (`ReturnToBattlefield`,
+//! `ReturnAllToBattlefield`) do not share this narrowing: they go through
+//! `ScriptedZoneMoveKind::Reanimate`, which is replacement-checked and applies
+//! the entry modifiers (`Engine::commit_reanimate`). This mover still skips
+//! both; see the `phase5/reanimation` backlog entry.
 
 use std::ops::ControlFlow;
 

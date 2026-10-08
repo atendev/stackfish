@@ -69,6 +69,23 @@ pub(crate) fn decode_condition_value(
     }
 }
 
+/// A `Game.Ops.*` constructor passed uncalled (`SetOperation(Game.Ops.Mill)`)
+/// would register as a custom script function and fail confusingly at
+/// resolution. Name the mistake up front instead.
+fn reject_uncalled_op(lua: &Lua, function: &Function) -> Result<(), ScriptError> {
+    let Ok(ops) = lua.globals().get::<_, mlua::Table>("Game").and_then(|g| g.get::<_, mlua::Table>("Ops")) else {
+        return Ok(());
+    };
+    for (name, candidate) in ops.pairs::<String, Value>().flatten() {
+        if matches!(&candidate, Value::Function(f) if f == function) {
+            return Err(ScriptError::LoadError(format!(
+                "Game.Ops.{name} builds an operation and must be called: Game.Ops.{name}(...)"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Same two-shapes pattern as `decode_condition_value`, for operations.
 /// Shared by `ScriptRuntime::load_operation` and
 /// `TriggeredAbilityBuilder::SetOperation`.
@@ -101,6 +118,7 @@ pub(crate) fn decode_operation_value(
             Ok((Some(tag.0), ScriptHandle(0)))
         }
         Value::Function(function) => {
+            reject_uncalled_op(lua, &function)?;
             let key = lua
                 .create_registry_value(function)
                 .map_err(|e| ScriptError::LoadError(e.to_string()))?;

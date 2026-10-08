@@ -304,6 +304,13 @@ pub enum ScriptedZoneMoveKind {
     /// so a replacement that rewrites the destination (to Exile) still
     /// lands in the right zone.
     Mill,
+    /// CR 400.7/110.2a: Graveyard (or Exile) -> Battlefield
+    /// (`AbilityEffect::ReturnToBattlefield` / `ReturnAllToBattlefield`).
+    /// `controller` is the player the permanent enters under (`None` means
+    /// each card's own owner); `tapped` makes it enter tapped. The commit arm
+    /// runs the full battlefield-entry treatment, see
+    /// `Engine::commit_scripted_zone_move`.
+    Reanimate { controller: Option<PlayerId>, tapped: bool },
 }
 
 impl ScriptedZoneMoveKind {
@@ -318,6 +325,7 @@ impl ScriptedZoneMoveKind {
             ScriptedZoneMoveKind::Bounce => {
                 matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard | ZoneKind::Exile)
             }
+            ScriptedZoneMoveKind::Reanimate { .. } => matches!(zone, ZoneKind::Graveyard | ZoneKind::Exile),
             other => zone == other.from_zone(),
         }
     }
@@ -329,6 +337,7 @@ impl ScriptedZoneMoveKind {
         match self {
             ScriptedZoneMoveKind::Discard => ZoneKind::Hand,
             ScriptedZoneMoveKind::Mill => ZoneKind::Library,
+            ScriptedZoneMoveKind::Reanimate { .. } => ZoneKind::Graveyard,
             ScriptedZoneMoveKind::Destroy
             | ScriptedZoneMoveKind::Sacrifice
             | ScriptedZoneMoveKind::Exile

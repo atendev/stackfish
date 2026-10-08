@@ -530,6 +530,14 @@ impl Engine {
             Some(AbilityEffect::ReturnAllToHand { filter, zone }) => self.resolve_return_all_to_hand_effect(top, filter, *zone),
             Some(AbilityEffect::ExileSelf) => self.resolve_exile_self_effect(top),
             Some(AbilityEffect::ExileAll { filter, zone }) => self.resolve_exile_all_effect(top, filter, *zone),
+            // CR 110.2a/400.7: graveyard or exile to battlefield, replacement-
+            // checked and with the full entry treatment.
+            Some(AbilityEffect::ReturnToBattlefield { control, tapped }) => {
+                self.resolve_return_to_battlefield_effect(top, legal_targets, *control, *tapped)
+            }
+            Some(AbilityEffect::ReturnAllToBattlefield { filter, zone, control, tapped }) => {
+                self.resolve_return_all_to_battlefield_effect(top, filter, *zone, *control, *tapped)
+            }
             // CR 701.26: synchronous tap/untap. Each flips `tapped` in
             // place and pushes the event only on a real flip - see
             // AbilityEffect::Tap's own doc comment.

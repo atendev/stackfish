@@ -313,6 +313,9 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::ReturnAllToHand { .. })
         | Some(AbilityEffect::ExileSelf)
         | Some(AbilityEffect::ExileAll { .. })
+        // CR 110.2a/400.7: reanimation goes on the stack like any other zone move.
+        | Some(AbilityEffect::ReturnToBattlefield { .. })
+        | Some(AbilityEffect::ReturnAllToBattlefield { .. })
         // CR 701.26: tap/untap goes on the stack like any other
         // non-mana effect (Icy Manipulator's own ability does).
         | Some(AbilityEffect::Tap)

@@ -222,3 +222,24 @@
   side).
 - Unresolved: hybrid and Phyrexian mana are still not representable in `CardSpec`'s cost shape —
   unchanged by this fix, same pre-existing gap the simplification note already names.
+
+## Slice: reanimation (branch `phase5/reanimation`)
+
+- `ScriptedZoneMoveKind::Reanimate { controller: Option<PlayerId>, tapped: bool }` moves a card from a graveyard
+  or exile to the battlefield. `from_zone()` is Graveyard and `accepts_source_zone` takes Graveyard or Exile, so the
+  real source zone is read at resolution like `Bounce`. `controller: None` means each card's owner.
+- `continue_scripted_zone_move` skips an instant or sorcery card (CR 400.4a), then writes the entering player onto
+  the graveyard object's `controller` before proposing the `ZoneChange`. This is a temporary mutation of a
+  non-battlefield object (CR 108.4a makes the field meaningless there). Replacement filters and the CR 616.1
+  affected-player lookup read it, so "creature would enter under an opponent's control" works.
+- `commit_scripted_zone_move` now returns the events the caller owes its `trailing` list. Only the new
+  `commit_reanimate` returns any (`CounterAdded`, `Attached`/`AttachedToPlayer`). Both callers (the loop and the
+  CR 616.1 resume arm) extend `trailing`.
+- `commit_reanimate` resets the controller to the owner first, on every path. If a replacement moved the card
+  elsewhere it commits through `commit_zone_move`. Otherwise it checks an Aura's host (`legal_aura_entry_candidates`:
+  one host attaches, none or several leave the card in the graveyard), then builds the new object
+  (`reset_for_new_object`, chosen controller, `tapped`, `controlled_since_turn`), retires the old id, logs the
+  `ZoneChange`, runs the card script (`run_card_script_for`) and calls `apply_enters_battlefield_modifiers`.
+- Left alone: `ReturnSelfWithCounter` (Persist/Undying) still skips replacement checks and entry modifiers.
+- Verify: `phase5_reanimation.rs` (44).
+
