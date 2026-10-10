@@ -401,8 +401,8 @@ pub enum AbilityEffect {
     /// graveyard" (CR 406.2). No target: the resolving ability's own source
     /// goes through `ScriptedZoneMoveKind::Exile`. A source that already
     /// changed zones is a new object (CR 400.7), so the effect does nothing.
-    /// TODO(CR 610.3): no "until it leaves the battlefield" return and no
-    /// face-down exile (CR 406.3) yet.
+    /// TODO: no face-down exile (CR 406.3) yet. The targeted "until it leaves
+    /// the battlefield" form is `ExileUntilSourceLeaves`.
     ExileSelf,
     /// The `Game.Ops.ExileAll(filter, zone)` primitive - "exile all
     /// creatures" / "exile all cards from graveyards" (CR 406.2, CR 601.2c).
@@ -412,6 +412,20 @@ pub enum AbilityEffect {
     /// replacement-checked and fire departed triggers.
     /// TODO: Hand and Library sources (`accepts_source_zone` rejects them).
     ExileAll { filter: EffectFilter, zone: ZoneKind },
+    /// The `Game.Ops.ExileUntilSourceLeaves` primitive - "exile target
+    /// creature until ~ leaves the battlefield" (CR 610.3). Targeted and
+    /// battlefield-only, like `Exile`, but each card that lands in exile is
+    /// linked to the ability's source (`GameState::linked_exiles`). Once the
+    /// source is off the battlefield the card returns under its owner's
+    /// control (CR 610.3c) through `ScriptedZoneMoveKind::Reanimate`, at the
+    /// point `finish_sba_loop` settles. If the source already left before
+    /// this resolves, nothing is exiled (CR 610.3a/b).
+    /// TODO: the cleanup-step SBA check doesn't return linked exiles.
+    /// TODO(CR 610.4): no "phases out until" form.
+    /// TODO: no untargeted form, no graveyard source, no other durations
+    /// (until end of turn, until your next turn) and no Oblivion Ring style
+    /// separate-trigger return (CR 607 linked abilities).
+    ExileUntilSourceLeaves,
     /// The `Game.Ops.ReturnToBattlefield(opts?)` primitive - "return target
     /// creature card from a graveyard to the battlefield" (Reanimate, Animate
     /// Dead's non-Aura half, Zombify, Unburial Rites). Every legal object
@@ -2492,6 +2506,7 @@ mod tests {
             script_ability_ids: std::collections::HashSet::new(),
             ability_function_zones: std::collections::HashMap::new(),
             off_battlefield_scripts_run: std::collections::HashSet::new(),
+            linked_exiles: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
         }

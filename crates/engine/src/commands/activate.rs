@@ -308,6 +308,7 @@ pub(super) fn execute_activate_ability(
         | Some(AbilityEffect::Mill(_))
         | Some(AbilityEffect::LoseLife(_))
         | Some(AbilityEffect::Exile)
+        | Some(AbilityEffect::ExileUntilSourceLeaves)
         | Some(AbilityEffect::ReturnToHand)
         | Some(AbilityEffect::ReturnSelfToHand)
         | Some(AbilityEffect::ReturnAllToHand { .. })

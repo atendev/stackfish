@@ -2,6 +2,28 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Exile until it leaves the battlefield (`phase5/exile-until-leaves`)**: `AbilityEffect::ExileUntilSourceLeaves`
+  (`Game.Ops.ExileUntilSourceLeaves`, bare tag), targeted and battlefield-only. It runs as
+  `ScriptedZoneMoveKind::ExileUntilLeaves { source }`, which shares the `Exile` commit arm and pushes a
+  `LinkedExile { source, exiled }` onto the new `GameState::linked_exiles` when the card really lands in exile. CR
+  610.3a/b: if `top.source` is no longer a battlefield object when the ability resolves, nothing is exiled. The
+  return is `Engine::return_linked_exiles`, called from `finish_sba_loop` once a pass finds nothing to do: every
+  link whose source is gone goes back through `continue_scripted_zone_move(Reanimate { controller: None })` as one
+  batch (CR 610.3c owner control, 610.3d simultaneous), then `ScriptedZoneMoveThen::SbaLoop` re-enters the SBA loop.
+  Replacement checks, CR 616.1 pauses, enters triggers and entry modifiers are the reanimation ones. It is not a
+  trigger and never uses the stack. `retire_object` drops a link when the exiled card leaves exile some other way.
+  A token ceases in exile, so nothing returns. Tests: `phase5_exile_until_leaves.rs` (19). Left open: **cleanup
+  step**: `finish_cleanup_sba_check` does not call `return_linked_exiles`, so a source that leaves during an SBA pass
+  in the cleanup step returns its cards at the next `SbaLoop` pass instead; no phasing form (CR 610.4); no untargeted
+  form ("exile each ..."), no graveyard source and no durations other than "source leaves" (until end of turn,
+  until your next turn); no Oblivion Ring style form, which is a separate leaves-the-battlefield trigger linked to
+  the exiled card (CR 607 linked abilities) and would need a way for a script to name "the exiled card"; no
+  "returns tapped / with a counter / attacking" options; an Aura with several legal hosts stays in exile (the
+  reanimation gap); the batch return is one card after another, not one simultaneous enters event (CR 603.6a);
+  not usable as a mode of a multi-mode spell (`is_modal_resolvable` unchanged). The `ExileSelf` TODO for "until it
+  leaves" is closed only for the targeted form. Test-harness note: a replacement effect's `source` must be a real
+  object in the state, and `activate` needs `ability_index: u32`.
+
 - **Fight and bite (`phase5/fight-bite`)**: `AbilityEffect::{Fight, Bite}` (`Game.Ops.Fight`, `Game.Ops.Bite`, bare
   tags). One resolver, `resolve_fight_effect` (`resolve/direct_effects.rs`), with a `mutual` flag. The creatures come
   from the target spec: a two-word `TargetSpec::Multiple` (first acts on second, read from `modal_chunk_legals`),

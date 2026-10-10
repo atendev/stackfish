@@ -15,6 +15,7 @@ use crate::types::ability::RegisteredAbility;
 use crate::types::card::{CardTypeSet, KeywordSet};
 use crate::types::mana::ColorSet;
 use crate::types::event::{GameEvent, GameEventKind};
+use crate::types::game::LinkedExile;
 use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, Target};
 use crate::types::zone::ZoneKind;
 
@@ -521,6 +522,12 @@ impl Engine {
         // PutTriggersApnap have both had a chance to consult it.
         self.departed_triggered_abilities.extend(departed);
         let next = if events.is_empty() {
+            // CR 610.3: state-based actions have settled, so any "until
+            // [source] leaves the battlefield" exile whose source is gone
+            // returns now, then the loop runs once more.
+            if let Some(returning) = self.return_linked_exiles() {
+                return self.game_over_check(returning);
+            }
             let since = self.pipeline_context.as_ref().map(|ctx| ctx.since_ledger).unwrap_or(0);
             ProcessState::CollectTriggers { since }
         } else {
@@ -622,7 +629,7 @@ impl Engine {
                 self.departed_triggered_abilities.extend(departed);
                 self.state.ledger.push(event);
             }
-            ScriptedZoneMoveKind::Exile => {
+            ScriptedZoneMoveKind::Exile | ScriptedZoneMoveKind::ExileUntilLeaves { .. } => {
                 let GameEventKind::ZoneChange { object: old_id, from, to, last_known_info, .. } = final_event else {
                     unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
                 };
@@ -658,6 +665,13 @@ impl Engine {
                     zone.push_bottom(new_id);
                 }
                 self.state.objects.insert(new_id, new_object);
+                // CR 610.3: only a card that really landed in exile is linked
+                // (a replacement may have sent it elsewhere).
+                if let ScriptedZoneMoveKind::ExileUntilLeaves { source } = kind {
+                    if to == ZoneKind::Exile {
+                        self.state.linked_exiles.push(LinkedExile { source, exiled: new_id });
+                    }
+                }
 
                 let event_id = self.state.allocate_event_id();
                 let sequence_no = self.state.allocate_sequence_no();
@@ -800,6 +814,31 @@ impl Engine {
             }
         }
         entry_events
+    }
+
+    /// CR 610.3: the second one-shot effect of every "exile until [source]
+    /// leaves the battlefield". Takes each `GameState::linked_exiles` entry
+    /// whose source is no longer on the battlefield and returns its card to
+    /// the battlefield under its owner's control (CR 610.3c) as one batch
+    /// (CR 610.3d), replacement-checked like any reanimation. A card that is
+    /// no longer in exile (`continue_scripted_zone_move` skips it) or never
+    /// was (a token) just drops out. Returns `None` when nothing is due.
+    fn return_linked_exiles(&mut self) -> Option<ProcessState> {
+        let (due, waiting): (Vec<LinkedExile>, Vec<LinkedExile>) =
+            std::mem::take(&mut self.state.linked_exiles).into_iter().partition(|link| {
+                self.state.object(link.source).map_or(true, |source| source.zone != ZoneKind::Battlefield)
+            });
+        self.state.linked_exiles = waiting;
+        if due.is_empty() {
+            return None;
+        }
+        let returning: VecDeque<ObjectId> = due.into_iter().map(|link| link.exiled).collect();
+        Some(self.continue_scripted_zone_move(
+            ScriptedZoneMoveKind::Reanimate { controller: None, tapped: false },
+            returning,
+            ScriptedZoneMoveThen::SbaLoop,
+            Vec::new(),
+        ))
     }
 
     /// `ScriptedZoneMoveKind::Reanimate`'s commit: puts a returned card onto
@@ -985,7 +1024,7 @@ impl Engine {
                 }
             }
             let to = match kind {
-                ScriptedZoneMoveKind::Exile => ZoneKind::Exile,
+                ScriptedZoneMoveKind::Exile | ScriptedZoneMoveKind::ExileUntilLeaves { .. } => ZoneKind::Exile,
                 ScriptedZoneMoveKind::Bounce => ZoneKind::Hand,
                 ScriptedZoneMoveKind::Reanimate { .. } => ZoneKind::Battlefield,
                 _ => ZoneKind::Graveyard,
@@ -1032,6 +1071,12 @@ impl Engine {
             // that actually reaches ScriptedZoneMoveThen::StackResolution.
             ScriptedZoneMoveThen::ThenScriptedZoneMove { kind, remaining, then } => {
                 self.continue_scripted_zone_move(kind, remaining, *then, trailing)
+            }
+            // CR 610.3: the returned permanents' own events (`trailing`) go
+            // straight into the ledger, then the SBA loop runs again.
+            ScriptedZoneMoveThen::SbaLoop => {
+                self.log_events(trailing);
+                ProcessState::SbaLoop
             }
         }
     }

@@ -486,6 +486,10 @@ pub(crate) fn retire_object(state: &mut GameState, old_id: ObjectId) -> Vec<Regi
     }
     let mut departed_triggered = Vec::new();
     state.off_battlefield_scripts_run.remove(&old_id);
+    // CR 610.3: the exiled card left exile by another route, so there is
+    // nothing left to return. A departing `source` keeps its link; the engine
+    // consumes it right after.
+    state.linked_exiles.retain(|link| link.exiled != old_id);
     let script_ids = &mut state.script_ability_ids;
     let function_zones = &mut state.ability_function_zones;
     state.abilities.retain(|a| {

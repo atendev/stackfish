@@ -311,6 +311,10 @@ pub enum ScriptedZoneMoveKind {
     /// runs the full battlefield-entry treatment, see
     /// `Engine::commit_scripted_zone_move`.
     Reanimate { controller: Option<PlayerId>, tapped: bool },
+    /// CR 610.3: `Exile` that also links each card landing in exile to
+    /// `source`, so it returns once `source` leaves the battlefield
+    /// (`GameState::linked_exiles`). Battlefield sources only.
+    ExileUntilLeaves { source: ObjectId },
 }
 
 impl ScriptedZoneMoveKind {
@@ -341,6 +345,7 @@ impl ScriptedZoneMoveKind {
             ScriptedZoneMoveKind::Destroy
             | ScriptedZoneMoveKind::Sacrifice
             | ScriptedZoneMoveKind::Exile
+            | ScriptedZoneMoveKind::ExileUntilLeaves { .. }
             | ScriptedZoneMoveKind::Bounce => {
                 ZoneKind::Battlefield
             }
@@ -390,6 +395,12 @@ pub enum ScriptedZoneMoveThen {
     /// move` recurses into `*then` — chains of length > 2 work for free the
     /// same way, though nothing here builds one longer than 2.
     ThenScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, then: Box<ScriptedZoneMoveThen> },
+    /// CR 610.3: the returns of `Engine::return_linked_exiles` happen at the
+    /// end of an `SbaLoop` pass, so once they settle the loop starts again
+    /// (the returned permanents get checked). `trailing` events are logged to
+    /// the ledger first. TODO: the cleanup-step SBA check
+    /// (`finish_cleanup_sba_check`) doesn't return linked exiles.
+    SbaLoop,
 }
 
 /// One card still to propose+replacement-check+commit — shared queue entry

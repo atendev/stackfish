@@ -212,6 +212,8 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     let lose_life = lua.create_function(|_, n: u32| Ok(OperationTag(AbilityEffect::LoseLife(n))))?;
     ops.set("LoseLife", lose_life)?;
     ops.set("Exile", OperationTag(AbilityEffect::Exile))?;
+    // CR 610.3: targeted exile that returns when the ability's source leaves.
+    ops.set("ExileUntilSourceLeaves", OperationTag(AbilityEffect::ExileUntilSourceLeaves))?;
     ops.set("ReturnToHand", OperationTag(AbilityEffect::ReturnToHand))?;
     ops.set("ReturnSelfToHand", OperationTag(AbilityEffect::ReturnSelfToHand))?;
     // CR 400.3: `zone` defaults to "Battlefield"; only the zones
