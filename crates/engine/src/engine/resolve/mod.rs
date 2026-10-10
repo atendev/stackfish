@@ -523,6 +523,8 @@ impl Engine {
             // ordering-choice handling as Destroy/Sacrifice
             // above.
             Some(AbilityEffect::Exile) => self.resolve_exile_effect(top, legal_targets),
+            // CR 610.3: Exile that returns when the source leaves.
+            Some(AbilityEffect::ExileUntilSourceLeaves) => self.resolve_exile_until_source_leaves_effect(top, legal_targets),
             // CR 400.3: same target-driven shape as Exile above.
             Some(AbilityEffect::ReturnToHand) => self.resolve_return_to_hand_effect(top, legal_targets),
             // CR 400.3: untargeted siblings of ReturnToHand.

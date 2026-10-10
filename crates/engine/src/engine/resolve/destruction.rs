@@ -113,6 +113,33 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
+    /// CR 610.3: `Game.Ops.ExileUntilSourceLeaves` - `resolve_exile_effect`
+    /// plus a link from each exiled card to `top.source`. CR 610.3a/b: if the
+    /// source already left the battlefield (it has a new id, or none), the
+    /// "until" event has happened and nothing is exiled.
+    pub(super) fn resolve_exile_until_source_leaves_effect(
+        &mut self,
+        top: &StackObject,
+        legal_targets: &[Target],
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let source_on_battlefield = self.state.object(top.source).is_some_and(|o| o.zone == ZoneKind::Battlefield);
+        let targets: VecDeque<ObjectId> = legal_targets
+            .iter()
+            .filter(|_| source_on_battlefield)
+            .filter_map(|t| match t {
+                Target::Object(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        self.process_state = self.continue_scripted_zone_move(
+            ScriptedZoneMoveKind::ExileUntilLeaves { source: top.source },
+            targets,
+            ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
+            Vec::new(),
+        );
+        ControlFlow::Break(StepStatus::Progressed)
+    }
+
     /// CR 400.3: `Game.Ops.ReturnToHand()` - moves each legal battlefield
     /// target to its owner's hand. Mirrors `resolve_exile_effect`.
     pub(super) fn resolve_return_to_hand_effect(

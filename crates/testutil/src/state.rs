@@ -54,6 +54,7 @@ pub fn two_player_state(zones: Vec<Zone>) -> GameState {
         script_ability_ids: std::collections::HashSet::new(),
         ability_function_zones: std::collections::HashMap::new(),
         off_battlefield_scripts_run: std::collections::HashSet::new(),
+        linked_exiles: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
     }
@@ -99,6 +100,7 @@ pub fn single_player_state(player: PlayerId, zones: Vec<Zone>) -> GameState {
         script_ability_ids: std::collections::HashSet::new(),
         ability_function_zones: std::collections::HashMap::new(),
         off_battlefield_scripts_run: std::collections::HashSet::new(),
+        linked_exiles: Vec::new(),
         pending_timing_bypass: None,
         pending_free_cast: None,
     }

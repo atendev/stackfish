@@ -623,6 +623,12 @@ GameOpsTable.ExileSelf = nil
 ---@return GameOpsValue
 function GameOpsTable.ExileAll(filter, zone) end
 
+--- CR 610.3: "exile target creature until this leaves the battlefield". Targeted, battlefield-only. Each exiled
+--- card is linked to the ability's source and returns under its owner's control once the source is off the
+--- battlefield. Does nothing if the source already left before the ability resolves (CR 610.3a/b).
+---@type GameOpsValue
+GameOpsTable.ExileUntilSourceLeaves = nil
+
 --- CR 110.2a/400.7: "return target creature card from a graveyard to the battlefield". Declare the target with a
 --- `zone = "Graveyard"` (or "Exile") filter. Replacement-checked, then the card enters as a new object with its
 --- script run, enters-tapped/enters-with-counters effects applied and its enters triggers firing. Instants and

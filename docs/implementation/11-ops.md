@@ -622,3 +622,28 @@
   unchanged, so neither op can be combined as one mode of a multi-mode spell.
 - Verify: `phase5_fight_bite.rs` (49).
 - Open: see the `phase5/fight-bite` entry in [99-backlog](99-backlog.md).
+
+
+## Slice: exile-until-leaves (branch `phase5/exile-until-leaves`)
+
+- `AbilityEffect::ExileUntilSourceLeaves`, a bare tag (`Game.Ops.ExileUntilSourceLeaves`) in `script/globals.rs`.
+  Targeted and battlefield-only, like `Exile`. `commands/activate.rs` lists it with the other non-mana effects.
+- `resolve_exile_until_source_leaves_effect` (`resolve/destruction.rs`) is `resolve_exile_effect` plus a source check.
+  If `top.source` is not a battlefield object the target list is emptied (CR 610.3a/b). Otherwise it runs
+  `ScriptedZoneMoveKind::ExileUntilLeaves { source }`.
+- The new kind shares the `Exile` commit arm in `commit_scripted_zone_move`. After the card is placed it pushes a
+  `LinkedExile { source, exiled: new_id }` onto `GameState::linked_exiles`, only when `to` is still Exile (a
+  replacement may have sent the card elsewhere).
+- The return is `Engine::return_linked_exiles` (`replacement_resume.rs`), called from `finish_sba_loop` when a pass
+  finds nothing to do. It takes every link whose source is missing or off the battlefield and runs the cards through
+  `continue_scripted_zone_move(Reanimate { controller: None, tapped: false })` as one batch. Owner control, the
+  replacement check, CR 616.1 pauses, enters triggers and entry modifiers all come from the reanimation path. The new
+  `ScriptedZoneMoveThen::SbaLoop` logs the trailing entry events and re-enters `SbaLoop`, so the returned permanents
+  are checked (legend rule, Auras) before triggers are collected. The links are removed before the move starts, so
+  a redirected or paused return cannot loop.
+- `commands::retire_object` drops a link whose `exiled` id retires, so a card that left exile by another route
+  (reanimated early, exiled again) is not pulled back. A departing source keeps its link until the return runs.
+- `LinkedExile` is a new field on `GameState` (`linked_exiles`); the 12 struct literals in src, tests, testutil and
+  scenario got `linked_exiles: Vec::new()`.
+- Verify: `phase5_exile_until_leaves.rs` (19).
+- Open: see the `phase5/exile-until-leaves` entry in [99-backlog](99-backlog.md).

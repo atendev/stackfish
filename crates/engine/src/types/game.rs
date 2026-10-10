@@ -19,6 +19,15 @@ pub struct RngState {
     pub draws_consumed: u64,
 }
 
+/// One "exile until it leaves the battlefield" link (CR 610.3). `exiled` is
+/// the card's id in exile (a new object, CR 400.7); `source` is the
+/// permanent whose departure returns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkedExile {
+    pub source: ObjectId,
+    pub exiled: ObjectId,
+}
+
 /// Owns the full mutable state for one game. Player count is a runtime
 /// parameter — not hardcoded to 2 or 4 — to support N-player Commander.
 pub struct GameState {
@@ -199,6 +208,11 @@ pub struct GameState {
     /// would otherwise need its own hook; sweeping once per trigger-collection
     /// pass covers them all. Entries are pruned by `commands::retire_object`.
     pub off_battlefield_scripts_run: std::collections::HashSet<ObjectId>,
+    /// CR 610.3: cards exiled "until [source] leaves the battlefield". Pushed
+    /// when the exile commits, drained by `Engine::return_linked_exiles` once
+    /// the source is off the battlefield. `commands::retire_object` drops an
+    /// entry whose `exiled` card left exile some other way.
+    pub linked_exiles: Vec<LinkedExile>,
     /// CR 702.35b: one-shot timing-restriction waiver, set immediately
     /// before `Engine::submit_madness_cast` queues its synthetic `CastSpell`
     /// command and consumed (`.take()`) by `commands::cast::execute_cast_spell`'s
@@ -349,6 +363,7 @@ mod tests {
             script_ability_ids: std::collections::HashSet::new(),
             ability_function_zones: std::collections::HashMap::new(),
             off_battlefield_scripts_run: std::collections::HashSet::new(),
+            linked_exiles: Vec::new(),
             pending_timing_bypass: None,
             pending_free_cast: None,
         };
