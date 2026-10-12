@@ -916,16 +916,16 @@ fn assign_targets_by_filter(
 /// resolver handles against a mode's own target requirement and the standard
 /// `ReplacementCheck` tail: the synchronous effects, the scripted zone moves
 /// (including their CR 616.1 ordering pauses), draw, discard, scry/surveil,
-/// search (including its devour/amplify entry choices) and token creation
-/// (including the Aura attach choice).
+/// search (including its devour/amplify entry choices), token creation
+/// (including the Aura attach choice) and "unless paid" (the payer's pay or
+/// decline answer).
 /// Checked at cast time so an unsupported mode is rejected immediately rather
 /// than silently doing nothing at resolution. A single chosen mode (the
 /// pre-existing "Choose one -" case) is never checked against this at all - it
 /// uses its own effect bare, unwrapped from `Modal`.
 ///
-/// TODO: not supported inside a multi-mode choice yet: `UnlessPaid` (payment
-/// pause) and `ExchangeTextBoxes` (pairs two targets, so its mode would need
-/// several target words). `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`,
+/// TODO: not supported inside a multi-mode choice yet: `ExchangeTextBoxes`
+/// (pairs two targets, so its mode would need several target words). `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`,
 /// `ReturnSelfWithCounter`, `AddMana*` and `Script` are not card-text modes.
 ///
 /// `pub(crate)` since CR 700.2e's `Engine::submit_mode_choice` (engine.rs)
@@ -977,6 +977,7 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::Surveil(_)
             | AbilityEffect::Search { .. }
             | AbilityEffect::CreateToken { .. }
+            | AbilityEffect::UnlessPaid { .. }
             // Act on the ability's own source, so only a modal triggered
             // ability can use them (a spell's source is not a permanent).
             | AbilityEffect::BecomeCopy(_)

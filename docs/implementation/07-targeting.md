@@ -437,7 +437,7 @@
     defaulting to `1`/`false, so every pre-existing modal-spell fixture parses unchanged),
     `build_mode_choice(&CardSpec) -> ModeChoice`, wired into all 3 `CardDefinition`-construction
     sites `modal-spell-toml` already touched.
-- Unresolved: combining a mode using `UnlessPaid` or `ExchangeTextBoxes` (see `is_modal_resolvable`).
+- Unresolved: combining a mode using `ExchangeTextBoxes` (see `is_modal_resolvable`).
   A mode whose own `target_requirement` is itself `TargetSpec::Multiple` (a mode independently
   needing several differently-filtered targets) can't be combined with other chosen modes either -
   rejected outright rather than silently flattened. CR 700.2d's "same mode twice" exception, CR
