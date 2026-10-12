@@ -31,6 +31,20 @@ pub struct PendingTrigger {
     /// collected, so a second qualifying event later in the same turn (even
     /// within the same batch) is correctly excluded.
     pub once_per_turn: bool,
+    /// CR 702.21a: the spell or ability that caused this trigger, when the
+    /// event that matched carries one (`BecameTarget::by`). Ward's counter
+    /// needs it as its target, and `TargetFilter::TriggeringStackObject`
+    /// reads it in `push_ordered_triggers`. `None` for every other event.
+    pub triggering_stack: Option<ObjectId>,
+}
+
+/// The stack object an event is "caused by" for `PendingTrigger::
+/// triggering_stack`, if it names one.
+fn triggering_stack_of(kind: &GameEventKind) -> Option<ObjectId> {
+    match kind {
+        GameEventKind::BecameTarget { by, .. } => Some(*by),
+        _ => None,
+    }
 }
 
 /// Finds every triggered ability that matches `event` and is currently
@@ -214,7 +228,13 @@ pub fn collect_triggers(
             }
         };
         if matched && intervening_if_holds {
-            pending.push(PendingTrigger { source: ability.source, controller, ability: ability.id, once_per_turn });
+            pending.push(PendingTrigger {
+                source: ability.source,
+                controller,
+                ability: ability.id,
+                once_per_turn,
+                triggering_stack: triggering_stack_of(&event.kind),
+            });
         }
     }
 
@@ -299,6 +319,7 @@ pub fn collect_triggers(
                 controller: lki.controller,
                 ability: ability.id,
                 once_per_turn,
+                triggering_stack: triggering_stack_of(&event.kind),
             });
         }
     }

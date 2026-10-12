@@ -435,7 +435,8 @@ doc comment for the full three-way shape): exact by default, 0-to-`count` if `up
 ```toml
 [cards.target_requirement]
 filter = "any"          # "object" | "player" | "any" (CR 115.4's any target: creature/player/
-                         # planeswalker/battle)
+                         # planeswalker/battle) | "ability" (an ability on the stack) | "triggering"
+                         # (the spell or ability that caused a Ward-style trigger)
 card_types = ["Creature"] # "object" filter only, default [] (no card-type restriction)
 excluded_card_types = ["Land"] # "object" filter only, default [] - CR 601.2c/115's negated form,
                          # e.g. "target nonland permanent"; independent of card_types above

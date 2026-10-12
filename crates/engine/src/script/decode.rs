@@ -951,6 +951,8 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
         // CR 113.9/701.6a: "counter target activated or triggered ability"
         // (Stifle, Trickbind) - see TargetFilter::Ability's own doc comment.
         "ability" => Ok(TargetFilter::Ability),
+        // CR 702.21a (Ward): the spell or ability that triggered this one.
+        "triggering" => Ok(TargetFilter::TriggeringStackObject),
         "object" => {
             let controller_name: Option<String> =
                 table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;

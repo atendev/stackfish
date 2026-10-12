@@ -491,6 +491,7 @@ local GameLandPlayAffectedTable = {}
 ---@field EachDiscardsCard GameConditionsValue              -- any player discards
 ---@field Discarded GameConditionsValue                     -- "when this card is discarded" (self-referential)
 ---@field Cast GameConditionsValue                          -- CR 601.2i, "when you cast this spell" (registers only while on the stack)
+---@field BecomesTargetOfOpponent GameConditionsValue       -- CR 702.21a, "whenever this permanent becomes the target of a spell or ability an opponent controls"
 ---@field Scries GameConditionsValue                        -- CR 701.22d, "whenever you scry"
 ---@field EachScries GameConditionsValue                    -- any player scries
 ---@field Surveils GameConditionsValue                      -- CR 701.25d, "whenever you surveil"
@@ -1053,6 +1054,12 @@ function Game.CreateDrawLimitModifier(c) end
 ---@param source ObjectId
 ---@param name KeywordName|string
 function Game.RegisterKeyword(source, name) end
+
+--- CR 702.21a: one instance of Ward. Sugar for CreateTriggeredAbility/SetCondition(BecomesTargetOfOpponent)/
+--- SetTarget({ type = "triggering" })/SetOperation(Ops.CounterUnlessPaid(cost))/Register().
+---@param source ObjectId
+---@param cost string  -- mana-cost string, e.g. "{2}"
+function Game.RegisterWard(source, cost) end
 
 --- Only callable inside an operation function; suspends/resumes synchronously.
 ---@param filter FilterTable|{ type?: "object"|"player"|"any" }

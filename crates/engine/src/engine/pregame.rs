@@ -187,6 +187,7 @@ impl Engine {
             pipeline_context: None,
             pipeline_exit: PipelineExit::BackToPriority,
             departed_triggered_abilities: Vec::new(),
+            recollect_triggers_since: None,
             next_command_id: 0,
             pending_payment: None,
             suspended_payments: Vec::new(),

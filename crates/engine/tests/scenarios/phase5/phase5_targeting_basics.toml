@@ -100,4 +100,5 @@ equals = "battlefield"
 [[steps]]
 type = "assert_ledger_len"
 # +1 vs. before phase5/cascade: CR 601.2i's new SpellCast marker event.
-equals = 18
+# +1 vs. before phase5/ward: BecameTarget for the bear the bolt targets.
+equals = 19

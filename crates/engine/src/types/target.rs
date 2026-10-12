@@ -169,6 +169,17 @@ pub enum TargetFilter {
     /// triggered ability matches too (CR 707.10 — a copy is that ability for
     /// every rules purpose, including this one).
     Ability,
+    /// CR 702.21a (Ward): "counter that spell or ability" - the spell or
+    /// ability whose event triggered this ability, not something the
+    /// controller picks. `push_ordered_triggers` fills it from
+    /// `PendingTrigger::triggering_stack` instead of raising a CR 603.3d
+    /// choice, and drops the trigger if that stack object is already gone.
+    /// Legal while the target is still on the stack (spell as `Target::Object`,
+    /// activated or triggered ability as `Target::Ability`), so the CR 608.2b
+    /// resolution recheck fizzles it once the spell or ability has left.
+    /// Meaningful only on a triggered ability; on a cast or activation nothing
+    /// can name a triggering object, so no legal target ever exists.
+    TriggeringStackObject,
 }
 
 /// A number of targets matching `filter`, chosen once for one instance of

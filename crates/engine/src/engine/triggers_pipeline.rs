@@ -12,7 +12,7 @@ use crate::types::card::ModeChoice;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::{StackEntryKind, StackObject};
-use crate::types::target::TargetSpec;
+use crate::types::target::{TargetFilter, TargetSpec};
 
 use super::{Engine, ProcessState, StepStatus, TriggerModeChoiceError, TriggerOrderError, TriggerTargetsError};
 
@@ -301,6 +301,23 @@ impl Engine {
             // CastSpell/ActivateAbility, nothing submitted `targets` up
             // front, since a triggered ability isn't initiated by a player
             // action in the first place.
+            // CR 702.21a (Ward): "counter that spell or ability" names the
+            // object that caused the trigger rather than asking for a choice,
+            // so it is filled in here and the CR 603.3d pause never happens.
+            // If that spell or ability has already left the stack there is
+            // nothing legal to target and the trigger is removed (CR 603.3d).
+            if let Some(TargetSpec::Primitive(req)) = &ability.target {
+                if req.filter == TargetFilter::TriggeringStackObject {
+                    let target = trigger.triggering_stack.and_then(|id| {
+                        let so = self.state.stack.iter().find(|so| so.stack_id == id)?;
+                        Some(if commands::is_ability_stack_entry(&so.kind) { Target::Ability(id) } else { Target::Object(id) })
+                    });
+                    if let Some(target) = target {
+                        self.push_trigger_stack_object(&trigger, vec![target], None);
+                    }
+                    continue;
+                }
+            }
             if let Some(spec) = &ability.target {
                 let spec = spec.clone();
                 let candidates =
@@ -323,7 +340,10 @@ impl Engine {
             }
             self.push_trigger_stack_object(&trigger, Vec::new(), None);
         }
-        self.process_state = self.end_pipeline_run();
+        self.process_state = match self.recollect_triggers_since.take() {
+            Some(since) => ProcessState::CollectTriggers { since },
+            None => self.end_pipeline_run(),
+        };
         StepStatus::Progressed
     }
 
@@ -414,6 +434,16 @@ impl Engine {
             caused_by_command: None,
             parent_event: None,
         });
+        // CR 603.2/702.21a: a triggered ability's targets are chosen before it
+        // goes on the stack (CR 603.3d), so they become targets right here.
+        // Nothing scans these events for triggers on its own at this point, so
+        // `push_ordered_triggers` re-enters `CollectTriggers` for them once its
+        // queue is empty (otherwise Ward would never see a triggered ability).
+        let ledger_before = self.state.ledger.len();
+        self.log_became_target(stack_id);
+        if self.state.ledger.len() > ledger_before && self.recollect_triggers_since.is_none() {
+            self.recollect_triggers_since = Some(ledger_before);
+        }
     }
 
     /// Answers a pending CR 603.3d target choice raised by

@@ -39,7 +39,7 @@ pub(crate) use attach::{
 pub use attach::{propose_attach, AttachProposal};
 pub(crate) use combat::{execute_assign_combat_damage, mark_effect_blocked};
 pub(crate) use legality::{
-    attachment_target_is_legal, combine_chosen_modes, effective_keywords, effective_power, is_modal_resolvable,
+    attachment_target_is_legal, combine_chosen_modes, effective_keywords, effective_power, is_ability_stack_entry, is_modal_resolvable,
     legal_target_candidates_for_spec, split_targets_by_requirement, target_is_legal, target_spec_minimums,
     validate_targets,
 };

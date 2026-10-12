@@ -227,6 +227,9 @@ impl Engine {
         if self.state.stack.iter().any(|s| s.stack_id == stack_id && matches!(s.kind, StackEntryKind::Spell)) {
             self.log_events(vec![GameEventKind::SpellCast { object: stack_id }]);
         }
+        // CR 603.2/702.21a: the spell or activated ability is now fully
+        // announced and paid for, so whatever it targets has become a target.
+        self.log_became_target(stack_id);
         ProcessState::SbaLoop
     }
 

@@ -1303,6 +1303,12 @@ pub enum ConditionPrimitive {
     /// `event.object == source and event.to == "battlefield"` Lua condition
     /// from the prior slice exactly.
     EntersBattlefield,
+    /// CR 702.21a (Ward): "whenever this permanent becomes the target of a
+    /// spell or ability an opponent controls" - matches a `BecameTarget`
+    /// event naming `source` whose spell or ability is controlled by anyone
+    /// but the trigger's controller. There is no team model, so "opponent"
+    /// is any other player.
+    BecomesTargetOfOpponent,
     /// No filter — always matches. A real variant (not just `None`) so a
     /// Lua author has an explicit, correct spelling for "unconditional";
     /// see `RegisteredAbility::condition`'s doc for why both spellings
@@ -1640,6 +1646,11 @@ impl ConditionPrimitive {
             ConditionPrimitive::Cast => matches!(
                 event,
                 GameEventKind::SpellCast { object } if *object == source
+            ),
+            ConditionPrimitive::BecomesTargetOfOpponent => matches!(
+                event,
+                GameEventKind::BecameTarget { object, by_controller, .. }
+                    if *object == source && *by_controller != controller
             ),
             ConditionPrimitive::BeginningOfYourCombat => {
                 controller == active_player

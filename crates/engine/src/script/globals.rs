@@ -79,6 +79,9 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     // comment for the double-registration hazard that ran into when tried
     // generically); direct `RegisteredAbility` construction only for now.
     conditions.set("Cast", ConditionTag(ConditionPrimitive::Cast))?;
+    // CR 702.21a - Ward's trigger event: "this permanent becomes the target
+    // of a spell or ability an opponent controls".
+    conditions.set("BecomesTargetOfOpponent", ConditionTag(ConditionPrimitive::BecomesTargetOfOpponent))?;
     conditions.set("Scries", ConditionTag(ConditionPrimitive::Scries))?;
     conditions.set("EachScries", ConditionTag(ConditionPrimitive::EachScries))?;
     conditions.set("Surveils", ConditionTag(ConditionPrimitive::Surveils))?;
@@ -1319,6 +1322,31 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         )
         .eval()?;
 
+    // `Game.RegisterWard(source, cost)` - CR 702.21a: "Whenever this permanent
+    // becomes the target of a spell or ability an opponent controls, counter
+    // that spell or ability unless that player pays [cost]." `cost` is a mana
+    // cost string, the same one `Game.Ops.CounterUnlessPaid` takes. Each call
+    // is one instance of the keyword (CR 702.21b). Equivalent to:
+    //   local e = Game.CreateTriggeredAbility(source)
+    //   e:SetCondition(Game.Conditions.BecomesTargetOfOpponent)
+    //   e:SetTarget({ type = "triggering" })
+    //   e:SetOperation(Game.Ops.CounterUnlessPaid(cost))
+    //   e:Register()
+    // Resolves `Game.*` at call time, like `Game.RegisterKeyword`.
+    let register_ward: Function = lua
+        .load(
+            r#"
+            function(source, cost)
+                local e = Game.CreateTriggeredAbility(source)
+                e:SetCondition(Game.Conditions.BecomesTargetOfOpponent)
+                e:SetTarget({ type = "triggering" })
+                e:SetOperation(Game.Ops.CounterUnlessPaid(cost))
+                e:Register()
+            end
+            "#,
+        )
+        .eval()?;
+
     let game = lua.create_table()?;
     game.set("Conditions", conditions)?;
     game.set("InterveningIf", intervening_if)?;
@@ -1334,6 +1362,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     game.set("CreateTriggeredAbility", create_triggered_ability)?;
     game.set("CreateStaticAbility", create_static_ability)?;
     game.set("RegisterKeyword", register_keyword)?;
+    game.set("RegisterWard", register_ward)?;
     game.set("CreateReplacementEffect", create_replacement_effect)?;
     game.set("CreateActivatedAbility", create_activated_ability)?;
     game.set("CreateManaAbility", create_mana_ability)?;
