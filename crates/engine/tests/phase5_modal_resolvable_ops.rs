@@ -329,7 +329,7 @@ fn a_scry_mode_pauses_for_its_choice_and_the_next_mode_runs_after_it() {
 
 #[test]
 fn a_mode_kind_that_still_cannot_be_combined_is_rejected_at_cast_time() {
-    let mut engine = engine_with(vec![mode(None, AbilityEffect::GainLife(3)), mode(None, AbilityEffect::ExchangeTextBoxes)], 0);
+    let mut engine = engine_with(vec![mode(None, AbilityEffect::GainLife(3)), mode(None, AbilityEffect::Cascade)], 0);
     let status = try_cast(&mut engine, vec![0, 1], Vec::new());
 
     assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))), "{status:?}");

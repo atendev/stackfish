@@ -827,9 +827,7 @@ pub enum AbilityEffect {
     /// TODO(CR 608.2h): a self-source fight whose source has left the
     /// battlefield does nothing instead of using last known information.
     /// TODO: no "fights up to one target creature" (an `up_to`/`at_least`
-    /// word) and no "fights each creature". As a mode of a multi-mode spell
-    /// only the single-word forms work (a mode with several target words
-    /// can't be combined).
+    /// word) and no "fights each creature".
     Fight,
     /// The `Game.Ops.Bite` primitive - the one-sided cousin of `Fight`:
     /// "target creature you control deals damage equal to its power to
@@ -862,12 +860,15 @@ pub enum AbilityEffect {
     /// walks this list, but its slot must still line up 1:1 with the
     /// parallel per-mode target chunk `ResolveStackTop` re-derives from
     /// `StackObject::target_requirement` (always `TargetSpec::Multiple`
-    /// when this variant is used, with one `TargetRequirement` per chosen
-    /// mode, `count: 0` synthesized for a mode with no `target_requirement`
-    /// of its own, so `commands::split_targets_by_requirement` always
-    /// produces exactly one chunk per entry here — see that call site's own
-    /// doc comment).
-    Modal(Vec<Option<AbilityEffect>>),
+    /// when this variant is used). A mode owns `words[i]` consecutive
+    /// target words of that flat list: one for a mode with no target
+    /// requirement (a `count: 0` placeholder, CR 700.2c) or a single
+    /// `TargetSpec::Primitive`, and n for a mode whose own requirement is
+    /// a `TargetSpec::Multiple` of n words (`phase5/modal-multi-word-
+    /// modes`), so `commands::split_targets_by_requirement` produces one
+    /// chunk per word and mode i reads the chunks of its own range. The
+    /// sum of `words` is the length of the flat list.
+    Modal { effects: Vec<Option<AbilityEffect>>, words: Vec<usize> },
     /// A plain spell's own resolution effect (CR 608.2m), declared by its
     /// script's optional `s.operation()` function (a sibling to
     /// `s.register_abilities(c)`, not a replacement) when that function

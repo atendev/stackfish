@@ -408,8 +408,8 @@ impl Engine {
             // or go through the event pipeline. Cast time
             // already rejected any kind `commands::
             // is_modal_resolvable` doesn't accept.
-            Some(AbilityEffect::Modal(effects)) => {
-                self.resolve_modal_effect(top, effects, modal_chunk_legals, events)
+            Some(AbilityEffect::Modal { effects, words }) => {
+                self.resolve_modal_effect(top, effects, words, modal_chunk_legals, events)
             }
             Some(AbilityEffect::GainLife(amount)) => self.resolve_gain_life_effect(top, *amount, events),
             // CR 608.2m/614-616: unlike GainLife above, Damage

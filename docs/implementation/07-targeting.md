@@ -437,10 +437,9 @@
     defaulting to `1`/`false, so every pre-existing modal-spell fixture parses unchanged),
     `build_mode_choice(&CardSpec) -> ModeChoice`, wired into all 3 `CardDefinition`-construction
     sites `modal-spell-toml` already touched.
-- Unresolved: combining a mode using `ExchangeTextBoxes` (see `is_modal_resolvable`).
-  A mode whose own `target_requirement` is itself `TargetSpec::Multiple` (a mode independently
-  needing several differently-filtered targets) can't be combined with other chosen modes either -
-  rejected outright rather than silently flattened. CR 700.2d's "same mode twice" exception, CR
+- A mode whose own `target_requirement` is a `TargetSpec::Multiple` is combined now
+  (`phase5/modal-multi-word-modes`, see `99-backlog.md`): the words of every chosen mode form one flat
+  list and `AbilityEffect::Modal::words` says how many each mode owns. CR 700.2d's "same mode twice" exception, CR
   700.2e (another player chooses), and 700.2i (pawprint budgets) stay unmodeled. CR 700.2h (a mode's
   own additional cost) is real now too - see `modal-mode-additional-cost` below.
 

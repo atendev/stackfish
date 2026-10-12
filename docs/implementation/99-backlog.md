@@ -2,6 +2,30 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Modal multi-word modes (`phase5/modal-multi-word-modes`)**: the only slice of the modal series that changes the data
+  model. `AbilityEffect::Modal(Vec<Option<AbilityEffect>>)` is now `Modal { effects, words }`. The target words of all
+  chosen modes still form one flat `TargetSpec::Multiple`, and `words[i]` says how many consecutive words mode i owns
+  (1 for no requirement, which is the CR 700.2c placeholder, or for a `Primitive`; n for a mode whose own requirement
+  is a `Multiple` of n words). `combine_chosen_modes` flattens a mode's own `Multiple` instead of rejecting it (an
+  empty `Multiple` is still an error), and the trigger path gets this for free because it shares the function. The
+  opponent-chosen spell path builds `words = vec![1; n]` (its modes are all target-less). In `resolve/modal.rs` the
+  loop slices the per-word legal chunks by `word_range`, builds the mode's view with a `Primitive` (one word), a
+  `Multiple` (several) or no requirement (the placeholder), and passes the mode's own chunk slice to the resolver,
+  so `resolve_fight_effect` and `resolve_exchange_text_boxes_effect` read the right pair with no change.
+  `ModalContinuation` carries `words`. `ExchangeTextBoxes` joins `is_modal_resolvable` (it is synchronous). Cast-time
+  validation needed no change: it already works on the flat list, so too few targets are rejected. Tests:
+  `phase5_modal_multi_word_modes.rs` (8): an exchange mode with gain life, the same with the exchange second (a
+  non-zero word offset); three modes with spans of two, one and one (fight, tap, lose life) each reading their own
+  words; two multi-word modes (exchange and fight) each reading their own pair; a fight mode whose word left before
+  resolution does nothing while the other mode still runs; too few targets and an empty `Multiple` rejected at cast
+  time; and a two-word fight on a modal triggered ability. `phase5_fight_bite.rs`'s rejection test became a positive
+  one, and the four "unsupported kind" rejection tests now use `Cascade` (a keyword ability's effect, not a
+  card-text mode). Left open: a mode that owns `up_to` or `at_least` words next to other modes relies on the
+  existing backtracking assignment of targets to words (it is not retested per mode); the scenario TOML still has
+  no field for a mode's own effect or target requirement; modal activated abilities (no modes in
+  `commands/activate.rs`); nothing is rejected at cast time any more except the non-mode kinds (`ForEachPlayer`,
+  `Cascade`, `MadnessCastOrDiscard`, `ReturnSelfWithCounter`, `AddMana*`, `Script`, a nested `Modal`).
+
 - **Modal unless-paid (`phase5/modal-unless-paid`)**: `UnlessPaid` joins `is_modal_resolvable`, for both consequences
   (`Counter`, `SacrificeSelf`). No engine change was needed beyond the gate: `submit_unless_paid_payment` and
   `decline_unless_paid` both end in the standard `ReplacementCheck` tail (the sacrifice consequence through

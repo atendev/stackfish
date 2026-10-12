@@ -370,7 +370,7 @@ pub(super) fn execute_activate_ability(
         // variant can't actually originate from an ability today.
         // Listed for exhaustiveness only, same "every variant named,
         // no wildcard" convention this disjunction already follows.
-        | Some(AbilityEffect::Modal(_))
+        | Some(AbilityEffect::Modal { .. })
         // AbilityEffect::Script only ever comes from a plain spell's
         // CardDefinition.effect (CastSpell unpacks it before push -
         // see that variant's own doc comment) - an ability's effect

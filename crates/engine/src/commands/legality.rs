@@ -924,9 +924,11 @@ fn assign_targets_by_filter(
 /// pre-existing "Choose one -" case) is never checked against this at all - it
 /// uses its own effect bare, unwrapped from `Modal`.
 ///
-/// TODO: not supported inside a multi-mode choice yet: `ExchangeTextBoxes`
-/// (pairs two targets, so its mode would need several target words). `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`,
-/// `ReturnSelfWithCounter`, `AddMana*` and `Script` are not card-text modes.
+/// `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`, `ReturnSelfWithCounter`,
+/// `AddMana*`, `Script` and a nested `Modal` are not card-text modes, so they
+/// are rejected here. A mode may own several target words (a
+/// `TargetSpec::Multiple`, e.g. a two-word `Fight` or `ExchangeTextBoxes`),
+/// see `AbilityEffect::Modal`.
 ///
 /// `pub(crate)` since CR 700.2e's `Engine::submit_mode_choice` (engine.rs)
 /// needs this same check once a deferred chosen-by-opponent choice finally
@@ -978,6 +980,8 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::Search { .. }
             | AbilityEffect::CreateToken { .. }
             | AbilityEffect::UnlessPaid { .. }
+            // A mode with several target words (`TargetSpec::Multiple`).
+            | AbilityEffect::ExchangeTextBoxes
             // Act on the ability's own source, so only a modal triggered
             // ability can use them (a spell's source is not a permanent).
             | AbilityEffect::BecomeCopy(_)
@@ -1045,17 +1049,26 @@ pub(crate) fn combine_chosen_modes(
         return Ok((only.target_requirement.clone(), only.effect.clone()));
     }
 
+    // One flat list of target words; `words[i]` is how many of them mode i
+    // owns (see `AbilityEffect::Modal`).
     let mut reqs = Vec::with_capacity(chosen_modes.len());
+    let mut words = Vec::with_capacity(chosen_modes.len());
     for mode in &chosen_modes {
         match &mode.target_requirement {
-            None => reqs.push(modal_placeholder_requirement()),
-            Some(TargetSpec::Primitive(req)) => reqs.push(req.clone()),
-            Some(TargetSpec::Multiple(_)) => {
-                return Err(
-                    "a mode with its own multi-target requirement can't be combined with other \
-                     chosen modes"
-                        .to_string(),
-                );
+            None => {
+                reqs.push(modal_placeholder_requirement());
+                words.push(1);
+            }
+            Some(TargetSpec::Primitive(req)) => {
+                reqs.push(req.clone());
+                words.push(1);
+            }
+            Some(TargetSpec::Multiple(own)) if own.is_empty() => {
+                return Err("a mode with an empty multi-target requirement can't be combined".to_string());
+            }
+            Some(TargetSpec::Multiple(own)) => {
+                reqs.extend(own.iter().cloned());
+                words.push(own.len());
             }
         }
     }
@@ -1071,5 +1084,5 @@ pub(crate) fn combine_chosen_modes(
         }
     }
     let effects: Vec<Option<AbilityEffect>> = chosen_modes.iter().map(|m| m.effect.clone()).collect();
-    Ok((Some(TargetSpec::Multiple(reqs)), Some(AbilityEffect::Modal(effects))))
+    Ok((Some(TargetSpec::Multiple(reqs)), Some(AbilityEffect::Modal { effects, words })))
 }

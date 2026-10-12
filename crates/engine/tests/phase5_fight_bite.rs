@@ -989,7 +989,7 @@ fn a_script_declared_prey_upon_rejects_two_creatures_you_control() {
 }
 
 #[test]
-fn fight_as_one_mode_of_a_multi_mode_spell_is_rejected_at_cast_time() {
+fn a_two_word_fight_can_be_one_mode_of_a_multi_mode_spell() {
     let definition = CardDefinition {
         modes: vec![
             SpellMode { target_requirement: Some(two_words()), effect: Some(AbilityEffect::Fight), additional_cost: None, pawprint_weight: 0 },
@@ -1013,7 +1013,13 @@ fn fight_as_one_mode_of_a_multi_mode_spell_is_rejected_at_cast_time() {
         })
         .unwrap();
     let status = drain(&mut engine);
+    assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "a mode with its own two target words combines now: {status:?}");
+    engine.submit_payment(PaymentPlan { payments: Vec::new() }).unwrap();
+    drain(&mut engine);
+    pass_both(&mut engine);
 
-    assert!(matches!(status, StepStatus::Error(_)), "got {status:?}");
-    assert_eq!(engine.state().object(SPELL).unwrap().zone, ZoneKind::Hand, "state untouched");
+    assert_eq!(marked(&engine, 1), 2, "the 3/3 takes the 2/2's power");
+    assert!(in_graveyard(&engine, 2), "the 2/2 takes 3 and dies");
+    assert_eq!(life(&engine, P0), 23, "the other mode ran too");
+    assert!(!fizzled(&engine));
 }
