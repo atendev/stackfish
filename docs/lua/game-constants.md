@@ -38,6 +38,7 @@ matching event.
 | `DiscardsCard` | "Whenever you discard a card." |
 | `EachDiscardsCard` | "Whenever a player discards a card," any player. |
 | `Discarded` | "When this card is discarded" (self-referential — contrast `DiscardsCard`, which is about *you* discarding *any* card). |
+| `BecomesTargetOfOpponent` | CR 702.21a, "whenever this permanent becomes the target of a spell or ability an opponent controls." Fires once per spell or ability, even if it names the permanent under several target words. "Opponent" is any other player. Pair with `:SetTarget({ type = "triggering" })` to refer to that spell or ability — `Game.RegisterWard` does exactly this. |
 | `Scries` | CR 701.22d, "whenever you scry." |
 | `EachScries` | "Whenever a player scries," any player. |
 | `Surveils` | CR 701.25d, "whenever you surveil." |
@@ -254,6 +255,15 @@ itself a printed keyword — see the
 [cookbook](../wiki/Card-Script-Cookbook.md#grant-itself-a-printed-keyword-ability) for the full
 comparison. Fall back to the longhand `Game.Effects.AddKeyword` form when the target isn't
 self-only or the duration isn't permanent.
+
+`Game.RegisterWard(source, cost)` registers one instance of Ward (CR 702.21a): "Whenever this
+permanent becomes the target of a spell or ability an opponent controls, counter that spell or ability
+unless that player pays `cost`." `cost` is a mana-cost string, the same grammar
+`Game.Ops.CounterUnlessPaid` takes (e.g. `"{2}"`). Call it once per instance (CR 702.21b); two calls make
+two triggers. It is sugar for a triggered ability with `Game.Conditions.BecomesTargetOfOpponent`,
+`:SetTarget({ type = "triggering" })` and `Game.Ops.CounterUnlessPaid(cost)`. The player who controls the
+spell or ability is asked to pay (`StepStatus::AwaitingUnlessPaidChoice`). Not available: a non-mana
+ward cost (such as "Ward—Pay 3 life"), and a ward cost that depends on X.
 
 ### Supported keyword names (`AddKeyword`/`RemoveKeyword`/`IgnoreKeyword`)
 

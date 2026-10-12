@@ -1486,6 +1486,8 @@ fn build_target_requirement(spec: &TargetRequirementSpec) -> stackfish_engine::T
         // CR 113.9/701.6a: "counter target activated or triggered ability"
         // (Stifle, Trickbind).
         "ability" => TargetFilter::Ability,
+        // CR 702.21a (Ward): the spell or ability that triggered this one.
+        "triggering" => TargetFilter::TriggeringStackObject,
         // Placeholder handle - no Engine/ScriptRuntime exists yet at this
         // point (see PendingTargetScript's own doc comment). Patched with
         // the real loaded handle by register_target_script, once one does.

@@ -146,7 +146,7 @@ impl Engine {
     /// (non-yielding) `invoke_operation` call already had — not a new gap
     /// this method introduces.
     pub fn submit_script_choice(&mut self, chosen: Target) -> Result<(), ScriptChoiceError> {
-        let ProcessState::AwaitingScriptChoice { request, controller, stack_id, .. } = &self.process_state else {
+        let ProcessState::AwaitingScriptChoice { request, controller, source, .. } = &self.process_state else {
             return Err(ScriptChoiceError::NotAwaitingChoice);
         };
         let ScriptChoiceRequest::SelectTarget { filter, exclude_ids } = request else {
@@ -161,10 +161,10 @@ impl Engine {
                 return Err(ScriptChoiceError::InvalidCandidate);
             }
         }
-        // CR 702.16c: the resolving StackObject's own id is the "source"
-        // protection checks against, not the controller - same distinction
-        // validate_targets' own callers already make for a static target
-        // requirement.
+        // CR 702.16c: the resolving spell or ability's source object is what
+        // protection checks against, not the controller and not the stack id
+        // (an ability's stack id is not a real object, so the lookup found
+        // nothing).
         // TODO(CR 115.4/"another target"): ScriptChoiceRequest::SelectTarget
         // carries a bare TargetFilter, not a full TargetRequirement, so
         // there's no exclude_source to read here - a Game.SelectTargets
@@ -176,7 +176,7 @@ impl Engine {
         // script builds a `mana_value` filter through this path (it's only
         // reachable via a card's own static `target_requirement()`), so
         // `None` is a real no-op here, not a narrowing.
-        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller, *stack_id, false, None)
+        if !commands::target_is_legal(&self.state, &self.script_runtime, chosen, filter, *controller, *source, false, None)
         {
             return Err(ScriptChoiceError::InvalidCandidate);
         }

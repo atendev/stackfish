@@ -535,13 +535,20 @@ fn target_is_legal_impl(
             let Target::Ability(stack_id) = target else { return false };
             state.stack.iter().any(|so| so.stack_id == stack_id && is_ability_stack_entry(&so.kind))
         }
+        // CR 702.21a: the triggering spell or ability, whichever kind it is.
+        // Which one it is was settled when the trigger was put on the stack;
+        // here it only has to still be there.
+        TargetFilter::TriggeringStackObject => {
+            let (Target::Object(id) | Target::Ability(id)) = target else { return false };
+            state.stack.iter().any(|so| so.stack_id == id)
+        }
     }
 }
 
 /// CR 707.10: a `StackEntryKind::Copy` of an activated/triggered ability is
 /// that ability for targeting purposes too, so this unwraps through any
 /// number of `Copy` layers rather than checking only the outermost kind.
-fn is_ability_stack_entry(kind: &StackEntryKind) -> bool {
+pub(crate) fn is_ability_stack_entry(kind: &StackEntryKind) -> bool {
     match kind {
         StackEntryKind::ActivatedAbility | StackEntryKind::TriggeredAbility => true,
         StackEntryKind::Copy { of } => is_ability_stack_entry(of),

@@ -33,6 +33,13 @@ effect.
 `type = "player"` honors the shared `controller` key too (e.g. `{ type = "player", controller =
 "opponent" }` for "target opponent") — omit it for a plain "target player" that accepts anyone.
 
+`:SetTarget` has two more values: `{ type = "ability" }` ("counter target activated or triggered
+ability") and `{ type = "triggering" }`. `"triggering"` is only meaningful on a triggered ability whose
+condition names a spell or ability, which today is `Game.Conditions.BecomesTargetOfOpponent`. The target
+is the spell or ability that caused the trigger, filled in automatically with no choice for the
+player, and the trigger is dropped if that spell or ability has already left the stack (CR 603.3d).
+`Game.RegisterWard` uses it.
+
 ```lua
 -- "Target opponent" - no script needed for this common case.
 function s.target_requirement()

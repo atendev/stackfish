@@ -18,8 +18,9 @@ use crate::types::config::GameSettings;
 use crate::types::cost::CostSpec;
 use crate::types::event::{GameEvent, GameEventKind};
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, ScriptHandle};
+use crate::types::ids::{ObjectId, ScriptHandle, Target};
 use crate::types::turn::Phase;
+use crate::types::zone::ZoneKind;
 
 mod action;
 mod choice_answers;
@@ -431,6 +432,11 @@ pub struct Engine {
     /// reason `pipeline_context` must be — otherwise a later pipeline run
     /// would see this run's stale entries piled up alongside its own.
     departed_triggered_abilities: Vec<RegisteredAbility>,
+    /// First ledger index of a `BecameTarget` event logged while triggered
+    /// abilities were being put on the stack (CR 603.3d), still waiting to be
+    /// scanned for triggers of its own (Ward). `push_ordered_triggers` takes it
+    /// when its queue empties and re-enters `CollectTriggers` from there.
+    recollect_triggers_since: Option<usize>,
     /// Dedicated monotonic counter for `CommandId` allocation — see the
     /// same rationale as `GameState::allocate_event_id`; was previously
     /// derived from `ledger.len()`, which doesn't even make sense for
@@ -490,6 +496,7 @@ impl Engine {
             pipeline_context: None,
             pipeline_exit: PipelineExit::BackToPriority,
             departed_triggered_abilities: Vec::new(),
+            recollect_triggers_since: None,
             next_command_id: 0,
             pending_payment: None,
             suspended_payments: Vec::new(),
@@ -779,6 +786,33 @@ impl Engine {
                 parent_event: None,
             });
         }
+    }
+
+    /// CR 603.2/702.21a: logs one `BecameTarget` per distinct battlefield
+    /// object that `stack_id`'s spell or ability targets (CR 603.2c: naming
+    /// the same object under two target words is still one event). Called
+    /// only once the stack object is really on the stack and paid for, from
+    /// `submit_payment` and `push_trigger_stack_object`. A stack object that
+    /// is gone, or targets nothing, logs nothing.
+    ///
+    /// `pub(in crate::engine)`: also called from `payment.rs` and
+    /// `triggers_pipeline.rs`.
+    pub(in crate::engine) fn log_became_target(&mut self, stack_id: ObjectId) {
+        let Some(stack_object) = self.state.stack.iter().find(|s| s.stack_id == stack_id) else {
+            return;
+        };
+        let by_controller = stack_object.controller;
+        let mut seen: Vec<ObjectId> = Vec::new();
+        for target in &stack_object.targets {
+            let Target::Object(id) = target else { continue };
+            let on_battlefield = self.state.object(*id).is_some_and(|o| o.zone == ZoneKind::Battlefield);
+            if on_battlefield && !seen.contains(id) {
+                seen.push(*id);
+            }
+        }
+        let events =
+            seen.into_iter().map(|object| GameEventKind::BecameTarget { object, by: stack_id, by_controller }).collect();
+        self.log_events(events);
     }
 
     fn advance(&mut self) -> StepStatus {

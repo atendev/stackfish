@@ -256,6 +256,17 @@ pub enum GameEventKind {
     /// Cascade-specific) - the same "when you cast a spell" hook Storm-style
     /// keywords would need too.
     SpellCast { object: ObjectId },
+    /// CR 603.2/702.21a: `object` (a permanent) has become the target of the
+    /// spell or ability `by` (its `StackObject::stack_id`), controlled by
+    /// `by_controller`. One event per distinct object per spell or ability,
+    /// however many target words name it (CR 603.2c). Logged once the spell
+    /// is cast (CR 601.2i), the activation's cost is paid (CR 602.2) or the
+    /// trigger is put on the stack (CR 603.3d), never at the proposal step,
+    /// so a cast that is unwound never fires it. `by_controller` is carried
+    /// because a `ConditionPrimitive` only sees the event, and Ward's "an
+    /// opponent controls" needs it. Players aren't permanents, so only
+    /// `Target::Object` targets produce it.
+    BecameTarget { object: ObjectId, by: ObjectId, by_controller: PlayerId },
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

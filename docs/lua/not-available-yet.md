@@ -75,9 +75,10 @@ name.
   Not available: hexproof/shroud on a player ("You have hexproof"), "hexproof from [quality]",
   and "can be the target as though it didn't have hexproof" (`IgnoreKeyword("Hexproof")` is
   accepted but nothing reads it). "Opponent" means any other player; there is no team model.
-- **No `Ward`.** It needs a "becomes the target of a spell or ability" trigger and a cost
-  parameter, so it can't be a plain keyword name. `Game.Ops.CounterUnlessPaid` covers the "counter unless
-  that player pays" half.
+- **Ward is `Game.RegisterWard(source, cost)`, not a keyword name.** It takes a cost, so it can't go
+  through `AddKeyword`. Only a mana cost works: no "Ward—Pay N life", discard or sacrifice cost, and no
+  cost that depends on X. It can only be registered when the card's script runs, not granted to another
+  permanent by a continuous effect. See [game-constants.md](game-constants.md#gameconditions).
 - **Enchanting/equipping a player** isn't modeled — attachment only ever targets a permanent.
 - **`Game.Ops.DestroyAll`'s filter has no `subtypes`/exclusion keys.** Only `card_types`/
   `controller`/`self_only` — "destroy all Zombies" or "destroy all nonland permanents" aren't

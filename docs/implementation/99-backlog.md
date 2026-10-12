@@ -2,6 +2,40 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Ward (`phase5/ward`)**: CR 702.21. New `GameEventKind::BecameTarget { object, by, by_controller }`, logged by
+  `Engine::log_became_target` once per distinct battlefield object a stack object targets (CR 603.2c). It fires
+  from `submit_payment` right after `SpellCast` (every cast and activation passes through there, so it also
+  covers a free cast) and from `push_trigger_stack_object` for triggered abilities, never at the proposal step,
+  so an unwound cast logs nothing. `by_controller` is on the event because a `ConditionPrimitive` only sees the
+  event. `ConditionPrimitive::BecomesTargetOfOpponent` (`Game.Conditions.BecomesTargetOfOpponent`) matches it
+  for `source` when `by_controller` differs from the trigger's controller. `PendingTrigger` gained
+  `triggering_stack`, filled from `BecameTarget::by`. `TargetFilter::TriggeringStackObject` (`{ type =
+  "triggering" }` in Lua and scenario TOML) is how the ward trigger targets the spell or ability that caused it:
+  `push_ordered_triggers` fills the target itself (`Target::Object` for a spell, `Target::Ability` for an
+  ability, via the now `pub(crate)` `is_ability_stack_entry`) and raises no CR 603.3d pause. If that stack object
+  is gone the trigger is dropped. Legal at resolution while the target is still on the stack, so the CR 608.2b
+  recheck fizzles it otherwise. The counter is the existing `AbilityEffect::UnlessPaid` with `Counter`, and the
+  payer is the targeted stack object's controller. `Game.RegisterWard(source, cost)` (a Lua helper like
+  `Game.RegisterKeyword`) registers one instance; two calls are two triggers (CR 702.21b). A trigger that
+  targets a ward permanent needed one more piece: events logged while triggers are being put on the stack were
+  never scanned, so `push_ordered_triggers` now records `Engine::recollect_triggers_since` and re-enters
+  `CollectTriggers` when its queue empties (only the `BecameTarget` events set it, and a ward trigger targets a
+  stack object, so it cannot loop). Also fixed the known bug from the hexproof/shroud entry:
+  `submit_script_choice` now passes the resolving object's real `source` to `target_is_legal` instead of
+  `stack_id`, so protection from a quality is checked against an ability's source permanent. Tests:
+  `phase5_ward.rs` (13, the `Game.SelectTargets` one fails on the old code). Existing scenario
+  `phase5_targeting_basics.toml` went from `ledger_len` 18 to 19 for the new event. Deviations from the plan: the
+  helper is `Game.RegisterWard`, not `Game.Keywords.Ward`; the event carries `by_controller`. Left open: only a
+  mana cost (no "Ward—Pay N life", discard or sacrifice, and no X); a spell copy (CR 707.10) is created without
+  going through `submit_payment`, so it logs no `BecameTarget` (**TODO**), and a copy that retargets onto a ward
+  permanent does not trigger it; no retargeting effect (CR 115.7) exists to test; ward can only be registered
+  when the card's script runs, so it cannot be granted by a continuous effect; players get no event (no player
+  hexproof, CR 702.11c); "opponent" is any other player; the trigger source is not rechecked, so a ward
+  permanent that leaves before its trigger resolves still counters (that matches CR 702.21a); not usable as a
+  mode of a multi-mode spell (`is_modal_resolvable` unchanged). Test-harness note: a cast spell is a new object
+  (CR 400.7), so read the spell's id off `state.stack`, not from the hand id; two ward triggers for one
+  controller pause on `AwaitingTriggerOrderChoice`.
+
 - **Exile until it leaves the battlefield (`phase5/exile-until-leaves`)**: `AbilityEffect::ExileUntilSourceLeaves`
   (`Game.Ops.ExileUntilSourceLeaves`, bare tag), targeted and battlefield-only. It runs as
   `ScriptedZoneMoveKind::ExileUntilLeaves { source }`, which shares the `Exile` commit arm and pushes a
@@ -114,9 +148,8 @@
   `crates/scenario/tests/hexproof_shroud_keywords.rs` (2). Left open: no hexproof/shroud on players (CR
   702.11c); no "hexproof from [quality]" (CR 702.11d-g, needs a parameter); nothing reads `ignored_keywords`, so
   "can be the target as though it didn't have hexproof" (CR 702.11e) isn't expressible; no team model, so
-  "opponent" is any other player. Recommended next slice: `phase5/ward` (CR 702.21), which needs a
-  "becomes the target" event/trigger and a cost parameter, then `AbilityEffect::UnlessPaid` for the counter;
-  it can't be a `KeywordSet` bit. Known bug, not fixed here: `engine/choice_answers.rs:179` passes the
+  "opponent" is any other player. Ward (CR 702.21) was the recommended next slice and is done in
+  `phase5/ward`. Known bug, fixed in `phase5/ward`: `engine/choice_answers.rs:179` passed the
   resolving `stack_id` as the `source` argument of `target_is_legal` for a `Game.SelectTargets` answer. For an
   activated or triggered ability that id isn't a real object, so the protection-from-source lookup silently
   finds nothing. Hexproof and shroud use `caster`, so they aren't affected. Test-harness note: attach by

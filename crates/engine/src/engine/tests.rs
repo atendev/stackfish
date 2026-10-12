@@ -68,7 +68,7 @@ fn minimal_state() -> GameState {
 }
 
 fn trigger(id: u64, controller: PlayerId) -> PendingTrigger {
-    PendingTrigger { source: ObjectId(id), controller, ability: AbilityId(id), once_per_turn: false }
+    PendingTrigger { source: ObjectId(id), controller, ability: AbilityId(id), once_per_turn: false, triggering_stack: None }
 }
 
 #[test]
