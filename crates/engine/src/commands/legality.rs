@@ -910,19 +910,22 @@ fn assign_targets_by_filter(
     }
 }
 
-/// CR 700.2d: is `effect` one of the synchronous, never-pausing
-/// `AbilityEffect` kinds `ResolveStackTop`'s `AbilityEffect::Modal` arm knows
-/// how to resolve? Checked at cast time (`execute_command`'s `CastSpell` arm)
-/// so combining an unsupported mode is rejected immediately rather than
-/// silently doing nothing at resolution. Narrowed deliberately: every kind
-/// excluded here either pauses mid-resolution (`Destroy`/`Sacrifice`/`Exile`/
-/// `DrawCards`/`Search`/`BecomeCopy`/`CreateToken`) or has its own bespoke
-/// per-target-pairing shape (`ExchangeTextBoxes`/`Attach`) that a generic
-/// per-mode chunk loop can't drive - combining 2+ such modes into one
-/// resolution would need real coordination between multiple simultaneous
-/// pauses, out of scope for this slice. A single chosen mode (the pre-
-/// existing "Choose one —" case) is never checked against this at all - it
-/// uses its own effect bare, unwrapped from `Modal`, exactly as before.
+/// CR 700.2d: can `effect` be one of 2+ chosen modes? `ResolveStackTop`'s
+/// `AbilityEffect::Modal` arm (`engine::resolve::modal`) hands each mode to
+/// the same resolver a single effect uses, so this is every kind that
+/// resolver handles against a mode's own target requirement and the standard
+/// `ReplacementCheck` tail: the synchronous effects, the scripted zone moves
+/// (including their CR 616.1 ordering pauses), draw, discard and scry/surveil.
+/// Checked at cast time so an unsupported mode is rejected immediately rather
+/// than silently doing nothing at resolution. A single chosen mode (the
+/// pre-existing "Choose one -" case) is never checked against this at all - it
+/// uses its own effect bare, unwrapped from `Modal`.
+///
+/// TODO: not supported inside a multi-mode choice yet: `Search` (devour
+/// choices re-enter its own battlefield-entry loop), `UnlessPaid` (payment
+/// pause), `CreateToken`, `BecomeCopy`, and the pairing effects `Attach` and
+/// `ExchangeTextBoxes`. `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`,
+/// `ReturnSelfWithCounter`, `AddMana*` and `Script` are not card-text modes.
 ///
 /// `pub(crate)` since CR 700.2e's `Engine::submit_mode_choice` (engine.rs)
 /// needs this same check once a deferred chosen-by-opponent choice finally
@@ -930,13 +933,70 @@ fn assign_targets_by_filter(
 pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
     matches!(
         effect,
+        // Synchronous.
         AbilityEffect::GainLife(_)
             | AbilityEffect::Damage(_)
             | AbilityEffect::Counters { .. }
             | AbilityEffect::Pump { .. }
             | AbilityEffect::GainControl(_)
             | AbilityEffect::Shuffle
+            | AbilityEffect::Regenerate
+            | AbilityEffect::LoseLife(_)
+            | AbilityEffect::Tap
+            | AbilityEffect::Untap
+            | AbilityEffect::TapSelf
+            | AbilityEffect::UntapSelf
+            | AbilityEffect::TapAll { .. }
+            | AbilityEffect::UntapAll { .. }
+            | AbilityEffect::Counter
+            | AbilityEffect::Fight
+            | AbilityEffect::Bite
+            // Scripted zone moves.
+            | AbilityEffect::Sacrifice
+            | AbilityEffect::SacrificeSelf
+            | AbilityEffect::SacrificeRandom { .. }
+            | AbilityEffect::Destroy
+            | AbilityEffect::DestroyAll(_)
+            | AbilityEffect::Exile
+            | AbilityEffect::ExileSelf
+            | AbilityEffect::ExileAll { .. }
+            | AbilityEffect::ExileUntilSourceLeaves
+            | AbilityEffect::ReturnToHand
+            | AbilityEffect::ReturnSelfToHand
+            | AbilityEffect::ReturnAllToHand { .. }
+            | AbilityEffect::ReturnToBattlefield { .. }
+            | AbilityEffect::ReturnAllToBattlefield { .. }
+            | AbilityEffect::Mill(_)
+            // Library and hand effects that pause for a draw replacement or
+            // a player choice.
+            | AbilityEffect::DrawCards(_)
+            | AbilityEffect::Discard { .. }
+            | AbilityEffect::DiscardRandom { .. }
+            | AbilityEffect::Scry(_)
+            | AbilityEffect::Surveil(_)
     )
+}
+
+/// The `TargetRequirement` `combine_chosen_modes` puts in a `Multiple` slot
+/// for a mode that has none of its own (CR 700.2c): zero targets of anything.
+fn modal_placeholder_requirement() -> TargetRequirement {
+    TargetRequirement {
+        filter: TargetFilter::AnyTarget,
+        count: 0,
+        up_to: false,
+        at_least: false,
+        exclude_source: false,
+    }
+}
+
+/// Whether `req` is the CR 700.2c placeholder, i.e. the mode declared no
+/// targets, so a resolver should see no target requirement at all.
+pub(crate) fn is_modal_placeholder_requirement(req: &TargetRequirement) -> bool {
+    req.count == 0
+        && !req.up_to
+        && !req.at_least
+        && !req.exclude_source
+        && matches!(req.filter, TargetFilter::AnyTarget)
 }
 
 /// CR 700.2c/d: combines `modes[chosen_indices]` (already validated for
@@ -980,13 +1040,7 @@ pub(crate) fn combine_chosen_modes(
     let mut reqs = Vec::with_capacity(chosen_modes.len());
     for mode in &chosen_modes {
         match &mode.target_requirement {
-            None => reqs.push(TargetRequirement {
-                filter: TargetFilter::AnyTarget,
-                count: 0,
-                up_to: false,
-                at_least: false,
-                exclude_source: false,
-            }),
+            None => reqs.push(modal_placeholder_requirement()),
             Some(TargetSpec::Primitive(req)) => reqs.push(req.clone()),
             Some(TargetSpec::Multiple(_)) => {
                 return Err(
@@ -1001,9 +1055,8 @@ pub(crate) fn combine_chosen_modes(
         if let Some(effect) = &mode.effect {
             if !is_modal_resolvable(effect) {
                 return Err(
-                    "this mode's effect can't be combined with other chosen modes yet - only \
-                     GainLife/Damage/Counters/Pump/GainControl/Shuffle are supported inside a \
-                     multi-mode choice"
+                    "this mode's effect can't be combined with other chosen modes yet - see \
+                     is_modal_resolvable for the supported kinds"
                         .to_string(),
                 );
             }

@@ -31,12 +31,8 @@ use stackfish_testutil::{card_object, drain, player_state, two_player_state as b
 ///  * You gain 3 life.
 ///  * You shuffle your library.
 ///  Starting with your opponent, that player chooses a mode."
-/// Mode 1 is `Shuffle` rather than `DrawCards` deliberately - `DrawCards`
-/// pauses mid-resolution (excluded from `commands::is_modal_resolvable`,
-/// same as `Destroy`/`Sacrifice`/`Search`/...), which would make choosing
-/// *both* modes at once rejected as an unsupported combination; `Shuffle`
-/// is one of the synchronous kinds `is_modal_resolvable` does accept, and
-/// needs no library contents/zone to exercise.
+/// Mode 1 is `Shuffle` because it needs no library contents or zone to
+/// exercise, and `is_modal_resolvable` accepts it.
 fn chosen_by_opponent_definition(mode_choice: ModeChoice) -> CardDefinition {
     CardDefinition {
         definition_id: 60,

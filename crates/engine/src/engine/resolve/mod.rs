@@ -74,11 +74,14 @@ mod each_player;
 mod library_effects;
 mod madness;
 mod misc_effects;
+mod modal;
 mod permanent_entry;
 mod reanimation;
 mod tokens;
 
 use super::{Engine, ProcessState, StepStatus};
+
+pub(in crate::engine) use modal::ModalContinuation;
 
 impl Engine {
     /// `ProcessState::ResolveStackTop` — CR 608.2m/601.2c/602.2b resolution
@@ -111,6 +114,9 @@ impl Engine {
                 return status;
             }
         }
+        // A continuation left over from a resolution that never finished
+        // must not resume into this one.
+        self.modal_continuation = None;
         let Some(mut top) = self.state.stack.pop() else {
             // Shouldn't happen - pipeline_exit only routes here when
             // the all-pass check saw a non-empty stack. Defensive
@@ -395,17 +401,13 @@ impl Engine {
             // effect), so this re-derives per-mode chunks
             // instead and re-filters each for current
             // legality (CR 608.2b), same is_legal_now
-            // closure legal_targets itself uses. Narrowed to
-            // the synchronous subset that never pauses
-            // mid-resolution (GainLife/Damage/Counters/Pump/
-            // GainControl/Shuffle) - commands::execute_command's
-            // CastSpell arm already rejects combining any
-            // other effect kind into a Modal at cast time,
-            // so an unsupported kind reaching the fallback
-            // arm below would mean that check has a gap;
-            // skip rather than guess/panic, same stance
-            // every other unreachable shape in this engine
-            // already takes.
+            // closure legal_targets itself uses. Each mode
+            // then runs through this same dispatcher against a
+            // per-mode view of `top` - see `modal.rs`, which
+            // also holds the continuation for modes that pause
+            // or go through the event pipeline. Cast time
+            // already rejected any kind `commands::
+            // is_modal_resolvable` doesn't accept.
             Some(AbilityEffect::Modal(effects)) => {
                 self.resolve_modal_effect(top, effects, modal_chunk_legals, events)
             }
