@@ -624,6 +624,7 @@ pub(crate) fn spend(units: &[ManaUnit], pool: &mut ManaPool) {
     }
 }
 
+#[derive(Clone)]
 pub enum CostPayment {
     /// The exact literal payment for a mana cost (CR 118.13a) — not an echo
     /// of the cost's shape. `units` is the exact literal mana spent from the

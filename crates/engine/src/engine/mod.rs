@@ -453,6 +453,10 @@ pub struct Engine {
     /// not "this pipeline run" in general — `ResolveStackTop` runs never set
     /// it, and it's already `None` by the time they reach `CommitEvents`.
     pending_payment: Option<PendingPaymentRequest>,
+    /// CR 700.2d: the modes of a multi-mode resolution still to run after the
+    /// one currently in the pipeline. Set by `resolve::modal`, taken by
+    /// `resolve_commit_events_state`.
+    modal_continuation: Option<resolve::ModalContinuation>,
     /// CR 601.2g/605.3a: a mana ability may be activated "even if it's in
     /// the middle of casting or resolving a spell or activating or
     /// resolving an ability" that itself requires a mana payment - so
@@ -499,6 +503,7 @@ impl Engine {
             recollect_triggers_since: None,
             next_command_id: 0,
             pending_payment: None,
+            modal_continuation: None,
             suspended_payments: Vec::new(),
             settings: GameSettings::default(),
             pregame_setup_done: true,

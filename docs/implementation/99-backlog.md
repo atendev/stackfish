@@ -2,6 +2,38 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Modal resolvable ops (`phase5/modal-resolvable-ops`)**: closes the "not usable as a mode of a multi-mode spell"
+  note that the tap/untap, mill/lose life/sacrifice self, reanimation, fight/bite and exile-until-leaves entries
+  below all carry. `AbilityEffect::Modal` no longer has its own inline copy of six effects. The new
+  `engine/resolve/modal.rs` hands each chosen mode to the normal `resolve_ability_effect` against `mode_view`, a
+  clone of the stack object with that mode's effect, its own target requirement (the CR 700.2c placeholder becomes
+  `None`, so `affected_player` still means "the controller") and its own legal targets. `StackObject`
+  and `CostPayment` derive `Clone` for this. A mode that moves cards, draws or waits for a choice ends in the usual
+  `ReplacementCheck` -> `CommitEvents` tail, which always carries `StackObjectResolved`. While later modes remain,
+  `Engine::modal_continuation` (`ModalContinuation`) holds them, and `resolve_commit_events_state` keeps that marker
+  out of the ledger and calls `resume_modal_resolution` instead of leaving for the SBA loop (CR 608.2c: nothing
+  runs between modes). That is how CR 616.1 ordering pauses, draw replacements and scry choices resume with no change
+  to any resolver. Pending events from earlier synchronous modes (damage, counters) are flushed through the same
+  pipeline before a pausing mode starts, so they land first. `is_modal_resolvable` is now: the synchronous effects
+  (`GainLife`, `Damage`, `Counters`, `Pump`, `GainControl`, `Shuffle`, `Regenerate`, `LoseLife`, the six tap/untap
+  forms, `Counter`, `Fight`, `Bite`), every scripted zone move (`Sacrifice`, `SacrificeSelf`, `SacrificeRandom`,
+  `Destroy`, `DestroyAll`, `Exile`, `ExileSelf`, `ExileAll`, `ExileUntilSourceLeaves`, the three return-to-hand
+  forms, both return-to-battlefield forms, `Mill`), `DrawCards`, `Discard`, `DiscardRandom`, `Scry`, `Surveil`.
+  Tests: `phase5_modal_resolvable_ops.rs` (14). `phase5_modal_multi_mode.rs`'s rejection test used `Destroy`, which is
+  supported now, so it uses `ExchangeTextBoxes`. Left open: **not supported as a mode** and still rejected at cast
+  time: `Search` (its devour choices re-enter the search's own entry loop), `UnlessPaid` (payment pause),
+  `CreateToken`, `BecomeCopy`, `Attach`, `ExchangeTextBoxes` (pairs two targets); `ForEachPlayer`, `Cascade`,
+  `MadnessCastOrDiscard`, `ReturnSelfWithCounter`, `AddMana*` and `Script` are not card-text modes. **Untested as a
+  mode**: `Discard`, `Surveil`, `Counter`, `Regenerate`, `Fight`/`Bite` (a spell's source is not a creature, so only
+  an ability could use the one-word form, and a modal ability is not tested), `SacrificeSelf`, and the
+  chosen-by-opponent paths (`submit_mode_choice`, `submit_trigger_mode_choice`) with the new kinds; they share the
+  gate and the resolver. The mode loop reads each mode's legal targets once, before the first mode runs, so a mode
+  that removes a later mode's target is not noticed until that mode's own resolver skips the stale id. A pause kind that never reaches `CommitEvents` with the
+  stack object's `StackObjectResolved` would drop the remaining modes; `resolve_stack_top` clears the continuation
+  at the start of each resolution so a stale one never leaks into the next. The destruction resolvers still pass
+  `Vec::new()` as trailing events instead of the accumulated `events` (the modal loop avoids the problem by
+  flushing first).
+
 - **Ward (`phase5/ward`)**: CR 702.21. New `GameEventKind::BecameTarget { object, by, by_controller }`, logged by
   `Engine::log_became_target` once per distinct battlefield object a stack object targets (CR 603.2c). It fires
   from `submit_payment` right after `SpellCast` (every cast and activation passes through there, so it also

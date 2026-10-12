@@ -419,12 +419,9 @@
     AbilityEffect>>)` (one slot per chosen mode, same card-print order, `None` for a mode with no
     effect of its own).
   - `commands::is_modal_resolvable` — cast-time gate rejecting a mode combination if any chosen
-    mode's effect isn't in the synchronous, never-pausing subset `ResolveStackTop`'s new `Modal` arm
-    actually knows how to resolve (`GainLife`/`Damage`/`Counters`/`Pump`/`GainControl`/`Shuffle`).
-    Every excluded kind (`Destroy`/`Sacrifice`/`Exile`/`DrawCards`/`Search`/`BecomeCopy`/
-    `CreateToken`/`Attach`/`ExchangeTextBoxes`) either pauses mid-resolution or has its own bespoke
-    per-target-pairing shape that a generic per-mode loop can't drive — combining 2+ such modes would
-    need real coordination between multiple simultaneous pauses, out of scope for this slice.
+    mode's effect isn't a kind `engine::resolve::modal` can drive (widened by
+    `phase5/modal-resolvable-ops`, see `99-backlog.md`: it was first only the synchronous
+    `GainLife`/`Damage`/`Counters`/`Pump`/`GainControl`/`Shuffle`).
   - `ResolveStackTop`'s new `Some(AbilityEffect::Modal(effects))` match arm: re-derives per-mode
     target chunks from `top.target_requirement` (always `TargetSpec::Multiple` by construction when
     `Modal` is used) via the existing `commands::split_targets_by_requirement`, since the pre-existing
@@ -440,7 +437,7 @@
     defaulting to `1`/`false, so every pre-existing modal-spell fixture parses unchanged),
     `build_mode_choice(&CardSpec) -> ModeChoice`, wired into all 3 `CardDefinition`-construction
     sites `modal-spell-toml` already touched.
-- Unresolved: combining a mode using a paused/bespoke effect kind (see `is_modal_resolvable` above).
+- Unresolved: combining a mode using `Search`, `UnlessPaid`, `CreateToken`, `BecomeCopy`, `Attach` or `ExchangeTextBoxes` (see `is_modal_resolvable`).
   A mode whose own `target_requirement` is itself `TargetSpec::Multiple` (a mode independently
   needing several differently-filtered targets) can't be combined with other chosen modes either -
   rejected outright rather than silently flattened. CR 700.2d's "same mode twice" exception, CR

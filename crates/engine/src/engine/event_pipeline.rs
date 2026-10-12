@@ -63,7 +63,20 @@ impl Engine {
             .map(|ctx| (ctx.caused_by_command, ctx.parent_event))
             .unwrap_or((None, None));
 
+        // CR 700.2d: a mode of a multi-mode resolution just settled. Its tail
+        // ends in the stack object's `StackObjectResolved`, but the object
+        // hasn't resolved until the last mode has, so that marker is kept out
+        // of the ledger and the next mode runs instead of the SBA loop.
+        let modal_resume = self.modal_continuation.as_ref().is_some_and(|continuation| {
+            checked.iter().any(|kind| {
+                matches!(kind, GameEventKind::StackObjectResolved { stack_id } if *stack_id == continuation.stack_id())
+            })
+        });
+
         for kind in checked {
+            if modal_resume && matches!(kind, GameEventKind::StackObjectResolved { .. }) {
+                continue;
+            }
             // CR 510.2/614-616: a DamageDealt event describes an
             // effect that hasn't happened to state yet - apply it
             // now that it's in its final, post-replacement form
@@ -109,6 +122,11 @@ impl Engine {
                 caused_by_command,
                 parent_event,
             });
+        }
+        if modal_resume {
+            if let Some(continuation) = self.modal_continuation.take() {
+                return self.resume_modal_resolution(continuation);
+            }
         }
         // CR 601.2f-h: if this run's command was a CastSpell that
         // needs payment, pause here instead of continuing into

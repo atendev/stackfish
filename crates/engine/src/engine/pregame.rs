@@ -190,6 +190,7 @@ impl Engine {
             recollect_triggers_since: None,
             next_command_id: 0,
             pending_payment: None,
+            modal_continuation: None,
             suspended_payments: Vec::new(),
             settings,
             pregame_setup_done: false,

@@ -1,0 +1,161 @@
+//! CR 700.2d: resolving 2+ chosen modes of one spell or ability, in printed
+//! order.
+//!
+//! Each mode is handed to the same `resolve_ability_effect` dispatcher a
+//! single effect uses, against a per-mode view of the stack object
+//! (`mode_view`), so a mode behaves exactly like that effect standing alone.
+//! Synchronous modes just return their events and the loop moves on. A mode
+//! that needs the event pipeline (a zone move, a draw, a player choice, a CR
+//! 616.1 ordering pause) ends in `ReplacementCheck` -> `CommitEvents` like
+//! every other resolution, and every one of those tails finishes with the
+//! stack object's `StackObjectResolved`. `Engine::modal_continuation` stores
+//! the rest of the modes; `resolve_commit_events_state` sees that marker,
+//! drops it from the ledger (the object hasn't resolved yet) and calls
+//! `resume_modal_resolution` instead of leaving for the SBA loop. Nothing in
+//! between runs state-based actions or collects triggers (CR 608.2c).
+
+use std::ops::ControlFlow;
+
+use crate::commands;
+use crate::types::ability::AbilityEffect;
+use crate::types::event::GameEventKind;
+use crate::types::ids::Target;
+use crate::types::stack::StackObject;
+use crate::types::target::TargetSpec;
+
+use super::super::{Engine, ProcessState, StepStatus};
+
+/// The modes of a `Modal` resolution still to run after the one currently in
+/// the pipeline. See this module's doc comment.
+pub(in crate::engine) struct ModalContinuation {
+    /// The whole stack object, not a per-mode view.
+    top: StackObject,
+    effects: Vec<Option<AbilityEffect>>,
+    chunks: Vec<Vec<Target>>,
+    /// Index of the next mode to run.
+    next: usize,
+}
+
+impl ModalContinuation {
+    pub(in crate::engine) fn stack_id(&self) -> crate::types::ids::ObjectId {
+        self.top.stack_id
+    }
+}
+
+/// Whether `effect` finishes inside `resolve_ability_effect` without ever
+/// touching `process_state`. Anything else may leave `ReplacementCheck` /
+/// a choice pause behind, so pending events from earlier modes are committed
+/// first (see `resolve_modal_from`) to keep printed-order semantics.
+fn is_synchronous(effect: &AbilityEffect) -> bool {
+    matches!(
+        effect,
+        AbilityEffect::GainLife(_)
+            | AbilityEffect::Damage(_)
+            | AbilityEffect::Counters { .. }
+            | AbilityEffect::Pump { .. }
+            | AbilityEffect::GainControl(_)
+            | AbilityEffect::Shuffle
+            | AbilityEffect::Regenerate
+            | AbilityEffect::LoseLife(_)
+            | AbilityEffect::Tap
+            | AbilityEffect::Untap
+            | AbilityEffect::TapSelf
+            | AbilityEffect::UntapSelf
+            | AbilityEffect::TapAll { .. }
+            | AbilityEffect::UntapAll { .. }
+            | AbilityEffect::Counter
+            | AbilityEffect::Fight
+            | AbilityEffect::Bite
+    )
+}
+
+/// `top` as the single effect `effect` at mode `index` would have seen it:
+/// that mode's own target requirement (none for the CR 700.2c placeholder)
+/// and its own legal targets, so `affected_player`, `Fight` and friends read
+/// the right shape.
+fn mode_view(top: &StackObject, index: usize, effect: &AbilityEffect, legal: &[Target]) -> StackObject {
+    let mut view = top.clone();
+    view.effect = Some(effect.clone());
+    view.target_requirement = match &top.target_requirement {
+        Some(TargetSpec::Multiple(reqs)) => reqs
+            .get(index)
+            .filter(|req| !commands::is_modal_placeholder_requirement(req))
+            .cloned()
+            .map(TargetSpec::Primitive),
+        _ => None,
+    };
+    view.targets = legal.to_vec();
+    view
+}
+
+impl Engine {
+    /// CR 700.2d — 2+ chosen modes, combined. See `AbilityEffect::Modal`'s
+    /// own doc comment for the shape invariant (one entry per chosen mode,
+    /// `modal_chunk_legals` precomputed by the caller with one legal-target
+    /// chunk per entry).
+    pub(super) fn resolve_modal_effect(
+        &mut self,
+        top: &StackObject,
+        effects: &[Option<AbilityEffect>],
+        modal_chunk_legals: &[Vec<Target>],
+        events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        self.resolve_modal_from(top, effects, modal_chunk_legals, 0, events)
+    }
+
+    fn resolve_modal_from(
+        &mut self,
+        top: &StackObject,
+        effects: &[Option<AbilityEffect>],
+        chunks: &[Vec<Target>],
+        start: usize,
+        mut events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        for index in start..effects.len() {
+            let Some(effect) = &effects[index] else { continue };
+            let legal = chunks.get(index).map(Vec::as_slice).unwrap_or(&[]);
+            let continuation = |next: usize| ModalContinuation {
+                top: top.clone(),
+                effects: effects.to_vec(),
+                chunks: chunks.to_vec(),
+                next,
+            };
+
+            // Earlier modes' proposed events (damage, counters) have to land
+            // before a mode that moves cards or pauses runs, so commit them
+            // through the pipeline first and pick this mode up afterwards.
+            if !is_synchronous(effect) && !events.is_empty() {
+                events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
+                self.modal_continuation = Some(continuation(index));
+                self.process_state = ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
+                return ControlFlow::Break(StepStatus::Progressed);
+            }
+
+            let has_later_mode = effects[index + 1..].iter().any(Option::is_some);
+            self.modal_continuation = (!is_synchronous(effect) && has_later_mode).then(|| continuation(index + 1));
+            let view = mode_view(top, index, effect, legal);
+            match self.resolve_ability_effect(&view, legal, &[], events) {
+                ControlFlow::Break(status) => return ControlFlow::Break(status),
+                ControlFlow::Continue(resumed) => events = resumed,
+            }
+            // The mode finished without pausing or reaching the pipeline.
+            self.modal_continuation = None;
+        }
+        ControlFlow::Continue(events)
+    }
+
+    /// Picks the remaining modes up after the mode before them settled. Called
+    /// from `resolve_commit_events_state` once it has committed the previous
+    /// mode's events.
+    pub(in crate::engine) fn resume_modal_resolution(&mut self, continuation: ModalContinuation) -> StepStatus {
+        let ModalContinuation { top, effects, chunks, next } = continuation;
+        match self.resolve_modal_from(&top, &effects, &chunks, next, Vec::new()) {
+            ControlFlow::Break(status) => status,
+            ControlFlow::Continue(mut events) => {
+                events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });
+                self.process_state = ProcessState::ReplacementCheck { remaining: events.into(), checked: Vec::new() };
+                StepStatus::Progressed
+            }
+        }
+    }
+}

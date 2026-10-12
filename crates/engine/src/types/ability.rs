@@ -291,7 +291,6 @@ pub enum AbilityEffect {
     /// counters (CR 728).
     /// TODO: a replacement that changes how many cards a mill moves is not
     /// modeled, since the batch is fixed before the first card moves.
-    /// TODO: `Modal` can't combine this effect (`is_modal_resolvable`).
     Mill(u32),
     /// The `Game.Ops.LoseLife(n)` primitive (CR 119.3) - the affected player
     /// loses `n` life. Player selection is the same as `Mill`: the
@@ -312,7 +311,6 @@ pub enum AbilityEffect {
     /// push `LifeChanged`.
     /// TODO: no "lose life equal to X" computed amount, and no Two-Headed
     /// Giant team life total (CR 119.4a).
-    /// TODO: `Modal` can't combine this effect (`is_modal_resolvable`).
     LoseLife(u32),
     /// The `Game.Ops.Sacrifice()` primitive — sacrifices the resolving
     /// `StackObject`'s first chosen target from the battlefield (CR 701.21a).
@@ -829,8 +827,9 @@ pub enum AbilityEffect {
     /// TODO(CR 608.2h): a self-source fight whose source has left the
     /// battlefield does nothing instead of using last known information.
     /// TODO: no "fights up to one target creature" (an `up_to`/`at_least`
-    /// word), no "fights each creature", and not usable as a mode of a
-    /// multi-mode spell (`commands::is_modal_resolvable` is unchanged).
+    /// word) and no "fights each creature". As a mode of a multi-mode spell
+    /// only the single-word forms work (a mode with several target words
+    /// can't be combined).
     Fight,
     /// The `Game.Ops.Bite` primitive - the one-sided cousin of `Fight`:
     /// "target creature you control deals damage equal to its power to
