@@ -2,6 +2,18 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Modal spell coverage (`phase5/modal-spell-coverage`)**: tests only for the modal gate, plus one fix. The ten
+  mode tests in `phase5_modal_spell_coverage.rs` found no engine bug: `Discard` (a pause by the targeted player, and
+  an empty hand that does not pause), `Surveil`, `Regenerate` (a shield from an earlier mode stops a later destroy,
+  and printed after the destroy it is too late), `Counter` (alone and followed by a destroy that pauses on a CR 616.1
+  choice), and the chosen-by-opponent path (`submit_mode_choice`) with a draw, a destroy-all that pauses, and an
+  unsupported kind rejected as `UnsupportedModeCombination`. The one bug: the scripted zone-move resolvers in
+  `resolve/destruction.rs` (and `resolve_discard_random_effect`) passed `Vec::new()` as trailing events, which
+  dropped the accumulated `events`. For an instant that carried its own Stack -> Graveyard `ZoneChange`, so a
+  `Destroy` instant never logged that move. Each now takes `events` and passes it on, like `Mill` already did.
+  Tests: 11 (10 mode tests and the ledger probe). Left open: `SacrificeSelf`, `Fight` and `Bite` as modes are still
+  untested because a spell's source is not a permanent (`phase5/modal-abilities`).
+
 - **Modal resolvable ops (`phase5/modal-resolvable-ops`)**: closes the "not usable as a mode of a multi-mode spell"
   note that the tap/untap, mill/lose life/sacrifice self, reanimation, fight/bite and exile-until-leaves entries
   below all carry. `AbilityEffect::Modal` no longer has its own inline copy of six effects. The new
@@ -30,9 +42,9 @@
   gate and the resolver. The mode loop reads each mode's legal targets once, before the first mode runs, so a mode
   that removes a later mode's target is not noticed until that mode's own resolver skips the stale id. A pause kind that never reaches `CommitEvents` with the
   stack object's `StackObjectResolved` would drop the remaining modes; `resolve_stack_top` clears the continuation
-  at the start of each resolution so a stale one never leaks into the next. The destruction resolvers still pass
-  `Vec::new()` as trailing events instead of the accumulated `events` (the modal loop avoids the problem by
-  flushing first).
+  at the start of each resolution so a stale one never leaks into the next. The destruction resolvers' dropped
+  `events` were fixed in `phase5/modal-spell-coverage`; the modal loop still flushes first so damage and counters
+  land before a later zone move.
 
 - **Ward (`phase5/ward`)**: CR 702.21. New `GameEventKind::BecameTarget { object, by, by_controller }`, logged by
   `Engine::log_became_target` once per distinct battlefield object a stack object targets (CR 603.2c). It fires
