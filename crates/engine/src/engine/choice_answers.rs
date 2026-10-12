@@ -760,7 +760,9 @@ impl Engine {
                 })
                 .collect();
             let effects: Vec<Option<AbilityEffect>> = chosen_modes.iter().map(|m| m.effect.clone()).collect();
-            (Some(TargetSpec::Multiple(reqs)), Some(AbilityEffect::Modal(effects)))
+            // Every mode is target-less here, one placeholder word each.
+            let words = vec![1; effects.len()];
+            (Some(TargetSpec::Multiple(reqs)), Some(AbilityEffect::Modal { effects, words }))
         };
 
         let Some(top) = self.state.stack.last_mut().filter(|o| o.stack_id == stack_id) else {

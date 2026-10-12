@@ -345,7 +345,7 @@ fn an_opponent_chosen_pause_in_the_first_mode_resumes_the_second() {
 
 #[test]
 fn an_opponent_chosen_combination_with_an_unsupported_kind_is_rejected() {
-    let spell = chosen_by_opponent(vec![mode(None, AbilityEffect::GainLife(3)), mode(None, AbilityEffect::ExchangeTextBoxes)]);
+    let spell = chosen_by_opponent(vec![mode(None, AbilityEffect::GainLife(3)), mode(None, AbilityEffect::Cascade)]);
     let mut engine = engine_with(spell, 0, 0);
     cast_and_reach_the_mode_choice(&mut engine);
     let err = engine.submit_mode_choice(vec![0, 1]).unwrap_err();

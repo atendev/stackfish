@@ -10,7 +10,7 @@
 //! Narrowed to the `AbilityEffect` kinds `commands::is_modal_resolvable`
 //! accepts (see its own doc comment and `phase5_modal_resolvable_ops.rs` for
 //! the zone-move, draw and tap modes); combining a mode using an unsupported
-//! kind (e.g. `ExchangeTextBoxes`) is rejected at cast time. CR 700.2d's "same mode twice" exception
+//! kind (e.g. `Cascade`) is rejected at cast time. CR 700.2d's "same mode twice" exception
 //! (reminder-text-gated) stays unmodeled — a repeated index is always
 //! rejected. CR 700.2e/h/i stay out of scope, same as before this slice.
 
@@ -260,13 +260,13 @@ fn combining_a_mode_with_an_unsupported_effect_kind_is_rejected_at_cast_time() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
     let card = ObjectId(2);
     let mut definition = choose_two_definition();
-    definition.modes[2].effect = Some(AbilityEffect::ExchangeTextBoxes);
+    definition.modes[2].effect = Some(AbilityEffect::Cascade);
     state.objects.insert(card, card_object(card, definition, p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Mode 2 can't be combined with another mode - ExchangeTextBoxes pairs
-    // two targets, which a per-mode resolution doesn't support.
+    // Mode 2 can't be combined with another mode - Cascade is a keyword
+    // ability's effect, not a card-text mode.
     cast_spell(&mut engine, p0, card, vec![0, 2], vec![Target::Object(target)]);
     let status = drain(&mut engine);
 

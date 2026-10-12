@@ -13,8 +13,11 @@
 //! drops it from the ledger (the object hasn't resolved yet) and calls
 //! `resume_modal_resolution` instead of leaving for the SBA loop. Nothing in
 //! between runs state-based actions or collects triggers (CR 608.2c).
+//!
+//! The target words of all modes form one flat list (`TargetSpec::Multiple`);
+//! `words[i]` of them belong to mode i (`AbilityEffect::Modal`).
 
-use std::ops::ControlFlow;
+use std::ops::{ControlFlow, Range};
 
 use crate::commands;
 use crate::types::ability::AbilityEffect;
@@ -31,6 +34,8 @@ pub(in crate::engine) struct ModalContinuation {
     /// The whole stack object, not a per-mode view.
     top: StackObject,
     effects: Vec<Option<AbilityEffect>>,
+    words: Vec<usize>,
+    /// One legal-target chunk per target word, flat across all modes.
     chunks: Vec<Vec<Target>>,
     /// Index of the next mode to run.
     next: usize,
@@ -66,22 +71,30 @@ fn is_synchronous(effect: &AbilityEffect) -> bool {
             | AbilityEffect::Counter
             | AbilityEffect::Fight
             | AbilityEffect::Bite
+            | AbilityEffect::ExchangeTextBoxes
     )
 }
 
+/// The slice of the flat word list that mode `index` owns.
+fn word_range(words: &[usize], index: usize) -> Range<usize> {
+    let start: usize = words[..index].iter().sum();
+    start..start + words[index]
+}
+
 /// `top` as the single effect `effect` at mode `index` would have seen it:
-/// that mode's own target requirement (none for the CR 700.2c placeholder)
-/// and its own legal targets, so `affected_player`, `Fight` and friends read
-/// the right shape.
-fn mode_view(top: &StackObject, index: usize, effect: &AbilityEffect, legal: &[Target]) -> StackObject {
+/// that mode's own target requirement (none for the CR 700.2c placeholder,
+/// a `Multiple` when it owns several words) and its own legal targets, so
+/// `affected_player`, `Fight` and friends read the right shape.
+fn mode_view(top: &StackObject, effect: &AbilityEffect, range: Range<usize>, legal: &[Target]) -> StackObject {
     let mut view = top.clone();
     view.effect = Some(effect.clone());
     view.target_requirement = match &top.target_requirement {
-        Some(TargetSpec::Multiple(reqs)) => reqs
-            .get(index)
-            .filter(|req| !commands::is_modal_placeholder_requirement(req))
-            .cloned()
-            .map(TargetSpec::Primitive),
+        Some(TargetSpec::Multiple(reqs)) => match reqs.get(range) {
+            Some([one]) if commands::is_modal_placeholder_requirement(one) => None,
+            Some([one]) => Some(TargetSpec::Primitive(one.clone())),
+            Some([]) | None => None,
+            Some(many) => Some(TargetSpec::Multiple(many.to_vec())),
+        },
         _ => None,
     };
     view.targets = legal.to_vec();
@@ -91,32 +104,37 @@ fn mode_view(top: &StackObject, index: usize, effect: &AbilityEffect, legal: &[T
 impl Engine {
     /// CR 700.2d — 2+ chosen modes, combined. See `AbilityEffect::Modal`'s
     /// own doc comment for the shape invariant (one entry per chosen mode,
-    /// `modal_chunk_legals` precomputed by the caller with one legal-target
-    /// chunk per entry).
+    /// `words[i]` target words each, `modal_chunk_legals` precomputed by the
+    /// caller with one legal-target chunk per word).
     pub(super) fn resolve_modal_effect(
         &mut self,
         top: &StackObject,
         effects: &[Option<AbilityEffect>],
+        words: &[usize],
         modal_chunk_legals: &[Vec<Target>],
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        self.resolve_modal_from(top, effects, modal_chunk_legals, 0, events)
+        self.resolve_modal_from(top, effects, words, modal_chunk_legals, 0, events)
     }
 
     fn resolve_modal_from(
         &mut self,
         top: &StackObject,
         effects: &[Option<AbilityEffect>],
+        words: &[usize],
         chunks: &[Vec<Target>],
         start: usize,
         mut events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         for index in start..effects.len() {
             let Some(effect) = &effects[index] else { continue };
-            let legal = chunks.get(index).map(Vec::as_slice).unwrap_or(&[]);
+            let range = word_range(words, index);
+            let mode_chunks = chunks.get(range.clone()).unwrap_or(&[]);
+            let legal: Vec<Target> = mode_chunks.iter().flatten().copied().collect();
             let continuation = |next: usize| ModalContinuation {
                 top: top.clone(),
                 effects: effects.to_vec(),
+                words: words.to_vec(),
                 chunks: chunks.to_vec(),
                 next,
             };
@@ -133,8 +151,8 @@ impl Engine {
 
             let has_later_mode = effects[index + 1..].iter().any(Option::is_some);
             self.modal_continuation = (!is_synchronous(effect) && has_later_mode).then(|| continuation(index + 1));
-            let view = mode_view(top, index, effect, legal);
-            match self.resolve_ability_effect(&view, legal, &[], events) {
+            let view = mode_view(top, effect, range, &legal);
+            match self.resolve_ability_effect(&view, &legal, mode_chunks, events) {
                 ControlFlow::Break(status) => return ControlFlow::Break(status),
                 ControlFlow::Continue(resumed) => events = resumed,
             }
@@ -148,8 +166,8 @@ impl Engine {
     /// from `resolve_commit_events_state` once it has committed the previous
     /// mode's events.
     pub(in crate::engine) fn resume_modal_resolution(&mut self, continuation: ModalContinuation) -> StepStatus {
-        let ModalContinuation { top, effects, chunks, next } = continuation;
-        match self.resolve_modal_from(&top, &effects, &chunks, next, Vec::new()) {
+        let ModalContinuation { top, effects, words, chunks, next } = continuation;
+        match self.resolve_modal_from(&top, &effects, &words, &chunks, next, Vec::new()) {
             ControlFlow::Break(status) => status,
             ControlFlow::Continue(mut events) => {
                 events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });

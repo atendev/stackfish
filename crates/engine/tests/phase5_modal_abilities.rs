@@ -309,7 +309,7 @@ fn an_opponent_chosen_pause_in_the_first_mode_resumes_the_second() {
 
 #[test]
 fn an_opponent_chosen_combination_with_an_unsupported_kind_is_rejected() {
-    let mut engine = engine_with(chosen_by_opponent(vec![mode(None, AbilityEffect::GainLife(3)), mode(None, AbilityEffect::ExchangeTextBoxes)]), 0);
+    let mut engine = engine_with(chosen_by_opponent(vec![mode(None, AbilityEffect::GainLife(3)), mode(None, AbilityEffect::Cascade)]), 0);
     let status = pass_both(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingTriggerModeChoice { .. }), "{status:?}");
     let err = engine.submit_trigger_mode_choice(vec![0, 1]).unwrap_err();
