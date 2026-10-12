@@ -461,7 +461,7 @@ impl Engine {
             // TODO: "sacrifice a permanent you control"
             // (player chooses at resolution) needs coroutines
             // — blocked on backlog item 9.
-            Some(AbilityEffect::Sacrifice) => self.resolve_sacrifice_effect(top, legal_targets),
+            Some(AbilityEffect::Sacrifice) => self.resolve_sacrifice_effect(top, legal_targets, events),
             // CR 701.8/614.13/702.12b: unlike Damage, this
             // can't be modeled as "push an unapplied event
             // and let CommitEvents retroactively apply it" -
@@ -483,7 +483,7 @@ impl Engine {
             // `AwaitingReplacementChoice`, same as every other
             // SBA-driven death - the remaining independent
             // targets in this same op resume afterward.
-            Some(AbilityEffect::Destroy) => self.resolve_destroy_effect(top, legal_targets),
+            Some(AbilityEffect::Destroy) => self.resolve_destroy_effect(top, legal_targets, events),
             // CR 509.1h/702.22i: direct CombatState mutation via
             // commands::mark_effect_blocked, same "already
             // happened, no CommitEvents needed" convention Pump/
@@ -503,13 +503,13 @@ impl Engine {
             // 616.1 ordering-choice pauses, and the CR 614.13
             // `WouldDie` replacement check all apply
             // identically - no new destruction logic here.
-            Some(AbilityEffect::DestroyAll(filter)) => self.resolve_destroy_all_effect(top, filter),
+            Some(AbilityEffect::DestroyAll(filter)) => self.resolve_destroy_all_effect(top, filter, events),
             // CR 701.21/CR 701.something "at random": count candidates
             // drawn without replacement via next_rng, same deterministic
             // ledger-logged source shuffle_library already uses - see
             // AbilityEffect::SacrificeRandom's own doc comment.
             Some(AbilityEffect::SacrificeRandom { filter, count }) => {
-                self.resolve_sacrifice_random_effect(top, filter, *count)
+                self.resolve_sacrifice_random_effect(top, filter, *count, events)
             }
             // CR 701.18: exile the first chosen target from
             // the battlefield. Unlike Destroy, indestructibility
@@ -524,23 +524,23 @@ impl Engine {
             // deferred as a named follow-up. CR 616.1: same
             // ordering-choice handling as Destroy/Sacrifice
             // above.
-            Some(AbilityEffect::Exile) => self.resolve_exile_effect(top, legal_targets),
+            Some(AbilityEffect::Exile) => self.resolve_exile_effect(top, legal_targets, events),
             // CR 610.3: Exile that returns when the source leaves.
-            Some(AbilityEffect::ExileUntilSourceLeaves) => self.resolve_exile_until_source_leaves_effect(top, legal_targets),
+            Some(AbilityEffect::ExileUntilSourceLeaves) => self.resolve_exile_until_source_leaves_effect(top, legal_targets, events),
             // CR 400.3: same target-driven shape as Exile above.
-            Some(AbilityEffect::ReturnToHand) => self.resolve_return_to_hand_effect(top, legal_targets),
+            Some(AbilityEffect::ReturnToHand) => self.resolve_return_to_hand_effect(top, legal_targets, events),
             // CR 400.3: untargeted siblings of ReturnToHand.
-            Some(AbilityEffect::ReturnSelfToHand) => self.resolve_return_self_to_hand_effect(top),
-            Some(AbilityEffect::ReturnAllToHand { filter, zone }) => self.resolve_return_all_to_hand_effect(top, filter, *zone),
-            Some(AbilityEffect::ExileSelf) => self.resolve_exile_self_effect(top),
-            Some(AbilityEffect::ExileAll { filter, zone }) => self.resolve_exile_all_effect(top, filter, *zone),
+            Some(AbilityEffect::ReturnSelfToHand) => self.resolve_return_self_to_hand_effect(top, events),
+            Some(AbilityEffect::ReturnAllToHand { filter, zone }) => self.resolve_return_all_to_hand_effect(top, filter, *zone, events),
+            Some(AbilityEffect::ExileSelf) => self.resolve_exile_self_effect(top, events),
+            Some(AbilityEffect::ExileAll { filter, zone }) => self.resolve_exile_all_effect(top, filter, *zone, events),
             // CR 110.2a/400.7: graveyard or exile to battlefield, replacement-
             // checked and with the full entry treatment.
             Some(AbilityEffect::ReturnToBattlefield { control, tapped }) => {
-                self.resolve_return_to_battlefield_effect(top, legal_targets, *control, *tapped)
+                self.resolve_return_to_battlefield_effect(top, legal_targets, *control, *tapped, events)
             }
             Some(AbilityEffect::ReturnAllToBattlefield { filter, zone, control, tapped }) => {
-                self.resolve_return_all_to_battlefield_effect(top, filter, *zone, *control, *tapped)
+                self.resolve_return_all_to_battlefield_effect(top, filter, *zone, *control, *tapped, events)
             }
             // CR 701.26: synchronous tap/untap. Each flips `tapped` in
             // place and pushes the event only on a real flip - see
@@ -568,7 +568,7 @@ impl Engine {
             // resolving StackObject's own controller's hand instead of the
             // battlefield - see AbilityEffect::DiscardRandom's own doc
             // comment.
-            Some(AbilityEffect::DiscardRandom { filter, count }) => self.resolve_discard_random_effect(top, filter, *count),
+            Some(AbilityEffect::DiscardRandom { filter, count }) => self.resolve_discard_random_effect(top, filter, *count, events),
             // CR 701.9/701.9b: pauses for the *targeted* player's own real
             // mid-resolution choice instead of resolving synchronously -
             // see AbilityEffect::Discard's own doc comment and
@@ -659,7 +659,7 @@ impl Engine {
             // CR 119.3: same player selection as Mill above. Synchronous.
             Some(AbilityEffect::LoseLife(amount)) => self.resolve_lose_life_effect(top, legal_targets, *amount, events),
             // CR 701.21a: untargeted sibling of Sacrifice above.
-            Some(AbilityEffect::SacrificeSelf) => self.resolve_sacrifice_self_effect(top),
+            Some(AbilityEffect::SacrificeSelf) => self.resolve_sacrifice_self_effect(top, events),
             // CR 701.19b: no target, always top.controller
             // (same "controller only" shape DrawCards/
             // GainLife use). shuffle_library already mutates

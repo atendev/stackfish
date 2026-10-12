@@ -26,6 +26,7 @@ impl Engine {
         &mut self,
         top: &StackObject,
         legal_targets: &[Target],
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = legal_targets
             .iter()
@@ -35,7 +36,7 @@ impl Engine {
             })
             .collect();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Sacrifice, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Sacrifice, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -44,13 +45,13 @@ impl Engine {
     /// A stale id does nothing (CR 400.7). A source still on the battlefield
     /// under someone else's control is not sacrificed either: a player can't
     /// sacrifice a permanent they don't control, and nothing targeted it.
-    pub(super) fn resolve_sacrifice_self_effect(&mut self, top: &StackObject) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+    pub(super) fn resolve_sacrifice_self_effect(&mut self, top: &StackObject, events: Vec<GameEventKind>) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let on_battlefield = self.state.object(top.source).is_some_and(|o| o.zone == ZoneKind::Battlefield);
         let controlled = !on_battlefield
             || crate::layers::effective_controller(&self.state, &self.script_runtime, top.source) == top.controller;
         let targets: VecDeque<ObjectId> = if controlled { VecDeque::from([top.source]) } else { VecDeque::new() };
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Sacrifice, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Sacrifice, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -58,6 +59,7 @@ impl Engine {
         &mut self,
         top: &StackObject,
         legal_targets: &[Target],
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = legal_targets
             .iter()
@@ -67,7 +69,7 @@ impl Engine {
             })
             .collect();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -75,6 +77,7 @@ impl Engine {
         &mut self,
         top: &StackObject,
         filter: &EffectFilter,
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = self
             .state
@@ -92,7 +95,7 @@ impl Engine {
             })
             .unwrap_or_default();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -100,6 +103,7 @@ impl Engine {
         &mut self,
         top: &StackObject,
         legal_targets: &[Target],
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = legal_targets
             .iter()
@@ -109,7 +113,7 @@ impl Engine {
             })
             .collect();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -121,6 +125,7 @@ impl Engine {
         &mut self,
         top: &StackObject,
         legal_targets: &[Target],
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let source_on_battlefield = self.state.object(top.source).is_some_and(|o| o.zone == ZoneKind::Battlefield);
         let targets: VecDeque<ObjectId> = legal_targets
@@ -135,7 +140,7 @@ impl Engine {
             ScriptedZoneMoveKind::ExileUntilLeaves { source: top.source },
             targets,
             ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
-            Vec::new(),
+            events,
         );
         ControlFlow::Break(StepStatus::Progressed)
     }
@@ -146,6 +151,7 @@ impl Engine {
         &mut self,
         top: &StackObject,
         legal_targets: &[Target],
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = legal_targets
             .iter()
@@ -155,17 +161,17 @@ impl Engine {
             })
             .collect();
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
     /// CR 400.3/400.7: `Game.Ops.ReturnSelfToHand()` - the resolving
     /// ability's own source. A source that already left its zone has a new
     /// id, so the lookup in `continue_scripted_zone_move` finds nothing.
-    pub(super) fn resolve_return_self_to_hand_effect(&mut self, top: &StackObject) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+    pub(super) fn resolve_return_self_to_hand_effect(&mut self, top: &StackObject, events: Vec<GameEventKind>) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = VecDeque::from([top.source]);
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -177,19 +183,20 @@ impl Engine {
         top: &StackObject,
         filter: &EffectFilter,
         zone: ZoneKind,
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets = self.objects_in_zone_matching(top, filter, zone);
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Bounce, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
     /// CR 406.2/400.7: `Game.Ops.ExileSelf()` - the resolving ability's own
     /// source. Same stale-id behavior as `resolve_return_self_to_hand_effect`.
-    pub(super) fn resolve_exile_self_effect(&mut self, top: &StackObject) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+    pub(super) fn resolve_exile_self_effect(&mut self, top: &StackObject, events: Vec<GameEventKind>) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = VecDeque::from([top.source]);
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -201,10 +208,11 @@ impl Engine {
         top: &StackObject,
         filter: &EffectFilter,
         zone: ZoneKind,
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets = self.objects_in_zone_matching(top, filter, zone);
         self.process_state =
-            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, Vec::new());
+            self.continue_scripted_zone_move(ScriptedZoneMoveKind::Exile, targets, ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id }, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 
@@ -217,6 +225,7 @@ impl Engine {
         legal_targets: &[Target],
         control: EntryControl,
         tapped: bool,
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = legal_targets
             .iter()
@@ -229,7 +238,7 @@ impl Engine {
             reanimate_kind(top, control, tapped),
             targets,
             ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
-            Vec::new(),
+            events,
         );
         ControlFlow::Break(StepStatus::Progressed)
     }
@@ -243,13 +252,14 @@ impl Engine {
         zone: ZoneKind,
         control: EntryControl,
         tapped: bool,
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets = self.objects_in_zone_matching(top, filter, zone);
         self.process_state = self.continue_scripted_zone_move(
             reanimate_kind(top, control, tapped),
             targets,
             ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
-            Vec::new(),
+            events,
         );
         ControlFlow::Break(StepStatus::Progressed)
     }
@@ -283,13 +293,14 @@ impl Engine {
         top: &StackObject,
         filter: &EffectFilter,
         count: u32,
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let chosen = self.pick_sacrifice_random_ids(top.source, top.controller, filter, count);
         self.process_state = self.continue_scripted_zone_move(
             ScriptedZoneMoveKind::Sacrifice,
             chosen,
             ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
-            Vec::new(),
+            events,
         );
         ControlFlow::Break(StepStatus::Progressed)
     }

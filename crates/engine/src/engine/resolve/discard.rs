@@ -42,13 +42,14 @@ impl Engine {
         top: &StackObject,
         filter: &EffectFilter,
         count: u32,
+        events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let chosen = self.pick_discard_random_ids(top.source, top.controller, filter, count);
         self.process_state = self.continue_scripted_zone_move(
             ScriptedZoneMoveKind::Discard,
             chosen,
             ScriptedZoneMoveThen::StackResolution { stack_id: top.stack_id },
-            Vec::new(),
+            events,
         );
         ControlFlow::Break(StepStatus::Progressed)
     }
