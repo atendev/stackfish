@@ -2,6 +2,18 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Modal choice-pause modes (`phase5/modal-choice-pause-modes`)**: `Search` and `CreateToken` join
+  `is_modal_resolvable`. No engine change was needed beyond the gate: both end their pauses in the standard
+  `ReplacementCheck` tail, so `modal_continuation` resumes the remaining modes after the answer. Tests:
+  `phase5_modal_choice_pause_modes.rs` (9): a search then a synchronous mode, the reverse, a search with no
+  matching card (no pause), a search that fetches a Devour creature (two pauses: the find, then the nested
+  `AwaitingSearchDevourChoice` through `SearchResume`), a token mode with a synchronous mode on either side, an Aura
+  copy token with two legal hosts (`AwaitingTokenAttachChoice`), a search followed by an Aura token (two pauses in a
+  row, so the continuation is installed again for the second), and a Treasure token before a search (the first mode
+  is committed before the search pauses). Left open: Amplify's choice mid-search as a mode (same path as Devour,
+  untested); a mode that makes tokens for a count above one with an attach choice on each (the loop is the single
+  effect's own); `UnlessPaid`, `BecomeCopy`, `Attach` and `ExchangeTextBoxes` are still rejected (slices 3 to 5).
+
 - **Modal spell coverage (`phase5/modal-spell-coverage`)**: tests only for the modal gate, plus one fix. The ten
   mode tests in `phase5_modal_spell_coverage.rs` found no engine bug: `Discard` (a pause by the targeted player, and
   an empty hand that does not pause), `Surveil`, `Regenerate` (a shield from an earlier mode stops a later destroy,

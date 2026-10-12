@@ -915,15 +915,16 @@ fn assign_targets_by_filter(
 /// the same resolver a single effect uses, so this is every kind that
 /// resolver handles against a mode's own target requirement and the standard
 /// `ReplacementCheck` tail: the synchronous effects, the scripted zone moves
-/// (including their CR 616.1 ordering pauses), draw, discard and scry/surveil.
+/// (including their CR 616.1 ordering pauses), draw, discard, scry/surveil,
+/// search (including its devour/amplify entry choices) and token creation
+/// (including the Aura attach choice).
 /// Checked at cast time so an unsupported mode is rejected immediately rather
 /// than silently doing nothing at resolution. A single chosen mode (the
 /// pre-existing "Choose one -" case) is never checked against this at all - it
 /// uses its own effect bare, unwrapped from `Modal`.
 ///
-/// TODO: not supported inside a multi-mode choice yet: `Search` (devour
-/// choices re-enter its own battlefield-entry loop), `UnlessPaid` (payment
-/// pause), `CreateToken`, `BecomeCopy`, and the pairing effects `Attach` and
+/// TODO: not supported inside a multi-mode choice yet: `UnlessPaid` (payment
+/// pause), `BecomeCopy`, and the pairing effects `Attach` and
 /// `ExchangeTextBoxes`. `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`,
 /// `ReturnSelfWithCounter`, `AddMana*` and `Script` are not card-text modes.
 ///
@@ -974,6 +975,8 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::DiscardRandom { .. }
             | AbilityEffect::Scry(_)
             | AbilityEffect::Surveil(_)
+            | AbilityEffect::Search { .. }
+            | AbilityEffect::CreateToken { .. }
     )
 }
 
