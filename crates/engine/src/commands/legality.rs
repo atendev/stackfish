@@ -924,8 +924,8 @@ fn assign_targets_by_filter(
 /// uses its own effect bare, unwrapped from `Modal`.
 ///
 /// TODO: not supported inside a multi-mode choice yet: `UnlessPaid` (payment
-/// pause), `BecomeCopy`, and the pairing effects `Attach` and
-/// `ExchangeTextBoxes`. `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`,
+/// pause) and `ExchangeTextBoxes` (pairs two targets, so its mode would need
+/// several target words). `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`,
 /// `ReturnSelfWithCounter`, `AddMana*` and `Script` are not card-text modes.
 ///
 /// `pub(crate)` since CR 700.2e's `Engine::submit_mode_choice` (engine.rs)
@@ -977,6 +977,10 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::Surveil(_)
             | AbilityEffect::Search { .. }
             | AbilityEffect::CreateToken { .. }
+            // Act on the ability's own source, so only a modal triggered
+            // ability can use them (a spell's source is not a permanent).
+            | AbilityEffect::BecomeCopy(_)
+            | AbilityEffect::Attach
     )
 }
 
