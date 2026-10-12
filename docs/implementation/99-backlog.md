@@ -2,6 +2,21 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Modal abilities (`phase5/modal-abilities`)**: `BecomeCopy` and `Attach` join `is_modal_resolvable`; `SacrificeSelf`,
+  `Fight` and `Bite` were already in it. They act on the ability's own source permanent, so they only mean something on
+  a modal triggered ability (a spell's source is not a permanent). The vehicle is a modal upkeep trigger
+  (`RegisteredAbility::modes`). **There is no modal activated ability**: `commands/activate.rs` has no modes (its CR
+  700.2b TODO is still open), so that is its own feature. No engine change was needed beyond the gate. Tests:
+  `phase5_modal_abilities.rs` (11): sacrifice self before and after a synchronous mode, before a draw; a fight mode
+  (the source and the target both take damage) and a bite mode (one-sided), each with `GainLife`; a fight followed by
+  a draw (the damage is committed before the draw, checked by ledger order); a become-copy mode (`BecameCopy` logged,
+  `copiable_override` set); an attach mode on an Equipment source; and the trigger-path chosen-by-opponent case with
+  sacrifice self plus gain life, a destroy-all that pauses on CR 616.1 choices before gain life, and an unsupported
+  kind rejected as `TriggerModeChoiceError::UnsupportedModeCombination`. Left open: a mode with two target words
+  (`Fight` between two chosen creatures, slice 5); `Attach` for an Aura's enchant-host choice and Equip's cost-side
+  rules are not exercised (only the resolution step); a modal ability with `Search` or a token mode is not retested
+  here (the spell path covers it); `UnlessPaid` and `ExchangeTextBoxes` are still rejected.
+
 - **Modal choice-pause modes (`phase5/modal-choice-pause-modes`)**: `Search` and `CreateToken` join
   `is_modal_resolvable`. No engine change was needed beyond the gate: both end their pauses in the standard
   `ReplacementCheck` tail, so `modal_continuation` resumes the remaining modes after the answer. Tests:
