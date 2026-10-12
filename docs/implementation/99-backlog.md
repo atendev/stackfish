@@ -2,6 +2,21 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Modal unless-paid (`phase5/modal-unless-paid`)**: `UnlessPaid` joins `is_modal_resolvable`, for both consequences
+  (`Counter`, `SacrificeSelf`). No engine change was needed beyond the gate: `submit_unless_paid_payment` and
+  `decline_unless_paid` both end in the standard `ReplacementCheck` tail (the sacrifice consequence through
+  `ScriptedZoneMoveThen::StackResolution`), so `modal_continuation` runs the remaining modes after the payer answers.
+  Tests: `phase5_modal_unless_paid.rs` (7): a spell mode that counters unless P1 pays {3}, declined (countered, next
+  mode runs) and paid (spared, mana deducted, next mode runs); a rejected plan (`InvalidPlan`) and a wrong payer
+  (`NotCurrentPayer`) leave the pause and the remaining modes intact, then a decline still finishes; an unless-paid
+  mode followed by a destroy that pauses on a CR 616.1 choice (two pauses in a row); a synchronous mode printed
+  before the unless-paid mode; and an echo-style trigger mode (sacrifice this unless you pay {2}) declined (source
+  sacrificed, next mode runs) and paid. Left open: the other `UnlessPaidConsequence` shapes do not exist yet (no
+  "pay life", discard or sacrifice cost, and ward's cost stays mana only); a modal ward is not a thing (ward is a
+  triggered ability, not a mode); the `payer_queue` is still a single payer; `ExchangeTextBoxes` is the last kind
+  rejected at cast time (slice 5). Test-harness note: the mana pool empties as the game leaves pre-game for upkeep,
+  so a trigger test has to add mana after the trigger is on the stack.
+
 - **Modal abilities (`phase5/modal-abilities`)**: `BecomeCopy` and `Attach` join `is_modal_resolvable`; `SacrificeSelf`,
   `Fight` and `Bite` were already in it. They act on the ability's own source permanent, so they only mean something on
   a modal triggered ability (a spell's source is not a permanent). The vehicle is a modal upkeep trigger
