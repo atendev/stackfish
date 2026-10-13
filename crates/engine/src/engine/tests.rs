@@ -12,7 +12,7 @@ use crate::types::turn::Step;
 use crate::types::zone::ZoneKind;
 use std::collections::{HashMap, VecDeque};
 
-fn minimal_state() -> GameState {
+pub(super) fn minimal_state() -> GameState {
     let p0 = PlayerId(0);
     GameState {
         players: vec![PlayerState {
@@ -67,7 +67,7 @@ fn minimal_state() -> GameState {
     }
 }
 
-fn trigger(id: u64, controller: PlayerId) -> PendingTrigger {
+pub(super) fn trigger(id: u64, controller: PlayerId) -> PendingTrigger {
     PendingTrigger { source: ObjectId(id), controller, ability: AbilityId(id), once_per_turn: false, triggering_stack: None }
 }
 

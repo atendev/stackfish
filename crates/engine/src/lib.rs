@@ -1,5 +1,6 @@
 pub mod color_identity;
 pub mod commands;
+pub mod decision;
 pub mod engine;
 pub mod engine_context;
 pub mod layers;
