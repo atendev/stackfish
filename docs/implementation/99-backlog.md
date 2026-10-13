@@ -2,6 +2,22 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Decision/Answer facade (`phase5/decision-answer-facade`, B1)**: see `16-decision-facade.md`. Open items:
+  - `submit_action` only checks whose priority it is. An illegal priority `PlayerAction` is accepted, then fails during
+    `step()` in `execute_command`. The facade therefore cannot reject it up front. B2 (`legal_actions()`) or the engine
+    atomicity item has to close this before a remote host sends untrusted actions.
+  - The `Action` shape lists no entries yet. B2 adds the entry lists for priority and the combat declarations. Combat
+    declarations are still `PlayerAction`s submitted at a priority window.
+  - A nested mana ability activated during a Payment Decision (CR 605.3a) is not accepted through `Answer`. It still
+    works through `submit_action`.
+  - `Target::Ability` candidates are not enumerated for a script `SelectTarget` filter.
+  - Rejection messages are the `Debug` text of the engine's error enum. Friendlier wording is for B3, which owns the wire
+    text.
+  - The Decision id counter lives on `Engine` and moves into the Session in B3. Mixing `open_decision`/`answer` with
+    direct `submit_*` calls on the same `Engine` leaves the counter out of step.
+  - Unit tests cover the shapes, not every pause variant. The exhaustive match in `decision/open.rs` is what guards new
+    variants.
+
 - **Modal multi-word modes (`phase5/modal-multi-word-modes`)**: the only slice of the modal series that changes the data
   model. `AbilityEffect::Modal(Vec<Option<AbilityEffect>>)` is now `Modal { effects, words }`. The target words of all
   chosen modes still form one flat `TargetSpec::Multiple`, and `words[i]` says how many consecutive words mode i owns

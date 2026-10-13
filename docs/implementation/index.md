@@ -18,4 +18,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [13-commander-multiplayer](13-commander-multiplayer.md) — multiplayer defending player, elimination, commander tax/damage, color identity
 - [14-protection-attach](14-protection-attach.md) — protection qualities, auras, equipment, attach/evasion keywords, hexproof/shroud vs attachment
 - [15-card-database-loader](15-card-database-loader.md) — `stackfish-carddb`: SQLite external-card-DB connector, `ManaCost::parse`/type_line/keyword mapping, CDA script gap
+- [16-decision-facade](16-decision-facade.md) — `decision` module: `Engine::open_decision`/`answer`, reply shapes, rejection codes, Decision ids
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

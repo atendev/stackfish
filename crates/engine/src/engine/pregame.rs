@@ -195,6 +195,7 @@ impl Engine {
             settings,
             pregame_setup_done: false,
             script_runtime: ScriptRuntime::new(),
+            decisions: crate::decision::DecisionTracker::new(),
         }
     }
 

@@ -35,6 +35,8 @@ mod triggers_pipeline;
 mod turn;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod decision_tests;
 
 pub use process_state::*;
 
@@ -490,6 +492,9 @@ pub struct Engine {
     /// with the right lifetime to own it, and nothing yet shares one
     /// `ScriptRuntime` across multiple `Engine`s.
     script_runtime: ScriptRuntime,
+    /// Decision id counter for the `decision` facade. TODO(B3): moves into
+    /// the Session.
+    pub(crate) decisions: crate::decision::DecisionTracker,
 }
 
 impl Engine {
@@ -508,11 +513,28 @@ impl Engine {
             settings: GameSettings::default(),
             pregame_setup_done: true,
             script_runtime: ScriptRuntime::new(),
+            decisions: crate::decision::DecisionTracker::new(),
         }
     }
 
     pub fn state(&self) -> &GameState {
         &self.state
+    }
+
+    /// Read access for the `decision` facade.
+    pub(crate) fn process_state(&self) -> &ProcessState {
+        &self.process_state
+    }
+
+    /// Read access for the `decision` facade.
+    pub(crate) fn script_runtime(&self) -> &ScriptRuntime {
+        &self.script_runtime
+    }
+
+    /// `true` until the first `step()` has run pregame setup. No Decision is
+    /// open before then, even though `process_state` is `PriorityWindow`.
+    pub(crate) fn awaiting_pregame_setup(&self) -> bool {
+        self.state.phase == Phase::PreGame && !self.pregame_setup_done
     }
 
     /// CR 601.2f-h/605.3b: the cost currently awaiting `submit_payment`, and
