@@ -48,86 +48,8 @@ pub(in crate::commands) fn execute_declare_attackers(
     // declaration is illegal" - validate every attacker before
     // mutating anything, so an illegal batch taps nobody.
     for (attacker, target) in &attackers {
-        let object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
-        // CR 508.1a: attacking requires *current* control, per
-        // layers::effective_controller.
-        if crate::layers::effective_controller(state, script_runtime, *attacker) != actor {
-            return Err(CommandError::IllegalAction(
-                "actor does not control a chosen attacker".to_string(),
-            ));
-        }
-        if !object.definition.card_types.contains(CardTypeSet::CREATURE)
-            || object.definition.card_types.contains(CardTypeSet::BATTLE)
-        {
-            return Err(CommandError::IllegalAction(
-                "a chosen attacker is not a creature, or is also a battle".to_string(),
-            ));
-        }
-        if object.tapped {
-            return Err(CommandError::IllegalAction(
-                "a chosen attacker is already tapped".to_string(),
-            ));
-        }
-        // CR 508.1a/302.6/702.10b: has_summoning_sickness itself
-        // grants Haste's bypass.
-        if has_summoning_sickness(state, script_runtime, object) {
-            return Err(CommandError::IllegalAction(
-                "a chosen attacker has summoning sickness".to_string(),
-            ));
-        }
-        // CR 302.6b/702.3b: a creature with defender can't attack -
-        // effective_keywords so a granted/removed Defender is respected, not
-        // just the printed keyword. A creature with an applicable
-        // IgnoreKeyword(DEFENDER) grant (e.g. Assault Formation's
-        // "Walls you control can attack as though they didn't have
-        // defender") still has Defender - it's just exempt from the
-        // restriction it imposes, see that primitive's own doc comment.
-        if effective_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
-            && !ignored_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
-        {
-            return Err(CommandError::IllegalAction(
-                "a chosen attacker has defender and can't attack".to_string(),
-            ));
-        }
-        match target {
-            Target::Player(pid) => {
-                if *pid == actor || !state.turn_order.contains(pid) {
-                    return Err(CommandError::IllegalAction(
-                        "an attacker's target must be an opponent".to_string(),
-                    ));
-                }
-            }
-            Target::Object(target_id) => {
-                let target_object =
-                    state.object(*target_id).ok_or(CommandError::InvalidTarget)?;
-                // CR 508.1b: the target permanent's *current*
-                // controller must be an opponent.
-                if crate::layers::effective_controller(state, script_runtime, *target_id)
-                    == actor
-                {
-                    return Err(CommandError::IllegalAction(
-                        "an attacker's target permanent must be controlled by an \
-                         opponent"
-                            .to_string(),
-                    ));
-                }
-                if !target_object
-                    .definition
-                    .card_types
-                    .intersects(CardTypeSet::PLANESWALKER | CardTypeSet::BATTLE)
-                {
-                    return Err(CommandError::IllegalAction(
-                        "an attacker's target permanent must be a planeswalker or \
-                         battle"
-                            .to_string(),
-                    ));
-                }
-            }
-            // CR 506.4/508.1a: an attacker is declared against a player, a
-            // planeswalker, or a battle - never an activated/triggered
-            // ability (nothing in Magic attacks a spell/ability).
-            Target::Ability(_) => return Err(CommandError::InvalidTarget),
-        }
+        attacker_can_attack(state, script_runtime, actor, *attacker)?;
+        attack_target_is_legal(state, script_runtime, actor, target)?;
     }
 
     // CR 508.1f: tapping an attacker isn't a cost - attacking
@@ -322,16 +244,7 @@ pub(in crate::commands) fn execute_declare_blockers(
     // is actually aimed at them.
     // CR 508.5a: "defending player" is resolved against a targeted
     // permanent's *current* controller.
-    let is_defending_player = combat.attackers.iter().any(|(_, target)| match target {
-        Target::Player(pid) => *pid == actor,
-        Target::Object(target_id) => state.object(*target_id).is_some_and(|_| {
-            crate::layers::effective_controller(state, script_runtime, *target_id) == actor
-        }),
-        // Structurally unreachable: DeclareAttackers already rejects
-        // Target::Ability (an attacker never targets an ability).
-        Target::Ability(_) => false,
-    });
-    if !is_defending_player {
+    if !is_defending_player(state, script_runtime, combat, actor) {
         return Err(CommandError::IllegalAction(
             "this player is not a defending player this combat".to_string(),
         ));
@@ -349,204 +262,7 @@ pub(in crate::commands) fn execute_declare_blockers(
         }
         seen_blockers.push(*blocker);
 
-        let blocker_object = state.object(*blocker).ok_or(CommandError::InvalidTarget)?;
-        // CR 509.1a: blocking requires *current* control.
-        if crate::layers::effective_controller(state, script_runtime, *blocker) != actor {
-            return Err(CommandError::IllegalAction(
-                "actor does not control a chosen blocker".to_string(),
-            ));
-        }
-        if !blocker_object.definition.card_types.contains(CardTypeSet::CREATURE)
-            || blocker_object.definition.card_types.contains(CardTypeSet::BATTLE)
-        {
-            return Err(CommandError::IllegalAction(
-                "a chosen blocker is not a creature, or is also a battle".to_string(),
-            ));
-        }
-        if blocker_object.tapped {
-            return Err(CommandError::IllegalAction(
-                "a chosen blocker is already tapped".to_string(),
-            ));
-        }
-
-        let (_, attacking) = combat
-            .attackers
-            .iter()
-            .find(|(id, _)| id == attacker)
-            .ok_or_else(|| {
-                CommandError::IllegalAction(
-                    "a chosen attacker isn't actually attacking this combat".to_string(),
-                )
-            })?;
-        let attacking_this_defender = match attacking {
-            Target::Player(pid) => *pid == actor,
-            Target::Object(target_id) => state.object(*target_id).is_some_and(|_| {
-                crate::layers::effective_controller(state, script_runtime, *target_id) == actor
-            }),
-            // Structurally unreachable: DeclareAttackers already rejects
-            // Target::Ability (an attacker never targets an ability).
-            Target::Ability(_) => false,
-        };
-        if !attacking_this_defender {
-            return Err(CommandError::IllegalAction(
-                "a chosen attacker isn't attacking this defending player, their \
-                 planeswalker, or their battle"
-                    .to_string(),
-            ));
-        }
-
-        // CR 702.9b: an attacker with flying can only be blocked by
-        // a creature with flying and/or reach. Reads through
-        // effective_keywords (CR 613 layer 6) - a continuous effect
-        // granting/removing Flying/Reach now actually changes
-        // blocking legality, not just the printed KeywordSet.
-        let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
-        let attacker_keywords = effective_keywords(state, script_runtime, attacker_object.object_id);
-        let blocker_keywords = effective_keywords(state, script_runtime, blocker_object.object_id);
-        if attacker_keywords.contains(KeywordSet::FLYING)
-            && !blocker_keywords.intersects(KeywordSet::FLYING | KeywordSet::REACH)
-        {
-            return Err(CommandError::IllegalAction(
-                "an attacker with flying can only be blocked by a creature with \
-                 flying or reach"
-                    .to_string(),
-            ));
-        }
-
-        // CR 702.16d's own protection check below already needs both
-        // objects' full effective_characteristics - computed here
-        // instead, once, so Fear/Intimidate's color/card-type checks
-        // (which need the same live values) can reuse them too.
-        let attacker_characteristics =
-            crate::layers::effective_characteristics(state, script_runtime, attacker_object.object_id);
-        let blocker_characteristics =
-            crate::layers::effective_characteristics(state, script_runtime, blocker_object.object_id);
-
-        // CR 702.36b/702.13b: Fear/Intimidate - can't be blocked
-        // except by an artifact creature and/or (Fear: a black
-        // creature; Intimidate: a creature sharing a color with the
-        // attacker).
-        if attacker_keywords.contains(KeywordSet::FEAR)
-            && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
-                || blocker_characteristics.colors.contains(ColorSet::BLACK))
-        {
-            return Err(CommandError::IllegalAction(
-                "an attacker with fear can only be blocked by an artifact and/or \
-                 black creature"
-                    .to_string(),
-            ));
-        }
-        if attacker_keywords.contains(KeywordSet::INTIMIDATE)
-            && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
-                || blocker_characteristics.colors.intersects(attacker_characteristics.colors))
-        {
-            return Err(CommandError::IllegalAction(
-                "an attacker with intimidate can only be blocked by an artifact \
-                 creature and/or a creature sharing a color with it"
-                    .to_string(),
-            ));
-        }
-
-        // CR 702.28b: Shadow - symmetric, a shadow creature can only
-        // block/be blocked by another shadow creature.
-        if attacker_keywords.contains(KeywordSet::SHADOW) != blocker_keywords.contains(KeywordSet::SHADOW) {
-            return Err(CommandError::IllegalAction(
-                "shadow creatures can only block or be blocked by other shadow \
-                 creatures"
-                    .to_string(),
-            ));
-        }
-
-        // CR 702.31b: Horsemanship - can't be blocked by a creature
-        // without horsemanship (a horsemanship creature may itself
-        // block anything, no restriction on that direction).
-        if attacker_keywords.contains(KeywordSet::HORSEMANSHIP)
-            && !blocker_keywords.contains(KeywordSet::HORSEMANSHIP)
-        {
-            return Err(CommandError::IllegalAction(
-                "an attacker with horsemanship can only be blocked by a creature \
-                 with horsemanship"
-                    .to_string(),
-            ));
-        }
-
-        // CR 702.14c: landwalk - a creature with landwalk can't be
-        // blocked at all while the defending player controls at
-        // least one land with the specified subtype. Unlike
-        // Fear/Intimidate/Shadow/Horsemanship above, this checks the
-        // *defending player's own battlefield*, not the blocker's
-        // own characteristics - see EffectiveCharacteristics::
-        // landwalk_subtypes' own doc comment for why.
-        if !attacker_characteristics.landwalk_subtypes.is_empty() || !attacker_characteristics.landwalk_qualities.is_empty() {
-            let defender_controls_matching_land = state.objects.values().any(|land| {
-                if land.zone != ZoneKind::Battlefield
-                    || crate::layers::effective_controller(state, script_runtime, land.object_id) != actor
-                {
-                    return false;
-                }
-                let land_characteristics = crate::layers::effective_characteristics(state, script_runtime, land.object_id);
-                land_characteristics.subtypes.iter().any(|s| attacker_characteristics.landwalk_subtypes.contains(s))
-                    // CR 702.14a's combination forms - the land must
-                    // satisfy every field the matched `LandwalkQuality`
-                    // specifies, in addition to being a land at all
-                    // (the "[type]" is always "land plus ...", never
-                    // just "artifact"/"snow" alone).
-                    || attacker_characteristics.landwalk_qualities.iter().any(|quality| {
-                        land_characteristics.card_types.contains(CardTypeSet::LAND)
-                            && quality.subtypes.iter().all(|s| land_characteristics.subtypes.contains(s))
-                            && quality.card_types.is_none_or(|ct| land_characteristics.card_types.intersects(ct))
-                            && quality.supertypes.is_none_or(|st| land_characteristics.supertypes.contains(st))
-                            && quality.excluded_supertypes.is_none_or(|st| !land_characteristics.supertypes.intersects(st))
-                    })
-            });
-            if defender_controls_matching_land {
-                return Err(CommandError::IllegalAction(
-                    "an attacker with landwalk can't be blocked while the defending \
-                     player controls a matching land"
-                        .to_string(),
-                ));
-            }
-        }
-
-        // CR 702.16d: an attacker with protection from a quality
-        // (color, 702.16e, card type, subtype, name, 702.16a,
-        // "everything," 702.16j, or a specific player, 702.16k)
-        // can't be blocked by a creature matching that quality.
-        // Reuses attacker_characteristics/blocker_characteristics
-        // computed above (Fear/Intimidate's own doc comment) - a
-        // granted color/type/subtype/name or a granted protection
-        // all change blocking legality for real, not just the
-        // printed values. The player quality compares raw
-        // GameObject.controller fields (attacker_object/
-        // blocker_object, already in scope), resolved relative to
-        // the attacker's own controller - same "You"/"Opponent"
-        // resolution target_has_protection_from's own player check
-        // uses.
-        if attacker_characteristics.protection_everything
-            || attacker_characteristics.protection_colors.intersects(blocker_characteristics.colors)
-            || attacker_characteristics
-                .protection_card_types
-                .intersects(blocker_characteristics.card_types)
-            || attacker_characteristics
-                .protection_subtypes
-                .iter()
-                .any(|s| blocker_characteristics.subtypes.contains(s))
-            || attacker_characteristics
-                .protection_names
-                .iter()
-                .any(|n| *n == blocker_characteristics.name)
-            || attacker_characteristics.protection_players.iter().any(|who| match who {
-                FilterController::You => blocker_object.controller == attacker_object.controller,
-                FilterController::Opponent => blocker_object.controller != attacker_object.controller,
-                FilterController::Any => false,
-            })
-        {
-            return Err(CommandError::IllegalAction(
-                "an attacker with protection from a quality can't be blocked by a \
-                 creature matching that quality"
-                    .to_string(),
-            ));
-        }
+        block_is_legal(state, script_runtime, actor, combat, *blocker, *attacker)?;
     }
 
     // CR 702.111b: an attacker with menace can't be blocked except
@@ -657,4 +373,336 @@ fn mark_one_effect_blocked(combat: &mut CombatState, attacker: ObjectId) {
     if !already {
         combat.effect_blocked.push(attacker);
     }
+}
+
+/// CR 508.1a/302.6/702.3b: whether `attacker` may be declared as an attacker by `actor`.
+/// Shared by `DeclareAttackers` and the attacker entries a Decision lists.
+pub(crate) fn attacker_can_attack(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+    attacker: ObjectId,
+) -> Result<(), CommandError> {
+    let object = state.object(attacker).ok_or(CommandError::InvalidTarget)?;
+    // CR 508.1a: attacking requires *current* control, per
+    // layers::effective_controller.
+    if crate::layers::effective_controller(state, script_runtime, attacker) != actor {
+        return Err(CommandError::IllegalAction(
+            "actor does not control a chosen attacker".to_string(),
+        ));
+    }
+    if !object.definition.card_types.contains(CardTypeSet::CREATURE)
+        || object.definition.card_types.contains(CardTypeSet::BATTLE)
+    {
+        return Err(CommandError::IllegalAction(
+            "a chosen attacker is not a creature, or is also a battle".to_string(),
+        ));
+    }
+    if object.tapped {
+        return Err(CommandError::IllegalAction(
+            "a chosen attacker is already tapped".to_string(),
+        ));
+    }
+    // CR 508.1a/302.6/702.10b: has_summoning_sickness itself
+    // grants Haste's bypass.
+    if has_summoning_sickness(state, script_runtime, object) {
+        return Err(CommandError::IllegalAction(
+            "a chosen attacker has summoning sickness".to_string(),
+        ));
+    }
+    // CR 302.6b/702.3b: a creature with defender can't attack -
+    // effective_keywords so a granted/removed Defender is respected, not
+    // just the printed keyword. A creature with an applicable
+    // IgnoreKeyword(DEFENDER) grant (e.g. Assault Formation's
+    // "Walls you control can attack as though they didn't have
+    // defender") still has Defender - it's just exempt from the
+    // restriction it imposes, see that primitive's own doc comment.
+    if effective_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
+        && !ignored_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
+    {
+        return Err(CommandError::IllegalAction(
+            "a chosen attacker has defender and can't attack".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// CR 506.4/508.1b: whether `target` is something `actor` may attack.
+pub(crate) fn attack_target_is_legal(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+    target: &Target,
+) -> Result<(), CommandError> {
+    match target {
+        Target::Player(pid) => {
+            if *pid == actor || !state.turn_order.contains(pid) {
+                return Err(CommandError::IllegalAction(
+                    "an attacker's target must be an opponent".to_string(),
+                ));
+            }
+        }
+        Target::Object(target_id) => {
+            let target_object =
+                state.object(*target_id).ok_or(CommandError::InvalidTarget)?;
+            // CR 508.1b: the target permanent's *current*
+            // controller must be an opponent.
+            if crate::layers::effective_controller(state, script_runtime, *target_id)
+                == actor
+            {
+                return Err(CommandError::IllegalAction(
+                    "an attacker's target permanent must be controlled by an \
+                     opponent"
+                        .to_string(),
+                ));
+            }
+            if !target_object
+                .definition
+                .card_types
+                .intersects(CardTypeSet::PLANESWALKER | CardTypeSet::BATTLE)
+            {
+                return Err(CommandError::IllegalAction(
+                    "an attacker's target permanent must be a planeswalker or \
+                     battle"
+                        .to_string(),
+                ));
+            }
+        }
+        // CR 506.4/508.1a: an attacker is declared against a player, a
+        // planeswalker, or a battle - never an activated/triggered
+        // ability (nothing in Magic attacks a spell/ability).
+        Target::Ability(_) => return Err(CommandError::InvalidTarget),
+    }
+    Ok(())
+}
+
+/// Every per-pair rule for `blocker` blocking `attacker` (CR 509.1a, 702.9b, 702.13b, 702.14c, 702.16d,
+/// 702.28b, 702.31b, 702.36b). The whole-declaration rules (menace, banding) stay in
+/// `execute_declare_blockers`. Shared with the blocker entries a Decision lists.
+pub(crate) fn block_is_legal(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+    combat: &CombatState,
+    blocker: ObjectId,
+    attacker: ObjectId,
+) -> Result<(), CommandError> {
+    let blocker_object = state.object(blocker).ok_or(CommandError::InvalidTarget)?;
+    // CR 509.1a: blocking requires *current* control.
+    if crate::layers::effective_controller(state, script_runtime, blocker) != actor {
+        return Err(CommandError::IllegalAction(
+            "actor does not control a chosen blocker".to_string(),
+        ));
+    }
+    if !blocker_object.definition.card_types.contains(CardTypeSet::CREATURE)
+        || blocker_object.definition.card_types.contains(CardTypeSet::BATTLE)
+    {
+        return Err(CommandError::IllegalAction(
+            "a chosen blocker is not a creature, or is also a battle".to_string(),
+        ));
+    }
+    if blocker_object.tapped {
+        return Err(CommandError::IllegalAction(
+            "a chosen blocker is already tapped".to_string(),
+        ));
+    }
+
+    let (_, attacking) = combat
+        .attackers
+        .iter()
+        .find(|(id, _)| *id == attacker)
+        .ok_or_else(|| {
+            CommandError::IllegalAction(
+                "a chosen attacker isn't actually attacking this combat".to_string(),
+            )
+        })?;
+    let attacking_this_defender = match attacking {
+        Target::Player(pid) => *pid == actor,
+        Target::Object(target_id) => state.object(*target_id).is_some_and(|_| {
+            crate::layers::effective_controller(state, script_runtime, *target_id) == actor
+        }),
+        // Structurally unreachable: DeclareAttackers already rejects
+        // Target::Ability (an attacker never targets an ability).
+        Target::Ability(_) => false,
+    };
+    if !attacking_this_defender {
+        return Err(CommandError::IllegalAction(
+            "a chosen attacker isn't attacking this defending player, their \
+             planeswalker, or their battle"
+                .to_string(),
+        ));
+    }
+
+    // CR 702.9b: an attacker with flying can only be blocked by
+    // a creature with flying and/or reach. Reads through
+    // effective_keywords (CR 613 layer 6) - a continuous effect
+    // granting/removing Flying/Reach now actually changes
+    // blocking legality, not just the printed KeywordSet.
+    let attacker_object = state.object(attacker).ok_or(CommandError::InvalidTarget)?;
+    let attacker_keywords = effective_keywords(state, script_runtime, attacker_object.object_id);
+    let blocker_keywords = effective_keywords(state, script_runtime, blocker_object.object_id);
+    if attacker_keywords.contains(KeywordSet::FLYING)
+        && !blocker_keywords.intersects(KeywordSet::FLYING | KeywordSet::REACH)
+    {
+        return Err(CommandError::IllegalAction(
+            "an attacker with flying can only be blocked by a creature with \
+             flying or reach"
+                .to_string(),
+        ));
+    }
+
+    // CR 702.16d's own protection check below already needs both
+    // objects' full effective_characteristics - computed here
+    // instead, once, so Fear/Intimidate's color/card-type checks
+    // (which need the same live values) can reuse them too.
+    let attacker_characteristics =
+        crate::layers::effective_characteristics(state, script_runtime, attacker_object.object_id);
+    let blocker_characteristics =
+        crate::layers::effective_characteristics(state, script_runtime, blocker_object.object_id);
+
+    // CR 702.36b/702.13b: Fear/Intimidate - can't be blocked
+    // except by an artifact creature and/or (Fear: a black
+    // creature; Intimidate: a creature sharing a color with the
+    // attacker).
+    if attacker_keywords.contains(KeywordSet::FEAR)
+        && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
+            || blocker_characteristics.colors.contains(ColorSet::BLACK))
+    {
+        return Err(CommandError::IllegalAction(
+            "an attacker with fear can only be blocked by an artifact and/or \
+             black creature"
+                .to_string(),
+        ));
+    }
+    if attacker_keywords.contains(KeywordSet::INTIMIDATE)
+        && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
+            || blocker_characteristics.colors.intersects(attacker_characteristics.colors))
+    {
+        return Err(CommandError::IllegalAction(
+            "an attacker with intimidate can only be blocked by an artifact \
+             creature and/or a creature sharing a color with it"
+                .to_string(),
+        ));
+    }
+
+    // CR 702.28b: Shadow - symmetric, a shadow creature can only
+    // block/be blocked by another shadow creature.
+    if attacker_keywords.contains(KeywordSet::SHADOW) != blocker_keywords.contains(KeywordSet::SHADOW) {
+        return Err(CommandError::IllegalAction(
+            "shadow creatures can only block or be blocked by other shadow \
+             creatures"
+                .to_string(),
+        ));
+    }
+
+    // CR 702.31b: Horsemanship - can't be blocked by a creature
+    // without horsemanship (a horsemanship creature may itself
+    // block anything, no restriction on that direction).
+    if attacker_keywords.contains(KeywordSet::HORSEMANSHIP)
+        && !blocker_keywords.contains(KeywordSet::HORSEMANSHIP)
+    {
+        return Err(CommandError::IllegalAction(
+            "an attacker with horsemanship can only be blocked by a creature \
+             with horsemanship"
+                .to_string(),
+        ));
+    }
+
+    // CR 702.14c: landwalk - a creature with landwalk can't be
+    // blocked at all while the defending player controls at
+    // least one land with the specified subtype. Unlike
+    // Fear/Intimidate/Shadow/Horsemanship above, this checks the
+    // *defending player's own battlefield*, not the blocker's
+    // own characteristics - see EffectiveCharacteristics::
+    // landwalk_subtypes' own doc comment for why.
+    if !attacker_characteristics.landwalk_subtypes.is_empty() || !attacker_characteristics.landwalk_qualities.is_empty() {
+        let defender_controls_matching_land = state.objects.values().any(|land| {
+            if land.zone != ZoneKind::Battlefield
+                || crate::layers::effective_controller(state, script_runtime, land.object_id) != actor
+            {
+                return false;
+            }
+            let land_characteristics = crate::layers::effective_characteristics(state, script_runtime, land.object_id);
+            land_characteristics.subtypes.iter().any(|s| attacker_characteristics.landwalk_subtypes.contains(s))
+                // CR 702.14a's combination forms - the land must
+                // satisfy every field the matched `LandwalkQuality`
+                // specifies, in addition to being a land at all
+                // (the "[type]" is always "land plus ...", never
+                // just "artifact"/"snow" alone).
+                || attacker_characteristics.landwalk_qualities.iter().any(|quality| {
+                    land_characteristics.card_types.contains(CardTypeSet::LAND)
+                        && quality.subtypes.iter().all(|s| land_characteristics.subtypes.contains(s))
+                        && quality.card_types.is_none_or(|ct| land_characteristics.card_types.intersects(ct))
+                        && quality.supertypes.is_none_or(|st| land_characteristics.supertypes.contains(st))
+                        && quality.excluded_supertypes.is_none_or(|st| !land_characteristics.supertypes.intersects(st))
+                })
+        });
+        if defender_controls_matching_land {
+            return Err(CommandError::IllegalAction(
+                "an attacker with landwalk can't be blocked while the defending \
+                 player controls a matching land"
+                    .to_string(),
+            ));
+        }
+    }
+
+    // CR 702.16d: an attacker with protection from a quality
+    // (color, 702.16e, card type, subtype, name, 702.16a,
+    // "everything," 702.16j, or a specific player, 702.16k)
+    // can't be blocked by a creature matching that quality.
+    // Reuses attacker_characteristics/blocker_characteristics
+    // computed above (Fear/Intimidate's own doc comment) - a
+    // granted color/type/subtype/name or a granted protection
+    // all change blocking legality for real, not just the
+    // printed values. The player quality compares raw
+    // GameObject.controller fields (attacker_object/
+    // blocker_object, already in scope), resolved relative to
+    // the attacker's own controller - same "You"/"Opponent"
+    // resolution target_has_protection_from's own player check
+    // uses.
+    if attacker_characteristics.protection_everything
+        || attacker_characteristics.protection_colors.intersects(blocker_characteristics.colors)
+        || attacker_characteristics
+            .protection_card_types
+            .intersects(blocker_characteristics.card_types)
+        || attacker_characteristics
+            .protection_subtypes
+            .iter()
+            .any(|s| blocker_characteristics.subtypes.contains(s))
+        || attacker_characteristics
+            .protection_names
+            .iter()
+            .any(|n| *n == blocker_characteristics.name)
+        || attacker_characteristics.protection_players.iter().any(|who| match who {
+            FilterController::You => blocker_object.controller == attacker_object.controller,
+            FilterController::Opponent => blocker_object.controller != attacker_object.controller,
+            FilterController::Any => false,
+        })
+    {
+        return Err(CommandError::IllegalAction(
+            "an attacker with protection from a quality can't be blocked by a \
+             creature matching that quality"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// CR 508.5a/506.4d: `player` is a defending player when some attacker is aimed at them, or at a
+/// planeswalker or battle they currently control.
+pub(crate) fn is_defending_player(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    combat: &CombatState,
+    player: PlayerId,
+) -> bool {
+    combat.attackers.iter().any(|(_, target)| match target {
+        Target::Player(pid) => *pid == player,
+        Target::Object(target_id) => state.object(*target_id).is_some_and(|_| {
+            crate::layers::effective_controller(state, script_runtime, *target_id) == player
+        }),
+        // Structurally unreachable: DeclareAttackers already rejects
+        // Target::Ability (an attacker never targets an ability).
+        Target::Ability(_) => false,
+    })
 }

@@ -25,7 +25,10 @@ methods. Those methods and the typed `ProcessState` pauses are unchanged. The de
 | `Payment { cost }` | `Payment(Option<PaymentPlan>)` | cast payment (`None` unwinds), unless-paid (`None` declines) |
 | `Targets { spec, candidates }` | `Targets(Vec<Vec<Target>>)` | trigger targets, one list per target word |
 | `MayCast { card }` | `MayCast(Option<CastAnnouncement>)` | Madness, Cascade |
-| `Action` | `Action(PlayerAction)` | priority |
+| `Action { entries }` | `Action(PlayerAction)` | priority, checked against the entries (see `17-legal-actions.md`) |
+| `DeclareAttackers { attackers }` | `DeclareAttackers(Vec<(ObjectId, Target)>)` | declare attackers step |
+| `DeclareBlockers { blockers }` | `DeclareBlockers(Vec<(ObjectId, ObjectId)>)` | declare blockers step, one defending player at a time |
+| `AssignDamage { splits }` | `AssignDamage(Vec<(ObjectId, Vec<(ObjectId, u32)>)>)` | combat damage splits |
 
 `Candidate` is `Target(Target) | Replacement(ReplacementCandidate)`. It reuses the engine's `Target`, so it also covers
 `Target::Ability`.

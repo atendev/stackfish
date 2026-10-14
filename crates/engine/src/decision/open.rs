@@ -45,6 +45,9 @@ pub(crate) enum Route {
     Mulligan,
     BottomCards,
     Priority,
+    DeclareAttackers,
+    DeclareBlockers,
+    AssignDamage,
 }
 
 pub(super) struct Described {
@@ -108,7 +111,7 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
             if engine.awaiting_pregame_setup() {
                 return None;
             }
-            (engine.state().priority_player, "Priority", Action, Route::Priority)
+            priority_window(engine)
         }
 
         ProcessState::AwaitingReplacementChoice { affected_player, candidates, .. } => (
@@ -229,4 +232,30 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
 
 fn targets_shape(spec: &TargetSpec, candidates: &[Vec<Target>]) -> ReplyShape {
     ReplyShape::Targets { spec: spec.clone(), candidates: candidates.to_vec() }
+}
+
+/// A priority window is also where the turn-based combat actions happen
+/// (CR 508.1, 509.1, 510.1c). They come before anyone gets priority, so a
+/// pending declaration or split is offered ahead of the priority Decision.
+fn priority_window(engine: &Engine) -> (PlayerId, &'static str, ReplyShape, Route) {
+    let state = engine.state();
+    if state.priority_player == state.active_player {
+        let attackers = engine.legal_attackers();
+        if !attackers.is_empty() {
+            return (
+                state.active_player,
+                "Declare attackers",
+                ReplyShape::DeclareAttackers { attackers },
+                Route::DeclareAttackers,
+            );
+        }
+    }
+    if let Some(player) = commands::next_blocking_player(state, engine.script_runtime()) {
+        let blockers = engine.legal_blockers(player);
+        return (player, "Declare blockers", ReplyShape::DeclareBlockers { blockers }, Route::DeclareBlockers);
+    }
+    if let Some((player, splits)) = engine.pending_damage_splits() {
+        return (player, "Assign combat damage", ReplyShape::AssignDamage { splits }, Route::AssignDamage);
+    }
+    (state.priority_player, "Priority", ReplyShape::Action { entries: engine.legal_actions() }, Route::Priority)
 }

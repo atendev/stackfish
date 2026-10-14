@@ -85,7 +85,7 @@ fn a_priority_window_is_an_action_decision_for_the_priority_player() {
     let mut engine = Engine::new(minimal_state());
     let decision = engine.open_decision().expect("priority is open");
     assert_eq!(decision.player, P0);
-    assert!(matches!(decision.shape, ReplyShape::Action));
+    assert!(matches!(decision.shape, ReplyShape::Action { .. }));
 }
 
 #[test]

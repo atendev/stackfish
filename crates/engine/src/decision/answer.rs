@@ -18,6 +18,7 @@ use crate::triggers::PendingTrigger;
 use crate::types::command::{PlayerAction, PlayerActionKind};
 use crate::types::ids::{ObjectId, PlayerId, Target};
 
+use super::check;
 use super::open::{self, Described, Route};
 use super::{Answer, Candidate, Decision, Rejection, RejectionCode, Reply, ReplyShape};
 
@@ -69,15 +70,38 @@ impl Engine {
                 if action.player != player {
                     return Err(Rejection::new(RejectionCode::WrongSeat, "the action names a different player"));
                 }
-                // TODO: submit_action only checks whose turn it is. An illegal
-                // action is rejected later, during step(), by execute_command,
-                // so it is accepted here and fails after the fact. B2's
-                // legal_actions() or the engine atomicity item has to close
-                // this before a remote host can send untrusted actions.
+                let ReplyShape::Action { entries } = &shape else {
+                    unreachable!("route and shape come from the same pause");
+                };
+                check::check_action(entries, &action.kind)?;
                 self.submit_action(action).map_err(|e| match e {
                     ActionError::NotYourTurn => Rejection::new(RejectionCode::WrongSeat, "it is not your priority"),
                     other => invalid(other),
                 })
+            }
+            (Route::DeclareAttackers, Reply::DeclareAttackers(attackers)) => {
+                let ReplyShape::DeclareAttackers { attackers: entries } = &shape else {
+                    unreachable!("route and shape come from the same pause");
+                };
+                check::check_attackers(entries, &attackers)?;
+                self.submit_action(PlayerAction::new(player, PlayerActionKind::DeclareAttackers { attackers }))
+                    .map_err(invalid)
+            }
+            (Route::DeclareBlockers, Reply::DeclareBlockers(blocks)) => {
+                let ReplyShape::DeclareBlockers { blockers } = &shape else {
+                    unreachable!("route and shape come from the same pause");
+                };
+                check::check_blockers(blockers, &blocks)?;
+                self.submit_action(PlayerAction::new(player, PlayerActionKind::DeclareBlockers { blocks }))
+                    .map_err(invalid)
+            }
+            (Route::AssignDamage, Reply::AssignDamage(assignments)) => {
+                let ReplyShape::AssignDamage { splits } = &shape else {
+                    unreachable!("route and shape come from the same pause");
+                };
+                check::check_splits(splits, &assignments)?;
+                self.submit_action(PlayerAction::new(player, PlayerActionKind::AssignCombatDamage { assignments }))
+                    .map_err(invalid)
             }
 
             (Route::Mulligan, Reply::YesNo(take_mulligan)) => {
@@ -207,7 +231,10 @@ fn shape_matches(shape: &ReplyShape, reply: &Reply) -> bool {
             | (ReplyShape::Payment { .. }, Reply::Payment(_))
             | (ReplyShape::Targets { .. }, Reply::Targets(_))
             | (ReplyShape::MayCast { .. }, Reply::MayCast(_))
-            | (ReplyShape::Action, Reply::Action(_))
+            | (ReplyShape::Action { .. }, Reply::Action(_))
+            | (ReplyShape::DeclareAttackers { .. }, Reply::DeclareAttackers(_))
+            | (ReplyShape::DeclareBlockers { .. }, Reply::DeclareBlockers(_))
+            | (ReplyShape::AssignDamage { .. }, Reply::AssignDamage(_))
     )
 }
 
