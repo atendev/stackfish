@@ -62,6 +62,19 @@ impl CounterSet {
         self.counters.push((kind, amount, timestamp));
     }
 
+    /// The total per counter kind, in the order each kind was first added.
+    /// A host reads this to show what an object carried.
+    pub fn totals(&self) -> Vec<(CounterKind, i32)> {
+        let mut totals: Vec<(CounterKind, i32)> = Vec::new();
+        for (kind, amount, _) in &self.counters {
+            match totals.iter_mut().find(|(k, _)| k == kind) {
+                Some((_, total)) => *total += amount,
+                None => totals.push((kind.clone(), *amount)),
+            }
+        }
+        totals
+    }
+
     /// CR 613.4c: `kind`'s individual addition batches (not the coalesced
     /// `count`), each with the timestamp it was added at — read by
     /// `layers::effective_characteristics`'s layer 7c fold to interleave

@@ -66,7 +66,7 @@ request). Replace the YGO rules kernel entirely with an MTG-native one per the a
 ### Step-able core (replay requirement)
 
 The rules processor is implemented as a pull-based state machine: `engine.step()` advances by
-one ledger entry and returns. Live play drives `step()` in a tight loop between player decision
+one state transition and returns (zero or several events). Live play drives `step()` in a tight loop between player decision
 points (no pausing needed). A separate replay viewer re-feeds the same seed + command list into
 a fresh engine instance and calls `step()` one at a time, so it can pause/resume/auto-play through
 an exact reconstruction. One engine, two callers — no separate "replay mode" code path.
@@ -100,7 +100,10 @@ surface gaps.
 8. **Continuous Layer Engine** — computes derived characteristics (CR 613 layers).
 9. **Trigger Engine** — captures and enqueues triggered abilities, APNAP-ordered onto the stack.
 10. **Script Runtime** — embedded Lua VM (`mlua`) exposing a card-author-friendly bound API.
-11. **Protocol Emitter** — sends prompts/state/log entries to host application.
+11. **Protocol Emitter** — `crates/host`. A `Session` wraps one engine and talks only in bytes (JSON
+    over direct calls): a `setup` request creates it, `advance` and `answer` requests drive it, and
+    each response carries a batch of events plus the open Decision. A `CardSource` handed in at
+    creation turns `oracle_id` keys into `CardDefinition`s. See `docs/implementation/18-host-session.md`.
 
 ## Data model
 

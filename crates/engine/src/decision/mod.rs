@@ -6,9 +6,10 @@
 //! stay as they are; this module is the only place that maps them onto reply
 //! shapes and rejection codes.
 //!
-//! Decision ids come from a counter that lives on `Engine` for now. TODO(B3):
-//! move the counter into the Session, which owns Decision ids per
-//! `.plan/closed/002-decision-answer-shape.md`.
+//! Decision ids come from a counter on `Engine`. The host `Session` is its only
+//! caller, so ids stay in step and replay rebuilds the same ids from the same
+//! seed. Mixing direct `submit_*` calls with `answer` on one `Engine` leaves
+//! the counter out of step.
 
 mod answer;
 mod check;
