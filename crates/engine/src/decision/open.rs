@@ -185,7 +185,11 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
             Route::Surveil,
         ),
         ProcessState::AwaitingSearchChoice { controller, candidates, count, .. } => {
-            (*controller, "Search", pick(objects(candidates), 0, *count as usize), Route::Search)
+            // CR 401.2: library order is hidden from every player, so the list
+            // is sorted by id and never follows the library.
+            let mut sorted = candidates.clone();
+            sorted.sort();
+            (*controller, "Search", pick(objects(&sorted), 0, *count as usize), Route::Search)
         }
         ProcessState::AwaitTriggerOrderChoice { player, group, .. } => {
             (*player, "Trigger order", Order { items: group.clone() }, Route::TriggerOrder(group.clone()))
