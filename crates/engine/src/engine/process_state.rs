@@ -275,10 +275,9 @@ pub struct StepResult {
 /// being opaque.
 ///
 /// `COLLECT_ACTIONS` and `PRIORITY_WINDOW` (in the human-design version
-/// this came from) are merged into `PriorityWindow` here: there's no
-/// `Engine::legal_actions()` yet to do a real "collect" step against, so
-/// there's nothing to separate it from "waiting for a submit_action" yet.
-/// Revisit if/when legal-action enumeration becomes a real feature.
+/// this came from) are merged into `PriorityWindow` here.
+/// `Engine::legal_actions()` exists now, but it reads the state on demand
+/// (`decision::open_decision` calls it), so it still has no pause of its own.
 ///
 /// Which scripted zone-move op a `ReplacementResumeTarget::ScriptedZoneMove`
 /// pause is resuming — each commits its resolved event differently:

@@ -19,4 +19,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [14-protection-attach](14-protection-attach.md) — protection qualities, auras, equipment, attach/evasion keywords, hexproof/shroud vs attachment
 - [15-card-database-loader](15-card-database-loader.md) — `stackfish-carddb`: SQLite external-card-DB connector, `ManaCost::parse`/type_line/keyword mapping, CDA script gap
 - [16-decision-facade](16-decision-facade.md) — `decision` module: `Engine::open_decision`/`answer`, reply shapes, rejection codes, Decision ids
+- [17-legal-actions](17-legal-actions.md) — `Engine::legal_actions`/`legal_attackers`/`legal_blockers`/`pending_damage_splits`, entry types, combat Decisions, Answer checks
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

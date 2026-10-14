@@ -2,12 +2,21 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Legal actions (`phase5/legal-actions`, B2)**: see `17-legal-actions.md`. Open items:
+  - Target candidates ignore the announced X, so a `mana_value` filter that mentions X sees 0.
+  - `DeclareBands` is not offered at a declare attackers Decision. It stays a direct `submit_action`.
+  - A modal spell is listed when enough single modes are usable. Two modes that cannot combine are rejected only when
+    the engine runs the cast.
+  - Timing and zone permissions granted by continuous effects ("as though it had flash") are missing from the
+    commands too, so entries inherit that gap.
+  - The declare attackers Decision is offered only while the active player holds priority, and the declare blockers
+    and damage Decisions come before priority. A host that mixes `submit_action` with `answer` can skip them.
 - **Decision/Answer facade (`phase5/decision-answer-facade`, B1)**: see `16-decision-facade.md`. Open items:
-  - `submit_action` only checks whose priority it is. An illegal priority `PlayerAction` is accepted, then fails during
-    `step()` in `execute_command`. The facade therefore cannot reject it up front. B2 (`legal_actions()`) or the engine
-    atomicity item has to close this before a remote host sends untrusted actions.
-  - The `Action` shape lists no entries yet. B2 adds the entry lists for priority and the combat declarations. Combat
-    declarations are still `PlayerAction`s submitted at a priority window.
+  - `submit_action` still accepts any action from the priority player. The facade now checks a priority, attack, block
+    or damage Answer against the listed entries (B2, `17-legal-actions.md`). What the entries cannot see still fails
+    during `step()`: a pair of modes `combine_chosen_modes` cannot combine, menace, a "must attack" requirement, and
+    the split rules the engine checks on its own. The engine atomicity item has to close that before a remote host
+    sends untrusted Answers.
   - A nested mana ability activated during a Payment Decision (CR 605.3a) is not accepted through `Answer`. It still
     works through `submit_action`.
   - `Target::Ability` candidates are not enumerated for a script `SelectTarget` filter.

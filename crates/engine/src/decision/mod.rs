@@ -11,7 +11,15 @@
 //! `.plan/closed/002-decision-answer-shape.md`.
 
 mod answer;
+mod check;
+mod entry;
+mod legal_actions;
 mod open;
+
+pub use entry::{
+    ActivateEntry, AttackerEntry, BlockerEntry, CastEntry, ColorChoice, DamageSplitEntry, Entry, EntryTargets, ModeRange,
+    TargetSlot,
+};
 
 use crate::replacement::ReplacementCandidate;
 use crate::triggers::PendingTrigger;
@@ -78,11 +86,15 @@ pub enum ReplyShape {
     /// Cascade CR 702.85a), or decline with `None`. Cascade with no
     /// qualifying card has `card: None` and only accepts a decline.
     MayCast { card: Option<ObjectId> },
-    /// The priority decision. The reply is a `PlayerAction`.
-    /// TODO(B2): list the playable entries and their announcement options
-    /// once `Engine::legal_actions()` exists. Combat declarations use the
-    /// same reply and need the same entry lists.
-    Action,
+    /// The priority decision. The reply is a `PlayerAction` that matches one
+    /// of `entries`: pass, a land play, a cast or an activation.
+    Action { entries: Vec<Entry> },
+    /// The active player declares attackers (CR 508.1). The reply may be empty.
+    DeclareAttackers { attackers: Vec<AttackerEntry> },
+    /// A defending player declares blockers (CR 509.1). The reply may be empty.
+    DeclareBlockers { blockers: Vec<BlockerEntry> },
+    /// Split combat damage (CR 510.1c). The reply covers every entry.
+    AssignDamage { splits: Vec<DamageSplitEntry> },
 }
 
 /// A point where the engine cannot continue until `player` chooses.
@@ -115,6 +127,9 @@ pub enum Reply {
     Targets(Vec<Vec<Target>>),
     MayCast(Option<CastAnnouncement>),
     Action(PlayerAction),
+    DeclareAttackers(Vec<(ObjectId, Target)>),
+    DeclareBlockers(Vec<(ObjectId, ObjectId)>),
+    AssignDamage(Vec<(ObjectId, Vec<(ObjectId, u32)>)>),
 }
 
 /// A player's reply to the open Decision, tagged with the Decision's id.

@@ -155,7 +155,7 @@ fn priority_decisions_alternate_and_pass_priority_advances_the_game() {
     run(&mut engine);
 
     let first = engine.open_decision().expect("a priority Decision");
-    assert!(matches!(first.shape, ReplyShape::Action));
+    assert!(matches!(first.shape, ReplyShape::Action { .. }));
     let pass = PlayerAction::new(first.player, PlayerActionKind::PassPriority);
     engine.answer(first.player, answer(first.id, Reply::Action(pass))).unwrap();
     assert!(engine.open_decision().is_none(), "the engine is running again until it is stepped");
