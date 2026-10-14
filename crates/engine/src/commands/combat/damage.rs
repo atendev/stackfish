@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::script::ScriptRuntime;
 use crate::types::card::KeywordSet;
+use crate::types::combat::CombatState;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, Target};
@@ -14,17 +15,30 @@ use crate::types::turn::{Phase, Step};
 use super::super::legality::{effective_keywords, effective_power, lethal_damage_needed, participates_in_damage_step};
 use super::super::{CommandError, CommandOutcome, PriorityHandoff};
 
-// `pub(crate)`, not `pub(in crate::commands)`: `phase5/automatic-combat-
-// damage`'s `engine::turn::resolve_advance_turn_step_state` calls this
-// directly (its own auto-fire attempt on entering the damage step),
-// outside the normal `execute_command` dispatch this was originally
-// scoped to.
-pub(crate) fn execute_assign_combat_damage(
-    state: &mut GameState,
+/// Who takes part in this damage step and which of them need a chosen split
+/// (CR 510.1c). `execute_assign_combat_damage` deals the damage from it, and
+/// the damage Decision lists the splits that are still missing.
+pub(crate) struct SplitPlan<'a> {
+    pub combat: &'a CombatState,
+    /// Attackers that are alive and strike in this step.
+    pub attackers: Vec<(ObjectId, Target)>,
+    /// `alive_blocks` limited to blockers that strike in this step.
+    pub blocks: Vec<(ObjectId, ObjectId)>,
+    pub declared_blocked_attackers: HashSet<ObjectId>,
+    pub blockers_by_attacker: HashMap<ObjectId, Vec<ObjectId>>,
+    pub attackers_by_blocker: HashMap<ObjectId, Vec<ObjectId>>,
+    /// Attackers and blockers that need a split this step.
+    pub requires_assignment: HashSet<ObjectId>,
+    /// The player who chooses each split (CR 702.22j/k can flip it).
+    pub required_actor_by_id: HashMap<ObjectId, PlayerId>,
+}
+
+/// `None` when this step's damage is already assigned. An `Err` means it is
+/// not a combat damage step, or there is no combat.
+pub(crate) fn plan_damage_splits<'a>(
+    state: &'a GameState,
     script_runtime: &ScriptRuntime,
-    actor: PlayerId,
-    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<Option<SplitPlan<'a>>, CommandError> {
     // CR 510.1/509.1's turn-based-action shape, same as
     // DeclareAttackers/DeclareBlockers: only during the combat
     // damage step. Which player is allowed to be `command.actor`
@@ -55,13 +69,7 @@ pub(crate) fn execute_assign_combat_damage(
     // way, so both collapse to the same no-op rather than distinguishing
     // them.
     if combat.damage_assigned_this_step {
-        return Ok(CommandOutcome {
-            events: Vec::new(),
-            broke_pass_chain: true,
-            priority_handoff: PriorityHandoff::Unchanged,
-            requires_payment: None,
-            battlefield_entries: Vec::new(),
-        });
+        return Ok(None);
     }
 
     // CR 510.1a/702.7: a participant that no longer resolves in
@@ -266,6 +274,50 @@ pub(crate) fn execute_assign_combat_damage(
         };
         required_actor_by_id.insert(*id, actor_for_id);
     }
+    Ok(Some(SplitPlan {
+        combat,
+        attackers,
+        blocks,
+        declared_blocked_attackers,
+        blockers_by_attacker,
+        attackers_by_blocker,
+        requires_assignment,
+        required_actor_by_id,
+    }))
+}
+
+// `pub(crate)`, not `pub(in crate::commands)`: `phase5/automatic-combat-
+// damage`'s `engine::turn::resolve_advance_turn_step_state` calls this
+// directly (its own auto-fire attempt on entering the damage step),
+// outside the normal `execute_command` dispatch this was originally
+// scoped to.
+pub(crate) fn execute_assign_combat_damage(
+    state: &mut GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+) -> Result<CommandOutcome, CommandError> {
+    let Some(SplitPlan {
+        combat,
+        attackers,
+        blocks,
+        declared_blocked_attackers,
+        blockers_by_attacker,
+        attackers_by_blocker,
+        requires_assignment,
+        required_actor_by_id,
+    }) = plan_damage_splits(state, script_runtime)?
+    else {
+        // `phase5/automatic-combat-damage`: already assigned and dealt, so a
+        // redundant submission is a harmless no-op.
+        return Ok(CommandOutcome {
+            events: Vec::new(),
+            broke_pass_chain: true,
+            priority_handoff: PriorityHandoff::Unchanged,
+            requires_payment: None,
+            battlefield_entries: Vec::new(),
+        });
+    };
     // Splits some other actor already submitted this step (CR 508.5a's
     // "declared_defenders" precedent for the identical "this turn-based
     // action can need input from more than one player" shape) - cloned
