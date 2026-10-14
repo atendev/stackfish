@@ -2,6 +2,12 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Host Session (`phase5/host-session`, B3)**: see `18-host-session.md`. Open items:
+  - Every Seat sees every event. B4 adds per-Seat visibility at `Session::take_events`.
+  - No replay export, no carddb-backed `CardSource`, and no spectator Seats yet.
+  - A Payment Decision lists additional costs without their filters.
+  - A panic inside the engine is not caught, and a pipeline error is fatal with no rollback.
+
 - **Legal actions (`phase5/legal-actions`, B2)**: see `17-legal-actions.md`. Open items:
   - Target candidates ignore the announced X, so a `mana_value` filter that mentions X sees 0.
   - `DeclareBands` is not offered at a declare attackers Decision. It stays a direct `submit_action`.
@@ -20,10 +26,10 @@
   - A nested mana ability activated during a Payment Decision (CR 605.3a) is not accepted through `Answer`. It still
     works through `submit_action`.
   - `Target::Ability` candidates are not enumerated for a script `SelectTarget` filter.
-  - Rejection messages are the `Debug` text of the engine's error enum. Friendlier wording is for B3, which owns the wire
-    text.
-  - The Decision id counter lives on `Engine` and moves into the Session in B3. Mixing `open_decision`/`answer` with
-    direct `submit_*` calls on the same `Engine` leaves the counter out of step.
+  - Rejection messages are the `Debug` text of the engine's error enum. B3 passes them through unchanged, so
+    friendlier wording is still open.
+  - The Decision id counter stays on `Engine` (B3 decided against moving it). Mixing `open_decision`/`answer` with
+    direct `submit_*` calls on the same `Engine` leaves the counter out of step. The Session never does.
   - Unit tests cover the shapes, not every pause variant. The exhaustive match in `decision/open.rs` is what guards new
     variants.
 

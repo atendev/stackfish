@@ -1,0 +1,12 @@
+[package]
+name = "stackfish-host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+stackfish-engine = { path = "../engine" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+stackfish-testutil = { path = "../testutil" }
