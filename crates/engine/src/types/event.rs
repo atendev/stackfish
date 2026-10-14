@@ -267,6 +267,20 @@ pub enum GameEventKind {
     /// opponent controls" needs it. Players aren't permanents, so only
     /// `Target::Object` targets produce it.
     BecameTarget { object: ObjectId, by: ObjectId, by_controller: PlayerId },
+    /// CR 701.20a: `player` revealed `cards` from `zone`. The cards stay where
+    /// they are, so this is not a `ZoneChange`. Each card carries a snapshot,
+    /// because a host decides per Seat whether it may also see the card's id
+    /// (a card revealed from a hand or library is still hidden afterwards).
+    /// TODO: no effect produces this yet. Reveal effects such as Wheel of Sun
+    /// and Moon's replacement are unmodeled, so only tests build it.
+    Revealed { player: PlayerId, zone: ZoneKind, cards: Vec<RevealedCard> },
+}
+
+/// One card of a `GameEventKind::Revealed`: its id and what it looked like.
+#[derive(Debug, Clone)]
+pub struct RevealedCard {
+    pub object: ObjectId,
+    pub snapshot: GameObject,
 }
 
 /// Immutable fact. Once committed, never mutated or removed.

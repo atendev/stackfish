@@ -3,10 +3,16 @@
 ## Live TODOs / unresolved gaps
 
 - **Host Session (`phase5/host-session`, B3)**: see `18-host-session.md`. Open items:
-  - Every Seat sees every event. B4 adds per-Seat visibility at `Session::take_events`.
-  - No replay export, no carddb-backed `CardSource`, and no spectator Seats yet.
+  - No replay export and no carddb-backed `CardSource`.
   - A Payment Decision lists additional costs without their filters.
   - A panic inside the engine is not caught, and a pipeline error is fatal with no rollback.
+
+- **Seat visibility (`phase5/seat-visibility`, B4)**: see `18-host-session.md`. Open items:
+  - No `(Seat, state)` snapshot request. A Seat that joins late cannot learn the current state.
+  - The engine writes no `Revealed` event and sets no `face_down`, so those two rules only have constructed-event tests.
+  - Outboxes grow until a Seat sends a request.
+  - Event ids other than the ones `view.rs` checks (trigger and replacement sources) are assumed to lie in public zones.
+  - The engine's event-writing notes still lack the rule that free-text fields never name a hidden card.
 
 - **Legal actions (`phase5/legal-actions`, B2)**: see `17-legal-actions.md`. Open items:
   - Target candidates ignore the announced X, so a `mana_value` filter that mentions X sees 0.

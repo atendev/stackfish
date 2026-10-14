@@ -180,11 +180,71 @@ impl From<&GameObject> for WireObjectSummary {
     }
 }
 
+/// What a card is, with no id and no game state: its printed characteristics.
+/// A Seat that may not see an object's id can still learn its identity, such as
+/// an opponent watching a card leave a hand.
+#[derive(Serialize, Clone, Debug)]
+pub struct WireIdentity {
+    pub name: String,
+    pub mana_cost: String,
+    pub supertypes: Vec<WireSupertype>,
+    pub card_types: Vec<WireCardType>,
+    pub subtypes: Vec<String>,
+    pub power: Option<String>,
+    pub toughness: Option<String>,
+    pub is_token: bool,
+    pub is_commander: bool,
+}
+
+impl From<&GameObject> for WireIdentity {
+    fn from(object: &GameObject) -> Self {
+        let definition = &object.definition;
+        WireIdentity {
+            name: definition.name.clone(),
+            mana_cost: mana_cost_string(&definition.mana_cost),
+            supertypes: supertypes(definition.supertypes),
+            card_types: card_types(definition.card_types),
+            subtypes: definition.subtypes.iter().map(|s| s.0.clone()).collect(),
+            power: pt_text(&definition.power),
+            toughness: pt_text(&definition.toughness),
+            is_token: object.is_token,
+            is_commander: object.is_commander,
+        }
+    }
+}
+
+/// One card of a `revealed` event. `object` is absent for a Seat that cannot
+/// see the card's id, such as an opponent of the player whose hand it is in.
+#[derive(Serialize, Clone, Debug)]
+pub struct WireRevealedCard {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object: Option<U64>,
+    pub identity: WireIdentity,
+}
+
 /// One ledger entry. Every variant has a `kind` tag.
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WireEventKind {
-    ZoneChange { object: U64, from: WireZone, to: WireZone, last_known_info: Option<WireObjectSummary> },
+    /// `object` is the new id and `previous` the old one. Each is absent for a
+    /// Seat that could not see the object in that zone. `owner` is the player
+    /// whose hand or library a hidden move came from or went to, so a Seat can
+    /// keep its count. `identity` is present when the Seat can tell which card
+    /// moved, and `last_known_info` when it could see the object where it was.
+    ZoneChange {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        object: Option<U64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        previous: Option<U64>,
+        from: WireZone,
+        to: WireZone,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        owner: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        identity: Option<WireIdentity>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_known_info: Option<WireObjectSummary>,
+    },
     LifeChanged { player: u32, delta: i32 },
     DamageDealt { source: U64, target: WireTarget, amount: u32, is_combat_damage: bool },
     CounterAdded { object: U64, counter: WireCounterKind, amount: i32 },
@@ -201,8 +261,18 @@ pub enum WireEventKind {
     Fizzled { stack_id: U64 },
     Countered { stack_id: U64 },
     CastingUnwound { stack_id: U64 },
-    TriggerQueued { source: U64, controller: u32 },
-    ReplacementApplied { source: U64, original_event: U64 },
+    /// `source` is absent for a Seat that cannot see the source object.
+    TriggerQueued {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<U64>,
+        controller: u32,
+    },
+    /// `source` is absent for a Seat that cannot see the source object.
+    ReplacementApplied {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<U64>,
+        original_event: U64,
+    },
     StateBasedActionApplied { description: String },
     ScriptError { message: String },
     TurnStarted { player: u32, turn_number: u32 },
@@ -221,10 +291,24 @@ pub enum WireEventKind {
     AttachedToPlayer { object: U64, player: u32 },
     Unattached { object: U64, was_attached_to: U64 },
     UmbraArmorConsumed { enchanted: U64, aura: U64 },
-    Cycled { object: U64, last_known_info: WireObjectSummary },
-    MadnessExiled { object: U64, last_known_info: WireObjectSummary },
+    /// `last_known_info` shows the card as it was in hand, so only a Seat that
+    /// could see that hand gets it. `identity` goes to every Seat, because the
+    /// card now lies in a public zone.
+    Cycled {
+        object: U64,
+        identity: WireIdentity,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_known_info: Option<WireObjectSummary>,
+    },
+    MadnessExiled {
+        object: U64,
+        identity: WireIdentity,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_known_info: Option<WireObjectSummary>,
+    },
     SpellCast { object: U64 },
     BecameTarget { object: U64, by: U64, by_controller: u32 },
+    Revealed { player: u32, zone: WireZone, cards: Vec<WireRevealedCard> },
 }
 
 fn ids(ids: &[stackfish_engine::ObjectId]) -> Vec<U64> {
@@ -235,16 +319,18 @@ fn player(player: PlayerId) -> u32 {
     player.0
 }
 
-impl From<&GameEventKind> for WireEventKind {
-    fn from(kind: &GameEventKind) -> Self {
+impl WireEventKind {
+    /// The wire form of an event whose fields do not depend on who is looking.
+    /// `None` for the four events that carry objects the viewer may not see:
+    /// `crate::view` builds those per Seat. There is no wildcard arm, so a new
+    /// engine event fails to compile here until it is mirrored.
+    pub(crate) fn plain(kind: &GameEventKind) -> Option<Self> {
         use WireEventKind as W;
-        match kind {
-            GameEventKind::ZoneChange { object, from, to, last_known_info } => W::ZoneChange {
-                object: (*object).into(),
-                from: (*from).into(),
-                to: (*to).into(),
-                last_known_info: last_known_info.as_ref().map(WireObjectSummary::from),
-            },
+        Some(match kind {
+            GameEventKind::ZoneChange { .. }
+            | GameEventKind::Cycled { .. }
+            | GameEventKind::MadnessExiled { .. }
+            | GameEventKind::Revealed { .. } => return None,
             GameEventKind::LifeChanged { player: p, delta } => W::LifeChanged { player: player(*p), delta: *delta },
             GameEventKind::DamageDealt { source, target, amount, is_combat_damage } => W::DamageDealt {
                 source: (*source).into(),
@@ -277,10 +363,10 @@ impl From<&GameEventKind> for WireEventKind {
             GameEventKind::Countered { stack_id } => W::Countered { stack_id: (*stack_id).into() },
             GameEventKind::CastingUnwound { stack_id } => W::CastingUnwound { stack_id: (*stack_id).into() },
             GameEventKind::TriggerQueued { source, controller } => {
-                W::TriggerQueued { source: (*source).into(), controller: player(*controller) }
+                W::TriggerQueued { source: Some((*source).into()), controller: player(*controller) }
             }
             GameEventKind::ReplacementApplied { source, original_event } => {
-                W::ReplacementApplied { source: (*source).into(), original_event: U64(original_event.0) }
+                W::ReplacementApplied { source: Some((*source).into()), original_event: U64(original_event.0) }
             }
             GameEventKind::StateBasedActionApplied { description } => {
                 W::StateBasedActionApplied { description: description.clone() }
@@ -320,19 +406,13 @@ impl From<&GameEventKind> for WireEventKind {
             GameEventKind::UmbraArmorConsumed { enchanted, aura } => {
                 W::UmbraArmorConsumed { enchanted: (*enchanted).into(), aura: (*aura).into() }
             }
-            GameEventKind::Cycled { object, last_known_info } => {
-                W::Cycled { object: (*object).into(), last_known_info: last_known_info.into() }
-            }
-            GameEventKind::MadnessExiled { object, last_known_info } => {
-                W::MadnessExiled { object: (*object).into(), last_known_info: last_known_info.into() }
-            }
             GameEventKind::SpellCast { object } => W::SpellCast { object: (*object).into() },
             GameEventKind::BecameTarget { object, by, by_controller } => W::BecameTarget {
                 object: (*object).into(),
                 by: (*by).into(),
                 by_controller: player(*by_controller),
             },
-        }
+        })
     }
 }
 
@@ -350,14 +430,15 @@ pub struct WireEvent {
     pub kind: WireEventKind,
 }
 
-impl From<&GameEvent> for WireEvent {
-    fn from(event: &GameEvent) -> Self {
+impl WireEvent {
+    /// `event`'s ids with a body already chosen for one viewer.
+    pub(crate) fn with_kind(event: &GameEvent, kind: WireEventKind) -> Self {
         WireEvent {
             event_id: U64(event.event_id.0),
             sequence_no: U64(event.sequence_no.0),
             caused_by_command: event.caused_by_command.map(|id| U64(id.0)),
             parent_event: event.parent_event.map(|id| U64(id.0)),
-            kind: (&event.kind).into(),
+            kind,
         }
     }
 }

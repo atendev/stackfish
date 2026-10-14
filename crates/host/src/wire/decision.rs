@@ -1,13 +1,13 @@
 use serde::Serialize;
 use stackfish_engine::decision::{
-    ActivateEntry, AttackerEntry, BlockerEntry, CastEntry, Decision, DamageSplitEntry, Entry, EntryTargets, ModeRange,
-    PartitionRest, ReplyShape, TargetSlot,
+    ActivateEntry, AttackerEntry, BlockerEntry, Candidate, CastEntry, Decision, DamageSplitEntry, Entry, EntryTargets,
+    ModeRange, PartitionRest, ReplyShape, TargetSlot,
 };
 use stackfish_engine::triggers::PendingTrigger;
-use stackfish_engine::{AdditionalCost, CostSpec, TargetRequirement, TargetSpec};
+use stackfish_engine::{AdditionalCost, CostSpec, ObjectId, Target, TargetRequirement, TargetSpec};
 
 use super::mana::mana_cost_string;
-use super::{U64, WireCandidate, WireColor, WireTarget};
+use super::{U64, WireCandidate, WireColor, WireIdentity, WireTarget};
 
 #[derive(Serialize, Clone, Debug)]
 pub struct WireTrigger {
@@ -328,6 +328,15 @@ pub enum WireShape {
     DeclareAttackers { attackers: Vec<WireAttacker> },
     DeclareBlockers { blockers: Vec<WireBlocker> },
     AssignDamage { splits: Vec<WireDamageSplit> },
+    /// What a Seat that is not choosing sees: the kind of reply the Decision
+    /// asks for and how many options it offers (ticket 004). `candidates`
+    /// lists the options that lie in public zones, which every Seat may see.
+    Opaque {
+        reply: &'static str,
+        count: usize,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        candidates: Vec<WireCandidate>,
+    },
 }
 
 impl From<&ReplyShape> for WireShape {
@@ -364,9 +373,18 @@ impl From<&ReplyShape> for WireShape {
     }
 }
 
+/// The identity of a card a Decision offers from a zone the chooser cannot
+/// otherwise see, such as a library search or a scry.
+#[derive(Serialize, Clone, Debug)]
+pub struct WireCardIdentity {
+    pub object: U64,
+    pub identity: WireIdentity,
+}
+
 /// The point where the engine waits on `player`. `id` goes up by one per
 /// Decision and an Answer echoes it. `mechanic` is a display label, so a host
-/// must not branch on it.
+/// must not branch on it. `identities` names the cards in hidden zones that
+/// the chooser is shown.
 #[derive(Serialize, Clone, Debug)]
 pub struct WireDecision {
     pub id: U64,
@@ -374,15 +392,99 @@ pub struct WireDecision {
     pub mechanic: &'static str,
     #[serde(flatten)]
     pub shape: WireShape,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub identities: Vec<WireCardIdentity>,
 }
 
-impl From<&Decision> for WireDecision {
-    fn from(decision: &Decision) -> Self {
+impl WireDecision {
+    /// The Decision as the chooser sees it.
+    pub fn full(decision: &Decision, identities: Vec<WireCardIdentity>) -> Self {
         WireDecision {
             id: U64(decision.id.0),
             player: decision.player.0,
             mechanic: decision.mechanic,
             shape: (&decision.shape).into(),
+            identities,
         }
     }
+
+    /// The Decision as any other Seat sees it. `public` says which of the
+    /// Decision's object candidates lie in public zones.
+    pub fn opaque(decision: &Decision, public: impl Fn(&Candidate) -> bool) -> Self {
+        let candidates = pick_candidates(&decision.shape).into_iter().filter(|c| public(c)).map(WireCandidate::from).collect();
+        WireDecision {
+            id: U64(decision.id.0),
+            player: decision.player.0,
+            mechanic: decision.mechanic,
+            shape: WireShape::Opaque {
+                reply: reply_kind(&decision.shape),
+                count: option_count(&decision.shape),
+                candidates,
+            },
+            identities: Vec::new(),
+        }
+    }
+}
+
+/// The `kind` an Answer to this shape carries.
+fn reply_kind(shape: &ReplyShape) -> &'static str {
+    match shape {
+        ReplyShape::Pick { .. } => "pick",
+        ReplyShape::YesNo => "yes_no",
+        ReplyShape::Order { .. } => "order",
+        ReplyShape::Modes { .. } => "modes",
+        ReplyShape::Partition { .. } => "partition",
+        ReplyShape::Payment { .. } => "payment",
+        ReplyShape::Targets { .. } => "targets",
+        ReplyShape::MayCast { .. } => "may_cast",
+        ReplyShape::Action { .. } => "action",
+        ReplyShape::DeclareAttackers { .. } => "declare_attackers",
+        ReplyShape::DeclareBlockers { .. } => "declare_blockers",
+        ReplyShape::AssignDamage { .. } => "assign_damage",
+    }
+}
+
+/// How many options the shape lists. A shape with nothing to list counts 0.
+fn option_count(shape: &ReplyShape) -> usize {
+    match shape {
+        ReplyShape::Pick { candidates, .. } => candidates.len(),
+        ReplyShape::Order { items } => items.len(),
+        ReplyShape::Partition { cards, .. } => cards.len(),
+        ReplyShape::Targets { candidates, .. } => candidates.iter().map(Vec::len).sum(),
+        ReplyShape::Action { entries } => entries.len(),
+        ReplyShape::DeclareAttackers { attackers } => attackers.len(),
+        ReplyShape::DeclareBlockers { blockers } => blockers.len(),
+        ReplyShape::AssignDamage { splits } => splits.len(),
+        ReplyShape::YesNo | ReplyShape::Modes { .. } | ReplyShape::Payment { .. } | ReplyShape::MayCast { .. } => 0,
+    }
+}
+
+/// The candidates a non-chooser may be shown if they lie in public zones:
+/// those of a Pick and the flattened words of a Targets Decision.
+fn pick_candidates(shape: &ReplyShape) -> Vec<Candidate> {
+    match shape {
+        ReplyShape::Pick { candidates, .. } => candidates.clone(),
+        ReplyShape::Targets { candidates, .. } => {
+            candidates.iter().flatten().map(|t| Candidate::Target(*t)).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Every object a Decision asks the chooser to pick or order from a zone that
+/// may be hidden: Pick and Targets candidates and Partition cards. Priority
+/// entries are left out, because they name the chooser's own hand and the
+/// battlefield.
+pub fn offered_objects(shape: &ReplyShape) -> Vec<ObjectId> {
+    let mut found: Vec<ObjectId> = pick_candidates(shape)
+        .into_iter()
+        .filter_map(|c| match c {
+            Candidate::Target(Target::Object(id)) => Some(id),
+            _ => None,
+        })
+        .collect();
+    if let ReplyShape::Partition { cards, .. } = shape {
+        found.extend(cards);
+    }
+    found
 }

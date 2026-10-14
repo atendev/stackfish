@@ -85,12 +85,25 @@ impl SettingOverrides {
     }
 }
 
+/// A Seat tied to no player. `omniscient` lets it see every hand and library,
+/// as a replay viewer of a finished game does. The host decides it here, and a
+/// player Seat can never have it.
+#[derive(Deserialize, Default, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct SpectatorSetup {
+    #[serde(default)]
+    pub omniscient: bool,
+}
+
 /// The body of a `setup` request. `players` is in turn order: the first entry
 /// plays first (CR 103.1), and player `i` gets `PlayerId(i)` and Seat `i`.
+/// Spectator Seats follow the player Seats, in the order listed.
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SetupBody {
     pub players: Vec<PlayerSetup>,
+    #[serde(default)]
+    pub spectators: Vec<SpectatorSetup>,
     pub format: String,
     #[serde(default)]
     pub overrides: SettingOverrides,

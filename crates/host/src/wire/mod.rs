@@ -8,8 +8,8 @@ mod event;
 mod mana;
 mod reply;
 
-pub use decision::WireDecision;
-pub use event::WireEvent;
+pub use decision::{WireCardIdentity, WireDecision, offered_objects};
+pub use event::{WireEvent, WireEventKind, WireIdentity, WireObjectSummary, WireRevealedCard};
 pub use reply::AnswerBody;
 
 use serde::de::Error as _;
