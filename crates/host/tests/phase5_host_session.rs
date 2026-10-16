@@ -51,9 +51,27 @@ fn send(session: &mut Session, request: Value) -> Value {
     parse(&session.handle(&serde_json::to_vec(&request).unwrap()))
 }
 
+/// Advances as Seat 0, so the response carries Seat 0's events and its view of
+/// the open Decision.
 fn advance(session: &mut Session, budget: Option<u64>) -> Value {
     let body = budget.map_or(json!({}), |b| json!({ "budget": b }));
-    send(session, json!({ "v": 1, "kind": "advance", "body": body }))
+    send(session, json!({ "v": 1, "kind": "advance", "seat": 0, "body": body }))
+}
+
+fn poll(session: &mut Session, seat: u32) -> Value {
+    send(session, json!({ "v": 1, "kind": "poll", "seat": seat, "body": {} }))
+}
+
+/// The open Decision as its chooser sees it. A response shows the requesting
+/// Seat's view, so when someone else has to choose next, this polls as them.
+fn chooser_view(session: &mut Session, response: &Value) -> Value {
+    let decision = body(response)["decision"].clone();
+    if decision["shape"] != "opaque" {
+        return decision;
+    }
+    let player = decision["player"].as_u64().unwrap() as u32;
+    let polled = poll(session, player);
+    body(&polled)["decision"].clone()
 }
 
 fn answer(session: &mut Session, seat: u32, decision: &Value, reply: Value) -> Value {
@@ -172,7 +190,7 @@ fn mulligan_decisions_come_in_turn_order_and_a_paid_mulligan_asks_for_a_bottom_c
     let mut response = answer(&mut session, 0, &decision["id"], json!({ "kind": "yes_no", "value": true }));
     let mut order = vec![0];
     let bottom = loop {
-        let decision = body(&response)["decision"].clone();
+        let decision = chooser_view(&mut session, &response);
         match decision["shape"].as_str().unwrap() {
             "yes_no" => {
                 let player = decision["player"].as_u64().unwrap() as u32;
@@ -206,7 +224,12 @@ fn a_rejected_answer_returns_the_same_decision_with_no_events() {
         let response = answer(&mut session, seat, &decision_id, reply);
         assert_eq!(error_code(&response), code);
         assert_eq!(body(&response)["status"], "decision_open", "{code}");
-        assert_eq!(body(&response)["decision"], decision, "{code}: the same Decision is still open");
+        if seat == 0 {
+            assert_eq!(body(&response)["decision"], decision, "{code}: the same Decision is still open");
+        } else {
+            let seen = &body(&response)["decision"];
+            assert_eq!((&seen["id"], &seen["shape"]), (&id, &json!("opaque")), "{code}: the other Seat sees it opaque");
+        }
         assert_eq!(body(&response)["events"], json!([]), "{code}");
     }
 
@@ -223,7 +246,7 @@ fn a_bottom_choice_that_is_not_a_candidate_is_invalid() {
     let first = body(&opened)["decision"]["id"].clone();
     let mut response = answer(&mut session, 0, &first, json!({ "kind": "yes_no", "value": true }));
     let bottom = loop {
-        let decision = body(&response)["decision"].clone();
+        let decision = chooser_view(&mut session, &response);
         if decision["shape"] == "pick" {
             break decision;
         }
@@ -336,7 +359,7 @@ fn the_same_setup_and_answers_give_identical_bytes() {
         let mut transcript = vec![session.handle(&serde_json::to_vec(&json!({ "v": 1, "kind": "advance", "body": {} })).unwrap())];
         let mut response = parse(&transcript[0]);
         for _ in 0..6 {
-            let decision = body(&response)["decision"].clone();
+            let decision = chooser_view(&mut session, &response);
             if decision.is_null() {
                 break;
             }
@@ -389,7 +412,7 @@ fn passing_priority_walks_the_game_forward() {
         if body(&response)["status"] == "game_over" {
             break;
         }
-        decision = body(&response)["decision"].clone();
+        decision = chooser_view(&mut session, &response);
     }
     assert!(seen_steps.len() >= 2, "passing priority moves through the turn: {seen_steps:?}");
 }

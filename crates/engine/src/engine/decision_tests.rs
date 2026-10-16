@@ -144,6 +144,24 @@ fn pick_pauses_list_explicit_candidates_with_bounds() {
 }
 
 #[test]
+fn a_search_lists_its_candidates_by_id_and_not_in_library_order() {
+    // The state holds the candidates in library order, top card first.
+    let search = ProcessState::AwaitingSearchChoice {
+        stack_id: ObjectId(50),
+        controller: P0,
+        events_so_far: Vec::new(),
+        candidates: vec![ObjectId(10), ObjectId(8), ObjectId(9)],
+        count: 1,
+        destination: crate::types::ability::SearchDestination::Hand,
+        shuffle_after: true,
+    };
+    let ReplyShape::Pick { candidates, .. } = engine_in(search).open_decision().unwrap().shape else {
+        panic!("expected Pick")
+    };
+    assert_eq!(candidates, vec![obj(8), obj(9), obj(10)], "CR 401.2: the list reveals no library order");
+}
+
+#[test]
 fn a_replacement_choice_offers_replacement_candidates() {
     let process_state = ProcessState::AwaitingReplacementChoice {
         affected_player: P0,
