@@ -21,4 +21,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [16-decision-facade](16-decision-facade.md) — `decision` module: `Engine::open_decision`/`answer`, reply shapes, rejection codes, Decision ids
 - [17-legal-actions](17-legal-actions.md) — `Engine::legal_actions`/`legal_attackers`/`legal_blockers`/`pending_damage_splits`, entry types, combat Decisions, Answer checks
 - [18-host-session](18-host-session.md) — `crates/host`: `Session` over JSON bytes, `CardSource`, setup/format presets, wire mirror types, error codes
+- [19-proof-game](19-proof-game.md) — `proof_cards`, the random `Bot`, the full-game byte tests, and the three engine bugs it found
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught
