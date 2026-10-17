@@ -571,7 +571,11 @@ pub(crate) fn legal_target_candidates(
     caster: PlayerId,
     source: ObjectId,
 ) -> Vec<Target> {
-    let object_candidates = state.objects.values().map(|obj| Target::Object(obj.object_id));
+    // Sorted by id: `state.objects` is a `HashMap`, and a candidate list that
+    // follows its order differs from run to run.
+    let mut object_ids: Vec<ObjectId> = state.objects.keys().copied().collect();
+    object_ids.sort();
+    let object_candidates = object_ids.into_iter().map(Target::Object);
     let player_candidates = non_eliminated_players(state).into_iter().map(Target::Player);
     // CR 113.9: an ability's own StackObject has no matching GameObject, so
     // it needs its own candidate source rather than falling out of

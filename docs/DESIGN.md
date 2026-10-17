@@ -104,6 +104,9 @@ surface gaps.
     over direct calls): a `setup` request creates it, `advance` and `answer` requests drive it, and
     each response carries a batch of events plus the open Decision. A `CardSource` handed in at
     creation turns `oracle_id` keys into `CardDefinition`s. See `docs/implementation/18-host-session.md`.
+    The crate also ships a 25-card fixture set (`proof_cards`) and a random `Bot` that plays whole games
+    through the byte interface, which is how the protocol is tested end to end. See
+    `docs/implementation/19-proof-game.md`.
 
 ## Data model
 

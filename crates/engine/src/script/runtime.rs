@@ -107,10 +107,10 @@ impl ScriptRuntime {
         self.lua.registry_value(key).map_err(|e| ScriptError::RuntimeError(e.to_string()))
     }
 
-    /// Loads `definition.script_ref`'s source, evaluates it to a Lua table
-    /// with a callable `register_abilities` field (the
-    /// `s.register_abilities(c)` module convention — see `docs/lua/card-script-basics.md`),
-    /// and calls it with `source.0`. Whatever the script's `register_abilities`
+    /// Loads `definition.script_ref`'s source, evaluates it to a Lua table,
+    /// and calls its `register_abilities` field (the
+    /// `s.register_abilities(c)` module convention — see `docs/lua/card-script-basics.md`)
+    /// with `source.0`. A table without that field registers nothing. Whatever the script's `register_abilities`
     /// `:Register()`ed onto the shared registry's pending queues during the
     /// call is drained right after — `pending_triggered` into
     /// `state.abilities`, `pending_static` into `state.continuous_effects`
@@ -151,12 +151,18 @@ impl ScriptRuntime {
 
         let module: Table =
             self.lua.load(source_code).eval().map_err(|e| ScriptError::LoadError(e.to_string()))?;
-        let register_abilities: Function = module
+        // A plain spell's script declares only `operation()` and
+        // `target_requirement()`, so a missing `register_abilities` registers
+        // nothing. A field that is present but not a function is still a load
+        // error.
+        let register_abilities: Option<Function> = module
             .get("register_abilities")
-            .map_err(|e| ScriptError::LoadError(format!("card script has no register_abilities: {e}")))?;
-        register_abilities
-            .call::<_, ()>(source.0)
-            .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+            .map_err(|e| ScriptError::LoadError(format!("card script's register_abilities is not a function: {e}")))?;
+        if let Some(register_abilities) = register_abilities {
+            register_abilities
+                .call::<_, ()>(source.0)
+                .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
+        }
 
         let (queued, function_zones) = {
             let mut registry = self.registry.borrow_mut();

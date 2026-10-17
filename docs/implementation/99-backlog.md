@@ -2,6 +2,16 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Proof game (`phase5/proof-game-bot`, B5)**: see `19-proof-game.md`. Fixed on the way: creatures outside the
+  battlefield could attack and block, simultaneous deaths took ids in `HashMap` order, and a script with no
+  `register_abilities` raised a `script_error`. Open items:
+  - The bot declines every `may_cast` Decision, and it cannot pay a sacrifice, discard, tap or graveyard-exile cost,
+    hybrid, Phyrexian, snow or `{X}` costs.
+  - Other unordered `HashMap` walks may still decide an order a host sees. Grep `objects.values()` before trusting a
+    new replay test.
+  - No card in the set uses a sacrifice or discard cost, menace or a must-attack rule, so the engine atomicity item
+    (a bad Answer that passes the facade checks) is untested by the bot.
+
 - **Host Session (`phase5/host-session`, B3)**: see `18-host-session.md`. Open items:
   - No replay export and no carddb-backed `CardSource`.
   - A Payment Decision lists additional costs without their filters.
