@@ -429,8 +429,12 @@ pub struct DyingCandidate {
 /// covers — `false` for 704.5f (zero toughness), `true` for 704.5g (lethal
 /// damage/deathtouch) — see that type's own doc comment for why.
 fn collect_dying_creatures(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
-    let candidates: Vec<ObjectId> =
+    // `state.objects` is a `HashMap`, so the order is fixed by id. Creatures
+    // that die together move to the graveyard in this order and take their new
+    // ids in it, so an unordered walk would give a replay different ids.
+    let mut candidates: Vec<ObjectId> =
         state.objects.values().filter(|o| o.zone == ZoneKind::Battlefield).map(|o| o.object_id).collect();
+    candidates.sort();
 
     candidates
         .into_iter()

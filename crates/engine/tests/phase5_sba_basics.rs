@@ -166,6 +166,29 @@ fn two_lethally_damaged_creatures_die_in_the_same_pass() {
     assert_eq!(state.zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 2);
 }
 
+/// Creatures that die together take their new ids in ascending order of their
+/// old ids. `state.objects` is a `HashMap`, so an unordered walk would fail this
+/// about 11 times in 12 with twelve creatures, and a replay would see other ids.
+#[test]
+fn creatures_that_die_together_leave_in_id_order() {
+    let mut state = base_state();
+    let p0 = PlayerId(0);
+    for id in 0..12 {
+        put_on_battlefield(&mut state, creature(ObjectId(id), p0, 1, 5));
+    }
+
+    let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
+
+    let old_ids: Vec<ObjectId> = events
+        .iter()
+        .map(|e| match &e.kind {
+            GameEventKind::ZoneChange { last_known_info, .. } => last_known_info.as_ref().unwrap().object_id,
+            other => panic!("expected ZoneChange, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(old_ids, (0..12).map(ObjectId).collect::<Vec<_>>());
+}
+
 #[test]
 fn creature_with_characteristic_defining_toughness_is_skipped() {
     let mut state = base_state();

@@ -404,6 +404,51 @@ fn attackers_are_untapped_creatures_without_summoning_sickness_or_defender() {
 }
 
 #[test]
+fn a_creature_that_is_not_on_the_battlefield_is_never_an_attacker() {
+    let mut state = combat_state(Step::DeclareAttackers);
+    on_battlefield(&mut state, 1, P0, definition("Bear", CardTypeSet::CREATURE));
+    in_hand(&mut state, 2, P0, definition("In Hand", CardTypeSet::CREATURE));
+    put(&mut state, Some(P0), card_object(ObjectId(3), definition("In Graveyard", CardTypeSet::CREATURE), P0, ZoneKind::Graveyard));
+    let engine = Engine::new(state);
+    assert_eq!(
+        engine.legal_attackers(),
+        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)] }],
+        "CR 508.1a: only a creature on the battlefield attacks"
+    );
+}
+
+#[test]
+fn a_planeswalker_that_is_not_on_the_battlefield_is_not_a_defender() {
+    let mut state = combat_state(Step::DeclareAttackers);
+    on_battlefield(&mut state, 1, P0, definition("Bear", CardTypeSet::CREATURE));
+    in_hand(&mut state, 2, P1, definition("In Hand", CardTypeSet::PLANESWALKER));
+    let engine = Engine::new(state);
+    assert_eq!(
+        engine.legal_attackers(),
+        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)] }],
+        "CR 508.1b: an attacked planeswalker is a permanent"
+    );
+}
+
+#[test]
+fn a_creature_that_is_not_on_the_battlefield_never_blocks() {
+    let mut state = combat_state(Step::DeclareBlockers);
+    on_battlefield(&mut state, 1, P0, definition("Bear", CardTypeSet::CREATURE));
+    in_hand(&mut state, 2, P1, definition("In Hand", CardTypeSet::CREATURE));
+    state.combat = Some(CombatState {
+        attackers: vec![(ObjectId(1), Target::Player(P1))],
+        blocks: Vec::new(),
+        declared_defenders: Vec::new(),
+        bands: Vec::new(),
+        effect_blocked: Vec::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: HashMap::new(),
+    });
+    let engine = Engine::new(state);
+    assert!(engine.legal_blockers(P1).is_empty(), "CR 509.1a: only a creature on the battlefield blocks");
+}
+
+#[test]
 fn a_flying_attacker_can_only_be_blocked_by_flying_or_reach() {
     let mut state = combat_state(Step::DeclareBlockers);
     on_battlefield(

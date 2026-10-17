@@ -301,7 +301,11 @@ pub(crate) fn legal_aura_entry_candidates(
     let Some(TargetSpec::Primitive(req)) = &aura_definition.target_requirement else {
         return Vec::new();
     };
-    let object_candidates = state.objects.values().map(|obj| Target::Object(obj.object_id));
+    // Sorted by id: `state.objects` is a `HashMap`, and a candidate list that
+    // follows its order differs from run to run.
+    let mut object_ids: Vec<ObjectId> = state.objects.keys().copied().collect();
+    object_ids.sort();
+    let object_candidates = object_ids.into_iter().map(Target::Object);
     let player_candidates = non_eliminated_players(state).into_iter().map(Target::Player);
     object_candidates
         .chain(player_candidates)

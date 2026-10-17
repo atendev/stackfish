@@ -384,6 +384,11 @@ pub(crate) fn attacker_can_attack(
     attacker: ObjectId,
 ) -> Result<(), CommandError> {
     let object = state.object(attacker).ok_or(CommandError::InvalidTarget)?;
+    // CR 508.1a: only a creature on the battlefield can be declared as an
+    // attacker.
+    if object.zone != ZoneKind::Battlefield {
+        return Err(CommandError::IllegalAction("a chosen attacker is not on the battlefield".to_string()));
+    }
     // CR 508.1a: attacking requires *current* control, per
     // layers::effective_controller.
     if crate::layers::effective_controller(state, script_runtime, attacker) != actor {
@@ -445,6 +450,12 @@ pub(crate) fn attack_target_is_legal(
         Target::Object(target_id) => {
             let target_object =
                 state.object(*target_id).ok_or(CommandError::InvalidTarget)?;
+            // CR 508.1b: an attacked planeswalker or battle is a permanent.
+            if target_object.zone != ZoneKind::Battlefield {
+                return Err(CommandError::IllegalAction(
+                    "an attacker's target permanent must be on the battlefield".to_string(),
+                ));
+            }
             // CR 508.1b: the target permanent's *current*
             // controller must be an opponent.
             if crate::layers::effective_controller(state, script_runtime, *target_id)
@@ -488,6 +499,11 @@ pub(crate) fn block_is_legal(
     attacker: ObjectId,
 ) -> Result<(), CommandError> {
     let blocker_object = state.object(blocker).ok_or(CommandError::InvalidTarget)?;
+    // CR 509.1a: only a creature on the battlefield can be declared as a
+    // blocker.
+    if blocker_object.zone != ZoneKind::Battlefield {
+        return Err(CommandError::IllegalAction("a chosen blocker is not on the battlefield".to_string()));
+    }
     // CR 509.1a: blocking requires *current* control.
     if crate::layers::effective_controller(state, script_runtime, blocker) != actor {
         return Err(CommandError::IllegalAction(
