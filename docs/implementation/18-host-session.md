@@ -102,7 +102,7 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
   `exile_from_graveyard`), because the engine does not list eligible objects for a Payment Decision.
 - Rejection messages are the engine's `Debug` text, passed through.
 - A pipeline error is fatal and the engine is not rolled back (engine atomicity item in `map.md`). A panic inside the
-  engine is not caught. The Godot adapter (B6) has to decide what a panic does at the FFI boundary.
+  engine is not caught by the Session. The Godot adapter catches it and kills the instance (`20-godot-adapter.md`).
 - CR 104.4b loop detection is not done. `step_cap` only stops a runaway from freezing the host.
 
 ## Tests

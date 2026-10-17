@@ -2,6 +2,13 @@
 
 ## Live TODOs / unresolved gaps
 
+- **Godot adapter (`phase5/godot-adapter`, B6)**: see `20-godot-adapter.md`. Open items:
+  - Decision 009's "empty array on a wrong-thread call" holds only with gdext's own check compiled out. By default gdext
+    panics first and GDScript gets `null`. Settle whether hosts are told to expect `null`, or the release build turns
+    the gdext check off.
+  - `create` serves only the proof card set until the carddb-backed `CardSource` exists.
+  - Export (copy step into `res://`, macOS `.framework`), web, hot reload and the late-join snapshot are untouched.
+  - The smoke test needs a Godot binary, so CI does not run it.
 - **Proof game (`phase5/proof-game-bot`, B5)**: see `19-proof-game.md`. Fixed on the way: creatures outside the
   battlefield could attack and block, simultaneous deaths took ids in `HashMap` order, and a script with no
   `register_abilities` raised a `script_error`. Open items:
