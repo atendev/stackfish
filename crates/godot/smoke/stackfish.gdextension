@@ -1,0 +1,14 @@
+; TODO(export): these paths point at the workspace target/ directory, which works from the editor
+; and the smoke test. Shipping needs a copy step into res:// and a macOS .framework.
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.2
+reloadable = false
+
+[libraries]
+linux.debug.x86_64 = "res://../../../target/debug/libstackfish_godot.so"
+linux.release.x86_64 = "res://../../../target/release/libstackfish_godot.so"
+windows.debug.x86_64 = "res://../../../target/debug/stackfish_godot.dll"
+windows.release.x86_64 = "res://../../../target/release/stackfish_godot.dll"
+macos.debug = "res://../../../target/debug/libstackfish_godot.dylib"
+macos.release = "res://../../../target/release/libstackfish_godot.dylib"

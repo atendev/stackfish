@@ -107,6 +107,9 @@ surface gaps.
     The crate also ships a 25-card fixture set (`proof_cards`) and a random `Bot` that plays whole games
     through the byte interface, which is how the protocol is tested end to end. See
     `docs/implementation/19-proof-game.md`.
+12. **Godot Adapter**, `crates/godot`. A `cdylib` that loads in Godot 4.2 or later and exposes `StackfishSession`, which
+    holds one `Session` on the thread that made it and passes `PackedByteArray` messages. A call from another thread
+    fails. See `docs/implementation/20-godot-adapter.md`.
 
 ## Data model
 

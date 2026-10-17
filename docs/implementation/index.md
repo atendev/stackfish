@@ -22,4 +22,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [17-legal-actions](17-legal-actions.md) — `Engine::legal_actions`/`legal_attackers`/`legal_blockers`/`pending_damage_splits`, entry types, combat Decisions, Answer checks
 - [18-host-session](18-host-session.md) — `crates/host`: `Session` over JSON bytes, `CardSource`, setup/format presets, wire mirror types, error codes
 - [19-proof-game](19-proof-game.md) — `proof_cards`, the random `Bot`, the full-game byte tests, and the three engine bugs it found
+- [20-godot-adapter](20-godot-adapter.md): `crates/godot`, `StackfishSession` over the Session, the main-thread guard, panic handling, the headless smoke test and its thread findings
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught
