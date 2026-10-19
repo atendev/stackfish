@@ -10,8 +10,11 @@ here="$(cd "$(dirname "$0")" && pwd)"
 repo="$here/../../.."
 godot="${GODOT:-godot}"
 project="$here"
+# The wrong-thread result that `play` must see: null with gdext's safeguards on, an empty array with them off.
+expect=null
 
 if [ -n "${SAFEGUARDS_OFF:-}" ]; then
+	expect=empty
 	cargo build --release -p stackfish-godot --manifest-path "$repo/Cargo.toml" \
 		--features godot/safeguards-release-disengaged || exit 1
 	project="$repo/target/smoke-release"
@@ -29,7 +32,7 @@ status=0
 # thread_owned is recorded only. With gdext's safeguards on it aborts Godot, and that is the finding.
 for mode in play drop thread_owned; do
 	echo "== $mode"
-	"$godot" --headless --path "$project" --script smoke.gd -- "$mode"
+	"$godot" --headless --path "$project" --script smoke.gd -- "$mode" "$expect"
 	code=$?
 	echo "exit code $code"
 	[ "$code" -eq 0 ] || [ "$mode" = thread_owned ] || status=1

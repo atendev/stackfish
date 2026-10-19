@@ -19,7 +19,15 @@ unsafe impl ExtensionLibrary for StackfishExtension {}
 /// `poll` requests through `handle`. Every call returns the response bytes.
 /// An empty array means the call failed, and `last_error` says why.
 ///
-/// Call it only from the thread that made it.
+/// Use it only on the thread that made it (decision 018):
+/// - A call from another thread returns `null` and raises a script error.
+///   gdext refuses it before the adapter runs, so `last_error` returns `null`
+///   there too. Treat `null` as a programming error and do not retry.
+///   The adapter's own `wrong_thread` code, with an empty array, is reached
+///   only in a build with gdext's safeguards compiled out. Do not rely on it.
+/// - `StackfishSession.new()` on another thread aborts the whole Godot process.
+/// - Freeing the last reference on another thread ran without a crash in the
+///   smoke test, but that is one run. Free it on the creating thread.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 struct StackfishSession {
