@@ -2,6 +2,9 @@
 #   play  plays a proof game to the end, then checks the wrong-thread guard
 #   drop  drops the last reference to a session on a second thread
 #   thread_owned  makes and uses a session on a second thread (recorded, not required)
+# play takes a second argument, the wrong-thread result to require:
+#   null   gdext's safeguards are on (default). Both calls return null.
+#   empty  gdext's safeguards are compiled out. handle returns an empty array and last_error "wrong_thread".
 extends SceneTree
 
 const MAX_ANSWERS := 5000
@@ -10,10 +13,11 @@ const MAX_ANSWERS := 5000
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	var mode := args[0] if args.size() > 0 else "play"
+	var expect := args[1] if args.size() > 1 else "null"
 	var ok := false
 	match mode:
 		"play":
-			ok = _play()
+			ok = _play(expect)
 		"drop":
 			ok = _drop()
 		"thread_owned":
@@ -76,7 +80,7 @@ func _new_session():
 	return session
 
 
-func _play() -> bool:
+func _play(expect: String) -> bool:
 	var session = _new_session()
 	if session == null:
 		return false
@@ -88,6 +92,7 @@ func _play() -> bool:
 	# A call from a second thread must not return a response and must leave the session usable.
 	# With gdext's own safeguards on (the default), gdext panics first and GDScript gets null.
 	# With them off, the adapter's guard answers with an empty array and "wrong_thread".
+	# The result must match `expect`, so a change in either build fails here.
 	# A call that fails inside gdext aborts the whole lambda, so each call gets its own thread.
 	var first := Thread.new()
 	first.start(func(): return session.handle(_bytes({"v": 1, "kind": "poll", "seat": 0, "body": {}})))
@@ -95,9 +100,17 @@ func _play() -> bool:
 	var last := Thread.new()
 	last.start(func(): return session.last_error())
 	var last_error = last.wait_to_finish()
-	var refused: bool = bytes == null or (typeof(bytes) == TYPE_PACKED_BYTE_ARRAY and bytes.size() == 0)
+	var refused: bool
+	match expect:
+		"null":
+			refused = bytes == null and last_error == null
+		"empty":
+			refused = typeof(bytes) == TYPE_PACKED_BYTE_ARRAY and bytes.size() == 0 and last_error == "wrong_thread"
+		_:
+			printerr("unknown expectation ", expect)
+			return false
 	print("WRONG_THREAD handle=", "null (gdext refused)" if bytes == null else "empty (adapter refused)",
-		" last_error=", "null (gdext refused)" if last_error == null else last_error)
+		" last_error=", "null (gdext refused)" if last_error == null else last_error, " expected=", expect)
 	if not refused:
 		return false
 	var after := _send(session, "poll", 0, {})
