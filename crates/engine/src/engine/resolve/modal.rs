@@ -30,6 +30,7 @@ use super::super::{Engine, ProcessState, StepStatus};
 
 /// The modes of a `Modal` resolution still to run after the one currently in
 /// the pipeline. See this module's doc comment.
+#[derive(Debug)]
 pub(in crate::engine) struct ModalContinuation {
     /// The whole stack object, not a per-mode view.
     top: StackObject,

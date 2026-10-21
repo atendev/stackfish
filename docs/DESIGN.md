@@ -167,6 +167,12 @@ adaptation doc, unchanged from the original plan:
 - Replay = same seed + same `PlayerAction`/`EngineCommand` stream -> byte-identical `GameEvent`
   stream. Replay viewer is a separate consumer of the step-able core (see above), not part of the
   live game loop.
+- A rejected input changes nothing (ticket 024). Every command and `submit_*` method checks before it
+  mutates, and a rejection does not use up a command id, an object id or a sequence number. So a replay
+  of only the accepted inputs gives the same stream. `Engine::snapshot` and the tests in
+  `docs/implementation/21-atomicity.md` hold this.
+- Any code that walks a `HashMap` and produces events or ids must sort first. `GameState::objects` is
+  one. The state-based action collectors sort by `ObjectId` for this reason.
 
 ## Open questions
 

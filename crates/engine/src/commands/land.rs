@@ -98,6 +98,14 @@ pub(super) fn execute_play_land(
             "card is not in actor's hand".to_string(),
         ));
     }
+    // Every zone the move touches is looked up before anything is allocated
+    // or removed, so a missing zone rejects without a partial move (024).
+    if state.zone(ZoneKind::Hand, Some(actor)).is_none() {
+        return Err(CommandError::IllegalAction("actor has no hand zone".to_string()));
+    }
+    if state.zone(ZoneKind::Battlefield, None).is_none() {
+        return Err(CommandError::IllegalAction("no battlefield zone".to_string()));
+    }
     // Snapshot before the move - CR 603.10's last_known_info (see
     // GameEventKind::ZoneChange's doc comment).
     let last_known_info = object.clone();

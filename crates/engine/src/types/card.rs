@@ -21,7 +21,7 @@ use crate::types::mana::{ColorSet, ManaCost};
 /// not a panic). `display` is unchanged from before this field existed —
 /// literal oracle text (`"*"`, `"*+1"`) for UI/debugging only, never
 /// consulted for resolution.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PTValue {
     Fixed(i32),
     CharacteristicDefining { display: String, script: Option<ScriptReference> },
@@ -213,6 +213,7 @@ bitflags! {
 
 /// Named keyword, per CR 702. Use this for matching/comparison; use
 /// `KeywordSet` for storage on a card.
+#[derive(Clone, PartialEq, Debug)]
 pub enum Keyword {
     Flying,
     Reach,
@@ -238,7 +239,7 @@ pub enum Keyword {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Subtype(pub String);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ScriptReference {
     /// Lookup key into the external card-database project's script registry.
     ByKey(String),
@@ -248,7 +249,7 @@ pub enum ScriptReference {
 
 /// Immutable, shared. Sourced from the external card database project — this
 /// engine consumes it, does not author or update it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CardDefinition {
     /// External DB's stable card identifier.
     pub definition_id: u64,
@@ -348,7 +349,7 @@ pub struct CardDefinition {
 }
 
 /// One option of a CR 700.2 modal spell — see `CardDefinition::modes`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SpellMode {
     pub target_requirement: Option<crate::types::target::TargetSpec>,
     pub effect: Option<AbilityEffect>,

@@ -23,6 +23,7 @@ pub enum ZoneKind {
 /// what order — nothing else (notably not `GameObject`) duplicates that
 /// ordering. `GameObject` only carries the `ZoneKind` classification, not a
 /// `Zone` itself, to avoid embedding this list inside every object in it.
+#[derive(Clone, PartialEq, Debug)]
 pub struct Zone {
     pub kind: ZoneKind,
     pub owner: Option<PlayerId>,

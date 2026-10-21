@@ -408,6 +408,7 @@ fn remove_players_objects(state: &mut GameState, player: PlayerId) {
 /// 700.4's "dies," but neither is "destroy" - conflating them would let a
 /// shield incorrectly save a 0-toughness creature, a real rules bug this
 /// type exists specifically to prevent.
+#[derive(Debug)]
 pub struct DyingCandidate {
     pub id: ObjectId,
     pub is_destroy: bool,
@@ -551,7 +552,7 @@ fn find_commander_return_candidate(state: &GameState) -> Option<(PlayerId, Objec
 /// supertypes read via `layers::effective_characteristics`, same convention
 /// `find_legend_rule_group` above uses.
 fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
-    let world_objects: Vec<(ObjectId, crate::types::ids::SequenceNo)> = state
+    let mut world_objects: Vec<(ObjectId, crate::types::ids::SequenceNo)> = state
         .objects
         .values()
         .filter(|o| o.zone == ZoneKind::Battlefield)
@@ -563,6 +564,8 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
     if world_objects.len() < 2 {
         return Vec::new();
     }
+    // `state.objects` is a `HashMap`, so sort for a replay-stable death order.
+    world_objects.sort_by_key(|(id, _)| *id);
     let max_timestamp = world_objects.iter().map(|(_, ts)| *ts).max().expect("checked len >= 2 above");
     let survivor_count = world_objects.iter().filter(|(_, ts)| *ts == max_timestamp).count();
     // CR 704.5k is "put into its owner's graveyard," not "destroy" - never
@@ -621,7 +624,7 @@ fn collect_world_rule_losers(state: &GameState, script_runtime: &ScriptRuntime) 
 /// resolves as a legal target here, so its attached Auras wait one more
 /// SBA pass to fall off, matching real-game timing.
 fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<DyingCandidate> {
-    state
+    let mut found: Vec<DyingCandidate> = state
         .objects
         .values()
         .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_aura(&o.definition))
@@ -666,7 +669,9 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
             };
             illegal.then_some(DyingCandidate { id: o.object_id, is_destroy: false })
         })
-        .collect()
+        .collect();
+    found.sort_by_key(|candidate| candidate.id);
+    found
 }
 
 /// CR 303.4d/704.5m: an Aura attached to itself is illegal regardless of
@@ -684,12 +689,14 @@ fn collect_illegally_attached_auras(state: &GameState, script_runtime: &ScriptRu
 /// (CR 303.4d states it as one unconditionally) in case a future
 /// reattach-style effect makes it reachable.
 fn collect_self_enchanted_auras(state: &GameState) -> Vec<DyingCandidate> {
-    state
+    let mut found: Vec<DyingCandidate> = state
         .objects
         .values()
         .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_aura(&o.definition) && o.attached_to == Some(o.object_id))
         .map(|o| DyingCandidate { id: o.object_id, is_destroy: false })
-        .collect()
+        .collect();
+    found.sort_by_key(|candidate| candidate.id);
+    found
 }
 
 /// CR 303.4d: "An Aura that's also a creature can't enchant anything" - a
@@ -705,7 +712,7 @@ fn collect_self_enchanted_auras(state: &GameState) -> Vec<DyingCandidate> {
 /// is two state-based actions performed together, not two separate SBA
 /// checks a pass apart.
 fn collect_creature_auras(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<ObjectId> {
-    state
+    let mut found: Vec<ObjectId> = state
         .objects
         .values()
         .filter(|o| {
@@ -717,7 +724,9 @@ fn collect_creature_auras(state: &GameState, script_runtime: &ScriptRuntime) -> 
                     .contains(CardTypeSet::CREATURE)
         })
         .map(|o| o.object_id)
-        .collect()
+        .collect();
+    found.sort();
+    found
 }
 
 /// CR 704.5n/301.5: every battlefield Equipment (`commands::is_equipment`)
@@ -750,7 +759,7 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
         zone: None,
         mana_value: None,
     };
-    state
+    let mut found: Vec<ObjectId> = state
         .objects
         .values()
         .filter(|o| o.zone == ZoneKind::Battlefield && commands::is_equipment(&o.definition))
@@ -770,7 +779,9 @@ fn collect_illegally_attached_equipment(state: &GameState, script_runtime: &Scri
             );
             illegal.then_some(o.object_id)
         })
-        .collect()
+        .collect();
+    found.sort();
+    found
 }
 
 /// CR 704.5n's actual commit: clears `id`'s own `attached_to` and removes it

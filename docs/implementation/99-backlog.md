@@ -5,7 +5,7 @@
 Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the `TODO` comments and the `.plan/` maps. Ticket numbers refer to `.plan/map-fixes.md`. The entries under "Live TODOs" below hold the detail. Re-check an item against the code before scoping a slice from it, because this file has gone stale before (see "Mistakes caught").
 
 1. Engine atomicity (decided in ticket 024: a rejected input changes nothing, enforced by validating before mutating). Build in this order:
-   1. 025 atomicity harness and audit. Test-only `Clone` and `PartialEq` on `GameState`, a rejection test over illegal inputs, and an audit of every `execute_command` branch and `submit_*` method for mutate-then-`Err`.
+   1. Done on `phase5/atomicity-harness` (awaiting review): 025 atomicity harness and audit. See `21-atomicity.md`.
    2. 035 error split and Session mapping. `CommandError` becomes `Rejected` and `Internal`, `Session` catches a panic, and `submit_*` validates on its own.
    3. 026 menace and must-attack as one predicate shared by `legal_attackers`, `legal_blockers` and command validation.
    4. 036 mode-combination predicate, rejected at announcement and left out of the modal entries.
@@ -33,9 +33,11 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - The bot declines every `may_cast` Decision, and it cannot pay a sacrifice, discard, tap or graveyard-exile cost,
     hybrid, Phyrexian, snow or `{X}` costs.
   - Other unordered `HashMap` walks may still decide an order a host sees. Grep `objects.values()` before trusting a
-    new replay test.
+    new replay test. Ticket 025 sorted the five state-based action collectors that walked `objects` (the same seed
+    sometimes ordered `Unattached` events differently); 8 more `objects` walks outside `sba.rs` are unchecked (ticket 028).
   - No card in the set uses a sacrifice or discard cost, menace or a must-attack rule, so the engine atomicity item
-    (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it.
+    (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it, and
+    `Bot::injecting_illegal_answers` now sends illegal Answers at every Decision (see `21-atomicity.md`).
 
 - **Host Session (`phase5/host-session`, B3)**: see `18-host-session.md`. Open items:
   - No replay export and no carddb-backed `CardSource`.

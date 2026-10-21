@@ -328,6 +328,8 @@ pub(super) fn execute_cast_spell(
             // rules (including the "mode with its own multi-target
             // requirement can't be combined" and "unsupported effect
             // kind" narrow gaps it names).
+            // TODO(036): which mode pairs combine is only decided here, so the
+            // modal entries a Decision lists can offer a pair this rejects.
             let (target_requirement, modal_effect) =
                 combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(CommandError::IllegalAction)?;
             (target_requirement, modal_effect, mode_additional_costs, None)
@@ -456,6 +458,18 @@ pub(super) fn execute_cast_spell(
         cost.mana = Some(mana);
     }
 
+    // CR 400.7: Exile (like Battlefield) is a shared zone, not per-player -
+    // same owner derivation `commands::commit_zone_move` already uses. Every
+    // `from_zone` before Madness's own `AlternativeCost::Replacement {
+    // from_zone: Exile, .. }` was per-player (Hand/Graveyard/Command), so
+    // this case was never reachable until now. Looked up before any id is
+    // allocated or the card is removed, so a missing zone rejects without a
+    // partial move (024).
+    let from_owner = if from_zone == ZoneKind::Exile { None } else { Some(actor) };
+    if state.zone(from_zone, from_owner).is_none() {
+        return Err(CommandError::IllegalAction("actor has no such zone".to_string()));
+    }
+
     // Snapshot before the move - CR 603.10's last_known_info (see
     // GameEventKind::ZoneChange's doc comment).
     let last_known_info = object.clone();
@@ -470,15 +484,9 @@ pub(super) fn execute_cast_spell(
     new_object.zone = ZoneKind::Stack;
     new_object.timestamp = state.allocate_sequence_no();
 
-    // CR 400.7: Exile (like Battlefield) is a shared zone, not per-player -
-    // same owner derivation `commands::commit_zone_move` already uses. Every
-    // `from_zone` before Madness's own `AlternativeCost::Replacement {
-    // from_zone: Exile, .. }` was per-player (Hand/Graveyard/Command), so
-    // this case was never reachable until now.
-    let from_owner = if from_zone == ZoneKind::Exile { None } else { Some(actor) };
     state
         .zone_mut(from_zone, from_owner)
-        .ok_or_else(|| CommandError::IllegalAction("actor has no such zone".to_string()))?
+        .expect("zone confirmed present above")
         .remove(card);
     state.objects.remove(&card);
     state.objects.insert(new_id, new_object);

@@ -131,7 +131,7 @@ impl ManaSymbol {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ManaCost {
     pub symbols: Vec<ManaSymbol>,
 }
@@ -449,7 +449,7 @@ pub fn parse_color_letter(s: &str) -> Result<Color, ManaCostParseError> {
 /// *any* type of mana, as long as it came from a snow source) can be told
 /// apart from an ordinary mana of the same color — see `ManaUnit`'s own doc
 /// comment for the matching per-unit tag.
-#[derive(Default)]
+#[derive(Default, Clone, PartialEq, Debug)]
 pub struct ManaPool {
     pub white: u32,
     pub blue: u32,

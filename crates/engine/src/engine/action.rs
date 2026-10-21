@@ -44,6 +44,9 @@ impl Engine {
     /// `AdvanceTurnStep` only open a generic priority window on every step,
     /// combat steps included).
     pub fn submit_action(&mut self, action: PlayerAction) -> Result<(), ActionError> {
+        // Every rejection below runs before the first mutation, including the
+        // payment suspension in the nested mana-ability arm (024).
+        let mut suspend_payment = false;
         match &self.process_state {
             ProcessState::PriorityWindow => {}
             // CR 601.2g/605.3a: a mana ability may be activated "even if
@@ -61,7 +64,7 @@ impl Engine {
             ProcessState::AwaitingPayment { payer, .. }
                 if action.player == *payer && self.is_mana_ability_activation(&action.kind) =>
             {
-                self.suspend_current_payment();
+                suspend_payment = true;
             }
             _ => {
                 return Err(ActionError::IllegalAction(
@@ -88,6 +91,9 @@ impl Engine {
             return Err(ActionError::IllegalAction(
                 "pregame actions use submit_mulligan_decision / submit_bottom_cards".to_string(),
             ));
+        }
+        if suspend_payment {
+            self.suspend_current_payment();
         }
         self.process_state = ProcessState::PendingAction(action);
         Ok(())
@@ -142,7 +148,9 @@ impl Engine {
     /// `state`, then hands off to `ReplacementCheck` for the events it
     /// proposed.
     pub(super) fn handle_pending_action(&mut self, action: PlayerAction) -> StepStatus {
-        let command_id = self.allocate_command_id();
+        // The id is only consumed once the command is accepted, so a
+        // rejected action leaves `next_command_id` as it was (024).
+        let command_id = CommandId(self.next_command_id);
         let since_ledger = self.state.ledger.len();
         let command = EngineCommand { command_id, actor: action.player, action: action.kind };
 
@@ -150,8 +158,9 @@ impl Engine {
             Ok(outcome) => outcome,
             Err(err) => {
                 // Reset to PriorityWindow rather than leaving process_state
-                // in limbo - see StepStatus::Error's doc comment for why
-                // this doesn't attempt rollback. If this was a nested
+                // in limbo. A rejection changes nothing else (024: every
+                // command validates before it mutates), so there is nothing
+                // to roll back. If this was a nested
                 // mana-ability activation (CR 601.2g/605.3a) that errored
                 // out before `pipeline_context`/`pipeline_exit` were even
                 // touched, resume the outer `AwaitingPayment` it suspended
@@ -173,8 +182,8 @@ impl Engine {
         // the side effect" half, same split priority_handoff/broke_pass_chain
         // already use. A script error here is logged as a
         // GameEventKind::ScriptError (record_script_error) rather than
-        // silently dropped - see its own doc comment for the "no rollback"
-        // caveat.
+        // silently dropped - see its own doc comment for why that is not a
+        // rejection.
         //
         // CR 603.6d/614.1c: `battlefield_entries` is only ever
         // populated by `PlayLand` (a hand->battlefield move) as of
@@ -208,6 +217,7 @@ impl Engine {
             outcome.events.extend(counter_events);
         }
 
+        self.next_command_id += 1;
         self.pipeline_context = Some(PipelineContext {
             since_ledger,
             caused_by_command: Some(command_id),

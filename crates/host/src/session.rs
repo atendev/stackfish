@@ -10,7 +10,7 @@ use std::mem;
 
 use serde::Deserialize;
 use stackfish_engine::decision::{Answer, DecisionId, Rejection, RejectionCode};
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::{Engine, EngineSnapshot, StepStatus};
 use stackfish_engine::PlayerId;
 
 use crate::card_source::CardSource;
@@ -136,6 +136,12 @@ impl Session {
         };
         session.observe();
         Ok((session, Response::created(ids).to_bytes()))
+    }
+
+    /// Everything a rejected request must leave as it was. Hosts never need
+    /// this: it exists so a test can prove a rejection changes nothing.
+    pub fn snapshot(&self) -> EngineSnapshot {
+        self.engine.snapshot()
     }
 
     /// Handles one `advance`, `answer` or `poll` request.

@@ -431,6 +431,7 @@ impl Engine {
             Ok(outcome) => outcome,
             Err(err) => {
                 self.state.pending_timing_bypass = None;
+                self.next_command_id = command_id.0;
                 return Err(MadnessChoiceError::IllegalCast(err));
             }
         };
@@ -523,6 +524,7 @@ impl Engine {
             Err(err) => {
                 self.state.pending_free_cast = None;
                 self.state.pending_timing_bypass = None;
+                self.next_command_id = command_id.0;
                 return Err(CascadeChoiceError::IllegalCast(err));
             }
         };

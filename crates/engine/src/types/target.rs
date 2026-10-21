@@ -225,7 +225,7 @@ pub struct TargetRequirement {
 /// never constructed in 5+ slices) — a script-backed legality predicate now
 /// lives at `TargetFilter::Script`, nested inside `TargetRequirement`, so it
 /// still gets a real `count`/`up_to` instead of an ungoverned bare handle.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TargetSpec {
     Primitive(TargetRequirement),
     /// CR 601.2c: a spell/ability that uses the word "target" in more than

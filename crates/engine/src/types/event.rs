@@ -8,7 +8,7 @@ use crate::types::zone::ZoneKind;
 /// and the live action log can filter/group from a single underlying stream.
 /// This variant list is a first pass — expect additions as Phase 5 dry runs
 /// surface gaps.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GameEventKind {
     /// `last_known_info` (CR 603.10): a snapshot of `object` exactly as it
     /// was in `from`, captured by whoever produces this event *before*
@@ -277,14 +277,14 @@ pub enum GameEventKind {
 }
 
 /// One card of a `GameEventKind::Revealed`: its id and what it looked like.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RevealedCard {
     pub object: ObjectId,
     pub snapshot: GameObject,
 }
 
 /// Immutable fact. Once committed, never mutated or removed.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GameEvent {
     pub event_id: EventId,
     pub sequence_no: SequenceNo,

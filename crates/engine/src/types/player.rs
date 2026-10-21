@@ -13,6 +13,7 @@ use crate::types::zone::ZoneKind;
 /// `CardDefinition`-backed `GameObject` model, which would need a definition
 /// they don't have. Revisit if the zone model ever needs to enumerate
 /// "everything in the command zone" uniformly.
+#[derive(Clone, PartialEq, Debug)]
 pub struct Emblem {
     pub emblem_id: ObjectId,
     pub source: ObjectId,
@@ -25,6 +26,7 @@ impl Emblem {
     }
 }
 
+#[derive(Clone, PartialEq, Debug)]
 pub struct PlayerState {
     pub player_id: PlayerId,
     pub life: i32,
@@ -133,7 +135,7 @@ pub enum HandSizeEffect {
 /// (`attached_to_player`) and resolved via `GameState` lookup rather than an
 /// already-borrowed `&GameObject`, since `effective_max_hand_size` only ever
 /// had a bare `PlayerId` to check against before this variant existed.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HandSizeAffected {
     Filter(FilterController),
     EnchantedPlayer,
@@ -147,7 +149,7 @@ pub enum HandSizeAffected {
 /// `affected` mirror `CostModifier`'s own `controller`/`filter.controller`
 /// split exactly — whose "you"/"opponent" perspective this modifier's text
 /// is written from, and which player(s) it actually affects.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct HandSizeModifier {
     pub source: ObjectId,
     pub controller: PlayerId,
@@ -202,7 +204,7 @@ pub fn effective_max_hand_size(state: &GameState, modifiers: &[HandSizeModifier]
 /// two unrelated CR concepts on their second occurrence would be premature;
 /// worth extracting into one shared `PlayerFilter`-style type if a third
 /// mechanism ever needs the identical shape.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HandRevealAffected {
     Filter(FilterController),
     EnchantedPlayer,
@@ -227,7 +229,7 @@ pub enum HandRevealAffected {
 /// currently unreachable, named not hidden" stance `VisibilityPolicy` itself
 /// already takes — proven here only via `is_hand_revealed`'s own direct unit
 /// tests, not an end-to-end gameplay consumer.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct HandRevealModifier {
     pub source: ObjectId,
     pub controller: PlayerId,
@@ -268,7 +270,7 @@ pub fn is_hand_revealed(state: &GameState, modifiers: &[HandRevealModifier], pla
 /// worked example driving that variant; this one doesn't), so it's left out
 /// rather than spec-built ahead of a real case. Add it the same way
 /// `HandRevealAffected` mirrored `HandSizeAffected` if one ever turns up.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DrawLimitAffected {
     Filter(FilterController),
 }
@@ -281,7 +283,7 @@ pub enum DrawLimitAffected {
 /// real enforcement consumer from the start: `commands::propose_draw`, the
 /// one choke point both `Engine::continue_draw_cards` and the turn-based
 /// `Step::Draw` handling already share.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DrawLimitModifier {
     pub source: ObjectId,
     pub controller: PlayerId,
@@ -317,7 +319,7 @@ pub fn effective_draw_limit(modifiers: &[DrawLimitModifier], player: PlayerId) -
 /// `Filter(FilterController)`-only shape `DrawLimitAffected` already takes,
 /// same reasoning (no real card needs an `EnchantedPlayer` form of this
 /// effect either).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LandPlayAffected {
     Filter(FilterController),
 }
@@ -336,7 +338,7 @@ pub enum LandPlayAffected {
 /// `source` once the granting permanent leaves the battlefield (CR 611.3b:
 /// a static ability's continuous effect only applies while its source
 /// remains on the battlefield) — `phase5/modifier-source-cleanup`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LandPlayModifier {
     pub source: ObjectId,
     pub controller: PlayerId,

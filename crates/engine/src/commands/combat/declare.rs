@@ -47,10 +47,20 @@ pub(in crate::commands) fn execute_declare_attackers(
     // CR 508.1: "if at any point ... unable to comply ... the
     // declaration is illegal" - validate every attacker before
     // mutating anything, so an illegal batch taps nobody.
+    let mut seen_attackers = Vec::with_capacity(attackers.len());
     for (attacker, target) in &attackers {
+        // CR 508.1: each creature is declared as an attacker once.
+        if seen_attackers.contains(attacker) {
+            return Err(CommandError::IllegalAction(
+                "the same creature can't be declared as an attacker twice".to_string(),
+            ));
+        }
+        seen_attackers.push(*attacker);
         attacker_can_attack(state, script_runtime, actor, *attacker)?;
         attack_target_is_legal(state, script_runtime, actor, target)?;
     }
+    // TODO(026): menace, must-attack and other whole-declaration attack
+    // requirements and restrictions are not checked here yet.
 
     // CR 508.1f: tapping an attacker isn't a cost - attacking
     // simply causes it. CR 702.20a: Vigilance means attacking
@@ -265,6 +275,9 @@ pub(in crate::commands) fn execute_declare_blockers(
         block_is_legal(state, script_runtime, actor, combat, *blocker, *attacker)?;
     }
 
+    // TODO(026): menace and the other whole-declaration rules are checked
+    // here only. `legal_blockers` does not know about them, so a Decision
+    // can list a block that this check then rejects at `step()`.
     // CR 702.111b: an attacker with menace can't be blocked except
     // by two or more creatures - a whole-batch check, since it's
     // about how many blockers ended up assigned to that attacker,

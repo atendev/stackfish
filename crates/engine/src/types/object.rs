@@ -12,7 +12,7 @@ use crate::types::zone::ZoneKind;
 /// battlefield whose owner secretly knows its identity, or a card on top of
 /// a (hidden) library revealed to one player by a scry/surveil-style effect.
 /// Keeping this field, but it's an override layer, not the primary source.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VisibilityPolicy {
     /// Visible to all players regardless of zone default (e.g. battlefield objects).
     pub public: bool,
@@ -40,7 +40,7 @@ impl VisibilityPolicy {
 /// `GameState`'s per-zone `VecDeque<ObjectId>`s in `game.rs`), so there's a
 /// single place that owns order instead of two places that can drift out of
 /// sync.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameObject {
     pub object_id: ObjectId,
     pub lineage: ObjectLineage,
