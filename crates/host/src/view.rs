@@ -221,7 +221,8 @@ impl Observed {
 
 /// Reads the ledger one step at a time. It remembers where objects sat in a
 /// hidden zone after they left, because their old ids can still turn up in a
-/// later event (a trigger whose source was the card in hand).
+/// later event (a trigger whose source was the card in hand), and where a
+/// token went when it entered one, because it ceases to exist there.
 #[derive(Default)]
 pub struct Observer {
     retired: HashMap<ObjectId, Place>,
@@ -251,8 +252,19 @@ impl Observer {
                 {
                     self.retired.insert(previous, mv.from.place);
                 }
+                // A token that moves into a hidden zone ceases there (CR 111.7),
+                // and the event that says so names its id.
+                if is_hidden(*to) && last_known_info.as_ref().is_some_and(|o| o.is_token) {
+                    self.retired.insert(*object, mv.to.place);
+                }
                 Observed::Move(mv)
             }
+            // CR 111.7: a token in a hidden zone (a hand, a library) ceases to
+            // exist there. Only its owner and omniscient Seats may be told.
+            K::TokenCeased { object } => match self.hidden_place(state, *object) {
+                Some(Place { owner: Some(owner), .. }) => Observed::Controller { player: owner, kind: plain() },
+                _ => Observed::Public(plain()),
+            },
             K::Cycled { object, last_known_info } | K::MadnessExiled { object, last_known_info } => {
                 Observed::Marker(Marker {
                     cycled: matches!(event.kind, K::Cycled { .. }),
@@ -309,7 +321,6 @@ impl Observer {
             | K::BecameCopy { .. }
             | K::TextBoxesExchanged { .. }
             | K::Regenerated { .. }
-            | K::TokenCeased { .. }
             | K::Attached { .. }
             | K::AttachedToPlayer { .. }
             | K::Unattached { .. }

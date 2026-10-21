@@ -448,6 +448,43 @@ mod tests {
         assert_eq!(opponent["object"], "9001");
     }
 
+    /// A token returned to its owner's hand has a hand id the opponent never
+    /// received. When the token then ceases to exist (CR 111.7), that event
+    /// would otherwise hand the opponent the id.
+    #[test]
+    fn a_token_that_ceases_in_a_hand_is_reported_only_to_its_owner() {
+        let mut session = started();
+        let card = a_card_in_player_zero_s_hand(&session);
+        let token = stackfish_engine::GameObject { is_token: true, zone: ZoneKind::Battlefield, ..card.clone() };
+        observe(
+            &mut session,
+            GameEventKind::ZoneChange {
+                object: card.object_id,
+                from: ZoneKind::Battlefield,
+                to: ZoneKind::Hand,
+                last_known_info: Some(token),
+            },
+        );
+        // The token ceases: it is gone from the state by the time the event is read.
+        let state = session.engine.state_mut();
+        state.zone_mut(ZoneKind::Hand, Some(PlayerId(0))).unwrap().remove(card.object_id);
+        state.objects.remove(&card.object_id);
+
+        let ceased = observe(&mut session, GameEventKind::TokenCeased { object: card.object_id });
+        for (viewer, receives) in VIEWERS.into_iter().zip([true, false, false, true]) {
+            assert_eq!(ceased.kind_for(viewer).is_some(), receives, "{viewer:?}");
+        }
+    }
+
+    #[test]
+    fn a_token_that_ceases_in_a_public_zone_is_reported_to_everyone() {
+        let mut session = started();
+        let ceased = observe(&mut session, GameEventKind::TokenCeased { object: ObjectId(9002) });
+        for viewer in VIEWERS {
+            assert!(ceased.kind_for(viewer).is_some(), "{viewer:?}");
+        }
+    }
+
     #[test]
     fn a_trigger_whose_source_sits_in_a_hand_hides_the_source_from_the_opponent() {
         let mut session = started();
