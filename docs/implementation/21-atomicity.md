@@ -30,6 +30,7 @@ Test files:
 | --- | --- |
 | `engine/tests/phase5_atomicity.rs` | 45 tests, at least one illegal input for each of the 9 command arms, plus nested mana abilities |
 | `engine/tests/phase5_atomicity_submit.rs` | Every `submit_*` and `decline_*` method (33 rows) asked when it is not waiting, a pending payment, a cleanup discard, Madness and Cascade |
+| `engine/src/engine/atomicity_tests.rs` | 56 bad answers to 23 kinds of hand-built pause (scry, surveil, search, attach choices, devour, amplify, trigger order, targets and modes, replacement, legend rule, copy, discard choice, unless paid, script choices, mulligan, bottom, spell mode, payment). Each must be refused with the engine unchanged and not with a "not awaiting" error |
 | `engine/tests/phase5_atomicity_harness.rs` | Meta-tests: the harness fails when state, a counter or the ledger changes, including a mutate-then-`Err` call |
 | `engine/tests/phase5_sba_event_order.rs` | Regression for the `HashMap` ordering bug below |
 | `host/tests/phase5_atomicity_proof_game.rs` | Whole games with illegal Answers injected at every Decision |
@@ -115,6 +116,6 @@ Because the facade checks an Answer against the Decision's entries first (`decis
 - `TODO(036)`: `combine_chosen_modes` decides which mode pairs combine at cast time only. The modal entries can offer a pair that is then rejected.
 - `MakeChoice` accepts any call. It should reject when no choice is pending.
 - `DeclareBands` accepts a second declaration and overwrites the first.
-- Scry and Search now get bad answers in the proof games. The other pauses that need a scripted library walk or an ordering choice (surveil, attach choices, replacement and trigger ordering, devour, amplify) still have only the wrong-state tests and the audit above.
+- Every pause with something to refuse now gets bad answers from `atomicity_tests.rs`. Those pauses are built by hand, not reached by playing, which is enough because a rejection happens before the code reads anything beyond the pause. Only Scry, Search, payment, discard, Madness and Cascade are also reached by playing.
 - `Engine::new_game` does not load `alternative_costs()` or `buyback_cost()` from a script. They are the same kind of declaration as `operation()`.
 - Cascade and Madness casts bypass `submit_action`, so their rejections are `IllegalCast` errors from the `submit_*` method. They are atomic now, but they do not go through the facade checks.

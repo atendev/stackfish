@@ -37,6 +37,8 @@ mod turn;
 mod tests;
 #[cfg(test)]
 mod decision_tests;
+#[cfg(test)]
+mod atomicity_tests;
 
 pub use process_state::*;
 
