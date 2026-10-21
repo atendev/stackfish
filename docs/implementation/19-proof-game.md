@@ -72,6 +72,10 @@ declare modes.
 
 Engine regressions: `phase5_legal_actions.rs` (3 zone tests), `phase5_sba_basics.rs` (one test, `creatures_that_die_together_leave_in_id_order`), `phase5_operation_only_script.rs` (2).
 
+## Spells were inert until `new_game` loaded their scripts
+
+Until the atomicity work (see `21-atomicity.md`), every spell in the set resolved doing nothing: `Engine::new_game` did not copy a script's `operation()` or `target_requirement()` onto the card. The bot cast them, paid for them and passed priority, but no Shock dealt damage and no Peek scried. `new_game` now loads both. Games change as a result: scry and search Decisions open, tokens appear and Bounce returns permanents to hands. The seed-21 hidden-id test caught a `token_ceased` leak that this exposed, now fixed in `view.rs`.
+
 ## Open items
 
 - TODO(proof bot): the bot never accepts a `may_cast` Decision (madness, cascade), because the Decision does not list

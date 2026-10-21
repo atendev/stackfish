@@ -38,6 +38,9 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - No card in the set uses a sacrifice or discard cost, menace or a must-attack rule, so the engine atomicity item
     (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it, and
     `Bot::injecting_illegal_answers` now sends illegal Answers at every Decision (see `21-atomicity.md`).
+  - Proof spells were inert until `Engine::new_game` started loading a script's `operation()` and `target_requirement()`
+    (see `19-proof-game.md`). It still does not load `alternative_costs()` or `buyback_cost()`, and a host that builds
+    `CardDefinition`s without `new_game` gets neither.
 
 - **Host Session (`phase5/host-session`, B3)**: see `18-host-session.md`. Open items:
   - No replay export and no carddb-backed `CardSource`.

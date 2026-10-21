@@ -36,7 +36,7 @@ fn play(players: usize, seed: u64, injecting: bool) -> Game {
 #[test]
 fn illegal_answers_at_every_decision_change_nothing_and_the_game_ends_the_same() {
     let mut shapes = std::collections::BTreeMap::<String, usize>::new();
-    for seed in 0..6 {
+    for seed in 0..12 {
         let plain = play(2, seed, false);
         let injected = play(2, seed, true);
 
@@ -56,11 +56,24 @@ fn illegal_answers_at_every_decision_change_nothing_and_the_game_ends_the_same()
             *shapes.entry(shape.clone()).or_default() += count;
         }
     }
-    // Every Decision shape the bot meets in these games was attacked.
-    for shape in ["action", "pick", "yes_no", "payment", "declare_attackers", "declare_blockers"] {
-        assert!(shapes.get(shape).copied().unwrap_or(0) > 0, "no illegal Answer was sent at a {shape} Decision: {shapes:?}");
+    // Every kind of Decision these games reach was attacked. Scry and Search
+    // only open because `Engine::new_game` loads a spell's `operation()`.
+    for kind in [
+        "action (Priority)",
+        "payment (Payment)",
+        "declare_attackers (Declare attackers)",
+        "declare_blockers (Declare blockers)",
+        "assign_damage (Assign combat damage)",
+        "partition (Scry)",
+        "pick (Search)",
+        "pick (Cleanup discard)",
+        "pick (Mulligan bottom)",
+        "yes_no (May)",
+        "yes_no (Mulligan)",
+    ] {
+        assert!(shapes.get(kind).copied().unwrap_or(0) > 0, "no illegal Answer was sent at a {kind} Decision: {shapes:?}");
     }
-    println!("illegal Answers turned down, by Decision shape: {shapes:?}");
+    println!("illegal Answers turned down, by Decision: {shapes:?}");
 }
 
 #[test]

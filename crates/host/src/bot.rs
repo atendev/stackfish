@@ -150,7 +150,7 @@ pub struct Bot {
     hash: u64,
     injecting: bool,
     illegal_rejected: usize,
-    /// Illegal Answers turned down, by the shape of the Decision they answered.
+    /// Illegal Answers turned down, by the shape and mechanic of the Decision they answered, such as `partition (Scry)`.
     illegal_by_shape: BTreeMap<String, usize>,
     /// The mana cost of each card the bot has seen, by object id. A move event
     /// carries the identity of every card its Seat may see, including the
@@ -218,7 +218,7 @@ impl Bot {
         self
     }
 
-    /// How many illegal Answers were turned down, by Decision shape.
+    /// How many illegal Answers were turned down, by Decision shape and mechanic.
     pub fn illegal_by_shape(&self) -> &BTreeMap<String, usize> {
         &self.illegal_by_shape
     }
@@ -421,7 +421,8 @@ impl Bot {
                 return Err(BotError::NotAtomic(format!("the engine changed: {context}")));
             }
             self.illegal_rejected += 1;
-            *self.illegal_by_shape.entry(decision["shape"].as_str().unwrap_or_default().to_string()).or_default() += 1;
+            let key = format!("{} ({})", decision["shape"].as_str().unwrap_or_default(), decision["mechanic"].as_str().unwrap_or_default());
+            *self.illegal_by_shape.entry(key).or_default() += 1;
         }
         Ok(())
     }

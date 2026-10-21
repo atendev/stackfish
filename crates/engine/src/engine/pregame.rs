@@ -7,6 +7,8 @@ use std::collections::{HashMap, VecDeque};
 use crate::commands;
 use crate::engine_context::PipelineExit;
 use crate::script::ScriptRuntime;
+use crate::types::ability::AbilityEffect;
+use crate::types::card::ScriptReference;
 use crate::types::command::{PlayerAction, PlayerActionKind};
 use crate::types::config::GameConfig;
 use crate::types::counter::CounterSet;
@@ -16,6 +18,7 @@ use crate::types::ids::{ObjectId, ObjectLineage, PlayerId, SequenceNo};
 use crate::types::mana::ManaPool;
 use crate::types::object::{GameObject, VisibilityPolicy};
 use crate::types::player::PlayerState;
+use crate::types::target::TargetSpec;
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::{Zone, ZoneKind};
 
@@ -181,7 +184,7 @@ impl Engine {
             pending_free_cast: None,
         };
 
-        Engine {
+        let mut engine = Engine {
             state,
             process_state: ProcessState::PriorityWindow,
             pipeline_context: None,
@@ -196,6 +199,68 @@ impl Engine {
             pregame_setup_done: false,
             script_runtime: ScriptRuntime::new(),
             decisions: crate::decision::DecisionTracker::new(),
+        };
+        engine.load_script_declarations();
+        engine
+    }
+
+    /// Copies what each card's script declares for a plain spell onto its
+    /// `CardDefinition`: `s.operation()` becomes `effect` (CR 608.2m) and
+    /// `s.target_requirement()` becomes `target_requirement`. Both are read
+    /// once per distinct script, not per zone entry like `register_abilities`,
+    /// because a spell is cast from the hand, before any script has run.
+    ///
+    /// Without this, a spell written only in Lua (Shock, Peek, Rampant
+    /// Growth) was cast with no target and resolved doing nothing. The
+    /// scenario crate did this wiring for its own fixtures; `new_game` is the
+    /// one place every other host builds cards through. A value already set in
+    /// Rust wins over the script, so a card that declares its modes or effect
+    /// in Rust keeps them.
+    ///
+    /// The values must come from this engine's own runtime: a custom-function
+    /// `ScriptHandle` is only valid against the runtime that decoded it.
+    ///
+    /// TODO: `alternative_costs()` and `buyback_cost()` are the same kind of
+    /// script declaration and are not loaded here yet.
+    fn load_script_declarations(&mut self) {
+        // Sorted: `objects` is a `HashMap`, and a failing script logs an event.
+        let mut ids: Vec<ObjectId> = self.state.objects.keys().copied().collect();
+        ids.sort();
+        let mut loaded: HashMap<String, (Option<AbilityEffect>, Option<TargetSpec>)> = HashMap::new();
+        for id in ids {
+            let definition = &self.state.objects[&id].definition;
+            let ScriptReference::Inline(source) = &definition.script_ref else { continue };
+            if source.trim().is_empty() || (definition.effect.is_some() && definition.target_requirement.is_some()) {
+                continue;
+            }
+            let (script_ref, source) = (definition.script_ref.clone(), source.clone());
+            let (effect, requirement) = match loaded.get(&source) {
+                Some(found) => found.clone(),
+                None => {
+                    let operation = self.script_runtime.build_operation(&source);
+                    let requirement = self.script_runtime.build_target_requirement(&source);
+                    let failed = operation.is_err() || requirement.is_err();
+                    let effect = match &operation {
+                        Ok(Some((primitive, handle))) => primitive.clone().or(Some(AbilityEffect::Script(*handle))),
+                        _ => None,
+                    };
+                    let requirement_ok = requirement.as_ref().ok().cloned().flatten();
+                    self.record_script_error(id, &script_ref, operation.map(|_| ()));
+                    self.record_script_error(id, &script_ref, requirement.map(|_| ()));
+                    // A script that failed is not cached, so every copy logs it.
+                    if !failed {
+                        loaded.insert(source, (effect.clone(), requirement_ok.clone()));
+                    }
+                    (effect, requirement_ok)
+                }
+            };
+            let definition = &mut self.state.objects.get_mut(&id).expect("id came from the map").definition;
+            if definition.effect.is_none() {
+                definition.effect = effect;
+            }
+            if definition.target_requirement.is_none() {
+                definition.target_requirement = requirement;
+            }
         }
     }
 

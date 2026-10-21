@@ -92,9 +92,19 @@ CR 601.2g and 605.3a let a player activate a mana ability while paying for a spe
 
 ## The proof-game test
 
-`illegal_answers_at_every_decision_change_nothing_and_the_game_ends_the_same` plays seeds 0 to 5 twice, with and without injection. Before each real Answer the injected bot sends the replies from `illegal.rs`: a reply of the wrong shape, and a reply of the right shape with illegal content (a made-up id, an out-of-range mode or order index, 50 colorless mana for a payment, an extra attacker or blocker, one point too much damage). For each, the bot checks that the Session refuses it, that the same Decision is still open, and that `Session::snapshot()` is equal before and after. At the end of the game the two runs must have the same winner, answer count, per-seat events, final `GameState` and `next_command_id`.
+`illegal_answers_at_every_decision_change_nothing_and_the_game_ends_the_same` plays seeds 0 to 11 twice, with and without injection. Before each real Answer the injected bot sends the replies from `illegal.rs`: a reply of the wrong shape, and a reply of the right shape with illegal content (a made-up id, an out-of-range mode or order index, 50 colorless mana for a payment, an extra attacker or blocker, one point too much damage). For each, the bot checks that the Session refuses it, that the same Decision is still open, and that `Session::snapshot()` is equal before and after. At the end of the game the two runs must have the same winner, answer count, per-seat events, final `GameState` and `next_command_id`.
 
-The six seeds send about 19,000 illegal Answers. By Decision shape: action 16,848, payment 2,146, declare_attackers 156, yes_no 72, declare_blockers 68, assign_damage 6, pick 4. The test asserts that action, pick, yes_no, payment, declare_attackers and declare_blockers were all attacked. The `order`, `modes`, `partition`, `targets` and `may_cast` shapes have injection code but did not occur in these games (I did not check 40 seeds for them), so no coverage is claimed. A three-player game with seed 7 passes the same comparison.
+The twelve seeds send about 43,000 illegal Answers. The test asserts that each of these Decisions was attacked at least once: priority, payment, declare attackers, declare blockers, assign combat damage, Scry, Search, cleanup discard, mulligan bottom, the "may" yes/no and the mulligan yes/no. A three-player game with seed 7 passes the same comparison.
+
+The first version of this test attacked only the first seven of those. Scry and Search never opened, in any seed, because `Engine::new_game` did not load a spell's `operation()` and `target_requirement()` from its script (see "The inert proof spells" below). The `order`, `modes`, `targets` and `may_cast` shapes still do not occur: no proof card has a triggered ability with targets or several triggers at once, and none has Madness or Cascade. They have injection code but no coverage is claimed.
+
+## The inert proof spells
+
+Every spell in the proof set declares its effect in Lua (`s.operation()`) and its targets in `s.target_requirement()`. `CardDefinition.effect` and `target_requirement` stayed `None`, so Shock was cast with no target and dealt no damage, Peek never scried and Rampant Growth never searched. The scenario crate wired these two values for its own fixtures. The host builds every card through `Engine::new_game`, which did not. Nothing flagged it, because an inert spell raises no script error.
+
+`Engine::new_game` now loads both for every card with an inline script (`load_script_declarations` in `engine/pregame.rs`). A value already set in Rust wins. A script that fails to load logs a `ScriptError` event. Tests: `phase5_new_game_script_declarations.rs` (3).
+
+Making spells work exposed a visibility leak. Raise Militia's token, returned to a hand by Bounce, ceased to exist there, and `token_ceased` carried its hand id to the opponent. `view.rs` now remembers where a token entered a hidden zone and sends `token_ceased` only to its owner and omniscient Seats. Tests: two in `session.rs`.
 
 Because the facade checks an Answer against the Decision's entries first (`decision/check.rs`), most injected replies never reach the engine. The engine-level coverage comes from the per-arm tests above.
 
@@ -105,5 +115,6 @@ Because the facade checks an Answer against the Decision's entries first (`decis
 - `TODO(036)`: `combine_chosen_modes` decides which mode pairs combine at cast time only. The modal entries can offer a pair that is then rejected.
 - `MakeChoice` accepts any call. It should reject when no choice is pending.
 - `DeclareBands` accepts a second declaration and overwrites the first.
-- The pauses that need a scripted library walk or an ordering choice (scry, surveil, search, attach choices, replacement and trigger ordering) have only the wrong-state tests and the audit above. The proof bot's games did not reach them with a bad answer.
+- Scry and Search now get bad answers in the proof games. The other pauses that need a scripted library walk or an ordering choice (surveil, attach choices, replacement and trigger ordering, devour, amplify) still have only the wrong-state tests and the audit above.
+- `Engine::new_game` does not load `alternative_costs()` or `buyback_cost()` from a script. They are the same kind of declaration as `operation()`.
 - Cascade and Madness casts bypass `submit_action`, so their rejections are `IllegalCast` errors from the `submit_*` method. They are atomic now, but they do not go through the facade checks.
