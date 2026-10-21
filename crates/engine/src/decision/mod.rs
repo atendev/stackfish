@@ -182,6 +182,7 @@ impl Rejection {
 }
 
 /// Hands out Decision ids and remembers which one is open.
+#[derive(Debug)]
 pub(crate) struct DecisionTracker {
     next: u64,
     open: Option<DecisionId>,

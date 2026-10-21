@@ -47,6 +47,12 @@ impl ScriptRuntime {
         ScriptRuntime { lua, registry }
     }
 
+    /// Number of loaded callbacks; `Engine::snapshot` uses it to prove a
+    /// rejected input registered nothing.
+    pub fn handle_count(&self) -> usize {
+        self.registry.borrow().scripts.len()
+    }
+
     /// Loads `source` (a Lua chunk that must evaluate to a single function
     /// value, e.g. `return function(...) ... end`) and stores it under a
     /// fresh `ScriptHandle`. Narrower than `run_card_script` below — this

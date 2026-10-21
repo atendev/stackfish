@@ -7,6 +7,7 @@
 mod bot;
 mod card_source;
 mod envelope;
+mod illegal;
 mod proof_cards;
 mod session;
 mod setup;

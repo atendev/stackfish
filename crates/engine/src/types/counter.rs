@@ -32,7 +32,7 @@ pub enum CounterKind {
 /// Energy/Charge/Loyalty, none of which ever interact with layer 7) sees no
 /// behavior change at all, only P/T-affecting kinds' *relative timing*
 /// against other layer-7c effects is new.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CounterSet {
     counters: Vec<(CounterKind, i32, crate::types::ids::SequenceNo)>,
 }

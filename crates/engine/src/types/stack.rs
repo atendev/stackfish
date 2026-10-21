@@ -4,7 +4,7 @@ use crate::types::ids::{ObjectId, PlayerId, ScriptHandle, Target};
 use crate::types::object::GameObject;
 use crate::types::target::TargetSpec;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum StackEntryKind {
     Spell,
     ActivatedAbility,
@@ -13,7 +13,7 @@ pub enum StackEntryKind {
 }
 
 /// A spell, activated ability, triggered ability, or copy thereof on the stack.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct StackObject {
     pub stack_id: ObjectId,
     pub kind: StackEntryKind,
@@ -109,7 +109,7 @@ pub struct StackObject {
 }
 
 /// See `StackObject::pending_mode_choice`'s own doc comment.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct PendingModeChoice {
     pub chooser: PlayerId,
     pub min: u32,

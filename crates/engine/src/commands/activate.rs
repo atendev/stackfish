@@ -199,12 +199,15 @@ pub(super) fn execute_activate_ability(
                     ));
                 }
 
+                // Checked before the tap so a missing player rejects without
+                // a half-activated ability (024).
+                if state.player(actor).is_none() {
+                    return Err(CommandError::IllegalAction("actor has no player state".to_string()));
+                }
                 state.object_mut(source).ok_or(CommandError::InvalidTarget)?.tapped = true;
                 let pool = &mut state
                     .player_mut(actor)
-                    .ok_or_else(|| {
-                        CommandError::IllegalAction("actor has no player state".to_string())
-                    })?
+                    .expect("player confirmed present above")
                     .mana_pool;
                 for unit in &units {
                     pool.add_unit(*unit);

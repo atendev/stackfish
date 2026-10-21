@@ -83,7 +83,7 @@ pub enum FilterController {
     Any,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AdditionalCost {
     /// CR 602.5a's `{T}` on an activated ability's own source — distinct
     /// from `TapPermanents`, which taps *other* permanents chosen by the
@@ -122,7 +122,7 @@ pub enum AdditionalCost {
     Other { description: String },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AlternativeCost {
     /// e.g. flashback, escape — paying this cost replaces the mana cost
     /// entirely, and is announced as part of casting (CR 601.2b), not
@@ -162,7 +162,7 @@ pub enum AlternativeCost {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CostSpec {
     pub mana: Option<ManaCost>,
     pub additional: Vec<AdditionalCost>,
@@ -226,7 +226,7 @@ impl CostSpec {
 /// `Game.CreateStaticAbility`/`Game.CreateReplacementEffect`'s own
 /// queue-and-drain shape — a direct Rust struct literal still works too
 /// (every existing fixture using one is unaffected).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CostModifier {
     pub source: ObjectId,
     /// Whose "you"/"opponent" the modifier's own `filter` is relative to —
@@ -624,7 +624,7 @@ pub(crate) fn spend(units: &[ManaUnit], pool: &mut ManaPool) {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum CostPayment {
     /// The exact literal payment for a mana cost (CR 118.13a) — not an echo
     /// of the cost's shape. `units` is the exact literal mana spent from the
@@ -686,6 +686,7 @@ pub fn colors_spent(payments: &[CostPayment]) -> ColorSet {
 /// lands, removes the mana, sacrifices the creature, etc.) if the entire plan
 /// checks out. No partial payment ever lands in game state; either the whole
 /// `PaymentPlan` is paid or none of it is.
+#[derive(Clone, PartialEq, Debug)]
 pub struct PaymentPlan {
     pub payments: Vec<CostPayment>,
 }

@@ -14,11 +14,12 @@
 //! eligible objects. It answers "cannot pay", which unwinds the cast.
 //! TODO(proof bot): hybrid, Phyrexian, snow and `{X}` costs get "cannot pay".
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{Value, json};
 
 use crate::envelope::PROTOCOL_VERSION;
+use crate::illegal::illegal_replies;
 use crate::session::Session;
 
 /// A small deterministic generator (splitmix64), so the bot needs no crate and
@@ -92,6 +93,9 @@ pub enum BotError {
     Rejected(String),
     /// The game went on past the answer limit.
     AnswerLimit(usize),
+    /// An illegal Answer sent on purpose (`injecting_illegal_answers`) was
+    /// accepted, changed the engine, or closed its Decision.
+    NotAtomic(String),
 }
 
 impl std::fmt::Display for BotError {
@@ -101,6 +105,7 @@ impl std::fmt::Display for BotError {
             BotError::Fatal(m) => write!(f, "fatal pipeline error: {m}"),
             BotError::Rejected(m) => write!(f, "answer rejected: {m}"),
             BotError::AnswerLimit(n) => write!(f, "no end after {n} answers"),
+            BotError::NotAtomic(m) => write!(f, "a rejection was not atomic: {m}"),
         }
     }
 }
@@ -128,6 +133,9 @@ pub struct Outcome {
     /// FNV-1a over every request and response, so two runs compare in one
     /// number.
     pub transcript_hash: u64,
+    /// Illegal Answers sent on purpose and turned down, as
+    /// `injecting_illegal_answers` asks. Zero otherwise.
+    pub illegal_rejected: usize,
 }
 
 pub struct Bot {
@@ -140,6 +148,10 @@ pub struct Bot {
     answers: usize,
     rejected: usize,
     hash: u64,
+    injecting: bool,
+    illegal_rejected: usize,
+    /// Illegal Answers turned down, by the shape of the Decision they answered.
+    illegal_by_shape: BTreeMap<String, usize>,
     /// The mana cost of each card the bot has seen, by object id. A move event
     /// carries the identity of every card its Seat may see, including the
     /// Seat's own hand.
@@ -177,6 +189,9 @@ impl Bot {
             answers: 0,
             rejected: 0,
             hash: FNV_OFFSET,
+            injecting: false,
+            illegal_rejected: 0,
+            illegal_by_shape: BTreeMap::new(),
             costs: HashMap::new(),
             seats: BTreeSet::new(),
             record: false,
@@ -192,6 +207,20 @@ impl Bot {
         self.record = true;
         self.watchers = watchers.to_vec();
         self
+    }
+
+    /// Sends illegal Answers before each real one: at every Decision, each reply
+    /// from `illegal::illegal_replies`. Each must be turned down with the
+    /// Decision still open and the engine exactly as it was. The real game is
+    /// unaffected, so it plays out as it would without them.
+    pub fn injecting_illegal_answers(mut self) -> Bot {
+        self.injecting = true;
+        self
+    }
+
+    /// How many illegal Answers were turned down, by Decision shape.
+    pub fn illegal_by_shape(&self) -> &BTreeMap<String, usize> {
+        &self.illegal_by_shape
     }
 
     /// Keeps every request and response, for `transcript`.
@@ -223,6 +252,7 @@ impl Bot {
                         answers: self.answers,
                         rejected: self.rejected,
                         transcript_hash: self.hash,
+                        illegal_rejected: self.illegal_rejected,
                     });
                 }
                 Progress::Answered | Progress::Running => {
@@ -262,6 +292,9 @@ impl Bot {
         }
 
         let reply = self.reply_for(seat, &decision);
+        if self.injecting {
+            self.send_illegal_answers(session, seat, &decision, &reply.value)?;
+        }
         let answered = self.answer(session, seat, &decision, &reply)?;
         self.answers += 1;
         if answered["status"] == "game_over" {
@@ -362,6 +395,35 @@ impl Bot {
         }
         self.accepted(seat, &Reply { value: fallback, spent: None }, &sent);
         Ok(sent)
+    }
+
+    /// Sends each illegal reply for `decision` and checks it is refused, the
+    /// Decision stays open, and the engine is unchanged.
+    fn send_illegal_answers(&mut self, session: &mut Session, seat: u32, decision: &Value, legal: &Value) -> Result<(), BotError> {
+        for illegal in illegal_replies(decision, legal) {
+            let before = session.snapshot();
+            let request = json!({
+                "v": PROTOCOL_VERSION,
+                "kind": "answer",
+                "seat": seat,
+                "body": { "decision": decision["id"], "reply": illegal },
+            });
+            let body = self.send(session, request)?;
+            let context = format!("Decision {} ({}), reply {illegal}", decision["id"], decision["shape"]);
+            if rejection(&body).is_none() {
+                return Err(BotError::NotAtomic(format!("accepted: {context}")));
+            }
+            if body["decision"]["id"] != decision["id"] {
+                return Err(BotError::NotAtomic(format!("the Decision did not stay open: {context}")));
+            }
+            let after = session.snapshot();
+            if before != after {
+                return Err(BotError::NotAtomic(format!("the engine changed: {context}")));
+            }
+            self.illegal_rejected += 1;
+            *self.illegal_by_shape.entry(decision["shape"].as_str().unwrap_or_default().to_string()).or_default() += 1;
+        }
+        Ok(())
     }
 
     fn send_answer(&mut self, session: &mut Session, seat: u32, decision: &Value, reply: &Value) -> Result<Value, BotError> {

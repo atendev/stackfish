@@ -13,6 +13,7 @@ use crate::types::ids::{ObjectId, PlayerId, Target};
 /// already submitted, both to stop a repeat submission and to distinguish
 /// "declared zero blockers" from "hasn't declared yet" (CR 509 allows the
 /// former).
+#[derive(Clone, PartialEq, Debug)]
 pub struct CombatState {
     pub attackers: Vec<(ObjectId, Target)>,
     pub blocks: Vec<(ObjectId, ObjectId)>,

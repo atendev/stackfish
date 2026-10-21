@@ -6,6 +6,7 @@ use crate::types::ids::{CommandId, EventId};
 /// started. Without this, `CollectTriggers`'s `since` had no real source
 /// except a hardcoded `0`, which is wrong for every action after the first
 /// in a game.
+#[derive(Debug)]
 pub struct PipelineContext {
     pub since_ledger: usize,
     pub caused_by_command: Option<CommandId>,
@@ -16,6 +17,7 @@ pub struct PipelineContext {
 /// trigger machinery settles. Decided at the point priority passes resolve
 /// (all players passed in a row) or a command commits, then consumed once
 /// the trigger-placement stage finishes.
+#[derive(Debug)]
 pub enum PipelineExit {
     BackToPriority,
     ResolveStackTop,

@@ -398,6 +398,7 @@ pub enum BottomCardsError {
 /// own doc comment) - without this, the outer run's trigger-collection
 /// window and post-settle destination would silently pick up the nested
 /// run's values instead of its own once resumed.
+#[derive(Debug)]
 struct SuspendedPayment {
     request: PendingPaymentRequest,
     pipeline_context: Option<PipelineContext>,
@@ -495,6 +496,45 @@ pub struct Engine {
     /// Decision id counter for the `decision` facade. TODO(B3): moves into
     /// the Session.
     pub(crate) decisions: crate::decision::DecisionTracker,
+}
+
+/// Everything a rejected input must leave exactly as it was (024: validate
+/// before mutate). `state` is compared structurally; the engine-side fields
+/// that have no `PartialEq` (pipeline stage, suspended payments, ...) are
+/// compared through their `Debug` rendering, which is stable for an
+/// unmodified value. Taken by `Engine::snapshot`.
+#[derive(Clone, PartialEq, Debug)]
+pub struct EngineSnapshot {
+    pub state: GameState,
+    pub next_command_id: u64,
+    pub script_handles: usize,
+    pub transient: String,
+}
+
+impl Engine {
+    /// Captures the state a rejection must not change. See `EngineSnapshot`.
+    pub fn snapshot(&self) -> EngineSnapshot {
+        EngineSnapshot {
+            state: self.state.clone(),
+            next_command_id: self.next_command_id,
+            script_handles: self.script_runtime.handle_count(),
+            transient: format!(
+                "{:?}",
+                (
+                    &self.process_state,
+                    &self.pipeline_context,
+                    &self.pipeline_exit,
+                    &self.departed_triggered_abilities,
+                    &self.recollect_triggers_since,
+                    &self.pending_payment,
+                    &self.modal_continuation,
+                    &self.suspended_payments,
+                    &self.pregame_setup_done,
+                    &self.decisions,
+                )
+            ),
+        }
+    }
 }
 
 impl Engine {
@@ -665,9 +705,8 @@ impl Engine {
     /// established for a script error — the caller's existing conservative
     /// fallback (proceed as though nothing happened) is unchanged; this
     /// only makes a *real* failure observable in the ledger rather than
-    /// invisible. No rollback of whatever the call already mutated is
-    /// attempted — same non-atomicity `StepStatus::Error`'s own doc comment
-    /// already admits for `execute_command` itself.
+    /// invisible. A script error is not a rejected input (024), so the
+    /// resolution that hit it carries on and nothing is rolled back.
     ///
     /// Deliberately skips logging when `script_ref` is `ByKey` or an empty
     /// `Inline` source — `run_card_script`'s own doc comment documents

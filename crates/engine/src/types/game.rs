@@ -14,6 +14,7 @@ use crate::types::zone::{Zone, ZoneKind};
 
 /// Seeded once at game start. Every draw is itself a logged `GameEvent`
 /// (`RngDrawn`), not an ambient side effect, so replay is exact.
+#[derive(Clone, PartialEq, Debug)]
 pub struct RngState {
     pub seed: u64,
     pub draws_consumed: u64,
@@ -30,6 +31,7 @@ pub struct LinkedExile {
 
 /// Owns the full mutable state for one game. Player count is a runtime
 /// parameter — not hardcoded to 2 or 4 — to support N-player Commander.
+#[derive(Clone, PartialEq, Debug)]
 pub struct GameState {
     pub players: Vec<PlayerState>,
     /// Turn order as a list of player indices into `players`; APNAP order is

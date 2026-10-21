@@ -243,11 +243,18 @@ pub enum StepStatus {
     /// same reason as `AwaitingPayment` — this is a mandatory cleanup action,
     /// not a priority decision.
     AwaitingDiscard { player: PlayerId, hand_size: usize, max_hand_size: usize },
-    /// A command failed mid-pipeline. The engine resets to `PriorityWindow`
-    /// so it doesn't get stuck — it does NOT retry or roll back whatever
-    /// partial mutation happened before the error, since `execute_command`
-    /// doesn't yet guarantee atomicity. Surfacing that gap honestly rather
-    /// than hiding it behind a panic.
+    /// A queued action was rejected when `step()` ran it. The engine resets
+    /// to `PriorityWindow` (or back to the payment a rejected nested mana
+    /// ability interrupted) and the rejection changed nothing else: every
+    /// command validates before it mutates, so `GameState`, the ledger and
+    /// the engine's own counters are exactly as they were before the action
+    /// was queued, and the player may try again (024). Only input rejection
+    /// carries this guarantee. A script error during resolution is logged as
+    /// a `ScriptError` event and resolution continues; a broken engine
+    /// invariant stays fatal.
+    // TODO(035): the action is queued by `submit_action` and only rejected
+    // here; ticket 035 moves that validation into `submit_action` and splits
+    // `CommandError` into `Rejected` and `Internal`.
     Error(CommandError),
     GameOver { winner: Option<PlayerId> },
     /// CR 103.5 pregame: `player` must submit `KeepHand` or `TakeMulligan`
@@ -359,6 +366,7 @@ impl ScriptedZoneMoveKind {
 /// unconditionally finalizing into `ReplacementCheck`. Same "generalize the
 /// resume target" shape `SbaResumeThen` already established for
 /// `SbaDeath`/`resume_sba_death`.
+#[derive(Debug)]
 pub enum ScriptedZoneMoveThen {
     /// The pre-existing behavior: `stack_id` is a resolving spell/ability
     /// (`ResolveStackTop`'s own `top.stack_id`, already popped off
@@ -422,6 +430,7 @@ pub struct PendingZoneMove {
 /// resume into once `Engine::submit_replacement_choice` answers — the pause
 /// itself (event/candidates/excluded) is identical either way; only what
 /// happens *after* the choice differs.
+#[derive(Debug)]
 pub enum ReplacementResumeTarget {
     /// Reached from a command's own proposed events (`CastSpell`/
     /// `ActivateAbility`/combat damage's `DamageDealt`, ...) —
@@ -602,11 +611,13 @@ pub struct EachPlayerLoop {
 /// before this SBA pass began) through the pause, so `resume_sba_death` can
 /// still hand it to `finish_cleanup_sba_check`/`PipelineExit::CleanupCheck`
 /// once the paused choice is answered.
+#[derive(Debug)]
 pub enum SbaResumeThen {
     SbaLoop,
     CleanupSbaCheck { since_ledger: usize },
 }
 
+#[derive(Debug)]
 pub enum ProcessState {
     PriorityWindow,
     /// Accepted by `submit_action`, waiting for the next `step()` to

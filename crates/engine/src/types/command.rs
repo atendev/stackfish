@@ -23,6 +23,7 @@ use crate::types::mana::Color;
 /// High-level player intent, as submitted by the host application. Hidden-
 /// information choices must always arrive as an explicit `PlayerAction`,
 /// never as an implicit default chosen by the engine.
+#[derive(Clone, PartialEq, Debug)]
 pub enum PlayerActionKind {
     CastSpell {
         card: ObjectId,
@@ -127,6 +128,7 @@ pub enum PlayerActionKind {
     BottomCards { cards: Vec<ObjectId> },
 }
 
+#[derive(Clone, PartialEq, Debug)]
 pub struct PlayerAction {
     pub player: PlayerId,
     pub kind: PlayerActionKind,
@@ -139,6 +141,7 @@ impl PlayerAction {
 }
 
 /// Fully specified, validated executable unit produced from a `PlayerAction`.
+#[derive(Clone, PartialEq, Debug)]
 pub struct EngineCommand {
     pub command_id: CommandId,
     pub actor: PlayerId,

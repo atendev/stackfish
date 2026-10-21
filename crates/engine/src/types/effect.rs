@@ -560,7 +560,7 @@ pub enum EffectPrimitive {
 /// panic. Once a real consumer exists, evaluating this will need a
 /// `&ScriptRuntime` threaded into the query — not needed for the
 /// primitive-only path this slice exercises.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EffectPayload {
     Primitive(EffectPrimitive),
     Script(ScriptHandle),
@@ -648,7 +648,7 @@ pub struct EffectFilter {
 /// already took and for the same reason: no real "creatures enchanted
 /// player controls that are also a [type]" card exists to justify combining
 /// this with `controller`/`card_types`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AffectedFilter {
     Primitive(EffectFilter),
     Script(ScriptHandle),
@@ -662,7 +662,7 @@ pub enum AffectedFilter {
 /// long as you control a Forest" — re-evaluated continuously, not a fixed
 /// end point), and `Custom` as a catch-all for unusual oracle wording that
 /// doesn't fit a structured case yet.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EffectDuration {
     UntilEndOfTurn,
     UntilYourNextTurn,
@@ -679,6 +679,7 @@ pub enum EffectDuration {
 /// (see `AffectedFilter`/`EffectPayload` above) — the same shape
 /// `ConditionSpec`/`AbilityEffect` already established for triggered/
 /// activated abilities, applied here to static/continuous effects.
+#[derive(Clone, PartialEq, Debug)]
 pub struct ContinuousEffect {
     pub source: ObjectId,
     pub layer: Layer,
@@ -897,7 +898,7 @@ pub enum EventFilter {
 /// check already takes — though no Lua builder exists for replacement
 /// effects yet, see this file's own backlog note) — `ReplacementEffect::apply`
 /// falls back to returning the event unchanged rather than guessing.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ReplacementPayload {
     /// CR 615: the matched damage doesn't happen at all — the event still
     /// fires (so anything downstream that cares "damage was dealt, amount
@@ -1107,12 +1108,13 @@ pub enum ReplacementPayload {
 /// substitution) still have no Lua entry point, same "prove one real shape,
 /// name the rest" precedent `Game.CreateStaticAbility` itself started with
 /// (layers 6/7b/7c only, before later slices widened it).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ReplacementSpec {
     Primitive { filter: EventFilter, payload: ReplacementPayload },
     Script(ScriptHandle),
 }
 
+#[derive(Clone, PartialEq, Debug)]
 pub struct ReplacementEffect {
     pub source: ObjectId,
     pub spec: ReplacementSpec,
@@ -1401,6 +1403,7 @@ fn event_target_matches(
 /// a mutable field on `GameObject`; recomputed whenever queried so layer
 /// reordering/dependency changes are always reflected. Query function lands
 /// in Phase 2.
+#[derive(Clone, PartialEq, Debug)]
 pub struct EffectiveCharacteristics {
     pub name: String,
     pub mana_cost: ManaCost,

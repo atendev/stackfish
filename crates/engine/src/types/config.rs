@@ -4,6 +4,7 @@ use crate::types::ids::PlayerId;
 /// Controls which automated behaviors the engine applies during game setup.
 /// All settings have defaults matching standard two-player rules; override
 /// individual fields for testing or variant formats.
+#[derive(Clone, PartialEq, Debug)]
 pub struct GameSettings {
     // --- Library setup ---
     /// Shuffle each player's library before drawing opening hands.
@@ -51,6 +52,7 @@ impl Default for GameSettings {
 
 /// Per-player input for `GameConfig`. Describes one player's starting state
 /// before any game rules are applied.
+#[derive(Clone, PartialEq, Debug)]
 pub struct PlayerConfig {
     pub player_id: PlayerId,
     /// Cards in library order, top-to-bottom. If `GameSettings::shuffle_libraries`
@@ -74,6 +76,7 @@ pub struct PlayerConfig {
 
 /// Full input bundle passed to `Engine::new_game`. The engine builds the
 /// initial `GameState` from this and runs the pregame setup sequence.
+#[derive(Clone, PartialEq, Debug)]
 pub struct GameConfig {
     pub players: Vec<PlayerConfig>,
     /// Turn order by `PlayerId`. Must reference every id in `players` exactly

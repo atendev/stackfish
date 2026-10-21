@@ -126,6 +126,7 @@ pub struct CommandOutcome {
 
 /// See `CommandOutcome::requires_payment`'s doc comment for why this exists
 /// as its own pause rather than a synchronous deduction.
+#[derive(Debug)]
 pub struct PendingPaymentRequest {
     pub stack_id: ObjectId,
     pub payer: PlayerId,
@@ -154,6 +155,7 @@ pub struct PendingPaymentRequest {
 /// ever match, since a mana ability with a real cost still pauses for
 /// payment exactly like any other ability, but nothing is ever pushed onto
 /// the stack for it to resolve later.
+#[derive(Debug)]
 pub enum PaymentResolution {
     StackObject,
     /// CR 605's mana units to add once this cost commits — already fully
@@ -176,6 +178,15 @@ pub enum PaymentResolution {
 /// exactly one place that writes the ledger. Does NOT mutate
 /// `state.consecutive_passes` or `state.priority_player` either — see
 /// `CommandOutcome::broke_pass_chain`/`priority_handoff`.
+///
+/// 024: a command that returns `Err` has changed nothing. Every arm runs all
+/// its checks before it mutates (audited in `docs/implementation/21-atomicity.md`,
+/// held by `tests/phase5_atomicity*.rs`).
+// TODO(035): `CommandError` does not yet tell a rejected input from a broken
+// invariant. The 42 `.expect(` calls under `commands/` (13) and `engine/` (29)
+// are the broken-invariant half and become `Internal` errors there. The
+// `submit_*` methods also still re-check what `submit_action` could check up
+// front.
 pub fn execute_command(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
