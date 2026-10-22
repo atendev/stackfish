@@ -219,7 +219,7 @@ pub enum ModeChoiceError {
     /// One of `modes` wasn't a valid index into the card's own mode list.
     NoSuchMode,
     /// 2+ modes chosen, but combining them hit the same synchronous-effect-
-    /// kind narrowing `commands::is_modal_resolvable` already enforces for
+    /// kind narrowing `commands::mode_can_join_others` already enforces for
     /// the caster-chosen variants (`ModeChoice::Exactly`/`UpTo`/
     /// `*Repeatable`).
     UnsupportedModeCombination,

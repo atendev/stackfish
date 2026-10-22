@@ -52,6 +52,10 @@ pub struct ModeRange {
     /// CR 700.2i: `max` is a pawprint budget, and this is the weight of each
     /// mode. `None` for every other spell.
     pub pawprint_weights: Option<Vec<u32>>,
+    /// Ascending indices of the modes that can only be chosen alone: the
+    /// resolver cannot yet run them beside another mode. Empty for almost
+    /// every card. A selection of two or more may not contain one.
+    pub solo_only: Vec<u32>,
 }
 
 /// A card the player may cast.

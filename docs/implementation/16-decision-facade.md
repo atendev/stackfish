@@ -20,7 +20,7 @@ methods. Those methods and the typed `ProcessState` pauses are unchanged. The de
 | `Pick { candidates, min, max }` | `Pick(Vec<Candidate>)` | legend rule, attach choices, Devour, Amplify, discard choice, copy choice, search, script `SelectTarget`, cleanup discard, mulligan bottom, replacement order |
 | `YesNo` | `YesNo(bool)` | mulligan (`true` takes one), commander return, script `MayChoose` |
 | `Order { items }` | `Order(Vec<usize>)` | trigger order |
-| `Modes { mode_count, min, max, repeatable }` | `Modes(Vec<u32>)` | spell mode choice, trigger mode choice |
+| `Modes { mode_count, min, max, repeatable, solo_only }` | `Modes(Vec<u32>)` | spell mode choice, trigger mode choice |
 | `Partition { cards, rest }` | `Partition { top, rest }` | Scry, Surveil |
 | `Payment { cost }` | `Payment(Option<PaymentPlan>)` | cast payment (`None` unwinds), unless-paid (`None` declines) |
 | `Targets { spec, candidates }` | `Targets(Vec<Vec<Target>>)` | trigger targets, one list per target word |

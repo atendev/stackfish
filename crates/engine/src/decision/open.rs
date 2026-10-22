@@ -202,14 +202,30 @@ pub(super) fn describe(engine: &Engine) -> Option<Described> {
         ),
         ProcessState::AwaitingTriggerModeChoice { modes, mode_choice, chooser, .. } => {
             let (min, max, repeatable) = mode_choice.bounds();
-            (*chooser, "Trigger mode", Modes { mode_count: modes.len(), min, max, repeatable }, Route::TriggerMode)
+            (
+                *chooser,
+                "Trigger mode",
+                Modes { mode_count: modes.len(), min, max, repeatable, solo_only: commands::solo_only_modes(modes) },
+                Route::TriggerMode,
+            )
         }
         ProcessState::AwaitingPayment { payer, cost, .. } => {
             (*payer, "Payment", Payment { cost: cost.clone() }, Route::Payment)
         }
         ProcessState::AwaitingModeChoice { stack_id, chooser, min, max } => {
-            let mode_count = engine.state().object(*stack_id).map_or(0, |o| o.definition.modes.len());
-            (*chooser, "Spell mode", Modes { mode_count, min: *min, max: *max, repeatable: false }, Route::SpellMode)
+            let modes = engine.state().object(*stack_id).map_or(&[][..], |o| &o.definition.modes[..]);
+            (
+                *chooser,
+                "Spell mode",
+                Modes {
+                    mode_count: modes.len(),
+                    min: *min,
+                    max: *max,
+                    repeatable: false,
+                    solo_only: commands::solo_only_modes(modes),
+                },
+                Route::SpellMode,
+            )
         }
         ProcessState::AwaitingDiscard { player, excess } => {
             (*player, "Cleanup discard", pick(hand(engine, *player), *excess, *excess), Route::CleanupDiscard)

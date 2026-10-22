@@ -23,7 +23,7 @@ use crate::types::mana::Color;
 use crate::types::target::{TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
-use super::legality::{has_summoning_sickness, is_sorcery_speed, legal_target_candidates};
+use super::legality::{has_summoning_sickness, is_sorcery_speed, legal_target_candidates, solo_only_modes};
 
 /// Every entry the priority player may take, with `Pass` last.
 pub(crate) fn priority_entries(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<Entry> {
@@ -125,13 +125,22 @@ fn cast_modes_and_targets(
         .map(|mode| target_slots(state, script_runtime, mode.target_requirement.as_ref(), player, card))
         .collect();
     let range = mode_range(definition);
-    // TODO: this counts modes that can be chosen on their own. Two modes
-    // that each have a target can still fail together if
-    // `combine_chosen_modes` cannot combine them, and the engine rejects
-    // that pair when the Answer arrives.
     let usable = per_mode.iter().filter(|slots| slots_are_satisfiable(slots)).count() as u32;
-    let needed = if range.repeatable { range.min.min(1) } else { range.min };
-    (usable >= needed).then_some((Some(range), EntryTargets::PerMode(per_mode)))
+    // A solo-only mode counts only toward a selection of one mode. Choosing
+    // it twice from a repeatable range is still two modes.
+    let joinable = per_mode
+        .iter()
+        .enumerate()
+        .filter(|(index, slots)| slots_are_satisfiable(slots) && !range.solo_only.contains(&(*index as u32)))
+        .count() as u32;
+    let listed = if range.min <= 1 {
+        usable >= range.min
+    } else if range.repeatable {
+        joinable >= 1
+    } else {
+        joinable >= range.min
+    };
+    listed.then_some((Some(range), EntryTargets::PerMode(per_mode)))
 }
 
 fn mode_range(definition: &CardDefinition) -> ModeRange {
@@ -145,6 +154,7 @@ fn mode_range(definition: &CardDefinition) -> ModeRange {
             repeatable: false,
             chosen_by_opponent: true,
             pawprint_weights: None,
+            solo_only: solo_only_modes(&definition.modes),
         },
         ModeChoice::PawprintBudget(_) => ModeRange {
             mode_count,
@@ -153,8 +163,17 @@ fn mode_range(definition: &CardDefinition) -> ModeRange {
             repeatable: false,
             chosen_by_opponent: false,
             pawprint_weights: Some(definition.modes.iter().map(|mode| mode.pawprint_weight).collect()),
+            solo_only: solo_only_modes(&definition.modes),
         },
-        _ => ModeRange { mode_count, min, max, repeatable, chosen_by_opponent: false, pawprint_weights: None },
+        _ => ModeRange {
+            mode_count,
+            min,
+            max,
+            repeatable,
+            chosen_by_opponent: false,
+            pawprint_weights: None,
+            solo_only: solo_only_modes(&definition.modes),
+        },
     }
 }
 

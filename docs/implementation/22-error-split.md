@@ -54,7 +54,7 @@ Two details came from the split:
 
 - `engine/src/engine/atomicity_tests.rs` (4 new): `submit_action` refuses with `ActionError::Rejected` and changes nothing; a zone that vanishes between validation and apply is `Internal`; an action rejected after it was queued is fatal and `step()` stays fatal; `execute_command` keeps the two error kinds apart.
 - `host/src/session.rs` (3 new or changed): a halted Session shows a generic message and keeps the detail; `guarded` turns a panic into `engine_panic` and refuses every later request including `poll`; a panic while building the game is an error response.
-- `host/tests/phase5_error_split.rs` (1): a modal cast the entries list but `combine_chosen_modes` refuses comes back as `invalid_answer` with the same Decision open, the snapshot unchanged, and a legal Answer accepted afterward.
+- `host/tests/phase5_error_split.rs` (1, deleted in 036): a modal cast the entries list but `combine_chosen_modes` refuses comes back as `invalid_answer` with the same Decision open, the snapshot unchanged, and a legal Answer accepted afterward.
 - The rejection assertions in about 60 engine test files moved from `StepStatus::Error(CommandError::X)` after `step()` to `submit_action` returning `Err(ActionError::Rejected(Rejected::X))`. Three scripts did most of the rewrite and I fixed the rest by hand. `assert_action_rejected` in `stackfish-testutil` now requires the refusal at `submit_action` and returns the `ActionError`.
 
 I did not check that the new Session test fails on the old code. The old `Session::run` turned every `StepStatus::Error` into a halt, which this test would catch, but I did not revert to confirm it.
@@ -62,7 +62,7 @@ I did not check that the new Session test fails on the old code. The old `Sessio
 ## Open items
 
 - Done in ticket 026 (`23-combat-predicates.md`): menace and must-attack. `validate_declare_blockers` and `validate_declare_attackers` call the shared predicate.
-- `TODO(036)`: the mode-pair predicate. The Session test above relies on the entries still listing a pair `combine_chosen_modes` refuses, and stops being able to reach that refusal when 036 lands. Its replacement needs another reply that passes the facade and fails the engine.
+- Done in ticket 036 (`24-mode-combination.md`): the entries stop listing a mode pair `combine_chosen_modes` refuses, so `host/tests/phase5_error_split.rs` could no longer reach an engine refusal and was deleted. The Session test that remains for rejection mapping is `a_rejected_answer_returns_the_same_decision_with_no_events` in `phase5_host_session.rs`. The engine-level refusal of a declaration the entries list (two menace attackers sharing two blockers) stays in `phase5_combat_predicates.rs`.
 - About 30 `.expect(` calls under `engine/` stay as panics, mostly in `pregame.rs` (16) and `library_choices.rs` (7), in functions that return no `Result`. The `Session` catches them. The ones in `commands/` became `Internal` errors or `ok_or` rejections.
 - A panic leaves the `Engine` inside the dead `Session` undropped until the `Session` drops. If the `Engine`'s drop can panic, `Core::die` still leaks it, but a plain `Session` user does not.
 - The proof-game injection bot has no reply that passes the facade and fails the engine. The Session test covers one hand-built case.

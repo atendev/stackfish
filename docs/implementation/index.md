@@ -26,4 +26,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [21-atomicity](21-atomicity.md) — ticket 025: a rejected input changes nothing, `Engine::snapshot`, the audit of every command arm and `submit_*` method, the bugs it found, the proof-game injection test
 - [22-error-split](22-error-split.md) — ticket 035: `Rejected` and `Internal`, the validate/apply split of every command, `submit_action` validating on its own, the Session's rejection mapping and panic catch
 - [23-combat-predicates](23-combat-predicates.md) — ticket 026: menace and "attacks each combat if able" as one predicate for the entries and the commands, `AttackerEntry::required`, `ATTACKS_EACH_COMBAT`
+- [24-mode-combination](24-mode-combination.md) — ticket 036: `mode_can_join_others`, `solo_only` on `ModeRange` and `ReplyShape::Modes`, the entries and the facade refusing a solo-only mode beside another
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught

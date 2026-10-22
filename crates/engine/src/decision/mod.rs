@@ -71,8 +71,9 @@ pub enum ReplyShape {
     /// `items`, because two pending triggers can be identical.
     Order { items: Vec<PendingTrigger> },
     /// Choose between `min` and `max` mode indices out of `mode_count`.
-    /// `repeatable` allows the same index twice (CR 700.2d).
-    Modes { mode_count: usize, min: u32, max: u32, repeatable: bool },
+    /// `repeatable` allows the same index twice (CR 700.2d). `solo_only`
+    /// lists the ascending indices that can only be chosen alone.
+    Modes { mode_count: usize, min: u32, max: u32, repeatable: bool, solo_only: Vec<u32> },
     /// Split `cards` into a list kept on top, in order, and the rest, which
     /// go to `rest`.
     Partition { cards: Vec<ObjectId>, rest: PartitionRest },

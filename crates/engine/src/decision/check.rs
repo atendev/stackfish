@@ -109,6 +109,9 @@ fn check_modes(range: &ModeRange, modes: &[u32]) -> Result<(), Rejection> {
     if modes.iter().any(|&mode| mode as usize >= range.mode_count) {
         return Err(invalid("no such mode on this card"));
     }
+    if modes.len() >= 2 && modes.iter().any(|mode| range.solo_only.contains(mode)) {
+        return Err(invalid("a mode that cannot be combined was chosen beside another mode"));
+    }
     if !range.repeatable && modes.iter().collect::<HashSet<_>>().len() != modes.len() {
         return Err(invalid("the same mode cannot be chosen twice"));
     }

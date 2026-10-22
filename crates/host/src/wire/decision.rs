@@ -179,6 +179,8 @@ pub struct WireModeRange {
     pub chosen_by_opponent: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pawprint_weights: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub solo_only: Vec<u32>,
 }
 
 impl From<&ModeRange> for WireModeRange {
@@ -190,6 +192,7 @@ impl From<&ModeRange> for WireModeRange {
             repeatable: range.repeatable,
             chosen_by_opponent: range.chosen_by_opponent,
             pawprint_weights: range.pawprint_weights.clone(),
+            solo_only: range.solo_only.clone(),
         }
     }
 }
@@ -318,7 +321,14 @@ pub enum WireShape {
     Pick { candidates: Vec<WireCandidate>, min: usize, max: usize },
     YesNo,
     Order { items: Vec<WireTrigger> },
-    Modes { mode_count: usize, min: u32, max: u32, repeatable: bool },
+    Modes {
+        mode_count: usize,
+        min: u32,
+        max: u32,
+        repeatable: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        solo_only: Vec<u32>,
+    },
     Partition { cards: Vec<U64>, rest: WireRest },
     Payment { cost: WireCost },
     Targets { words: Vec<WireTargetWord> },
@@ -351,8 +361,14 @@ impl From<&ReplyShape> for WireShape {
             },
             ReplyShape::YesNo => WireShape::YesNo,
             ReplyShape::Order { items } => WireShape::Order { items: items.iter().map(WireTrigger::from).collect() },
-            ReplyShape::Modes { mode_count, min, max, repeatable } => {
-                WireShape::Modes { mode_count: *mode_count, min: *min, max: *max, repeatable: *repeatable }
+            ReplyShape::Modes { mode_count, min, max, repeatable, solo_only } => {
+                WireShape::Modes {
+                    mode_count: *mode_count,
+                    min: *min,
+                    max: *max,
+                    repeatable: *repeatable,
+                    solo_only: solo_only.clone(),
+                }
             }
             ReplyShape::Partition { cards, rest } => WireShape::Partition {
                 cards: cards.iter().map(|c| (*c).into()).collect(),
@@ -502,5 +518,30 @@ mod tests {
         let json = serde_json::to_value(WireAttacker::from(&entry)).unwrap();
         assert_eq!(json["required"], true);
         assert_eq!(json["attacker"], "7");
+    }
+
+    #[test]
+    fn a_mode_range_carries_its_solo_only_modes_and_omits_an_empty_list() {
+        let range = |solo_only: Vec<u32>| ModeRange {
+            mode_count: 3,
+            min: 2,
+            max: 2,
+            repeatable: false,
+            chosen_by_opponent: false,
+            pawprint_weights: None,
+            solo_only,
+        };
+        let json = serde_json::to_value(WireModeRange::from(&range(vec![1]))).unwrap();
+        assert_eq!(json["solo_only"], serde_json::json!([1]));
+        let json = serde_json::to_value(WireModeRange::from(&range(Vec::new()))).unwrap();
+        assert!(json.get("solo_only").is_none(), "{json}");
+    }
+
+    #[test]
+    fn a_modes_shape_carries_its_solo_only_modes() {
+        let shape = ReplyShape::Modes { mode_count: 3, min: 2, max: 2, repeatable: false, solo_only: vec![1] };
+        let json = serde_json::to_value(WireShape::from(&shape)).unwrap();
+        assert_eq!(json["shape"], "modes");
+        assert_eq!(json["solo_only"], serde_json::json!([1]));
     }
 }
