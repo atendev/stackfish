@@ -208,6 +208,16 @@ bitflags! {
         ///
         /// TODO(CR 702.18a): no shroud on players.
         const SHROUD        = 1 << 22;
+        /// CR 508.1d - the "attacks each combat if able" requirement. Not a
+        /// CR 702 keyword, but a static requirement on the creature's own
+        /// declaration, so it rides the same layer-6 fold as a keyword and
+        /// a granted or removed requirement counts. Enforced by
+        /// `commands::combat::predicate`, which also lets the declare
+        /// attackers entries mark the creature `required`.
+        ///
+        /// TODO(026-followup): "attacks a specific player if able" and
+        /// "blocks if able" (CR 509.1c) need a parameter or a second bit.
+        const ATTACKS_EACH_COMBAT = 1 << 23;
     }
 }
 

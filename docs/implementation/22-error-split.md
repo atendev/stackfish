@@ -61,7 +61,7 @@ I did not check that the new Session test fails on the old code. The old `Sessio
 
 ## Open items
 
-- `TODO(026)`: menace and must-attack. `validate_declare_blockers` and `validate_declare_attackers` are where the shared predicate goes.
+- Done in ticket 026 (`23-combat-predicates.md`): menace and must-attack. `validate_declare_blockers` and `validate_declare_attackers` call the shared predicate.
 - `TODO(036)`: the mode-pair predicate. The Session test above relies on the entries still listing a pair `combine_chosen_modes` refuses, and stops being able to reach that refusal when 036 lands. Its replacement needs another reply that passes the facade and fails the engine.
 - About 30 `.expect(` calls under `engine/` stay as panics, mostly in `pregame.rs` (16) and `library_choices.rs` (7), in functions that return no `Result`. The `Session` catches them. The ones in `commands/` became `Internal` errors or `ok_or` rejections.
 - A panic leaves the `Engine` inside the dead `Session` undropped until the `Session` drops. If the `Engine`'s drop can panic, `Core::die` still leaks it, but a plain `Session` user does not.

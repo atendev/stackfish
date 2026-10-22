@@ -399,7 +399,7 @@ fn attackers_are_untapped_creatures_without_summoning_sickness_or_defender() {
     let engine = Engine::new(state);
     assert_eq!(
         engine.legal_attackers(),
-        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)] }]
+        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)], required: false }]
     );
 }
 
@@ -412,7 +412,7 @@ fn a_creature_that_is_not_on_the_battlefield_is_never_an_attacker() {
     let engine = Engine::new(state);
     assert_eq!(
         engine.legal_attackers(),
-        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)] }],
+        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)], required: false }],
         "CR 508.1a: only a creature on the battlefield attacks"
     );
 }
@@ -425,7 +425,7 @@ fn a_planeswalker_that_is_not_on_the_battlefield_is_not_a_defender() {
     let engine = Engine::new(state);
     assert_eq!(
         engine.legal_attackers(),
-        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)] }],
+        vec![AttackerEntry { attacker: ObjectId(1), defenders: vec![Target::Player(P1)], required: false }],
         "CR 508.1b: an attacked planeswalker is a permanent"
     );
 }

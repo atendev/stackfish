@@ -799,7 +799,7 @@ function GameCostsTable.Mana(cost) end
 ---| "Flying" | "Reach" | "Menace" | "Vigilance" | "Haste" | "Defender" | "Flash"
 ---| "Deathtouch" | "Indestructible" | "Lifelink" | "Wither" | "Infect"
 ---| "FirstStrike" | "DoubleStrike" | "Trample" | "Fear" | "Intimidate"
----| "Shadow" | "Horsemanship" | "Hexproof" | "Shroud" | "CantBeRegenerated"
+---| "Shadow" | "Horsemanship" | "Hexproof" | "Shroud" | "CantBeRegenerated" | "AttacksEachCombat"
 
 ---@class GameEffectsTable
 ---@field AddProtectionEverything GameEffectsValue

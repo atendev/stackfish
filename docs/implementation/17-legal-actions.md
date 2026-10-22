@@ -32,6 +32,9 @@ are in `crates/engine/src/decision/entry.rs`. The builders are in `commands/entr
 - Land: sorcery window and below the land play limit.
 - Attackers use `attacker_can_attack` and `attack_target_is_legal`. Blockers use `block_is_legal`. These were pulled
   out of `execute_declare_attackers` and `execute_declare_blockers`, so the command and the entries share one rule.
+- The whole-declaration rules (menace, "attacks each combat if able") live in `commands/combat/predicate.rs` and are
+  shared the same way. An `AttackerEntry` has `required`, and a menace attacker is listed only when two creatures could
+  block it. See `23-combat-predicates.md`.
 - Splits use `plan_damage_splits`, pulled out of `execute_assign_combat_damage` the same way.
 
 ## Combat Decisions

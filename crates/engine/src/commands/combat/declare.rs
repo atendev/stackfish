@@ -1,8 +1,6 @@
 //! `execute_command`'s `DeclareAttackers`/`DeclareBands`/`DeclareBlockers`
 //! arm bodies, split out of the original monolithic `commands.rs`.
 
-use std::collections::HashMap;
-
 use crate::script::ScriptRuntime;
 use crate::types::card::CardTypeSet;
 use crate::types::card::KeywordSet;
@@ -18,6 +16,7 @@ use crate::types::zone::ZoneKind;
 
 use super::super::legality::{effective_keywords, has_summoning_sickness, ignored_keywords};
 use super::super::{CommandOutcome, Internal, PriorityHandoff, Rejected, Validated};
+use super::predicate::{attack_declaration_is_legal, block_declaration_is_legal};
 
 /// A declaration that passed `validate_declare_attackers`. The flag is false for
 /// an attacker with vigilance (CR 702.20a), decided with the layered keywords at
@@ -67,8 +66,8 @@ pub(crate) fn validate_declare_attackers(
         attacker_can_attack(state, script_runtime, actor, *attacker)?;
         attack_target_is_legal(state, script_runtime, actor, target)?;
     }
-    // TODO(026): menace, must-attack and other whole-declaration attack
-    // requirements and restrictions are not checked here yet.
+    // CR 508.1d: a creature that attacks each combat if able can't stay home.
+    attack_declaration_is_legal(state, script_runtime, actor, &attackers)?;
 
     // CR 508.1f: tapping an attacker isn't a cost - attacking
     // simply causes it. CR 702.20a: Vigilance means attacking
@@ -318,29 +317,10 @@ pub(crate) fn validate_declare_blockers(
         block_is_legal(state, script_runtime, actor, combat, *blocker, *attacker)?;
     }
 
-    // TODO(026): menace and the other whole-declaration rules are checked
-    // here only. `legal_blockers` does not know about them, so a Decision
-    // can list a block that this check then rejects at `step()`.
-    // CR 702.111b: an attacker with menace can't be blocked except
-    // by two or more creatures - a whole-batch check, since it's
-    // about how many blockers ended up assigned to that attacker,
-    // not any single pairing. Same effective_keywords treatment as
-    // Flying/Reach above.
-    let mut blocker_counts: HashMap<ObjectId, u32> = HashMap::new();
-    for (_, attacker) in &blocks {
-        *blocker_counts.entry(*attacker).or_insert(0) += 1;
-    }
-    for (attacker, count) in &blocker_counts {
-        let attacker_object = state.object(*attacker).ok_or(Rejected::InvalidTarget)?;
-        let attacker_keywords = effective_keywords(state, script_runtime, attacker_object.object_id);
-        if attacker_keywords.contains(KeywordSet::MENACE) && *count < 2 {
-            return Err(Rejected::IllegalAction(
-                "an attacker with menace can't be blocked except by two or more \
-                 creatures"
-                    .to_string(),
-            ));
-        }
-    }
+    // CR 509.1b/702.111b: menace is about how many blockers ended up on one
+    // attacker, not any single pairing, so it checks the whole batch. The
+    // entries share `blockers_needed` with this check.
+    block_declaration_is_legal(state, script_runtime, &blocks)?;
 
     // CR 702.22h: banding - once a band member has been directly
     // blocked by a creature in this submission, every other member
@@ -549,8 +529,8 @@ pub(crate) fn attack_target_is_legal(
 }
 
 /// Every per-pair rule for `blocker` blocking `attacker` (CR 509.1a, 702.9b, 702.13b, 702.14c, 702.16d,
-/// 702.28b, 702.31b, 702.36b). The whole-declaration rules (menace, banding) stay in
-/// `execute_declare_blockers`. Shared with the blocker entries a Decision lists.
+/// 702.28b, 702.31b, 702.36b). The whole-declaration rules (menace, banding) are in
+/// `predicate` and `validate_declare_blockers`. Shared with the blocker entries a Decision lists.
 pub(crate) fn block_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,

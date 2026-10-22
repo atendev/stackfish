@@ -1367,6 +1367,7 @@ fn parse_keywords(names: &[String]) -> KeywordSet {
             "Banding" => KeywordSet::BANDING,
             "Hexproof" => KeywordSet::HEXPROOF,
             "Shroud" => KeywordSet::SHROUD,
+            "AttacksEachCombat" => KeywordSet::ATTACKS_EACH_COMBAT,
             other => panic!("unknown keyword in scenario file: {other}"),
         };
     }

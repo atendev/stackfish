@@ -42,6 +42,7 @@ fn parse_one(name: &str) -> Option<KeywordSet> {
         "Banding" => KeywordSet::BANDING,
         "Hexproof" => KeywordSet::HEXPROOF,
         "Shroud" => KeywordSet::SHROUD,
+        "Attacks each combat if able" => KeywordSet::ATTACKS_EACH_COMBAT,
         "Can't be regenerated" => KeywordSet::CANT_BE_REGENERATED,
         _ => return None,
     })
@@ -50,6 +51,11 @@ fn parse_one(name: &str) -> Option<KeywordSet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_must_attack_clause_sets_its_bit() {
+        assert_eq!(parse(&["Attacks each combat if able".to_string()]), KeywordSet::ATTACKS_EACH_COMBAT);
+    }
 
     #[test]
     fn recognized_keywords_set_bits() {

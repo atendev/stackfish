@@ -680,7 +680,8 @@ impl Bot {
         let mut attacks = Vec::new();
         for entry in entries {
             let defenders = entry["defenders"].as_array().cloned().unwrap_or_default();
-            if !defenders.is_empty() && self.rng.chance(1, 2) {
+            let required = entry["required"].as_bool().unwrap_or(false);
+            if !defenders.is_empty() && (required || self.rng.chance(1, 2)) {
                 let defender = defenders[self.rng.below(defenders.len())].clone();
                 attacks.push(json!({ "attacker": entry["attacker"], "defender": defender }));
             }
