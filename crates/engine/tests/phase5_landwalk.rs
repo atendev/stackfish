@@ -18,7 +18,8 @@
 //! plain subtype-only form rather than folded into it (see
 //! `LandwalkQuality`'s own doc comment for how its fields combine).
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state};
@@ -162,18 +163,18 @@ fn combat_state(players: Vec<PlayerId>) -> GameState {
     }
 }
 
-fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
+fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> StepStatus {
+fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
 fn pass_to_declare_blockers(engine: &mut Engine) {
@@ -188,12 +189,12 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
 
-fn assert_legal_block(status: StepStatus) {
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal block, got {status:?}");
+fn assert_legal_block(status: Result<StepStatus, ActionError>) {
+    let status = status.expect("the engine should accept the action");    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal block, got {status:?}");
 }
 
-fn assert_illegal_block(status: StepStatus) {
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "expected an illegal block, got {status:?}");
+fn assert_illegal_block(status: Result<StepStatus, ActionError>) {
+    assert!(matches!(status, Err(ActionError::Rejected(Rejected::IllegalAction(_)))), "expected an illegal block, got {status:?}");
 }
 
 // ---------------------------------------------------------------------
@@ -215,7 +216,7 @@ fn islandwalk_attacker_unblockable_when_defender_controls_an_island() {
     state.continuous_effects.push(islandwalk(attacker));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_illegal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -235,7 +236,7 @@ fn islandwalk_attacker_blockable_when_defender_controls_no_island() {
     state.continuous_effects.push(islandwalk(attacker));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_legal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -255,7 +256,7 @@ fn non_landwalk_attacker_blockable_even_when_defender_controls_an_island() {
     // No islandwalk grant on the attacker this time.
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_legal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -282,7 +283,7 @@ fn islandwalk_checks_only_the_defending_players_own_battlefield() {
     state.continuous_effects.push(islandwalk(attacker));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_legal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -309,7 +310,7 @@ fn artifact_landwalk_attacker_unblockable_when_defender_controls_an_artifact_lan
     ));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_illegal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -332,7 +333,7 @@ fn artifact_landwalk_attacker_blockable_when_defender_controls_only_a_nonartifac
     ));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_legal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -355,7 +356,7 @@ fn nonbasic_landwalk_attacker_unblockable_when_defender_controls_a_nonbasic_land
     ));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_illegal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -378,7 +379,7 @@ fn nonbasic_landwalk_attacker_blockable_when_defender_controls_only_a_basic_land
     ));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_legal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -406,7 +407,7 @@ fn snow_swampwalk_attacker_unblockable_when_defender_controls_a_snow_swamp() {
     ));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_illegal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
@@ -434,7 +435,7 @@ fn snow_swampwalk_attacker_blockable_when_defender_controls_only_a_nonsnow_swamp
     ));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     assert_legal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }

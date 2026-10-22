@@ -9,7 +9,7 @@
 //! whole engine) delegates into the `resolve/` subdirectory rather than a
 //! single sibling file — see `resolve`'s own module doc comment.
 
-use crate::commands::{CommandError, PendingPaymentRequest};
+use crate::commands::{Internal, PendingPaymentRequest, Rejected};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::script::{ScriptError, ScriptRuntime};
 use crate::types::ability::{AbilityEffect, ConditionSpec, RegisteredAbility};
@@ -43,13 +43,17 @@ mod atomicity_tests;
 pub use process_state::*;
 
 /// Why `submit_action` rejected a `PlayerAction` outright (wrong player has
-/// priority, action doesn't match what's currently legal, etc). Distinct
-/// from in-progress command execution failures, which surface through
-/// `CommandError` instead once the action is accepted and being carried out.
+/// priority, action doesn't match what's currently legal, etc). Since ticket
+/// 035 this also carries the command's own rejection (`Rejected`), so every
+/// refusal of a player action comes out of `submit_action`. A broken engine
+/// invariant is different: it surfaces as `StepStatus::Error(Internal)`.
 #[derive(Debug)]
 pub enum ActionError {
     NotYourTurn,
     IllegalAction(String),
+    /// The command itself is illegal (CR 733.1). Nothing changed and the player
+    /// may try another action.
+    Rejected(Rejected),
 }
 
 /// Why `submit_replacement_choice` rejected an answer to a CR 616.1
@@ -145,7 +149,9 @@ pub enum MadnessChoiceError {
     /// targets, unpayable cost, ...) — the pause is left untouched so the
     /// caller can retry with different targets/modes or call
     /// `decline_madness_cast` instead.
-    IllegalCast(CommandError),
+    IllegalCast(Rejected),
+    /// Casting broke an engine invariant. Fatal: `Engine::fatal_error` has the detail.
+    Internal,
 }
 
 /// Why `decline_cascade_cast`/`submit_cascade_cast` rejected an answer to a
@@ -162,7 +168,9 @@ pub enum CascadeChoiceError {
     /// `commands::execute_command` rejected the synthetic `CastSpell` (bad
     /// targets, ...) — the pause is left untouched so the caller can retry
     /// with different targets/modes or call `decline_cascade_cast` instead.
-    IllegalCast(CommandError),
+    IllegalCast(Rejected),
+    /// Casting broke an engine invariant. Fatal: `Engine::fatal_error` has the detail.
+    Internal,
 }
 
 /// Why `submit_unless_paid_payment`/`decline_unless_paid` rejected an answer
@@ -447,6 +455,10 @@ pub struct Engine {
     /// derived from `ledger.len()`, which doesn't even make sense for
     /// command ids (commands aren't ledger entries).
     next_command_id: u64,
+    /// The first broken invariant (035). Once set, `step()` only reports it, so a
+    /// host that ignores one `Internal` error cannot go on playing a half-changed
+    /// game. The text is for logs and never goes to a player.
+    fatal: Option<Internal>,
     /// Set by `PendingAction` when `execute_command`'s outcome carries a
     /// `CommandOutcome::requires_payment` (currently only `CastSpell`),
     /// consumed (`Option::take`) by `CommitEvents` once this run's events
@@ -549,6 +561,7 @@ impl Engine {
             departed_triggered_abilities: Vec::new(),
             recollect_triggers_since: None,
             next_command_id: 0,
+            fatal: None,
             pending_payment: None,
             modal_continuation: None,
             suspended_payments: Vec::new(),
@@ -561,6 +574,17 @@ impl Engine {
 
     pub fn state(&self) -> &GameState {
         &self.state
+    }
+
+    /// The broken invariant that made the engine fatal, if one did. Detail for a
+    /// host's log: it can name hidden cards, so it must not reach a player.
+    pub fn fatal_error(&self) -> Option<&Internal> {
+        self.fatal.as_ref()
+    }
+
+    /// Records a broken invariant. The first one wins.
+    pub fn poison(&mut self, internal: Internal) {
+        self.fatal.get_or_insert(internal);
     }
 
     /// Read access for the `decision` facade.
@@ -831,6 +855,9 @@ impl Engine {
 
     pub fn step(&mut self) -> StepResult {
         let events_start = self.state.ledger.len();
+        if let Some(internal) = &self.fatal {
+            return StepResult { events_added: events_start..events_start, status: StepStatus::Error(internal.clone()) };
+        }
         let status = self.advance();
         StepResult { events_added: events_start..self.state.ledger.len(), status }
     }

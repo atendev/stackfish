@@ -21,7 +21,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -163,6 +164,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -170,36 +180,36 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
+fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> Result<StepStatus, ActionError> {
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine);
     engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
-    drain(engine)
+    Ok(drain(engine))
 }
 
 fn assign_combat_damage(
     engine: &mut Engine,
     player: PlayerId,
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
+) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
-        .expect("turn-based action, no priority required");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
+fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> StepStatus {
+fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
 fn pass_to_declare_blockers(engine: &mut Engine) {
@@ -259,7 +269,7 @@ fn combat_damage_from_a_matching_name_is_prevented_by_protection() {
     state.continuous_effects.push(protection_from_progenitus(blocker));
 
     let mut engine = Engine::new(state);
-    assign_combat_damage(&mut engine, p0, Vec::new());
+    assign_combat_damage(&mut engine, p0, Vec::new()).unwrap();
 
     let ward = engine.state().object(blocker).unwrap();
     assert_eq!(ward.damage_marked, 0, "protection from Progenitus prevents the same-named attacker's combat damage");
@@ -282,7 +292,7 @@ fn combat_damage_from_a_non_matching_name_still_lands() {
     state.continuous_effects.push(protection_from_progenitus(blocker));
 
     let mut engine = Engine::new(state);
-    assign_combat_damage(&mut engine, p0, Vec::new());
+    assign_combat_damage(&mut engine, p0, Vec::new()).unwrap();
 
     let ward = engine.state().object(blocker).unwrap();
     assert_eq!(ward.damage_marked, 3, "protection from Progenitus doesn't stop a differently-named creature's damage");
@@ -304,13 +314,10 @@ fn casting_a_matching_name_spell_at_a_protected_target_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(target)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "a spell named Progenitus can't target a creature with protection from Progenitus, got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a spell named Progenitus can't target a creature with protection from Progenitus, got {err:?}");
 }
 
 #[test]
@@ -328,7 +335,7 @@ fn casting_a_non_matching_name_spell_at_a_protected_target_still_works() {
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     let p1 = PlayerId(1);
     pay_free_and_drain(&mut engine);
-    pass_both_and_drain(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1).unwrap();
     assert_eq!(engine.state().object(target).unwrap().damage_marked, 2, "the differently-named spell's damage still lands");
 }
 
@@ -353,7 +360,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     // resolution time.
     engine.state_mut().continuous_effects.push(protection_from_progenitus(target));
 
-    pass_both_and_drain(&mut engine, p0, p1);
+    pass_both_and_drain(&mut engine, p0, p1).unwrap();
 
     assert!(
         engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
@@ -378,13 +385,13 @@ fn an_attacker_with_protection_cannot_be_blocked_by_a_matching_name_creature() {
     state.continuous_effects.push(protection_from_progenitus(attacker));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
+    let result = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
 
     assert!(
-        matches!(status, StepStatus::Error(_)),
-        "a creature named Progenitus can't block an attacker with protection from Progenitus, got {status:?}"
+        matches!(result, Err(ActionError::Rejected(_))),
+        "a creature named Progenitus can't block an attacker with protection from Progenitus, got {result:?}"
     );
 }
 
@@ -400,9 +407,9 @@ fn an_attacker_with_protection_can_still_be_blocked_by_a_non_matching_name_creat
     state.continuous_effects.push(protection_from_progenitus(attacker));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
+    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]).unwrap();
 
     assert!(
         matches!(status, StepStatus::AwaitingAction { .. }),

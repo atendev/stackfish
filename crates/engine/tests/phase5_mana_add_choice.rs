@@ -15,7 +15,8 @@
 
 use std::collections::VecDeque;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -70,6 +71,22 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, chosen_colo
     drain(engine)
 }
 
+fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, chosen_colors: Vec<Color>) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors,
+                x_value: None,
+            },
+        })
+        ?;
+    Ok(drain(engine))
+}
+
 // ---------------------------------------------------------------------
 // "More than one fixed mana" - already worked mechanically, now proven.
 // ---------------------------------------------------------------------
@@ -116,8 +133,8 @@ fn add_mana_choice_rejects_wrong_choice_count() {
         state_with_ability(source, p0, AbilityEffect::AddManaChoice { count: 2, choices: ColorSet::all() });
     let mut engine = Engine::new(state);
 
-    let status = activate(&mut engine, p0, source, vec![Color::Blue]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate(&mut engine, p0, source, vec![Color::Blue]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 0);
 }
@@ -133,8 +150,8 @@ fn add_mana_choice_rejects_a_color_outside_the_allowed_set() {
     );
     let mut engine = Engine::new(state);
 
-    let status = activate(&mut engine, p0, source, vec![Color::Black]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate(&mut engine, p0, source, vec![Color::Black]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.black, 0);
 }
@@ -146,8 +163,8 @@ fn chosen_colors_rejected_against_a_plain_fixed_mana_ability() {
     let state = state_with_ability(source, p0, AbilityEffect::AddMana(vec![ManaUnit::Colored(Color::Green)]));
     let mut engine = Engine::new(state);
 
-    let status = activate(&mut engine, p0, source, vec![Color::Blue]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate(&mut engine, p0, source, vec![Color::Blue]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0);
 }

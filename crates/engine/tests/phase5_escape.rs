@@ -32,7 +32,8 @@
 //! [counters/ability]") are real now too (`phase5/escape-provenance`) - see
 //! `phase5_escape_provenance.rs` for the full slice.
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -143,6 +144,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, alternative
             kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost , pay_buyback: false},
         })
         .expect("player controls the card and holds priority");
+}
+
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, alternative_cost: Option<usize>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost , pay_buyback: false},
+        })
+        
 }
 
 /// Finds the specific `ZoneChange` whose destination is `to` - needed since
@@ -297,9 +307,8 @@ fn casting_from_hand_while_declaring_escape_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, Some(0));
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    let err = try_cast_spell(&mut engine, p0, card, Some(0)).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "card untouched");
 }
 

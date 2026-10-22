@@ -44,7 +44,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -120,36 +121,36 @@ fn combat_state() -> GameState {
     }
 }
 
-fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
+fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>>) -> StepStatus {
+fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBands { bands } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> StepStatus {
+fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
 fn assign_combat_damage(
     engine: &mut Engine,
     player: PlayerId,
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
+) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
-        .expect("turn-based action, no priority required");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
 fn pass_to_step(engine: &mut Engine, step: Step) {
@@ -164,8 +165,8 @@ fn pass_to_step(engine: &mut Engine, step: Step) {
     panic!("never reached {step:?} - state.step = {:?}", engine.state().step);
 }
 
-fn assert_illegal(status: StepStatus) {
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "expected an illegal action, got {status:?}");
+fn assert_illegal(status: Result<StepStatus, ActionError>) {
+    assert!(matches!(status, Err(ActionError::Rejected(Rejected::IllegalAction(_)))), "expected an illegal action, got {status:?}");
 }
 
 // ---------------------------------------------------------------------
@@ -184,7 +185,7 @@ fn a_band_needs_at_least_one_banding_member() {
     put_on_battlefield(&mut state, permanent(b, creature_definition(2, "Bear2", 2, 2, KeywordSet::empty()), p0));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(a, Target::Player(p1)), (b, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(a, Target::Player(p1)), (b, Target::Player(p1))]).unwrap();
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![a, b]]));
 }
 
@@ -206,7 +207,7 @@ fn a_band_allows_at_most_one_non_banding_member() {
         &mut engine,
         p0,
         vec![(banding, Target::Player(p1)), (bear1, Target::Player(p1)), (bear2, Target::Player(p1))],
-    );
+    ).unwrap();
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![banding, bear1, bear2]]));
 }
 
@@ -224,7 +225,7 @@ fn every_band_member_must_attack_the_same_target() {
     put_on_battlefield(&mut state, permanent(pw, planeswalker_definition(3, "Test Walker"), p1));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(banding, Target::Player(p1)), (other, Target::Object(pw))]);
+    declare_attackers(&mut engine, p0, vec![(banding, Target::Player(p1)), (other, Target::Object(pw))]).unwrap();
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![banding, other]]));
 }
 
@@ -251,13 +252,13 @@ fn a_directly_blocked_band_member_forces_the_same_block_onto_a_shadow_bandmate()
     put_on_battlefield(&mut state, permanent(blocker, creature_definition(3, "Bear", 2, 2, KeywordSet::empty()), p1));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(banding, Target::Player(p1)), (shadow_mate, Target::Player(p1))]);
-    assert!(matches!(declare_bands(&mut engine, p0, vec![vec![banding, shadow_mate]]), StepStatus::AwaitingAction { .. }));
+    declare_attackers(&mut engine, p0, vec![(banding, Target::Player(p1)), (shadow_mate, Target::Player(p1))]).unwrap();
+    assert!(matches!(declare_bands(&mut engine, p0, vec![vec![banding, shadow_mate]]).unwrap(), StepStatus::AwaitingAction { .. }));
     pass_to_step(&mut engine, Step::DeclareBlockers);
 
     // Directly blocking the shadow creature would be illegal on its own -
     // only the non-shadow bandmate is submitted as a direct block.
-    declare_blockers(&mut engine, p1, vec![(blocker, banding)]);
+    declare_blockers(&mut engine, p1, vec![(blocker, banding)]).unwrap();
 
     let combat = engine.state().combat.as_ref().expect("still in combat");
     assert!(
@@ -286,10 +287,10 @@ fn a_band_forced_blocker_must_split_its_damage_among_both_attackers() {
     put_on_battlefield(&mut state, permanent(blocker, creature_definition(3, "Ogre", 4, 4, KeywordSet::empty()), p1));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(a, Target::Player(p1)), (b, Target::Player(p1))]);
-    declare_bands(&mut engine, p0, vec![vec![a, b]]);
+    declare_attackers(&mut engine, p0, vec![(a, Target::Player(p1)), (b, Target::Player(p1))]).unwrap();
+    declare_bands(&mut engine, p0, vec![vec![a, b]]).unwrap();
     pass_to_step(&mut engine, Step::DeclareBlockers);
-    declare_blockers(&mut engine, p1, vec![(blocker, a)]);
+    declare_blockers(&mut engine, p1, vec![(blocker, a)]).unwrap();
 
     let combat = engine.state().combat.as_ref().unwrap();
     assert!(combat.blocks.contains(&(blocker, a)));
@@ -301,7 +302,7 @@ fn a_band_forced_blocker_must_split_its_damage_among_both_attackers() {
     // now covering the blocker side too).
     assert_illegal(assign_combat_damage(&mut engine, p0, Vec::new()));
 
-    let status = assign_combat_damage(&mut engine, p0, vec![(blocker, vec![(a, 3), (b, 1)])]);
+    let status = assign_combat_damage(&mut engine, p0, vec![(blocker, vec![(a, 3), (b, 1)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "expected the split to be accepted, got {status:?}");
 }
 
@@ -324,16 +325,16 @@ fn attacker_double_blocked_by_a_banding_creature_needs_the_defending_players_cho
     put_on_battlefield(&mut state, permanent(plain, creature_definition(3, "Plain", 1, 5, KeywordSet::empty()), p1));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_step(&mut engine, Step::DeclareBlockers);
-    declare_blockers(&mut engine, p1, vec![(bander, attacker), (plain, attacker)]);
+    declare_blockers(&mut engine, p1, vec![(bander, attacker), (plain, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
     // The active player no longer gets to choose this split - one of the
     // attacker's blockers has banding.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(bander, 2), (plain, 2)])]));
 
-    let status = assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(bander, 2), (plain, 2)])]);
+    let status = assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(bander, 2), (plain, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "expected the defending player's split to be accepted, got {status:?}");
 }
 
@@ -349,9 +350,9 @@ fn trampler_blocked_by_a_single_banding_creature_still_needs_the_defending_playe
     put_on_battlefield(&mut state, permanent(bander, creature_definition(2, "Bander", 1, 2, KeywordSet::BANDING), p1));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_step(&mut engine, Step::DeclareBlockers);
-    declare_blockers(&mut engine, p1, vec![(bander, attacker)]);
+    declare_blockers(&mut engine, p1, vec![(bander, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
     // A single blocker with trample still needs a chosen lethal-vs-excess
@@ -359,7 +360,7 @@ fn trampler_blocked_by_a_single_banding_creature_still_needs_the_defending_playe
     // choice here, since the lone blocker has banding.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(bander, 2)])]));
 
-    let status = assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(bander, 2)])]);
+    let status = assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(bander, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "expected the defending player's split (2 lethal, 3 trampling) to be accepted, got {status:?}");
 }
 
@@ -407,7 +408,7 @@ fn two_actor_split_fixture() -> (Engine, PlayerId, PlayerId, ObjectId, ObjectId,
         &mut engine,
         p0,
         vec![(plain_attacker, Target::Player(p1)), (banded_attacker, Target::Player(p1))],
-    );
+    ).unwrap();
     pass_to_step(&mut engine, Step::DeclareBlockers);
     declare_blockers(
         &mut engine,
@@ -418,7 +419,7 @@ fn two_actor_split_fixture() -> (Engine, PlayerId, PlayerId, ObjectId, ObjectId,
             (bander, banded_attacker),
             (plain_blocker_c, banded_attacker),
         ],
-    );
+    ).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
     (engine, p0, p1, plain_attacker, plain_blocker_a, plain_blocker_b, banded_attacker, bander, plain_blocker_c)
 }
@@ -458,7 +459,7 @@ fn each_actor_submitting_only_their_own_share_deals_damage_once_both_are_in() {
         two_actor_split_fixture();
 
     // p0 submits first - only their own share (the plain double-block).
-    let status = assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)])]);
+    let status = assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "p0's own share should be accepted, got {status:?}");
     // Nothing dealt yet - CR 510.2 damage is simultaneous, still waiting on
     // p1's own share for the banding-blocked attacker.
@@ -468,7 +469,7 @@ fn each_actor_submitting_only_their_own_share_deals_damage_once_both_are_in() {
 
     // p1 submits their own share (the banding-blocked attacker) - this
     // completes the step, so both splits' damage lands together.
-    let status = assign_combat_damage(&mut engine, p1, vec![(banded_attacker, vec![(bander, 2), (plain_blocker_c, 2)])]);
+    let status = assign_combat_damage(&mut engine, p1, vec![(banded_attacker, vec![(bander, 2), (plain_blocker_c, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "p1's own share should be accepted, got {status:?}");
     assert!(engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
     assert_eq!(engine.state().object(plain_blocker_a).unwrap().damage_marked, 2);
@@ -485,11 +486,11 @@ fn the_two_actors_can_submit_in_either_order_with_the_same_result() {
         two_actor_split_fixture();
 
     // p1 (the banding split's own chooser) goes first this time.
-    let status = assign_combat_damage(&mut engine, p1, vec![(banded_attacker, vec![(bander, 2), (plain_blocker_c, 2)])]);
+    let status = assign_combat_damage(&mut engine, p1, vec![(banded_attacker, vec![(bander, 2), (plain_blocker_c, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "p1's own share should be accepted, got {status:?}");
     assert!(!engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
 
-    let status = assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)])]);
+    let status = assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "p0's own share should be accepted, got {status:?}");
     assert!(engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
     assert_eq!(engine.state().object(plain_blocker_a).unwrap().damage_marked, 2);
@@ -501,7 +502,7 @@ fn an_actor_who_already_submitted_their_share_cannot_submit_again() {
     let (mut engine, p0, _p1, plain_attacker, plain_blocker_a, plain_blocker_b, _banded_attacker, _bander, _plain_blocker_c) =
         two_actor_split_fixture();
 
-    assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)])]);
+    assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)])]).unwrap();
     // p0 has nothing left to contribute this step - their own share is
     // already recorded, and the banding-blocked attacker was never theirs
     // to choose.
@@ -532,13 +533,13 @@ fn an_actor_cannot_submit_only_part_of_their_own_share() {
     put_on_battlefield(&mut state, permanent(blocker_b2, creature_definition(6, "BlockerB2", 1, 5, KeywordSet::empty()), p1));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker_a, Target::Player(p1)), (attacker_b, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker_a, Target::Player(p1)), (attacker_b, Target::Player(p1))]).unwrap();
     pass_to_step(&mut engine, Step::DeclareBlockers);
     declare_blockers(
         &mut engine,
         p1,
         vec![(blocker_a1, attacker_a), (blocker_a2, attacker_a), (blocker_b1, attacker_b), (blocker_b2, attacker_b)],
-    );
+    ).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
     // p0 is the sole chooser for both - but submits only attacker_a's

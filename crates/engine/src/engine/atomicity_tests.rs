@@ -421,3 +421,85 @@ fn a_bad_answer_to_any_pause_is_refused_and_changes_nothing() {
         );
     }
 }
+
+// ---- 035: Rejected and Internal -----------------------------------------------------
+
+use crate::commands::{apply_command, validate_command, Internal, Rejected};
+use crate::types::zone::Zone;
+use crate::types::turn::{Phase, Step};
+
+const LAND: ObjectId = ObjectId(7);
+
+/// p0 holds a land in hand in their main phase, so `PlayLand` is legal.
+fn land_game() -> Engine {
+    let mut state = minimal_state();
+    state.phase = Phase::Main;
+    state.step = Step::PreCombatMain;
+    state.zones = vec![
+        Zone { kind: ZoneKind::Hand, owner: Some(P0), contents: VecDeque::from([LAND]) },
+        Zone { kind: ZoneKind::Battlefield, owner: None, contents: VecDeque::new() },
+    ];
+    let mut land = object(LAND, CardDefinition { card_types: CardTypeSet::LAND, ..definition(Vec::new(), ModeChoice::Exactly(1)) });
+    land.zone = ZoneKind::Hand;
+    state.objects.insert(LAND, land);
+    Engine::new(state)
+}
+
+fn play_land() -> PlayerAction {
+    action(P0, PlayerActionKind::PlayLand { card: LAND })
+}
+
+#[test]
+fn submit_action_refuses_with_a_rejected_error_and_changes_nothing() {
+    let mut engine = land_game();
+    engine.state_mut().zones.retain(|z| z.kind != ZoneKind::Battlefield);
+    let before = engine.snapshot();
+
+    let refusal = engine.submit_action(play_land()).expect_err("there is no battlefield to play onto");
+
+    assert!(matches!(refusal, ActionError::Rejected(Rejected::IllegalAction(_))), "{refusal:?}");
+    assert!(before == engine.snapshot(), "a refusal changes nothing");
+    assert!(engine.fatal_error().is_none(), "a rejection is not a fatal error");
+}
+
+#[test]
+fn a_zone_that_vanishes_after_validation_is_an_internal_error() {
+    let mut engine = land_game();
+    let plan = validate_command(&engine.state, &engine.script_runtime, P0, play_land().kind).expect("the play is legal");
+    engine.state.zones.retain(|z| z.kind != ZoneKind::Battlefield);
+
+    let error = apply_command(&mut engine.state, plan).expect_err("the validated zone is gone");
+
+    let Internal(detail) = error;
+    assert!(detail.contains("battlefield"), "{detail}");
+}
+
+#[test]
+fn an_action_that_is_rejected_after_it_was_queued_is_fatal_and_stays_fatal() {
+    let mut engine = land_game();
+    // Queue the action the way `submit_action` would, then break the state it
+    // was validated against. Nothing in the public API can do this.
+    engine.submit_action(play_land()).expect("legal");
+    engine.state.zones.retain(|z| z.kind != ZoneKind::Battlefield);
+
+    let first = engine.step();
+    let StepStatus::Error(Internal(detail)) = first.status else { panic!("expected an Internal error") };
+    assert!(detail.contains("rejected after it was accepted"), "{detail}");
+    assert!(engine.fatal_error().is_some());
+
+    let ledger = engine.state.ledger.len();
+    let second = engine.step();
+    assert!(matches!(second.status, StepStatus::Error(_)), "a fatal engine only reports the error");
+    assert_eq!(engine.state.ledger.len(), ledger, "and writes nothing more");
+}
+
+#[test]
+fn a_command_error_from_execute_command_keeps_the_two_kinds_apart() {
+    let mut engine = land_game();
+    let rejected = crate::commands::execute_command(
+        &mut engine.state,
+        &engine.script_runtime,
+        crate::types::command::EngineCommand { command_id: crate::types::ids::CommandId(0), actor: P1, action: PlayerActionKind::PassPriority },
+    );
+    assert!(matches!(rejected, Err(crate::commands::CommandError::Rejected(_))), "{rejected:?}");
+}

@@ -21,7 +21,12 @@ pub enum ErrorCode {
     InvalidAnswer,
     GameOver,
     SetupInvalid,
+    /// The engine returned an `Internal` error (035). The game is over for this
+    /// Session, but a Seat can still `poll` for the events it was owed.
     PipelineError,
+    /// The engine panicked (035). The Session is dead: every later message, a
+    /// `poll` included, gets this code.
+    EnginePanic,
     /// `advance` while a Decision is open. Added after ticket 007's ten codes,
     /// which had none for this case.
     DecisionPending,
@@ -40,6 +45,7 @@ impl ErrorCode {
             ErrorCode::GameOver => "game_over",
             ErrorCode::SetupInvalid => "setup_invalid",
             ErrorCode::PipelineError => "pipeline_error",
+            ErrorCode::EnginePanic => "engine_panic",
             ErrorCode::DecisionPending => "decision_pending",
         }
     }

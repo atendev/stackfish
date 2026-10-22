@@ -19,7 +19,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -250,6 +251,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -356,10 +366,9 @@ fn up_to_word_exceeding_its_own_bound_is_rejected() {
     let mut engine = Engine::new(state);
     // 3 creatures + 1 land = 4 submitted - after the exact word claims 1,
     // the derived up_to count is 3, exceeding its own max of 2.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox), Target::Object(land)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox), Target::Object(land)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -376,10 +385,9 @@ fn at_least_word_below_its_own_bound_is_rejected() {
     let mut engine = Engine::new(state);
     // Only the land submitted - after it claims its exact share, the
     // derived at_least count is 0, below its own minimum of 1.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(land)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(land)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -513,9 +521,8 @@ fn two_variable_words_with_no_valid_assignment_is_still_rejected() {
     // total minimum), so no split of 3 targets across both words can ever
     // satisfy both minimums at once. Genuinely infeasible, not just
     // under-specified - correctly rejected, not guessed at.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }

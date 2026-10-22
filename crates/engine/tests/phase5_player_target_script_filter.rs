@@ -20,7 +20,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -117,7 +118,7 @@ fn set_target_with_a_player_table_self_registers_a_player_scripted_target_filter
 // End-to-end: real Engine pipeline through `ActivateAbility`.
 // ---------------------------------------------------------------------
 
-fn play_land_and_activate(p1_life: i32, target: Target) -> Engine {
+fn try_play_land_and_activate(p1_life: i32, target: Target) -> (Engine, Result<(), ActionError>) {
     let p0 = PlayerId(0);
     let land = ObjectId(0);
     let mut state = two_player_state(p1_life);
@@ -132,8 +133,7 @@ fn play_land_and_activate(p1_life: i32, target: Target) -> Engine {
     assert_eq!(engine.state().abilities.len(), 1, "the land's activated ability self-registered");
 
     let new_land_id = engine.state().abilities[0].source;
-    engine
-        .submit_action(PlayerAction {
+    let result = engine.submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::ActivateAbility {
                 source: new_land_id,
@@ -142,8 +142,13 @@ fn play_land_and_activate(p1_life: i32, target: Target) -> Engine {
                 chosen_colors: Vec::new(),
                 x_value: None,
             },
-        })
-        .expect("p0 controls the land and holds priority");
+        });
+    (engine, result)
+}
+
+fn play_land_and_activate(p1_life: i32, target: Target) -> Engine {
+    let (engine, result) = try_play_land_and_activate(p1_life, target);
+    result.expect("p0 controls the land and holds priority");
     engine
 }
 
@@ -158,21 +163,21 @@ fn a_player_at_or_below_the_life_threshold_satisfies_the_script_predicate() {
 #[test]
 fn a_player_above_the_life_threshold_fails_the_script_predicate() {
     let p1 = PlayerId(1);
-    let mut engine = play_land_and_activate(20, Target::Player(p1));
-    let status = drain(&mut engine);
+    let (_engine, result) = try_play_land_and_activate(20, Target::Player(p1));
+    let err = result.unwrap_err();
     assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "20-life player should fail the script predicate, got {status:?}"
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "20-life player should fail the script predicate, got {err:?}"
     );
 }
 
 #[test]
 fn an_object_target_is_rejected_outright_by_a_player_script_filter() {
     let big = ObjectId(1);
-    let mut engine = play_land_and_activate(10, Target::Object(big));
-    let status = drain(&mut engine);
+    let (_engine, result) = try_play_land_and_activate(10, Target::Object(big));
+    let err = result.unwrap_err();
     assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "TargetFilter::PlayerScript is player-only by this slice's own narrowing, got {status:?}"
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "TargetFilter::PlayerScript is player-only by this slice's own narrowing, got {err:?}"
     );
 }

@@ -39,7 +39,11 @@ Checks run in this order: a Decision is open (`not_open`), the id matches (`stal
 (`wrong_seat`), the reply variant matches the shape (`wrong_answer_shape`), then the choice is legal
 (`invalid_choice`). The facade checks Pick membership, bounds and duplicates itself. Every other typed engine error maps
 to `invalid_choice` with its `Debug` text in the message. The engine's `submit_*` methods leave the pause untouched when
-they fail, so a rejected Answer changes nothing and the Decision keeps its id.
+they fail, so a rejected Answer changes nothing and the Decision keeps its id. A priority, attack, block or damage Answer
+now also goes through `validate_command` inside `submit_action` (ticket 035), so a reply the entries list but the
+engine's rules refuse comes back here as `invalid_choice` instead of failing in `step()`. The one exception is
+`internal`: a Madness or Cascade cast that broke an engine invariant. It means the engine is fatal and gives no
+"nothing changed" promise (`22-error-split.md`).
 
 ## Decision ids
 

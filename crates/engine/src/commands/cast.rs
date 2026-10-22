@@ -18,10 +18,30 @@ use crate::types::zone::ZoneKind;
 
 use super::attach::{non_eliminated_players, remap_abilities};
 use super::legality::{combine_chosen_modes, is_sorcery_speed, validate_targets};
-use super::{CommandError, CommandOutcome, PaymentResolution, PendingPaymentRequest, PriorityHandoff};
+use super::{CommandOutcome, Internal, PaymentResolution, PendingPaymentRequest, PriorityHandoff, Rejected, Validated};
 
-pub(super) fn execute_cast_spell(
-    state: &mut GameState,
+/// What `apply_cast_spell` needs, all settled by `validate_cast_spell`.
+#[derive(Debug)]
+pub(crate) struct CastPlan {
+    actor: PlayerId,
+    card: ObjectId,
+    modes: Vec<u32>,
+    targets: Vec<Target>,
+    x_value: Option<u32>,
+    pay_buyback: bool,
+    from_zone: ZoneKind,
+    from_owner: Option<PlayerId>,
+    cost: CostSpec,
+    exile_on_leaving_stack: bool,
+    escaped: bool,
+    cast_from_command_zone: bool,
+    modal_effect: Option<AbilityEffect>,
+    target_requirement: Option<TargetSpec>,
+    pending_mode_choice: Option<PendingModeChoice>,
+}
+
+pub(super) fn validate_cast_spell(
+    state: &GameState,
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
     card: ObjectId,
@@ -30,7 +50,7 @@ pub(super) fn execute_cast_spell(
     x_value: Option<u32>,
     alternative_cost: Option<usize>,
     pay_buyback: bool,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<Validated, Rejected> {
     // CR 601.3/702.35b: a one-shot timing waiver set by `Engine::
     // submit_madness_cast` immediately before this call - the resolving
     // madness triggered ability's own "you may cast it" text is itself the
@@ -38,18 +58,16 @@ pub(super) fn execute_cast_spell(
     // timing permission, not a property of the alternative cost declaration
     // itself (see `GameState::pending_timing_bypass`'s own doc comment for
     // why this is a side channel rather than a new `CastSpell` field).
-    // `.take()` unconditionally so it can never leak into a later,
-    // unrelated ordinary cast of the same card. Computed before `object` is
-    // borrowed below since both borrow `state` and `object` stays alive for
-    // the rest of this function.
-    let timing_bypassed = state.pending_timing_bypass.take() == Some(card);
+    // `apply_cast_spell` clears both grants unconditionally so they can never
+    // leak into a later, unrelated ordinary cast of the same card.
+    let timing_bypassed = state.pending_timing_bypass == Some(card);
     // CR 702.85a: a one-shot "cast this exact object for {0}, from Exile"
     // grant set by `Engine::submit_cascade_cast` immediately before this
     // call - see `GameState::pending_free_cast`'s own doc comment for why
     // this can't be an ordinary printed `alternative_costs` entry (the
     // permission comes from Cascade's own effect, not from anything the
     // exiled candidate card was ever printed with).
-    let free_cast = state.pending_free_cast.take() == Some(card);
+    let free_cast = state.pending_free_cast == Some(card);
     let free_cast_alternative = AlternativeCost::Replacement {
         description: "cast without paying its mana cost".to_string(),
         cost: CostSpec::mana_only(ManaCost { symbols: Vec::new() }),
@@ -57,9 +75,9 @@ pub(super) fn execute_cast_spell(
         exile_on_leaving_stack: false,
         escape: false,
     };
-    let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
+    let object = state.object(card).ok_or(Rejected::InvalidTarget)?;
     if object.definition.card_types.contains(CardTypeSet::LAND) {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "lands aren't cast as spells - use PlayLand".to_string(),
         ));
     }
@@ -67,7 +85,7 @@ pub(super) fn execute_cast_spell(
     // alternative_cost/x_value - rejected here (before any state
     // mutation) rather than silently ignored if the card has none.
     if pay_buyback && object.definition.buyback_cost.is_none() {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "this spell has no buyback cost to pay".to_string(),
         ));
     }
@@ -86,7 +104,7 @@ pub(super) fn execute_cast_spell(
                     .definition
                     .alternative_costs
                     .get(idx)
-                    .ok_or(CommandError::IllegalAction(
+                    .ok_or(Rejected::IllegalAction(
                         "no such alternative cost on this card".to_string(),
                     ))?,
             ),
@@ -119,7 +137,7 @@ pub(super) fn execute_cast_spell(
     if !cast_from_command_zone
         && (object.zone != required_zone || object.controller != actor)
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "card is not in the zone required to cast it this way".to_string(),
         ));
     }
@@ -140,12 +158,12 @@ pub(super) fn execute_cast_spell(
     if !timing_bypassed {
         if castable_at_instant_speed {
             if state.priority_player != actor {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "actor does not hold priority".to_string(),
                 ));
             }
         } else if !is_sorcery_speed(state, actor) {
-            return Err(CommandError::IllegalAction(
+            return Err(Rejected::IllegalAction(
                 "this spell can only be cast at sorcery speed: actor's turn, a main \
                  phase, actor holding priority, and an empty stack"
                     .to_string(),
@@ -183,7 +201,7 @@ pub(super) fn execute_cast_spell(
         Option<PendingModeChoice>,
     ) = if object.definition.modes.is_empty() {
             if !modes.is_empty() {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "this card isn't modal - no modes to choose".to_string(),
                 ));
             }
@@ -197,14 +215,14 @@ pub(super) fn execute_cast_spell(
             // deferred to a resolution-time pause rather than
             // supplied here.
             if !modes.is_empty() {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "this card's mode is chosen by another player, not the caster - submit \
                      no modes when casting it"
                         .to_string(),
                 ));
             }
             if !targets.is_empty() {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "this card's mode (and therefore its targets) isn't chosen yet"
                         .to_string(),
                 ));
@@ -215,7 +233,7 @@ pub(super) fn execute_cast_spell(
                 .iter()
                 .any(|m| m.target_requirement.is_some() || m.additional_cost.is_some())
             {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "a chosen-by-opponent modal card's modes must have no target \
                      requirement and no additional cost"
                         .to_string(),
@@ -224,7 +242,7 @@ pub(super) fn execute_cast_spell(
             let others: Vec<PlayerId> =
                 non_eliminated_players(state).into_iter().filter(|&p| p != actor).collect();
             let [chooser] = others.as_slice() else {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "a chosen-by-opponent modal card needs exactly one other player in the \
                      game - CR 700.2e's 3+ player 'controller decides who chooses' \
                      sub-clause isn't supported yet"
@@ -252,17 +270,17 @@ pub(super) fn execute_cast_spell(
             let mut total_weight: u32 = 0;
             for &m in &modes {
                 if !seen_modes.insert(m) {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "the same mode can't be chosen more than once".to_string(),
                     ));
                 }
                 let mode = object.definition.modes.get(m as usize).ok_or_else(|| {
-                    CommandError::IllegalAction("no such mode on this card".to_string())
+                    Rejected::IllegalAction("no such mode on this card".to_string())
                 })?;
                 total_weight += mode.pawprint_weight;
             }
             if total_weight > budget {
-                return Err(CommandError::IllegalAction(format!(
+                return Err(Rejected::IllegalAction(format!(
                     "this modal spell allows choosing modes worth up to {budget} pawprint(s), got {total_weight}"
                 )));
             }
@@ -273,7 +291,7 @@ pub(super) fn execute_cast_spell(
                 .filter_map(|&idx| object.definition.modes.get(idx as usize).and_then(|m| m.additional_cost.clone()))
                 .collect();
             let (target_requirement, modal_effect) =
-                combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(CommandError::IllegalAction)?;
+                combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(Rejected::IllegalAction)?;
             (target_requirement, modal_effect, mode_additional_costs, None)
         } else {
             // CR 700.2a: "choose a number of those options" - never
@@ -282,7 +300,7 @@ pub(super) fn execute_cast_spell(
             let (min, max, repeatable) = object.definition.mode_choice.bounds();
             let chosen_count = modes.len() as u32;
             if chosen_count < min || chosen_count > max {
-                return Err(CommandError::IllegalAction(format!(
+                return Err(Rejected::IllegalAction(format!(
                     "this modal spell requires choosing between {min} and {max} mode(s), got {chosen_count}"
                 )));
             }
@@ -290,7 +308,7 @@ pub(super) fn execute_cast_spell(
                 let mut seen_modes = HashSet::new();
                 for &m in &modes {
                     if !seen_modes.insert(m) {
-                        return Err(CommandError::IllegalAction(
+                        return Err(Rejected::IllegalAction(
                             "the same mode can't be chosen more than once".to_string(),
                         ));
                     }
@@ -305,7 +323,7 @@ pub(super) fn execute_cast_spell(
             let mut chosen_modes = Vec::with_capacity(chosen_indices.len());
             for &idx in &chosen_indices {
                 let mode = object.definition.modes.get(idx as usize).ok_or_else(|| {
-                    CommandError::IllegalAction("no such mode on this card".to_string())
+                    Rejected::IllegalAction("no such mode on this card".to_string())
                 })?;
                 chosen_modes.push(mode);
             }
@@ -331,7 +349,7 @@ pub(super) fn execute_cast_spell(
             // TODO(036): which mode pairs combine is only decided here, so the
             // modal entries a Decision lists can offer a pair this rejects.
             let (target_requirement, modal_effect) =
-                combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(CommandError::IllegalAction)?;
+                combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(Rejected::IllegalAction)?;
             (target_requirement, modal_effect, mode_additional_costs, None)
         };
 
@@ -386,13 +404,13 @@ pub(super) fn execute_cast_spell(
                 (true, Some(x)) => object.definition.mana_cost.resolve_x(x),
                 (false, None) => object.definition.mana_cost.clone(),
                 (true, None) => {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "this spell's cost includes {X} - a value must be announced"
                             .to_string(),
                     ));
                 }
                 (false, Some(_)) => {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "an X value was announced but this spell's cost has no {X}"
                             .to_string(),
                     ));
@@ -452,7 +470,9 @@ pub(super) fn execute_cast_spell(
     // combined total through the same generic mana-payment check, rather
     // than a second independent one.
     if pay_buyback {
-        let buyback_cost = object.definition.buyback_cost.clone().expect("checked above");
+        let buyback_cost = object.definition.buyback_cost.clone().ok_or_else(|| {
+            Rejected::IllegalAction("this spell has no buyback cost to pay".to_string())
+        })?;
         let mut mana = cost.mana.unwrap_or(ManaCost { symbols: Vec::new() });
         mana.symbols.extend(buyback_cost.symbols);
         cost.mana = Some(mana);
@@ -467,9 +487,50 @@ pub(super) fn execute_cast_spell(
     // partial move (024).
     let from_owner = if from_zone == ZoneKind::Exile { None } else { Some(actor) };
     if state.zone(from_zone, from_owner).is_none() {
-        return Err(CommandError::IllegalAction("actor has no such zone".to_string()));
+        return Err(Rejected::IllegalAction("actor has no such zone".to_string()));
     }
 
+    Ok(Validated::CastSpell(Box::new(CastPlan {
+        actor,
+        card,
+        modes,
+        targets,
+        x_value,
+        pay_buyback,
+        from_zone,
+        from_owner,
+        cost,
+        exile_on_leaving_stack,
+        escaped,
+        cast_from_command_zone,
+        modal_effect,
+        target_requirement,
+        pending_mode_choice,
+    })))
+}
+
+pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<CommandOutcome, Internal> {
+    let CastPlan {
+        actor,
+        card,
+        modes,
+        targets,
+        x_value,
+        pay_buyback,
+        from_zone,
+        from_owner,
+        cost,
+        exile_on_leaving_stack,
+        escaped,
+        cast_from_command_zone,
+        modal_effect,
+        target_requirement,
+        pending_mode_choice,
+    } = plan;
+    // CR 601.3/702.85a: the one-shot grants are spent by this cast, or by none.
+    state.pending_timing_bypass.take();
+    state.pending_free_cast.take();
+    let object = state.object(card).ok_or_else(|| Internal::new("cast: the validated card is gone"))?;
     // Snapshot before the move - CR 603.10's last_known_info (see
     // GameEventKind::ZoneChange's doc comment).
     let last_known_info = object.clone();
@@ -486,7 +547,7 @@ pub(super) fn execute_cast_spell(
 
     state
         .zone_mut(from_zone, from_owner)
-        .expect("zone confirmed present above")
+        .ok_or_else(|| Internal::new("cast: the validated source zone is gone"))?
         .remove(card);
     state.objects.remove(&card);
     state.objects.insert(new_id, new_object);
@@ -571,7 +632,7 @@ pub(super) fn execute_cast_spell(
         None,
     ));
 
-    return Ok(CommandOutcome {
+    Ok(CommandOutcome {
         events: vec![
             GameEventKind::ZoneChange {
                 object: new_id,
@@ -599,5 +660,5 @@ pub(super) fn execute_cast_spell(
             on_paid: PaymentResolution::StackObject,
         }),
         battlefield_entries: Vec::new(),
-    });
+    })
 }

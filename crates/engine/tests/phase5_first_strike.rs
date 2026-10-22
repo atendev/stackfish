@@ -17,7 +17,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -101,6 +102,17 @@ fn assign_combat_damage(
         .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
         .expect("turn-based action, no priority required");
     drain(engine)
+}
+
+fn try_assign_combat_damage(
+    engine: &mut Engine,
+    player: PlayerId,
+    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        ?;
+    Ok(drain(engine))
 }
 
 /// Drives the real `AdvanceTurnStep` pipeline (both players passing with an
@@ -348,9 +360,7 @@ fn multi_blocked_split_requirement_is_scoped_to_the_current_step() {
     // Now attacker_a does participate (regular step, no keyword needed) and
     // is still blocked by both walls - the same split requirement
     // pre-existing tests (phase5_combat_damage.rs) already cover applies.
-    let status = assign_combat_damage(&mut engine, p0, Vec::new());
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "a split is required once attacker_a actually participates in the regular step: got {status:?}"
-    );
+    let err = try_assign_combat_damage(&mut engine, p0, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "a split is required once attacker_a actually participates in the regular step: got {err:?}");
 }

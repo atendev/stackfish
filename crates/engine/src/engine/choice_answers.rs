@@ -432,7 +432,13 @@ impl Engine {
             Err(err) => {
                 self.state.pending_timing_bypass = None;
                 self.next_command_id = command_id.0;
-                return Err(MadnessChoiceError::IllegalCast(err));
+                return Err(match err {
+                    commands::CommandError::Rejected(rejected) => MadnessChoiceError::IllegalCast(rejected),
+                    commands::CommandError::Internal(internal) => {
+                        self.poison(internal);
+                        MadnessChoiceError::Internal
+                    }
+                });
             }
         };
 
@@ -525,7 +531,13 @@ impl Engine {
                 self.state.pending_free_cast = None;
                 self.state.pending_timing_bypass = None;
                 self.next_command_id = command_id.0;
-                return Err(CascadeChoiceError::IllegalCast(err));
+                return Err(match err {
+                    commands::CommandError::Rejected(rejected) => CascadeChoiceError::IllegalCast(rejected),
+                    commands::CommandError::Internal(internal) => {
+                        self.poison(internal);
+                        CascadeChoiceError::Internal
+                    }
+                });
             }
         };
 

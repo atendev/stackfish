@@ -25,7 +25,8 @@
 //! permanent_entry`'s normal-resolution path, not `resolve/mod.rs`'s
 //! CR 608.2b fizzle branch.
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
@@ -119,6 +120,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
             kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None, pay_buyback },
         })
         .expect("player holds priority, spell is in hand");
+}
+
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>, pay_buyback: bool) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None, pay_buyback },
+        })
+        
 }
 
 /// Finds the `ZoneChange` whose origin is the stack - i.e. the resolving
@@ -250,9 +260,8 @@ fn pay_buyback_on_a_card_with_no_buyback_cost_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], true);
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(creature)], true).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "card untouched");
     assert!(engine.state().stack.is_empty(), "never pushed");
 }

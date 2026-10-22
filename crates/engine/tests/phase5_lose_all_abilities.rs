@@ -16,7 +16,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -204,6 +205,13 @@ fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId
     drain(engine)
 }
 
+fn try_declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
+        ?;
+    Ok(drain(engine))
+}
+
 fn pass_to_declare_blockers(engine: &mut Engine) {
     for _ in 0..10 {
         if engine.state().step == Step::DeclareBlockers {
@@ -253,12 +261,10 @@ fn without_the_strip_the_same_printed_flying_attacker_still_enforces_legality() 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
+    let err = try_declare_blockers(&mut engine, p1, vec![(blocker, attacker)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "no strip - printed Flying should still enforce blocking legality, got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "no strip - printed Flying should still enforce blocking legality, got {err:?}");
 }
 
 // ---------------------------------------------------------------------

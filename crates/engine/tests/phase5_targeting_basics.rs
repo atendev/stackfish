@@ -6,7 +6,8 @@
 //! `GameState` construction pattern as `phase5_cast_spell.rs`.
 
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -159,6 +160,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 #[test]
 fn cast_spell_rejects_wrong_target_count() {
     let mut state = two_player_state();
@@ -173,10 +183,9 @@ fn cast_spell_rejects_wrong_target_count() {
     let mut engine = Engine::new(state);
     // bolt_definition requires exactly 1 target - submitting 0 or 2 is
     // illegal (CR 601.2c: the count is fixed by the spell's own text).
-    cast_spell(&mut engine, p0, card, Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "cast never happened");
     assert_eq!(engine.state().ledger.len(), 0);
 }
@@ -195,10 +204,9 @@ fn cast_spell_rejects_unrequested_target() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(creature)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(creature)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
 }
 
 #[test]
@@ -219,10 +227,9 @@ fn cast_spell_rejects_target_failing_filter() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(opponents_creature)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(opponents_creature)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
 }
 
 #[test]
@@ -244,10 +251,9 @@ fn cast_spell_rejects_duplicate_targets() {
     let mut engine = Engine::new(state);
     // CR 115.3: the same target can't be chosen twice for one instance of
     // the word "target".
-    cast_spell(&mut engine, p0, card, vec![Target::Object(creature), Target::Object(creature)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(creature), Target::Object(creature)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
 }
 
 #[test]
@@ -287,10 +293,9 @@ fn any_target_filter_rejects_noncreature_artifact() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(artifact)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(artifact)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
 }
 
 /// CR 608.2b: the target creature is removed from the battlefield after the

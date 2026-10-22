@@ -5,7 +5,7 @@
 //! ability's own cost actually has an `{X}` (`activate.rs`'s `cost_has_x`
 //! check) before `ManaCost::resolve_x` substitutes it in, same as casting.
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, single_player_state};
@@ -115,9 +115,8 @@ fn x_ability_activated_without_announcing_x_is_rejected() {
         state_with_ability_cost(mana_cost, ManaPool { red: 1, colorless: 3, ..ManaPool::default() });
     let mut engine = Engine::new(state);
 
-    activate(&mut engine, p0, source, None).unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    let err = activate(&mut engine, p0, source, None).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "nothing paid, nothing mutated");
 }
 
@@ -129,9 +128,8 @@ fn announcing_x_for_a_non_x_ability_is_rejected() {
     let (state, p0, source) = state_with_ability_cost(mana_cost, ManaPool { red: 1, ..ManaPool::default() });
     let mut engine = Engine::new(state);
 
-    activate(&mut engine, p0, source, Some(1)).unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    let err = activate(&mut engine, p0, source, Some(1)).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 /// Test case 4: `{X}` alone with `x_value: Some(0)` is legal, paid with an

@@ -21,7 +21,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -101,11 +102,25 @@ fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(Obje
     drain(engine)
 }
 
+fn try_declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
+        ?;
+    Ok(drain(engine))
+}
+
 fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> StepStatus {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
         .expect("player holds priority");
     drain(engine)
+}
+
+fn try_declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
+        ?;
+    Ok(drain(engine))
 }
 
 /// Drives the real `AdvanceTurnStep` pipeline (both players passing with the
@@ -151,8 +166,8 @@ fn flying_attacker_cannot_be_blocked_by_non_flying_non_reach() {
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p1, vec![(blocker, attacker)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -189,8 +204,8 @@ fn menace_attacker_rejects_a_single_blocker() {
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p1, vec![(blocker, attacker)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -261,8 +276,8 @@ fn creature_without_haste_cannot_attack_the_turn_it_entered() {
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Rookie", 2, 2, KeywordSet::empty()), p0, 1));
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 // ---------------------------------------------------------------------
@@ -278,8 +293,8 @@ fn defender_creature_cannot_attack() {
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Wall", 0, 4, KeywordSet::DEFENDER), p0, 0));
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 // ---------------------------------------------------------------------
@@ -330,11 +345,9 @@ fn defender_granted_by_a_continuous_effect_prevents_attacking() {
     state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::AddKeyword(KeywordSet::DEFENDER)));
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "a continuous effect granting Defender must actually prevent attacking, got {status:?}"
-    );
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "a continuous effect granting Defender must actually prevent attacking, got {err:?}");
 }
 
 #[test]
@@ -474,11 +487,9 @@ fn defender_creature_still_cannot_attack_without_a_matching_ignore_grant() {
     state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::IgnoreKeyword(KeywordSet::VIGILANCE)));
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "an ignore grant for an unrelated keyword must not lift the Defender restriction, got {status:?}"
-    );
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "an ignore grant for an unrelated keyword must not lift the Defender restriction, got {err:?}");
 }
 
 #[test]
@@ -555,14 +566,11 @@ fn non_flash_creature_rejected_outside_main_phase() {
     let (state, card) = hand_state_outside_main_phase(KeywordSet::empty());
     let p0 = PlayerId(0);
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false} })
-        .expect("actor holds priority - the sorcery-speed rejection happens inside execute_command, not submit_action");
-    let status = drain(&mut engine);
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "without flash, a creature needs the sorcery-speed window, got {status:?}"
-    );
+        .unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "without flash, a creature needs the sorcery-speed window, got {err:?}");
 }
 
 // ---------------------------------------------------------------------

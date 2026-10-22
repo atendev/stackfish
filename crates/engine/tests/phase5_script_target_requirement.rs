@@ -25,7 +25,8 @@
 //! any `CardDefinition.target_requirement` before this slice - only
 //! `target_requirement()`'s own decode entry point needed the change.
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -243,6 +244,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -294,13 +304,10 @@ fn casting_the_script_declared_aura_at_a_non_wall_creature_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "a plain Bear (no Wall subtype) should fail the script-declared Enchant Wall restriction, got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a plain Bear (no Wall subtype) should fail the script-declared Enchant Wall restriction, got {err:?}");
 }
 
 // ---------------------------------------------------------------------
@@ -428,11 +435,8 @@ fn casting_the_scripted_predicate_aura_at_a_small_creature_is_rejected() {
 
     let mut engine = Engine::new(state);
     patch_in_power_four_target_requirement(&mut engine, card);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(small_creature)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(small_creature)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "a power-2 creature should fail the scripted power-4-or-greater predicate, got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a power-2 creature should fail the scripted power-4-or-greater predicate, got {err:?}");
 }

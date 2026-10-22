@@ -1,7 +1,7 @@
 //! `submit_action`'s validation entry point, `CommandId` allocation, and the
 //! `ProcessState::PendingAction` pipeline stage - split out of `engine.rs`.
 
-use crate::commands::{self, find_ability, PendingPaymentRequest, PriorityHandoff};
+use crate::commands::{self, find_ability, Internal, PendingPaymentRequest, PriorityHandoff};
 use crate::engine_context::{PipelineContext, PipelineExit};
 use crate::replacement;
 use crate::types::ability::AbilityEffect;
@@ -23,10 +23,11 @@ impl Engine {
     /// actually available) and queues it for the next `step()` to act on.
     /// Does not itself advance the ledger — `step()` does that.
     ///
-    /// Only checks "are we even waiting for an action right now" and "is
-    /// it this player's priority" (CR 117.3a). Cost/target/timing legality
-    /// beyond that isn't designed yet — see `commands::execute_command`'s
-    /// TODOs for where that has to land.
+    /// Checks "are we even waiting for an action right now", "is it this
+    /// player's priority" (CR 117.3a), and then the command itself with
+    /// `commands::validate_command` (timing, costs, targets, combat rules).
+    /// Any refusal leaves the engine exactly as it was (CR 733.1/733.2, 024,
+    /// 035) and the player keeps priority.
     ///
     /// CR 508.1/509.1/510.1 exception: `DeclareAttackers`/`DeclareBlockers`/
     /// `AssignCombatDamage` are turn-based actions that explicitly "don't
@@ -36,7 +37,7 @@ impl Engine {
     /// attackers step), and combat damage is dealt automatically as the
     /// combat damage step opens (510.1/510.2), not in response to a
     /// priority window. Skipping the priority check for these three and
-    /// leaving the actor check entirely to `execute_command` (active player
+    /// leaving the actor check entirely to `validate_command` (active player
     /// / defending player, per CR 506.2) is a deliberate simplification -
     /// the fully correct model would have these fire automatically on
     /// entering their step, before any priority window opens, which this
@@ -92,6 +93,12 @@ impl Engine {
                 "pregame actions use submit_mulligan_decision / submit_bottom_cards".to_string(),
             ));
         }
+        // 035: the command is checked in full before it is queued, so the answer
+        // does not depend on the caller (the Session, a test or a scenario). A
+        // rejection returns here with nothing changed, the pending payment
+        // included.
+        commands::validate_command(&self.state, &self.script_runtime, action.player, action.kind.clone())
+            .map_err(ActionError::Rejected)?;
         if suspend_payment {
             self.suspend_current_payment();
         }
@@ -157,17 +164,22 @@ impl Engine {
         let mut outcome = match commands::execute_command(&mut self.state, &self.script_runtime, command) {
             Ok(outcome) => outcome,
             Err(err) => {
-                // Reset to PriorityWindow rather than leaving process_state
-                // in limbo. A rejection changes nothing else (024: every
-                // command validates before it mutates), so there is nothing
-                // to roll back. If this was a nested
-                // mana-ability activation (CR 601.2g/605.3a) that errored
-                // out before `pipeline_context`/`pipeline_exit` were even
-                // touched, resume the outer `AwaitingPayment` it suspended
-                // instead of abandoning it - see `submit_action`'s own doc
-                // comment.
+                // `submit_action` validated this command with the same
+                // `validate_command`, so a rejection here means the state
+                // changed between the two, or the engine broke (035). Either
+                // way it is an `Internal` error, and fatal. The process state
+                // is still reset, and a nested mana ability's outer payment
+                // resumed, so a host that inspects the engine finds it
+                // consistent.
+                let internal = match err {
+                    commands::CommandError::Internal(internal) => internal,
+                    commands::CommandError::Rejected(rejected) => {
+                        Internal::new(format!("a queued action was rejected after it was accepted: {rejected:?}"))
+                    }
+                };
                 self.process_state = self.resume_suspended_payment_or(ProcessState::PriorityWindow);
-                return StepStatus::Error(err);
+                self.poison(internal.clone());
+                return StepStatus::Error(internal);
             }
         };
 

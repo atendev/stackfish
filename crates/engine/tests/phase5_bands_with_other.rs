@@ -34,7 +34,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -131,36 +132,36 @@ fn combat_state() -> GameState {
     }
 }
 
-fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
+fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>>) -> StepStatus {
+fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBands { bands } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> StepStatus {
+fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
 fn assign_combat_damage(
     engine: &mut Engine,
     player: PlayerId,
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> StepStatus {
+) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
-        .expect("turn-based action, no priority required");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
 fn pass_to_step(engine: &mut Engine, step: Step) {
@@ -175,15 +176,17 @@ fn pass_to_step(engine: &mut Engine, step: Step) {
     panic!("never reached {step:?} - state.step = {:?}", engine.state().step);
 }
 
-fn assert_illegal(status: StepStatus) {
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "expected an illegal action, got {status:?}");
+fn assert_illegal(status: Result<StepStatus, ActionError>) {
+    assert!(matches!(status, Err(ActionError::Rejected(Rejected::IllegalAction(_)))), "expected an illegal action, got {status:?}");
 }
 
-fn assert_legal_band(status: StepStatus) {
+fn assert_legal_band(status: Result<StepStatus, ActionError>) {
+    let status = status.expect("the engine should accept the action");
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal band declaration, got {status:?}");
 }
 
-fn assert_accepted(status: StepStatus) {
+fn assert_accepted(status: Result<StepStatus, ActionError>) {
+    let status = status.expect("the engine should accept the action");
     assert!(!matches!(status, StepStatus::Error(_)), "expected the split to be accepted, got {status:?}");
 }
 
@@ -203,7 +206,7 @@ fn quality_band_legal_with_no_banding_member_at_all() {
     state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (elf, Target::Player(PlayerId(1)))]);
+    declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (elf, Target::Player(PlayerId(1)))]).unwrap();
     // Neither creature has plain Banding - only the quality path can make
     // this legal, and it does (elf_lord has bands-with-other Elf, elf is an
     // Elf).
@@ -222,7 +225,7 @@ fn quality_band_rejects_a_bandmate_missing_the_quality() {
     state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (bear, Target::Player(PlayerId(1)))]);
+    declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (bear, Target::Player(PlayerId(1)))]).unwrap();
     // bear isn't an Elf - doesn't satisfy elf_lord's named quality, and
     // neither creature has plain Banding either.
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![elf_lord, bear]]));
@@ -240,7 +243,7 @@ fn quality_band_rejects_when_no_member_has_bands_with_other() {
     // No bands_with_other grant on either creature this time.
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(elf_a, Target::Player(PlayerId(1))), (elf_b, Target::Player(PlayerId(1)))]);
+    declare_attackers(&mut engine, p0, vec![(elf_a, Target::Player(PlayerId(1))), (elf_b, Target::Player(PlayerId(1)))]).unwrap();
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![elf_a, elf_b]]));
 }
 
@@ -266,7 +269,7 @@ fn quality_band_allows_any_number_of_matching_members() {
             (elf_a, Target::Player(PlayerId(1))),
             (elf_b, Target::Player(PlayerId(1))),
         ],
-    );
+    ).unwrap();
     // Unlike the plain-banding path's "at most one non-banding member" cap,
     // the quality path allows any number of quality-matching members.
     assert_legal_band(declare_bands(&mut engine, p0, vec![vec![elf_lord, elf_a, elf_b]]));
@@ -290,7 +293,7 @@ fn plain_banding_path_unaffected_by_this_slice() {
         &mut engine,
         p0,
         vec![(banding_creature, Target::Player(PlayerId(1))), (plain_creature, Target::Player(PlayerId(1)))],
-    );
+    ).unwrap();
     assert_legal_band(declare_bands(&mut engine, p0, vec![vec![banding_creature, plain_creature]]));
 }
 
@@ -317,9 +320,9 @@ fn attacker_double_blocked_by_a_bands_with_other_pair_needs_the_defending_player
     state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_step(&mut engine, Step::DeclareBlockers);
-    declare_blockers(&mut engine, p1, vec![(elf_lord, attacker), (elf, attacker)]);
+    declare_blockers(&mut engine, p1, vec![(elf_lord, attacker), (elf, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
     // The active player no longer gets to choose this split - the
@@ -346,9 +349,9 @@ fn double_blocked_attacker_with_no_quality_pair_still_defaults_to_active_player(
     state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_step(&mut engine, Step::DeclareBlockers);
-    declare_blockers(&mut engine, p1, vec![(elf_lord, attacker), (bear, attacker)]);
+    declare_blockers(&mut engine, p1, vec![(elf_lord, attacker), (bear, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
     assert_illegal(assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(elf_lord, 2), (bear, 2)])]));
@@ -371,7 +374,7 @@ fn supertype_quality_band_legal_with_no_banding_member_at_all() {
     state.continuous_effects.push(bands_with_other_supertype(legend_lord, SupertypeSet::LEGENDARY));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(legend_lord, Target::Player(PlayerId(1))), (legend, Target::Player(PlayerId(1)))]);
+    declare_attackers(&mut engine, p0, vec![(legend_lord, Target::Player(PlayerId(1))), (legend, Target::Player(PlayerId(1)))]).unwrap();
     // Neither creature has plain Banding - only the supertype-quality path
     // can make this legal, and it does (legend_lord has bands-with-other
     // Legends, legend is Legendary).
@@ -390,7 +393,7 @@ fn supertype_quality_band_rejects_a_bandmate_missing_the_quality() {
     state.continuous_effects.push(bands_with_other_supertype(legend_lord, SupertypeSet::LEGENDARY));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(legend_lord, Target::Player(PlayerId(1))), (bear, Target::Player(PlayerId(1)))]);
+    declare_attackers(&mut engine, p0, vec![(legend_lord, Target::Player(PlayerId(1))), (bear, Target::Player(PlayerId(1)))]).unwrap();
     // bear isn't Legendary - doesn't satisfy legend_lord's named quality,
     // and neither creature has plain Banding either.
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![legend_lord, bear]]));
@@ -414,9 +417,9 @@ fn attacker_double_blocked_by_a_bands_with_other_supertype_pair_needs_the_defend
     state.continuous_effects.push(bands_with_other_supertype(legend_lord, SupertypeSet::LEGENDARY));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_step(&mut engine, Step::DeclareBlockers);
-    declare_blockers(&mut engine, p1, vec![(legend_lord, attacker), (legend, attacker)]);
+    declare_blockers(&mut engine, p1, vec![(legend_lord, attacker), (legend, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
     // The active player no longer gets to choose this split - the

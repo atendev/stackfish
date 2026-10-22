@@ -30,7 +30,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -115,6 +116,18 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
     drain(engine)
 }
 
+fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
+        })
+        ?;
+    Ok(drain(engine))
+}
+
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine);
@@ -131,8 +144,8 @@ fn an_ability_with_another_target_creature_cannot_target_its_own_source() {
     state.abilities.push(another_target_creature_ability(olivia));
 
     let mut engine = Engine::new(state);
-    let status = activate(&mut engine, p0, olivia, vec![Target::Object(olivia)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::InvalidTarget)), "expected the source to be rejected as its own target, got {status:?}");
+    let err = try_activate(&mut engine, p0, olivia, vec![Target::Object(olivia)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "expected the source to be rejected as its own target, got {err:?}");
 }
 
 #[test]

@@ -20,7 +20,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -71,18 +72,18 @@ fn combat_state() -> GameState {
     }
 }
 
-fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
+fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> StepStatus {
+fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
 fn pass_to_declare_blockers(engine: &mut Engine) {
@@ -97,7 +98,7 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
 
-fn attack_and_try_block(attacker_def: CardDefinition, blocker_def: CardDefinition) -> StepStatus {
+fn attack_and_try_block(attacker_def: CardDefinition, blocker_def: CardDefinition) -> Result<StepStatus, ActionError> {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
@@ -107,17 +108,17 @@ fn attack_and_try_block(attacker_def: CardDefinition, blocker_def: CardDefinitio
     put_on_battlefield(&mut state, permanent(blocker, blocker_def, p1));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
+    declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap();
     pass_to_declare_blockers(&mut engine);
     declare_blockers(&mut engine, p1, vec![(blocker, attacker)])
 }
 
-fn assert_legal_block(status: StepStatus) {
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal block, got {status:?}");
+fn assert_legal_block(status: Result<StepStatus, ActionError>) {
+    let status = status.expect("the engine should accept the action");    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal block, got {status:?}");
 }
 
-fn assert_illegal_block(status: StepStatus) {
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "expected an illegal block, got {status:?}");
+fn assert_illegal_block(status: Result<StepStatus, ActionError>) {
+    assert!(matches!(status, Err(ActionError::Rejected(Rejected::IllegalAction(_)))), "expected an illegal block, got {status:?}");
 }
 
 // ---------------------------------------------------------------------

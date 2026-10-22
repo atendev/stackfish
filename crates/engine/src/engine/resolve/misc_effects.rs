@@ -399,6 +399,11 @@ impl Engine {
             Err(err) => {
                 self.state.pending_timing_bypass = None;
                 self.state.pending_free_cast = None;
+                // A rejected cast is the script's mistake and is logged below. A
+                // broken invariant is the engine's, and fatal (035).
+                if let commands::CommandError::Internal(internal) = &err {
+                    self.poison(internal.clone());
+                }
                 self.log_events(vec![GameEventKind::ScriptError {
                     message: format!("script-requested cast failed on source {stack_id:?}: {err:?}"),
                 }]);

@@ -16,7 +16,7 @@ use crate::types::target::{ManaValueBound, ManaValueComparison, TargetFilter, Ta
 use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
-use super::{non_eliminated_players, CommandError};
+use super::{non_eliminated_players, Rejected};
 
 /// CR 117.1a's "sorcery speed" window — `player` may take an action that
 /// requires it (playing a land, casting a sorcery, most activated
@@ -74,7 +74,7 @@ pub(crate) fn has_summoning_sickness(
 /// applicable `ContinuousEffect`), via `layers::effective_characteristics`.
 /// Tolerates a missing `id` (returns `KeywordSet::empty()`) rather than
 /// panicking the way `effective_characteristics` itself does — several call
-/// sites below already separately raise `CommandError::InvalidTarget` for a
+/// sites below already separately raise `Rejected::InvalidTarget` for a
 /// missing id and just want "no keywords" as the fallback otherwise (mirrors
 /// the pre-existing `Option<&GameObject>` + `is_some_and` shape this
 /// replaces).
@@ -674,13 +674,13 @@ pub(crate) fn validate_targets(
     // X concept (a triggered ability's own CR 603.3d target choice never
     // has one).
     caster_x_value: Option<u32>,
-) -> Result<(), CommandError> {
+) -> Result<(), Rejected> {
     match requirement {
         None => {
             if targets.is_empty() {
                 Ok(())
             } else {
-                Err(CommandError::InvalidTarget)
+                Err(Rejected::InvalidTarget)
             }
         }
         Some(TargetSpec::Primitive(req)) => {
@@ -692,7 +692,7 @@ pub(crate) fn validate_targets(
             // by filter-assignment for 2+ (see `split_targets_by_
             // requirement`'s own doc comment).
             let Some(chunks) = split_targets_by_requirement(state, script_runtime, reqs, targets, caster, source, caster_x_value) else {
-                return Err(CommandError::InvalidTarget);
+                return Err(Rejected::InvalidTarget);
             };
             // CR 115.3/601.2c: dedup is checked independently per word by
             // `validate_one_target_requirement` below (its own `seen` set is
@@ -718,7 +718,7 @@ fn validate_one_target_requirement(
     caster: PlayerId,
     source: ObjectId,
     caster_x_value: Option<u32>,
-) -> Result<(), CommandError> {
+) -> Result<(), Rejected> {
     // CR 601.2c/115.6: "up to N" accepts anywhere from 0 to `count`
     // chosen; "N or more" accepts `count` or more with no upper
     // bound; the common exact-count case still requires exactly
@@ -731,19 +731,19 @@ fn validate_one_target_requirement(
         targets.len() == req.count as usize
     };
     if !count_ok {
-        return Err(CommandError::InvalidTarget);
+        return Err(Rejected::InvalidTarget);
     }
     // CR 115.3/601.2c: the same target can't be chosen twice for one
     // instance of the word "target".
     let mut seen = HashSet::new();
     for t in targets {
         if !seen.insert(*t) {
-            return Err(CommandError::InvalidTarget);
+            return Err(Rejected::InvalidTarget);
         }
     }
     for t in targets {
         if !target_is_legal(state, script_runtime, *t, &req.filter, caster, source, req.exclude_source, caster_x_value) {
-            return Err(CommandError::InvalidTarget);
+            return Err(Rejected::InvalidTarget);
         }
     }
     Ok(())

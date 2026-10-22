@@ -17,7 +17,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -144,6 +145,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<u32>, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes, targets, x_value: None, alternative_cost: None, pay_buyback: false },
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -211,10 +221,9 @@ fn modal_spell_rejects_a_target_illegal_for_the_chosen_modes_own_requirement() {
     let mut engine = Engine::new(state);
     // Mode 1 requires exactly one AnyTarget - supplying none is illegal,
     // same as any non-modal spell's own target_requirement would reject.
-    cast_spell(&mut engine, p0, card, vec![1], Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![1], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -227,10 +236,9 @@ fn modal_spell_rejects_casting_with_no_mode_chosen() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, Vec::new(), Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, Vec::new(), Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
     assert_eq!(engine.state().ledger.len(), 0);
 }
@@ -246,10 +254,9 @@ fn modal_spell_rejects_choosing_two_modes() {
     let mut engine = Engine::new(state);
     // CR 700.2d ("choose two"/repeated modes) is out of scope this slice -
     // narrowed to exactly one.
-    cast_spell(&mut engine, p0, card, vec![0, 1], Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0, 1], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -262,10 +269,9 @@ fn modal_spell_rejects_an_out_of_range_mode_index() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![7], Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![7], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -282,10 +288,9 @@ fn non_modal_spell_rejects_a_mode_choice() {
 
     let mut engine = Engine::new(state);
     // shock_definition() has no modes - announcing one is illegal.
-    cast_spell(&mut engine, p0, card, vec![0], vec![Target::Object(target)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0], vec![Target::Object(target)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 

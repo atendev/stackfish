@@ -2,7 +2,8 @@
 //! stack involved) plus the zone helpers (`Zone::remove`/`push_bottom`,
 //! `GameState::object_mut`/`zone_mut`) it's the first real caller of.
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
@@ -97,12 +98,11 @@ fn play_land_rejects_non_land_card() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
     assert!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.contains(&card));
     assert_eq!(engine.state().ledger.len(), 0, "no ledger growth on a rejected command");
@@ -117,12 +117,11 @@ fn play_land_rejects_card_not_in_hand() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Battlefield, "state untouched");
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&card));
     assert_eq!(engine.state().ledger.len(), 0);
@@ -138,12 +137,11 @@ fn play_land_rejects_outside_main_phase() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -176,12 +174,11 @@ fn play_land_rejects_nonempty_stack() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -198,12 +195,11 @@ fn play_land_rejects_not_actors_turn() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card } })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -227,12 +223,11 @@ fn play_land_rejects_second_land_same_turn() {
     assert!(engine.state().object(first).is_none(), "old id retired per CR 400.7");
     assert_eq!(engine.state().object(first_new_id).unwrap().zone, ZoneKind::Battlefield);
 
-    engine
+    let err = engine
         .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: second } })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(second).unwrap().zone, ZoneKind::Hand, "second land untouched");
 }
 
@@ -266,9 +261,10 @@ fn play_land_allows_an_additional_land_with_a_land_play_modifier() {
         assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected {card:?} to be playable, got {status:?}");
     }
 
-    engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: third } }).unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))), "a 3rd land should still be rejected");
+    let err = engine
+        .submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PlayLand { card: third } })
+        .unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "a 3rd land should still be rejected");
 }
 
 /// CR 305.2's own "additional lands" stack — two separate +1 modifiers grant

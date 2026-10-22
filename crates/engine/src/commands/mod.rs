@@ -52,16 +52,48 @@ pub(crate) use zone_ops::{
     apply_damage_event, collect_cost_zone_moves, commit_payment, commit_zone_move, propose_draw, propose_zone_move,
 };
 
-/// Carrying out an already-validated `EngineCommand` failed partway —
-/// distinct from `ActionError` (engine.rs), which rejects an action before
-/// it's even accepted. Reaching a `CommandError` mid-execution should be
-/// rare/exceptional once cost/target validation happens up front; this
-/// exists mainly for cases validation can't fully rule out ahead of time.
-#[derive(Debug)]
-pub enum CommandError {
-    CostNotPaid,
+/// Why a command was turned down before it changed anything (CR 733.1,
+/// 733.2). Only the validation half of a command builds one: every `validate_*`
+/// function returns `Result<_, Rejected>`, and every `apply_*` function returns
+/// `Result<_, Internal>`, so a mutating step cannot report "rejected" by type.
+/// The player keeps priority and may try again.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Rejected {
     InvalidTarget,
     IllegalAction(String),
+}
+
+/// A broken engine invariant found while carrying out a command that already
+/// passed validation, for example a zone or object that validation just
+/// confirmed is gone. Fatal: the state may be half-changed. The text is for the
+/// host's logs and never goes on the wire (it can name a hidden card).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Internal(pub String);
+
+impl Internal {
+    pub fn new(message: impl Into<String>) -> Self {
+        Internal(message.into())
+    }
+}
+
+/// What `execute_command` can fail with. `Rejected` leaves everything as it
+/// was; `Internal` is fatal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommandError {
+    Rejected(Rejected),
+    Internal(Internal),
+}
+
+impl From<Rejected> for CommandError {
+    fn from(rejected: Rejected) -> Self {
+        CommandError::Rejected(rejected)
+    }
+}
+
+impl From<Internal> for CommandError {
+    fn from(internal: Internal) -> Self {
+        CommandError::Internal(internal)
+    }
 }
 
 /// Whether/how priority should move as a result of one `EngineCommand`.
@@ -70,6 +102,7 @@ pub enum CommandError {
 /// place that actually writes that field — same reasoning as
 /// `CommandOutcome::broke_pass_chain` not mutating `consecutive_passes`
 /// directly.
+#[derive(Debug)]
 pub enum PriorityHandoff {
     /// Most variants: priority stays with whoever currently has it.
     Unchanged,
@@ -84,6 +117,7 @@ pub enum PriorityHandoff {
 /// What carrying out one `EngineCommand` produced, for `engine.rs` to act
 /// on. Returned explicitly rather than left for `engine.rs` to infer from
 /// `state` afterward — see `broke_pass_chain`/`priority_handoff` below.
+#[derive(Debug)]
 pub struct CommandOutcome {
     /// Proposed events, not yet final — `engine.rs` runs these through
     /// `ReplacementCheck` -> `CommitEvents` to allocate ids and append to
@@ -166,6 +200,98 @@ pub enum PaymentResolution {
     ManaAbility { controller: PlayerId, units: Vec<ManaUnit> },
 }
 
+/// A command that passed validation, holding everything its apply step needs
+/// so the apply step reads nothing that could still reject it.
+#[derive(Debug)]
+pub(crate) enum Validated {
+    PassPriority { actor: PlayerId },
+    MakeChoice,
+    PlayLand(land::LandPlan),
+    CastSpell(Box<cast::CastPlan>),
+    ActivateAbility(Box<activate::ActivatePlan>),
+    DeclareAttackers(combat::AttackersPlan),
+    DeclareBands(combat::BandsPlan),
+    DeclareBlockers(combat::BlockersPlan),
+    AssignCombatDamage(combat::DamagePlan),
+}
+
+/// Checks `action` against `state` without changing anything. Every rejection
+/// of a command comes from here (024, 035), so `Engine::submit_action` and
+/// `execute_command` cannot disagree.
+pub(crate) fn validate_command(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+    action: PlayerActionKind,
+) -> Result<Validated, Rejected> {
+    match action {
+        PlayerActionKind::PassPriority => land::validate_pass_priority(state, actor),
+        PlayerActionKind::MakeChoice { .. } => Ok(Validated::MakeChoice),
+        PlayerActionKind::PlayLand { card } => land::validate_play_land(state, actor, card),
+        PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost, pay_buyback } => {
+            cast::validate_cast_spell(
+                state,
+                script_runtime,
+                actor,
+                card,
+                modes,
+                targets,
+                x_value,
+                alternative_cost,
+                pay_buyback,
+            )
+        }
+        PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors, x_value } => {
+            activate::validate_activate_ability(
+                state,
+                script_runtime,
+                actor,
+                source,
+                ability_index,
+                targets,
+                chosen_colors,
+                x_value,
+            )
+        }
+        PlayerActionKind::DeclareAttackers { attackers } => {
+            combat::validate_declare_attackers(state, script_runtime, actor, attackers)
+        }
+        PlayerActionKind::DeclareBands { bands } => combat::validate_declare_bands(state, script_runtime, actor, bands),
+        PlayerActionKind::DeclareBlockers { blocks } => {
+            combat::validate_declare_blockers(state, script_runtime, actor, blocks)
+        }
+        PlayerActionKind::AssignCombatDamage { assignments } => {
+            combat::validate_assign_combat_damage(state, script_runtime, actor, assignments)
+        }
+        // `submit_action` turns the pregame actions away before a command is
+        // built, and a payment is answered through `Engine::submit_payment`,
+        // never as a `PlayerActionKind`.
+        PlayerActionKind::KeepHand | PlayerActionKind::TakeMulligan | PlayerActionKind::BottomCards { .. } => {
+            Err(Rejected::IllegalAction("pregame actions use submit_mulligan_decision / submit_bottom_cards".to_string()))
+        }
+        PlayerActionKind::SubmitPayment { .. } => {
+            Err(Rejected::IllegalAction("a payment is answered through submit_payment".to_string()))
+        }
+    }
+}
+
+/// Carries out a command that passed `validate_command`. The only failure is
+/// `Internal`: a broken invariant, since validation already ruled out every
+/// bad input.
+pub(crate) fn apply_command(state: &mut GameState, validated: Validated) -> Result<CommandOutcome, Internal> {
+    match validated {
+        Validated::PassPriority { actor } => land::apply_pass_priority(state, actor),
+        Validated::MakeChoice => land::apply_make_choice(),
+        Validated::PlayLand(plan) => land::apply_play_land(state, plan),
+        Validated::CastSpell(plan) => cast::apply_cast_spell(state, *plan),
+        Validated::ActivateAbility(plan) => activate::apply_activate_ability(state, *plan),
+        Validated::DeclareAttackers(plan) => combat::apply_declare_attackers(state, plan),
+        Validated::DeclareBands(plan) => combat::apply_declare_bands(state, plan),
+        Validated::DeclareBlockers(plan) => combat::apply_declare_blockers(state, plan),
+        Validated::AssignCombatDamage(plan) => combat::apply_assign_combat_damage(state, plan),
+    }
+}
+
 /// Executes one already-accepted `EngineCommand` against `state`, mutating
 /// non-ledger state directly (zones, etc.) and returning a
 /// `CommandOutcome`. Per the rationale in `command.rs`: this does not
@@ -179,80 +305,13 @@ pub enum PaymentResolution {
 /// `state.consecutive_passes` or `state.priority_player` either — see
 /// `CommandOutcome::broke_pass_chain`/`priority_handoff`.
 ///
-/// 024: a command that returns `Err` has changed nothing. Every arm runs all
-/// its checks before it mutates (audited in `docs/implementation/21-atomicity.md`,
-/// held by `tests/phase5_atomicity*.rs`).
-// TODO(035): `CommandError` does not yet tell a rejected input from a broken
-// invariant. The 42 `.expect(` calls under `commands/` (13) and `engine/` (29)
-// are the broken-invariant half and become `Internal` errors there. The
-// `submit_*` methods also still re-check what `submit_action` could check up
-// front.
+/// 024/035: runs `validate_command` first and `apply_command` second. A
+/// `Rejected` result has changed nothing; an `Internal` one is fatal.
 pub fn execute_command(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
     command: EngineCommand,
 ) -> Result<CommandOutcome, CommandError> {
-    match command.action {
-        PlayerActionKind::PassPriority => {
-            return land::execute_pass_priority(state, command.actor);
-        }
-        PlayerActionKind::MakeChoice { .. } => {
-            return land::execute_make_choice();
-        }
-        PlayerActionKind::PlayLand { card } => {
-            return land::execute_play_land(state, script_runtime, command.actor, card);
-        }
-        PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost, pay_buyback } => {
-            return cast::execute_cast_spell(
-                state,
-                script_runtime,
-                command.actor,
-                card,
-                modes,
-                targets,
-                x_value,
-                alternative_cost,
-                pay_buyback,
-            );
-        }
-        PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors, x_value } => {
-            return activate::execute_activate_ability(
-                state,
-                script_runtime,
-                command.actor,
-                source,
-                ability_index,
-                targets,
-                chosen_colors,
-                x_value,
-            );
-        }
-        PlayerActionKind::DeclareAttackers { attackers } => {
-            return combat::execute_declare_attackers(state, script_runtime, command.actor, attackers);
-        }
-        PlayerActionKind::DeclareBands { bands } => {
-            return combat::execute_declare_bands(state, script_runtime, command.actor, bands);
-        }
-        PlayerActionKind::DeclareBlockers { blocks } => {
-            return combat::execute_declare_blockers(state, script_runtime, command.actor, blocks);
-        }
-        PlayerActionKind::AssignCombatDamage { assignments } => {
-            return combat::execute_assign_combat_damage(state, script_runtime, command.actor, assignments);
-        }
-        _ => {}
-    }
-    // Every remaining `PlayerActionKind` variant reaching this point is a
-    // should-never-happen case, not a "not implemented yet" one - every
-    // variant `submit_action` actually lets through has its own explicit arm
-    // above (CastSpell, ActivateAbility, PlayLand, PassPriority, MakeChoice,
-    // DeclareAttackers, DeclareBands, DeclareBlockers, AssignCombatDamage):
-    //   SubmitPayment never reaches here at all - Engine::submit_payment
-    //     takes a bare PaymentPlan, not a PlayerActionKind::SubmitPayment
-    //     wrapped in an EngineCommand (see CommandOutcome::requires_payment's
-    //     doc comment above for how a payment pause is actually answered).
-    //   KeepHand/TakeMulligan/BottomCards are rejected by submit_action
-    //     itself before an EngineCommand is ever built - see its own
-    //     "pregame actions use submit_mulligan_decision / submit_bottom_cards"
-    //     error.
-    todo!()
+    let validated = validate_command(state, script_runtime, command.actor, command.action)?;
+    Ok(apply_command(state, validated)?)
 }

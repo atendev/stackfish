@@ -466,16 +466,16 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
     // that's irrelevant to who may activate the Aura's own ability.
     state.priority_player = p1;
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p1,
             kind: PlayerActionKind::ActivateAbility { source: aura, ability_index: 0, targets: Vec::new(), chosen_colors: Vec::new(),
             x_value: None,
             },
         })
-        .unwrap();
+        .unwrap_err();
     assert!(
-        matches!(drain(&mut engine), StepStatus::Error(stackfish_engine::commands::CommandError::IllegalAction(_))),
+        matches!(err, stackfish_engine::engine::ActionError::Rejected(stackfish_engine::commands::Rejected::IllegalAction(_))),
         "the enchanted creature's controller shouldn't be able to activate the Aura's own ability"
     );
 

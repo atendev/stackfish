@@ -22,7 +22,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -163,6 +164,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -186,6 +196,17 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
             },
         })
         .expect("player holds priority");
+}
+
+fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
+        })
+        
 }
 
 // ---------------------------------------------------------------------
@@ -222,13 +243,10 @@ fn casting_at_a_non_matching_subtype_creature_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(target)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "a Zombie isn't a legal target for \"target Human\", got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a Zombie isn't a legal target for \"target Human\", got {err:?}");
 }
 
 #[test]
@@ -305,13 +323,10 @@ fn equipping_a_non_matching_subtype_creature_is_rejected() {
     runtime.run_card_script(&mut state, &definition, equipment).expect("script self-registers cleanly");
 
     let mut engine = Engine::new(state);
-    activate(&mut engine, p0, equipment, vec![Target::Object(bear)]);
-    let status = drain(&mut engine);
+    let err = try_activate(&mut engine, p0, equipment, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "\"Equip Dragons\" can't target a non-Dragon creature, got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "\"Equip Dragons\" can't target a non-Dragon creature, got {err:?}");
 }
 
 #[test]

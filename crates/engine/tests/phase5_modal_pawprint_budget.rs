@@ -20,7 +20,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus, TriggerModeChoiceError};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -94,6 +95,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<
             kind: PlayerActionKind::CastSpell { card, modes, targets, x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("player holds priority, spell is in hand");
+}
+
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<u32>, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes, targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
@@ -180,10 +190,9 @@ fn choosing_a_combination_over_budget_is_rejected() {
 
     let mut engine = Engine::new(state);
     // Modes 1 and 2 together cost 2 + 2 = 4 > budget of 3.
-    cast_spell(&mut engine, p0, card, vec![1, 2], vec![Target::Player(p1), Target::Player(p0)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![1, 2], vec![Target::Player(p1), Target::Player(p0)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -198,10 +207,9 @@ fn choosing_the_same_pawprint_mode_twice_is_rejected() {
     let mut engine = Engine::new(state);
     // Weight 1 + 1 = 2, well within budget - but repeats aren't supported
     // for this ModeChoice variant regardless.
-    cast_spell(&mut engine, p0, card, vec![0, 0], Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0, 0], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 

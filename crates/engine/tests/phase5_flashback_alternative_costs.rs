@@ -12,7 +12,7 @@
 //! the stack - whether by resolving normally or by fizzling (CR 608.2b).
 
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
@@ -202,9 +202,8 @@ fn cast_from_graveyard_without_declaring_alternative_is_rejected() {
     state.zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, Vec::new(), None).unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    let err = cast_spell(&mut engine, p0, card, Vec::new(), None).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Graveyard, "card untouched");
 }
 
@@ -301,9 +300,8 @@ fn out_of_range_alternative_cost_index_is_rejected() {
     state.zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, Vec::new(), Some(5)).unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    let err = cast_spell(&mut engine, p0, card, Vec::new(), Some(5)).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Graveyard, "card untouched");
 }
 
@@ -321,8 +319,7 @@ fn casting_from_hand_while_declaring_the_alternative_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, Vec::new(), Some(0)).unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    let err = cast_spell(&mut engine, p0, card, Vec::new(), Some(0)).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "card untouched");
 }

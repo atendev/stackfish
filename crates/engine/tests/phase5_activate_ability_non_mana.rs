@@ -11,7 +11,8 @@
 
 use std::collections::VecDeque;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, minimal_card_definition, single_player_state};
@@ -78,6 +79,27 @@ fn activate_and_drain(
 ) -> StepStatus {
     activate(engine, player, source, targets);
     drain(engine)
+}
+
+fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
+        })
+        
+}
+
+fn try_activate_and_drain(
+    engine: &mut Engine,
+    player: PlayerId,
+    source: ObjectId,
+    targets: Vec<Target>,
+) -> Result<StepStatus, ActionError> {
+    try_activate(engine, player, source, targets)?;
+    Ok(drain(engine))
 }
 
 /// This ability's whole cost is `{T}` on its own source - pays it via the
@@ -154,8 +176,8 @@ fn reject_when_actor_does_not_control_source() {
     state.object_mut(source).unwrap().controller = p1;
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
 }
 
@@ -167,8 +189,8 @@ fn reject_when_source_already_tapped() {
     state.object_mut(source).unwrap().tapped = true;
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(engine.state().stack.is_empty(), "nothing pushed");
 }
 
@@ -184,8 +206,8 @@ fn reject_when_source_has_summoning_sickness() {
     state.object_mut(source).unwrap().controlled_since_turn = 1;
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
     assert!(engine.state().stack.is_empty(), "nothing pushed");
 }
@@ -198,8 +220,8 @@ fn reject_ability_kind_not_activated() {
     state.abilities[0].kind = AbilityKind::Triggered;
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 /// This ability's `target: None` (CR 601.2c's "no targets required") -
@@ -213,7 +235,7 @@ fn unrequested_target_is_rejected() {
     let state = state_with_source(source, p0, source);
     let mut engine = Engine::new(state);
 
-    let status = activate_and_drain(&mut engine, p0, source, vec![Target::Player(p0)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::InvalidTarget)));
+    let err = try_activate_and_drain(&mut engine, p0, source, vec![Target::Player(p0)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert!(!engine.state().object(source).unwrap().tapped);
 }

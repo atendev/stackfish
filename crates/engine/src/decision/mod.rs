@@ -154,6 +154,10 @@ pub enum RejectionCode {
     StaleDecision,
     /// The reply variant does not match the open Decision's shape.
     WrongAnswerShape,
+    /// The engine broke while carrying out the Answer (035). Unlike every other
+    /// code this one gives no guarantee that nothing changed: the engine is
+    /// fatal (`Engine::fatal_error`) and `step()` only reports the error.
+    Internal,
 }
 
 impl RejectionCode {
@@ -165,6 +169,7 @@ impl RejectionCode {
             RejectionCode::InvalidChoice => "invalid_choice",
             RejectionCode::StaleDecision => "stale_decision",
             RejectionCode::WrongAnswerShape => "wrong_answer_shape",
+            RejectionCode::Internal => "internal",
         }
     }
 }

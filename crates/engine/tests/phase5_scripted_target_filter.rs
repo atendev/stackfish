@@ -24,7 +24,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -178,11 +179,11 @@ fn set_target_with_a_function_self_registers_a_scripted_target_filter() {
 /// register the Lua function into a registry `Engine::new` immediately
 /// discards. So every end-to-end test here plays the land through the real
 /// `PlayLand` pipeline instead of building `state.abilities` by hand.
-fn play_land_and_activate(
+fn try_play_land_and_activate(
     creatures: &[(ObjectId, &str, i32, i32)],
     target: ObjectId,
     protect_target_from_land: bool,
-) -> Engine {
+) -> (Engine, Result<(), ActionError>) {
     let p0 = PlayerId(0);
     let land = ObjectId(0);
     let mut state = two_player_state();
@@ -208,8 +209,7 @@ fn play_land_and_activate(
     // on the battlefield before `PlayLand` runs make "whichever id is at
     // the front of the zone" unreliable.
     let new_land_id = engine.state().abilities[0].source;
-    engine
-        .submit_action(PlayerAction {
+    let result = engine.submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::ActivateAbility {
                 source: new_land_id,
@@ -218,8 +218,17 @@ fn play_land_and_activate(
                 chosen_colors: Vec::new(),
                 x_value: None,
             },
-        })
-        .expect("p0 controls the land and holds priority");
+        });
+    (engine, result)
+}
+
+fn play_land_and_activate(
+    creatures: &[(ObjectId, &str, i32, i32)],
+    target: ObjectId,
+    protect_target_from_land: bool,
+) -> Engine {
+    let (engine, result) = try_play_land_and_activate(creatures, target, protect_target_from_land);
+    result.expect("p0 controls the land and holds priority");
     engine
 }
 
@@ -236,22 +245,22 @@ fn a_target_that_satisfies_the_script_predicate_is_accepted() {
 fn a_target_that_fails_the_script_predicate_is_rejected() {
     let big = ObjectId(1);
     let small = ObjectId(2);
-    let mut engine = play_land_and_activate(&[(big, "Big", 4, 4), (small, "Small", 2, 2)], small, false);
-    let status = drain(&mut engine);
+    let (_engine, result) = try_play_land_and_activate(&[(big, "Big", 4, 4), (small, "Small", 2, 2)], small, false);
+    let err = result.unwrap_err();
     assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "power-2 target should fail the script predicate, got {status:?}"
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "power-2 target should fail the script predicate, got {err:?}"
     );
 }
 
 #[test]
 fn protection_still_blocks_a_script_legal_target() {
     let big = ObjectId(1);
-    let mut engine = play_land_and_activate(&[(big, "Big", 4, 4)], big, true);
-    let status = drain(&mut engine);
+    let (_engine, result) = try_play_land_and_activate(&[(big, "Big", 4, 4)], big, true);
+    let err = result.unwrap_err();
     assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "CR 702.16e protection from Land must still block a target the script itself would accept, got {status:?}"
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "CR 702.16e protection from Land must still block a target the script itself would accept, got {err:?}"
     );
 }
 
@@ -270,7 +279,7 @@ fn a_player_target_is_rejected_outright_by_a_script_filter() {
     drain(&mut engine);
     let new_land_id = *engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.front().unwrap();
 
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::ActivateAbility {
@@ -281,21 +290,20 @@ fn a_player_target_is_rejected_outright_by_a_script_filter() {
                 x_value: None,
             },
         })
-        .expect("p0 controls the land and holds priority");
-    let status = drain(&mut engine);
+        .unwrap_err();
     assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "TargetFilter::Script is object-only by this slice's own narrowing, got {status:?}"
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "TargetFilter::Script is object-only by this slice's own narrowing, got {err:?}"
     );
 }
 
 #[test]
 fn a_nonexistent_object_target_is_rejected() {
     let ghost = ObjectId(9999);
-    let mut engine = play_land_and_activate(&[], ghost, false);
-    let status = drain(&mut engine);
+    let (_engine, result) = try_play_land_and_activate(&[], ghost, false);
+    let err = result.unwrap_err();
     assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "a target id with no matching object must fail before the script ever runs, got {status:?}"
+        matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a target id with no matching object must fail before the script ever runs, got {err:?}"
     );
 }
