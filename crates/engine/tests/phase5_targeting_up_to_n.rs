@@ -14,7 +14,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -92,6 +93,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
             kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
         })
         .expect("player holds priority, spell is in hand");
+}
+
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
@@ -212,10 +222,9 @@ fn casting_with_more_than_the_maximum_is_rejected() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target_c);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(target_a), Target::Object(target_b), Target::Object(target_c)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(target_a), Target::Object(target_b), Target::Object(target_c)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)), "got {status:?}");
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "cast never happened");
 }
 
@@ -225,10 +234,9 @@ fn casting_with_a_duplicate_target_is_rejected() {
     let p0 = PlayerId(0);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(target_a), Target::Object(target_a)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(target_a), Target::Object(target_a)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)), "got {status:?}");
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
 }
 
 #[test]

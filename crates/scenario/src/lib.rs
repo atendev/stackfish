@@ -2365,9 +2365,10 @@ fn chain_auto_pay(engine: &mut Engine, payer: PlayerId, outcome: StepOutcome) ->
 pub enum StepOutcome {
     Ran,
     NotImplemented(String),
-    /// The engine accepted the action but a command failed mid-pipeline
-    /// (`StepStatus::Error`) — distinct from a panic (`NotImplemented`):
-    /// this means real code ran and rejected the action on purpose.
+    /// The engine refused the action (`submit_action` returned an `Err`, with
+    /// nothing changed) or broke an invariant while carrying it out
+    /// (`StepStatus::Error`). Distinct from a panic (`NotImplemented`): real code
+    /// ran and turned the action down.
     Errored(String),
 }
 

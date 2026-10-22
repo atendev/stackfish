@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state, zones};
@@ -93,6 +94,20 @@ fn declare_attackers(
     drain(engine)
 }
 
+fn try_declare_attackers(
+    engine: &mut Engine,
+    player: PlayerId,
+    attackers: Vec<(ObjectId, Target)>,
+) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::DeclareAttackers { attackers },
+        })
+        ?;
+    Ok(drain(engine))
+}
+
 fn declare_blockers(
     engine: &mut Engine,
     player: PlayerId,
@@ -102,6 +117,17 @@ fn declare_blockers(
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
         .expect("player holds priority");
     drain(engine)
+}
+
+fn try_declare_blockers(
+    engine: &mut Engine,
+    player: PlayerId,
+    blocks: Vec<(ObjectId, ObjectId)>,
+) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
+        ?;
+    Ok(drain(engine))
 }
 
 /// Drives the real `AdvanceTurnStep` pipeline (both players passing with
@@ -169,8 +195,8 @@ fn declare_attackers_rejects_non_active_player() {
     let p1 = PlayerId(1);
     let state = combat_state();
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p1, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p1, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -180,8 +206,8 @@ fn declare_attackers_rejects_wrong_step() {
     state.step = Step::PreCombatMain;
     state.phase = Phase::Main;
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -190,8 +216,8 @@ fn declare_attackers_rejects_redeclaration() {
     let state = combat_state();
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, Vec::new());
-    let status = declare_attackers(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -203,8 +229,8 @@ fn declare_attackers_rejects_uncontrolled_creature() {
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p1, 0));
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(attacker).unwrap().tapped, "no partial mutation");
     assert!(engine.state().combat.is_none());
 }
@@ -220,8 +246,8 @@ fn declare_attackers_rejects_non_creature() {
     put_on_battlefield(&mut state, permanent(attacker, definition, p0, 0));
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -235,8 +261,8 @@ fn declare_attackers_rejects_already_tapped_creature() {
     put_on_battlefield(&mut state, object);
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -251,8 +277,8 @@ fn declare_attackers_rejects_summoning_sick_creature() {
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 1));
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(attacker).unwrap().tapped, "no partial mutation");
 }
 
@@ -280,8 +306,8 @@ fn declare_attackers_rejects_invalid_target() {
 
     let mut engine = Engine::new(state);
     // Targeting self is illegal - no opponent named p0.
-    let status = declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p0))]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p0))]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -297,12 +323,12 @@ fn declare_attackers_is_atomic_across_a_mixed_legal_illegal_batch() {
     put_on_battlefield(&mut state, tapped_object);
 
     let mut engine = Engine::new(state);
-    let status = declare_attackers(
+    let err = try_declare_attackers(
         &mut engine,
         p0,
         vec![(legal, Target::Player(p1)), (already_tapped, Target::Player(p1))],
-    );
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    ).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(legal).unwrap().tapped, "508.1: illegal batch taps nobody");
     assert!(engine.state().combat.is_none());
 }
@@ -369,8 +395,8 @@ fn declare_blockers_rejects_non_defending_player() {
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
-    let status = declare_blockers(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p0, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -391,8 +417,8 @@ fn declare_blockers_rejects_wrong_step() {
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
 
     let mut engine = Engine::new(state);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p1, vec![(blocker, attacker)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -411,8 +437,8 @@ fn declare_blockers_rejects_redeclaration() {
     declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
     // Step/phase haven't changed between calls (only AdvanceTurnStep moves
     // those) - this isolates the `declared_defenders` redeclaration check.
-    let status = declare_blockers(&mut engine, p1, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p1, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -430,8 +456,8 @@ fn declare_blockers_rejects_uncontrolled_or_tapped_blocker() {
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(tapped_blocker, attacker)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p1, vec![(tapped_blocker, attacker)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -449,8 +475,8 @@ fn declare_blockers_rejects_unknown_attacker_reference() {
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, not_attacking)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p1, vec![(blocker, not_attacking)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -472,8 +498,8 @@ fn declare_blockers_rejects_duplicate_blocker_assignment() {
         vec![(attacker_a, Target::Player(p1)), (attacker_b, Target::Player(p1))],
     );
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker_a), (blocker, attacker_b)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p1, vec![(blocker, attacker_a), (blocker, attacker_b)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -485,8 +511,8 @@ fn declare_blockers_rejects_no_attackers_declared_yet() {
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall"), p1, 0));
 
     let mut engine = Engine::new(state);
-    let status = declare_blockers(&mut engine, p1, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p1, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 // ---------------------------------------------------------------------
@@ -580,8 +606,8 @@ fn declare_blockers_rejects_a_player_nobody_is_attacking() {
     // Only p1 is attacked - p2 has no defending-player role this combat.
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p2, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_declare_blockers(&mut engine, p2, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -604,11 +630,9 @@ fn declare_blockers_planeswalker_controller_is_the_defending_player() {
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Object(planeswalker))]);
     pass_to_declare_blockers(&mut engine);
 
-    let status = declare_blockers(&mut engine, p1, Vec::new());
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "p1 controls nothing being attacked - not a defending player this combat"
-    );
+    let err = try_declare_blockers(&mut engine, p1, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "p1 controls nothing being attacked - not a defending player this combat");
 
     let status = declare_blockers(&mut engine, p2, Vec::new());
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));

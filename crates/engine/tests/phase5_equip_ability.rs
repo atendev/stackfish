@@ -27,7 +27,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
@@ -174,6 +175,17 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
         .expect("player holds priority");
 }
 
+fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the ability's (free) cost, got {status:?}");
@@ -271,13 +283,10 @@ fn equipping_a_creature_you_dont_control_is_rejected() {
     state.abilities.push(equip_ability(equipment));
 
     let mut engine = Engine::new(state);
-    activate(&mut engine, p0, equipment, vec![Target::Object(bear)]);
-    let status = drain(&mut engine);
+    let err = try_activate(&mut engine, p0, equipment, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "CR 702.6a requires a creature *you control* - got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "CR 702.6a requires a creature *you control* - got {err:?}");
 }
 
 #[test]
@@ -316,13 +325,10 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
     });
 
     let mut engine = Engine::new(state);
-    activate(&mut engine, p0, equipment, vec![Target::Object(bear)]);
-    let status = drain(&mut engine);
+    let err = try_activate(&mut engine, p0, equipment, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::IllegalAction(_))),
-        "Equip can only be activated as a sorcery (empty stack), got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "Equip can only be activated as a sorcery (empty stack), got {err:?}");
 }
 
 #[test]

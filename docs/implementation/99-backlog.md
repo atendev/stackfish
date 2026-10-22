@@ -6,7 +6,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 
 1. Engine atomicity (decided in ticket 024: a rejected input changes nothing, enforced by validating before mutating). Build in this order:
    1. Done on `phase5/atomicity-harness` (awaiting review): 025 atomicity harness and audit. See `21-atomicity.md`.
-   2. 035 error split and Session mapping. `CommandError` becomes `Rejected` and `Internal`, `Session` catches a panic, and `submit_*` validates on its own.
+   2. Done on `phase5/error-split` (awaiting review): 035 error split and Session mapping. See `22-error-split.md`.
    3. 026 menace and must-attack as one predicate shared by `legal_attackers`, `legal_blockers` and command validation.
    4. 036 mode-combination predicate, rejected at announcement and left out of the modal entries.
 2. 019 carddb-backed `CardSource`. The Godot `create` serves only the 25 proof cards until it exists. Run real cards through the proof bot straight after.
@@ -18,7 +18,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 8. CR 601.2d division of damage or counters among targets, then subtype and exclusion keys on `DestroyAll` filters.
 9. `Revealed` and `face_down` producers and the free-text event rule (ticket 027). Search reveal (CR 701.23e) is the first natural producer.
 10. Rules polish, in no fixed order: reanimation options (extra counter, enters attacking or blocking, "may" return), ward with non-mana costs, hexproof on players and "hexproof from", fight target shapes, damage redirected to another target, stun counters, Condescend's X, Echo's control check, and CR 104.4b loop detection (ticket 029).
-11. Housekeeping, alongside the above: ticket 017 (stale notes and the `.plan/` commit policy), 032 (rejection text and payment cost filters), 033 (Godot smoke test in CI, export and web builds), 034 (unconfirmed gdext items), the two live `todo!()` bodies (`ScriptRuntime::invoke_cost` and one in `commands/mod.rs`, neither checked for reachability), and a stale-prose pass over `docs/lua/` (for example, "Protection from an attached Aura/Equipment" in `not-available-yet.md` may predate `14-protection-attach.md`).
+11. Housekeeping, alongside the above: ticket 017 (stale notes and the `.plan/` commit policy), 032 (rejection text and payment cost filters), 033 (Godot smoke test in CI, export and web builds), 034 (unconfirmed gdext items), the live `todo!()` body in `ScriptRuntime::invoke_cost` (not checked for reachability; the one in `commands/mod.rs` went away in ticket 035), and a stale-prose pass over `docs/lua/` (for example, "Protection from an attached Aura/Equipment" in `not-available-yet.md` may predate `14-protection-attach.md`).
 12. Design non-goals (planeswalkers, battles, double-faced, split and flip cards, sagas, face-down permanents, team rules). If the card database holds any of these, the loader should skip or reject them explicitly before then.
 
 ## Live TODOs / unresolved gaps
@@ -45,9 +45,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Host Session (`phase5/host-session`, B3)**: see `18-host-session.md`. Open items:
   - No replay export and no carddb-backed `CardSource`.
   - A Payment Decision lists additional costs without their filters.
-  - A panic inside the engine is not caught, and a pipeline error is fatal with no rollback. Ticket 024 decided that
-    an input rejection changes nothing, a panic is caught by the `Session` and marks it dead, and script errors keep
-    logging and continuing. Tickets 025 and 035 build it.
+  - Done in tickets 025 and 035: an input rejection changes nothing, the `Session` catches a panic and marks itself
+    dead (`engine_panic`), an engine `Internal` error halts it, and script errors keep logging and continuing.
 
 - **Seat visibility (`phase5/seat-visibility`, B4)**: see `18-host-session.md`. Open items:
   - No `(Seat, state)` snapshot request. A Seat that joins late cannot learn the current state.
@@ -66,11 +65,10 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - The declare attackers Decision is offered only while the active player holds priority, and the declare blockers
     and damage Decisions come before priority. A host that mixes `submit_action` with `answer` can skip them.
 - **Decision/Answer facade (`phase5/decision-answer-facade`, B1)**: see `16-decision-facade.md`. Open items:
-  - `submit_action` still accepts any action from the priority player. The facade now checks a priority, attack, block
-    or damage Answer against the listed entries (B2, `17-legal-actions.md`). What the entries cannot see still fails
-    during `step()`: a pair of modes `combine_chosen_modes` cannot combine, menace, a "must attack" requirement, and
-    the split rules the engine checks on its own. Tickets 025, 035, 026 and 036 close that (see "Priority order"),
-    and they have to land before a remote host sends untrusted Answers.
+  - `submit_action` now validates every command itself (ticket 035), so what the entries cannot see (a pair of modes
+    `combine_chosen_modes` cannot combine, menace, a "must attack" requirement, the split rules) is refused there with
+    the Decision still open, not in `step()`. The entries still list the first three, so a player can pick a choice
+    that is then refused. Tickets 026 and 036 remove them from the entries.
   - A nested mana ability activated during a Payment Decision (CR 605.3a) is not accepted through `Answer`. It still
     works through `submit_action`.
   - `Target::Ability` candidates are not enumerated for a script `SelectTarget` filter.

@@ -1,16 +1,5 @@
-use stackfish_engine::commands::CommandError;
-use stackfish_engine::engine::{ActionError, Engine, EngineSnapshot, StepStatus};
+use stackfish_engine::engine::{ActionError, Engine, EngineSnapshot};
 use stackfish_engine::*;
-
-use crate::drain;
-
-/// Where an action was turned down: straight away by `submit_action`, or
-/// when `step()` ran the queued command.
-#[derive(Debug)]
-pub enum Rejected {
-    AtSubmit(ActionError),
-    AtStep(CommandError),
-}
 
 /// The parts of `before` and `after` that differ, by name. Empty means the
 /// two snapshots are equal.
@@ -92,18 +81,15 @@ pub fn assert_unchanged_after<R>(engine: &mut Engine, context: &str, f: impl FnO
     result
 }
 
-/// Drives `action` through `submit_action` and `step()` and asserts it is
-/// rejected and changes nothing. A rejection is allowed to come from either
-/// call: `submit_action` queues the action and `step()` runs it, so most
-/// rejections only show up at `step()` (ticket 035 moves them earlier).
-pub fn assert_action_rejected(engine: &mut Engine, context: &str, action: PlayerAction) -> Rejected {
+/// Submits `action` and asserts `submit_action` refuses it and changes nothing.
+/// Since ticket 035 every rejection happens there, never at `step()`, so a
+/// queued action fails the assertion. Returns the refusal for the caller to
+/// inspect.
+pub fn assert_action_rejected(engine: &mut Engine, context: &str, action: PlayerAction) -> ActionError {
     let before = engine.snapshot();
     let rejected = match engine.submit_action(action) {
-        Err(err) => Rejected::AtSubmit(err),
-        Ok(()) => match drain(engine) {
-            StepStatus::Error(err) => Rejected::AtStep(err),
-            other => panic!("{context}: expected the action to be rejected, but the engine went on to {other:?}"),
-        },
+        Err(err) => err,
+        Ok(()) => panic!("{context}: expected submit_action to reject the action, but it was queued"),
     };
     assert_unchanged(&before, engine, context);
     rejected

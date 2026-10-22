@@ -6,7 +6,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{CommanderReturnChoiceError, Engine, StepStatus};
 use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
@@ -100,6 +101,20 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) -> StepStat
     status
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) -> Result<(), ActionError> {
+    engine.submit_action(PlayerAction {
+        player,
+        kind: PlayerActionKind::CastSpell {
+            card,
+            modes: Vec::new(),
+            targets: Vec::new(),
+            x_value: None,
+            alternative_cost: None,
+            pay_buyback: false,
+        },
+    })
+}
+
 // ---------------------------------------------------------------------
 // Marking (CR 903.3) + casting from the command zone (CR 903.8)
 // ---------------------------------------------------------------------
@@ -172,8 +187,8 @@ fn casting_a_non_commander_card_from_the_command_zone_is_rejected() {
     );
 
     let mut engine = Engine::new(state);
-    let status = cast_spell(&mut engine, p0, not_a_commander);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "got {status:?}");
+    let err = try_cast_spell(&mut engine, p0, not_a_commander).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "got {err:?}");
 }
 
 #[test]
@@ -190,8 +205,8 @@ fn casting_someone_elses_commander_from_the_command_zone_is_rejected() {
     );
 
     let mut engine = Engine::new(state);
-    let status = cast_spell(&mut engine, p0, commander);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "got {status:?}");
+    let err = try_cast_spell(&mut engine, p0, commander).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "got {err:?}");
 }
 
 // ---------------------------------------------------------------------

@@ -33,7 +33,7 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 - A response is `{v, kind: "response", body}`. The body has `status`, `events`, and optionally `decision`, `error`,
   `winner` (`game_over` only, `null` for a draw) and `seats` (`created` only).
 - Any refusal that leaves a Decision open returns `decision_open` with that Decision and an empty `events` list. The
-  rest return status `error`. Only `pipeline_error` is fatal.
+  rest return status `error`. Only `pipeline_error` and `engine_panic` are fatal.
 - Engine rejection codes map to wire codes: `wrong_seat` to `not_your_decision`, `not_open` to `no_open_decision`,
   `stale_decision` to `stale_decision`, and `invalid_choice` and `wrong_answer_shape` to `invalid_answer`.
 - `decision_pending` is an eleventh error code. 007 had none for an `advance` sent while a Decision is open.
@@ -101,8 +101,9 @@ JSON bytes. The design is in `.plan/closed/001`, `002`, `005`, `006` and `007`.
 - The Payment cost lists additional costs without their filters (`sacrifice`, `discard`, `tap_permanents`,
   `exile_from_graveyard`), because the engine does not list eligible objects for a Payment Decision.
 - Rejection messages are the engine's `Debug` text, passed through.
-- A pipeline error is fatal and the engine is not rolled back (engine atomicity item in `map.md`). A panic inside the
-  engine is not caught by the Session. The Godot adapter catches it and kills the instance (`20-godot-adapter.md`).
+- Ticket 035 (`22-error-split.md`): a refusal that gets past the facade is a normal `invalid_answer` and the Decision stays
+  open. An engine `Internal` error halts the Session as `pipeline_error`, and a panic kills it as `engine_panic`. Both send a
+  fixed message; the detail is in `Session::internal_error()`. `engine_panic` is a twelfth error code.
 - CR 104.4b loop detection is not done. `step_cap` only stops a runaway from freezing the host.
 
 ## Tests

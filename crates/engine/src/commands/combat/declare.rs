@@ -17,29 +17,37 @@ use crate::types::turn::{Phase, Step};
 use crate::types::zone::ZoneKind;
 
 use super::super::legality::{effective_keywords, has_summoning_sickness, ignored_keywords};
-use super::super::{CommandError, CommandOutcome, PriorityHandoff};
+use super::super::{CommandOutcome, Internal, PriorityHandoff, Rejected, Validated};
 
-pub(in crate::commands) fn execute_declare_attackers(
-    state: &mut GameState,
+/// A declaration that passed `validate_declare_attackers`. The flag is false for
+/// an attacker with vigilance (CR 702.20a), decided with the layered keywords at
+/// validation time.
+#[derive(Debug)]
+pub(crate) struct AttackersPlan {
+    attackers: Vec<(ObjectId, Target, bool)>,
+}
+
+pub(crate) fn validate_declare_attackers(
+    state: &GameState,
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
     attackers: Vec<(ObjectId, Target)>,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<Validated, Rejected> {
     // CR 508.1: a turn-based action of the active player, only
     // during the declare attackers step, and only once per combat.
     if actor != state.active_player {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "only the active player declares attackers".to_string(),
         ));
     }
     if state.phase != Phase::Combat || state.step != Step::DeclareAttackers {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "attackers can only be declared during the declare attackers step"
                 .to_string(),
         ));
     }
     if state.combat.is_some() {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "attackers have already been declared this combat".to_string(),
         ));
     }
@@ -51,7 +59,7 @@ pub(in crate::commands) fn execute_declare_attackers(
     for (attacker, target) in &attackers {
         // CR 508.1: each creature is declared as an attacker once.
         if seen_attackers.contains(attacker) {
-            return Err(CommandError::IllegalAction(
+            return Err(Rejected::IllegalAction(
                 "the same creature can't be declared as an attacker twice".to_string(),
             ));
         }
@@ -64,61 +72,81 @@ pub(in crate::commands) fn execute_declare_attackers(
 
     // CR 508.1f: tapping an attacker isn't a cost - attacking
     // simply causes it. CR 702.20a: Vigilance means attacking
-    // doesn't tap it.
-    let mut events = Vec::with_capacity(attackers.len() * 2);
-    for (attacker, target) in &attackers {
-        // effective_keywords first (immutable borrow) so a granted
-        // Vigilance is respected too, not just the printed keyword -
-        // computed before the mutable borrow below, since the two
-        // can't overlap.
-        let has_vigilance = effective_keywords(state, script_runtime, *attacker).contains(KeywordSet::VIGILANCE);
-        let object = state.object_mut(*attacker).expect("validated above");
-        if !has_vigilance {
+    // doesn't tap it. effective_keywords so a granted Vigilance is
+    // respected too, not just the printed keyword.
+    let attackers = attackers
+        .into_iter()
+        .map(|(attacker, target)| {
+            let taps = !effective_keywords(state, script_runtime, attacker).contains(KeywordSet::VIGILANCE);
+            (attacker, target, taps)
+        })
+        .collect();
+    Ok(Validated::DeclareAttackers(AttackersPlan { attackers }))
+}
+
+pub(crate) fn apply_declare_attackers(
+    state: &mut GameState,
+    plan: AttackersPlan,
+) -> Result<CommandOutcome, Internal> {
+    let mut events = Vec::with_capacity(plan.attackers.len() * 2);
+    let mut declared = Vec::with_capacity(plan.attackers.len());
+    for (attacker, target, taps) in plan.attackers {
+        if taps {
+            let object = state
+                .object_mut(attacker)
+                .ok_or_else(|| Internal::new("declare attackers: a validated attacker is gone"))?;
             object.tapped = true;
-            events.push(GameEventKind::Tapped { object: *attacker });
+            events.push(GameEventKind::Tapped { object: attacker });
         }
-        events
-            .push(GameEventKind::AttackerDeclared { attacker: *attacker, target: *target });
+        events.push(GameEventKind::AttackerDeclared { attacker, target });
+        declared.push((attacker, target));
     }
     state.combat = Some(CombatState {
-        attackers,
+        attackers: declared,
         blocks: Vec::new(),
         declared_defenders: Vec::new(),
         bands: Vec::new(),
         effect_blocked: Vec::new(),
-        damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
+        damage_assigned_this_step: false,
+        pending_damage_splits: std::collections::HashMap::new(),
     });
 
-    return Ok(CommandOutcome {
+    Ok(CommandOutcome {
         events,
         broke_pass_chain: true,
         priority_handoff: PriorityHandoff::Unchanged,
         requires_payment: None,
         battlefield_entries: Vec::new(),
-    });
+    })
 }
 
-pub(in crate::commands) fn execute_declare_bands(
-    state: &mut GameState,
+/// A band declaration that passed `validate_declare_bands`.
+#[derive(Debug)]
+pub(crate) struct BandsPlan {
+    bands: Vec<Vec<ObjectId>>,
+}
+
+pub(crate) fn validate_declare_bands(
+    state: &GameState,
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
     bands: Vec<Vec<ObjectId>>,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<Validated, Rejected> {
     // CR 508.1e/702.22c: same window as DeclareAttackers itself -
     // active player, only during the declare attackers step, only
     // once attackers actually exist to group.
     if actor != state.active_player {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "only the active player declares bands".to_string(),
         ));
     }
     if state.phase != Phase::Combat || state.step != Step::DeclareAttackers {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "bands can only be declared during the declare attackers step".to_string(),
         ));
     }
     let combat = state.combat.as_ref().ok_or_else(|| {
-        CommandError::IllegalAction("no attackers have been declared this combat".to_string())
+        Rejected::IllegalAction("no attackers have been declared this combat".to_string())
     })?;
 
     let mut seen: Vec<ObjectId> = Vec::new();
@@ -139,12 +167,12 @@ pub(in crate::commands) fn execute_declare_bands(
         let mut member_bands_with_other_supertypes: Vec<SupertypeSet> = Vec::new();
         for member in band {
             let (_, member_target) = combat.attackers.iter().find(|(id, _)| id == member).ok_or_else(|| {
-                CommandError::IllegalAction(
+                Rejected::IllegalAction(
                     "a band member isn't actually attacking this combat".to_string(),
                 )
             })?;
             if seen.contains(member) {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "a creature can be in at most one band".to_string(),
                 ));
             }
@@ -156,7 +184,7 @@ pub(in crate::commands) fn execute_declare_bands(
                 None => target = Some(*member_target),
                 Some(t) if t == *member_target => {}
                 Some(_) => {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "every creature in a band must attack the same player, \
                          planeswalker, or battle"
                             .to_string(),
@@ -206,7 +234,7 @@ pub(in crate::commands) fn execute_declare_bands(
                 })
             });
         if !plain_banding_shape && !quality_shape && !supertype_quality_shape {
-            return Err(CommandError::IllegalAction(
+            return Err(Rejected::IllegalAction(
                 "a band needs either at least one attacking creature with banding (and \
                  at most one without), or a creature with \"bands with other [quality]\" \
                  whose bandmates all share that quality"
@@ -215,34 +243,49 @@ pub(in crate::commands) fn execute_declare_bands(
         }
     }
 
-    let combat = state.combat.as_mut().expect("checked Some above");
-    combat.bands = bands;
+    Ok(Validated::DeclareBands(BandsPlan { bands }))
+}
 
-    return Ok(CommandOutcome {
+pub(crate) fn apply_declare_bands(
+    state: &mut GameState,
+    plan: BandsPlan,
+) -> Result<CommandOutcome, Internal> {
+    let combat = state.combat.as_mut().ok_or_else(|| Internal::new("declare bands: the validated combat is gone"))?;
+    combat.bands = plan.bands;
+
+    Ok(CommandOutcome {
         events: Vec::new(),
         broke_pass_chain: true,
         priority_handoff: PriorityHandoff::Unchanged,
         requires_payment: None,
         battlefield_entries: Vec::new(),
-    });
+    })
 }
 
-pub(in crate::commands) fn execute_declare_blockers(
-    state: &mut GameState,
+/// A blocker declaration that passed `validate_declare_blockers`, with the CR
+/// 702.22h banding blocks already added.
+#[derive(Debug)]
+pub(crate) struct BlockersPlan {
+    actor: PlayerId,
+    blocks: Vec<(ObjectId, ObjectId)>,
+}
+
+pub(crate) fn validate_declare_blockers(
+    state: &GameState,
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
     mut blocks: Vec<(ObjectId, ObjectId)>,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<Validated, Rejected> {
     if state.phase != Phase::Combat || state.step != Step::DeclareBlockers {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "blockers can only be declared during the declare blockers step".to_string(),
         ));
     }
     let combat = state.combat.as_ref().ok_or_else(|| {
-        CommandError::IllegalAction("no attackers have been declared this combat".to_string())
+        Rejected::IllegalAction("no attackers have been declared this combat".to_string())
     })?;
     if combat.declared_defenders.contains(&actor) {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "this player has already declared blockers this combat".to_string(),
         ));
     }
@@ -255,7 +298,7 @@ pub(in crate::commands) fn execute_declare_blockers(
     // CR 508.5a: "defending player" is resolved against a targeted
     // permanent's *current* controller.
     if !is_defending_player(state, script_runtime, combat, actor) {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "this player is not a defending player this combat".to_string(),
         ));
     }
@@ -266,7 +309,7 @@ pub(in crate::commands) fn execute_declare_blockers(
     let mut seen_blockers = Vec::with_capacity(blocks.len());
     for (blocker, attacker) in &blocks {
         if seen_blockers.contains(blocker) {
-            return Err(CommandError::IllegalAction(
+            return Err(Rejected::IllegalAction(
                 "the same blocker can't be assigned to block twice".to_string(),
             ));
         }
@@ -288,10 +331,10 @@ pub(in crate::commands) fn execute_declare_blockers(
         *blocker_counts.entry(*attacker).or_insert(0) += 1;
     }
     for (attacker, count) in &blocker_counts {
-        let attacker_object = state.object(*attacker).ok_or(CommandError::InvalidTarget)?;
+        let attacker_object = state.object(*attacker).ok_or(Rejected::InvalidTarget)?;
         let attacker_keywords = effective_keywords(state, script_runtime, attacker_object.object_id);
         if attacker_keywords.contains(KeywordSet::MENACE) && *count < 2 {
-            return Err(CommandError::IllegalAction(
+            return Err(Rejected::IllegalAction(
                 "an attacker with menace can't be blocked except by two or more \
                  creatures"
                     .to_string(),
@@ -330,25 +373,30 @@ pub(in crate::commands) fn execute_declare_blockers(
         }
     }
     blocks.extend(propagated);
+    Ok(Validated::DeclareBlockers(BlockersPlan { actor, blocks }))
+}
 
-    let mut events = Vec::with_capacity(blocks.len());
-    for (blocker, attacker) in &blocks {
-        events.push(GameEventKind::BlockerDeclared {
-            blocker: *blocker,
-            attacker: *attacker,
-        });
-    }
-    let combat = state.combat.as_mut().expect("checked Some above");
+pub(crate) fn apply_declare_blockers(
+    state: &mut GameState,
+    plan: BlockersPlan,
+) -> Result<CommandOutcome, Internal> {
+    let BlockersPlan { actor, blocks } = plan;
+    let events = blocks
+        .iter()
+        .map(|(blocker, attacker)| GameEventKind::BlockerDeclared { blocker: *blocker, attacker: *attacker })
+        .collect();
+    let combat =
+        state.combat.as_mut().ok_or_else(|| Internal::new("declare blockers: the validated combat is gone"))?;
     combat.blocks.extend(blocks);
     combat.declared_defenders.push(actor);
 
-    return Ok(CommandOutcome {
+    Ok(CommandOutcome {
         events,
         broke_pass_chain: true,
         priority_handoff: PriorityHandoff::Unchanged,
         requires_payment: None,
         battlefield_entries: Vec::new(),
-    });
+    })
 }
 
 /// CR 509.1h/702.22i: makes `target` become blocked via an effect (`Ability
@@ -395,36 +443,36 @@ pub(crate) fn attacker_can_attack(
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
     attacker: ObjectId,
-) -> Result<(), CommandError> {
-    let object = state.object(attacker).ok_or(CommandError::InvalidTarget)?;
+) -> Result<(), Rejected> {
+    let object = state.object(attacker).ok_or(Rejected::InvalidTarget)?;
     // CR 508.1a: only a creature on the battlefield can be declared as an
     // attacker.
     if object.zone != ZoneKind::Battlefield {
-        return Err(CommandError::IllegalAction("a chosen attacker is not on the battlefield".to_string()));
+        return Err(Rejected::IllegalAction("a chosen attacker is not on the battlefield".to_string()));
     }
     // CR 508.1a: attacking requires *current* control, per
     // layers::effective_controller.
     if crate::layers::effective_controller(state, script_runtime, attacker) != actor {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "actor does not control a chosen attacker".to_string(),
         ));
     }
     if !object.definition.card_types.contains(CardTypeSet::CREATURE)
         || object.definition.card_types.contains(CardTypeSet::BATTLE)
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "a chosen attacker is not a creature, or is also a battle".to_string(),
         ));
     }
     if object.tapped {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "a chosen attacker is already tapped".to_string(),
         ));
     }
     // CR 508.1a/302.6/702.10b: has_summoning_sickness itself
     // grants Haste's bypass.
     if has_summoning_sickness(state, script_runtime, object) {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "a chosen attacker has summoning sickness".to_string(),
         ));
     }
@@ -438,7 +486,7 @@ pub(crate) fn attacker_can_attack(
     if effective_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
         && !ignored_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "a chosen attacker has defender and can't attack".to_string(),
         ));
     }
@@ -451,21 +499,21 @@ pub(crate) fn attack_target_is_legal(
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
     target: &Target,
-) -> Result<(), CommandError> {
+) -> Result<(), Rejected> {
     match target {
         Target::Player(pid) => {
             if *pid == actor || !state.turn_order.contains(pid) {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "an attacker's target must be an opponent".to_string(),
                 ));
             }
         }
         Target::Object(target_id) => {
             let target_object =
-                state.object(*target_id).ok_or(CommandError::InvalidTarget)?;
+                state.object(*target_id).ok_or(Rejected::InvalidTarget)?;
             // CR 508.1b: an attacked planeswalker or battle is a permanent.
             if target_object.zone != ZoneKind::Battlefield {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "an attacker's target permanent must be on the battlefield".to_string(),
                 ));
             }
@@ -474,7 +522,7 @@ pub(crate) fn attack_target_is_legal(
             if crate::layers::effective_controller(state, script_runtime, *target_id)
                 == actor
             {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "an attacker's target permanent must be controlled by an \
                      opponent"
                         .to_string(),
@@ -485,7 +533,7 @@ pub(crate) fn attack_target_is_legal(
                 .card_types
                 .intersects(CardTypeSet::PLANESWALKER | CardTypeSet::BATTLE)
             {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "an attacker's target permanent must be a planeswalker or \
                      battle"
                         .to_string(),
@@ -495,7 +543,7 @@ pub(crate) fn attack_target_is_legal(
         // CR 506.4/508.1a: an attacker is declared against a player, a
         // planeswalker, or a battle - never an activated/triggered
         // ability (nothing in Magic attacks a spell/ability).
-        Target::Ability(_) => return Err(CommandError::InvalidTarget),
+        Target::Ability(_) => return Err(Rejected::InvalidTarget),
     }
     Ok(())
 }
@@ -510,28 +558,28 @@ pub(crate) fn block_is_legal(
     combat: &CombatState,
     blocker: ObjectId,
     attacker: ObjectId,
-) -> Result<(), CommandError> {
-    let blocker_object = state.object(blocker).ok_or(CommandError::InvalidTarget)?;
+) -> Result<(), Rejected> {
+    let blocker_object = state.object(blocker).ok_or(Rejected::InvalidTarget)?;
     // CR 509.1a: only a creature on the battlefield can be declared as a
     // blocker.
     if blocker_object.zone != ZoneKind::Battlefield {
-        return Err(CommandError::IllegalAction("a chosen blocker is not on the battlefield".to_string()));
+        return Err(Rejected::IllegalAction("a chosen blocker is not on the battlefield".to_string()));
     }
     // CR 509.1a: blocking requires *current* control.
     if crate::layers::effective_controller(state, script_runtime, blocker) != actor {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "actor does not control a chosen blocker".to_string(),
         ));
     }
     if !blocker_object.definition.card_types.contains(CardTypeSet::CREATURE)
         || blocker_object.definition.card_types.contains(CardTypeSet::BATTLE)
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "a chosen blocker is not a creature, or is also a battle".to_string(),
         ));
     }
     if blocker_object.tapped {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "a chosen blocker is already tapped".to_string(),
         ));
     }
@@ -541,7 +589,7 @@ pub(crate) fn block_is_legal(
         .iter()
         .find(|(id, _)| *id == attacker)
         .ok_or_else(|| {
-            CommandError::IllegalAction(
+            Rejected::IllegalAction(
                 "a chosen attacker isn't actually attacking this combat".to_string(),
             )
         })?;
@@ -555,7 +603,7 @@ pub(crate) fn block_is_legal(
         Target::Ability(_) => false,
     };
     if !attacking_this_defender {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "a chosen attacker isn't attacking this defending player, their \
              planeswalker, or their battle"
                 .to_string(),
@@ -567,13 +615,13 @@ pub(crate) fn block_is_legal(
     // effective_keywords (CR 613 layer 6) - a continuous effect
     // granting/removing Flying/Reach now actually changes
     // blocking legality, not just the printed KeywordSet.
-    let attacker_object = state.object(attacker).ok_or(CommandError::InvalidTarget)?;
+    let attacker_object = state.object(attacker).ok_or(Rejected::InvalidTarget)?;
     let attacker_keywords = effective_keywords(state, script_runtime, attacker_object.object_id);
     let blocker_keywords = effective_keywords(state, script_runtime, blocker_object.object_id);
     if attacker_keywords.contains(KeywordSet::FLYING)
         && !blocker_keywords.intersects(KeywordSet::FLYING | KeywordSet::REACH)
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "an attacker with flying can only be blocked by a creature with \
              flying or reach"
                 .to_string(),
@@ -597,7 +645,7 @@ pub(crate) fn block_is_legal(
         && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
             || blocker_characteristics.colors.contains(ColorSet::BLACK))
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "an attacker with fear can only be blocked by an artifact and/or \
              black creature"
                 .to_string(),
@@ -607,7 +655,7 @@ pub(crate) fn block_is_legal(
         && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
             || blocker_characteristics.colors.intersects(attacker_characteristics.colors))
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "an attacker with intimidate can only be blocked by an artifact \
              creature and/or a creature sharing a color with it"
                 .to_string(),
@@ -617,7 +665,7 @@ pub(crate) fn block_is_legal(
     // CR 702.28b: Shadow - symmetric, a shadow creature can only
     // block/be blocked by another shadow creature.
     if attacker_keywords.contains(KeywordSet::SHADOW) != blocker_keywords.contains(KeywordSet::SHADOW) {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "shadow creatures can only block or be blocked by other shadow \
              creatures"
                 .to_string(),
@@ -630,7 +678,7 @@ pub(crate) fn block_is_legal(
     if attacker_keywords.contains(KeywordSet::HORSEMANSHIP)
         && !blocker_keywords.contains(KeywordSet::HORSEMANSHIP)
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "an attacker with horsemanship can only be blocked by a creature \
              with horsemanship"
                 .to_string(),
@@ -667,7 +715,7 @@ pub(crate) fn block_is_legal(
                 })
         });
         if defender_controls_matching_land {
-            return Err(CommandError::IllegalAction(
+            return Err(Rejected::IllegalAction(
                 "an attacker with landwalk can't be blocked while the defending \
                  player controls a matching land"
                     .to_string(),
@@ -708,7 +756,7 @@ pub(crate) fn block_is_legal(
             FilterController::Any => false,
         })
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "an attacker with protection from a quality can't be blocked by a \
              creature matching that quality"
                 .to_string(),

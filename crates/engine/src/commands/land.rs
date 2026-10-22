@@ -3,7 +3,6 @@
 //! `MakeChoice` are trivial enough to share this file with `PlayLand`
 //! rather than each getting their own.
 
-use crate::script::ScriptRuntime;
 use crate::types::card::CardTypeSet;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -12,9 +11,9 @@ use crate::types::zone::ZoneKind;
 
 use super::attach::{next_active_player, remap_abilities};
 use super::legality::is_sorcery_speed;
-use super::{CommandError, CommandOutcome, PriorityHandoff};
+use super::{CommandOutcome, Internal, PriorityHandoff, Rejected, Validated};
 
-pub(super) fn execute_pass_priority(state: &GameState, actor: PlayerId) -> Result<CommandOutcome, CommandError> {
+pub(super) fn validate_pass_priority(state: &GameState, actor: PlayerId) -> Result<Validated, Rejected> {
     // CR 117.3c: priority moves to the next player in turn_order
     // after whoever just passed - skipping anyone eliminated (CR
     // 800.4b). Read-only against turn_order - does not touch
@@ -22,19 +21,25 @@ pub(super) fn execute_pass_priority(state: &GameState, actor: PlayerId) -> Resul
     // engine.rs owns (see PriorityHandoff/broke_pass_chain doc
     // comments above).
     if !state.turn_order.contains(&actor) {
-        return Err(CommandError::IllegalAction("actor not in turn_order".to_string()));
+        return Err(Rejected::IllegalAction("actor not in turn_order".to_string()));
     }
+    Ok(Validated::PassPriority { actor })
+}
+
+pub(super) fn apply_pass_priority(state: &GameState, actor: PlayerId) -> Result<CommandOutcome, Internal> {
     let next_player = next_active_player(state, actor);
-    return Ok(CommandOutcome {
+    Ok(CommandOutcome {
         events: vec![GameEventKind::PriorityPassed { player: actor }],
         broke_pass_chain: false,
         priority_handoff: PriorityHandoff::To(next_player),
         requires_payment: None,
         battlefield_entries: Vec::new(),
-    });
+    })
 }
 
-pub(super) fn execute_make_choice() -> Result<CommandOutcome, CommandError> {
+// TODO: `MakeChoice` accepts any call, even with no choice pending. It should be
+// rejected here once something raises a choice through a `PlayerAction`.
+pub(super) fn apply_make_choice() -> Result<CommandOutcome, Internal> {
     // Real choice application is genuinely generic - "depends
     // entirely on what asked for the choice" (see the TODO block
     // below) - no fixed event shape exists yet, so this produces
@@ -42,27 +47,29 @@ pub(super) fn execute_make_choice() -> Result<CommandOutcome, CommandError> {
     // broke_pass_chain's reset wiring (CR 117.3c) has something
     // other than PassPriority to exercise in tests; not a real
     // implementation of MakeChoice itself.
-    return Ok(CommandOutcome {
+    Ok(CommandOutcome {
         events: Vec::new(),
         broke_pass_chain: true,
         priority_handoff: PriorityHandoff::Unchanged,
         requires_payment: None,
         battlefield_entries: Vec::new(),
-    });
+    })
 }
 
-pub(super) fn execute_play_land(
-    state: &mut GameState,
-    _script_runtime: &ScriptRuntime,
+/// What `apply_play_land` needs, checked by `validate_play_land`.
+#[derive(Debug)]
+pub(crate) struct LandPlan {
     actor: PlayerId,
     card: ObjectId,
-) -> Result<CommandOutcome, CommandError> {
+}
+
+pub(super) fn validate_play_land(state: &GameState, actor: PlayerId, card: ObjectId) -> Result<Validated, Rejected> {
     // CR 305.1: lands aren't spells, so this goes straight to the
     // battlefield - no stack object. Playing a land is still
     // restricted to sorcery speed (CR 305.1/305.3, via
     // is_sorcery_speed) and to once per turn (CR 305.2).
     if !is_sorcery_speed(state, actor) {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "a land can only be played at sorcery speed: actor's turn, a main phase, \
              actor holding priority, and an empty stack"
                 .to_string(),
@@ -70,16 +77,13 @@ pub(super) fn execute_play_land(
     }
     // CR 305.2: normally one land per turn, raised by any applicable
     // LandPlayModifier (e.g. "you may play an additional land each turn").
-    let already_played =
-        *state.lands_played_this_turn.get(&actor).unwrap_or(&0);
+    let already_played = *state.lands_played_this_turn.get(&actor).unwrap_or(&0);
     let limit = crate::types::player::effective_land_play_limit(&state.land_play_modifiers, actor);
     if already_played >= limit {
-        return Err(CommandError::IllegalAction(
-            "actor has already played their land for this turn".to_string(),
-        ));
+        return Err(Rejected::IllegalAction("actor has already played their land for this turn".to_string()));
     }
 
-    let object = state.object(card).ok_or(CommandError::InvalidTarget)?;
+    let object = state.object(card).ok_or(Rejected::InvalidTarget)?;
     // TODO: reads CardDefinition.card_types directly rather than
     // layers::effective_characteristics (CR 613 layer 4, real as of
     // the layer-engine-types-colors slice) - a continuous effect
@@ -91,21 +95,25 @@ pub(super) fn execute_play_land(
     // hand card - flagged rather than silently wired to an
     // untested shape.
     if !object.definition.card_types.contains(CardTypeSet::LAND) {
-        return Err(CommandError::IllegalAction("card is not a Land".to_string()));
+        return Err(Rejected::IllegalAction("card is not a Land".to_string()));
     }
     if object.zone != ZoneKind::Hand || object.controller != actor {
-        return Err(CommandError::IllegalAction(
-            "card is not in actor's hand".to_string(),
-        ));
+        return Err(Rejected::IllegalAction("card is not in actor's hand".to_string()));
     }
-    // Every zone the move touches is looked up before anything is allocated
-    // or removed, so a missing zone rejects without a partial move (024).
+    // Every zone the move touches is looked up here, so `apply_play_land` has
+    // nothing left that can fail (024).
     if state.zone(ZoneKind::Hand, Some(actor)).is_none() {
-        return Err(CommandError::IllegalAction("actor has no hand zone".to_string()));
+        return Err(Rejected::IllegalAction("actor has no hand zone".to_string()));
     }
     if state.zone(ZoneKind::Battlefield, None).is_none() {
-        return Err(CommandError::IllegalAction("no battlefield zone".to_string()));
+        return Err(Rejected::IllegalAction("no battlefield zone".to_string()));
     }
+    Ok(Validated::PlayLand(LandPlan { actor, card }))
+}
+
+pub(super) fn apply_play_land(state: &mut GameState, plan: LandPlan) -> Result<CommandOutcome, Internal> {
+    let LandPlan { actor, card } = plan;
+    let object = state.object(card).ok_or_else(|| Internal::new("play land: the validated card is gone"))?;
     // Snapshot before the move - CR 603.10's last_known_info (see
     // GameEventKind::ZoneChange's doc comment).
     let last_known_info = object.clone();
@@ -125,18 +133,18 @@ pub(super) fn execute_play_land(
 
     state
         .zone_mut(ZoneKind::Hand, Some(actor))
-        .ok_or_else(|| CommandError::IllegalAction("actor has no hand zone".to_string()))?
+        .ok_or_else(|| Internal::new("play land: the validated hand zone is gone"))?
         .remove(card);
     state.objects.remove(&card);
     state
         .zone_mut(ZoneKind::Battlefield, None)
-        .ok_or_else(|| CommandError::IllegalAction("no battlefield zone".to_string()))?
+        .ok_or_else(|| Internal::new("play land: the validated battlefield zone is gone"))?
         .push_bottom(new_id);
     state.objects.insert(new_id, new_object);
     *state.lands_played_this_turn.entry(actor).or_insert(0) += 1;
     remap_abilities(state, card, new_id);
 
-    return Ok(CommandOutcome {
+    Ok(CommandOutcome {
         events: vec![GameEventKind::ZoneChange {
             object: new_id,
             from: ZoneKind::Hand,
@@ -147,5 +155,5 @@ pub(super) fn execute_play_land(
         priority_handoff: PriorityHandoff::Unchanged,
         requires_payment: None,
         battlefield_entries: vec![new_id],
-    });
+    })
 }

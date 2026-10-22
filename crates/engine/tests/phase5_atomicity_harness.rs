@@ -99,7 +99,7 @@ fn an_accepted_action_is_not_a_rejection() {
     let message = panic_message(|| {
         assert_action_rejected(&mut engine, "pass", PlayerAction { player: P0, kind: PlayerActionKind::PassPriority });
     });
-    assert!(message.contains("expected the action to be rejected"), "{message}");
+    assert!(message.contains("expected submit_action to reject"), "{message}");
 }
 
 #[test]

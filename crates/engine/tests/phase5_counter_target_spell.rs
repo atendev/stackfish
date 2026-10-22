@@ -16,7 +16,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -237,6 +238,15 @@ fn cast_spell_with_x(engine: &mut Engine, player: PlayerId, card: ObjectId, targ
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell_with_x(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>, x_value: u32) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: Some(x_value), alternative_cost: None, pay_buyback: false },
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -337,22 +347,14 @@ fn counter_noncreature_spell_rejects_a_creature_spell_target_at_cast_time() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: vec![Target::Object(target)], x_value: None, alternative_cost: None, pay_buyback: false },
         })
-        .expect("player holds priority, spell is in hand");
-    // Target legality is checked when the queued command is actually
-    // processed (`drain`), not synchronously inside `submit_action` — same
-    // "queued, not synchronous" shape `phase5_targeting_basics.rs`'s own
-    // `cast_spell_rejects_wrong_target_count`/`cast_spell_rejects_
-    // unrequested_target` tests already rely on.
-    let status = drain(&mut engine);
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "a creature spell is not a legal target for \"counter target noncreature spell\", got {status:?}"
-    );
+        .unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a creature spell is not a legal target for \"counter target noncreature spell\", got {err:?}");
 }
 
 #[test]
@@ -420,12 +422,9 @@ fn counter_with_mana_value_x_rejects_a_target_whose_mana_value_does_not_equal_x(
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell_with_x(&mut engine, p0, card, vec![Target::Object(target)], 2);
-    let status = drain(&mut engine);
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "mana value 3 != announced X=2, got {status:?}"
-    );
+    let err = try_cast_spell_with_x(&mut engine, p0, card, vec![Target::Object(target)], 2).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "mana value 3 != announced X=2, got {err:?}");
 }
 
 #[test]

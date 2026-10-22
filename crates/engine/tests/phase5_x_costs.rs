@@ -7,7 +7,8 @@
 //! cost. See commands.rs's `CastSpell` arm and mana.rs's `resolve_x` doc
 //! comment.
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, single_player_state};
@@ -116,14 +117,13 @@ fn x_spell_cast_without_announcing_x_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets: Vec::new(), x_value: None, alternative_cost: None , pay_buyback: false},
         })
-        .unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+        .unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "card never left hand");
 }
 
@@ -139,7 +139,7 @@ fn announcing_x_for_a_non_x_spell_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::CastSpell {
@@ -150,9 +150,8 @@ fn announcing_x_for_a_non_x_spell_is_rejected() {
                 alternative_cost: None, pay_buyback: false,
             },
         })
-        .unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+        .unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 /// Test case 4: `{X}` alone with `x_value: Some(0)` is legal, paid with an

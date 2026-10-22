@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, minimal_card_definition, two_player_state as base_two_player_state};
@@ -62,6 +63,20 @@ fn assign_combat_damage(
         })
         .expect("turn-based action, no priority required");
     drain(engine)
+}
+
+fn try_assign_combat_damage(
+    engine: &mut Engine,
+    player: PlayerId,
+    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::AssignCombatDamage { assignments },
+        })
+        ?;
+    Ok(drain(engine))
 }
 
 // ---------------------------------------------------------------------
@@ -196,9 +211,9 @@ fn double_blocked_attacker_rejects_an_illegal_split_sum() {
 
     let mut engine = Engine::new(state);
     // 3 + 1 = 4, not the attacker's power of 5.
-    let status =
-        assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker_a, 3), (blocker_b, 1)])]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker_a, 3), (blocker_b, 1)])])
+        .unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 
     assert_eq!(engine.state().object(attacker).unwrap().damage_marked, 0, "510.1e: illegal split rejects the whole action");
     assert_eq!(engine.state().object(blocker_a).unwrap().damage_marked, 0);
@@ -224,8 +239,8 @@ fn double_blocked_attacker_rejects_a_missing_split() {
 
     let mut engine = Engine::new(state);
     // No assignments entry at all for the double-blocked attacker.
-    let status = assign_combat_damage(&mut engine, p0, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_assign_combat_damage(&mut engine, p0, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -246,8 +261,8 @@ fn single_blocked_attacker_rejects_a_redundant_split_entry() {
     let mut engine = Engine::new(state);
     // Only one blocker - there's no real choice here, so an assignments
     // entry is disallowed input, not just redundant.
-    let status = assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 3)])]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 3)])]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 // ---------------------------------------------------------------------

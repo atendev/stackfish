@@ -12,12 +12,11 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
     assert_action_rejected, assert_unchanged_after, card_object, drain, minimal_card_definition, two_player_state, zones,
-    Rejected,
 };
 
 const P0: PlayerId = PlayerId(0);
@@ -122,12 +121,8 @@ fn tap_cost() -> CostSpec {
     CostSpec { mana: None, additional: vec![AdditionalCost::TapSelf], alternative: Vec::new() }
 }
 
-fn illegal(rejected: &Rejected) -> bool {
-    matches!(
-        rejected,
-        Rejected::AtStep(CommandError::IllegalAction(_) | CommandError::InvalidTarget)
-            | Rejected::AtSubmit(ActionError::IllegalAction(_))
-    )
+fn illegal(rejected: &ActionError) -> bool {
+    matches!(rejected, ActionError::Rejected(_) | ActionError::IllegalAction(_))
 }
 
 // ---------------------------------------------------------------------
@@ -138,7 +133,7 @@ fn illegal(rejected: &Rejected) -> bool {
 fn pass_priority_by_the_wrong_player_is_rejected() {
     let mut engine = Engine::new(game());
     let rejected = assert_action_rejected(&mut engine, "pass by p1", act(P1, PlayerActionKind::PassPriority));
-    assert!(matches!(rejected, Rejected::AtSubmit(ActionError::NotYourTurn)));
+    assert!(matches!(rejected, ActionError::NotYourTurn));
 }
 
 #[test]
@@ -146,14 +141,14 @@ fn make_choice_by_the_wrong_player_is_rejected() {
     let mut engine = Engine::new(game());
     let rejected =
         assert_action_rejected(&mut engine, "choice by p1", act(P1, PlayerActionKind::MakeChoice { description: String::new(), selection: Vec::new() }));
-    assert!(matches!(rejected, Rejected::AtSubmit(ActionError::NotYourTurn)));
+    assert!(matches!(rejected, ActionError::NotYourTurn));
 }
 
 #[test]
 fn pregame_actions_are_rejected_by_submit_action() {
     let mut engine = Engine::new(game());
     let rejected = assert_action_rejected(&mut engine, "keep hand", act(P0, PlayerActionKind::KeepHand));
-    assert!(matches!(rejected, Rejected::AtSubmit(ActionError::IllegalAction(_))));
+    assert!(matches!(rejected, ActionError::IllegalAction(_)));
 }
 
 #[test]
@@ -235,7 +230,7 @@ fn play_land_that_is_not_in_hand_is_rejected() {
 fn play_land_that_does_not_exist_is_rejected() {
     let (mut engine, _) = land_engine();
     let rejected = assert_action_rejected(&mut engine, "unknown land", act(P0, PlayerActionKind::PlayLand { card: ObjectId(777) }));
-    assert!(matches!(rejected, Rejected::AtStep(CommandError::InvalidTarget)), "{rejected:?}");
+    assert!(matches!(rejected, ActionError::Rejected(Rejected::InvalidTarget)), "{rejected:?}");
 }
 
 /// Regression: `execute_play_land` allocated the new object id and sequence
@@ -383,7 +378,7 @@ fn cast_with_the_wrong_timing_is_rejected() {
     state.priority_player = P1;
     let mut engine = Engine::new(state);
     let rejected = assert_action_rejected(&mut engine, "instant without priority", act(P0, cast(card)));
-    assert!(matches!(rejected, Rejected::AtSubmit(ActionError::NotYourTurn)));
+    assert!(matches!(rejected, ActionError::NotYourTurn));
 }
 
 #[test]
@@ -398,7 +393,7 @@ fn cast_a_land_or_a_card_from_the_wrong_zone_is_rejected() {
 
     let mut engine = Engine::new(game());
     let rejected = assert_action_rejected(&mut engine, "unknown card", act(P0, cast(ObjectId(777))));
-    assert!(matches!(rejected, Rejected::AtStep(CommandError::InvalidTarget)), "{rejected:?}");
+    assert!(matches!(rejected, ActionError::Rejected(Rejected::InvalidTarget)), "{rejected:?}");
 }
 
 #[test]
@@ -542,7 +537,7 @@ fn activate_when_not_the_controller_or_not_on_the_battlefield_is_rejected() {
 
     let mut engine = Engine::new(game());
     let rejected = assert_action_rejected(&mut engine, "unknown source", act(P0, activate(ObjectId(777))));
-    assert!(matches!(rejected, Rejected::AtStep(CommandError::InvalidTarget)), "{rejected:?}");
+    assert!(matches!(rejected, ActionError::Rejected(Rejected::InvalidTarget)), "{rejected:?}");
 }
 
 #[test]
@@ -646,7 +641,7 @@ fn pay_green() -> PaymentPlan {
 fn a_rejected_nested_mana_ability_leaves_the_payment_intact() {
     let (mut engine, forest) = paying_engine();
     let rejected = assert_action_rejected(&mut engine, "tapped forest mid-payment", act(P0, activate(forest)));
-    assert!(matches!(rejected, Rejected::AtStep(CommandError::IllegalAction(_))), "{rejected:?}");
+    assert!(matches!(rejected, ActionError::Rejected(Rejected::IllegalAction(_))), "{rejected:?}");
     assert!(engine.pending_payment_cost().is_some(), "still waiting on the payment");
 
     engine.submit_payment(pay_green()).expect("the suspended payment resumes and accepts a plan");
@@ -659,10 +654,10 @@ fn a_rejected_nested_mana_ability_leaves_the_payment_intact() {
 fn another_action_during_a_payment_is_rejected_without_touching_it() {
     let (mut engine, forest) = paying_engine();
     let rejected = assert_action_rejected(&mut engine, "pass mid-payment", act(P0, PlayerActionKind::PassPriority));
-    assert!(matches!(rejected, Rejected::AtSubmit(ActionError::IllegalAction(_))));
+    assert!(matches!(rejected, ActionError::IllegalAction(_)));
     // A mana ability for someone who is not the payer.
     let rejected = assert_action_rejected(&mut engine, "p1 mid-payment", act(P1, activate(forest)));
-    assert!(matches!(rejected, Rejected::AtSubmit(ActionError::IllegalAction(_))));
+    assert!(matches!(rejected, ActionError::IllegalAction(_)));
     // A mana ability that does not exist is not a mana ability.
     let missing = PlayerActionKind::ActivateAbility {
         source: forest,
@@ -672,7 +667,7 @@ fn another_action_during_a_payment_is_rejected_without_touching_it() {
         x_value: None,
     };
     let rejected = assert_action_rejected(&mut engine, "missing ability mid-payment", act(P0, missing));
-    assert!(matches!(rejected, Rejected::AtSubmit(ActionError::IllegalAction(_))));
+    assert!(matches!(rejected, ActionError::IllegalAction(_)));
     assert!(engine.pending_payment_cost().is_some());
 }
 
@@ -737,7 +732,7 @@ fn declare_attackers_that_cannot_attack_is_rejected() {
 
     let mut engine = Engine::new(combat_state(Step::DeclareAttackers, None));
     let rejected = assert_action_rejected(&mut engine, "unknown attacker", declare(vec![(ObjectId(777), Target::Player(P1))]));
-    assert!(matches!(rejected, Rejected::AtStep(CommandError::InvalidTarget)), "{rejected:?}");
+    assert!(matches!(rejected, ActionError::Rejected(Rejected::InvalidTarget)), "{rejected:?}");
 }
 
 #[test]

@@ -13,7 +13,7 @@
 use std::fmt::Debug;
 
 use crate::engine::Engine;
-use crate::engine::ActionError;
+use crate::engine::{ActionError, CascadeChoiceError, MadnessChoiceError};
 use crate::triggers::PendingTrigger;
 use crate::types::command::{PlayerAction, PlayerActionKind};
 use crate::types::ids::{ObjectId, PlayerId, Target};
@@ -127,11 +127,11 @@ impl Engine {
 
             (Route::Madness, Reply::MayCast(None)) => self.decline_madness_cast().map_err(invalid),
             (Route::Madness, Reply::MayCast(Some(cast))) => {
-                self.submit_madness_cast(cast.modes, cast.targets, cast.x_value).map_err(invalid)
+                self.submit_madness_cast(cast.modes, cast.targets, cast.x_value).map_err(madness_error)
             }
             (Route::Cascade, Reply::MayCast(None)) => self.decline_cascade_cast().map_err(invalid),
             (Route::Cascade, Reply::MayCast(Some(cast))) => {
-                self.submit_cascade_cast(cast.modes, cast.targets, cast.x_value).map_err(invalid)
+                self.submit_cascade_cast(cast.modes, cast.targets, cast.x_value).map_err(cascade_error)
             }
 
             (Route::CommanderReturn, Reply::YesNo(returned)) => {
@@ -236,6 +236,26 @@ fn shape_matches(shape: &ReplyShape, reply: &Reply) -> bool {
             | (ReplyShape::DeclareBlockers { .. }, Reply::DeclareBlockers(_))
             | (ReplyShape::AssignDamage { .. }, Reply::AssignDamage(_))
     )
+}
+
+/// The engine broke while carrying out an Answer (035). The detail stays on the
+/// engine (`Engine::fatal_error`); this text can reach a Seat.
+fn internal() -> Rejection {
+    Rejection::new(RejectionCode::Internal, "the engine hit an internal error")
+}
+
+fn madness_error(error: MadnessChoiceError) -> Rejection {
+    match error {
+        MadnessChoiceError::Internal => internal(),
+        other => invalid(other),
+    }
+}
+
+fn cascade_error(error: CascadeChoiceError) -> Rejection {
+    match error {
+        CascadeChoiceError::Internal => internal(),
+        other => invalid(other),
+    }
 }
 
 fn invalid<E: Debug>(error: E) -> Rejection {

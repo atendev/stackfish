@@ -22,7 +22,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, ModeChoiceError, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
@@ -112,6 +113,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<u32>, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes, targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -140,10 +150,9 @@ fn casting_with_modes_supplied_by_the_caster_is_rejected() {
     let mut engine = Engine::new(state);
     // The caster can't supply the mode themselves - it's deferred to the
     // other player.
-    cast_spell(&mut engine, p0, card, vec![0], Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -156,10 +165,9 @@ fn a_mode_with_a_target_requirement_is_rejected_at_cast_time() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, Vec::new(), Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, Vec::new(), Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -178,10 +186,9 @@ fn a_three_player_game_is_rejected_at_cast_time() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, Vec::new(), Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, Vec::new(), Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 

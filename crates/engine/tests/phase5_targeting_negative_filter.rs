@@ -14,7 +14,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -210,6 +211,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -248,10 +258,9 @@ fn nonland_filter_rejects_a_land_target() {
     let (state, card) = setup(bolt_definition(), vec![(land, land_definition(1, "Test Land"), p0)]);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(land)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(land)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)), "got {status:?}");
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
 }
 
 #[test]
@@ -278,10 +287,9 @@ fn isnt_a_wall_filter_rejects_a_wall_target() {
         setup(purge_definition(), vec![(wall, creature_definition(1, "Test Wall", vec![Subtype("Wall".to_string())]), p1)]);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(wall)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(wall)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)), "got {status:?}");
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
 }
 
 #[test]
@@ -306,13 +314,10 @@ fn combined_filter_rejects_your_own_creature() {
     let (state, card) = setup(smite_definition(), vec![(bear, creature_definition(1, "Bear", Vec::new()), p0)]);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "\"you don't control\" must still reject your own creature - got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "\"you don't control\" must still reject your own creature - got {err:?}");
 }
 
 #[test]
@@ -324,13 +329,10 @@ fn combined_filter_rejects_an_opponents_wall() {
         setup(smite_definition(), vec![(wall, creature_definition(1, "Test Wall", vec![Subtype("Wall".to_string())]), p1)]);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(wall)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(wall)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "\"isn't a Wall\" must still reject an opponent's Wall - got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "\"isn't a Wall\" must still reject an opponent's Wall - got {err:?}");
 }
 
 #[test]

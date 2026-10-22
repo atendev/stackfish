@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
 
@@ -129,15 +129,12 @@ fn the_original_owner_can_no_longer_attack_with_a_gain_controlled_creature() {
     state.priority_player = p1;
     let mut engine = Engine::new(state);
 
-    engine
-        .submit_action(PlayerAction {
+    let result = engine.submit_action(PlayerAction {
             player: p1,
             kind: PlayerActionKind::DeclareAttackers { attackers: vec![(creature, Target::Player(PlayerId(0)))] },
-        })
-        .expect("player holds priority");
-    let status = drain(&mut engine);
+        });
     assert!(
-        matches!(status, StepStatus::Error(_)),
+        matches!(result, Err(ActionError::Rejected(_))),
         "p1 (the original owner, no longer the effective controller) must not be able to attack with it"
     );
     assert!(!engine.state().object(creature).unwrap().tapped, "rejected declaration must not tap it");
@@ -161,15 +158,12 @@ fn only_the_new_controller_can_declare_it_as_a_blocker() {
 
     // p1 no longer effectively controls `creature` (GainControl gave it to
     // p0) - blocking with it must be rejected even though p1 owns it.
-    engine
-        .submit_action(PlayerAction {
+    let result = engine.submit_action(PlayerAction {
             player: p1,
             kind: PlayerActionKind::DeclareBlockers { blocks: vec![(creature, attacker)] },
-        })
-        .expect("player holds priority");
-    let status = drain(&mut engine);
+        });
     assert!(
-        matches!(status, StepStatus::Error(_)),
+        matches!(result, Err(ActionError::Rejected(_))),
         "p1 no longer effectively controls the creature and must not be able to block with it"
     );
 }
@@ -191,17 +185,14 @@ fn summoning_sickness_is_checked_against_the_new_controllers_last_active_turn() 
     let (state, p0, _p1, creature) = control_changed_combat_state(1, 5);
     let mut engine = Engine::new(state);
 
-    engine
-        .submit_action(PlayerAction {
+    let result = engine.submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::DeclareAttackers { attackers: vec![(creature, Target::Player(PlayerId(1)))] },
-        })
-        .expect("player holds priority");
-    let status = drain(&mut engine);
+        });
     assert!(
-        matches!(status, StepStatus::Error(_)),
+        matches!(result, Err(ActionError::Rejected(_))),
         "the creature should read as summoning sick under its new controller p0 (5 >= p0's own \
-         last active turn 1), got {status:?}"
+         last active turn 1), got {result:?}"
     );
 }
 

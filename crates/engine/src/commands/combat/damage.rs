@@ -13,7 +13,7 @@ use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::turn::{Phase, Step};
 
 use super::super::legality::{effective_keywords, effective_power, lethal_damage_needed, participates_in_damage_step};
-use super::super::{CommandError, CommandOutcome, PriorityHandoff};
+use super::super::{CommandOutcome, Internal, PriorityHandoff, Rejected, Validated};
 
 /// Who takes part in this damage step and which of them need a chosen split
 /// (CR 510.1c). `execute_assign_combat_damage` deals the damage from it, and
@@ -38,7 +38,7 @@ pub(crate) struct SplitPlan<'a> {
 pub(crate) fn plan_damage_splits<'a>(
     state: &'a GameState,
     script_runtime: &ScriptRuntime,
-) -> Result<Option<SplitPlan<'a>>, CommandError> {
+) -> Result<Option<SplitPlan<'a>>, Rejected> {
     // CR 510.1/509.1's turn-based-action shape, same as
     // DeclareAttackers/DeclareBlockers: only during the combat
     // damage step. Which player is allowed to be `command.actor`
@@ -48,13 +48,13 @@ pub(crate) fn plan_damage_splits<'a>(
     if state.phase != Phase::Combat
         || !matches!(state.step, Step::CombatDamage | Step::FirstStrikeDamage)
     {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "combat damage can only be assigned during a combat damage step"
                 .to_string(),
         ));
     }
     let combat = state.combat.as_ref().ok_or_else(|| {
-        CommandError::IllegalAction("no attackers have been declared this combat".to_string())
+        Rejected::IllegalAction("no attackers have been declared this combat".to_string())
     })?;
     let step = state.step;
 
@@ -286,17 +286,49 @@ pub(crate) fn plan_damage_splits<'a>(
     }))
 }
 
-// `pub(crate)`, not `pub(in crate::commands)`: `phase5/automatic-combat-
-// damage`'s `engine::turn::resolve_advance_turn_step_state` calls this
-// directly (its own auto-fire attempt on entering the damage step),
-// outside the normal `execute_command` dispatch this was originally
-// scoped to.
+/// What `apply_assign_combat_damage` does, decided by `validate_assign_combat_damage`.
+#[derive(Debug)]
+pub(crate) enum DamagePlan {
+    /// This step's damage was already dealt, so a repeat submission does nothing.
+    AlreadyAssigned,
+    /// This actor's share is recorded while another chooser's share is still missing.
+    Record { assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)> },
+    /// Every required share is in. The damage events are built and the step is marked done.
+    Deal { events: Vec<GameEventKind> },
+}
+
+/// `phase5/automatic-combat-damage`'s `engine::turn::resolve_advance_turn_step_state`
+/// calls this directly (its own auto-fire attempt on entering the damage step),
+/// outside the normal `execute_command` dispatch.
 pub(crate) fn execute_assign_combat_damage(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
     assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
-) -> Result<CommandOutcome, CommandError> {
+) -> Result<CommandOutcome, super::super::CommandError> {
+    let plan = validate_damage(state, script_runtime, actor, assignments)?;
+    Ok(apply_damage(state, plan)?)
+}
+
+pub(crate) fn validate_assign_combat_damage(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+) -> Result<Validated, Rejected> {
+    validate_damage(state, script_runtime, actor, assignments).map(Validated::AssignCombatDamage)
+}
+
+pub(crate) fn apply_assign_combat_damage(state: &mut GameState, plan: DamagePlan) -> Result<CommandOutcome, Internal> {
+    apply_damage(state, plan)
+}
+
+fn validate_damage(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+) -> Result<DamagePlan, Rejected> {
     let Some(SplitPlan {
         combat,
         attackers,
@@ -310,13 +342,7 @@ pub(crate) fn execute_assign_combat_damage(
     else {
         // `phase5/automatic-combat-damage`: already assigned and dealt, so a
         // redundant submission is a harmless no-op.
-        return Ok(CommandOutcome {
-            events: Vec::new(),
-            broke_pass_chain: true,
-            priority_handoff: PriorityHandoff::Unchanged,
-            requires_payment: None,
-            battlefield_entries: Vec::new(),
-        });
+        return Ok(DamagePlan::AlreadyAssigned);
     };
     // Splits some other actor already submitted this step (CR 508.5a's
     // "declared_defenders" precedent for the identical "this turn-based
@@ -341,13 +367,13 @@ pub(crate) fn execute_assign_combat_damage(
         // convention DeclareAttackers/DeclareBlockers use, active player
         // only (matches every pre-existing zero-split test).
         if actor != state.active_player {
-            return Err(CommandError::IllegalAction(
+            return Err(Rejected::IllegalAction(
                 "actor is not the player who chooses this combat damage step's split(s)"
                     .to_string(),
             ));
         }
     } else if this_actors_ids.is_empty() {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "actor is not the player who chooses any of this combat damage step's still-\
              pending split(s) (either not a chooser at all this step, or already submitted \
              their own share)"
@@ -362,7 +388,7 @@ pub(crate) fn execute_assign_combat_damage(
     // player's own share is submitted in its own separate call).
     let submitted: HashSet<ObjectId> = assignments.iter().map(|(id, _)| *id).collect();
     if submitted != this_actors_ids {
-        return Err(CommandError::IllegalAction(
+        return Err(Rejected::IllegalAction(
             "assignments must cover exactly this actor's own share of the attackers and \
              blockers that need a chosen split this step (two or more blockers on an \
              attacker, one blocker with trample, or a blocker forced onto two or more \
@@ -374,7 +400,7 @@ pub(crate) fn execute_assign_combat_damage(
 
     for (id, splits) in &assignments {
         if state.object(*id).is_none() {
-            return Err(CommandError::InvalidTarget);
+            return Err(Rejected::InvalidTarget);
         }
         // CR 510.1a: 0-or-less power assigns no damage. Reads through
         // effective_power (CR 613 layer 7c) so this validation stays
@@ -391,13 +417,13 @@ pub(crate) fn execute_assign_combat_damage(
             let mut sum: u32 = 0;
             for (blocker, amount) in splits {
                 if !blockers.contains(blocker) {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "a split entry's blocker isn't actually blocking that attacker"
                             .to_string(),
                     ));
                 }
                 if seen.contains(blocker) {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "a split can't assign the same blocker twice".to_string(),
                     ));
                 }
@@ -405,14 +431,14 @@ pub(crate) fn execute_assign_combat_damage(
                 sum += amount;
             }
             if seen.len() != blockers.len() {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "a split must assign an amount (possibly zero) to every blocker"
                         .to_string(),
                 ));
             }
             if !has_trample {
                 if sum != power {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "a split's amounts must sum to exactly the attacker's power".to_string(),
                     ));
                 }
@@ -424,7 +450,7 @@ pub(crate) fn execute_assign_combat_damage(
                 // and *nothing* can go to the player, all of `power`
                 // must stay on blockers instead.
                 if sum > power {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "a split's amounts can't sum to more than the attacker's power".to_string(),
                     ));
                 }
@@ -433,7 +459,7 @@ pub(crate) fn execute_assign_combat_damage(
                         let needed =
                             lethal_damage_needed(state, script_runtime, *blocker, has_deathtouch);
                         if *amount < needed {
-                            return Err(CommandError::IllegalAction(
+                            return Err(Rejected::IllegalAction(
                                 "trample can't send excess damage to the defending player until \
                                  every blocker has been assigned its own lethal amount"
                                     .to_string(),
@@ -453,13 +479,13 @@ pub(crate) fn execute_assign_combat_damage(
             let mut sum: u32 = 0;
             for (attacker, amount) in splits {
                 if !attackers_for_blocker.contains(attacker) {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "a split entry's attacker isn't actually blocked by that blocker"
                             .to_string(),
                     ));
                 }
                 if seen.contains(attacker) {
-                    return Err(CommandError::IllegalAction(
+                    return Err(Rejected::IllegalAction(
                         "a split can't assign the same attacker twice".to_string(),
                     ));
                 }
@@ -467,49 +493,34 @@ pub(crate) fn execute_assign_combat_damage(
                 sum += amount;
             }
             if seen.len() != attackers_for_blocker.len() {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "a split must assign an amount (possibly zero) to every attacker \
                      it blocks"
                         .to_string(),
                 ));
             }
             if sum != power {
-                return Err(CommandError::IllegalAction(
+                return Err(Rejected::IllegalAction(
                     "a split's amounts must sum to exactly the blocker's power".to_string(),
                 ));
             }
         }
     }
 
-    // Merge this actor's now-validated share into the accumulator - CR
-    // 508.5a's `declared_defenders` precedent, applied to a real payload
-    // instead of a bare "who's gone" marker.
-    {
-        let combat_mut = state.combat.as_mut().expect("checked Some above");
-        for (id, splits) in assignments {
-            combat_mut.pending_damage_splits.insert(id, splits);
-        }
+    // Everyone required has submitted once this actor's share joins the shares
+    // already recorded (CR 508.5a's `declared_defenders` precedent, applied to a
+    // real payload instead of a bare "who's gone" marker).
+    let mut assignment_map: HashMap<ObjectId, Vec<(ObjectId, u32)>> = already_submitted;
+    for (id, splits) in &assignments {
+        assignment_map.insert(*id, splits.clone());
     }
-    let combat_ref = state.combat.as_ref().expect("checked Some above");
-    if combat_ref.pending_damage_splits.len() < requires_assignment.len() {
+    if assignment_map.len() < requires_assignment.len() {
         // Still waiting on a different required actor's own share this
         // step - CR 510.2's simultaneous damage can't be dealt until
         // everyone's chosen, but this actor's own split is genuinely
         // recorded (a real turn-based action, not a no-op).
-        return Ok(CommandOutcome {
-            events: Vec::new(),
-            broke_pass_chain: true,
-            priority_handoff: PriorityHandoff::Unchanged,
-            requires_payment: None,
-            battlefield_entries: Vec::new(),
-        });
+        return Ok(DamagePlan::Record { assignments });
     }
-    // Everyone required has now submitted - clone out of the accumulator
-    // (rather than borrowing) so state.combat is free to be mutably
-    // re-borrowed below (damage_assigned_this_step/clearing the
-    // accumulator) without fighting this map's own borrows, which live
-    // through the whole assign-and-deal pass just below.
-    let assignment_map: HashMap<ObjectId, Vec<(ObjectId, u32)>> = combat_ref.pending_damage_splits.clone();
 
     // CR 510.1b/c/d + 510.2: assign and deal in the same pass - no
     // priority window between them.
@@ -635,25 +646,43 @@ pub(crate) fn execute_assign_combat_damage(
         }
     }
 
-    // `phase5/automatic-combat-damage`: mark this step done so a later
-    // call this same step (auto-fire or a redundant explicit submission)
-    // hits the no-op guard above instead of dealing damage twice. Also
-    // clears the now-fully-consumed accumulator, same as
-    // `damage_assigned_this_step` itself, both reset again on the next
-    // real transition into a fresh damage step (engine/turn.rs).
-    let combat_mut = state.combat.as_mut().expect("checked Some above");
-    combat_mut.damage_assigned_this_step = true;
-    combat_mut.pending_damage_splits.clear();
-
     // CR 510.2/601.2a: these are proposed events only - engine.rs's
     // ReplacementCheck (CR 614-616) gets a chance to rewrite or
     // prevent each one (see apply_damage_event's own doc comment for
     // why the real mutation isn't performed here anymore).
-    return Ok(CommandOutcome {
+    Ok(DamagePlan::Deal { events })
+}
+
+fn apply_damage(state: &mut GameState, plan: DamagePlan) -> Result<CommandOutcome, Internal> {
+    let events = match plan {
+        DamagePlan::AlreadyAssigned => Vec::new(),
+        DamagePlan::Record { assignments } => {
+            let combat =
+                state.combat.as_mut().ok_or_else(|| Internal::new("assign damage: the validated combat is gone"))?;
+            for (id, splits) in assignments {
+                combat.pending_damage_splits.insert(id, splits);
+            }
+            Vec::new()
+        }
+        DamagePlan::Deal { events } => {
+            // `phase5/automatic-combat-damage`: mark this step done so a later
+            // call this same step (auto-fire or a redundant explicit submission)
+            // hits the no-op guard above instead of dealing damage twice. Also
+            // clears the now-fully-consumed accumulator, same as
+            // `damage_assigned_this_step` itself, both reset again on the next
+            // real transition into a fresh damage step (engine/turn.rs).
+            let combat =
+                state.combat.as_mut().ok_or_else(|| Internal::new("assign damage: the validated combat is gone"))?;
+            combat.damage_assigned_this_step = true;
+            combat.pending_damage_splits.clear();
+            events
+        }
+    };
+    Ok(CommandOutcome {
         events,
         broke_pass_chain: true,
         priority_handoff: PriorityHandoff::Unchanged,
         requires_payment: None,
         battlefield_entries: Vec::new(),
-    });
+    })
 }

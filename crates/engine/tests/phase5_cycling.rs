@@ -41,7 +41,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -154,6 +155,21 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId) {
         .expect("player controls source and holds priority");
 }
 
+fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility {
+                source,
+                ability_index: 0,
+                targets: Vec::new(),
+                chosen_colors: Vec::new(),
+                x_value: None,
+            },
+        })
+        
+}
+
 // ---------------------------------------------------------------------
 // Unit-level: ScriptRuntime::run_card_script's Cycling registration
 // mechanics.
@@ -250,12 +266,9 @@ fn cycling_ability_cannot_be_activated_from_the_battlefield() {
     state.abilities.push(cycling_ability(card, AbilityEffect::DrawCards(1)));
 
     let mut engine = Engine::new(state);
-    activate(&mut engine, p0, card);
-    let status = drain(&mut engine);
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "a DiscardSelf-cost ability must require hand, not battlefield - got {status:?}"
-    );
+    let err = try_activate(&mut engine, p0, card).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "a DiscardSelf-cost ability must require hand, not battlefield - got {err:?}");
 }
 
 #[test]
@@ -268,9 +281,8 @@ fn cycling_ability_cannot_be_activated_from_the_graveyard() {
     state.abilities.push(cycling_ability(card, AbilityEffect::DrawCards(1)));
 
     let mut engine = Engine::new(state);
-    activate(&mut engine, p0, card);
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate(&mut engine, p0, card).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 /// Proves the Hand-zone override is scoped exactly to `DiscardSelf`-cost
@@ -298,9 +310,8 @@ fn an_ordinary_battlefield_ability_still_requires_the_battlefield_not_hand() {
     });
 
     let mut engine = Engine::new(state);
-    activate(&mut engine, p0, card);
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate(&mut engine, p0, card).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]

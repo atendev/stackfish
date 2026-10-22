@@ -111,7 +111,7 @@ Because the facade checks an Answer against the Decision's entries first (`decis
 
 ## Open items
 
-- `TODO(035)`: validation that runs inside `step()` instead of `submit_action` (on `StepStatus::Error`), and the 42 `.expect(` calls under `commands/` (13) and `engine/` (29), which become `Internal` errors (on `execute_command`).
+- Done in ticket 035 (`22-error-split.md`): command validation runs in `submit_action`, and the `.expect(` calls under `commands/` became `Internal` errors or rejections. About 30 `.expect(` calls under `engine/` stay as panics that the `Session` catches.
 - `TODO(026)`: menace is checked only in `execute_declare_blockers`, and must-attack is not checked at all. `legal_blockers` does not know either rule.
 - `TODO(036)`: `combine_chosen_modes` decides which mode pairs combine at cast time only. The modal entries can offer a pair that is then rejected.
 - `MakeChoice` accepts any call. It should reject when no choice is pending.

@@ -20,7 +20,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -166,6 +167,17 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, ability_ind
         .expect("player holds priority");
 }
 
+fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, ability_index: u32, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility { source, ability_index, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the ability's (free) cost, got {status:?}");
@@ -212,12 +224,9 @@ fn either_of_two_equip_abilities_may_be_activated_keeping_its_own_restriction() 
 
     // Index 1 rejects the non-Dragon bear - its own restriction is real,
     // not silently sharing index 0's laxer one.
-    activate(&mut engine, p0, equipment, 1, vec![Target::Object(bear)]);
-    let status = drain(&mut engine);
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "\"Equip Dragon\" (index 1) must reject a non-Dragon creature, got {status:?}"
-    );
+    let err = try_activate(&mut engine, p0, equipment, 1, vec![Target::Object(bear)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "\"Equip Dragon\" (index 1) must reject a non-Dragon creature, got {err:?}");
 }
 
 const TWO_EQUIP_ABILITIES: &str = r#"

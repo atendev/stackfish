@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use crate::commands::{CommandError, PaymentResolution};
+use crate::commands::{Internal, PaymentResolution};
 use crate::replacement;
 use crate::sba;
 use crate::script::ScriptChoiceRequest;
@@ -243,19 +243,14 @@ pub enum StepStatus {
     /// same reason as `AwaitingPayment` — this is a mandatory cleanup action,
     /// not a priority decision.
     AwaitingDiscard { player: PlayerId, hand_size: usize, max_hand_size: usize },
-    /// A queued action was rejected when `step()` ran it. The engine resets
-    /// to `PriorityWindow` (or back to the payment a rejected nested mana
-    /// ability interrupted) and the rejection changed nothing else: every
-    /// command validates before it mutates, so `GameState`, the ledger and
-    /// the engine's own counters are exactly as they were before the action
-    /// was queued, and the player may try again (024). Only input rejection
-    /// carries this guarantee. A script error during resolution is logged as
-    /// a `ScriptError` event and resolution continues; a broken engine
-    /// invariant stays fatal.
-    // TODO(035): the action is queued by `submit_action` and only rejected
-    // here; ticket 035 moves that validation into `submit_action` and splits
-    // `CommandError` into `Rejected` and `Internal`.
-    Error(CommandError),
+    /// A broken engine invariant: carrying out a command that had passed
+    /// validation failed, or a queued action was rejected after
+    /// `submit_action` accepted it. Fatal: the state may be half-changed and
+    /// the host must stop using this engine. An input rejection never lands
+    /// here; `submit_action` and the other `submit_*` methods refuse a bad
+    /// input up front and change nothing (024, 035). A script error during
+    /// resolution is logged as a `ScriptError` event and resolution continues.
+    Error(Internal),
     GameOver { winner: Option<PlayerId> },
     /// CR 103.5 pregame: `player` must submit `KeepHand` or `TakeMulligan`
     /// via `Engine::submit_mulligan_decision` before `step()` can continue.

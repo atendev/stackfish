@@ -192,6 +192,7 @@ impl Engine {
             departed_triggered_abilities: Vec::new(),
             recollect_triggers_since: None,
             next_command_id: 0,
+            fatal: None,
             pending_payment: None,
             modal_continuation: None,
             suspended_payments: Vec::new(),

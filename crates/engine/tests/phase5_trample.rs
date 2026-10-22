@@ -15,7 +15,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -84,6 +85,17 @@ fn assign_combat_damage(
     drain(engine)
 }
 
+fn try_assign_combat_damage(
+    engine: &mut Engine,
+    player: PlayerId,
+    assignments: Vec<(ObjectId, Vec<(ObjectId, u32)>)>,
+) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::AssignCombatDamage { assignments } })
+        ?;
+    Ok(drain(engine))
+}
+
 fn p1_life(engine: &Engine, p1: PlayerId) -> i32 {
     engine.state().players.iter().find(|p| p.player_id == p1).unwrap().life
 }
@@ -147,11 +159,9 @@ fn single_blocker_trample_now_requires_a_chosen_split() {
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 0, 2, KeywordSet::empty()), p1));
 
     let mut engine = Engine::new(state);
-    let status = assign_combat_damage(&mut engine, p0, Vec::new());
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "a single trampling blocker still needs a chosen lethal-vs-excess split: got {status:?}"
-    );
+    let err = try_assign_combat_damage(&mut engine, p0, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "a single trampling blocker still needs a chosen lethal-vs-excess split: got {err:?}");
 }
 
 #[test]
@@ -195,8 +205,8 @@ fn trample_cannot_send_excess_until_the_blocker_gets_lethal() {
     // Only 1 of the 2 needed to be lethal - claiming any of the remaining 4
     // for the player must be rejected outright (CR 702.19b's "in that case
     // can't assign any damage to the player").
-    let status = assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 1)])]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "got {status:?}");
+    let err = try_assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 1)])]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "got {err:?}");
 }
 
 #[test]

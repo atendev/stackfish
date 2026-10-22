@@ -16,7 +16,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -145,6 +146,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, modes: Vec<u32>, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes, targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -209,10 +219,9 @@ fn choosing_the_same_mode_twice_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![0, 0], Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0, 0], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -225,10 +234,9 @@ fn choosing_only_one_mode_when_exactly_two_are_required_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![0], Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -244,10 +252,9 @@ fn choosing_all_three_modes_when_exactly_two_are_required_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![0, 1, 2], vec![Target::Player(p0), Target::Object(target)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0, 1, 2], vec![Target::Player(p0), Target::Object(target)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -267,10 +274,9 @@ fn combining_a_mode_with_an_unsupported_effect_kind_is_rejected_at_cast_time() {
     let mut engine = Engine::new(state);
     // Mode 2 can't be combined with another mode - Cascade is a keyword
     // ability's effect, not a card-text mode.
-    cast_spell(&mut engine, p0, card, vec![0, 2], vec![Target::Object(target)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0, 2], vec![Target::Object(target)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -320,10 +326,9 @@ fn up_to_two_rejects_choosing_zero_modes() {
     let mut engine = Engine::new(state);
     // CR 700.2a: "choose a number of those options" - never zero, even for
     // an UpTo spell.
-    cast_spell(&mut engine, p0, card, Vec::new(), Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, Vec::new(), Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -338,9 +343,8 @@ fn a_target_illegal_for_its_own_mode_rejects_the_whole_cast() {
     let mut engine = Engine::new(state);
     // Modes 0 and 1 chosen, but no target supplied for mode 1's own
     // requirement - illegal, same as any missing-target cast.
-    cast_spell(&mut engine, p0, card, vec![0, 1], Vec::new());
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![0, 1], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }

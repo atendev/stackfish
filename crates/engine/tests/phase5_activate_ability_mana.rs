@@ -8,7 +8,8 @@
 
 use std::collections::VecDeque;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, minimal_card_definition, single_player_state};
@@ -77,6 +78,27 @@ fn activate_and_drain(
     drain(engine)
 }
 
+fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::ActivateAbility { source, ability_index: 0, targets, chosen_colors: Vec::new(),
+            x_value: None,
+            },
+        })
+        
+}
+
+fn try_activate_and_drain(
+    engine: &mut Engine,
+    player: PlayerId,
+    source: ObjectId,
+    targets: Vec<Target>,
+) -> Result<StepStatus, ActionError> {
+    try_activate(engine, player, source, targets)?;
+    Ok(drain(engine))
+}
+
 #[test]
 fn mana_ability_taps_source_and_adds_mana_no_stack_object() {
     let p0 = PlayerId(0);
@@ -113,8 +135,8 @@ fn reject_when_actor_does_not_control_source() {
     state.object_mut(source).unwrap().controller = p1;
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
 }
 
@@ -126,8 +148,8 @@ fn reject_when_source_already_tapped() {
     state.object_mut(source).unwrap().tapped = true;
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0, "no mana added");
 }
 
@@ -150,8 +172,8 @@ fn reject_when_source_has_summoning_sickness() {
     state.object_mut(source).unwrap().controlled_since_turn = 1;
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0, "no mana added");
 }
@@ -203,7 +225,7 @@ fn reject_nonexistent_ability_index() {
     let state = state_with_source(source, p0, source);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::ActivateAbility {
@@ -214,9 +236,8 @@ fn reject_nonexistent_ability_index() {
                 x_value: None,
             },
         })
-        .unwrap();
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+        .unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -227,8 +248,8 @@ fn reject_ability_kind_not_activated() {
     state.abilities[0].kind = AbilityKind::Triggered;
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, Vec::new());
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, Vec::new()).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -238,8 +259,8 @@ fn reject_target_supplied_for_mana_ability() {
     let state = state_with_source(source, p0, source);
 
     let mut engine = Engine::new(state);
-    let status = activate_and_drain(&mut engine, p0, source, vec![Target::Player(p0)]);
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))));
+    let err = try_activate_and_drain(&mut engine, p0, source, vec![Target::Player(p0)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert!(!engine.state().object(source).unwrap().tapped, "no partial mutation");
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0);
 }

@@ -14,7 +14,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -148,6 +149,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -188,10 +198,9 @@ fn nonlegendary_filter_rejects_a_legendary_target() {
         setup(purge_definition(), vec![(legend, creature_definition(1, "Test Legend", SupertypeSet::LEGENDARY), p1)]);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(legend)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(legend)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)), "got {status:?}");
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
 }
 
 #[test]
@@ -218,13 +227,10 @@ fn combined_filter_rejects_your_own_creature() {
         setup(smite_definition(), vec![(bear, creature_definition(1, "Bear", SupertypeSet::empty()), p0)]);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "\"you don't control\" must still reject your own creature - got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "\"you don't control\" must still reject your own creature - got {err:?}");
 }
 
 #[test]
@@ -236,13 +242,10 @@ fn combined_filter_rejects_an_opponents_legendary_creature() {
         setup(smite_definition(), vec![(legend, creature_definition(1, "Test Legend", SupertypeSet::LEGENDARY), p1)]);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(legend)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(legend)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "\"isn't legendary\" must still reject an opponent's legendary creature - got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "\"isn't legendary\" must still reject an opponent's legendary creature - got {err:?}");
 }
 
 #[test]

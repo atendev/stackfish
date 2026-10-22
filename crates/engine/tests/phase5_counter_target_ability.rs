@@ -13,7 +13,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
@@ -165,6 +166,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
             kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None, pay_buyback: false },
         })
         .expect("player holds priority, spell is in hand");
+}
+
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None, pay_buyback: false },
+        })
+        
 }
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
@@ -325,12 +335,9 @@ fn stifle_rejects_a_spell_as_a_target_at_cast_time() {
     // CR 113.9: a spell is never a legal target for "counter target
     // activated or triggered ability" - Target::Object doesn't even match
     // TargetFilter::Ability's own arm.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
-    let status = drain(&mut engine);
-    assert!(
-        matches!(status, StepStatus::Error(CommandError::InvalidTarget)),
-        "a spell is not a legal target for \"counter target ability\", got {status:?}"
-    );
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(target)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
+        "a spell is not a legal target for \"counter target ability\", got {err:?}");
 }
 
 #[test]
@@ -346,9 +353,8 @@ fn stifle_has_no_legal_target_when_nothing_is_on_the_stack() {
     let mut engine = Engine::new(state);
     // No ability with this stack_id actually exists - same "not a real
     // candidate" rejection as any other bogus id.
-    cast_spell(&mut engine, p0, card, vec![Target::Ability(ability_stack_id)]);
-    let status = drain(&mut engine);
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)), "got {status:?}");
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Ability(ability_stack_id)]).unwrap_err();
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
 }
 
 #[test]

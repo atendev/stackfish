@@ -7,7 +7,8 @@
 //! `phase5_play_land.rs`, since the engine's own constructors are still
 //! `todo!()`.
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{
@@ -174,7 +175,7 @@ fn cast_spell_rejects_land() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::CastSpell {
@@ -185,10 +186,9 @@ fn cast_spell_rejects_land() {
                 alternative_cost: None, pay_buyback: false,
             },
         })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
     assert_eq!(engine.state().ledger.len(), 0);
 }
@@ -202,7 +202,7 @@ fn cast_spell_rejects_card_not_in_hand() {
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::CastSpell {
@@ -213,10 +213,9 @@ fn cast_spell_rejects_card_not_in_hand() {
                 alternative_cost: None, pay_buyback: false,
             },
         })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
 #[test]
@@ -229,7 +228,7 @@ fn cast_sorcery_rejects_outside_main_phase() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    engine
+    let err = engine
         .submit_action(PlayerAction {
             player: p0,
             kind: PlayerActionKind::CastSpell {
@@ -240,10 +239,9 @@ fn cast_sorcery_rejects_outside_main_phase() {
                 alternative_cost: None, pay_buyback: false,
             },
         })
-        .unwrap();
-    let status = drain(&mut engine);
+        .unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))));
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 

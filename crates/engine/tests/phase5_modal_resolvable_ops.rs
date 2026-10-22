@@ -7,7 +7,8 @@
 //! `Scry`/`Surveil` can all be a mode. The rest of the modes wait in
 //! `Engine::modal_continuation` and run when the mode before them settles.
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
 use stackfish_engine::*;
@@ -108,6 +109,16 @@ fn try_cast(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) -> Step
         })
         .expect("p0 holds priority");
     drain(engine)
+}
+
+fn try_try_cast(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player: P0,
+            kind: PlayerActionKind::CastSpell { card: SPELL, modes: chosen, targets, x_value: None, alternative_cost: None, pay_buyback: false },
+        })
+        ?;
+    Ok(drain(engine))
 }
 
 fn cast(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) {
@@ -330,9 +341,9 @@ fn a_scry_mode_pauses_for_its_choice_and_the_next_mode_runs_after_it() {
 #[test]
 fn a_mode_kind_that_still_cannot_be_combined_is_rejected_at_cast_time() {
     let mut engine = engine_with(vec![mode(None, AbilityEffect::GainLife(3)), mode(None, AbilityEffect::Cascade)], 0);
-    let status = try_cast(&mut engine, vec![0, 1], Vec::new());
+    let err = try_try_cast(&mut engine, vec![0, 1], Vec::new()).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::IllegalAction(_))), "{status:?}");
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "{err:?}");
     assert_eq!(zone_of_named(&engine, "Test Spell"), vec![ZoneKind::Hand], "state untouched");
 }
 

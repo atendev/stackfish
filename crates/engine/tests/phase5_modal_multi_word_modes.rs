@@ -6,7 +6,7 @@
 //! them mode i owns, and each mode resolves against its own range of the
 //! per-word legal chunks.
 
-use stackfish_engine::engine::{Engine, StepStatus};
+use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, minimal_card_definition, two_player_state as base_two_player_state, zones};
@@ -97,18 +97,16 @@ fn engine_with(modes: Vec<SpellMode>, choose: u32) -> Engine {
     Engine::new(state)
 }
 
-fn try_cast(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) -> StepStatus {
-    engine
-        .submit_action(PlayerAction {
-            player: P0,
-            kind: PlayerActionKind::CastSpell { card: SPELL, modes: chosen, targets, x_value: None, alternative_cost: None, pay_buyback: false },
-        })
-        .expect("p0 holds priority");
-    drain(engine)
+fn try_cast(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) -> Result<StepStatus, ActionError> {
+    engine.submit_action(PlayerAction {
+        player: P0,
+        kind: PlayerActionKind::CastSpell { card: SPELL, modes: chosen, targets, x_value: None, alternative_cost: None, pay_buyback: false },
+    })?;
+    Ok(drain(engine))
 }
 
 fn cast(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) {
-    let status = try_cast(engine, chosen, targets);
+    let status = try_cast(engine, chosen, targets).expect("p0 holds priority");
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "{status:?}");
     engine.submit_payment(PaymentPlan { payments: Vec::new() }).unwrap();
     drain(engine);
@@ -224,18 +222,18 @@ fn a_fight_mode_whose_word_left_does_nothing_but_the_other_mode_still_runs() {
 #[test]
 fn too_few_targets_for_the_combined_words_are_rejected_at_cast_time() {
     let mut engine = engine_with(vec![mode(two_creatures(), AbilityEffect::Fight), mode(one_creature(), AbilityEffect::Tap)], 2);
-    let status = try_cast(&mut engine, vec![0, 1], vec![obj(1), obj(2)]);
+    let result = try_cast(&mut engine, vec![0, 1], vec![obj(1), obj(2)]);
 
-    assert!(matches!(status, StepStatus::Error(_)), "{status:?}");
+    assert!(matches!(result, Err(ActionError::Rejected(_))), "{result:?}");
     assert_eq!(zone(&engine, SPELL.0), Some(ZoneKind::Hand), "state untouched");
 }
 
 #[test]
 fn a_mode_with_an_empty_multi_target_requirement_is_rejected() {
     let mut engine = engine_with(vec![mode(Some(TargetSpec::Multiple(Vec::new())), AbilityEffect::Fight), mode(None, AbilityEffect::GainLife(3))], 2);
-    let status = try_cast(&mut engine, vec![0, 1], Vec::new());
+    let result = try_cast(&mut engine, vec![0, 1], Vec::new());
 
-    assert!(matches!(status, StepStatus::Error(_)), "{status:?}");
+    assert!(matches!(result, Err(ActionError::Rejected(_))), "{result:?}");
     assert_eq!(zone(&engine, SPELL.0), Some(ZoneKind::Hand), "state untouched");
 }
 

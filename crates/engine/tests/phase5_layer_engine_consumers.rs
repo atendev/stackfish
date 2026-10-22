@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
@@ -84,6 +85,13 @@ fn declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
         .expect("player holds priority");
     drain(engine)
+}
+
+fn try_declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(ObjectId, ObjectId)>) -> Result<StepStatus, ActionError> {
+    engine
+        .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBlockers { blocks } })
+        ?;
+    Ok(drain(engine))
 }
 
 fn pass_to_declare_blockers(engine: &mut Engine) {
@@ -186,12 +194,10 @@ fn granted_flying_via_continuous_effect_still_enforces_blocking_legality() {
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
-    let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
+    let err = try_declare_blockers(&mut engine, p1, vec![(blocker, attacker)]).unwrap_err();
 
-    assert!(
-        matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))),
-        "a continuous-effect-granted Flying should block just as legally as printed Flying, got {status:?}"
-    );
+    assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
+        "a continuous-effect-granted Flying should block just as legally as printed Flying, got {err:?}");
 }
 
 #[test]

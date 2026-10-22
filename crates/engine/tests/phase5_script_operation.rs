@@ -25,7 +25,8 @@
 //! call is the one that's actually safe for a custom-function script (see
 //! `ScriptRuntime::build_operation`'s own "Caller trap" doc note).
 
-use stackfish_engine::commands::CommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::{OperationOutcome, ScriptRuntime};
 use stackfish_engine::*;
@@ -221,6 +222,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -343,8 +353,7 @@ fn casting_a_script_declared_spell_at_an_illegal_target_is_rejected() {
     let nonexistent = ObjectId(999);
 
     let mut engine = Engine::new(state);
-    cast_spell(&mut engine, p0, card, vec![Target::Object(nonexistent)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(nonexistent)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(CommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
 }

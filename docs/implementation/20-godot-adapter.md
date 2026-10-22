@@ -20,7 +20,9 @@
 
 - `core.rs`: `Core` holds the Session, the owner `ThreadId`, a dead flag and the last failure. It has no Godot type, so unit tests run it
   from any thread. A call from another thread fails without writing to `self`. Each call runs under `catch_unwind`. After a
-  panic the instance is dead, the Session is leaked instead of dropped, and every later call fails with `panicked`.
+  panic the instance is dead, the Session is leaked instead of dropped, and every later call fails with `panicked`. Since ticket
+  035 the Session catches an engine panic first and answers with an `engine_panic` response, so this guard is a backstop for a
+  panic outside the Session's own guard (`22-error-split.md`).
 - `lib.rs`: the class, a thin wrapper over `Core`. A failure logs through `godot_error!` and returns an empty array.
 - `smoke/`: a Godot project, `smoke.gd` and `run.sh`.
 

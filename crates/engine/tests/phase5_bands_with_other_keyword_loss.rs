@@ -31,7 +31,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -124,26 +125,26 @@ fn combat_state() -> GameState {
     }
 }
 
-fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
+fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareAttackers { attackers } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>>) -> StepStatus {
+fn declare_bands(engine: &mut Engine, player: PlayerId, bands: Vec<Vec<ObjectId>>) -> Result<StepStatus, ActionError> {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::DeclareBands { bands } })
-        .expect("player holds priority");
-    drain(engine)
+        ?;
+    Ok(drain(engine))
 }
 
-fn assert_illegal(status: StepStatus) {
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::IllegalAction(_))), "expected an illegal action, got {status:?}");
+fn assert_illegal(status: Result<StepStatus, ActionError>) {
+    assert!(matches!(status, Err(ActionError::Rejected(Rejected::IllegalAction(_)))), "expected an illegal action, got {status:?}");
 }
 
-fn assert_legal_band(status: StepStatus) {
-    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal band declaration, got {status:?}");
+fn assert_legal_band(status: Result<StepStatus, ActionError>) {
+    let status = status.expect("the engine should accept the action");    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal band declaration, got {status:?}");
 }
 
 // ---------------------------------------------------------------------
@@ -239,7 +240,7 @@ fn a_quality_band_that_would_be_legal_is_rejected_once_banding_is_stripped() {
     state.continuous_effects.push(remove_keyword(elf_lord, KeywordSet::BANDING));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (elf, Target::Player(PlayerId(1)))]);
+    declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (elf, Target::Player(PlayerId(1)))]).unwrap();
     // elf_lord's own Banding was stripped, so its bands-with-other grant is
     // gone too, and elf itself never had Banding either - no path makes
     // this band legal any more.
@@ -260,6 +261,6 @@ fn the_same_band_is_legal_without_the_remove_keyword_effect() {
     state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
 
     let mut engine = Engine::new(state);
-    declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (elf, Target::Player(PlayerId(1)))]);
+    declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (elf, Target::Player(PlayerId(1)))]).unwrap();
     assert_legal_band(declare_bands(&mut engine, p0, vec![vec![elf_lord, elf]]));
 }

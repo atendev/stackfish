@@ -16,7 +16,8 @@
 
 use std::collections::HashMap;
 
-use stackfish_engine::commands::CommandError as EngineCommandError;
+use stackfish_engine::engine::ActionError;
+use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
@@ -160,6 +161,15 @@ fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Ve
         .expect("player holds priority, spell is in hand");
 }
 
+fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> Result<(), ActionError> {
+    engine
+        .submit_action(PlayerAction {
+            player,
+            kind: PlayerActionKind::CastSpell { card, modes: Vec::new(), targets, x_value: None, alternative_cost: None , pay_buyback: false},
+        })
+        
+}
+
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's (free) cost, got {status:?}");
@@ -300,10 +310,9 @@ fn rejects_a_wrong_count_submission() {
 
     let mut engine = Engine::new(state);
     // Only one target submitted for a two-word spell.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(creature)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(creature)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
 
@@ -322,9 +331,8 @@ fn rejects_targets_that_dont_match_their_own_word() {
 
     let mut engine = Engine::new(state);
     // Swapped - the land submitted for the creature word, and vice versa.
-    cast_spell(&mut engine, p0, card, vec![Target::Object(land), Target::Object(creature)]);
-    let status = drain(&mut engine);
+    let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(land), Target::Object(creature)]).unwrap_err();
 
-    assert!(matches!(status, StepStatus::Error(EngineCommandError::InvalidTarget)));
+    assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
