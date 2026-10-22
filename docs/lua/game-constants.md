@@ -294,6 +294,7 @@ not a silent no-op:
 | `"Horsemanship"` | 702.31 | Can't be blocked by creatures without Horsemanship. |
 | `"Hexproof"` | 702.11b | This permanent can't be the target of spells or abilities its controller's opponents control. Its own controller can still target it. |
 | `"Shroud"` | 702.18a | This permanent can't be the target of any spell or ability, including its controller's. |
+| `"AttacksEachCombat"` | 508.1d | Not a CR 702 keyword. The creature attacks each combat if able, and a declaration that leaves it home is illegal. A creature that can't attack (tapped, summoning sick, defender, no legal defender) is not required to. "Attacks a specific player if able" and "blocks if able" aren't modeled. |
 | `"CantBeRegenerated"` | 701.19c | Not a true CR 702 keyword — an internal status flag ("this permanent can't have a regeneration shield created for it"), granted the same way as any other keyword. |
 
 **Not grantable via `AddKeyword`:** Banding (CR 702.22) exists as a real `KeywordSet` bit

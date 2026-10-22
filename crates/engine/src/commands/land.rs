@@ -3,6 +3,7 @@
 //! `MakeChoice` are trivial enough to share this file with `PlayLand`
 //! rather than each getting their own.
 
+use crate::script::ScriptRuntime;
 use crate::types::card::CardTypeSet;
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -13,7 +14,11 @@ use super::attach::{next_active_player, remap_abilities};
 use super::legality::is_sorcery_speed;
 use super::{CommandOutcome, Internal, PriorityHandoff, Rejected, Validated};
 
-pub(super) fn validate_pass_priority(state: &GameState, actor: PlayerId) -> Result<Validated, Rejected> {
+pub(super) fn validate_pass_priority(
+    state: &GameState,
+    script_runtime: &ScriptRuntime,
+    actor: PlayerId,
+) -> Result<Validated, Rejected> {
     // CR 117.3c: priority moves to the next player in turn_order
     // after whoever just passed - skipping anyone eliminated (CR
     // 800.4b). Read-only against turn_order - does not touch
@@ -22,6 +27,12 @@ pub(super) fn validate_pass_priority(state: &GameState, actor: PlayerId) -> Resu
     // comments above).
     if !state.turn_order.contains(&actor) {
         return Err(Rejected::IllegalAction("actor not in turn_order".to_string()));
+    }
+    // CR 508.1d: passing would skip the declaration of a creature that must attack.
+    if super::combat::pass_would_skip_a_required_attack(state, script_runtime, actor) {
+        return Err(Rejected::IllegalAction(
+            "a creature that attacks each combat if able must be declared as an attacker".to_string(),
+        ));
     }
     Ok(Validated::PassPriority { actor })
 }

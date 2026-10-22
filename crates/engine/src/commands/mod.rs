@@ -225,7 +225,7 @@ pub(crate) fn validate_command(
     action: PlayerActionKind,
 ) -> Result<Validated, Rejected> {
     match action {
-        PlayerActionKind::PassPriority => land::validate_pass_priority(state, actor),
+        PlayerActionKind::PassPriority => land::validate_pass_priority(state, script_runtime, actor),
         PlayerActionKind::MakeChoice { .. } => Ok(Validated::MakeChoice),
         PlayerActionKind::PlayLand { card } => land::validate_play_land(state, actor, card),
         PlayerActionKind::CastSpell { card, modes, targets, x_value, alternative_cost, pay_buyback } => {

@@ -326,6 +326,7 @@ pub(crate) fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> 
         "Horsemanship" => KeywordSet::HORSEMANSHIP,
         "Hexproof" => KeywordSet::HEXPROOF,
         "Shroud" => KeywordSet::SHROUD,
+        "AttacksEachCombat" => KeywordSet::ATTACKS_EACH_COMBAT,
         other => return Err(ScriptError::LoadError(format!("unknown keyword '{other}'"))),
     })
 }

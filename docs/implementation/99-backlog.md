@@ -7,7 +7,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 1. Engine atomicity (decided in ticket 024: a rejected input changes nothing, enforced by validating before mutating). Build in this order:
    1. Done on `phase5/atomicity-harness` (awaiting review): 025 atomicity harness and audit. See `21-atomicity.md`.
    2. Done on `phase5/error-split` (awaiting review): 035 error split and Session mapping. See `22-error-split.md`.
-   3. 026 menace and must-attack as one predicate shared by `legal_attackers`, `legal_blockers` and command validation.
+   3. Done on `phase5/combat-predicates` (awaiting review): 026 menace and must-attack as one predicate shared by `legal_attackers`, `legal_blockers` and command validation. See `23-combat-predicates.md`.
    4. 036 mode-combination predicate, rejected at announcement and left out of the modal entries.
 2. 019 carddb-backed `CardSource`. The Godot `create` serves only the 25 proof cards until it exists. Run real cards through the proof bot straight after.
 3. Hybrid, Phyrexian, snow and `{X}` payment, plus the bot's matching gaps (ticket 030). Real card data hits these at once.
@@ -35,8 +35,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - Other unordered `HashMap` walks may still decide an order a host sees. Grep `objects.values()` before trusting a
     new replay test. Ticket 025 sorted the five state-based action collectors that walked `objects` (the same seed
     sometimes ordered `Unattached` events differently); 8 more `objects` walks outside `sba.rs` are unchecked (ticket 028).
-  - No card in the set uses a sacrifice or discard cost, menace or a must-attack rule, so the engine atomicity item
-    (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it, and
+  - No card in the set uses a sacrifice or discard cost, menace or a must-attack rule (the keyword exists since ticket
+    026, but no proof card has it), so the engine atomicity item (a bad Answer that passes the facade checks) is untested by the bot. Ticket 025's rejection harness covers it, and
     `Bot::injecting_illegal_answers` now sends illegal Answers at every Decision (see `21-atomicity.md`).
   - Proof spells were inert until `Engine::new_game` started loading a script's `operation()` and `target_requirement()`
     (see `19-proof-game.md`). It still does not load `alternative_costs()` or `buyback_cost()`, and a host that builds
@@ -67,8 +67,9 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Decision/Answer facade (`phase5/decision-answer-facade`, B1)**: see `16-decision-facade.md`. Open items:
   - `submit_action` now validates every command itself (ticket 035), so what the entries cannot see (a pair of modes
     `combine_chosen_modes` cannot combine, menace, a "must attack" requirement, the split rules) is refused there with
-    the Decision still open, not in `step()`. The entries still list the first three, so a player can pick a choice
-    that is then refused. Tickets 026 and 036 remove them from the entries.
+    the Decision still open, not in `step()`. Ticket 026 removed menace and must-attack from the entries (a lone
+    blocker for a menace attacker is no longer listed, and a required attacker is marked). The entries still list a
+    mode pair `combine_chosen_modes` refuses, so a player can pick a choice that is then refused. Ticket 036 removes it.
   - A nested mana ability activated during a Payment Decision (CR 605.3a) is not accepted through `Answer`. It still
     works through `submit_action`.
   - `Target::Ability` candidates are not enumerated for a script `SelectTarget` filter.

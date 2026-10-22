@@ -6,8 +6,8 @@
 //! allow it. The engine does not check that the player can pay (ticket 003):
 //! a Payment Decision that cannot be met answers `Payment(None)` and the cast
 //! unwinds. The engine's own validation still runs when the Answer arrives,
-//! because some rules depend on the combination of choices (a "must attack"
-//! requirement, the targets chosen for a mode).
+//! because some rules depend on the combination of choices (the targets chosen
+//! for a mode, how many blockers a menace attacker got).
 
 use crate::types::ids::{ObjectId, Target};
 use crate::types::mana::Color;
@@ -114,11 +114,15 @@ pub enum Entry {
 pub struct AttackerEntry {
     pub attacker: ObjectId,
     pub defenders: Vec<Target>,
+    /// CR 508.1d: the creature attacks each combat if able, so a declaration
+    /// that leaves it home is refused.
+    pub required: bool,
 }
 
-/// A creature that may block, and the attackers it may block. Menace
-/// (CR 702.111b) is a rule about the whole declaration, so a menace attacker
-/// is listed here and the engine checks the count when the Answer arrives.
+/// A creature that may block, and the attackers it may block. A menace
+/// attacker (CR 702.111b) is listed only when the defending player has two
+/// creatures that could block it. The engine checks that the blockers picked
+/// add up to two when the Answer arrives.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BlockerEntry {
     pub blocker: ObjectId,

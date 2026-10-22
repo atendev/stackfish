@@ -265,6 +265,7 @@ impl From<&Entry> for WireEntry {
 pub struct WireAttacker {
     pub attacker: U64,
     pub defenders: Vec<WireTarget>,
+    pub required: bool,
 }
 
 impl From<&AttackerEntry> for WireAttacker {
@@ -272,6 +273,7 @@ impl From<&AttackerEntry> for WireAttacker {
         WireAttacker {
             attacker: entry.attacker.into(),
             defenders: entry.defenders.iter().map(|t| (*t).into()).collect(),
+            required: entry.required,
         }
     }
 }
@@ -487,4 +489,18 @@ pub fn offered_objects(shape: &ReplyShape) -> Vec<ObjectId> {
         found.extend(cards);
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stackfish_engine::{ObjectId, PlayerId, Target};
+
+    #[test]
+    fn an_attacker_entry_carries_its_required_flag() {
+        let entry = AttackerEntry { attacker: ObjectId(7), defenders: vec![Target::Player(PlayerId(1))], required: true };
+        let json = serde_json::to_value(WireAttacker::from(&entry)).unwrap();
+        assert_eq!(json["required"], true);
+        assert_eq!(json["attacker"], "7");
+    }
 }

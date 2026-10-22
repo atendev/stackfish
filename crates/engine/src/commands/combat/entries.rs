@@ -1,8 +1,11 @@
 //! The options a combat Decision lists. Each builder asks the same checks that
 //! `DeclareAttackers`, `DeclareBlockers` and `AssignCombatDamage` run, so a
 //! listed attack, block or split is one the command accepts on its own. The
-//! rules about the whole declaration (menace, "must attack", banding) stay
-//! with the command and are checked when the Answer arrives.
+//! whole-declaration rules (menace, "attacks each combat if able") come from
+//! `predicate`, the same module the commands use. An entry is a per-creature
+//! list, so it carries only what one creature decides alone. How the picks
+//! add up (two blockers on a menace attacker, a required attacker left
+//! home) is checked when the Answer arrives. Banding is checked there too.
 //!
 //! TODO: `DeclareBands` (CR 702.22) is not offered. It stays a direct
 //! `submit_action`.
@@ -13,43 +16,38 @@ use crate::decision::{AttackerEntry, BlockerEntry, DamageSplitEntry};
 use crate::script::ScriptRuntime;
 use crate::types::card::KeywordSet;
 use crate::types::game::GameState;
-use crate::types::ids::{ObjectId, PlayerId, Target};
+use crate::types::ids::{ObjectId, PlayerId};
 use crate::types::turn::{Phase, Step};
 
-use super::super::attach::non_eliminated_players;
-use super::super::entries::target_order;
 use super::super::legality::{effective_keywords, effective_power};
 use super::damage::plan_damage_splits;
-use super::declare::{attack_target_is_legal, attacker_can_attack, block_is_legal, is_defending_player};
+use super::declare::{attacker_can_attack, is_defending_player};
+use super::predicate::{blockable_attackers, legal_defenders, required_attackers};
 
 /// The active player's attackers while attackers can still be declared, or
-/// an empty list. An empty list means no Decision is needed.
+/// an empty list. An empty list means no Decision is needed. An attacker that
+/// must attack (CR 508.1d) is marked `required`.
 pub(crate) fn attacker_entries(state: &GameState, script_runtime: &ScriptRuntime) -> Vec<AttackerEntry> {
     if state.phase != Phase::Combat || state.step != Step::DeclareAttackers || state.combat.is_some() {
         return Vec::new();
     }
     let actor = state.active_player;
-    let mut ids: Vec<ObjectId> = state.objects.keys().copied().collect();
-    ids.sort();
-    // Opponents first, then the planeswalkers and battles they control.
-    let mut possible_defenders: Vec<Target> =
-        non_eliminated_players(state).into_iter().filter(|&p| p != actor).map(Target::Player).collect();
-    possible_defenders.extend(ids.iter().map(|&id| Target::Object(id)));
-    possible_defenders.sort_by_key(target_order);
-    let defenders: Vec<Target> = possible_defenders
-        .into_iter()
-        .filter(|target| attack_target_is_legal(state, script_runtime, actor, target).is_ok())
-        .collect();
+    let defenders = legal_defenders(state, script_runtime, actor);
     if defenders.is_empty() {
         return Vec::new();
     }
+    let required = required_attackers(state, script_runtime, actor);
+    let mut ids: Vec<ObjectId> = state.objects.keys().copied().collect();
+    ids.sort();
     ids.into_iter()
         .filter(|&id| attacker_can_attack(state, script_runtime, actor, id).is_ok())
-        .map(|attacker| AttackerEntry { attacker, defenders: defenders.clone() })
+        .map(|attacker| AttackerEntry { attacker, defenders: defenders.clone(), required: required.contains(&attacker) })
         .collect()
 }
 
 /// `player`'s blockers while they still owe a declaration, or an empty list.
+/// An attacker is listed only if enough creatures could block it for some
+/// declaration to block it at all (menace needs two).
 pub(crate) fn blocker_entries(state: &GameState, script_runtime: &ScriptRuntime, player: PlayerId) -> Vec<BlockerEntry> {
     if state.phase != Phase::Combat || state.step != Step::DeclareBlockers {
         return Vec::new();
@@ -58,17 +56,19 @@ pub(crate) fn blocker_entries(state: &GameState, script_runtime: &ScriptRuntime,
     if combat.declared_defenders.contains(&player) || !is_defending_player(state, script_runtime, combat, player) {
         return Vec::new();
     }
-    let mut ids: Vec<ObjectId> = state.objects.keys().copied().collect();
-    ids.sort();
-    ids.into_iter()
-        .filter_map(|blocker| {
-            let attackers: Vec<ObjectId> = combat
-                .attackers
+    let blockable = blockable_attackers(state, script_runtime, player, combat);
+    let mut blockers: Vec<ObjectId> = blockable.iter().flat_map(|(_, blockers)| blockers.iter().copied()).collect();
+    blockers.sort();
+    blockers.dedup();
+    blockers
+        .into_iter()
+        .map(|blocker| BlockerEntry {
+            blocker,
+            attackers: blockable
                 .iter()
+                .filter(|(_, candidates)| candidates.contains(&blocker))
                 .map(|(attacker, _)| *attacker)
-                .filter(|&attacker| block_is_legal(state, script_runtime, player, combat, blocker, attacker).is_ok())
-                .collect();
-            (!attackers.is_empty()).then_some(BlockerEntry { blocker, attackers })
+                .collect(),
         })
         .collect()
 }
