@@ -465,7 +465,7 @@ impl Bot {
                 plain(json!({ "kind": "order", "order": order }))
             }
             "modes" => {
-                let modes = self.modes(&decision["mode_count"], &decision["min"], &decision["max"]);
+                let modes = self.modes(&decision["mode_count"], &decision["min"], &decision["max"], &decision["solo_only"]);
                 plain(json!({ "kind": "modes", "modes": modes }))
             }
             "partition" => plain(self.partition(decision)),
@@ -511,14 +511,20 @@ impl Bot {
     }
 
     /// Distinct mode indices, in ascending order. A repeatable range still gets
-    /// distinct modes, which is always legal.
+    /// distinct modes, which is always legal. A mode in `solo_only` is picked
+    /// only as the single chosen mode.
     ///
     /// TODO(proof bot): a pawprint budget (CR 700.2i) is read as a plain count.
-    fn modes(&mut self, mode_count: &Value, min: &Value, max: &Value) -> Vec<u64> {
+    fn modes(&mut self, mode_count: &Value, min: &Value, max: &Value, solo_only: &Value) -> Vec<u64> {
         let total = mode_count.as_u64().unwrap_or(0) as usize;
         let (min, max) = (min.as_u64().unwrap_or(0) as usize, max.as_u64().unwrap_or(0) as usize);
-        let count = self.count(min, Some(max), total);
-        let mut indices: Vec<usize> = (0..total).collect();
+        let solo: Vec<u64> = solo_only.as_array().map(|list| list.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+        let joinable = (0..total).filter(|&i| !solo.contains(&(i as u64))).count();
+        let mut count = self.count(min, Some(max), total);
+        if count >= 2 {
+            count = count.min(joinable);
+        }
+        let mut indices: Vec<usize> = (0..total).filter(|&i| count < 2 || !solo.contains(&(i as u64))).collect();
         self.shuffle(&mut indices);
         let mut chosen: Vec<u64> = indices.into_iter().take(count).map(|i| i as u64).collect();
         chosen.sort_unstable();
@@ -572,7 +578,7 @@ impl Bot {
         let (modes, slots): (Vec<u64>, Vec<Value>) = match entry["modes"].as_object() {
             None => (Vec::new(), entry["targets"]["slots"].as_array().cloned().unwrap_or_default()),
             Some(range) => {
-                let modes = self.modes(&range["mode_count"], &range["min"], &range["max"]);
+                let modes = self.modes(&range["mode_count"], &range["min"], &range["max"], range.get("solo_only").unwrap_or(&Value::Null));
                 let per_mode = entry["targets"]["modes"].as_array()?;
                 let slots = modes.iter().flat_map(|m| per_mode[*m as usize].as_array().cloned().unwrap_or_default()).collect();
                 (modes, slots)

@@ -113,7 +113,7 @@ Because the facade checks an Answer against the Decision's entries first (`decis
 
 - Done in ticket 035 (`22-error-split.md`): command validation runs in `submit_action`, and the `.expect(` calls under `commands/` became `Internal` errors or rejections. About 30 `.expect(` calls under `engine/` stay as panics that the `Session` catches.
 - Done in ticket 026 (`23-combat-predicates.md`): menace and must-attack share one predicate with the entries and the commands.
-- `TODO(036)`: `combine_chosen_modes` decides which mode pairs combine at cast time only. The modal entries can offer a pair that is then rejected.
+- Done in ticket 036 (`24-mode-combination.md`): the entries no longer offer a mode selection that `combine_chosen_modes` refuses.
 - `MakeChoice` accepts any call. It should reject when no choice is pending.
 - `DeclareBands` accepts a second declaration and overwrites the first.
 - Every pause with something to refuse now gets bad answers from `atomicity_tests.rs`. Those pauses are built by hand, not reached by playing, which is enough because a rejection happens before the code reads anything beyond the pause. Only Scry, Search, payment, discard, Madness and Cascade are also reached by playing.

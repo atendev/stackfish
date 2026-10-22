@@ -934,10 +934,8 @@ fn assign_targets_by_filter(
 /// `TargetSpec::Multiple`, e.g. a two-word `Fight` or `ExchangeTextBoxes`),
 /// see `AbilityEffect::Modal`.
 ///
-/// `pub(crate)` since CR 700.2e's `Engine::submit_mode_choice` (engine.rs)
-/// needs this same check once a deferred chosen-by-opponent choice finally
-/// names its modes, mirroring this function's own call site here.
-pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
+/// Callers outside this module ask `mode_can_join_others` instead.
+fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
     matches!(
         effect,
         // Synchronous.
@@ -991,6 +989,47 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
             | AbilityEffect::BecomeCopy(_)
             | AbilityEffect::Attach
     )
+}
+
+/// Why `mode` can only be chosen alone, or `None` when it can join other
+/// chosen modes. Two modes that each pass can always combine: target words are
+/// deduplicated per word, so no joint check is needed.
+///
+/// TODO(modal-resolver): `is_modal_resolvable` still refuses `ForEachPlayer`,
+/// `Cascade`, `MadnessCastOrDiscard`, `ReturnSelfWithCounter`, `AddMana*`,
+/// `Script` and a nested `Modal`. Each kind the resolver learns to handle
+/// shrinks the set of solo-only modes.
+/// TODO: an empty `TargetSpec::Multiple` is a card-definition mistake. A
+/// load-time check should reject it one day.
+fn mode_join_refusal(mode: &SpellMode) -> Option<&'static str> {
+    if matches!(&mode.target_requirement, Some(TargetSpec::Multiple(own)) if own.is_empty()) {
+        return Some("a mode with an empty multi-target requirement can't be combined");
+    }
+    match &mode.effect {
+        Some(effect) if !is_modal_resolvable(effect) => Some(
+            "this mode's effect can't be combined with other chosen modes yet - see \
+             is_modal_resolvable for the supported kinds",
+        ),
+        _ => None,
+    }
+}
+
+/// Whether `mode` can be one of two or more chosen modes (CR 700.2). The
+/// rules allow any pair, so a `false` here is a gap in the resolver and not a
+/// rule. The cast, the modal triggers, the opponent's choice and the entries
+/// all ask this one question.
+pub(crate) fn mode_can_join_others(mode: &SpellMode) -> bool {
+    mode_join_refusal(mode).is_none()
+}
+
+/// The ascending indices of the modes that can only be chosen alone.
+pub(crate) fn solo_only_modes(modes: &[SpellMode]) -> Vec<u32> {
+    modes
+        .iter()
+        .enumerate()
+        .filter(|(_, mode)| !mode_can_join_others(mode))
+        .map(|(index, _)| index as u32)
+        .collect()
 }
 
 /// The `TargetRequirement` `combine_chosen_modes` puts in a `Multiple` slot
@@ -1052,6 +1091,11 @@ pub(crate) fn combine_chosen_modes(
     if let [only] = chosen_modes.as_slice() {
         return Ok((only.target_requirement.clone(), only.effect.clone()));
     }
+    for mode in &chosen_modes {
+        if let Some(reason) = mode_join_refusal(mode) {
+            return Err(reason.to_string());
+        }
+    }
 
     // One flat list of target words; `words[i]` is how many of them mode i
     // owns (see `AbilityEffect::Modal`).
@@ -1067,23 +1111,9 @@ pub(crate) fn combine_chosen_modes(
                 reqs.push(req.clone());
                 words.push(1);
             }
-            Some(TargetSpec::Multiple(own)) if own.is_empty() => {
-                return Err("a mode with an empty multi-target requirement can't be combined".to_string());
-            }
             Some(TargetSpec::Multiple(own)) => {
                 reqs.extend(own.iter().cloned());
                 words.push(own.len());
-            }
-        }
-    }
-    for mode in &chosen_modes {
-        if let Some(effect) = &mode.effect {
-            if !is_modal_resolvable(effect) {
-                return Err(
-                    "this mode's effect can't be combined with other chosen modes yet - see \
-                     is_modal_resolvable for the supported kinds"
-                        .to_string(),
-                );
             }
         }
     }

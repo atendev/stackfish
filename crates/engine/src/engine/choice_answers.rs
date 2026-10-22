@@ -752,12 +752,8 @@ impl Engine {
         let (target_requirement, effect) = if let [only] = chosen_modes.as_slice() {
             (only.target_requirement.clone(), only.effect.clone())
         } else {
-            for mode in &chosen_modes {
-                if let Some(effect) = &mode.effect {
-                    if !commands::is_modal_resolvable(effect) {
-                        return Err(ModeChoiceError::UnsupportedModeCombination);
-                    }
-                }
+            if !chosen_modes.iter().all(|mode| commands::mode_can_join_others(mode)) {
+                return Err(ModeChoiceError::UnsupportedModeCombination);
             }
             // Every mode is target-less by this `ModeChoice` variant's own
             // cast-time narrowing - a synthetic zero-count placeholder per

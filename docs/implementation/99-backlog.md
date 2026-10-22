@@ -8,7 +8,7 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
    1. Done on `phase5/atomicity-harness` (awaiting review): 025 atomicity harness and audit. See `21-atomicity.md`.
    2. Done on `phase5/error-split` (awaiting review): 035 error split and Session mapping. See `22-error-split.md`.
    3. Done on `phase5/combat-predicates` (awaiting review): 026 menace and must-attack as one predicate shared by `legal_attackers`, `legal_blockers` and command validation. See `23-combat-predicates.md`.
-   4. 036 mode-combination predicate, rejected at announcement and left out of the modal entries.
+   4. Done on `phase5/mode-combination` (awaiting review): 036 mode-combination predicate, shared by the cast, the modal entries, modal triggers and the opponent's mode choice. See `24-mode-combination.md`.
 2. 019 carddb-backed `CardSource`. The Godot `create` serves only the 25 proof cards until it exists. Run real cards through the proof bot straight after.
 3. Hybrid, Phyrexian, snow and `{X}` payment, plus the bot's matching gaps (ticket 030). Real card data hits these at once.
 4. Remaining `legal_actions` gaps (ticket 031): target candidates that ignore X, timing grants from continuous effects ("as though it had flash"), nested mana abilities through `Answer`, `DeclareBands`, and `Target::Ability` candidates for script picks.
@@ -68,8 +68,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   - `submit_action` now validates every command itself (ticket 035), so what the entries cannot see (a pair of modes
     `combine_chosen_modes` cannot combine, menace, a "must attack" requirement, the split rules) is refused there with
     the Decision still open, not in `step()`. Ticket 026 removed menace and must-attack from the entries (a lone
-    blocker for a menace attacker is no longer listed, and a required attacker is marked). The entries still list a
-    mode pair `combine_chosen_modes` refuses, so a player can pick a choice that is then refused. Ticket 036 removes it.
+    blocker for a menace attacker is no longer listed, and a required attacker is marked). Ticket 036 did the same for
+    modes: the entries carry `solo_only` and no longer list a card with no legal selection.
   - A nested mana ability activated during a Payment Decision (CR 605.3a) is not accepted through `Answer`. It still
     works through `submit_action`.
   - `Target::Ability` candidates are not enumerated for a script `SelectTarget` filter.

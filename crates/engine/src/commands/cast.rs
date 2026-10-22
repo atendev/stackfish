@@ -346,8 +346,6 @@ pub(super) fn validate_cast_spell(
             // rules (including the "mode with its own multi-target
             // requirement can't be combined" and "unsupported effect
             // kind" narrow gaps it names).
-            // TODO(036): which mode pairs combine is only decided here, so the
-            // modal entries a Decision lists can offer a pair this rejects.
             let (target_requirement, modal_effect) =
                 combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(Rejected::IllegalAction)?;
             (target_requirement, modal_effect, mode_additional_costs, None)
