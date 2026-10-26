@@ -36,13 +36,42 @@ struct StackfishSession {
 
 #[godot_api]
 impl StackfishSession {
-    /// Builds the game from a `setup` request. Returns the `created` response,
-    /// or an error response if the setup was refused.
-    // TODO(carddb): take a real CardSource. Until the carddb wrapper exists, only the proof card set resolves.
+    /// Builds the game from a `setup` request using the 25 proof-card fixture
+    /// set. Returns the `created` response, or an error response if the setup
+    /// was refused. This path needs no external card database, so the smoke
+    /// test and quick demos keep using it.
     #[func]
     fn create(&mut self, setup: PackedByteArray) -> PackedByteArray {
         let result = self.core.create(setup.as_slice(), &proof_cards());
         into_bytes(result)
+    }
+
+    /// Builds the game from a `setup` request using the real card database at
+    /// `../stackfish-db/stackfish.db` relative to the engine process's current
+    /// working directory. Returns the `created` response, or an error response
+    /// if the database is missing or the setup was refused.
+    ///
+    /// TODO(godot paths): this assumes a particular launch working directory.
+    /// A host that launches Godot from somewhere else must either change the
+    /// working directory or call a path-exposing variant once one exists.
+    #[func]
+    fn create_with_db(&mut self, setup: PackedByteArray) -> PackedByteArray {
+        match stackfish_host::CardDbCardSource::open("../stackfish-db/stackfish.db") {
+            Ok(source) => into_bytes(self.core.create(setup.as_slice(), &source)),
+            Err(e) => {
+                // The setup has not been parsed yet, so return a host-style
+                // error response with the database failure reason.
+                let body = serde_json::json!({
+                    "v": stackfish_host::PROTOCOL_VERSION,
+                    "kind": "response",
+                    "body": {
+                        "status": "error",
+                        "error": { "code": "setup_error", "message": format!("could not open card database: {e}") }
+                    }
+                });
+                PackedByteArray::from(body.to_string().into_bytes())
+            }
+        }
     }
 
     /// Passes one `advance`, `answer` or `poll` request to the game.

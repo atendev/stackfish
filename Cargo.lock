@@ -494,8 +494,10 @@ dependencies = [
 name = "stackfish-host"
 version = "0.1.0"
 dependencies = [
+ "rusqlite",
  "serde",
  "serde_json",
+ "stackfish-carddb",
  "stackfish-engine",
  "stackfish-testutil",
 ]

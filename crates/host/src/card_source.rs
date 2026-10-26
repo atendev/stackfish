@@ -27,9 +27,6 @@ pub trait CardSource {
 
 /// Serves cards from a map built in code. Tests and the proof game use it, so
 /// CI never reads `../stackfish-db`.
-///
-/// TODO(carddb source): a source backed by `stackfish_carddb::CardDb::load_by_oracle_id`
-/// comes after B3. It wraps one call, so it needs no new decision.
 #[derive(Default)]
 pub struct FixtureCardSource {
     cards: HashMap<String, CardDefinition>,
