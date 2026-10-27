@@ -510,6 +510,18 @@ pub enum ManaUnit {
     RestrictedColorless(CardTypeSet),
 }
 
+impl ManaUnit {
+    /// The unit as produced by a snow source (CR 106.3, 107.4h). A restricted
+    /// unit stays restricted, because the pool has no snow-restricted unit.
+    pub fn from_snow_source(self) -> ManaUnit {
+        match self {
+            ManaUnit::Colored(color) => ManaUnit::SnowColored(color),
+            ManaUnit::Colorless => ManaUnit::SnowColorless,
+            other => other,
+        }
+    }
+}
+
 impl ManaPool {
     /// CR 500.5/106.4: empties the pool as a step or phase ends. Just resets
     /// to `Default` - every field (including `restricted`) starts at zero/

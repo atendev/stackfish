@@ -12,13 +12,16 @@
 //! TODO(proof bot): it cannot pay a cost that names a sacrifice, a discard, a
 //! tap or a graveyard exile, because the Payment Decision does not list the
 //! eligible objects. It answers "cannot pay", which unwinds the cast.
-//! TODO(proof bot): hybrid, Phyrexian, snow and `{X}` costs get "cannot pay".
+//! TODO(proof bot): it never pays a Phyrexian symbol with more life than its
+//! tracked life minus one, and it assumes a starting life of 20 unless told
+//! otherwise (`with_starting_life`).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{Value, json};
 
 use crate::envelope::PROTOCOL_VERSION;
+use crate::bot_payment::{Pool, mana_value, plan_payment, resolve_x};
 use crate::illegal::illegal_replies;
 use crate::session::Session;
 
@@ -44,42 +47,6 @@ impl Rng {
     fn chance(&mut self, num: usize, den: usize) -> bool {
         self.below(den) < num
     }
-}
-
-/// The mana a player has, as the bot learns it from `mana_added` events. The
-/// Payment Decision does not list the pool.
-#[derive(Default, Clone, Copy)]
-struct Pool {
-    /// White, blue, black, red, green.
-    colored: [u32; 5],
-    colorless: u32,
-}
-
-const COLORS: [&str; 5] = ["white", "blue", "black", "red", "green"];
-
-impl Pool {
-    fn total(&self) -> u32 {
-        self.colored.iter().sum::<u32>() + self.colorless
-    }
-
-    fn add(&mut self, unit: &Value) {
-        match unit["kind"].as_str() {
-            Some("colored" | "snow_colored") => {
-                if let Some(i) = COLORS.iter().position(|c| unit["color"] == *c) {
-                    self.colored[i] += 1;
-                }
-            }
-            Some("colorless" | "snow_colorless") => self.colorless += 1,
-            // A restricted unit may pay only for some spells, so the bot never spends it.
-            _ => {}
-        }
-    }
-}
-
-/// What a plan spends from the pool.
-struct Spent {
-    colored: [u32; 5],
-    colorless: u32,
 }
 
 /// Why the bot stopped without finishing the game.
@@ -141,6 +108,9 @@ pub struct Outcome {
 pub struct Bot {
     rng: Rng,
     pools: HashMap<u32, Pool>,
+    /// Each Seat's life, from `life_changed` events on top of `starting_life`.
+    life: HashMap<u32, i64>,
+    starting_life: i64,
     /// The source of the last ability the bot activated. A self cost
     /// (`tap_self`, `sacrifice_self`, `discard_self`) names it in the plan.
     last_source: Option<Value>,
@@ -184,6 +154,8 @@ impl Bot {
         Bot {
             rng: Rng(seed ^ 0xA5A5_5A5A_DEAD_BEEF),
             pools: HashMap::new(),
+            life: HashMap::new(),
+            starting_life: 20,
             last_source: None,
             last_decision: None,
             answers: 0,
@@ -199,6 +171,13 @@ impl Bot {
             events: HashMap::new(),
             transcript: None,
         }
+    }
+
+    /// Tells the bot the life each player starts with. The default is 20, so a
+    /// commander game needs 40 for the bot to pay Phyrexian symbols with life.
+    pub fn with_starting_life(mut self, life: u32) -> Bot {
+        self.starting_life = i64::from(life);
+        self
     }
 
     /// Keeps every event each Seat receives, for `events`. `watchers` are Seats
@@ -348,6 +327,12 @@ impl Bot {
         self.pools.entry(seat).or_default()
     }
 
+    /// The life a plan may spend on Phyrexian symbols: all but the last point.
+    fn life_budget(&self, seat: u32) -> u32 {
+        let life = self.starting_life + self.life.get(&seat).copied().unwrap_or(0);
+        (life - 1).max(0) as u32
+    }
+
     /// Learns the pool from the events a Seat received, and keeps them when
     /// recording.
     fn take_events(&mut self, seat: u32, body: &Value) {
@@ -359,6 +344,15 @@ impl Bot {
                         let pool = self.pool(seat);
                         units.iter().for_each(|unit| pool.add(unit));
                     }
+                }
+                Some("life_changed") if event["player"].as_u64() == Some(u64::from(seat)) => {
+                    *self.life.entry(seat).or_default() += event["delta"].as_i64().unwrap_or(0);
+                }
+                // Damage to a player is not a `life_changed` event.
+                // TODO: gaining life emits no event either (backlog item 6), so the
+                // bot's life is never above the real one.
+                Some("damage_dealt") if event["target"]["kind"] == "player" && event["target"]["id"].as_u64() == Some(u64::from(seat)) => {
+                    *self.life.entry(seat).or_default() -= event["amount"].as_i64().unwrap_or(0);
                 }
                 // CR 500.5: mana empties at the end of each step and phase.
                 Some("step_started" | "phase_started") => *self.pool(seat) = Pool::default(),
@@ -444,11 +438,7 @@ impl Bot {
     /// Bookkeeping after the Session accepted `reply`.
     fn accepted(&mut self, seat: u32, reply: &Reply, body: &Value) {
         if let Some(spent) = &reply.spent {
-            let pool = self.pool(seat);
-            for (have, used) in pool.colored.iter_mut().zip(spent.colored) {
-                *have = have.saturating_sub(used);
-            }
-            pool.colorless = pool.colorless.saturating_sub(spent.colorless);
+            self.pool(seat).spend(spent);
         }
         self.take_events(seat, body);
     }
@@ -573,7 +563,16 @@ impl Bot {
         Some(chosen)
     }
 
-    fn cast(&mut self, entry: &Value) -> Option<Value> {
+    /// Picks X for a spell, between 0 and 2, never above what the pool can pay.
+    fn x_value(&mut self, cost: Option<&str>, can_pay: &dyn Fn(&str, u32) -> bool) -> Value {
+        let most = match cost {
+            Some(cost) => (0..3).rev().find(|x| can_pay(cost, *x)).unwrap_or(0),
+            None => 2,
+        };
+        json!(self.rng.below(most as usize + 1))
+    }
+
+    fn cast(&mut self, entry: &Value, x_value: Value) -> Option<Value> {
         let alternative = if entry["normal"] == true { Value::Null } else { entry["alternative_costs"].get(0)?.clone() };
         let (modes, slots): (Vec<u64>, Vec<Value>) = match entry["modes"].as_object() {
             None => (Vec::new(), entry["targets"]["slots"].as_array().cloned().unwrap_or_default()),
@@ -585,7 +584,6 @@ impl Bot {
             }
         };
         let targets = self.slot_targets(&slots)?;
-        let x_value = if entry["x"] == true { json!(self.rng.below(3)) } else { Value::Null };
         Some(json!({
             "kind": "cast_spell",
             "card": entry["card"],
@@ -625,6 +623,11 @@ impl Bot {
     /// passes.
     fn action(&mut self, seat: u32, decision: &Value) -> Value {
         let pool = *self.pool(seat);
+        let budget = self.life_budget(seat);
+        let can_pay = |cost: &str, x: u32| {
+            let cost = json!({ "mana": resolve_x(cost, x), "additional": [] });
+            plan_payment(&cost, &pool, budget, None).is_some()
+        };
         let entries = decision["entries"].as_array().cloned().unwrap_or_default();
         let sources = entries.iter().filter(|e| e["kind"] == "activate" && e["mana_ability"] == true).count() as u32;
 
@@ -637,9 +640,10 @@ impl Bot {
             match entry["kind"].as_str() {
                 Some("play_land") => options.push((Some(12), json!({ "kind": "play_land", "card": entry["card"] }), None)),
                 Some("cast") => {
-                    let weight = match entry["card"].as_str().and_then(|card| self.costs.get(card)) {
+                    let cost = entry["card"].as_str().and_then(|card| self.costs.get(card)).cloned();
+                    let weight = match &cost {
                         None => 2,
-                        Some(cost) if plan_payment(&json!({ "mana": cost, "additional": [] }), &pool, None).is_some() => {
+                        Some(cost) if can_pay(cost, 0) => {
                             affordable = true;
                             10
                         }
@@ -648,10 +652,11 @@ impl Bot {
                             0
                         }
                     };
-                    if weight > 0
-                        && let Some(action) = self.cast(entry)
-                    {
-                        options.push((Some(weight), action, None));
+                    if weight > 0 {
+                        let x_value = if entry["x"] == true { self.x_value(cost.as_deref(), &can_pay) } else { Value::Null };
+                        if let Some(action) = self.cast(entry, x_value) {
+                            options.push((Some(weight), action, None));
+                        }
                     }
                 }
                 Some("activate") => {
@@ -711,7 +716,7 @@ impl Bot {
     /// Pays from the tracked pool, or answers "cannot pay".
     fn payment(&mut self, seat: u32, decision: &Value) -> Reply {
         let pool = *self.pool(seat);
-        match plan_payment(&decision["cost"], &pool, self.last_source.as_ref()) {
+        match plan_payment(&decision["cost"], &pool, self.life_budget(seat), self.last_source.as_ref()) {
             Some((payments, spent)) => Reply { value: json!({ "kind": "payment", "plan": { "payments": payments } }), spent: Some(spent) },
             None => Reply { value: json!({ "kind": "payment", "plan": null }), spent: None },
         }
@@ -721,7 +726,7 @@ impl Bot {
 /// An Answer's reply, and the mana it spends if accepted.
 struct Reply {
     value: Value,
-    spent: Option<Spent>,
+    spent: Option<Pool>,
 }
 
 fn protocol(message: impl Into<String>) -> BotError {
@@ -753,74 +758,4 @@ fn assign_damage(decision: &Value) -> Value {
         })
         .collect();
     json!({ "kind": "assign_damage", "assignments": assignments })
-}
-
-/// The mana value of a cost of plain symbols, or `None` for a hybrid,
-/// Phyrexian, snow or `{X}` cost.
-fn mana_value(cost: &str) -> Option<u32> {
-    let mut total = 0;
-    for part in cost.split('{').skip(1) {
-        total += match part.trim_end_matches('}') {
-            "W" | "U" | "B" | "R" | "G" | "C" => 1,
-            generic => generic.parse::<u32>().ok()?,
-        };
-    }
-    Some(total)
-}
-
-/// A plan for `cost` from `pool`, or `None` if the bot cannot make one. Mana
-/// comes first, then each additional cost in the order the Decision lists
-/// them.
-fn plan_payment(cost: &Value, pool: &Pool, source: Option<&Value>) -> Option<(Vec<Value>, Spent)> {
-    let mut left = *pool;
-    let mut payments = Vec::new();
-    let mut spent = Spent { colored: [0; 5], colorless: 0 };
-
-    let mana = cost["mana"].as_str().unwrap_or_default();
-    if !mana.is_empty() {
-        let mut units = Vec::new();
-        let mut generic = 0u32;
-        for part in mana.split('{').skip(1) {
-            match part.trim_end_matches('}') {
-                "C" => {
-                    left.colorless = left.colorless.checked_sub(1)?;
-                    spent.colorless += 1;
-                    units.push(json!({ "kind": "colorless" }));
-                }
-                symbol => match ["W", "U", "B", "R", "G"].iter().position(|c| *c == symbol) {
-                    Some(i) => {
-                        left.colored[i] = left.colored[i].checked_sub(1)?;
-                        spent.colored[i] += 1;
-                        units.push(json!({ "kind": "colored", "color": COLORS[i] }));
-                    }
-                    None => generic += symbol.parse::<u32>().ok()?,
-                },
-            }
-        }
-        for _ in 0..generic {
-            if left.colorless > 0 {
-                left.colorless -= 1;
-                spent.colorless += 1;
-                units.push(json!({ "kind": "colorless" }));
-            } else {
-                let i = (0..5).max_by_key(|i| left.colored[*i]).filter(|i| left.colored[*i] > 0)?;
-                left.colored[i] -= 1;
-                spent.colored[i] += 1;
-                units.push(json!({ "kind": "colored", "color": COLORS[i] }));
-            }
-        }
-        payments.push(json!({ "kind": "mana", "units": units }));
-    }
-
-    for additional in cost["additional"].as_array()? {
-        let payment = match additional["kind"].as_str()? {
-            "tap_self" => json!({ "kind": "tap", "object": source? }),
-            "sacrifice_self" => json!({ "kind": "sacrifice", "object": source? }),
-            "discard_self" => json!({ "kind": "discard", "object": source? }),
-            "life_payment" => json!({ "kind": "life", "amount": additional["amount"] }),
-            _ => return None,
-        };
-        payments.push(payment);
-    }
-    Some((payments, spent))
 }

@@ -355,6 +355,8 @@ fn color_index(c: Color) -> usize {
 #[derive(Clone, Copy)]
 enum PayBranch {
     Color(Color),
+    /// CR 107.4c: `{C}` is paid only with one colorless mana.
+    Colorless,
     Snow,
     Generic(u32),
     Life(u32),
@@ -362,16 +364,15 @@ enum PayBranch {
 
 /// The branches a single atom offers (CR 107.4f: a `Phyrexian` atom is
 /// inherently two-way — pay that color, or pay 2 life — even outside a
-/// `Hybrid`). `None` for atoms this slice doesn't support paying for yet
-/// (`Colorless` — the `{C}` symbol, unrelated to `ManaUnit::Colorless` —
-/// isn't modeled as its own cost-side atom yet).
+/// `Hybrid`). `Colorless` is the `{C}` cost symbol (CR 107.4c), payable only
+/// with colorless mana.
 fn atom_branches(atom: AtomicManaSymbol) -> Option<Vec<PayBranch>> {
     match atom {
         AtomicManaSymbol::Colored(c) => Some(vec![PayBranch::Color(c)]),
         AtomicManaSymbol::Generic(n) => Some(vec![PayBranch::Generic(n)]),
         AtomicManaSymbol::Phyrexian(c) => Some(vec![PayBranch::Color(c), PayBranch::Life(2)]),
         AtomicManaSymbol::Snow => Some(vec![PayBranch::Snow]),
-        AtomicManaSymbol::Colorless => None,
+        AtomicManaSymbol::Colorless => Some(vec![PayBranch::Colorless]),
     }
 }
 
@@ -480,6 +481,25 @@ fn assign_branches(
                     let mut next = spent;
                     next.colored[ci] -= 1;
                     next.snow_colored[ci] -= 1;
+                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
+                    {
+                        return true;
+                    }
+                }
+            }
+            PayBranch::Colorless => {
+                if spent.colorless > spent.snow_colorless {
+                    let mut next = spent;
+                    next.colorless -= 1;
+                    if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
+                    {
+                        return true;
+                    }
+                }
+                if spent.snow_colorless > 0 {
+                    let mut next = spent;
+                    next.colorless -= 1;
+                    next.snow_colorless -= 1;
                     if assign_branches(branch_sets, idx + 1, next, generic_needed, life_needed, phyrexian_life)
                     {
                         return true;
@@ -724,10 +744,9 @@ impl PaymentPlan {
     /// cost — every pip accounted for by the right color, every leftover
     /// unit summing to exactly the generic amount, no more, no less.
     ///
-    /// Out of scope this slice (returns `false`): `spec.alternative` costs,
-    /// `{X}` costs, and the `{C}` colorless mana symbol on the *cost* side
-    /// (not modeled as its own atom yet — see `atom_branches`). Plain
-    /// colored/generic pips, `Phyrexian` pips (paid with colored mana or 2
+    /// Out of scope this slice (returns `false`): `spec.alternative` costs and
+    /// an unresolved `{X}` (callers run `ManaCost::resolve_x` first). Plain
+    /// colored/generic pips, the `{C}` colorless pip (CR 107.4c), `Phyrexian` pips (paid with colored mana or 2
     /// life, CR 107.4f), `Snow` pips (paid with any snow-tagged mana, CR
     /// 107.4h), and `Hybrid` symbols built from any of those atoms (`{W/U}`,
     /// `{2/W}`, `{W/U/P}`) *are* handled. `AdditionalCost::Other` always
@@ -1297,13 +1316,34 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_symbol_shapes_bail_with_none() {
-        // The {C} colorless cost symbol and bare X requirements aren't
-        // modeled yet.
-        assert_eq!(
-            mana_payment_satisfies(&[ManaSymbol::Atom(AtomicManaSymbol::Colorless)], spent([0; 5], 1), 0),
-            None
-        );
+    fn a_bare_x_bails_with_none() {
+        // `resolve_x` turns every {X} into generic mana before payment, so an
+        // unresolved one is never payable.
         assert_eq!(mana_payment_satisfies(&[ManaSymbol::X], spent([0; 5], 0), 0), None);
+    }
+
+    #[test]
+    fn colorless_symbol_takes_only_colorless_mana() {
+        let required = [ManaSymbol::Atom(AtomicManaSymbol::Colorless)];
+        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 1), 0), Some(true));
+        // CR 107.4c: a colored unit never pays {C}.
+        assert_eq!(mana_payment_satisfies(&required, spent([1, 0, 0, 0, 0], 0), 0), Some(false));
+        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 0), 0), Some(false));
+        // A snow colorless unit is still colorless.
+        assert_eq!(mana_payment_satisfies(&required, spent_snow([0; 5], 1, [0; 5], 1), 0), Some(true));
+    }
+
+    #[test]
+    fn colorless_symbol_beside_generic_must_match_exactly() {
+        // {2}{C} paid with three colorless: legal. Paid with one colorless and
+        // two white: the {C} takes the colorless and the {2} takes the white.
+        let required = [
+            ManaSymbol::Atom(AtomicManaSymbol::Generic(2)),
+            ManaSymbol::Atom(AtomicManaSymbol::Colorless),
+        ];
+        assert_eq!(mana_payment_satisfies(&required, spent([0; 5], 3), 0), Some(true));
+        assert_eq!(mana_payment_satisfies(&required, spent([2, 0, 0, 0, 0], 1), 0), Some(true));
+        // Three white has no colorless unit for the {C}.
+        assert_eq!(mana_payment_satisfies(&required, spent([3, 0, 0, 0, 0], 0), 0), Some(false));
     }
 }

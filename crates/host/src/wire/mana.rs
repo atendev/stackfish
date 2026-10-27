@@ -23,6 +23,18 @@ fn atom(symbol: &AtomicManaSymbol) -> String {
     }
 }
 
+/// A hybrid symbol. One with a Phyrexian half is written `{A/B/P}`, which is
+/// the form `ManaCost::parse` reads back, and not `{A/P/B}`.
+fn hybrid(a: &AtomicManaSymbol, b: &AtomicManaSymbol) -> String {
+    match (a, b) {
+        (AtomicManaSymbol::Phyrexian(p), AtomicManaSymbol::Colored(c))
+        | (AtomicManaSymbol::Colored(c), AtomicManaSymbol::Phyrexian(p)) => {
+            format!("{{{}/{}/P}}", color_letter(*p), color_letter(*c))
+        }
+        _ => format!("{{{}/{}}}", atom(a), atom(b)),
+    }
+}
+
 /// A mana cost in the usual brace notation, such as `{2}{R}{G/W}`. An empty
 /// cost is an empty string.
 pub(crate) fn mana_cost_string(cost: &ManaCost) -> String {
@@ -30,7 +42,7 @@ pub(crate) fn mana_cost_string(cost: &ManaCost) -> String {
         .iter()
         .map(|symbol| match symbol {
             ManaSymbol::Atom(a) => format!("{{{}}}", atom(a)),
-            ManaSymbol::Hybrid(a, b) => format!("{{{}/{}}}", atom(a), atom(b)),
+            ManaSymbol::Hybrid(a, b) => hybrid(a, b),
             ManaSymbol::X => "{X}".to_string(),
         })
         .collect()
@@ -75,6 +87,19 @@ impl From<WireManaUnit> for ManaUnit {
                 ManaUnit::RestrictedColored(color.into(), card_type_set(&types))
             }
             WireManaUnit::RestrictedColorless { types } => ManaUnit::RestrictedColorless(card_type_set(&types)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cost_prints_in_the_form_the_parser_reads() {
+        for text in ["{2}{R}{G/W}", "{2/W}{C}{S}", "{X}{X}{B}", "{1}{B/P}{B/P}", "{W/U/P}", "{U/P}"] {
+            let cost = ManaCost::parse(text).expect("valid cost");
+            assert_eq!(mana_cost_string(&cost), text);
         }
     }
 }

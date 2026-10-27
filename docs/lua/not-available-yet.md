@@ -28,8 +28,8 @@ name.
   A card script *can* declare both now (`s.alternative_costs()`/`s.buyback_cost()` — see
   [card-script-basics.md](card-script-basics.md#writing-alternative_costs)), but the TOML scenario
   format itself still has no `[cards.alternative_costs]`/`buyback_cost` field, so a scenario
-  fixture can't drive either without a script. Hybrid/Phyrexian/snow mana payment remain
-  pre-existing gaps in cost-paying generally, not specific to anything in this API.
+  fixture can't drive either without a script. Hybrid, Phyrexian, `{C}`, `{X}` and snow mana
+  payment all work in the engine now (see [mana-abilities.md](mana-abilities.md#snow-mana)).
 - **Only zone changes are visible to a condition.** A condition wanting to check a damage event,
   life change, or tap/untap event will always see `nil` for `event` — see
   [card-script-basics.md](card-script-basics.md#writing-a-condition).

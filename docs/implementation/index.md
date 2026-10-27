@@ -28,4 +28,5 @@ Compact reference for my own use. Each file covers one subsystem.
 - [23-combat-predicates](23-combat-predicates.md) — ticket 026: menace and "attacks each combat if able" as one predicate for the entries and the commands, `AttackerEntry::required`, `ATTACKS_EACH_COMBAT`
 - [24-mode-combination](24-mode-combination.md) — ticket 036: `mode_can_join_others`, `solo_only` on `ModeRange` and `ReplyShape::Modes`, the entries and the facade refusing a solo-only mode beside another
 - [25-chain-operations](25-chain-operations.md) — `Game.Ops.Chain`/`ChainEach`, `AbilityEffect::Chain`, `ModalContinuation::shared_legal`, per-entry target words, `:SetTarget` arrays, `DrawCards` player target
+- [26-special-mana-payment](26-special-mana-payment.md) — ticket 030: the `{C}` cost symbol, snow mana from snow sources, hybrid Phyrexian wire text, the bot's payment planner (`bot_payment.rs`), X and life tracking
 - [99-backlog](99-backlog.md) — current unresolved gaps and mistakes caught
