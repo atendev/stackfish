@@ -869,6 +869,21 @@ pub enum AbilityEffect {
     /// chunk per word and mode i reads the chunks of its own range. The
     /// sum of `words` is the length of the flat list.
     Modal { effects: Vec<Option<AbilityEffect>>, words: Vec<usize> },
+    /// CR 608.2c — several effects of one spell or ability, followed in the
+    /// order written (`Game.Ops.Chain(a, b, ...)`). Each entry is an effect
+    /// `commands::is_modal_resolvable` accepts, so a chain never nests,
+    /// holds a `ForEachPlayer`, or holds a custom function. Every entry
+    /// sees the ability's one target requirement and its one set of legal
+    /// targets, and an entry that doesn't use a target ignores them. A
+    /// chain runs through the same loop as `Modal`
+    /// (`engine::resolve::modal`), so an entry that pauses (a CR 616.1
+    /// ordering choice, a search, a scry) resumes the rest afterward. An
+    /// entry that can't do anything leaves the next one to run (CR 609.3).
+    ///
+    /// TODO: per-entry targets ("destroy target creature, then deal 2
+    /// damage to target player") and a chain inside `ForEachPlayer` or as a
+    /// mode of a `Modal`.
+    Chain(Vec<AbilityEffect>),
     /// A plain spell's own resolution effect (CR 608.2m), declared by its
     /// script's optional `s.operation()` function (a sibling to
     /// `s.register_abilities(c)`, not a replacement) when that function

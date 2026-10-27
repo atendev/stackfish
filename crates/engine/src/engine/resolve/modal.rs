@@ -16,6 +16,11 @@
 //!
 //! The target words of all modes form one flat list (`TargetSpec::Multiple`);
 //! `words[i]` of them belong to mode i (`AbilityEffect::Modal`).
+//!
+//! `AbilityEffect::Chain` (CR 608.2c) uses the same loop with every entry
+//! "chosen". Its entries share the ability's one target requirement and one
+//! legal-target set (`ModalContinuation::shared_legal`), so no per-entry
+//! target words exist.
 
 use std::ops::{ControlFlow, Range};
 
@@ -38,6 +43,8 @@ pub(in crate::engine) struct ModalContinuation {
     words: Vec<usize>,
     /// One legal-target chunk per target word, flat across all modes.
     chunks: Vec<Vec<Target>>,
+    /// `Some` for an `AbilityEffect::Chain`: the legal targets every entry sees.
+    shared_legal: Option<Vec<Target>>,
     /// Index of the next mode to run.
     next: usize,
 }
@@ -115,7 +122,21 @@ impl Engine {
         modal_chunk_legals: &[Vec<Target>],
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        self.resolve_modal_from(top, effects, words, modal_chunk_legals, 0, events)
+        self.resolve_modal_from(top, effects, words, modal_chunk_legals, None, 0, events)
+    }
+
+    /// CR 608.2c — `AbilityEffect::Chain`: every entry runs in order against
+    /// the ability's own target requirement and `legal_targets`.
+    pub(super) fn resolve_chain_effect(
+        &mut self,
+        top: &StackObject,
+        entries: &[AbilityEffect],
+        legal_targets: &[Target],
+        modal_chunk_legals: &[Vec<Target>],
+        events: Vec<GameEventKind>,
+    ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
+        let effects: Vec<Option<AbilityEffect>> = entries.iter().cloned().map(Some).collect();
+        self.resolve_modal_from(top, &effects, &[], modal_chunk_legals, Some(legal_targets), 0, events)
     }
 
     fn resolve_modal_from(
@@ -124,19 +145,27 @@ impl Engine {
         effects: &[Option<AbilityEffect>],
         words: &[usize],
         chunks: &[Vec<Target>],
+        shared_legal: Option<&[Target]>,
         start: usize,
         mut events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         for index in start..effects.len() {
             let Some(effect) = &effects[index] else { continue };
-            let range = word_range(words, index);
-            let mode_chunks = chunks.get(range.clone()).unwrap_or(&[]);
-            let legal: Vec<Target> = mode_chunks.iter().flatten().copied().collect();
+            let (range, mode_chunks, legal): (Range<usize>, &[Vec<Target>], Vec<Target>) = match shared_legal {
+                Some(legal) => (0..0, chunks, legal.to_vec()),
+                None => {
+                    let range = word_range(words, index);
+                    let mode_chunks = chunks.get(range.clone()).unwrap_or(&[]);
+                    let legal = mode_chunks.iter().flatten().copied().collect();
+                    (range, mode_chunks, legal)
+                }
+            };
             let continuation = |next: usize| ModalContinuation {
                 top: top.clone(),
                 effects: effects.to_vec(),
                 words: words.to_vec(),
                 chunks: chunks.to_vec(),
+                shared_legal: shared_legal.map(<[Target]>::to_vec),
                 next,
             };
 
@@ -152,7 +181,15 @@ impl Engine {
 
             let has_later_mode = effects[index + 1..].iter().any(Option::is_some);
             self.modal_continuation = (!is_synchronous(effect) && has_later_mode).then(|| continuation(index + 1));
-            let view = mode_view(top, effect, range, &legal);
+            let view = match shared_legal {
+                Some(_) => {
+                    let mut view = top.clone();
+                    view.effect = Some(effect.clone());
+                    view.targets = legal.clone();
+                    view
+                }
+                None => mode_view(top, effect, range, &legal),
+            };
             match self.resolve_ability_effect(&view, &legal, mode_chunks, events) {
                 ControlFlow::Break(status) => return ControlFlow::Break(status),
                 ControlFlow::Continue(resumed) => events = resumed,
@@ -167,8 +204,8 @@ impl Engine {
     /// from `resolve_commit_events_state` once it has committed the previous
     /// mode's events.
     pub(in crate::engine) fn resume_modal_resolution(&mut self, continuation: ModalContinuation) -> StepStatus {
-        let ModalContinuation { top, effects, words, chunks, next } = continuation;
-        match self.resolve_modal_from(&top, &effects, &words, &chunks, next, Vec::new()) {
+        let ModalContinuation { top, effects, words, chunks, shared_legal, next } = continuation;
+        match self.resolve_modal_from(&top, &effects, &words, &chunks, shared_legal.as_deref(), next, Vec::new()) {
             ControlFlow::Break(status) => status,
             ControlFlow::Continue(mut events) => {
                 events.push(GameEventKind::StackObjectResolved { stack_id: top.stack_id });

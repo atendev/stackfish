@@ -72,7 +72,7 @@ pub(crate) fn decode_condition_value(
 /// A `Game.Ops.*` constructor passed uncalled (`SetOperation(Game.Ops.Mill)`)
 /// would register as a custom script function and fail confusingly at
 /// resolution. Name the mistake up front instead.
-fn reject_uncalled_op(lua: &Lua, function: &Function) -> Result<(), ScriptError> {
+pub(crate) fn reject_uncalled_op(lua: &Lua, function: &Function) -> Result<(), ScriptError> {
     let Ok(ops) = lua.globals().get::<_, mlua::Table>("Game").and_then(|g| g.get::<_, mlua::Table>("Ops")) else {
         return Ok(());
     };
