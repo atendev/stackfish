@@ -394,6 +394,57 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?
     };
     ops.set("ForEachPlayer", for_each_player)?;
+    // `Game.Ops.Chain(a, b, ...)` (CR 608.2c) - several `Game.Ops.*` values
+    // run in the order written. Every argument must be a called op that
+    // `is_modal_resolvable` accepts; a custom function, an uncalled
+    // constructor, a `ForEachPlayer`, a nested `Chain` and an empty chain
+    // are load errors (see `AbilityEffect::Chain`).
+    let chain = lua.create_function(|lua, args: mlua::Variadic<Value>| {
+        if args.is_empty() {
+            return Err(mlua::Error::RuntimeError(
+                "Game.Ops.Chain needs at least one Game.Ops.* value".to_string(),
+            ));
+        }
+        let mut entries = Vec::with_capacity(args.len());
+        for (index, arg) in args.into_iter().enumerate() {
+            let position = index + 1;
+            match arg {
+                Value::UserData(ud) if ud.is::<OperationTag>() => {
+                    let effect = ud.borrow::<OperationTag>()?.0.clone();
+                    if !crate::commands::is_modal_resolvable(&effect) {
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "Game.Ops.Chain argument {position} can't be chained (a nested Chain and some                              effects aren't supported) - see is_modal_resolvable for the supported kinds"
+                        )));
+                    }
+                    entries.push(effect);
+                }
+                Value::UserData(ud) if ud.is::<ForEachPlayerTag>() => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "Game.Ops.Chain argument {position} is a ForEachPlayer, which can't be chained yet"
+                    )));
+                }
+                Value::Function(function) => {
+                    if let Err(crate::script::ScriptError::LoadError(message)) =
+                        crate::script::decode::reject_uncalled_op(lua, &function)
+                    {
+                        return Err(mlua::Error::RuntimeError(format!("Game.Ops.Chain argument {position}: {message}")));
+                    }
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "Game.Ops.Chain argument {position} is a custom function, which can't be chained yet - \
+                         use Game.Ops.* values"
+                    )));
+                }
+                other => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "Game.Ops.Chain argument {position} must be a Game.Ops.* value, got {}",
+                        other.type_name()
+                    )));
+                }
+            }
+        }
+        Ok(OperationTag(AbilityEffect::Chain(entries)))
+    })?;
+    ops.set("Chain", chain)?;
     let counters = lua.create_function(|_, (kind, amount): (String, i32)| {
         Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
     })?;

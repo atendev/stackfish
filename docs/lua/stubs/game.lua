@@ -691,6 +691,11 @@ function GameOpsTable.DiscardRandom(filter, count) end
 ---@return GameOpsValue
 function GameOpsTable.ForEachPlayer(x) end
 
+--- CR 608.2c, several operations in the order written. Every argument must be a called `Game.Ops.*` value that a mode of a modal spell could be. A nested `Chain`, a `ForEachPlayer`, `AddMana*`, a custom function and an empty list are load errors. All entries share the ability's one `:SetTarget` and ignore it when they don't use a target.
+---@param ... GameOpsValue
+---@return GameOpsValue
+function GameOpsTable.Chain(...) end
+
 --- CR 122.1a. `kind` e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge", or a custom name. Object targets only.
 ---@param kind string
 ---@param amount integer

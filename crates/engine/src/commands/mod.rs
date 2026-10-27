@@ -44,7 +44,7 @@ pub(crate) use combat::{
 };
 pub(crate) use entries::priority_entries;
 pub(crate) use legality::{
-    attachment_target_is_legal, combine_chosen_modes, effective_keywords, effective_power, is_ability_stack_entry, is_modal_placeholder_requirement, mode_can_join_others, solo_only_modes,
+    attachment_target_is_legal, combine_chosen_modes, effective_keywords, effective_power, is_ability_stack_entry, is_modal_placeholder_requirement, is_modal_resolvable, mode_can_join_others, solo_only_modes,
     legal_target_candidates_for_spec, split_targets_by_requirement, target_is_legal, target_spec_minimums,
     validate_targets,
 };

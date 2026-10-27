@@ -87,6 +87,16 @@ return Game.Conditions.Enters       -- CR 603, "when this enters the battlefield
 return Game.Conditions.Always       -- no filter, matches every event
 ```
 
+**Several operations in order** — wrap them in `Game.Ops.Chain`. `:SetOperation` and `s.operation()` hold
+one value each, and a second `:SetOperation` call replaces the first.
+
+```lua
+a:SetTarget({ type = "object", card_types = { "Creature" } })
+a:SetOperation(Game.Ops.Chain(Game.Ops.Destroy, Game.Ops.DrawCards(1)))   -- destroy it, then you draw
+```
+
+See [game-constants.md](game-constants.md#gameops) for the rules and limits.
+
 **Custom function** (general case):
 
 ```lua

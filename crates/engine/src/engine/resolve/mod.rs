@@ -411,6 +411,11 @@ impl Engine {
             Some(AbilityEffect::Modal { effects, words }) => {
                 self.resolve_modal_effect(top, effects, words, modal_chunk_legals, events)
             }
+            // CR 608.2c: `Game.Ops.Chain(...)` - the modal loop with every
+            // entry chosen and the ability's one target set shared.
+            Some(AbilityEffect::Chain(entries)) => {
+                self.resolve_chain_effect(top, entries, legal_targets, modal_chunk_legals, events)
+            }
             Some(AbilityEffect::GainLife(amount)) => self.resolve_gain_life_effect(top, *amount, events),
             // CR 608.2m/614-616: unlike GainLife above, Damage
             // doesn't mutate GameState directly - it emits a

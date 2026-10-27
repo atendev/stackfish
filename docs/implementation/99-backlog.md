@@ -23,6 +23,10 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 
 ## Live TODOs / unresolved gaps
 
+- **Chain operations (`phase5/chain-operations`)**: see `25-chain-operations.md`. Open items:
+  - Entries share one target set. Separate targets per entry, a chain inside `ForEachPlayer`, a custom function as an
+    entry and a chain as a mode are not built.
+  - Scenario TOML has no field for a chain.
 - **Godot adapter (`phase5/godot-adapter`, B6)**: see `20-godot-adapter.md`. Open items:
   - `create` serves only the proof card set until the carddb-backed `CardSource` exists.
   - Export (copy step into `res://`, macOS `.framework`), web, hot reload and the late-join snapshot are untouched.

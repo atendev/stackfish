@@ -935,7 +935,7 @@ fn assign_targets_by_filter(
 /// see `AbilityEffect::Modal`.
 ///
 /// Callers outside this module ask `mode_can_join_others` instead.
-fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
+pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
     matches!(
         effect,
         // Synchronous.

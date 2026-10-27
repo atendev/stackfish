@@ -342,6 +342,8 @@ pub(super) fn validate_activate_ability(
         // CR 701.14: fight and the one-sided bite are ordinary stack effects.
         | Some(AbilityEffect::Fight)
         | Some(AbilityEffect::Bite)
+        // CR 608.2c: several effects in one ability, run in order.
+        | Some(AbilityEffect::Chain(_))
         // CR 700.2b (a modal activated/triggered ability) is still
         // unmodeled - RegisteredAbility has no modes field, so this
         // variant can't actually originate from an ability today.
