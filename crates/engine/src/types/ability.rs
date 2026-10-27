@@ -880,10 +880,20 @@ pub enum AbilityEffect {
     /// ordering choice, a search, a scry) resumes the rest afterward. An
     /// entry that can't do anything leaves the next one to run (CR 609.3).
     ///
-    /// TODO: per-entry targets ("destroy target creature, then deal 2
-    /// damage to target player") and a chain inside `ForEachPlayer` or as a
-    /// mode of a `Modal`.
-    Chain(Vec<AbilityEffect>),
+    /// `words` is `None` for `Game.Ops.Chain`, where every entry shares the
+    /// ability's whole target set. `Game.Ops.ChainEach` sets it to
+    /// `Some(counts)`, one per entry: entry i owns `counts[i]` consecutive
+    /// target words of the ability's `TargetSpec` (a `Primitive` is one
+    /// word, a `Multiple` is one per requirement), the same `words`
+    /// convention `Modal` uses. An entry that owns none acts on its
+    /// controller. The counts must sum to the number of declared words,
+    /// which `script::decode::check_chain_words` checks when the ability
+    /// registers or the spell loads.
+    ///
+    /// TODO: a word shared by two entries ("destroy target creature, then
+    /// its controller gains 3 life"), and a chain inside `ForEachPlayer` or
+    /// as a mode of a `Modal`.
+    Chain { entries: Vec<AbilityEffect>, words: Option<Vec<usize>> },
     /// A plain spell's own resolution effect (CR 608.2m), declared by its
     /// script's optional `s.operation()` function (a sibling to
     /// `s.register_abilities(c)`, not a replacement) when that function

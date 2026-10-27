@@ -188,8 +188,9 @@ errors. A one-entry array is the same single word as a bare table.
 An ability (not a spell) can also use `Fight` or `Bite` with a normal single `:SetTarget`. The
 ability's own source is then the first creature, for example "When this creature enters, it fights
 target creature you don't control" (a triggered ability) or "{1}: This creature fights target
-creature you don't control" (an activated one). A triggered or activated ability cannot declare two
-target words yet, because `:SetTarget` builds a single requirement.
+creature you don't control" (an activated one). `:SetTarget` also takes an array of filters, one
+target word each (see [triggered-abilities.md](triggered-abilities.md)). A two-word `Fight` on an ability
+is not tested yet.
 
 ## Scripted targeting predicates
 

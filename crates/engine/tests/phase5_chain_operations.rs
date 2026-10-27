@@ -27,7 +27,7 @@ fn decode(body: &str) -> Result<Option<AbilityEffect>, String> {
 #[test]
 fn chain_decodes_to_its_entries_in_order() {
     let effect = decode("Game.Ops.Chain(Game.Ops.Destroy, Game.Ops.DrawCards(1), Game.Ops.GainLife(2))").expect("loads");
-    assert_eq!(effect, Some(AbilityEffect::Chain(vec![AbilityEffect::Destroy, AbilityEffect::DrawCards(1), AbilityEffect::GainLife(2)])));
+    assert_eq!(effect, Some(AbilityEffect::Chain { entries: vec![AbilityEffect::Destroy, AbilityEffect::DrawCards(1), AbilityEffect::GainLife(2)], words: None }));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn player_target() -> TargetSpec {
 
 fn chain_spell(entries: Vec<AbilityEffect>, target_requirement: Option<TargetSpec>) -> CardDefinition {
     CardDefinition {
-        effect: Some(AbilityEffect::Chain(entries)),
+        effect: Some(AbilityEffect::Chain { entries, words: None }),
         target_requirement,
         ..minimal_card_definition(99, "Test Spell", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::INSTANT)
     }
@@ -401,7 +401,7 @@ fn an_activated_ability_runs_its_chain() {
 fn a_scripted_spell_operation_can_return_a_chain() {
     let runtime = ScriptRuntime::new();
     let (effect, _) = runtime.build_operation(GAIN_AND_DRAW_SPELL).unwrap().unwrap();
-    let Some(AbilityEffect::Chain(entries)) = effect else { panic!("expected a chain, got {effect:?}") };
+    let Some(AbilityEffect::Chain { entries, .. }) = effect else { panic!("expected a chain, got {effect:?}") };
 
     let mut engine = engine_with(chain_spell(entries, None), 3);
     cast(&mut engine, Vec::new());

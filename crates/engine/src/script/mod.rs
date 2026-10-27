@@ -24,5 +24,6 @@ mod types;
 // `triggers.rs`/`types/cost.rs`/`types/effect.rs` (and, for `ScriptRuntime`,
 // every `crates/engine/tests/phase5_*.rs` integration test) already reach
 // through this module - see `runtime`/`types` for the real definitions.
+pub(crate) use decode::check_chain_words;
 pub use runtime::ScriptRuntime;
 pub use types::{OperationOutcome, ScriptChoiceRequest, ScriptContext, ScriptError, ScriptZoneMoveKind};

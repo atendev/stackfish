@@ -23,9 +23,10 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 
 ## Live TODOs / unresolved gaps
 
-- **Chain operations (`phase5/chain-operations`)**: see `25-chain-operations.md`. Open items:
-  - Entries share one target set. Separate targets per entry, a chain inside `ForEachPlayer`, a custom function as an
-    entry and a chain as a mode are not built.
+- **Chain operations (`phase5/chain-operations`, `phase5/chain-per-entry-targets`)**: see `25-chain-operations.md`. Open items:
+  - A word shared by two entries, a chain inside `ForEachPlayer`, a custom function as an entry and a chain as a mode
+    are not built.
+  - The spell-load word check in `pregame` has no integration test, and a two-word fight on an ability is untested.
   - Scenario TOML has no field for a chain.
 - **Godot adapter (`phase5/godot-adapter`, B6)**: see `20-godot-adapter.md`. Open items:
   - `create` serves only the proof card set until the carddb-backed `CardSource` exists.
@@ -267,8 +268,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
   creature left the battlefield does nothing instead of using last known information for its power; no "fights up
   to one target creature" (`up_to`/`at_least` words), no "fights each creature", no damage based on something other
   than power; not usable as a mode of a multi-mode spell (`is_modal_resolvable` unchanged); a triggered or
-  activated ability cannot declare two target words (`:SetTarget` builds one `Primitive`, count 1), so "target
-  creature you control fights target creature you don't control" works as a spell only; the scenario TOML
+  activated ability could not declare two target words until `phase5/chain-per-entry-targets` (`:SetTarget` takes an array
+  now; a two-word fight on an ability is still untested); the scenario TOML
   `[cards.target_requirement]` cannot declare two words (use the script array form); a two-word spec where either
   word is `up_to` or `at_least` does nothing; damage to planeswalkers and battles keeps the existing TODO in
   `apply_damage_event`. A Fight or Bite whose pair is a `Multiple` with more than two words does nothing.
