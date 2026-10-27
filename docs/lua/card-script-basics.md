@@ -95,6 +95,22 @@ a:SetTarget({ type = "object", card_types = { "Creature" } })
 a:SetOperation(Game.Ops.Chain(Game.Ops.Destroy, Game.Ops.DrawCards(1)))   -- destroy it, then you draw
 ```
 
+With `Chain`, every entry shares the ability's target set. When different sentences name different
+targets, use `Game.Ops.ChainEach`, which pairs each operation with the number of target words it owns
+(0 acts on the controller). The words come from `:SetTarget` (an array of filters, one word each) on
+an ability, or from `s.target_requirement()` (a requirement table with a `count`, or an array of them) on a spell, and the
+counts must add up to the words declared or the ability fails to register and the spell fails to load.
+
+```lua
+-- "Draw 2 cards. Target opponent draws 2 cards."
+function s.target_requirement()
+    return { type = "player", controller = "opponent", count = 1 }
+end
+function s.operation()
+    return Game.Ops.ChainEach({ Game.Ops.DrawCards(2), 0 }, { Game.Ops.DrawCards(2), 1 })
+end
+```
+
 See [game-constants.md](game-constants.md#gameops) for the rules and limits.
 
 **Custom function** (general case):

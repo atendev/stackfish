@@ -51,7 +51,7 @@
   has a player word (`Player`, `PlayerScript` or `AnyTarget`), and for the controller otherwise. The first version used
   `affected_player` for any spec, which stopped "destroy target creature, then draw" from drawing (a creature spec has
   no player target). Two shared-chain tests caught it. `Mill` and `LoseLife` keep the stricter rule.
-- Verify: `phase5_chain_per_entry_targets.rs` (17), 3 unit tests for `check_chain_words` in `decode.rs`, the 20
+- Verify: `phase5_chain_per_entry_targets.rs` (18), 3 unit tests for `check_chain_words` in `decode.rs`, the 20
   shared-chain tests unchanged except for the new variant shape. Full workspace suite green, no new warnings. The tests
   cover "Draw 2 cards. Target opponent draws 2 cards." (hand sizes and draw order), a plain "target player draws",
   a creature word plus a player word plus a zero-word entry, partial and total fizzle, a CR 616.1 pause in the first

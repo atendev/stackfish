@@ -461,3 +461,26 @@ fn an_etb_trigger_with_two_words_asks_for_both_and_runs_each_entry_on_its_word()
     assert_eq!(life(&engine, P0), 20);
     assert_eq!(hand_size(&engine, P0), hand + 1, "the zero-word entry drew for the controller");
 }
+
+#[test]
+fn the_documented_spell_script_declares_matching_words() {
+    let source = r#"
+        local s = {}
+        function s.target_requirement()
+            return { type = "player", controller = "opponent", count = 1 }
+        end
+        function s.operation()
+            return Game.Ops.ChainEach({ Game.Ops.DrawCards(2), 0 }, { Game.Ops.DrawCards(2), 1 })
+        end
+        return s
+    "#;
+    let runtime = ScriptRuntime::new();
+    let (effect, _) = runtime.build_operation(source).unwrap().unwrap();
+    let requirement = runtime.build_target_requirement(source).unwrap().expect("declares a target_requirement");
+    let TargetSpec::Primitive(word) = &requirement else { panic!("{requirement:?}") };
+    assert_eq!(word.filter, TargetFilter::Player { controller: Some(FilterController::Opponent) });
+    assert_eq!(
+        effect,
+        Some(AbilityEffect::Chain { entries: vec![AbilityEffect::DrawCards(2), AbilityEffect::DrawCards(2)], words: Some(vec![0, 1]) })
+    );
+}
