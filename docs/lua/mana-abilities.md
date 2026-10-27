@@ -103,7 +103,25 @@ e:Register()
 The payment engine only accepts a restricted unit toward casting a spell of the named card type —
 never toward an activated ability's cost, even one belonging to a permanent of that same card type.
 
+## Snow mana
+
+CR 106.3 and 107.4h. Mana a snow source produces is snow mana, and only snow mana pays an `{S}` cost
+symbol. There is nothing to write in the script. When a permanent that has the Snow supertype
+activates a mana ability, the engine marks each unit `snow_colored` or `snow_colorless`. A snow unit
+is still its color for every other cost symbol. Restricted mana stays restricted and is not marked.
+
+```lua
+-- Snow-Covered Forest
+-- Snow Basic Land - Forest
+-- {T}: Add {G}.
+```
+
+The supertype comes from the card (or from `AddSupertype("Snow")`), so a script does not name it
+again in `register_abilities`.
+
 ## What's not covered
+
+- **Triggered mana abilities** are not built, so their mana is never marked snow.
 
 - **Object-specific restrictions** ("only to cast the exiled card") aren't modeled — only a
   card-type filter.

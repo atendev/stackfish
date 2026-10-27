@@ -9,8 +9,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
    2. Done on `phase5/error-split` (awaiting review): 035 error split and Session mapping. See `22-error-split.md`.
    3. Done on `phase5/combat-predicates` (awaiting review): 026 menace and must-attack as one predicate shared by `legal_attackers`, `legal_blockers` and command validation. See `23-combat-predicates.md`.
    4. Done on `phase5/mode-combination` (awaiting review): 036 mode-combination predicate, shared by the cast, the modal entries, modal triggers and the opponent's mode choice. See `24-mode-combination.md`.
-2. 019 carddb-backed `CardSource` and 037 real-card proof bot. Done on `phase5/carddb-card-source` and `phase5/real-card-proof-bot`: `CardDbCardSource` loads real cards, `crates/host/tests/real_card_bot.rs` runs the bot against two curated 40-card decks, and `docs/real_card_set.md` lists the chosen cards with scripts to add next. The test skips if `../stackfish-db/stackfish.db` is absent so CI stays independent.
-3. Hybrid, Phyrexian, snow and `{X}` payment, plus the bot's matching gaps (ticket 030). Real card data hits these at once.
+2. 019 carddb-backed `CardSource` and 037 real-card proof bot. Done on `phase5/carddb-card-source` and `phase5/real-card-proof-bot`: `CardDbCardSource` loads real cards, `crates/host/tests/real_card_bot.rs` runs the bot against two curated 40-card decks, and `docs/real_card_set.md` lists the chosen cards. The six nonland spells now have active scripts in the database. The test skips if `../stackfish-db/stackfish.db` is absent so CI stays independent.
+3. Done on `phase5/special-mana-payment` (awaiting review): ticket 030, hybrid, Phyrexian, `{C}`, snow and `{X}` payment, the bot's matching gaps, and snow mana from snow sources. See `26-special-mana-payment.md`. Still open: real cards that use these symbols have no scripts in the database yet (Dismember, Deathrite Shaman, Glaring Fleshraker are examples).
 4. Remaining `legal_actions` gaps (ticket 031): target candidates that ignore X, timing grants from continuous effects ("as though it had flash"), nested mana abilities through `Answer`, `DeclareBands`, and `Target::Ability` candidates for script picks.
 5. Late join, replay and wire versioning. Decide in 020, then build 021 (Seat snapshot), 022 (replay export and card-data version) and 023 (`v` bump and outbox bound). Do the `HashMap` ordering audit (028) in this step, because replay determinism depends on it.
 6. Lua event visibility. Let conditions see damage, life, tap/untap and mill events, and make `GainLife` and combat damage emit `LifeChanged`. This unblocks the most card scripts for the least work.
@@ -35,8 +35,8 @@ Set on 2026-10-21 from a read of this file, `docs/lua/not-available-yet.md`, the
 - **Proof game (`phase5/proof-game-bot`, B5)**: see `19-proof-game.md`. Fixed on the way: creatures outside the
   battlefield could attack and block, simultaneous deaths took ids in `HashMap` order, and a script with no
   `register_abilities` raised a `script_error`. Open items:
-  - The bot declines every `may_cast` Decision, and it cannot pay a sacrifice, discard, tap or graveyard-exile cost,
-    hybrid, Phyrexian, snow or `{X}` costs.
+  - The bot declines every `may_cast` Decision, and it cannot pay a sacrifice, discard, tap or graveyard-exile cost.
+    It pays hybrid, Phyrexian, `{C}`, snow and `{X}` costs (`26-special-mana-payment.md`).
   - Other unordered `HashMap` walks may still decide an order a host sees. Grep `objects.values()` before trusting a
     new replay test. Ticket 025 sorted the five state-based action collectors that walked `objects` (the same seed
     sometimes ordered `Unattached` events differently); 8 more `objects` walks outside `sba.rs` are unchecked (ticket 028).

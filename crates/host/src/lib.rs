@@ -5,6 +5,7 @@
 //! `.plan/closed/007-wire-format.md` for the envelope and error codes.
 
 mod bot;
+mod bot_payment;
 mod card_source;
 mod carddb_source;
 mod envelope;

@@ -4,7 +4,8 @@
 use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityEffect;
 use crate::types::ability::AbilityKind;
-use crate::types::card::CardTypeSet;
+use crate::layers::effective_characteristics;
+use crate::types::card::{CardTypeSet, SupertypeSet};
 use crate::types::cost::{AdditionalCost, CostSpec};
 use crate::types::event::GameEventKind;
 use crate::types::game::GameState;
@@ -187,6 +188,18 @@ pub(super) fn validate_activate_ability(
                     units
                 }
                 _ => unreachable!("matched only AddMana/AddManaChoice above"),
+            };
+            // CR 106.3: mana a snow source produces is snow mana, which is
+            // what lets it pay a {S} symbol (CR 107.4h).
+            // TODO: a triggered mana ability's mana is not tagged, because
+            // triggered mana abilities are not built yet.
+            let units = if effective_characteristics(state, script_runtime, source)
+                .supertypes
+                .contains(SupertypeSet::SNOW)
+            {
+                units.into_iter().map(ManaUnit::from_snow_source).collect()
+            } else {
+                units
             };
 
             // A mana ability built with no `Game.Costs.*` component at
