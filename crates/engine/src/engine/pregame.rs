@@ -240,14 +240,24 @@ impl Engine {
                 None => {
                     let operation = self.script_runtime.build_operation(&source);
                     let requirement = self.script_runtime.build_target_requirement(&source);
-                    let failed = operation.is_err() || requirement.is_err();
+                    // A `ChainEach` must own exactly the words the card declares.
+                    let words_check = match (&operation, &requirement) {
+                        (Ok(Some((Some(effect), _))), Ok(requirement)) => {
+                            crate::script::check_chain_words(Some(effect), requirement.as_ref())
+                        }
+                        _ => Ok(()),
+                    };
+                    let failed = operation.is_err() || requirement.is_err() || words_check.is_err();
                     let effect = match &operation {
+                        // A chain whose word counts don't match resolves nothing.
+                        _ if words_check.is_err() => None,
                         Ok(Some((primitive, handle))) => primitive.clone().or(Some(AbilityEffect::Script(*handle))),
                         _ => None,
                     };
                     let requirement_ok = requirement.as_ref().ok().cloned().flatten();
                     self.record_script_error(id, &script_ref, operation.map(|_| ()));
                     self.record_script_error(id, &script_ref, requirement.map(|_| ()));
+                    self.record_script_error(id, &script_ref, words_check);
                     // A script that failed is not cached, so every copy logs it.
                     if !failed {
                         loaded.insert(source, (effect.clone(), requirement_ok.clone()));

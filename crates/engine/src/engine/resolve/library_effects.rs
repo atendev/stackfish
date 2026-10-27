@@ -15,19 +15,40 @@ use crate::types::cost::FilterSpec;
 use crate::types::event::GameEventKind;
 use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::stack::StackObject;
+use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
 use crate::types::zone::ZoneKind;
 
 use super::super::{Engine, ProcessState, ScriptedZoneMoveKind, ScriptedZoneMoveThen, StepStatus};
 use super::direct_effects::affected_player;
 
+/// Whether a target word can pick a player (a player word, a scripted player
+/// word or "any target").
+fn word_names_a_player(req: &TargetRequirement) -> bool {
+    matches!(req.filter, TargetFilter::Player { .. } | TargetFilter::PlayerScript(_) | TargetFilter::AnyTarget)
+}
+
 impl Engine {
     pub(super) fn resolve_draw_cards_effect(
         &mut self,
         top: &StackObject,
+        legal_targets: &[Target],
         amount: u32,
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        self.process_state = self.continue_draw_cards(amount, top.controller, top.stack_id, events);
+        // "Target player draws N" draws for the targeted player, and a
+        // player target that is gone draws nobody. An ability whose words
+        // name no player ("destroy target creature, then draw a card") leaves
+        // the controller drawing.
+        let names_a_player = match &top.target_requirement {
+            None => false,
+            Some(TargetSpec::Primitive(req)) => word_names_a_player(req),
+            Some(TargetSpec::Multiple(reqs)) => reqs.iter().any(word_names_a_player),
+        };
+        let player = if names_a_player { affected_player(top, legal_targets) } else { Some(top.controller) };
+        let Some(player) = player else {
+            return ControlFlow::Continue(events);
+        };
+        self.process_state = self.continue_draw_cards(amount, player, top.stack_id, events);
         ControlFlow::Break(StepStatus::Progressed)
     }
 

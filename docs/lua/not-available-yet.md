@@ -52,7 +52,8 @@ name.
   `s.target_requirement()` array, a `count = 2` entry (Fight only) or a single `count = 1` entry
   (the ability's source is the first creature). Not available: "fights up to one target creature"
   (`up_to`/`at_least` entries), "fights each creature", damage equal to something other than power,
-  and a two-word target spec on a triggered or activated ability (`:SetTarget` builds one word). A
+  and, for a two-word fight on a triggered or activated ability, any test (`:SetTarget` takes an array of
+  filters now, but only `Game.Ops.ChainEach` is exercised with it). A
   self-source fight or a bite whose creature left the battlefield does nothing instead of using
   last known information (CR 608.2h). Neither op can be one mode of a multi-mode spell, and a
   scenario TOML `[cards.target_requirement]` cannot declare two words (use the script array form).

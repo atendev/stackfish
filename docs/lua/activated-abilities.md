@@ -69,8 +69,10 @@ script stays dormant there. Statics, replacement effects and modifiers accept it
    controller, state) -> bool }`, the player-candidate version of (2). A bare `{ type = "player" }`
    with no `filter` key still works as an ordinary unfiltered player target.
 
-Always exactly one target — there's no "up to N" or multi-target shape on an activated ability's
-`:SetTarget` yet.
+Every target word is exactly one target, with no "up to N". `:SetTarget` also takes an array of filter
+tables for CR 601.2c's multi-word form, one word per entry in order, for example
+`a:SetTarget({ { type = "object", card_types = { "Creature" } }, { type = "player" } })`. Use
+[`Game.Ops.ChainEach`](game-constants.md#gameops) to give each operation its own word.
 
 ## Worked example: Equip
 

@@ -54,10 +54,13 @@ without an operation set is an error.
 **`:SetTarget(value)`** — CR 603.3d: "target [something]" in the ability's own text. `value` is
 either a flat option-bag table (the same shape [`Game.SelectTargets`](targeting-and-choices.md)
 accepts, e.g. `{type="object", card_types={"Creature"}, controller="opponent"}`) or a custom
-scripted-legality function `function(object, source, controller, state) -> bool`. Always a single,
-exact-count target (`count: 1, up_to: false`) — no "up to N" and no CR 601.2c multi-word form
-("target creature and target land") from this builder; construct a `RegisteredAbility` directly in
-Rust for either of those. Omitting `:SetTarget` means no target requirement at all (`target: None`).
+scripted-legality function `function(object, source, controller, state) -> bool`. Every word is an
+exact-count target (`count: 1, up_to: false`), with no "up to N". An array of those values is
+CR 601.2c's multi-word form ("target creature and target land"), one word per entry in order, and a
+one-entry array is the same single word as a bare table. Pair a multi-word `:SetTarget` with
+[`Game.Ops.ChainEach`](game-constants.md#gameops) so each operation reads its own word. A table that
+mixes array entries with other keys is a load error. For "up to N" words, construct a
+`RegisteredAbility` directly in Rust. Omitting `:SetTarget` means no target requirement at all (`target: None`).
 When set, the real engine pause this implies (`ProcessState`/`StepStatus::AwaitingTriggerTargets`,
 `Engine::submit_trigger_targets`) happens automatically the moment the ability would go on the
 stack — nothing else needs to be written to make that happen.

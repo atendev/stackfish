@@ -395,10 +395,8 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
     };
     ops.set("ForEachPlayer", for_each_player)?;
     // `Game.Ops.Chain(a, b, ...)` (CR 608.2c) - several `Game.Ops.*` values
-    // run in the order written. Every argument must be a called op that
-    // `is_modal_resolvable` accepts; a custom function, an uncalled
-    // constructor, a `ForEachPlayer`, a nested `Chain` and an empty chain
-    // are load errors (see `AbilityEffect::Chain`).
+    // run in the order written, every entry sharing the ability's whole
+    // target set. See `chain_entry` for what an entry may be.
     let chain = lua.create_function(|lua, args: mlua::Variadic<Value>| {
         if args.is_empty() {
             return Err(mlua::Error::RuntimeError(
@@ -407,44 +405,51 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         }
         let mut entries = Vec::with_capacity(args.len());
         for (index, arg) in args.into_iter().enumerate() {
+            entries.push(chain_entry(lua, "Chain", index + 1, arg)?);
+        }
+        Ok(OperationTag(AbilityEffect::Chain { entries, words: None }))
+    })?;
+    ops.set("Chain", chain)?;
+    // `Game.Ops.ChainEach({ op, words }, ...)` - the same, but entry i owns
+    // `words` consecutive target words of the ability's target requirement
+    // (0 for an entry that acts on its controller). Whether the counts add up
+    // to the declared words is checked later, when the ability registers or
+    // the spell loads (`check_chain_words`), because the operation and the
+    // target requirement are declared separately.
+    let chain_each = lua.create_function(|lua, args: mlua::Variadic<Value>| {
+        if args.is_empty() {
+            return Err(mlua::Error::RuntimeError(
+                "Game.Ops.ChainEach needs at least one { op, words } pair".to_string(),
+            ));
+        }
+        let mut entries = Vec::with_capacity(args.len());
+        let mut words = Vec::with_capacity(args.len());
+        for (index, arg) in args.into_iter().enumerate() {
             let position = index + 1;
-            match arg {
-                Value::UserData(ud) if ud.is::<OperationTag>() => {
-                    let effect = ud.borrow::<OperationTag>()?.0.clone();
-                    if !crate::commands::is_modal_resolvable(&effect) {
-                        return Err(mlua::Error::RuntimeError(format!(
-                            "Game.Ops.Chain argument {position} can't be chained (a nested Chain and some                              effects aren't supported) - see is_modal_resolvable for the supported kinds"
-                        )));
-                    }
-                    entries.push(effect);
-                }
-                Value::UserData(ud) if ud.is::<ForEachPlayerTag>() => {
-                    return Err(mlua::Error::RuntimeError(format!(
-                        "Game.Ops.Chain argument {position} is a ForEachPlayer, which can't be chained yet"
-                    )));
-                }
-                Value::Function(function) => {
-                    if let Err(crate::script::ScriptError::LoadError(message)) =
-                        crate::script::decode::reject_uncalled_op(lua, &function)
-                    {
-                        return Err(mlua::Error::RuntimeError(format!("Game.Ops.Chain argument {position}: {message}")));
-                    }
-                    return Err(mlua::Error::RuntimeError(format!(
-                        "Game.Ops.Chain argument {position} is a custom function, which can't be chained yet - \
-                         use Game.Ops.* values"
-                    )));
-                }
+            let Value::Table(pair) = arg else {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Game.Ops.ChainEach argument {position} must be a {{ op, words }} table, got {}",
+                    arg.type_name()
+                )));
+            };
+            let op: Value = pair.get(1)?;
+            let count: Value = pair.get(2)?;
+            let count = match count {
+                Value::Integer(n) if n >= 0 => n as usize,
+                Value::Number(n) if n >= 0.0 && n.fract() == 0.0 => n as usize,
                 other => {
                     return Err(mlua::Error::RuntimeError(format!(
-                        "Game.Ops.Chain argument {position} must be a Game.Ops.* value, got {}",
+                        "Game.Ops.ChainEach argument {position}: words must be a whole number of 0 or more, got {}",
                         other.type_name()
                     )));
                 }
-            }
+            };
+            entries.push(chain_entry(lua, "ChainEach", position, op)?);
+            words.push(count);
         }
-        Ok(OperationTag(AbilityEffect::Chain(entries)))
+        Ok(OperationTag(AbilityEffect::Chain { entries, words: Some(words) }))
     })?;
-    ops.set("Chain", chain)?;
+    ops.set("ChainEach", chain_each)?;
     let counters = lua.create_function(|_, (kind, amount): (String, i32)| {
         Ok(OperationTag(AbilityEffect::Counters { kind: parse_counter_kind_name(&kind), amount }))
     })?;
@@ -1463,4 +1468,42 @@ fn decode_entry_options(opts: Option<Table>, op_name: &str) -> mlua::Result<(Ent
         }
     }
     Ok((control, tapped))
+}
+
+/// One argument of `Game.Ops.Chain`/`ChainEach` (`ctor` names which). It must
+/// be a called `Game.Ops.*` value that `is_modal_resolvable` accepts, so a
+/// chain never holds an entry the modal loop would skip. A custom function,
+/// an uncalled constructor, a `ForEachPlayer`, a nested chain and a
+/// non-operation value are load errors (see `AbilityEffect::Chain`).
+fn chain_entry(lua: &Lua, ctor: &str, position: usize, arg: Value) -> mlua::Result<AbilityEffect> {
+    match arg {
+        Value::UserData(ud) if ud.is::<OperationTag>() => {
+            let effect = ud.borrow::<OperationTag>()?.0.clone();
+            if !crate::commands::is_modal_resolvable(&effect) {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "Game.Ops.{ctor} argument {position} can't be chained (a nested chain and some \
+                     effects aren't supported) - see is_modal_resolvable for the supported kinds"
+                )));
+            }
+            Ok(effect)
+        }
+        Value::UserData(ud) if ud.is::<ForEachPlayerTag>() => Err(mlua::Error::RuntimeError(format!(
+            "Game.Ops.{ctor} argument {position} is a ForEachPlayer, which can't be chained yet"
+        ))),
+        Value::Function(function) => {
+            if let Err(crate::script::ScriptError::LoadError(message)) =
+                crate::script::decode::reject_uncalled_op(lua, &function)
+            {
+                return Err(mlua::Error::RuntimeError(format!("Game.Ops.{ctor} argument {position}: {message}")));
+            }
+            Err(mlua::Error::RuntimeError(format!(
+                "Game.Ops.{ctor} argument {position} is a custom function, which can't be chained yet - \
+                 use Game.Ops.* values"
+            )))
+        }
+        other => Err(mlua::Error::RuntimeError(format!(
+            "Game.Ops.{ctor} argument {position} must be a Game.Ops.* value, got {}",
+            other.type_name()
+        ))),
+    }
 }

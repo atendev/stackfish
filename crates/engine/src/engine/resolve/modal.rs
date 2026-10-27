@@ -97,6 +97,9 @@ fn mode_view(top: &StackObject, effect: &AbilityEffect, range: Range<usize>, leg
     let mut view = top.clone();
     view.effect = Some(effect.clone());
     view.target_requirement = match &top.target_requirement {
+        // A lone word, owned by the entry whose range covers it (a chain
+        // with per-entry words over a single-target ability).
+        Some(TargetSpec::Primitive(req)) => (range == (0..1)).then(|| TargetSpec::Primitive(req.clone())),
         Some(TargetSpec::Multiple(reqs)) => match reqs.get(range) {
             Some([one]) if commands::is_modal_placeholder_requirement(one) => None,
             Some([one]) => Some(TargetSpec::Primitive(one.clone())),
@@ -125,18 +128,37 @@ impl Engine {
         self.resolve_modal_from(top, effects, words, modal_chunk_legals, None, 0, events)
     }
 
-    /// CR 608.2c — `AbilityEffect::Chain`: every entry runs in order against
-    /// the ability's own target requirement and `legal_targets`.
+    /// CR 608.2c — `AbilityEffect::Chain`: every entry runs in order.
+    /// `words: None` hands each entry the ability's whole target requirement
+    /// and `legal_targets`. `Some(words)` gives entry i the `words[i]`
+    /// target words it owns, the same way a `Modal` mode owns its words.
     pub(super) fn resolve_chain_effect(
         &mut self,
         top: &StackObject,
         entries: &[AbilityEffect],
+        words: Option<&[usize]>,
         legal_targets: &[Target],
         modal_chunk_legals: &[Vec<Target>],
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let effects: Vec<Option<AbilityEffect>> = entries.iter().cloned().map(Some).collect();
-        self.resolve_modal_from(top, &effects, &[], modal_chunk_legals, Some(legal_targets), 0, events)
+        match words {
+            None => self.resolve_modal_from(top, &effects, &[], modal_chunk_legals, Some(legal_targets), 0, events),
+            Some(words) => {
+                // A lone `Primitive` word has no per-word chunks (they are
+                // only derived for a `Multiple`), so its one chunk is the
+                // whole legal set.
+                let single;
+                let chunks = match &top.target_requirement {
+                    Some(TargetSpec::Primitive(_)) => {
+                        single = vec![legal_targets.to_vec()];
+                        &single[..]
+                    }
+                    _ => modal_chunk_legals,
+                };
+                self.resolve_modal_from(top, &effects, words, chunks, None, 0, events)
+            }
+        }
     }
 
     fn resolve_modal_from(

@@ -1227,6 +1227,73 @@ pub(crate) fn decode_target_spec_table(
     }
 }
 
+/// `:SetTarget`'s argument for activated and triggered abilities. A plain
+/// filter table or function is one target word (count 1). An array of them is
+/// one word per entry in order (CR 601.2c, "target creature and target
+/// player"), a one-entry array being the same single word. Each entry decodes
+/// like a bare `:SetTarget` argument, so a function or a player-script table
+/// works in an array too.
+pub(crate) fn decode_target_spec_value(
+    lua: &Lua,
+    registry: &mut ScriptRegistry,
+    value: Value,
+) -> Result<TargetSpec, ScriptError> {
+    let single = |filter| TargetRequirement { filter, count: 1, up_to: false, at_least: false, exclude_source: false };
+    if let Value::Table(ref table) = value {
+        let array_len = table.raw_len();
+        if array_len > 0 {
+            let mut key_count = 0usize;
+            for pair in table.clone().pairs::<Value, Value>() {
+                pair.map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                key_count += 1;
+            }
+            if key_count != array_len {
+                return Err(ScriptError::LoadError(
+                    "SetTarget got a table that mixes array entries with other keys (or has gaps) - pass one \
+                     filter table, or a plain array of filter tables"
+                        .to_string(),
+                ));
+            }
+            let mut requirements = Vec::with_capacity(array_len);
+            for index in 1..=array_len {
+                let entry: Value = table.get(index).map_err(|e| ScriptError::LoadError(e.to_string()))?;
+                requirements.push(single(decode_target_filter_value(lua, registry, entry)?));
+            }
+            return Ok(if requirements.len() == 1 {
+                TargetSpec::Primitive(requirements.remove(0))
+            } else {
+                TargetSpec::Multiple(requirements)
+            });
+        }
+    }
+    Ok(TargetSpec::Primitive(single(decode_target_filter_value(lua, registry, value)?)))
+}
+
+/// A `Game.Ops.ChainEach` whose per-entry word counts don't add up to the
+/// words the ability or spell declares can't resolve, so the load or the
+/// registration fails. Plain `Chain`, other effects and `words: None` pass.
+/// A `Primitive` spec is one word, a `Multiple` one per requirement, no spec
+/// none.
+pub(crate) fn check_chain_words(
+    effect: Option<&AbilityEffect>,
+    target: Option<&TargetSpec>,
+) -> Result<(), ScriptError> {
+    let Some(AbilityEffect::Chain { words: Some(words), .. }) = effect else { return Ok(()) };
+    let declared = match target {
+        None => 0,
+        Some(TargetSpec::Primitive(_)) => 1,
+        Some(TargetSpec::Multiple(requirements)) => requirements.len(),
+    };
+    let owned: usize = words.iter().sum();
+    if owned == declared {
+        Ok(())
+    } else {
+        Err(ScriptError::LoadError(format!(
+            "Game.Ops.ChainEach entries own {owned} target word(s) but the ability declares {declared}"
+        )))
+    }
+}
+
 /// `ActivatedAbilityBuilder::SetTarget`'s argument decoder — a `Value`
 /// rather than `decode_target_filter_table`'s bare `Table`, same table-or-
 /// function fallback `decode_affected_value` established for `:SetAffected`.
@@ -1271,5 +1338,47 @@ pub(crate) fn decode_target_filter_value(
             "SetTarget expected a filter table or a function, got {}",
             other.type_name()
         ))),
+    }
+}
+
+#[cfg(test)]
+mod chain_word_tests {
+    use super::*;
+    use crate::types::target::{TargetFilter, TargetRequirement};
+
+    fn word() -> TargetRequirement {
+        TargetRequirement {
+            filter: TargetFilter::Player { controller: None },
+            count: 1,
+            up_to: false,
+            at_least: false,
+            exclude_source: false,
+        }
+    }
+
+    fn each(words: Vec<usize>) -> AbilityEffect {
+        AbilityEffect::Chain { entries: vec![AbilityEffect::DrawCards(1); words.len()], words: Some(words) }
+    }
+
+    #[test]
+    fn counts_that_match_the_declared_words_pass() {
+        assert!(check_chain_words(Some(&each(vec![0, 1])), Some(&TargetSpec::Primitive(word()))).is_ok());
+        assert!(check_chain_words(Some(&each(vec![1, 1])), Some(&TargetSpec::Multiple(vec![word(), word()]))).is_ok());
+        assert!(check_chain_words(Some(&each(vec![0, 0])), None).is_ok());
+    }
+
+    #[test]
+    fn counts_that_do_not_match_fail_and_name_both_numbers() {
+        let error = check_chain_words(Some(&each(vec![1, 1])), Some(&TargetSpec::Primitive(word()))).expect_err("2 vs 1");
+        assert!(format!("{error:?}").contains("own 2") && format!("{error:?}").contains("declares 1"), "{error:?}");
+        assert!(check_chain_words(Some(&each(vec![0, 1])), None).is_err());
+    }
+
+    #[test]
+    fn a_shared_chain_and_other_effects_are_not_checked() {
+        let shared = AbilityEffect::Chain { entries: vec![AbilityEffect::Destroy], words: None };
+        assert!(check_chain_words(Some(&shared), Some(&TargetSpec::Multiple(vec![word(), word()]))).is_ok());
+        assert!(check_chain_words(Some(&AbilityEffect::Destroy), None).is_ok());
+        assert!(check_chain_words(None, None).is_ok());
     }
 }

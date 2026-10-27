@@ -181,8 +181,8 @@ function TriggeredAbilityBuilder:SetFunctionsFrom(zoneName) end
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetOperation(value) end
 
---- Always exactly one target. Omit ⇒ no target requirement.
----@param value FilterTable|ScriptedTargetFn
+--- One target word, or an array of values for CR 601.2c's multi-word form (one word per entry, in order). Omit ⇒ no target requirement.
+---@param value FilterTable|ScriptedTargetFn|(FilterTable|ScriptedTargetFn)[]
 ---@return TriggeredAbilityBuilder
 function TriggeredAbilityBuilder:SetTarget(value) end
 
@@ -250,8 +250,8 @@ function ActivatedAbilityBuilder:SetFunctionsFrom(zoneName) end
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetOperation(value) end
 
---- Always exactly one target when set. Optional.
----@param value FilterTable|ScriptedTargetFn|{ type: "player", filter?: PlayerPredicateFn }
+--- One target word when set, or an array of values for CR 601.2c's multi-word form (one word per entry, in order). Optional.
+---@param value FilterTable|ScriptedTargetFn|{ type: "player", filter?: PlayerPredicateFn }|(FilterTable|ScriptedTargetFn)[]
 ---@return ActivatedAbilityBuilder
 function ActivatedAbilityBuilder:SetTarget(value) end
 
@@ -696,6 +696,11 @@ function GameOpsTable.ForEachPlayer(x) end
 ---@return GameOpsValue
 function GameOpsTable.Chain(...) end
 
+--- CR 601.2c/608.2c, `Chain` where each entry owns `words` consecutive target words (0 acts on the controller). Counts must add up to the declared target words.
+---@param ... { [1]: GameOpsValue, [2]: integer }
+---@return GameOpsValue
+function GameOpsTable.ChainEach(...) end
+
 --- CR 122.1a. `kind` e.g. "PlusOnePlusOne"/"MinusOneMinusOne"/"Loyalty"/"Poison"/"Energy"/"Experience"/"Charge", or a custom name. Object targets only.
 ---@param kind string
 ---@param amount integer
@@ -714,6 +719,7 @@ function GameOpsTable.Pump(power, toughness, duration) end
 ---@return GameOpsValue
 function GameOpsTable.GainControl(duration) end
 
+--- The controller draws, unless the ability declares a player target word, in which case that player draws.
 ---@param amount integer
 ---@return GameOpsValue
 function GameOpsTable.DrawCards(amount) end

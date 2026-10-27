@@ -18,13 +18,13 @@ use crate::types::effect::{
 };
 use crate::types::ids::{AbilityId, ObjectId, PlayerId, ScriptHandle, SequenceNo, Target};
 use crate::types::player::{DrawLimitModifier, HandRevealModifier, HandSizeModifier, LandPlayModifier};
-use crate::types::target::{TargetFilter, TargetRequirement, TargetSpec};
+use crate::types::target::TargetSpec;
 use crate::types::zone::ZoneKind;
 
 use super::decode::{
     decode_affected_value, decode_condition_value, decode_cost_component_value, decode_effect_filter_table,
     decode_effect_value, decode_filter_table, decode_layer_value, decode_operation_value,
-    decode_target_filter_value, parse_single_color_letter,
+    check_chain_words, decode_target_spec_value, parse_single_color_letter,
 };
 use super::tags::{
     ConsumptionPolicyTag, CostComponent, DrawLimitAffectedTag, DurationTag, EventFilterKind, EventFilterKindTag,
@@ -217,7 +217,7 @@ fn validate_replacement_filter_payload_pairing(
 pub(crate) struct TriggeredAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) condition: Option<ConditionSpec>,
-    pub(crate) target: Option<TargetFilter>,
+    pub(crate) target: Option<TargetSpec>,
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
     /// CR 603.4's intervening-if clause — see `InterveningIfSpec`'s own doc
     /// comment. Set via `:SetInterveningIf(Game.InterveningIf.*)`, orthogonal
@@ -294,7 +294,7 @@ impl UserData for TriggeredAbilityBuilder {
         });
         methods.add_method_mut("SetTarget", |lua, this, value: Value| {
             let mut registry = this.registry.borrow_mut();
-            let decoded = decode_target_filter_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            let decoded = decode_target_spec_value(lua, &mut registry, value).map_err(to_lua_err)?;
             drop(registry);
             this.target = Some(decoded);
             Ok(())
@@ -312,10 +312,8 @@ impl UserData for TriggeredAbilityBuilder {
             // `:SetTarget`; see that builder's own doc comment for why
             // (nothing built yet to consume "up to N" or a multi-word
             // TargetSpec::Multiple from this builder).
-            let target = this
-                .target
-                .clone()
-                .map(|filter| TargetSpec::Primitive(TargetRequirement { filter, count: 1, up_to: false, at_least: false, exclude_source: false }));
+            let target = this.target.clone();
+            check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
@@ -385,7 +383,7 @@ impl UserData for TriggeredAbilityBuilder {
 pub(crate) struct ActivatedAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) cost: CostSpec,
-    pub(crate) target: Option<TargetFilter>,
+    pub(crate) target: Option<TargetSpec>,
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
     pub(crate) function_zone: Option<ZoneKind>,
@@ -423,7 +421,7 @@ impl UserData for ActivatedAbilityBuilder {
         });
         methods.add_method_mut("SetTarget", |lua, this, value: Value| {
             let mut registry = this.registry.borrow_mut();
-            let decoded = decode_target_filter_value(lua, &mut registry, value).map_err(to_lua_err)?;
+            let decoded = decode_target_spec_value(lua, &mut registry, value).map_err(to_lua_err)?;
             drop(registry);
             this.target = Some(decoded);
             Ok(())
@@ -445,10 +443,8 @@ impl UserData for ActivatedAbilityBuilder {
             } else {
                 Some(this.cost.clone())
             };
-            let target = this
-                .target
-                .clone()
-                .map(|filter| TargetSpec::Primitive(TargetRequirement { filter, count: 1, up_to: false, at_least: false, exclude_source: false }));
+            let target = this.target.clone();
+            check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),

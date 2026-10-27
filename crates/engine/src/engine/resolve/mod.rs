@@ -413,8 +413,8 @@ impl Engine {
             }
             // CR 608.2c: `Game.Ops.Chain(...)` - the modal loop with every
             // entry chosen and the ability's one target set shared.
-            Some(AbilityEffect::Chain(entries)) => {
-                self.resolve_chain_effect(top, entries, legal_targets, modal_chunk_legals, events)
+            Some(AbilityEffect::Chain { entries, words }) => {
+                self.resolve_chain_effect(top, entries, words.as_deref(), legal_targets, modal_chunk_legals, events)
             }
             Some(AbilityEffect::GainLife(amount)) => self.resolve_gain_life_effect(top, *amount, events),
             // CR 608.2m/614-616: unlike GainLife above, Damage
@@ -655,7 +655,7 @@ impl Engine {
             // isn't modeled - TODO, same gap draw_step
             // itself already carries).
             Some(AbilityEffect::DrawCards(amount)) => {
-                self.resolve_draw_cards_effect(top, *amount, events)
+                self.resolve_draw_cards_effect(top, legal_targets, *amount, events)
             }
             // CR 701.17a/b: the affected player is the controller when
             // the ability declared no target spec, else the first legal
