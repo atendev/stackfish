@@ -26,11 +26,11 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 045: Measured `stackfish-engine` test build times (7.65s wall / 1m 53s CPU after touching `lib.rs`, 95% spent linking 224 test binaries totaling 16 GiB) and decided to proceed with both halves of 046: consolidating `crates/engine/tests/` into a single test binary (`tests/main.rs` with modules) and renaming `phase5_*` test files by feature.
 - 046: Consolidated 224 engine integration test files into a single binary (`crates/engine/tests/main.rs` with `autotests = false`) and stripped `phase5_` from all 229 Rust test files across `crates/engine/tests/` and `crates/host/tests/`. Incremental test rebuild after touching `crates/engine/src/lib.rs` dropped from 7.65s (1m 53s CPU) to 2.43s (4.64s CPU).
 - 047: Audited `crates/engine/src/` for missing local unit tests. About 200 pure helpers across 35 files lack `#[cfg(test)]` coverage; the densest gaps are in `types/`, `commands/legality.rs`, `commands/combat/*`, `script/decode.rs`, `sba.rs`, `replacement.rs`, and `triggers.rs`. [closed/047-missing-unit-tests-audit.md]
-
 - 048: Added local `#[cfg(test)]` coverage for pure helpers in `color_identity.rs` and `types/{zone,object,player,counter,card,mana,cost}.rs`. [closed/048-add-unit-tests-pure-helpers.md]
 - 049: Added `#[cfg(test)]` coverage for `layers.rs`, `commands/legality.rs` and `commands/combat/predicate.rs` with minimal state fixtures. Open gaps: `FilterSpec::matches`, `ReplacementEffect`, `ContinuousEffect` helpers and `script::decode`. [closed/049-add-unit-tests-stubbed-helpers.md]
 - 050: Audited `crates/engine/src/script/`. Every table decoder ignores unknown keys except `decode_entry_options`; strict validation touches about 12 call sites plus one helper. Operation results and effect shapes each have a tag and a raw-key spelling, three method names take different argument families, and several decoders swallow wrong-typed values. `cards/` is absent from this checkout, so no card script was read. [closed/050-audit-lua-api-surface.md]
 - 051: Audited the 25 active Lua scripts in the sibling `stackfish-db` database. Eleven basic-land scripts repeat the mana-ability builder, target tables repeat too little to hide, and Balance's custom counting is card-specific. [closed/051-audit-card-script-idioms.md]
+- 052: Decided on canonical Lua API forms and strict validation: require `Game.Ops.*` and `Game.Effects.*` constructors (remove raw-key return tables, use `Ops.Chain` for multi-op results, allow string or list in `Effects.AddKeyword`); unify `InterveningIf` into `Game.Conditions` and the 4 `*Affected` tables into `Game.Affected` with explicit `Game.Filter({...})` for filter tables; use flat filter keys in target tables with one shared filter schema; reject unknown keys, wrong-typed values, and unknown counter strings at both load time and game time; remove `Conditions.Always` and `Tokens.ArtifactCreature`, keep `RegisterKeyword`/`RegisterWard` and explicit `ManaAbility.New()`; standardize parameter names (`count`, `amount`, `counter`), casing, `"C"` colorless, and `AddMana`/`AddManaChoice` argument order; migrate both `crates/` inline scripts and the 25 active scripts in `../stackfish-db/stackfish.db`. [closed/052-decide-lua-api-canonical-forms.md]
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
 ## Tracks
@@ -53,7 +53,7 @@ Stop the test binary sprawl, drop the `phase5_` prefix, and fill in missing modu
 
 - 045 Measure test build and decide on consolidating test binaries. Type grilling, HITL. Closed.
 - 046 Consolidate engine test binaries and rename `phase5_*` files by feature. Type task, HITL. Blocked by 044 and 045. Closed.
-- 047 Audit `crates/engine/src/` modules for missing `#[cfg(test)]` unit tests. Type research, AFK. Blocked by 041.
+- 047 Audit `crates/engine/src/` modules for missing `#[cfg(test)]` unit tests. Type research, AFK. Blocked by 041. Closed.
   - List pure helpers and data structures in `crates/engine/src/` that have no local unit tests and are only exercised end-to-end.
 - 048 Add unit tests for pure engine helpers. Type build, HITL. Blocked by 047. Closed. A follow-up, 049, covered helpers that need a small `GameState` or layer stubs. Closed.
 - 060 Decide which repetitive Rust tests become TOML scenarios and whether to rename `phase5_*.toml`. Type grilling, HITL. Blocked by 046.
@@ -68,9 +68,9 @@ Make the Lua surface area small, documented, and strict before scaling up card s
 - 051 Audit `cards/scripts/` for idioms that belong in engine helpers. Type research, AFK. Closed.
   - The complete `cards/scripts/` source is absent from this checkout; the audit used the 25 active scripts in `../stackfish-db/stackfish.db`.
   - Scan existing Lua scripts for multi-line workarounds, repeated filter tables, or boilerplate that a small Lua helper or engine primitive would replace.
-- 052 Decide on Lua API removals, canonical forms, and strict key validation. Type grilling, HITL. Blocked by 050 and 051.
+- 052 Decide on Lua API removals, canonical forms, and strict key validation. Type grilling, HITL. Blocked by 050 and 051. Closed.
   - Pick the single canonical spelling for each concept, decide which aliases to cut, and agree on how unknown table keys fail at load time.
-- 053 Enforce strict table key validation and canonical Lua API in `crates/engine/src/script/` and migrate `cards/scripts/`. Type build, HITL. Blocked by 052.
+- 053 Enforce strict table key validation and canonical Lua API in `crates/engine/src/script/` and migrate inline and active `stackfish-db` card scripts. Type build, HITL. Blocked by 052.
 - 054 Document the canonical Lua API in `docs/LUA_API.md`. Type task, HITL. Blocked by 053.
 
 ### D. Architecture and housekeeping
@@ -88,9 +88,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 052, 055, 056, 060
+- 053, 055, 056, 060
 
-Suggested order. Start with 052. The research tickets 055 and 056 and the grilling 060 can run in parallel.
+Suggested order. Start with 053 (or run research tickets 055 and 056 and grilling 060 in parallel).
 
 ## Not yet specified
 
