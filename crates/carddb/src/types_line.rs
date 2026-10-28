@@ -1,12 +1,6 @@
-//! `cards.type_line` (e.g. `"Legendary Creature — Human Wizard"`, `"Land"`,
-//! `"Artifact Creature — Construct"`) -> `CardTypeSet`/`SupertypeSet`/
-//! `Vec<Subtype>`. Same left-of-dash/right-of-dash split, and the same
-//! recognized-supertype/card-type name vocabulary, `stackfish_scenario`'s
-//! `parse_card_types`/`parse_supertypes` already use for TOML fixtures -
-//! duplicated rather than shared since that crate's parsers panic on an
-//! unrecognized name (fine for hand-authored test fixtures) where this one
-//! must return a real error (a bulk DB import can't panic on the first
-//! casual-format card it hits).
+//! Parses `cards.type_line` (`"Legendary Creature — Human Wizard"`) into supertypes, card
+//! types and subtypes. It duplicates the scenario crate's parsers because those panic on an
+//! unknown name and this one must return an error.
 
 use stackfish_engine::{CardTypeSet, Subtype, SupertypeSet};
 
@@ -25,9 +19,8 @@ pub struct ParsedTypeLine {
     pub subtypes: Vec<Subtype>,
 }
 
-/// Splits on the em dash (`—`, U+2014) Scryfall's `type_line` uses to
-/// separate the supertype/type portion from the subtype portion. A
-/// type_line with no dash (e.g. `"Land"`, `"Instant"`) has no subtypes.
+/// Splits on the em dash (U+2014) between the type portion and the subtypes. A line with
+/// no dash has no subtypes.
 pub fn parse(type_line: &str) -> Result<ParsedTypeLine, TypeLineError> {
     let (left, right) = match type_line.split_once('—') {
         Some((l, r)) => (l, Some(r)),
@@ -80,8 +73,8 @@ fn parse_card_type(word: &str) -> Option<CardTypeSet> {
         "Instant" => CardTypeSet::INSTANT,
         "Land" => CardTypeSet::LAND,
         "Sorcery" => CardTypeSet::SORCERY,
-        // Scryfall prints the pre-2024 name; CardTypeSet uses the current
-        // (2024) rules name (CR 205.3m) - both map to the same bit.
+        // CR 205.3m
+        // Scryfall data can still print the old name.
         "Tribal" | "Kindred" => CardTypeSet::KINDRED,
         "Planeswalker" => CardTypeSet::PLANESWALKER,
         "Battle" => CardTypeSet::BATTLE,

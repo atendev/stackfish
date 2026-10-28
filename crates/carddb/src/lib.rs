@@ -1,18 +1,6 @@
-//! Reads the external card-database SQLite file (schema owned by that
-//! separate project, not this repo — see `DESIGN.md`'s "no card database
-//! tooling" non-goal) and produces real `stackfish_engine::CardDefinition`s
-//! from it. This is the connecting point `DESIGN.md` describes: the engine
-//! consumes `CardDefinition`, it doesn't author one — this crate is what
-//! turns a DB row into one.
-//!
-//! Scope: only the *structural/printed* characteristics a card carries (CR
-//! 613 layer 7's starting values — cost, types, P/T, keywords) come from SQL
-//! columns. Everything behavioral (target requirements, spell effects,
-//! alternative costs, modes) is left at `CardDefinition`'s "unset" default
-//! and is expected to come from the card's own Lua script via the
-//! self-registering `register_abilities(c)` module convention every other
-//! card in this engine already uses (see `docs/lua/card-script-basics.md`) —
-//! this loader never attempts to derive game behavior from oracle text.
+//! Turns rows of the external card SQLite file into `CardDefinition`s. Only printed
+//! characteristics (cost, types, P/T, keywords) come from columns; behavior comes from
+//! the card's Lua script. See `docs/DESIGN.md`.
 
 mod keywords;
 mod script;
@@ -25,23 +13,17 @@ use std::path::Path;
 pub use types_line::TypeLineError;
 
 /// Everything that can go wrong turning a DB row into a `CardDefinition`.
-/// Deliberately a hard error, never a best-effort guess — same "unrecognized
-/// input is a bug to surface, not paper over" posture `ManaCost::parse`
-/// already takes in the engine crate.
+/// Unrecognized input is always an error, never a guess.
 #[derive(Debug)]
 pub enum CardLoadError {
     Sqlite(rusqlite::Error),
-    /// No `cards` row matched the given oracle_id/name.
+    /// No `cards` row matched the key.
     NotFound(String),
-    /// `cards.has_multiple_faces = 1` — DFC/split/flip/adventure cards are
-    /// an explicit `DESIGN.md` non-goal; `card_faces` isn't consumed at all
-    /// by this slice. Revisit if that non-goal is ever lifted.
+    /// `cards.has_multiple_faces = 1`; multi-face cards are a `DESIGN.md` non-goal.
     MultiFace(String),
-    /// `cards.mana_cost` didn't parse via `ManaCost::parse` — a malformed or
-    /// unexpected string in the DB, not something to silently zero out.
+    /// `cards.mana_cost` failed `ManaCost::parse`.
     ManaCost(stackfish_engine::ManaCostParseError),
-    /// `cards.type_line` couldn't be decoded into this engine's
-    /// `CardTypeSet`/`SupertypeSet` — see `TypeLineError`.
+    /// `cards.type_line` held a type this engine does not model.
     TypeLine(TypeLineError),
 }
 
@@ -67,8 +49,7 @@ impl From<rusqlite::Error> for CardLoadError {
     }
 }
 
-/// Read-only handle onto the card database. Cheap to construct; holds one
-/// `rusqlite::Connection`.
+/// Read-only handle onto the card database.
 pub struct CardDb {
     conn: Connection,
 }
@@ -79,37 +60,28 @@ impl CardDb {
         Ok(CardDb { conn })
     }
 
-    /// Scryfall oracle_id (the `cards.oracle_id` primary key) -> a real
-    /// `CardDefinition`.
+    /// Loads the card whose `cards.oracle_id` (the primary key) is `oracle_id`.
     pub fn load_by_oracle_id(&self, oracle_id: &str) -> Result<CardDefinition, CardLoadError> {
         let row = self.fetch_row("oracle_id", oracle_id)?;
         self.build_definition(row)
     }
 
-    /// Card name (`cards.name`) -> a real `CardDefinition`. Scryfall names
-    /// are unique per oracle card in the bulk data this DB is built from, so
-    /// this is unambiguous the same way `load_by_oracle_id` is - not true in
-    /// general for arbitrary SQL data, but true of this specific schema's
-    /// source.
+    /// Loads the card named `cards.name`. Names are unique per oracle card in the source
+    /// data, but the schema does not enforce it.
     pub fn load_by_name(&self, name: &str) -> Result<CardDefinition, CardLoadError> {
         let row = self.fetch_row("name", name)?;
         self.build_definition(row)
     }
 
-    /// `cards.script_id` -> a real `CardDefinition`. The stable, human-typed
-    /// slug tied to a card's script (e.g. `"lightning_bolt"`) - meant as the
-    /// ergonomic lookup key for hand-authored callers (scenario TOML
-    /// fixtures) that want a real card without retyping its full printed
-    /// name or a UUID `oracle_id`.
+    /// Loads the card whose `cards.script_id` slug (e.g. `"lightning_bolt"`) is `script_id`.
+    /// Hand-written scenarios use it to avoid typing a name or UUID.
     pub fn load_by_script_id(&self, script_id: &str) -> Result<CardDefinition, CardLoadError> {
         let row = self.fetch_row("script_id", script_id)?;
         self.build_definition(row)
     }
 
     fn fetch_row(&self, column: &str, key: &str) -> Result<CardRow, CardLoadError> {
-        // `column` is always one of the three hardcoded literals above,
-        // never caller-supplied - safe to interpolate into the query string
-        // (rusqlite doesn't support parameterizing identifiers, only values).
+        // `column` is always a literal from the loaders above, and SQLite cannot bind identifiers.
         let sql = format!(
             "SELECT oracle_id, name, mana_cost, type_line, oracle_text, power, toughness, \
              loyalty, defense, has_multiple_faces \
@@ -169,12 +141,7 @@ impl CardDb {
             defense: parse_pt(row.defense.as_deref()),
             script_ref,
             keywords,
-            // Behavioral fields deliberately left at their "unset" default -
-            // see this module's own doc comment for why. A card's own
-            // script fills these in at runtime (`Engine::
-            // register_script_target_requirement`/`register_script_operation`,
-            // same convention every hand-authored Lua card already uses),
-            // not this loader.
+            // The card's script registers these at runtime.
             target_requirement: None,
             alternative_costs: Vec::new(),
             buyback_cost: None,
@@ -196,13 +163,8 @@ impl CardDb {
         Ok(keywords::parse(&names))
     }
 
-    /// `card_scripts` has no active row for a vanilla card with no ability
-    /// text - returns a minimal valid stub module rather than an empty
-    /// string, so `ScriptRuntime::run_card_script` doesn't hit its
-    /// `LoadError` path for the overwhelming majority of real cards (every
-    /// call site today discards that `Result`, so an empty string would
-    /// silently do the same thing in practice - this is just not relying on
-    /// that).
+    // A card with no active `card_scripts` row gets a stub module, so `run_card_script`
+    // does not fail on an empty string.
     fn load_script_ref(&self, oracle_id: &str) -> Result<ScriptReference, CardLoadError> {
         use rusqlite::OptionalExtension;
         let source: Option<String> = self
@@ -218,11 +180,8 @@ impl CardDb {
         Ok(ScriptReference::Inline(source.unwrap_or_else(script::vanilla_stub)))
     }
 
-    /// Every active `card_tests` row, one per `(oracle_id, test_name)` -
-    /// same "`is_active = 1`, highest `version` wins" convention
-    /// `load_script_ref` already uses for `card_scripts`, just per test name
-    /// instead of a single row per card. Ordered by card name then test name
-    /// so a batch run's output is stable/readable run to run.
+    /// The highest active `version` of each `(oracle_id, test_name)` in `card_tests`,
+    /// ordered by card name then test name so batch output is stable.
     pub fn active_tests(&self) -> Result<Vec<CardTestRow>, CardLoadError> {
         let mut stmt = self.conn.prepare(
             "SELECT ct.oracle_id, c.name, ct.test_name, ct.version, ct.test_source \
@@ -252,10 +211,8 @@ impl CardDb {
     }
 }
 
-/// One active row from `card_tests`, joined with the card's own `name` for
-/// reporting - a hand-authored scenario TOML (see `docs/scenario_format.md`)
-/// stored in the DB and tied to the card it exercises, rather than living as
-/// a file under `tests/scenarios/`.
+/// One active `card_tests` row joined with its card's name. `test_source` is a scenario
+/// TOML (`docs/scenario_format.md`).
 pub struct CardTestRow {
     pub oracle_id: String,
     pub card_name: String,
@@ -277,20 +234,10 @@ struct CardRow {
     has_multiple_faces: bool,
 }
 
-/// `cards.power`/`toughness`/`loyalty`/`defense` -> `PTValue`. A plain
-/// integer (optionally signed, e.g. `-1` for some vehicles' printed values
-/// though not toughness in practice) is `Fixed`; anything else (`"*"`,
-/// `"*+1"`, `"1+*"`, null) is a characteristic-defining value.
+/// An integer is `Fixed`; anything else (`"*"`, `"*+1"`) is characteristic-defining.
 ///
-/// TODO: every `CharacteristicDefining` produced here gets `script: None` -
-/// the DB schema has no column holding the bare `function(source,
-/// controller) -> integer` `ScriptRuntime::invoke_cda` expects, only the
-/// full self-registering module in `card_scripts`. `layers::
-/// effective_characteristics` already treats `script: None` as "skip rather
-/// than guess" (not a panic), so a `*`-power creature loads today with
-/// correct display text but contributes no real layer-7a number until the
-/// DB schema grows a dedicated CDA-function column. Revisit once
-/// `card_scripts` (or a new table) can hand back that shape.
+/// TODO: `CharacteristicDefining` gets `script: None` because the DB has no column for a
+/// bare CDA function, so a `*` creature contributes no layer 7a value. CR 613.4a
 fn parse_pt(raw: Option<&str>) -> Option<PTValue> {
     let raw = raw?;
     if let Ok(n) = raw.parse::<i32>() {
@@ -299,14 +246,8 @@ fn parse_pt(raw: Option<&str>) -> Option<PTValue> {
     Some(PTValue::CharacteristicDefining { display: raw.to_string(), script: None })
 }
 
-/// `CardDefinition.definition_id` is a `u64`, but this DB's stable card
-/// identifier (`cards.oracle_id`) is a UUID string with no numeric id
-/// anywhere in the schema. FNV-1a 64-bit over the UTF-8 bytes gives a
-/// deterministic id that's stable across runs/machines - deliberately not
-/// `std::collections::hash_map::DefaultHasher`, which is explicitly
-/// documented as *not* build-stable (its output can change between Rust
-/// versions/compilations), which would silently break anything persisting
-/// this id across a rebuild.
+// FNV-1a over the oracle_id UUID, because the schema has no numeric id. `DefaultHasher` is
+// not stable across Rust versions, which would break any persisted id.
 fn hash_oracle_id(oracle_id: &str) -> u64 {
     const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
