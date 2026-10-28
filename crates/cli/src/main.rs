@@ -1,16 +1,7 @@
-//! Scenario-file runner. `cargo run -p stackfish-cli -- path/to/scenario.toml`
-//! loads, runs, and prints a pass/fail report for one scenario file — see
-//! `stackfish_scenario` for the scenario format and execution model.
-//!
-//! `cargo run -p stackfish-cli -- db-tests path/to/cards.sqlite` instead runs
-//! every active `card_tests` row straight out of a `stackfish-carddb` SQLite
-//! file — each row's `test_source` is its own scenario TOML, run against the
-//! real card data in that same file. See `stackfish_scenario::run_db_tests`.
-//!
-//! No live/interactive REPL mode yet — file-driven covers both a human
-//! (write/edit a .toml, rerun) and an AI agent (run via shell, read stdout)
-//! without needing real interactivity. Revisit if live typed-command
-//! exploration turns out to be wanted on top of this.
+//! Command-line runner for scenario files and the `card_tests` rows of a card database.
+//! Scenario format and execution live in `stackfish_scenario`; see `docs/DESIGN.md`.
+
+// TODO: interactive REPL mode; runs are file-driven only
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -95,7 +86,6 @@ fn run_db_tests(db_path: &std::path::Path) -> ExitCode {
     }
 }
 
-/// Prints one scenario's step-by-step report and returns its hard-failure count.
 fn print_report(report: &stackfish_scenario::ScenarioReport) -> usize {
     let mut hard_failures = 0;
     for (i, entry) in report.entries.iter().enumerate() {
