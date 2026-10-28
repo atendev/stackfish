@@ -33,6 +33,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 - 015 Build B6 Godot adapter. `crates/godot` has `StackfishSession` over the Session, a main-thread guard in a plain `Core` and a headless Godot smoke test that plays a proof game. gdext's own safeguards refuse a wrong-thread call first, so GDScript gets `null` and not the empty array from 009, unless the check is compiled out. Dropping off the main thread did not crash. [closed/015-godot-adapter.md]
 - 026 Whole-declaration combat predicates. Menace and "attacks each combat if able" are one module, `commands/combat/predicate.rs`, called by `validate_declare_attackers`, `validate_declare_blockers`, `validate_pass_priority` and the two entry builders. Must-attack is the `ATTACKS_EACH_COMBAT` keyword bit, and `AttackerEntry` has `required`. [closed/026-whole-declaration-predicates.md]
 - 036 Mode-combination predicate. `mode_can_join_others` in `commands/legality.rs` is the shared rule for the cast, the modal entries, modal triggers and the opponent's mode choice. `ModeRange` and `ReplyShape::Modes` carry `solo_only`, and the entries refuse a solo-only mode beside another. [closed/036-mode-combination-predicate.md]
+- 048 Add unit tests for pure engine helpers. Added local `#[cfg(test)]` coverage for deterministic helpers in `color_identity.rs` and `types/{zone,object,player,counter,card,mana,cost}.rs`. [closed/048-add-unit-tests-pure-helpers.md]
 
 ## Not yet specified
 
@@ -54,7 +55,7 @@ A `crates/host` Session that talks only in bytes. A full game for any number of 
 
 Open build tickets, unblocked and unclaimed:
 
-- none
+- 049 Add unit tests for engine helpers that need a small GameState or layer stubs. [tickets/049-add-unit-tests-stubbed-helpers.md]
 
 Blocked:
 

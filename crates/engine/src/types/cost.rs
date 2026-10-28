@@ -1094,4 +1094,171 @@ mod tests {
         // Three white has no colorless unit for the {C}.
         assert_eq!(mana_payment_satisfies(&required, spent([3, 0, 0, 0, 0], 0), 0), Some(false));
     }
+
+    #[test]
+    fn filter_spec_matches_combined_conditions() {
+        let p0 = PlayerId(0);
+        let mut forest = creature(p0, CardTypeSet::LAND);
+        forest.definition.supertypes = SupertypeSet::BASIC;
+        forest.definition.subtypes = vec![Subtype("Forest".to_string())];
+
+        let basic_forest_filter = FilterSpec {
+            card_types: Some(CardTypeSet::LAND),
+            supertypes: Some(SupertypeSet::BASIC),
+            subtypes: Some(vec![Subtype("Forest".to_string())]),
+            controller: Some(FilterController::You),
+            random: false,
+            extra: None,
+        };
+        assert!(basic_forest_filter.matches(&forest, p0, p0));
+
+        let nonbasic_forest = {
+            let mut c = creature(p0, CardTypeSet::LAND);
+            c.definition.subtypes = vec![Subtype("Forest".to_string())];
+            c
+        };
+        assert!(!basic_forest_filter.matches(&nonbasic_forest, p0, p0));
+    }
+
+    #[test]
+    fn apply_cost_modifiers_generic_reduction_floors_at_zero() {
+        let base = ManaCost::parse("{2}{R}").unwrap();
+        let red_creature = creature(PlayerId(0), CardTypeSet::CREATURE);
+        let modifier = CostModifier {
+            source: ObjectId(0),
+            controller: PlayerId(0),
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
+            target: CostModifierTarget::Generic,
+            amount: -3,
+        };
+        let adjusted = apply_cost_modifiers(&base, &[modifier], &red_creature);
+        assert_eq!(adjusted.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]);
+    }
+
+    #[test]
+    fn apply_cost_modifiers_colored_reduction_spills_to_generic() {
+        // CR 118.7c: reducing a color beyond the cost's pips zeroes that color and spills to generic.
+        // {W} reduced by 3 on {1}{W}{W} removes both white pips and spills -1 generic, which then
+        // floors the existing {1}, leaving no symbols at all.
+        let base = ManaCost::parse("{1}{W}{W}").unwrap();
+        let white_creature = creature(PlayerId(0), CardTypeSet::CREATURE);
+        let modifier = CostModifier {
+            source: ObjectId(0),
+            controller: PlayerId(0),
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::CREATURE),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
+            target: CostModifierTarget::Colored(Color::White),
+            amount: -3,
+        };
+        let adjusted = apply_cost_modifiers(&base, &[modifier], &white_creature);
+        assert!(adjusted.symbols.is_empty());
+    }
+
+    #[test]
+    fn apply_cost_modifiers_unmatched_filter_is_ignored() {
+        let base = ManaCost::parse("{2}").unwrap();
+        let creature_obj = creature(PlayerId(0), CardTypeSet::CREATURE);
+        let modifier = CostModifier {
+            source: ObjectId(0),
+            controller: PlayerId(0),
+            filter: FilterSpec {
+                card_types: Some(CardTypeSet::LAND),
+                supertypes: None,
+                subtypes: None,
+                controller: None,
+                random: false,
+                extra: None,
+            },
+            target: CostModifierTarget::Generic,
+            amount: -1,
+        };
+        let adjusted = apply_cost_modifiers(&base, &[modifier], &creature_obj);
+        assert_eq!(adjusted.symbols, base.symbols);
+    }
+
+    #[test]
+    fn apply_cost_modifiers_mixed_reductions_sum_before_clamping() {
+        // -2 generic and -1 red on {1}{R}{R} leaves {R}, because colored spillover (-1 red over two pips leaves {0} generic)
+        // and generic -2 zero the {1} generic; the remaining red pip survives.
+        let base = ManaCost::parse("{1}{R}{R}").unwrap();
+        let red_creature = creature(PlayerId(0), CardTypeSet::CREATURE);
+        let modifiers = vec![
+            CostModifier {
+                source: ObjectId(0),
+                controller: PlayerId(0),
+                filter: FilterSpec {
+                    card_types: Some(CardTypeSet::CREATURE),
+                    supertypes: None,
+                    subtypes: None,
+                    controller: None,
+                    random: false,
+                    extra: None,
+                },
+                target: CostModifierTarget::Generic,
+                amount: -2,
+            },
+            CostModifier {
+                source: ObjectId(0),
+                controller: PlayerId(0),
+                filter: FilterSpec {
+                    card_types: Some(CardTypeSet::CREATURE),
+                    supertypes: None,
+                    subtypes: None,
+                    controller: None,
+                    random: false,
+                    extra: None,
+                },
+                target: CostModifierTarget::Colored(Color::Red),
+                amount: -1,
+            },
+        ];
+        let adjusted = apply_cost_modifiers(&base, &modifiers, &red_creature);
+        assert_eq!(adjusted.symbols, vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))]);
+    }
+
+    #[test]
+    fn colors_spent_collects_distinct_colors_from_mana_payments() {
+        let payments = vec![
+            CostPayment::Mana {
+                units: vec![ManaUnit::Colored(Color::White), ManaUnit::Colored(Color::Blue)],
+                phyrexian_life: 0,
+            },
+            CostPayment::Mana {
+                units: vec![ManaUnit::SnowColored(Color::Red), ManaUnit::Colorless],
+                phyrexian_life: 0,
+            },
+        ];
+        assert_eq!(colors_spent(&payments), ColorSet::WHITE | ColorSet::BLUE | ColorSet::RED);
+    }
+
+    #[test]
+    fn colors_spent_ignores_non_mana_payments_and_colorless() {
+        let payments = vec![
+            CostPayment::Mana { units: vec![ManaUnit::Colorless, ManaUnit::SnowColorless], phyrexian_life: 0 },
+            CostPayment::Life(2),
+        ];
+        assert_eq!(colors_spent(&payments), ColorSet::empty());
+    }
+
+    #[test]
+    fn cost_spec_mana_only_builds_expected_shape() {
+        let cost = ManaCost::parse("{1}{G}").unwrap();
+        let spec = CostSpec::mana_only(cost.clone());
+        assert_eq!(spec.mana, Some(cost));
+        assert!(spec.additional.is_empty());
+        assert!(spec.alternative.is_empty());
+    }
 }

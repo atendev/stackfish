@@ -728,4 +728,113 @@ mod tests {
         assert!(ManaCost::parse("{}").is_err(), "empty group");
         assert!(ManaCost::parse("{W/U/B}").is_err(), "3-part group not ending in P");
     }
+
+    #[test]
+    fn color_set_contains_color_for_each_color() {
+        assert!(ColorSet::all().contains_color(Color::White));
+        assert!(ColorSet::all().contains_color(Color::Blue));
+        assert!(ColorSet::all().contains_color(Color::Black));
+        assert!(ColorSet::all().contains_color(Color::Red));
+        assert!(ColorSet::all().contains_color(Color::Green));
+        assert!(!ColorSet::empty().contains_color(Color::Red));
+    }
+
+    #[test]
+    fn atomic_mana_symbol_mana_value() {
+        assert_eq!(AtomicManaSymbol::Generic(5).mana_value(), 5);
+        assert_eq!(AtomicManaSymbol::Colored(Color::White).mana_value(), 1);
+        assert_eq!(AtomicManaSymbol::Colorless.mana_value(), 1);
+        assert_eq!(AtomicManaSymbol::Snow.mana_value(), 1);
+        assert_eq!(AtomicManaSymbol::Phyrexian(Color::Black).mana_value(), 1);
+    }
+
+    #[test]
+    fn atomic_mana_symbol_colors() {
+        assert_eq!(AtomicManaSymbol::Colored(Color::Red).colors(), ColorSet::RED);
+        assert_eq!(AtomicManaSymbol::Phyrexian(Color::White).colors(), ColorSet::WHITE);
+        assert_eq!(AtomicManaSymbol::Generic(2).colors(), ColorSet::empty());
+        assert_eq!(AtomicManaSymbol::Colorless.colors(), ColorSet::empty());
+        assert_eq!(AtomicManaSymbol::Snow.colors(), ColorSet::empty());
+    }
+
+    #[test]
+    fn mana_symbol_colors() {
+        assert_eq!(ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Green)).colors(), ColorSet::GREEN);
+        let hybrid = ManaSymbol::Hybrid(AtomicManaSymbol::Colored(Color::White), AtomicManaSymbol::Colored(Color::Blue));
+        assert_eq!(hybrid.colors(), ColorSet::WHITE | ColorSet::BLUE);
+        assert_eq!(ManaSymbol::X.colors(), ColorSet::empty());
+    }
+
+    #[test]
+    fn mana_cost_colors_union_across_symbols() {
+        let cost = ManaCost::parse("{W}{U}{B}{R}{G}{X}").unwrap();
+        assert_eq!(cost.colors(), ColorSet::all());
+
+        let generic_only = ManaCost::parse("{1}{C}").unwrap();
+        assert_eq!(generic_only.colors(), ColorSet::empty());
+    }
+
+    #[test]
+    fn apply_cost_delta_positive_negative_and_zero() {
+        // CR 118.9: generic reduction floors at {0}; generic increase adds a new symbol.
+        let base = ManaCost::parse("{1}").unwrap();
+        assert!(base.apply_cost_delta(-1).symbols.is_empty());
+        assert!(base.apply_cost_delta(-2).symbols.is_empty()); // floor at {0}
+
+        let colored = ManaCost::parse("{R}").unwrap();
+        let increased = colored.apply_cost_delta(1);
+        assert_eq!(increased.symbols.len(), 2);
+        assert!(increased.symbols.contains(&ManaSymbol::Atom(AtomicManaSymbol::Generic(1))));
+        assert!(increased.symbols.contains(&ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))));
+
+        assert_eq!(base.apply_cost_delta(0).symbols, base.symbols);
+    }
+
+    #[test]
+    fn apply_cost_delta_order_independence_from_sum() {
+        // Base {1} with -2 then +1 would give {1} if applied one by one, but summing first gives {0}.
+        let base = ManaCost::parse("{1}").unwrap();
+        assert!(base.apply_cost_delta(-2 + 1).symbols.is_empty());
+    }
+
+    #[test]
+    fn mana_pool_empty_resets_all_fields() {
+        let mut pool = ManaPool {
+            white: 1, blue: 1, black: 1, red: 1, green: 1, colorless: 1,
+            snow_white: 1, snow_blue: 1, snow_black: 1, snow_red: 1, snow_green: 1, snow_colorless: 1,
+            restricted: vec![ManaUnit::Colored(Color::White)],
+        };
+        pool.empty();
+        assert_eq!(pool, ManaPool::default());
+    }
+
+    #[test]
+    fn mana_pool_add_unit_bumps_each_bucket() {
+        let mut pool = ManaPool::default();
+        pool.add_unit(ManaUnit::Colored(Color::Red));
+        assert_eq!(pool.red, 1);
+
+        pool.add_unit(ManaUnit::SnowColored(Color::Blue));
+        assert_eq!(pool.blue, 1);
+        assert_eq!(pool.snow_blue, 1);
+
+        pool.add_unit(ManaUnit::Colorless);
+        assert_eq!(pool.colorless, 1);
+
+        pool.add_unit(ManaUnit::SnowColorless);
+        assert_eq!(pool.colorless, 2);
+        assert_eq!(pool.snow_colorless, 1);
+
+        pool.add_unit(ManaUnit::RestrictedColored(Color::Black, crate::types::card::CardTypeSet::CREATURE));
+        assert_eq!(pool.restricted.len(), 1);
+    }
+
+    #[test]
+    fn mana_unit_from_snow_source_tags_colored_and_colorless() {
+        assert_eq!(ManaUnit::Colored(Color::White).from_snow_source(), ManaUnit::SnowColored(Color::White));
+        assert_eq!(ManaUnit::Colorless.from_snow_source(), ManaUnit::SnowColorless);
+        // Restricted units stay restricted.
+        let restricted = ManaUnit::RestrictedColored(Color::Red, crate::types::card::CardTypeSet::CREATURE);
+        assert_eq!(restricted.from_snow_source(), restricted);
+    }
 }

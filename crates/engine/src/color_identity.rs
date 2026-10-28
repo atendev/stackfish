@@ -71,3 +71,147 @@ fn mana_symbol_groups(text: &str) -> Vec<ColorSet> {
     }
     groups
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::card::{CardDefinition, ModeChoice, PTValue, ScriptReference, SupertypeSet};
+    use crate::types::mana::ManaCost;
+
+    fn card_named(name: &str) -> CardDefinition {
+        CardDefinition {
+            definition_id: 1,
+            name: name.to_string(),
+            mana_cost: ManaCost { symbols: Vec::new() },
+            color_indicator: None,
+            supertypes: SupertypeSet::empty(),
+            card_types: crate::types::card::CardTypeSet::CREATURE,
+            subtypes: Vec::new(),
+            oracle_text: String::new(),
+            power: Some(PTValue::Fixed(1)),
+            toughness: Some(PTValue::Fixed(1)),
+            loyalty: None,
+            defense: None,
+            script_ref: ScriptReference::ByKey("test".to_string()),
+            keywords: crate::types::card::KeywordSet::empty(),
+            target_requirement: None,
+            alternative_costs: Vec::new(),
+            buyback_cost: None,
+            effect: None,
+            modes: Vec::new(),
+            mode_choice: ModeChoice::Exactly(1),
+        }
+    }
+
+    fn with_mana_cost(mut card: CardDefinition, cost: &str) -> CardDefinition {
+        card.mana_cost = ManaCost::parse(cost).unwrap();
+        card
+    }
+
+    fn with_indicator(mut card: CardDefinition, indicator: ColorSet) -> CardDefinition {
+        card.color_indicator = Some(indicator);
+        card
+    }
+
+    fn with_text(mut card: CardDefinition, text: &str) -> CardDefinition {
+        card.oracle_text = text.to_string();
+        card
+    }
+
+    #[test]
+    fn color_identity_from_mana_cost_alone() {
+        let card = with_mana_cost(card_named("Red Creature"), "{1}{R}");
+        assert_eq!(color_identity(&card), ColorSet::RED);
+    }
+
+    #[test]
+    fn color_identity_uses_color_indicator_when_present() {
+        // CR 105.2a: a color indicator overrides the mana-cost color.
+        let card = with_indicator(with_mana_cost(card_named("Blue-ish"), "{1}{R}"), ColorSet::BLUE);
+        assert_eq!(color_identity(&card), ColorSet::BLUE);
+    }
+
+    #[test]
+    fn color_identity_includes_rules_text_symbols() {
+        // "Flying" carries no mana symbols; "{T}: Add {G}" does.
+        let card = with_text(with_mana_cost(card_named("Birds of Paradise-ish"), "{G}"), "{T}: Add {W}.");
+        assert_eq!(color_identity(&card), ColorSet::GREEN | ColorSet::WHITE);
+    }
+
+    #[test]
+    fn color_identity_skips_reminder_text_before_scanning() {
+        // CR 903.4c: reminder text in parentheses is ignored.
+        let card = with_text(
+            with_mana_cost(card_named("Hybrid Reminder"), "{W/B}"),
+            "(This spell costs {U} more to cast.) {T}: Add {R}.",
+        );
+        // Mana cost gives W|B; rules text gives only {R} after stripping parentheses.
+        assert_eq!(color_identity(&card), ColorSet::WHITE | ColorSet::BLACK | ColorSet::RED);
+    }
+
+    #[test]
+    fn color_identity_unions_multiple_text_symbols() {
+        let card = with_text(
+            with_mana_cost(card_named("Five-Color Text"), "{1}"),
+            "{T}: Add {W}. {T}: Add {U}. {T}: Add {B}. {T}: Add {R}. {T}: Add {G}.",
+        );
+        assert_eq!(color_identity(&card), ColorSet::all());
+    }
+
+    #[test]
+    fn color_identity_ignores_malformed_groups() {
+        let card = with_text(with_mana_cost(card_named("Malformed"), "{1}"), "{T}: Add {Q}.");
+        // {Q} is not a known symbol, so it is skipped.
+        assert_eq!(color_identity(&card), ColorSet::empty());
+    }
+
+    #[test]
+    fn commander_color_identity_unions_commanders() {
+        let red = with_mana_cost(card_named("Red"), "{R}");
+        let blue = with_mana_cost(card_named("Blue"), "{U}");
+        assert_eq!(commander_color_identity(&[red, blue]), ColorSet::RED | ColorSet::BLUE);
+    }
+
+    #[test]
+    fn illegal_cards_for_color_identity_filters_by_subset() {
+        let commander = with_mana_cost(card_named("Commander"), "{R}{G}");
+        let identity = color_identity(&commander);
+
+        let legal = with_mana_cost(card_named("Legal"), "{R}");
+        let legal_hybrid = with_mana_cost(card_named("Legal Hybrid"), "{R/G}");
+        let illegal = with_mana_cost(card_named("Illegal"), "{U}");
+
+        let cards = [legal, legal_hybrid, illegal];
+        let illegal_cards = illegal_cards_for_color_identity(identity, &cards);
+        assert_eq!(illegal_cards.len(), 1);
+        assert_eq!(illegal_cards[0].name, "Illegal");
+    }
+
+    #[test]
+    fn strip_reminder_text_removes_parenthesized_spans() {
+        assert_eq!(strip_reminder_text("(foo) bar"), " bar");
+        assert_eq!(strip_reminder_text("a (b (c)) d"), "a  d");
+    }
+
+    #[test]
+    fn mana_symbol_groups_collects_colors() {
+        // {T} has no color; {G} is green; {W/U} is white/blue.
+        let groups = mana_symbol_groups("{T}: Add {G} or {W/U}.");
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0], ColorSet::GREEN);
+        assert_eq!(groups[1], ColorSet::WHITE | ColorSet::BLUE);
+    }
+
+    #[test]
+    fn mana_symbol_groups_skips_malformed_and_plain_text() {
+        let groups = mana_symbol_groups("{T}: Add {Q} and 1 red mana.");
+        // {T}, {Q} both have no colors.
+        assert!(groups.iter().all(|g| g.is_empty()));
+    }
+
+    #[test]
+    fn mana_symbol_groups_hybrid_color_color_yields_union() {
+        let groups = mana_symbol_groups("{W/B}");
+        assert_eq!(groups, vec![ColorSet::WHITE | ColorSet::BLACK]);
+    }
+}
