@@ -1,8 +1,6 @@
-//! Thin `mlua::UserData` wrapper structs that let a Lua script hold an
-//! opaque Rust enum value (e.g. `Game.Conditions.Enters` is a `ConditionTag`
-//! under the hood) — split out of the original monolithic `script.rs`. See
-//! each tag's own doc comment for what it wraps and which `decode_*`
-//! function (`super::decode`) unwraps it.
+//! `mlua::UserData` wrappers that let a Lua script hold an opaque Rust enum
+//! value (`Game.Conditions.Enters` is a `ConditionTag`). Each tag's doc says
+//! which `decode_*` function in `super::decode` unwraps it.
 
 use mlua::UserData;
 
@@ -14,71 +12,53 @@ use crate::types::mana::ManaCost;
 use crate::types::player::{DrawLimitAffected, HandRevealAffected, HandSizeAffected, HandSizeEffect, LandPlayAffected};
 use crate::types::zone::ZoneKind;
 
-/// Thin `mlua::UserData` wrapper around `ConditionPrimitive` so
-/// `Game.Conditions.Enters`/`Game.Conditions.Always` are real Lua values a
-/// condition script can `return` directly — decoded back out via
-/// `decode_condition_value`. `Clone`-only (not `Copy`) since
-/// `ConditionPrimitive` itself dropped `Copy` (its `DiesMatching`/
-/// `LeavesBattlefieldMatching` variants own a `FilterSpec`).
+/// Wraps `ConditionPrimitive` so `Game.Conditions.Enters` and `Always` are Lua
+/// values a condition script can `return`, decoded by `decode_condition_value`.
+/// `Clone` only, since `ConditionPrimitive` owns a `FilterSpec`.
 #[derive(Clone)]
 pub(crate) struct ConditionTag(pub(crate) ConditionPrimitive);
 impl UserData for ConditionTag {}
 
-/// Thin `mlua::UserData` wrapper around `InterveningIfPrimitive`, same idea
-/// as `ConditionTag` — `Game.InterveningIf.AtOrBelowLife(n)` returns one of
-/// these, consumed directly by `TriggeredAbilityBuilder::SetInterveningIf`
-/// (CR 603.4). No `decode_*` function needed the way `ConditionTag`/
-/// `OperationTag` have one — `SetInterveningIf` is the only place this is
-/// ever consumed, unlike a condition/operation source string which can be
-/// `load_condition`/`load_operation`'d standalone. `Clone`-only (not `Copy`)
-/// since `InterveningIfPrimitive` itself dropped `Copy` (its
-/// `ControllerControlsAtLeast` variant owns a `FilterSpec`).
+/// Wraps `InterveningIfPrimitive` like `ConditionTag`:
+/// `Game.InterveningIf.AtOrBelowLife(n)` returns one, consumed by
+/// `TriggeredAbilityBuilder::SetInterveningIf` (CR 603.4). It has no
+/// `decode_*` function, since that is its only consumer. `Clone` only, since
+/// `InterveningIfPrimitive` owns a `FilterSpec`.
 #[derive(Clone)]
 pub(crate) struct InterveningIfTag(pub(crate) InterveningIfPrimitive);
 impl UserData for InterveningIfTag {}
 
-/// `Game.Conditions.OncePerTurn(tag)`'s return value — wraps whichever
-/// `ConditionPrimitive` `tag` (any other `ConditionTag`) already carries, so
-/// `decode_condition_value` can tell "wrap this one as `ConditionSpec::
-/// PrimitiveOncePerTurn` instead of `Primitive`" apart from a bare
-/// `ConditionTag` at decode time (CR 603.2h). A wrapper struct rather than a
-/// second field on `ConditionTag` itself, so the two Lua-visible shapes
-/// (plain tag vs. once-per-turn-wrapped tag) stay distinguishable by type at
-/// the `AnyUserData::borrow` check in `decode_condition_value`.
+/// `Game.Conditions.OncePerTurn(tag)`'s return value (CR 603.2h), wrapping
+/// another `ConditionTag`'s primitive so `decode_condition_value` can tell it
+/// from a bare tag and build `ConditionSpec::PrimitiveOncePerTurn`. A wrapper
+/// and not a second `ConditionTag` field, so the two Lua shapes differ by type
+/// at the `AnyUserData::borrow` check.
 #[derive(Clone)]
 pub(crate) struct OncePerTurnTag(pub(crate) ConditionPrimitive);
 impl UserData for OncePerTurnTag {}
 
-/// Same idea as `ConditionTag`, for `Game.Ops.*` — e.g. `Game.Ops.GainLife(1)`
-/// is a Lua function that returns one of these, decoded back out via
-/// `decode_operation_value`.
+/// Like `ConditionTag`, for `Game.Ops.*`: `Game.Ops.GainLife(1)` returns one,
+/// decoded by `decode_operation_value`.
 #[derive(Clone)]
 pub(crate) struct OperationTag(pub(crate) AbilityEffect);
 impl UserData for OperationTag {}
 
-/// `Game.Ops.ForEachPlayer(x)`'s return value (`phase5/mass-choice-effects`,
-/// CR 101.4 APNAP) — `x` is either a real per-card Lua function or a bare
-/// `SacrificeRandom`/`DiscardRandom` tag, so this can't be a plain
-/// `OperationTag(AbilityEffect::ForEachPlayer(..))` either way: `OperationTag`'s
-/// decode path always pairs a tag with `ScriptHandle(0)` (see
-/// `decode_operation_value`'s own doc comment), but the function shape needs a
-/// *real* handle and the bare-tag shape needs the wrapped `AbilityEffect`
-/// itself, neither of which fits that placeholder. `Game.Ops.ForEachPlayer`
-/// is instead a `create_function` closure (`globals.rs`) that branches on its
-/// argument's Lua type:
-/// - a function: registers it into the script registry immediately, the same
-///   way a bare `function(...)` passed straight to `:SetOperation` already
-///   does, and returns `Function(handle)`.
-/// - a `Game.Ops.SacrificeRandom`/`DiscardRandom` value (checked there, not
-///   here — a loud load-time error for anything else, same "typos are
-///   load-time errors" stance every other tag decode takes): unwraps the
-///   `OperationTag` and returns `Static(effect)`.
+/// `Game.Ops.ForEachPlayer(x)`'s return value (CR 101.4). `x` is a per-card
+/// Lua function or a bare tag, so this can't be an `OperationTag`, whose
+/// decode pairs a tag with `ScriptHandle(0)` (see `decode_operation_value`).
+/// The function shape needs a real handle and the bare-tag shape needs the
+/// wrapped `AbilityEffect`. `Game.Ops.ForEachPlayer` is a `create_function`
+/// closure in `globals.rs` that branches on its argument's Lua type:
+/// - a function: registered into the script registry at once, as a bare
+///   function passed to `:SetOperation` is, returning `Function(handle)`.
+/// - a bare-tag value, which is checked there and rejected at load time
+///   otherwise: unwraps the `OperationTag` and returns `Static(effect)`.
 ///
 /// `decode_operation_value` recognizes this type ahead of `OperationTag` and
 /// returns `(Some(AbilityEffect::ForEachPlayer(None)), handle)` for
-/// `Function`, or `(Some(AbilityEffect::ForEachPlayer(Some(Box::new(effect)))),
-/// ScriptHandle(0))` for `Static` (unused placeholder handle, same as every
-/// other static tag).
+/// `Function`, or
+/// `(Some(AbilityEffect::ForEachPlayer(Some(Box::new(effect)))), ScriptHandle(0))`
+/// for `Static`.
 #[derive(Clone)]
 pub(crate) enum ForEachPlayerTag {
     Function(ScriptHandle),
@@ -86,176 +66,145 @@ pub(crate) enum ForEachPlayerTag {
 }
 impl UserData for ForEachPlayerTag {}
 
-/// `Game.Tokens.*` return value — wraps a `TokenSpec` so `Game.Ops.CreateToken`
-/// can receive it as a typed argument instead of parsing a string.
+/// `Game.Tokens.*` return value, wrapping a `TokenSpec` so
+/// `Game.Ops.CreateToken` takes a typed argument and not a string.
 #[derive(Clone)]
 pub(crate) struct TokenTag(pub(crate) TokenSpec);
 impl UserData for TokenTag {}
 
-/// One `:AddCost(...)` component — either an `AdditionalCost` (tap/
-/// sacrifice/discard/life, CR 602.5a-ish) or a real mana-cost component
-/// (CR 107.4, from `Game.Costs.Mana("{1}{R}")`/`ManaCost::parse`). A single
-/// enum rather than two separate builder methods so `:AddCost` stays the
-/// one call every cost component goes through — `Game.Costs.Mana(...)` just
-/// slots into the same `Game.Costs.*` vocabulary as `TapSelf`/`Sacrifice`.
+/// One `:AddCost(...)` component, an `AdditionalCost` (tap, sacrifice,
+/// discard, life, CR 602.5a) or a mana cost (CR 107.4, from
+/// `Game.Costs.Mana("{1}{R}")` and `ManaCost::parse`). One enum so every cost
+/// component goes through `:AddCost`.
 #[derive(Clone)]
 pub(crate) enum CostComponent {
     Additional(AdditionalCost),
     Mana(ManaCost),
 }
 
-/// Same idea, for `Game.Costs.*` — e.g. `Game.Costs.TapSelf` is a plain
-/// tagged value, `Game.Costs.Sacrifice({...})`/`Game.Costs.Mana("{1}{R}")`
-/// are Lua functions returning one of these — decoded back out via
-/// `decode_cost_component_value`.
+/// Like `ConditionTag`, for `Game.Costs.*`: `Game.Costs.TapSelf` is a plain
+/// value, and `Sacrifice({...})` and `Mana("{1}{R}")` are functions returning
+/// one. Decoded by `decode_cost_component_value`.
 #[derive(Clone)]
 pub(crate) struct CostTag(pub(crate) CostComponent);
 impl UserData for CostTag {}
 
-/// Same idea, for `Game.Layers.*` — e.g. `Game.Layers.PowerToughnessModifying`
-/// is a plain tagged value, decoded back out via `decode_layer_value`. Only
-/// the 7 layers with a real query path (`layers::effective_characteristics`)
-/// are ever bound onto `Game.Layers` — see `bind_game_globals`.
+/// Like `ConditionTag`, for `Game.Layers.*`, decoded by `decode_layer_value`.
+/// Only the 7 layers with a query path in `layers::effective_characteristics`
+/// are bound (see `bind_game_globals`).
 #[derive(Clone, Copy)]
 pub(crate) struct LayerTag(pub(crate) Layer);
 impl UserData for LayerTag {}
 
-/// Same idea, for `Game.Effects.*` — e.g. `Game.Effects.ModifyPT(1, 1)` is a
-/// Lua function returning one of these, decoded back out via
-/// `decode_effect_value`.
+/// Like `ConditionTag`, for `Game.Effects.*`: `Game.Effects.ModifyPT(1, 1)`
+/// returns one, decoded by `decode_effect_value`.
 #[derive(Clone)]
 pub(crate) struct EffectPrimitiveTag(pub(crate) EffectPrimitive);
 impl UserData for EffectPrimitiveTag {}
 
-/// Same idea, for `Game.Durations.*` — e.g. `Game.Durations.UntilEndOfTurn`
-/// is a plain tagged value, the third argument to `Game.Ops.Pump`. Only the
-/// four durations with a real drain path (`Engine::advance_turn_step`'s
-/// Cleanup/EndOfCombat arms, `phase5/effect-duration-expiration`) are ever
-/// bound here - `WhileSourceOnBattlefield`/`UntilSourceLeaves` would be pure
-/// sugar for `Pump` specifically (the target's own id already stops
-/// resolving the moment it leaves any zone, regardless of `duration` - see
-/// `AbilityEffect::Pump`'s own doc comment), and `WhileConditionHolds`/
-/// `Custom` have no meaning for a one-shot resolution effect with no
-/// `ContinuousEffect.condition` to attach.
+/// Like `ConditionTag`, for `Game.Durations.*`, the third argument to
+/// `Game.Ops.Pump`. Only the four durations with a drain path
+/// (`Engine::advance_turn_step`'s Cleanup and EndOfCombat arms) are bound.
+/// `WhileSourceOnBattlefield` and `UntilSourceLeaves` would be sugar for
+/// `Pump`, since the target's id stops resolving when it leaves any zone (see
+/// `AbilityEffect::Pump`), and `WhileConditionHolds` and `Custom` mean nothing
+/// for a one-shot effect with no `ContinuousEffect.condition`.
 #[derive(Clone)]
 pub(crate) struct DurationTag(pub(crate) EffectDuration);
 impl UserData for DurationTag {}
 
-/// Which `EventFilter` shape a `Game.CreateReplacementEffect` builder should
-/// build, before `:SetAffected` fills in the actual `EffectFilter` — plain
-/// data, not `EventFilter` itself, since `EventFilter`'s real variants all
-/// carry an `affected: EffectFilter` this tag doesn't have yet at
-/// `:SetFilter()` time (see `ReplacementEffectBuilder`'s own doc comment).
-/// `WouldMoveZone`'s `from`/`to` are carried here (unlike `WouldDie`, which
-/// hardcodes Battlefield/Graveyard) since they're chosen at `:SetFilter()`
-/// call time via `Game.EventFilters.WouldMoveZone(fromName, toName)`, a
-/// function rather than a bare tagged value - either argument may be `nil`
-/// for "any zone" (`EventFilter::WouldMoveZone`'s own wildcard meaning).
+/// Which `EventFilter` shape a `Game.CreateReplacementEffect` builder builds,
+/// before `:SetAffected` supplies the `EffectFilter`. Plain data and not
+/// `EventFilter`, whose variants all carry `affected`, which doesn't exist yet
+/// at `:SetFilter()` time (see `ReplacementEffectBuilder`). `WouldMoveZone`'s
+/// `from` and `to` are carried here, unlike `WouldDie`, because
+/// `Game.EventFilters.WouldMoveZone(fromName, toName)` is a function, and
+/// either argument may be `nil` for any zone.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum EventFilterKind {
     DamageDealt,
     WouldDie,
     WouldMoveZone { from: Option<ZoneKind>, to: Option<ZoneKind> },
-    /// CR 702.89a (Umbra armor) — see `EventFilter::WouldDieEnchanted`'s own
-    /// doc comment. Fieldless like `WouldDie`, since `:SetAffected` plays no
-    /// role for this shape at all (the affected object is always the
-    /// registering effect's own `attached_to`, never a `controller`/
-    /// `card_types`/`self_only` filter) — `ReplacementEffectBuilder::
-    /// Register` ignores `this.affected` entirely for this variant.
+    /// CR 702.89a (Umbra armor); see `EventFilter::WouldDieEnchanted`.
+    /// Fieldless like `WouldDie`. `:SetAffected` plays no role, since the
+    /// affected object is always the registering effect's own `attached_to`,
+    /// and `ReplacementEffectBuilder::Register` ignores `this.affected` for
+    /// this variant.
     WouldDieEnchanted,
-    /// CR 303.4m/616 (Wheel of Sun and Moon) — see `EventFilter::
-    /// WouldEnterEnchantedPlayerGraveyard`'s own doc comment. Fieldless like
-    /// `WouldDieEnchanted`, for the same reason: `:SetAffected` plays no role
-    /// here either (the affected side is always the registering effect's own
-    /// `attached_to_player`, never a `controller`/`card_types`/`self_only`
-    /// filter).
+    /// CR 303.4m, 616 (Wheel of Sun and Moon); see
+    /// `EventFilter::WouldEnterEnchantedPlayerGraveyard`. Fieldless like
+    /// `WouldDieEnchanted`, for the same reason: the affected side is the
+    /// registering effect's own `attached_to_player`.
     WouldEnterEnchantedPlayerGraveyard,
 }
 
-/// Same idea, for `Game.EventFilters.*` — e.g. `Game.EventFilters.DamageDealt`
-/// is a plain tagged value, the argument to `ReplacementEffectBuilder::
-/// SetFilter`.
+/// Like `ConditionTag`, for `Game.EventFilters.*`: `Game.EventFilters.DamageDealt`
+/// is the argument to `ReplacementEffectBuilder::SetFilter`.
 #[derive(Clone, Copy)]
 pub(crate) struct EventFilterKindTag(pub(crate) EventFilterKind);
 impl UserData for EventFilterKindTag {}
 
-/// Same idea, for `Game.ReplacementPayloads.*` — e.g.
-/// `Game.ReplacementPayloads.PreventDamage` is a plain tagged value, decoded
-/// back out by `ReplacementEffectBuilder::SetPayload`. Wraps the real
-/// `ReplacementPayload` directly (unlike `EventFilterKindTag` above, a
-/// payload needs no deferred data the way `affected` is for a filter) —
-/// `RedirectDamage(Target)` itself is never wrapped here (see
-/// `RedirectDamageToSourceTag`, its narrow bound sibling, and
-/// `ReplacementEffectBuilder::SetPayload` for why).
+/// Like `ConditionTag`, for `Game.ReplacementPayloads.*`, decoded by
+/// `ReplacementEffectBuilder::SetPayload`. It wraps `ReplacementPayload`
+/// directly, since a payload has no deferred data as `affected` is for a
+/// filter. `RedirectDamage(Target)` is never wrapped; see
+/// `RedirectDamageToSourceTag` and `SetPayload`.
 #[derive(Clone)]
 pub(crate) struct ReplacementPayloadTag(pub(crate) ReplacementPayload);
 impl UserData for ReplacementPayloadTag {}
 
-/// Same idea, for `Game.HandSizeAffected.*` — e.g. `Game.HandSizeAffected.You`/
-/// `.EnchantedPlayer` are plain tagged values, the argument to
-/// `HandSizeModifierBuilder::SetAffected`. `EnchantedPlayer` (CR 303.4m,
-/// `phase5/enchanted-player-hand-size`) is `HandSizeAffected`'s own second
-/// variant, not a `FilterController` — see that enum's own doc comment.
+/// Like `ConditionTag`, for `Game.HandSizeAffected.*`: `You` and
+/// `.EnchantedPlayer` are the argument to `HandSizeModifierBuilder::SetAffected`.
+/// `EnchantedPlayer` (CR 303.4m) is `HandSizeAffected`'s second variant, not a
+/// `FilterController`.
 #[derive(Clone, Copy)]
 pub(crate) struct HandSizeAffectedTag(pub(crate) HandSizeAffected);
 impl UserData for HandSizeAffectedTag {}
 
-/// Same idea, for `Game.HandSizeEffects.*` — e.g. `Game.HandSizeEffects.
-/// NoMaximum`/`.SetTo(n)` are tagged values, the argument to
-/// `HandSizeModifierBuilder::SetEffect`.
+/// Like `ConditionTag`, for `Game.HandSizeEffects.*`: `NoMaximum` and
+/// `.SetTo(n)` are the argument to `HandSizeModifierBuilder::SetEffect`.
 #[derive(Clone, Copy)]
 pub(crate) struct HandSizeEffectTag(pub(crate) HandSizeEffect);
 impl UserData for HandSizeEffectTag {}
 
-/// Same idea, for `Game.HandRevealAffected.*` — e.g. `Game.HandRevealAffected.
-/// You`/`.EnchantedPlayer` are plain tagged values, the argument to
-/// `HandRevealModifierBuilder::SetAffected`. A separate tag from
-/// `HandSizeAffectedTag` despite the identical wrapped shape — see
-/// `HandRevealAffected`'s own doc comment for why it's not shared yet.
+/// Like `ConditionTag`, for `Game.HandRevealAffected.*`, the argument to
+/// `HandRevealModifierBuilder::SetAffected`. Separate from `HandSizeAffectedTag`
+/// despite the same shape; see `HandRevealAffected`.
 #[derive(Clone, Copy)]
 pub(crate) struct HandRevealAffectedTag(pub(crate) HandRevealAffected);
 impl UserData for HandRevealAffectedTag {}
 
-/// Same idea, for `Game.DrawLimitAffected.*` — e.g. `Game.DrawLimitAffected.
-/// You`/`.Opponent`/`.Any` are plain tagged values, the argument to
-/// `DrawLimitModifierBuilder::SetAffected`. No `EnchantedPlayer` variant —
-/// see `DrawLimitAffected`'s own doc comment for why.
+/// Like `ConditionTag`, for `Game.DrawLimitAffected.*` (`You`, `.Opponent`,
+/// `.Any`), the argument to `DrawLimitModifierBuilder::SetAffected`. It has no
+/// `EnchantedPlayer`; see `DrawLimitAffected`.
 #[derive(Clone, Copy)]
 pub(crate) struct DrawLimitAffectedTag(pub(crate) DrawLimitAffected);
 impl UserData for DrawLimitAffectedTag {}
 
-/// Same idea, for `Game.LandPlayAffected.*` — e.g. `Game.LandPlayAffected.
-/// You`/`.Opponent`/`.Any` are plain tagged values, the argument to
-/// `LandPlayModifierBuilder::SetAffected`. No `EnchantedPlayer` variant —
-/// see `LandPlayAffected`'s own doc comment for why.
+/// Like `ConditionTag`, for `Game.LandPlayAffected.*` (`You`, `.Opponent`,
+/// `.Any`), the argument to `LandPlayModifierBuilder::SetAffected`. It has no
+/// `EnchantedPlayer`; see `LandPlayAffected`.
 #[derive(Clone, Copy)]
 pub(crate) struct LandPlayAffectedTag(pub(crate) LandPlayAffected);
 impl UserData for LandPlayAffectedTag {}
 
-/// `Game.ReplacementPayloads.RedirectDamageToSource` — a sentinel, not a
-/// `ReplacementPayloadTag`, because `RedirectDamage(Target)` needs a real
-/// `ObjectId` that doesn't exist yet when `Game.ReplacementPayloads` itself
-/// is built (a plain global table, constructed once at `ScriptRuntime::new`,
-/// long before any card's `Game.CreateReplacementEffect(c)` call). CR 614.9
-/// redirection to an arbitrary chosen target stays unbound — a redirect
-/// target isn't a static Lua literal and live target selection doesn't
-/// obviously compose with a builder that's queued and drained later rather
-/// than resolved synchronously (same gap `ReplacementEffectBuilder`'s own
-/// doc comment already named). This binds exactly one real shape: redirect
-/// to the replacement effect's own source, e.g. "damage that would be dealt
-/// to you is dealt to [this permanent] instead" (Pariah/Pariah's Shield-
-/// style, composes with `phase5/aura-attach`/`phase5/equip-ability`'s
-/// attach machinery once a card wants "enchanted/equipped creature" instead
-/// of literally itself — that's a different, still-unbound target shape).
+/// `Game.ReplacementPayloads.RedirectDamageToSource`, a sentinel and not a
+/// `ReplacementPayloadTag`: `RedirectDamage(Target)` needs a real `ObjectId`,
+/// which doesn't exist when `Game.ReplacementPayloads` is built once at
+/// `ScriptRuntime::new`. It binds one shape, redirect to the replacement
+/// effect's own source ("damage that would be dealt to you is dealt to [this
+/// permanent] instead", Pariah). CR 614.9 redirection to an arbitrary chosen
+/// target, and to "enchanted/equipped creature", stays unbound, since a
+/// redirect target isn't a static Lua literal and live target selection
+/// doesn't compose with a builder that is queued and drained later.
+/// TODO: redirect to a chosen target, and to the enchanted or equipped creature (CR 614.9)
 #[derive(Clone, Copy)]
 pub(crate) struct RedirectDamageToSourceTag;
 impl UserData for RedirectDamageToSourceTag {}
 
-/// Same idea, for `Game.Consumption.*` — e.g. `Game.Consumption.Repeatable`/
-/// `Game.Consumption.LimitedUses(3)` are plain tagged values, decoded back
-/// out by `ReplacementEffectBuilder::SetConsumption`. Wraps the real
-/// `ConsumptionPolicy` directly, same reasoning `ReplacementPayloadTag` above
-/// documents.
+/// Like `ConditionTag`, for `Game.Consumption.*` (`Repeatable`,
+/// `LimitedUses(3)`), decoded by `ReplacementEffectBuilder::SetConsumption`. It
+/// wraps `ConsumptionPolicy` directly, like `ReplacementPayloadTag`.
 #[derive(Clone, Copy)]
 pub(crate) struct ConsumptionPolicyTag(pub(crate) ConsumptionPolicy);
 impl UserData for ConsumptionPolicyTag {}

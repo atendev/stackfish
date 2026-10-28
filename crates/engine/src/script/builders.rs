@@ -1,8 +1,6 @@
-//! The `Game.Create*Ability`/`Game.CreateReplacementEffect`/
-//! `Game.CreateCostModifier` fluent builder `UserData` types, plus the two
-//! layer/effect and event-filter/payload pairing validators their
-//! `:Register()` methods call — split out of the original monolithic
-//! `script.rs`.
+//! The `Game.Create*Ability`, `Game.CreateReplacementEffect` and
+//! `Game.CreateCostModifier` fluent builders, plus the pairing validators
+//! their `:Register()` methods call.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -33,22 +31,16 @@ use super::tags::{
 };
 use super::types::{to_lua_err, ScriptError, ScriptRegistry};
 
-/// CR 613.1's per-layer primitive shape (`Layer`'s own doc comment) — a
-/// static ability's `:SetLayer`/`:SetEffect` pairing must agree, or
-/// `:Register()` would silently build a `ContinuousEffect` that
-/// `layers::effective_characteristics` can never actually apply (it matches
-/// on `(layer, primitive)` shape internally). Checked explicitly here so a
-/// card script gets a real error instead of a silently-inert effect.
+/// CR 613.1: a static ability's `:SetLayer` and `:SetEffect` must agree, or
+/// `:Register()` would build a `ContinuousEffect` that
+/// `layers::effective_characteristics` can never apply, since it matches on
+/// `(layer, primitive)`. Checked here so a card script gets a real error and
+/// not an inert effect.
 ///
-/// Only checked for `EffectPayload::Primitive` — a `Script` payload's real
-/// shape isn't known until `ScriptRuntime::invoke_continuous_effect` actually
-/// calls it (it could return a different table each call), so there's
-/// nothing to validate at `:Register()` time. A mismatch between a `Script`
-/// effect's declared layer and its decoded shape is instead silently skipped
-/// at query time (`layers::resolve_primitive`'s caller) — a real, narrower
-/// safety net than the `Primitive` case gets, flagged in
-/// docs/implementation.md's continuous-effects-script slice notes rather
-/// than silently accepted as equivalent.
+/// Only for `EffectPayload::Primitive`. A `Script` payload's shape isn't known
+/// until `ScriptRuntime::invoke_continuous_effect` calls it, and a mismatch
+/// there is silently skipped at query time (`layers::resolve_primitive`'s
+/// caller), a narrower safety net.
 fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result<(), ScriptError> {
     let EffectPayload::Primitive(effect) = effect else { return Ok(()) };
     let paired = matches!(
@@ -87,13 +79,12 @@ fn validate_layer_effect_pairing(layer: Layer, effect: &EffectPayload) -> Result
     }
 }
 
-/// CR 604.3a's criteria for a characteristic-defining ability, as far as a
-/// `Game.CreateStaticAbility` builder can express them: it defines the object's
-/// own colors or subtypes (power/toughness CDAs live on `CardDefinition`'s
-/// `PTValue::CharacteristicDefining`, not here), affects only itself, and
-/// isn't conditional. Criterion (2)/(4) (printed on the card, not granted by
-/// itself) hold by construction - a script's own `register_abilities` is the
-/// card's printed text.
+/// CR 604.3a: a characteristic-defining ability, as far as a
+/// `Game.CreateStaticAbility` builder can express: it defines the object's own
+/// colors or subtypes (power and toughness CDAs live on `CardDefinition`'s
+/// `PTValue::CharacteristicDefining`), affects only itself, and isn't
+/// conditional. Criteria 2 and 4 (printed on the card, not self-granted) hold
+/// because a script's own `register_abilities` is the card's printed text.
 fn validate_characteristic_defining(
     layer: Layer,
     effect: &EffectPayload,
@@ -127,21 +118,13 @@ fn validate_characteristic_defining(
     Ok(())
 }
 
-/// `EventFilter`'s per-shape payload pairing (`types/effect.rs`'s own
-/// `ReplacementPayload` doc comment) — same "reject a bad pairing at
-/// `:Register()` time" stance `validate_layer_effect_pairing` above already
-/// takes for `StaticAbilityBuilder`. `RedirectDamage` pairs only with
-/// `DamageDealt`, same as `PreventDamage` — CR 614.9 redirection is a
-/// damage-event rewrite, not a zone-change one. `EntersTapped`/
-/// `EntersWithCounters` (CR 603.6d/614.1c) additionally require `to` to
-/// name `Battlefield` specifically (not just any `WouldMoveZone` shape) —
-/// "how a permanent enters" only means something for a move landing on the
-/// battlefield; `replacement::apply_enters_battlefield_modifiers` (the
-/// function that actually reads these two payloads back out) only ever
-/// checks a candidate event shaped exactly that way, so a registered effect
-/// with a different `to` would silently never match anything - rejected
-/// here instead, at `:Register()` time, same "real error over a silently
-/// inert effect" stance every other pairing check in this function takes.
+/// The per-shape `EventFilter` and `ReplacementPayload` pairing, rejected at
+/// `:Register()` as `validate_layer_effect_pairing` does. `RedirectDamage`
+/// pairs only with `DamageDealt`, like `PreventDamage`, since CR 614.9
+/// redirection rewrites damage and not a zone change. `EntersTapped` and
+/// `EntersWithCounters` (CR 603.6d, 614.1c) also need `to` to be `Battlefield`,
+/// because `replacement::apply_enters_battlefield_modifiers` only checks an
+/// event shaped that way, so another `to` would never match.
 fn validate_replacement_filter_payload_pairing(
     kind: EventFilterKind,
     payload: &ReplacementPayload,
@@ -179,49 +162,33 @@ fn validate_replacement_filter_payload_pairing(
     }
 }
 
-/// `Game.CreateTriggeredAbility(c)`'s return value — a builder mirroring
-/// ygopro's `Effect.CreateEffect(c)` / `e1:SetCondition(...)` /
-/// `c:RegisterEffect(e1)` convention (see `docs/ygo_pro_reference.md`).
-/// `:SetCondition`/`:SetOperation` accept either shape `decode_condition_value`/
-/// `decode_operation_value` recognize. Omitting `:SetCondition` before
-/// `:Register()` means unconditional (`condition: None`, same meaning
-/// `RegisteredAbility::condition`'s doc already documents). `:Register()`
-/// queues the finished `RegisteredAbility` onto the shared registry's
-/// `pending_triggered` list rather than touching `GameState` directly.
+/// `Game.CreateTriggeredAbility(c)`'s return value, a builder mirroring
+/// ygo-pro's `Effect.CreateEffect(c)`, `e1:SetCondition(...)` and
+/// `c:RegisterEffect(e1)` (see `docs/ygo_pro_reference.md`). `:SetCondition`
+/// and `:SetOperation` accept either shape `decode_condition_value` and
+/// `decode_operation_value` recognize. Omitting `:SetCondition` means
+/// unconditional (`condition: None`, see `RegisteredAbility::condition`).
+/// `:Register()` queues the `RegisteredAbility` onto the shared registry's
+/// `pending_triggered` and never touches `GameState`.
 ///
-/// `kind` is implied by which constructor built this (`CreateTriggeredAbility`
-/// -> always `AbilityKind::Triggered`) rather than a settable field — this is
-/// what permanently resolves `script_api.rs::register_triggered_ability`'s
-/// old "no `AbilityKind` parameter" gap; `Game.CreateActivatedAbility`/
-/// `Game.CreateStaticAbility` are the natural sibling builders (both built,
-/// see below).
+/// `kind` comes from the constructor (`CreateTriggeredAbility` is always
+/// `AbilityKind::Triggered`), not a settable field. `:SetCost` is not bound,
+/// since triggered abilities have no activation cost.
 ///
-/// `:SetCost` is deliberately not bound — triggered abilities don't have
-/// activation costs (CR 603 has no equivalent to CR 602.2b's cost payment).
-/// `:SetTarget(table | function)` (`phase5/trigger-target-lua-exposure`)
-/// mirrors `ActivatedAbilityBuilder::SetTarget` exactly — same
-/// `decode_target_filter_value` decode, same single-exact-count narrowing
-/// (`count: 1, up_to: false`, no CR 601.2c multi-word form) — making CR
-/// 603.3d's real target-selection pause (`ProcessState`/`StepStatus::
-/// AwaitingTriggerTargets`, `Engine::submit_trigger_targets`, already
-/// engine-complete since `phase5/trigger-target-selection`) reachable from an
-/// actual card script for the first time, not just direct Rust
-/// `RegisteredAbility` construction. Omitting `:SetTarget` means `target:
-/// None`, same "no targets required" meaning `RegisteredAbility::target`'s
-/// own doc already documents. No mode-declaration method exists on this
-/// builder either — CR 603.3c's modal choice is real in the engine
-/// (`phase5/trigger-modal-choice`) but has no Lua vocabulary anywhere yet
-/// (modal *spells* don't either — see `docs/lua/not-available-yet.md`), a
-/// separate, bigger, more novel gap than this slice's narrow `:SetTarget`
-/// mirror.
+/// `:SetTarget(table | function)` mirrors `ActivatedAbilityBuilder::SetTarget`:
+/// the same `decode_target_filter_value` and a single exact count
+/// (`count: 1, up_to: false`, no multi-word form). It makes CR 603.3d's
+/// target-selection pause (`AwaitingTriggerTargets`,
+/// `Engine::submit_trigger_targets`) reachable from a card script. Omitting it
+/// means `target: None`.
+// TODO: a mode-declaration method; CR 603.3c's modal choice works in the engine (`AwaitingTriggerModeChoice`) but has no Lua vocabulary, and modal spells have none either (see `docs/lua/not-available-yet.md`)
 pub(crate) struct TriggeredAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) condition: Option<ConditionSpec>,
     pub(crate) target: Option<TargetSpec>,
     pub(crate) operation: Option<(Option<AbilityEffect>, ScriptHandle)>,
-    /// CR 603.4's intervening-if clause — see `InterveningIfSpec`'s own doc
-    /// comment. Set via `:SetInterveningIf(Game.InterveningIf.*)`, orthogonal
-    /// to `condition` above (the trigger-event check).
+    /// CR 603.4's intervening-if clause (see `InterveningIfSpec`), set through
+    /// `:SetInterveningIf(Game.InterveningIf.*)`, separate from `condition`.
     pub(crate) intervening_if: Option<InterveningIfSpec>,
     /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_method`.
     pub(crate) function_zone: Option<ZoneKind>,
@@ -229,16 +196,14 @@ pub(crate) struct TriggeredAbilityBuilder {
 }
 
 /// `:SetFunctionsFrom("Graveyard")` (CR 113.6): declares the one zone this
-/// ability functions from, instead of the default. Shared by the triggered
-/// and activated builders. An ability declaring a zone is registered only
-/// while its source is in that zone, and is dropped when it leaves.
+/// ability functions from, shared by the triggered and activated builders. An
+/// ability declaring a zone is registered only while its source is there and
+/// is dropped when it leaves.
 fn function_zone_name(name: &str) -> Result<ZoneKind, mlua::Error> {
     let zone = super::decode::parse_zone_kind_name(name).map_err(to_lua_err)?;
     match zone {
         ZoneKind::Hand | ZoneKind::Graveyard | ZoneKind::Exile => Ok(zone),
-        // TODO: Stack/Library/Command-zone abilities. Hand abilities written
-        // before this existed (Cycling) are still also recognized by cost
-        // shape in `commands::activate`.
+        // TODO: Stack, Library and Command-zone abilities. Hand abilities written before this (Cycling) are still also recognized by cost shape in `commands::activate`.
         other => Err(mlua::Error::RuntimeError(format!(
             "SetFunctionsFrom only supports \"Hand\", \"Graveyard\" or \"Exile\" today, got {other:?}"
         ))),
@@ -264,10 +229,7 @@ impl UserData for TriggeredAbilityBuilder {
                     let primitive = ud.borrow::<InterveningIfTag>()?.0.clone();
                     InterveningIfSpec::Primitive(primitive)
                 }
-                // Backlog item 7: a real Lua predicate, invoked via
-                // ScriptRuntime::invoke_intervening_if - same registry-
-                // handle mechanism decode_condition_value's own Function arm
-                // already uses.
+                // A real Lua predicate, invoked through `ScriptRuntime::invoke_intervening_if` and registered as in the `Function` arm of `decode_condition_value`.
                 Value::Function(function) => {
                     let key = lua.create_registry_value(function)?;
                     let mut registry = this.registry.borrow_mut();
@@ -307,20 +269,13 @@ impl UserData for TriggeredAbilityBuilder {
                         .to_string(),
                 )
             })?;
-            // CR 603.3d - same single-exact-count wrapping
-            // `ActivatedAbilityBuilder::Register` already uses for its own
-            // `:SetTarget`; see that builder's own doc comment for why
-            // (nothing built yet to consume "up to N" or a multi-word
-            // TargetSpec::Multiple from this builder).
+            // CR 603.3d: the same single-exact-count wrapping as `ActivatedAbilityBuilder::Register`'s `:SetTarget`; nothing consumes "up to N" or `TargetSpec::Multiple` from this builder.
             let target = this.target.clone();
             check_chain_words(effect.as_ref(), target.as_ref()).map_err(to_lua_err)?;
             let ability = RegisteredAbility {
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
-                // Real id allocated at drain time (run_card_script) - the
-                // builder itself has no &mut GameState to allocate one from
-                // inside a Lua callback, same reason StaticAbilityBuilder's
-                // own timestamp starts as a placeholder too.
+                // The real id is allocated at drain time (`run_card_script`), since the builder has no `&mut GameState`.
                 id: AbilityId(0),
                 source: this.source,
                 kind: AbilityKind::Triggered,
@@ -344,42 +299,26 @@ impl UserData for TriggeredAbilityBuilder {
     }
 }
 
-/// `Game.CreateActivatedAbility(c)`'s return value — mirrors
-/// `TriggeredAbilityBuilder` for CR 602 activated abilities, generalized off
-/// the old single `AbilityCost::Tap` shortcut. `:AddCost` is called once per
-/// cost component (`Game.Costs.TapSelf`, `Sacrifice({...})`, `Discard({...})`,
-/// `TapPermanents({...}, count)`, `Life(n)`, `Mana("{1}{R}")`) — the
-/// `AdditionalCost` shapes accumulate onto `CostSpec.additional`,
-/// `Game.Costs.Mana(...)` sets `CostSpec.mana` (parsed via
-/// `ManaCost::parse` — see that method's own doc comment for the closed
-/// "no Lua-facing mana-cost-string parser exists anywhere yet" gap this
-/// resolves). Not a single `:SetCost`, since a real activation can need more
-/// than one component at once (e.g. `{1}{R}, Sacrifice a creature:`).
-/// `:SetOperation` mirrors `TriggeredAbilityBuilder`'s own setter exactly.
-/// `:Register()` queues the finished `RegisteredAbility` onto the same
-/// shared `pending_triggered` list `TriggeredAbilityBuilder` uses — that
-/// queue drains into `state.abilities` regardless of `AbilityKind` (see
-/// `ScriptRegistry::pending_triggered`'s doc comment), so there's no need
-/// for an `Activated`-only queue.
+/// `Game.CreateActivatedAbility(c)`'s return value (CR 602), mirroring
+/// `TriggeredAbilityBuilder`. `:AddCost` is called once per cost component
+/// (`Game.Costs.TapSelf`, `Sacrifice({...})`, `Discard({...})`,
+/// `TapPermanents({...}, count)`, `Life(n)`, `Mana("{1}{R}")`): `AdditionalCost`
+/// shapes accumulate onto `CostSpec.additional` and `Game.Costs.Mana(...)` sets
+/// `CostSpec.mana`, parsed by `ManaCost::parse`. It isn't a single `:SetCost`,
+/// since an activation can need several components (`{1}{R}, Sacrifice a
+/// creature:`). `:SetOperation` mirrors the triggered builder's. `:Register()`
+/// queues onto the same `pending_triggered`, which drains into `state.abilities`
+/// regardless of `AbilityKind`.
 ///
-/// `kind` is implied the same way `TriggeredAbilityBuilder`'s own doc
-/// comment already explains.
+/// `kind` is implied by the constructor, as for `TriggeredAbilityBuilder`.
 ///
-/// `:SetTarget(table | function)` (table shape added for
-/// `phase5/equip-ability`, CR 702.6a's "target creature you control";
-/// function shape added for `phase5/scripted-target-filter`, CR 601.2c/
-/// 602.2b's scripted legality predicate) goes through
-/// `decode_target_filter_value` — a table decodes the same flat option-bag
-/// `Game.SelectTargets` already uses, e.g. `{type="object",
-/// card_types={"Creature"}, controller="you"}`; a bare function becomes
-/// `TargetFilter::Script`, e.g. `function(object, source, controller,
-/// state) return ... end`. Always a single, exact-count target (`count: 1,
-/// up_to: false`) — no "up to N" or multi-target shape, same narrowing
-/// precedent `Game.SelectTargets`'s own doc comment already set for the
-/// identical reason (nothing built yet to consume more than one).
-/// `CardDefinition.mana_cost` (spells) is untouched by `ManaCost::parse`
-/// existing now — it's still sourced as a structured `ManaCost` from the
-/// external card database, never parsed from a string.
+/// `:SetTarget(table | function)` goes through `decode_target_filter_value`. A
+/// table decodes the flat option-bag `Game.SelectTargets` uses, such as
+/// `{type="object", card_types={"Creature"}, controller="you"}` (Equip,
+/// CR 702.6a). A bare function becomes `TargetFilter::Script`, such as
+/// `function(object, source, controller, state) return ... end` (CR 601.2c,
+/// 602.2b). Always a single exact-count target (`count: 1, up_to: false`),
+/// since nothing consumes more.
 pub(crate) struct ActivatedAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) cost: CostSpec,
@@ -434,10 +373,7 @@ impl UserData for ActivatedAbilityBuilder {
                         .to_string(),
                 )
             })?;
-            // `None` means "no cost at all" - same empty-CostSpec treatment
-            // RegisteredAbility::cost's own doc comment describes; only
-            // meaningfully different from Some(empty) in that ActivateAbility
-            // doesn't have to construct the empty CostSpec itself.
+            // `None` means no cost, treated as an empty `CostSpec` (see `RegisteredAbility::cost`); it spares `ActivateAbility` from building the empty `CostSpec`.
             let cost = if this.cost.additional.is_empty() && this.cost.mana.is_none() {
                 None
             } else {
@@ -448,8 +384,7 @@ impl UserData for ActivatedAbilityBuilder {
             let ability = RegisteredAbility {
                 modes: Vec::new(),
                 mode_choice: ModeChoice::Exactly(1),
-                // Real id allocated at drain time - see the sibling
-                // TriggeredAbilityBuilder::Register's own comment.
+                // The real id is allocated at drain time; see `TriggeredAbilityBuilder::Register`.
                 id: AbilityId(0),
                 source: this.source,
                 kind: AbilityKind::Activated,
@@ -473,38 +408,26 @@ impl UserData for ActivatedAbilityBuilder {
     }
 }
 
-/// `Game.CreateManaAbility(c)`'s return value — CR 605's own dedicated
-/// sibling of `ActivatedAbilityBuilder`, not a mode of it, for two reasons:
+/// `Game.CreateManaAbility(c)`'s return value, CR 605's own sibling of
+/// `ActivatedAbilityBuilder` and not a mode of it, for two reasons:
 ///
-/// 1. **No `:SetTarget` at all** (not "accepted but ignored") — CR 605.1a
-///    says a mana ability never has a target, so the method simply isn't on
-///    this builder's `UserData` impl; there's nothing to silently store and
-///    forget.
-/// 2. **`:SetOperation` only accepts `Game.Ops.AddMana`/`AddManaChoice`** —
-///    checked at `:Register()` time, not just documented convention. Nothing
-///    else (a custom function included) would actually resolve correctly:
-///    `commands.rs`'s `ActivateAbility` handler dispatches purely on the
-///    ability's resolved `effect` shape being `AddMana`/`AddManaChoice`
-///    specifically (that's how it tells a mana ability apart from an
-///    ordinary one at all) — any other operation shape would silently fall
-///    through to the normal stack-using activated-ability path instead,
-///    which is wrong for something registered as a mana ability. Rejecting
-///    it here means that mistake surfaces as a load-time error instead of a
-///    card that quietly behaves like a different kind of ability than its
-///    author intended.
+/// 1. It has no `:SetTarget`, since a mana ability never has a target
+///    (CR 605.1a). The method isn't on the `UserData` impl, so nothing is
+///    stored and ignored.
+/// 2. `:SetOperation` accepts only `Game.Ops.AddMana` and `AddManaChoice`,
+///    checked at `:Register()`. The `ActivateAbility` handler tells a mana
+///    ability apart by its resolved `effect` being `AddMana` or
+///    `AddManaChoice`, so any other operation would fall through to the
+///    stack-using path, which is wrong for a mana ability. Rejecting it makes
+///    that a load-time error.
 ///
-/// `:AddCost` (same decoder `ActivatedAbilityBuilder` uses, so
-/// `Game.Costs.TapSelf`/`Sacrifice`/`Discard`/`TapPermanents`/`Life`/`Mana`
-/// all work here too) is genuinely optional in a way that changes behavior,
-/// not just cost content: omitting it entirely reproduces the original
-/// hardcoded-tap, no-payment-pause shape TOML's `mana_ability` field has
-/// always had (free, immediate — no `Engine::submit_payment` call needed).
-/// Calling `:AddCost` even once (e.g. just `Game.Costs.TapSelf`) opts into a
-/// real payment pause instead, same as any other ability's cost (CR
-/// 118.5a's "even a {0}/free cost needs an explicit acknowledgment" stance,
-/// applied here for the first time to a mana ability) — see
-/// `commands::PaymentResolution::ManaAbility` for how that pause still never
-/// reaches the stack (CR 605.3b) even though it now has a real cost.
+/// `:AddCost` (the same decoder as `ActivatedAbilityBuilder`) changes
+/// behavior when present, not just the cost. Omitting it keeps the free,
+/// immediate, hardcoded-tap shape of TOML's `mana_ability` field, with no
+/// `Engine::submit_payment` call. Calling it even once (such as
+/// `Game.Costs.TapSelf`) opts into a real payment pause, as for any ability
+/// (CR 118.5a). See `commands::PaymentResolution::ManaAbility` for how that
+/// pause still never reaches the stack (CR 605.3b).
 pub(crate) struct ManaAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) cost: CostSpec,
@@ -551,10 +474,7 @@ impl UserData for ManaAbilityBuilder {
                         .to_string(),
                 ));
             }
-            // Same "None means no cost at all" convention
-            // ActivatedAbilityBuilder::Register uses - here it additionally
-            // decides which of the two mana-ability resolution shapes this
-            // becomes (see this struct's own doc comment).
+            // `None` means no cost, as in `ActivatedAbilityBuilder::Register`, and here it also picks which of the two mana-ability resolution shapes this becomes.
             let cost = if this.cost.additional.is_empty() && this.cost.mana.is_none() {
                 None
             } else {
@@ -579,48 +499,39 @@ impl UserData for ManaAbilityBuilder {
     }
 }
 
-/// `Game.CreateStaticAbility(c)`'s return value — mirrors
-/// `TriggeredAbilityBuilder` for CR 604/611 static abilities: `:SetLayer`
-/// accepts a `Game.Layers.*` tag only (no `Script` fallback — a `Layer` has
-/// no such concept, see `decode_layer_value`'s own doc comment). `:SetEffect`/
-/// `:SetAffected` each accept either shape `decode_effect_value`/
-/// `decode_affected_value` recognize — a `Game.Effects.*` tag/plain filter
-/// table (`EffectPayload::Primitive`/`AffectedFilter::Primitive`, zero
-/// further evaluation) or a custom function (`::Script`, invoked later via
-/// `ScriptRuntime::invoke_continuous_effect`/`invoke_continuous_affects` —
-/// see docs/implementation.md's continuous-effects-script slice notes).
-/// `:Register()` validates the layer/effect pairing (`validate_layer_effect_pairing`
-/// — skipped for a `Script` effect, see that function's own doc comment)
-/// and queues the finished `ContinuousEffect` onto the shared registry's
-/// `pending_static` list — `run_card_script` drains it into
-/// `state.continuous_effects`, stamping the real `timestamp` there (the only
-/// place with `&mut GameState` to allocate one).
+/// `Game.CreateStaticAbility(c)`'s return value, mirroring
+/// `TriggeredAbilityBuilder` for CR 604 and 611. `:SetLayer` accepts a
+/// `Game.Layers.*` tag only, with no `Script` fallback (see
+/// `decode_layer_value`). `:SetEffect` and `:SetAffected` accept either shape
+/// `decode_effect_value` and `decode_affected_value` recognize: a
+/// `Game.Effects.*` tag or plain filter table (`Primitive`, no further
+/// evaluation), or a custom function (`Script`, invoked later through
+/// `ScriptRuntime::invoke_continuous_effect` and `invoke_continuous_affects`).
+/// `:Register()` validates the layer and effect pairing
+/// (`validate_layer_effect_pairing`, skipped for a `Script` effect) and queues
+/// the `ContinuousEffect` onto `pending_static`, which `run_card_script` drains
+/// into `state.continuous_effects`, stamping the real `timestamp` there (the
+/// only place with `&mut GameState`).
 ///
-/// `kind` is implied by which constructor built this the same way
-/// `TriggeredAbilityBuilder`'s doc comment already explains for
-/// `AbilityKind` — a `ContinuousEffect` has no `kind` field at all (it's
-/// always CR 613, not a `RegisteredAbility`), so this is more "which queue
-/// does :Register() push onto" than a settable field anywhere.
+/// A `ContinuousEffect` has no `kind` (it is CR 613, not a `RegisteredAbility`),
+/// so the constructor really picks which queue `:Register()` pushes onto.
 pub(crate) struct StaticAbilityBuilder {
     pub(crate) source: ObjectId,
     pub(crate) layer: Option<Layer>,
     pub(crate) effect: Option<EffectPayload>,
     pub(crate) affected: AffectedFilter,
-    /// CR 611.2c's "applies only as long as X is true" — see
-    /// `ContinuousEffect::condition`'s own doc comment. Set via
-    /// `:SetCondition(Game.InterveningIf.*)`, same decode shape
-    /// `TriggeredAbilityBuilder::SetInterveningIf` already uses.
+    /// CR 611.2c: "applies only as long as X is true" (see
+    /// `ContinuousEffect::condition`), set through
+    /// `:SetCondition(Game.InterveningIf.*)`, decoded as
+    /// `TriggeredAbilityBuilder::SetInterveningIf` does.
     pub(crate) condition: Option<InterveningIfSpec>,
-    /// CR 611.2a-style limited-duration static effect (e.g. "artifacts you
-    /// control gain flying until end of turn") — set via
-    /// `:SetDuration(Game.Durations.*)`, same `DurationTag` decode
-    /// `Game.Ops.Pump`'s duration argument already uses. Defaults to
-    /// `Permanent` (this builder's original, only behavior before this
-    /// field existed) when never called.
+    /// CR 611.2a: a limited-duration static effect ("artifacts you control gain
+    /// flying until end of turn"), set through `:SetDuration(Game.Durations.*)`
+    /// with the `DurationTag` decode of `Game.Ops.Pump`. Defaults to
+    /// `Permanent`.
     pub(crate) duration: EffectDuration,
-    /// Set via `:SetFunctionsFrom(zoneName)` - see `function_zone_name`.
-    /// CR 604.3: set via `:SetCharacteristicDefining()`. Validated at
-    /// `:Register()` against CR 604.3a - see `validate_characteristic_defining`.
+    /// CR 604.3: set through `:SetCharacteristicDefining()` and validated at
+    /// `:Register()` against CR 604.3a (see `validate_characteristic_defining`).
     pub(crate) characteristic_defining: bool,
     pub(crate) function_zone: Option<ZoneKind>,
     pub(crate) registry: Rc<RefCell<ScriptRegistry>>,
@@ -650,8 +561,7 @@ impl UserData for StaticAbilityBuilder {
             this.affected = affected;
             Ok(())
         });
-        // CR 611.2c - mirrors TriggeredAbilityBuilder::SetInterveningIf's own
-        // decode logic exactly (same InterveningIfTag/Function shape).
+        // CR 611.2c: decoded as `TriggeredAbilityBuilder::SetInterveningIf` is (the same `InterveningIfTag` and `Function` shapes).
         methods.add_method_mut("SetCondition", |lua, this, value: Value| {
             let spec = match value {
                 Value::UserData(ud) => {
@@ -675,16 +585,12 @@ impl UserData for StaticAbilityBuilder {
             this.condition = Some(spec);
             Ok(())
         });
-        // `Game.Ops.Pump`'s own duration argument decode (script.rs, `Game.Ops`
-        // table setup) - same `AnyUserData`/`DurationTag` shape, exposed here as
-        // a settable method instead of a constructor argument since every other
-        // `StaticAbilityBuilder` field follows the `:SetX` convention.
+        // The decode of `Game.Ops.Pump`'s duration argument (`AnyUserData` and `DurationTag`), as a settable method to match the `:SetX` convention.
         methods.add_method_mut("SetDuration", |_, this, value: mlua::AnyUserData| {
             this.duration = value.borrow::<DurationTag>()?.0.clone();
             Ok(())
         });
-        // CR 604.3: marks this static as a characteristic-defining ability, so
-        // it functions in every zone instead of only the battlefield.
+        // CR 604.3: a characteristic-defining ability functions in every zone, not only the battlefield.
         methods.add_method_mut("SetCharacteristicDefining", |_, this, ()| {
             this.characteristic_defining = true;
             Ok(())
@@ -719,8 +625,7 @@ impl UserData for StaticAbilityBuilder {
                 layer,
                 affected: this.affected.clone(),
                 effect,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value (see this struct's own doc comment).
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 timestamp: SequenceNo(0),
                 duration: this.duration.clone(),
                 condition: this.condition.clone(),
@@ -731,38 +636,27 @@ impl UserData for StaticAbilityBuilder {
     }
 }
 
-/// `Game.CreateReplacementEffect(c)`'s return value (CR 614/615/701.19b) —
-/// the "natural future sibling to `Game.CreateStaticAbility`" `ReplacementSpec`'s
-/// own doc comment named. Deliberately narrower than that sibling: a
-/// `ReplacementEffect` isn't a CR 613 layer effect (it doesn't touch
-/// `layers::effective_characteristics` at all — it rewrites an *event*, a
-/// wholly separate mechanism, `state.replacement_effects`), so there's no
-/// `:SetLayer`/`:SetEffect` pairing to validate; `:SetFilter`/`:SetPayload`
-/// serve the equivalent role, checked by
-/// `validate_replacement_filter_payload_pairing`. `:SetAffected` mirrors
-/// `StaticAbilityBuilder::SetAffected`'s own table shape, but decodes
-/// straight to `EffectFilter` (not `AffectedFilter`) - `EventFilter` has no
-/// `Script`-affected shape yet (see `ReplacementSpec`'s own doc comment), so
-/// a custom-function argument is rejected with a real error rather than
-/// silently discarded.
+/// `Game.CreateReplacementEffect(c)`'s return value (CR 614, 615, 701.19b),
+/// the sibling of `Game.CreateStaticAbility` that `ReplacementSpec` named.
+/// Narrower: a `ReplacementEffect` rewrites an event in
+/// `state.replacement_effects` and isn't a CR 613 layer effect, so there is no
+/// `:SetLayer`/`:SetEffect` pairing. `:SetFilter` and `:SetPayload` play that
+/// role, checked by `validate_replacement_filter_payload_pairing`.
+/// `:SetAffected` takes `StaticAbilityBuilder::SetAffected`'s table shape but
+/// decodes straight to `EffectFilter`, since `EventFilter` has no
+/// `Script`-affected shape (see `ReplacementSpec`), and a custom function is
+/// rejected with an error and not silently dropped.
 ///
-/// Defaults (`WouldDie`/`Regenerate`/`Repeatable`) when `:SetFilter`/
-/// `:SetPayload`/`:SetConsumption` are never called reproduce this builder's
-/// exact original CR 701.19b-only behavior - same backward-compatible-
-/// default convention `StaticAbilityBuilder::SetDuration` already
-/// established, so `phase5_static_regeneration.rs`'s existing tests (which
-/// only ever call `:SetAffected` before `:Register()`) keep working
-/// unmodified.
+/// Never calling `:SetFilter`, `:SetPayload` or `:SetConsumption` gives the
+/// defaults `WouldDie`, `Regenerate` and `Repeatable`, the original CR 701.19b
+/// behavior, as `StaticAbilityBuilder::SetDuration` defaults.
 ///
 /// `ReplacementPayload::RedirectDamage(Target)` is bound narrowly:
-/// `Game.ReplacementPayloads.RedirectDamageToSource` (CR 614.9, "redirect to
-/// this effect's own source") is a real, real-card-shaped case (Pariah/
-/// Pariah's Shield: "damage that would be dealt to you is dealt to
-/// [this permanent] instead"). Redirecting to an arbitrary *chosen* target
-/// stays unbound — that would need live target selection
-/// (`Game.SelectTargets`), which doesn't obviously compose with a builder
-/// that's queued and drained later rather than resolved synchronously. See
-/// `RedirectDamageToSourceTag`'s own doc comment.
+/// `Game.ReplacementPayloads.RedirectDamageToSource` (CR 614.9, Pariah:
+/// "damage that would be dealt to you is dealt to [this permanent] instead").
+/// A chosen target stays unbound, since live target selection
+/// (`Game.SelectTargets`) doesn't compose with a queued, later-drained
+/// builder. See `RedirectDamageToSourceTag`.
 pub(crate) struct ReplacementEffectBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: EffectFilter,
@@ -784,17 +678,12 @@ impl UserData for ReplacementEffectBuilder {
             this.affected = decode_effect_filter_table(&table).map_err(to_lua_err)?;
             Ok(())
         });
-        // `Game.EventFilters.*` - which EventFilter shape this effect
-        // watches. See EventFilterKindTag's own doc comment for why this
-        // isn't the real EventFilter yet (affected is still separate).
+        // `Game.EventFilters.*`: which `EventFilter` shape this effect watches. It isn't the real `EventFilter` yet because `affected` is separate; see `EventFilterKindTag`.
         methods.add_method_mut("SetFilter", |_, this, value: mlua::AnyUserData| {
             this.event_kind = value.borrow::<EventFilterKindTag>()?.0;
             Ok(())
         });
-        // `Game.ReplacementPayloads.*` - what this effect rewrites the
-        // matched event into. `RedirectDamageToSourceTag` is handled here
-        // rather than at decode time - it needs `this.source`, only known
-        // once the builder already exists (see that tag's own doc comment).
+        // `Game.ReplacementPayloads.*`: what the matched event is rewritten into. `RedirectDamageToSourceTag` is handled here and not at decode time, because it needs `this.source`.
         methods.add_method_mut("SetPayload", |_, this, value: mlua::AnyUserData| {
             if value.is::<RedirectDamageToSourceTag>() {
                 this.payload = ReplacementPayload::RedirectDamage(Target::Object(this.source));
@@ -830,31 +719,25 @@ impl UserData for ReplacementEffectBuilder {
     }
 }
 
-/// `Game.CreateCostModifier(c)`'s return value (CR 601.2f) — mirrors
-/// `StaticAbilityBuilder`/`ReplacementEffectBuilder` for a spell cost
-/// modifier. `:SetFilter(table)` reuses `decode_filter_table` verbatim — the
-/// same flat option-bag (`controller`/`card_types`/`supertypes`/`subtypes`/
-/// `random`) `Game.Costs.Sacrifice`/`Discard`/`TapPermanents` already decode
-/// through, no new filter-table shape to learn. `:SetAmount(n)` sets the flat
-/// delta (negative reduces, positive increases — see `CostModifier::amount`'s
-/// own doc comment) against the generic component by default; `:SetAmount(n,
-/// color)` (CR 118.7b/c/d, `phase5/cost-modifier-colored-pip`) targets a
-/// specific colored pip instead — `color` is a letter string (`"W"`/`"U"`/
-/// `"B"`/`"R"`/`"G"`) or `"C"` for the colorless component, reusing
-/// `parse_single_color_letter` (a `Color`-returning sibling of
-/// `parse_color_letter`, which returns a `ColorSet` instead - not reusable
-/// here since `CostModifierTarget::Colored` needs exactly one `Color`, not a
-/// set).
+/// `Game.CreateCostModifier(c)`'s return value (CR 601.2f), mirroring
+/// `StaticAbilityBuilder` and `ReplacementEffectBuilder` for a spell cost
+/// modifier. `:SetFilter(table)` reuses `decode_filter_table`, the flat
+/// option-bag (`controller`, `card_types`, `supertypes`, `subtypes`, `random`)
+/// that `Game.Costs.Sacrifice`, `Discard` and `TapPermanents` decode.
+/// `:SetAmount(n)` sets the signed delta (see `CostModifier::amount`) against
+/// the generic component, and `:SetAmount(n, color)` (CR 118.7b-d) targets a
+/// colored pip, with `color` a letter (`"W"`, `"U"`, `"B"`, `"R"`, `"G"`) or
+/// `"C"` for colorless, through `parse_single_color_letter` (a
+/// `Color`-returning sibling of `parse_color_letter`, which returns a
+/// `ColorSet`).
 ///
-/// `:Register()` queues onto the shared registry's `pending_cost_modifiers`
-/// list with a placeholder `controller` (`PlayerId(0)`) — `run_card_script`'s
-/// drain step resolves the real value (this effect's source's own live
-/// controller, CR 601.2f's "you"/"opponent" perspective the modifier's own
-/// `filter` is relative to) once it does, since it has the `&mut GameState`
-/// the builder itself never gets inside a Lua callback. Same "placeholder
-/// now, patch at drain" pattern `StaticAbilityBuilder`'s `timestamp` and
-/// `TriggeredAbilityBuilder`'s `AbilityId` already use, just for a different
-/// field kind.
+/// `:Register()` queues onto `pending_cost_modifiers` with a placeholder
+/// `controller` (`PlayerId(0)`). `run_card_script`'s drain step resolves it to
+/// the source's live controller, the "you" and "opponent" perspective of the
+/// modifier's `filter` (CR 601.2f), because it has the `&mut GameState` a Lua
+/// callback never gets. This is the same placeholder-then-patch pattern as
+/// `StaticAbilityBuilder`'s `timestamp` and `TriggeredAbilityBuilder`'s
+/// `AbilityId`.
 pub(crate) struct CostModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) filter: Option<FilterSpec>,
@@ -899,8 +782,7 @@ impl UserData for CostModifierBuilder {
             })?;
             this.registry.borrow_mut().pending_cost_modifiers.push((CostModifier {
                 source: this.source,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value (see this struct's own doc comment).
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 controller: PlayerId(0),
                 filter,
                 target: this.target,
@@ -911,16 +793,12 @@ impl UserData for CostModifierBuilder {
     }
 }
 
-/// `Game.CreateHandSizeModifier(c)`'s return value (CR 402.2) — mirrors
-/// `CostModifierBuilder` exactly, same queue-and-drain shape, same
-/// placeholder-`controller`-patched-at-drain-time convention. The only real
-/// difference is `:SetAffected` takes a `Game.HandSizeAffected.*` tagged
-/// value instead of a filter table — `HandSizeAffected` is a small closed
-/// enum (`Filter(FilterController)`/`EnchantedPlayer`, CR 303.4m,
-/// `phase5/enchanted-player-hand-size`), not an open filter shape with
-/// combinable keys the way `EffectFilter`/`FilterSpec` are, so a tagged
-/// value (same idea `EventFilterKindTag`/`ReplacementPayloadTag` already
-/// use) fits better than a table decoder.
+/// `Game.CreateHandSizeModifier(c)`'s return value (CR 402.2), mirroring
+/// `CostModifierBuilder`'s queue-and-drain shape and its placeholder
+/// `controller`. `:SetAffected` takes a `Game.HandSizeAffected.*` tagged value
+/// and not a filter table, because `HandSizeAffected` is a small closed enum
+/// (`Filter(FilterController)`, `EnchantedPlayer` for CR 303.4m) and not an
+/// open filter with combinable keys.
 pub(crate) struct HandSizeModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<crate::types::player::HandSizeAffected>,
@@ -960,13 +838,11 @@ impl UserData for HandSizeModifierBuilder {
             })?;
             this.registry.borrow_mut().pending_hand_size_modifiers.push((HandSizeModifier {
                 source: this.source,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value (see this struct's own doc comment).
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 controller: PlayerId(0),
                 affected,
                 effect,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value, same reason StaticAbilityBuilder's own timestamp is.
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 timestamp: SequenceNo(0),
             }, this.function_zone));
             Ok(())
@@ -974,12 +850,10 @@ impl UserData for HandSizeModifierBuilder {
     }
 }
 
-/// `Game.CreateHandRevealModifier(c)`'s return value (CR 701.20a/303.4m) —
-/// mirrors `HandSizeModifierBuilder` exactly, minus `:SetEffect` (`Game.
-/// HandRevealModifier` has no `effect` field to set - see that struct's own
-/// doc comment for why). `phase5/hand-reveal-modifier`: a mechanism-only
-/// slice - no real enforcement consumer exists yet for what this builder
-/// registers (see `HandRevealModifier`'s own doc comment).
+/// `Game.CreateHandRevealModifier(c)`'s return value (CR 701.20a, 303.4m),
+/// mirroring `HandSizeModifierBuilder` minus `:SetEffect`, since
+/// `HandRevealModifier` has no `effect` field. A mechanism only, with no
+/// enforcement consumer yet; see `HandRevealModifier`.
 pub(crate) struct HandRevealModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<crate::types::player::HandRevealAffected>,
@@ -1008,12 +882,10 @@ impl UserData for HandRevealModifierBuilder {
             })?;
             this.registry.borrow_mut().pending_hand_reveal_modifiers.push((HandRevealModifier {
                 source: this.source,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value (see this struct's own doc comment).
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 controller: PlayerId(0),
                 affected,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value, same reason StaticAbilityBuilder's own timestamp is.
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 timestamp: SequenceNo(0),
             }, this.function_zone));
             Ok(())
@@ -1021,13 +893,10 @@ impl UserData for HandRevealModifierBuilder {
     }
 }
 
-/// `Game.CreateDrawLimitModifier(c)`'s return value (CR 121.2b) — mirrors
-/// `HandSizeModifierBuilder`'s exact shape (`:SetAffected` + a magnitude
-/// setter, `:Register()`), same queue-and-drain, placeholder-`controller`/
-/// `timestamp`-patched-at-drain-time convention. `:SetLimit` is this
-/// builder's `HandSizeEffect`-equivalent magnitude - a plain `u32` rather
-/// than a tagged value, since `DrawLimitModifier::limit` has no polarity to
-/// distinguish (unlike `HandSizeEffect::NoMaximum`/`SetTo(n)`).
+/// `Game.CreateDrawLimitModifier(c)`'s return value (CR 121.2b), mirroring
+/// `HandSizeModifierBuilder` (`:SetAffected`, a magnitude setter and
+/// `:Register()`) with the same placeholders. `:SetLimit` is a plain `u32`,
+/// since `DrawLimitModifier::limit` has no polarity as `HandSizeEffect` does.
 pub(crate) struct DrawLimitModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<crate::types::player::DrawLimitAffected>,
@@ -1067,13 +936,11 @@ impl UserData for DrawLimitModifierBuilder {
             })?;
             this.registry.borrow_mut().pending_draw_limit_modifiers.push((DrawLimitModifier {
                 source: this.source,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value (see this struct's own doc comment).
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 controller: PlayerId(0),
                 affected,
                 limit,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value, same reason StaticAbilityBuilder's own timestamp is.
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 timestamp: SequenceNo(0),
             }, this.function_zone));
             Ok(())
@@ -1081,12 +948,11 @@ impl UserData for DrawLimitModifierBuilder {
     }
 }
 
-/// `Game.CreateLandPlayModifier(c)`'s return value (CR 305.2) — mirrors
-/// `DrawLimitModifierBuilder`'s shape (`:SetAffected` + a magnitude setter,
-/// `:Register()`), same queue-and-drain, placeholder-`controller` convention.
-/// `:SetAdditional` is this builder's `:SetLimit`-equivalent magnitude. No
-/// `timestamp` placeholder to patch at drain time - see `LandPlayModifier`'s
-/// own doc comment for why this mechanism has none.
+/// `Game.CreateLandPlayModifier(c)`'s return value (CR 305.2), mirroring
+/// `DrawLimitModifierBuilder` (`:SetAffected`, a magnitude setter and
+/// `:Register()`) with a placeholder `controller`. `:SetAdditional` is the
+/// magnitude setter. It has no `timestamp` placeholder, since
+/// `LandPlayModifier` has none.
 pub(crate) struct LandPlayModifierBuilder {
     pub(crate) source: ObjectId,
     pub(crate) affected: Option<crate::types::player::LandPlayAffected>,
@@ -1126,8 +992,7 @@ impl UserData for LandPlayModifierBuilder {
             })?;
             this.registry.borrow_mut().pending_land_play_modifiers.push((LandPlayModifier {
                 source: this.source,
-                // Placeholder - run_card_script's drain step stamps the real
-                // value (see this struct's own doc comment).
+                // Placeholder, stamped by `run_card_script`'s drain step.
                 controller: PlayerId(0),
                 affected,
                 additional,
