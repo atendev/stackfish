@@ -1,19 +1,12 @@
-//! End-to-end tests against an in-memory SQLite DB built from (a subset of)
-//! the real schema - only the tables this loader actually reads
-//! (`cards`/`keywords`/`card_keywords`/`card_scripts`), enough to exercise
-//! every branch `CardDb::build_definition` takes without needing a real
-//! bulk-data file on disk.
+//! End-to-end tests against a fixture SQLite DB holding only the tables the loader reads.
 
 use rusqlite::Connection;
 use stackfish_carddb::CardDb;
 use stackfish_engine::{CardTypeSet, KeywordSet, PTValue, ScriptReference, Subtype, SupertypeSet};
 use std::path::PathBuf;
 
-/// `CardDb::open` only takes a file path (no "wrap an existing Connection"
-/// constructor - that's a real DB file's job, not a test seam) - so the
-/// fixture is written to a real temp file rather than kept in memory. Each
-/// test gets its own file (name includes the process id and an atomic
-/// counter) so parallel test runs never collide on the same path.
+// `CardDb::open` takes a path, so the fixture is a temp file. The process id and a counter
+// keep parallel tests off each other's file.
 fn fixture_db_path() -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -94,8 +87,7 @@ fn loads_vanilla_creature_by_name() {
     assert_eq!(def.subtypes, vec![Subtype("Bear".to_string())]);
     assert!(matches!(def.power, Some(PTValue::Fixed(2))));
     assert!(matches!(def.toughness, Some(PTValue::Fixed(2))));
-    // No active card_scripts row - falls back to the vanilla stub, not an
-    // empty string.
+    // No active script row, so the loader supplies the stub.
     match def.script_ref {
         ScriptReference::Inline(src) => assert!(src.contains("register_abilities")),
         ScriptReference::ByKey(_) => panic!("expected Inline"),
@@ -110,8 +102,7 @@ fn loads_scripted_card_with_keywords_by_oracle_id() {
     let def = db.load_by_oracle_id("bolt-1").unwrap();
     assert_eq!(def.name, "Lightning Bolt");
     assert_eq!(def.card_types, CardTypeSet::INSTANT);
-    // "Cumulative upkeep" isn't in KeywordSet - silently dropped, only
-    // Flying's bit survives.
+    // "Cumulative upkeep" is not in KeywordSet, so only Flying survives.
     assert_eq!(def.keywords, KeywordSet::FLYING);
     match def.script_ref {
         ScriptReference::Inline(src) => assert!(src.contains("register_abilities")),
@@ -159,9 +150,8 @@ fn not_found_is_a_typed_error() {
 
 #[test]
 fn cda_power_and_toughness_have_no_script_yet() {
-    // Documents the known gap this slice's own doc comment (parse_pt in
-    // lib.rs) flags: the DB has no column holding a bare CDA function, so
-    // CharacteristicDefining values always resolve with script: None.
+    // CR 613.4a
+    // The DB has no CDA function column, so `script` is always None.
     let db = open_fixture();
     let def = db.load_by_oracle_id("tarmogoyf-1").unwrap();
     match def.power {
@@ -175,7 +165,7 @@ fn cda_power_and_toughness_have_no_script_yet() {
         Some(PTValue::CharacteristicDefining { display, .. }) => assert_eq!(display, "1+*"),
         other => panic!("expected CharacteristicDefining, got {other:?}"),
     }
-    // No loyalty column supplied for this fixture row - NULL, not "*".
+    // The fixture row has a NULL loyalty, which must not read as "*".
     assert!(def.loyalty.is_none());
     assert_eq!(def.supertypes, SupertypeSet::empty());
 }

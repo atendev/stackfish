@@ -1,7 +1,5 @@
-//! Phase 5 vertical slice: the bot pays hybrid, Phyrexian, `{C}`, `{S}` and
-//! `{X}` costs in whole games over the byte interface. The deck is vanilla
-//! creatures with those costs and lands that produce what they need, so the
-//! test needs no card database and no card scripts beyond the lands.
+//! The bot pays hybrid, Phyrexian, `{C}`, `{S}` and `{X}` costs in whole games over bytes.
+//! The deck is vanilla creatures and lands, so it needs no card database.
 
 use std::collections::BTreeSet;
 
@@ -51,7 +49,6 @@ return s
     }
 }
 
-/// The nine creatures, by name and cost, and the number of copies of each.
 const CREATURES: [(&str, &str, u32); 9] = [
     ("Hybrid Bear", "{1}{R/G}", 3),
     ("Twofold Goblin", "{2/R}{2/G}", 3),

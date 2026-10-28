@@ -1,5 +1,4 @@
-//! Phase 5 vertical slice: per-Seat visibility. Every test talks to the Session
-//! in bytes only. Seats 0 and 1 are the players, Seat 2 is a spectator and
+//! Per-Seat visibility over bytes. Seats 0 and 1 are players, Seat 2 is a spectator and
 //! Seat 3 is an omniscient spectator.
 
 use std::collections::HashSet;
@@ -18,7 +17,7 @@ fn cards() -> FixtureCardSource {
     FixtureCardSource::new().with("bear", card(1, "Bear", CardTypeSet::CREATURE)).with("land", card(2, "Land", CardTypeSet::LAND))
 }
 
-/// Alternating cards, so any seven-card hand holds both kinds.
+// Alternating cards, so any seven-card hand holds both kinds.
 fn deck() -> Value {
     let entries: Vec<Value> = (0..12)
         .flat_map(|_| [json!({ "card": "bear", "count": 1 }), json!({ "card": "land", "count": 1 })])
@@ -59,7 +58,6 @@ fn create(setup: Value) -> Session {
     session
 }
 
-/// Everything each Seat has received so far, in order.
 struct Table {
     session: Session,
     seen: [Vec<Value>; 4],
@@ -70,8 +68,6 @@ impl Table {
         Table { session: create(setup), seen: Default::default() }
     }
 
-    /// Collects what every Seat has not received yet and returns the open
-    /// Decision as the omniscient Seat sees it.
     fn sync(&mut self) -> Value {
         let mut decision = Value::Null;
         for seat in 0..4u32 {
@@ -97,7 +93,6 @@ impl Table {
             json!({ "v": 1, "kind": "answer", "seat": seat, "body": { "decision": decision["id"], "reply": reply } }),
         );
         assert!(body(&response).get("error").is_none(), "{response}");
-        // The answering Seat's events arrive in its own response.
         let seat = seat.as_u64().unwrap() as usize;
         self.seen[seat].extend(body(&response)["events"].as_array().unwrap().clone());
         self.sync()
@@ -107,7 +102,6 @@ impl Table {
         self.answer(decision, json!({ "kind": "action", "action": { "kind": "pass_priority" } }))
     }
 
-    /// Answers the Decision with the first entry of `kind`, or passes.
     fn play(&mut self, decision: &Value, kind: &str) -> Value {
         let entry = decision["entries"].as_array().unwrap().iter().find(|e| e["kind"] == kind).cloned();
         match (kind, entry) {
@@ -122,8 +116,6 @@ impl Table {
         }
     }
 
-    /// Plays the game forward with a simple bot: each player plays a land,
-    /// then casts a creature, then passes. Stops after `answers` answers.
     fn bot(&mut self, mut decision: Value, answers: usize) {
         for _ in 0..answers {
             decision = match decision["shape"].as_str() {
@@ -151,7 +143,6 @@ impl Table {
         &self.seen[seat as usize]
     }
 
-    /// Moves of cards into or out of a hand or library, as `seat` received them.
     fn hidden_moves(&self, seat: u32) -> Vec<&Value> {
         self.events(seat)
             .iter()
@@ -161,7 +152,7 @@ impl Table {
     }
 }
 
-/// Every id a Seat's events carry. The ledger's own numbers are not object ids.
+// The ledger's own numbers are not object ids.
 fn ids_in(events: &[Value]) -> HashSet<String> {
     fn walk(value: &Value, key: &str, found: &mut HashSet<String>) {
         const NOT_IDS: [&str; 6] = ["event_id", "sequence_no", "caused_by_command", "parent_event", "original_event", "value"];
@@ -218,7 +209,6 @@ fn a_draw_shows_the_opponent_a_move_with_no_ids_and_no_identity() {
 fn a_cast_shows_the_opponent_the_new_id_and_the_identity_but_not_the_hand_id() {
     let mut table = Table::new(setup(quick()));
     let mut decision = table.advance();
-    // Get to a main phase with the first player holding priority.
     while !decision["entries"].as_array().is_some_and(|e| e.iter().any(|e| e["kind"] == "cast")) {
         decision = table.pass(&decision);
         assert!(!decision.is_null(), "the game ended before a cast was possible");
@@ -260,7 +250,7 @@ fn no_seat_ever_receives_a_hidden_id() {
     let mut library = HashSet::new();
     let mut hands = [HashSet::new(), HashSet::new()];
     for event in table.events(OMNISCIENT).iter().filter(|e| e["kind"] == "zone_change") {
-        // `previous` is the id in the zone the card left and `object` the id in the zone it entered.
+        // `previous` is the id in the zone left and `object` the id in the zone entered.
         for (id_field, zone_field) in [("previous", "from"), ("object", "to")] {
             let Some(id) = event.get(id_field).and_then(Value::as_str) else { continue };
             if event[zone_field] == "library" {
@@ -371,7 +361,6 @@ fn spectators_cannot_answer_and_players_cannot_be_omniscient() {
 #[test]
 fn poll_hands_a_seat_what_it_missed_and_needs_a_seat() {
     let mut table = Table::new(setup(quick()));
-    // A request without a seat runs the game and returns no events (checked in `advance`).
     table.advance();
     let again = send(&mut table.session, json!({ "v": 1, "kind": "poll", "seat": 1, "body": {} }));
     assert_eq!(body(&again)["events"], json!([]), "the first sync already drained Seat 1");
@@ -390,7 +379,7 @@ fn a_seat_that_did_not_ask_gets_the_events_of_an_answer_on_its_next_poll() {
     let mut table = Table::new(setup(quick()));
     let decision = table.advance();
     let before = table.events(1).len();
-    // Seat 0 answers directly, so Seat 1 has not been polled since.
+    // Seat 0 answers directly, so Seat 1 has not polled since.
     let response = send(
         &mut table.session,
         json!({

@@ -1,13 +1,10 @@
-//! The interface a Session uses to turn a card key into a `CardDefinition`.
-//! Whoever creates the Session passes the source in, and it never travels in a
-//! message. A key is the card's `oracle_id` UUID. The engine never sees keys,
-//! decklists or a database.
+//! How a Session turns a card key (an `oracle_id` UUID) into a `CardDefinition`. The host
+//! passes the source in at creation. The engine never sees keys or a database.
 
 use std::collections::HashMap;
 
 use stackfish_engine::CardDefinition;
 
-/// Why a source could not give a card. The Session adds the key to the message.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CardSourceError(pub String);
 
@@ -20,13 +17,11 @@ impl std::fmt::Display for CardSourceError {
 impl std::error::Error for CardSourceError {}
 
 pub trait CardSource {
-    /// The definition for `key`. The Session calls this once per distinct key
-    /// and clones the result for each copy in a deck.
+    /// The definition for `key`. The Session calls it once per distinct key.
     fn load(&self, key: &str) -> Result<CardDefinition, CardSourceError>;
 }
 
-/// Serves cards from a map built in code. Tests and the proof game use it, so
-/// CI never reads `../stackfish-db`.
+/// Serves cards from a map built in code, so CI never reads `../stackfish-db`.
 #[derive(Default)]
 pub struct FixtureCardSource {
     cards: HashMap<String, CardDefinition>,

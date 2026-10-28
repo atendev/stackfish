@@ -1,8 +1,5 @@
-//! 024/025: a rejected Answer changes nothing, proved on whole games. The bot
-//! sends deliberately illegal Answers before each real one and `Session`
-//! checks the engine is exactly as it was after each. Then the game with the
-//! illegal Answers must end in exactly the state of the game without them,
-//! which is what a replay of the accepted Answers alone produces.
+//! A rejected Answer changes nothing, proved on whole games. The bot sends illegal Answers
+//! before each real one, and the game must end in the same state as one without them.
 
 use serde_json::Value;
 use stackfish_host::{Bot, Outcome, Session, proof_cards, proof_setup_request};
@@ -56,8 +53,7 @@ fn illegal_answers_at_every_decision_change_nothing_and_the_game_ends_the_same()
             *shapes.entry(shape.clone()).or_default() += count;
         }
     }
-    // Every kind of Decision these games reach was attacked. Scry and Search
-    // only open because `Engine::new_game` loads a spell's `operation()`.
+    // Every kind of Decision these games reach was attacked.
     for kind in [
         "action (Priority)",
         "payment (Payment)",

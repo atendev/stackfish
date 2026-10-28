@@ -3,16 +3,14 @@
 
 use serde_json::{Value, json};
 
-/// An id no game reaches.
 const BOGUS: &str = "999999";
 
 fn bogus_object() -> Value {
     json!({ "kind": "object", "id": BOGUS })
 }
 
-/// Illegal replies for a Decision, derived from `legal`, the reply the bot
-/// would send. A Decision whose every reply of the right shape is legal (a
-/// yes or no) only gets the wrong-shape reply.
+/// Illegal replies for a Decision, derived from `legal`, the reply the bot would send. A
+/// yes or no has no illegal reply of its shape, so it only gets the wrong-shape one.
 pub(crate) fn illegal_replies(decision: &Value, legal: &Value) -> Vec<Value> {
     let wrong_shape = if legal["kind"] == "yes_no" {
         json!({ "kind": "pick", "picks": [] })

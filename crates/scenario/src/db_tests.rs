@@ -6,8 +6,7 @@ use crate::load::parse;
 use crate::report::{ScenarioReport, run};
 use crate::run::panic_message;
 
-/// One `card_tests` row after being run - identifies which card/test it was
-/// (`CardTestRow`'s own fields) alongside what happened.
+/// One `card_tests` row and what happened when it ran.
 pub struct DbTestOutcome {
     pub oracle_id: String,
     pub card_name: String,
@@ -18,19 +17,13 @@ pub struct DbTestOutcome {
 
 pub enum DbTestResult {
     Report(ScenarioReport),
-    /// `test_source` didn't parse as a scenario TOML, or building/running it
-    /// panicked (e.g. a bad `db_script_id`) - caught per-test via
-    /// `catch_unwind` rather than aborting the whole batch, since these rows
-    /// are independent and one malformed test shouldn't hide the results of
-    /// every other one.
+    /// `test_source` did not parse, or building or running it panicked. The panic is caught
+    /// per test so one malformed row does not hide the others.
     Errored(String),
 }
 
 impl DbTestOutcome {
-    /// A hard failure is either an `Errored` build/run, or a `Report` that
-    /// itself has a hard assertion failure - same two-tier distinction
-    /// `ScenarioReport::has_hard_failures` already draws between "ran and
-    /// got the wrong answer" and "not yet implemented".
+    /// A hard failure is an `Errored` build or run, or a report with a hard failure.
     pub fn has_hard_failures(&self) -> bool {
         match &self.result {
             DbTestResult::Report(report) => report.has_hard_failures(),
@@ -39,14 +32,8 @@ impl DbTestOutcome {
     }
 }
 
-/// Opens `db_path`, reads every active `card_tests` row
-/// (`CardDb::active_tests`), and runs each `test_source` as its own scenario
-/// - the same `run` this module uses for a file-based scenario, just sourced
-/// from the DB instead of `tests/scenarios/`. Every test's `card_db` is
-/// forced to `db_path` regardless of what (if anything) `test_source` itself
-/// sets, so a DB-stored test always resolves real cards against the exact
-/// database it was read from - see `docs/scenario_format.md`'s `card_db`
-/// field for what that path feeds.
+/// Runs every active `card_tests` row in `db_path` as its own scenario. Each test's
+/// `card_db` is forced to `db_path`, so it resolves cards against the database it came from.
 pub fn run_db_tests(db_path: &std::path::Path) -> Vec<DbTestOutcome> {
     let db = CardDb::open(db_path)
         .unwrap_or_else(|e| panic!("failed to open card_db {}: {e}", db_path.display()));
@@ -54,8 +41,7 @@ pub fn run_db_tests(db_path: &std::path::Path) -> Vec<DbTestOutcome> {
         .active_tests()
         .unwrap_or_else(|e| panic!("failed to read card_tests from {}: {e}", db_path.display()));
 
-    // Absolute up front so `resolve_card_db_path` never needs `base_dir` -
-    // there's no scenario *file* here to resolve a relative path against.
+    // Absolute, because there is no scenario file for a relative path to resolve against.
     let db_path = std::fs::canonicalize(db_path)
         .unwrap_or_else(|e| panic!("failed to canonicalize card_db {}: {e}", db_path.display()));
     let db_path_str = db_path.to_string_lossy().into_owned();

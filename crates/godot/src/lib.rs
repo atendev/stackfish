@@ -1,6 +1,5 @@
-//! The Godot adapter for the Stackfish host. `StackfishSession` holds one
-//! `Session` and passes bytes to it. The Session lives on the thread that made
-//! the object (decision 009), and the rules for that are in `core.rs`.
+//! Godot adapter over the host `Session`: `StackfishSession` passes bytes to one Session.
+//! Thread rules live in `core.rs`; see `docs/DESIGN.md`.
 
 mod core;
 
@@ -14,20 +13,17 @@ struct StackfishExtension;
 #[gdextension]
 unsafe impl ExtensionLibrary for StackfishExtension {}
 
-/// One game. GDScript makes an instance with `StackfishSession.new()`, calls
-/// `create` once with a `setup` request, then sends `advance`, `answer` and
-/// `poll` requests through `handle`. Every call returns the response bytes.
-/// An empty array means the call failed, and `last_error` says why.
+/// One game. Call `create` once with a `setup` request, then send `advance`, `answer` and
+/// `poll` requests through `handle`. An empty array means the call failed, and `last_error`
+/// says why.
 ///
-/// Use it only on the thread that made it (decision 018):
-/// - A call from another thread returns `null` and raises a script error.
-///   gdext refuses it before the adapter runs, so `last_error` returns `null`
-///   there too. Treat `null` as a programming error and do not retry.
-///   The adapter's own `wrong_thread` code, with an empty array, is reached
-///   only in a build with gdext's safeguards compiled out. Do not rely on it.
-/// - `StackfishSession.new()` on another thread aborts the whole Godot process.
-/// - Freeing the last reference on another thread ran without a crash in the
-///   smoke test, but that is one run. Free it on the creating thread.
+/// Use it only on the thread that made it:
+/// - A call from another thread returns `null` and raises a script error, because gdext
+///   refuses it before the adapter runs. `last_error` returns `null` there too. The
+///   adapter's `wrong_thread` code is reached only with gdext's safeguards compiled out.
+/// - `StackfishSession.new()` on another thread aborts the Godot process.
+/// - Freeing the last reference on another thread did not crash in the smoke test, but
+///   free it on the creating thread anyway.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 struct StackfishSession {
@@ -36,31 +32,24 @@ struct StackfishSession {
 
 #[godot_api]
 impl StackfishSession {
-    /// Builds the game from a `setup` request using the 25 proof-card fixture
-    /// set. Returns the `created` response, or an error response if the setup
-    /// was refused. This path needs no external card database, so the smoke
-    /// test and quick demos keep using it.
+    /// Builds the game from a `setup` request using the proof-card fixture set, which
+    /// needs no card database. Returns the `created` response or an error response.
     #[func]
     fn create(&mut self, setup: PackedByteArray) -> PackedByteArray {
         let result = self.core.create(setup.as_slice(), &proof_cards());
         into_bytes(result)
     }
 
-    /// Builds the game from a `setup` request using the real card database at
-    /// `../stackfish-db/stackfish.db` relative to the engine process's current
-    /// working directory. Returns the `created` response, or an error response
-    /// if the database is missing or the setup was refused.
-    ///
-    /// TODO(godot paths): this assumes a particular launch working directory.
-    /// A host that launches Godot from somewhere else must either change the
-    /// working directory or call a path-exposing variant once one exists.
+    /// Builds the game from a `setup` request using the card database at
+    /// `../stackfish-db/stackfish.db`, relative to the process's working directory.
+    /// Returns the `created` response, or an error response if the database is missing.
+    // TODO: take the database path as a parameter instead of assuming the launch directory
     #[func]
     fn create_with_db(&mut self, setup: PackedByteArray) -> PackedByteArray {
         match stackfish_host::CardDbCardSource::open("../stackfish-db/stackfish.db") {
             Ok(source) => into_bytes(self.core.create(setup.as_slice(), &source)),
             Err(e) => {
-                // The setup has not been parsed yet, so return a host-style
-                // error response with the database failure reason.
+                // No Session exists to build the error response, so build one by hand.
                 let body = serde_json::json!({
                     "v": stackfish_host::PROTOCOL_VERSION,
                     "kind": "response",
@@ -75,40 +64,34 @@ impl StackfishSession {
     }
 
     /// Passes one `advance`, `answer` or `poll` request to the game.
-    // TODO(snapshot): a Seat that joins late has no request that returns the current state.
+    // TODO: a Seat that joins late has no request that returns the current state
     #[func]
     fn handle(&mut self, request: PackedByteArray) -> PackedByteArray {
         let result = self.core.handle(request.as_slice());
         into_bytes(result)
     }
 
-    /// The reason the last call returned an empty array: `wrong_thread`,
-    /// `panicked`, `not_created` or `already_created`. Empty if the last call
-    /// worked.
+    /// Why the last call returned an empty array (`wrong_thread`, `panicked`, `not_created`
+    /// or `already_created`), or an empty string if it worked.
     #[func]
     fn last_error(&self) -> GString {
         GString::from(self.core.last_error())
     }
 
-    /// A `setup` request for the proof card set. The smoke test uses it to
-    /// start a game without building JSON in GDScript.
+    /// A `setup` request for the proof card set, so GDScript need not build the JSON.
     #[func]
     fn proof_setup(players: i64, seed: i64) -> PackedByteArray {
         let players = players.max(0) as usize;
         PackedByteArray::from(proof_setup_request(players, seed as u64))
     }
 
-    /// How many sessions Godot has freed on a thread other than the one that
-    /// made them. The smoke test reads this to see where Godot runs the
-    /// destructor.
+    /// How many sessions Godot freed on a thread other than their creator's.
     #[func]
     fn off_thread_drops() -> i64 {
         core::off_thread_drops() as i64
     }
 }
 
-/// Turns a core result into bytes for GDScript. A failure logs and returns an
-/// empty array.
 fn into_bytes(result: Result<Vec<u8>, Failure>) -> PackedByteArray {
     match result {
         Ok(bytes) => PackedByteArray::from(bytes),

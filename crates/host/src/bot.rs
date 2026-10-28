@@ -1,20 +1,10 @@
-//! A random legal-move bot. It is a client of a `Session`: it sends and reads
-//! bytes, parses the JSON, and answers every Decision from the candidates the
-//! Decision itself lists. It never reads engine state, so it exercises the same
-//! protocol a Godot host uses.
-//!
-//! The bot is uniform where a choice has no better answer, with two biases so
-//! that games finish. At priority it passes more often than it acts, and it
-//! plays a land whenever it can. It does not try to win.
-//!
-//! TODO(proof bot): the bot never accepts a `may_cast` Decision (madness,
-//! cascade), because the Decision does not list the cast's modes or targets.
-//! TODO(proof bot): it cannot pay a cost that names a sacrifice, a discard, a
-//! tap or a graveyard exile, because the Payment Decision does not list the
-//! eligible objects. It answers "cannot pay", which unwinds the cast.
-//! TODO(proof bot): it never pays a Phyrexian symbol with more life than its
-//! tracked life minus one, and it assumes a starting life of 20 unless told
-//! otherwise (`with_starting_life`).
+//! A random legal-move bot that plays through a `Session` using only bytes and the
+//! candidates each Decision lists. It biases toward passing and playing lands so games end.
+//! See `docs/DESIGN.md`.
+
+// TODO: accept `may_cast` Decisions; they do not list the cast's modes or targets
+// TODO: pay costs that name a sacrifice, discard, tap or graveyard exile; the Payment Decision lists no eligible objects
+// TODO: spend more than life minus one on a Phyrexian symbol, and learn the starting life instead of assuming 20
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -282,7 +272,6 @@ impl Bot {
         Ok(Progress::Answered)
     }
 
-    /// Reads whatever each Seat has not received yet, so `events` is complete.
     fn flush(&mut self, session: &mut Session) -> Result<(), BotError> {
         if !self.record {
             return Ok(());
@@ -316,7 +305,6 @@ impl Bot {
         Ok(body)
     }
 
-    /// A response that is not a normal one, as an error.
     fn failure(&self, body: &Value) -> BotError {
         let error = &body["error"];
         let text = format!("{}: {}", error["code"], error["message"]);
@@ -327,14 +315,12 @@ impl Bot {
         self.pools.entry(seat).or_default()
     }
 
-    /// The life a plan may spend on Phyrexian symbols: all but the last point.
+    // A payment plan may spend all but the last point of life.
     fn life_budget(&self, seat: u32) -> u32 {
         let life = self.starting_life + self.life.get(&seat).copied().unwrap_or(0);
         (life - 1).max(0) as u32
     }
 
-    /// Learns the pool from the events a Seat received, and keeps them when
-    /// recording.
     fn take_events(&mut self, seat: u32, body: &Value) {
         let Some(events) = body["events"].as_array() else { return };
         for event in events {
@@ -349,12 +335,11 @@ impl Bot {
                     *self.life.entry(seat).or_default() += event["delta"].as_i64().unwrap_or(0);
                 }
                 // Damage to a player is not a `life_changed` event.
-                // TODO: gaining life emits no event either (backlog item 6), so the
-                // bot's life is never above the real one.
+                // TODO: gaining life emits no event, so the tracked life can sit below the real one
                 Some("damage_dealt") if event["target"]["kind"] == "player" && event["target"]["id"].as_u64() == Some(u64::from(seat)) => {
                     *self.life.entry(seat).or_default() -= event["amount"].as_i64().unwrap_or(0);
                 }
-                // CR 500.5: mana empties at the end of each step and phase.
+                // CR 500.5
                 Some("step_started" | "phase_started") => *self.pool(seat) = Pool::default(),
                 Some("zone_change") => {
                     if let (Some(object), Some(cost)) = (event["object"].as_str(), event["identity"]["mana_cost"].as_str()) {
@@ -369,8 +354,7 @@ impl Bot {
         }
     }
 
-    /// Sends the answer. A rejection is replaced once by a fallback that is
-    /// always legal at its shape.
+    // A rejected reply is retried once with a fallback that is always legal for its shape.
     fn answer(&mut self, session: &mut Session, seat: u32, decision: &Value, reply: &Reply) -> Result<Value, BotError> {
         let sent = self.send_answer(session, seat, decision, &reply.value)?;
         let Some(message) = rejection(&sent) else {
@@ -391,8 +375,6 @@ impl Bot {
         Ok(sent)
     }
 
-    /// Sends each illegal reply for `decision` and checks it is refused, the
-    /// Decision stays open, and the engine is unchanged.
     fn send_illegal_answers(&mut self, session: &mut Session, seat: u32, decision: &Value, legal: &Value) -> Result<(), BotError> {
         for illegal in illegal_replies(decision, legal) {
             let before = session.snapshot();
@@ -435,7 +417,6 @@ impl Bot {
         Ok(body)
     }
 
-    /// Bookkeeping after the Session accepted `reply`.
     fn accepted(&mut self, seat: u32, reply: &Reply, body: &Value) {
         if let Some(spent) = &reply.spent {
             self.pool(seat).spend(spent);
@@ -477,9 +458,7 @@ impl Bot {
         }
     }
 
-    /// How many to choose from `len` options when the reply takes `min` to
-    /// `max` (no `max` means no upper bound). A flexible count is a coin flip
-    /// between the minimum and a random count.
+    // A flexible range is a coin flip between the minimum and a random count.
     fn count(&mut self, min: usize, max: Option<usize>, len: usize) -> usize {
         let upper = max.unwrap_or(len).min(len);
         let lower = min.min(upper);
@@ -500,11 +479,9 @@ impl Bot {
         json!({ "kind": "pick", "picks": self.sample(&candidates, count) })
     }
 
-    /// Distinct mode indices, in ascending order. A repeatable range still gets
-    /// distinct modes, which is always legal. A mode in `solo_only` is picked
-    /// only as the single chosen mode.
-    ///
-    /// TODO(proof bot): a pawprint budget (CR 700.2i) is read as a plain count.
+    /// Distinct mode indices in ascending order, which is legal even for a repeatable
+    /// range. A `solo_only` mode is picked only alone.
+    // TODO: a pawprint budget is read as a plain count. CR 700.2i
     fn modes(&mut self, mode_count: &Value, min: &Value, max: &Value, solo_only: &Value) -> Vec<u64> {
         let total = mode_count.as_u64().unwrap_or(0) as usize;
         let (min, max) = (min.as_u64().unwrap_or(0) as usize, max.as_u64().unwrap_or(0) as usize);
@@ -531,7 +508,6 @@ impl Bot {
         json!({ "kind": "partition", "top": top, "rest": rest })
     }
 
-    /// One list of targets per word.
     fn targets(&mut self, decision: &Value) -> Value {
         let words = decision["words"].as_array().cloned().unwrap_or_default();
         let lists: Vec<Value> = words
@@ -547,7 +523,6 @@ impl Bot {
         json!({ "kind": "targets", "targets": lists })
     }
 
-    /// Targets for a list of slots, or `None` if a slot lacks candidates.
     fn slot_targets(&mut self, slots: &[Value]) -> Option<Vec<Value>> {
         let mut chosen = Vec::new();
         for slot in slots {
@@ -563,7 +538,6 @@ impl Bot {
         Some(chosen)
     }
 
-    /// Picks X for a spell, between 0 and 2, never above what the pool can pay.
     fn x_value(&mut self, cost: Option<&str>, can_pay: &dyn Fn(&str, u32) -> bool) -> Value {
         let most = match cost {
             Some(cost) => (0..3).rev().find(|x| can_pay(cost, *x)).unwrap_or(0),
@@ -583,9 +557,7 @@ impl Bot {
                 (modes, slots)
             }
         };
-        // TODO(ticket 031): a slot with `x_dependent` lists targets legal for some X, and the bot
-        // picks X and the targets separately, so the engine can reject the pair. No proof card
-        // has a `mana_value` filter that mentions X.
+        // TODO: pick X and targets together; an `x_dependent` slot lists targets legal for some X, so the engine can reject the pair
         let targets = self.slot_targets(&slots)?;
         Some(json!({
             "kind": "cast_spell",
@@ -620,10 +592,8 @@ impl Bot {
         }))
     }
 
-    /// Picks one priority entry. A land play is likely and passing is likelier
-    /// than most things. The bot casts a card whose cost the pool covers,
-    /// taps mana sources while a card in reach needs more mana, and otherwise
-    /// passes.
+    /// Picks one priority entry: casts what the pool covers, taps mana sources while a card
+    /// in reach needs more, and otherwise passes.
     fn action(&mut self, seat: u32, decision: &Value) -> Value {
         let pool = *self.pool(seat);
         let budget = self.life_budget(seat);
@@ -634,8 +604,7 @@ impl Bot {
         let entries = decision["entries"].as_array().cloned().unwrap_or_default();
         let sources = entries.iter().filter(|e| e["kind"] == "activate" && e["mana_ability"] == true).count() as u32;
 
-        // First pass: the weights that do not depend on what else is on offer.
-        // A mana ability is `None` until `wants_mana` is known.
+        // A mana ability's weight stays `None` until `wants_mana` is known.
         let mut options: Vec<(Option<usize>, Value, Option<Value>)> = Vec::new();
         let mut affordable = false;
         let mut wants_mana = false;
@@ -716,7 +685,6 @@ impl Bot {
         json!({ "kind": "declare_blockers", "blocks": blocks })
     }
 
-    /// Pays from the tracked pool, or answers "cannot pay".
     fn payment(&mut self, seat: u32, decision: &Value) -> Reply {
         let pool = *self.pool(seat);
         match plan_payment(&decision["cost"], &pool, self.life_budget(seat), self.last_source.as_ref()) {
@@ -726,7 +694,6 @@ impl Bot {
     }
 }
 
-/// An Answer's reply, and the mana it spends if accepted.
 struct Reply {
     value: Value,
     spent: Option<Pool>,
@@ -736,15 +703,13 @@ fn protocol(message: impl Into<String>) -> BotError {
     BotError::Protocol(message.into())
 }
 
-/// The message of a refused Answer: a response that still shows a Decision and
-/// carries an error.
 fn rejection(body: &Value) -> Option<String> {
     let error = body.get("error")?;
     Some(format!("{}: {}", error["code"], error["message"]))
 }
 
-/// Gives all of each creature's damage to its first recipient, which is always
-/// legal (CR 510.1c).
+// CR 510.1c
+// All damage to the first recipient is always a legal split.
 fn assign_damage(decision: &Value) -> Value {
     let splits = decision["splits"].as_array().cloned().unwrap_or_default();
     let assignments: Vec<Value> = splits

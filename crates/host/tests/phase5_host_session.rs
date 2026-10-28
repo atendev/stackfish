@@ -1,5 +1,4 @@
-//! Phase 5 vertical slice: the host Session. Every test talks to the Session in
-//! bytes only, the way a Godot adapter or a bot would.
+//! The host Session over bytes only, as a Godot adapter or a bot would drive it.
 
 use serde_json::{Value, json};
 use stackfish_engine::{CardTypeSet, ManaCost};
@@ -51,8 +50,6 @@ fn send(session: &mut Session, request: Value) -> Value {
     parse(&session.handle(&serde_json::to_vec(&request).unwrap()))
 }
 
-/// Advances as Seat 0, so the response carries Seat 0's events and its view of
-/// the open Decision.
 fn advance(session: &mut Session, budget: Option<u64>) -> Value {
     let body = budget.map_or(json!({}), |b| json!({ "budget": b }));
     send(session, json!({ "v": 1, "kind": "advance", "seat": 0, "body": body }))
@@ -62,8 +59,7 @@ fn poll(session: &mut Session, seat: u32) -> Value {
     send(session, json!({ "v": 1, "kind": "poll", "seat": seat, "body": {} }))
 }
 
-/// The open Decision as its chooser sees it. A response shows the requesting
-/// Seat's view, so when someone else has to choose next, this polls as them.
+// A response shows the requesting Seat's view, so when someone else chooses next this polls as them.
 fn chooser_view(session: &mut Session, response: &Value) -> Value {
     let decision = body(response)["decision"].clone();
     if decision["shape"] != "opaque" {
@@ -89,7 +85,7 @@ fn error_code(response: &Value) -> &str {
     body(response)["error"]["code"].as_str().expect("the response has an error")
 }
 
-/// No shuffle and no mulligan: the first Advance reaches a priority Decision.
+// No shuffle and no mulligan, so the first Advance reaches a priority Decision.
 fn quick_overrides() -> Value {
     json!({ "shuffle_libraries": false, "skip_mulligan": true })
 }

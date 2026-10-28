@@ -1,8 +1,5 @@
-//! The host protocol for the Stackfish engine. A `Session` talks only in bytes:
-//! the host sends a `setup` request to create it, then `advance`, `answer` and
-//! `poll` requests, and reads one response per request. A response shows only
-//! what the requesting Seat may see. The wire format is JSON; see
-//! `.plan/closed/007-wire-format.md` for the envelope and error codes.
+//! The host protocol: a `Session` talks only in JSON bytes, one response per request, and
+//! shows each Seat only what it may see. See `docs/DESIGN.md`.
 
 mod bot;
 mod bot_payment;

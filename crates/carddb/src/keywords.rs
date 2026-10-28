@@ -1,10 +1,5 @@
-//! `keywords.name` rows -> `KeywordSet` bits. The DB's `keywords` table
-//! covers Scryfall's full ~140-entry CR 702 keyword list; `KeywordSet` only
-//! models the subset that changes engine-checkpoint behavior (see that
-//! type's own doc comment). Anything outside that subset is silently
-//! dropped here, not an error - `KeywordSet` is explicitly documented as
-//! "deliberately NOT meant to grow to cover all ~140 CR 702 keywords," so an
-//! unrecognized name is expected input, not a bug to surface.
+//! Maps `keywords.name` rows to `KeywordSet` bits. Names `KeywordSet` does not model are
+//! dropped without an error, since the DB lists every CR 702 keyword.
 
 use stackfish_engine::KeywordSet;
 

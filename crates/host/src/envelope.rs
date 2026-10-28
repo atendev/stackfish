@@ -1,6 +1,5 @@
-//! The message envelope. Every message has `v`, `kind` and `body`, and a
-//! request from a Seat adds `seat`. A response has one shape, with a `status`
-//! that says which of its optional fields to read.
+//! The message envelope: `v`, `kind` and `body` on every message, plus `seat` on a Seat's
+//! request. One response shape, whose `status` says which optional fields to read.
 
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -21,14 +20,12 @@ pub enum ErrorCode {
     InvalidAnswer,
     GameOver,
     SetupInvalid,
-    /// The engine returned an `Internal` error (035). The game is over for this
-    /// Session, but a Seat can still `poll` for the events it was owed.
+    /// The engine returned an `Internal` error. The game is over, but a Seat can still
+    /// `poll` for the events it was owed.
     PipelineError,
-    /// The engine panicked (035). The Session is dead: every later message, a
-    /// `poll` included, gets this code.
+    /// The engine panicked. Every later message, a `poll` included, gets this code.
     EnginePanic,
-    /// `advance` while a Decision is open. Added after ticket 007's ten codes,
-    /// which had none for this case.
+    /// `advance` while a Decision is open.
     DecisionPending,
 }
 
@@ -57,8 +54,7 @@ impl Serialize for ErrorCode {
     }
 }
 
-/// A request as it arrives. Unknown fields are rejected, and `body` is parsed
-/// once `kind` is known.
+/// A request as it arrives. `body` stays raw until `kind` says how to parse it.
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -84,7 +80,6 @@ pub struct WireError {
     pub message: String,
 }
 
-/// The body of every response.
 #[derive(Serialize, Clone, Debug)]
 pub struct Response {
     pub status: Status,

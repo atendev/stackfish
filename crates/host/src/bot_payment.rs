@@ -1,15 +1,13 @@
-//! How the proof bot pays a cost. The Payment Decision gives the cost as brace
-//! notation (`{2}{W/U}{B/P}`) and does not list the pool, so the bot tracks its
-//! own pool from `mana_added` events and plans against that.
+//! How the proof bot pays a cost. A Payment Decision gives brace notation and no pool, so
+//! the bot tracks its pool from `mana_added` events. See `docs/DESIGN.md`.
 
 use serde_json::{Value, json};
 
 pub(crate) const COLORS: [&str; 5] = ["white", "blue", "black", "red", "green"];
 const LETTERS: [&str; 5] = ["W", "U", "B", "R", "G"];
 
-/// A pile of mana, as the bot learns it from events or spends it in a plan.
-/// `colored` and `colorless` count every unit. The snow counts are the part of
-/// each that came from a snow source (CR 106.3), as in the engine's pool.
+// `colored` and `colorless` count every unit; the snow counts are the part from a snow source.
+// CR 106.3
 #[derive(Default, Clone, Copy)]
 pub(crate) struct Pool {
     colored: [u32; 5],
@@ -41,7 +39,6 @@ impl Pool {
         }
     }
 
-    /// Removes what a plan spent, once the Session accepted it.
     pub(crate) fn spend(&mut self, spent: &Pool) {
         for i in 0..5 {
             self.colored[i] = self.colored[i].saturating_sub(spent.colored[i]);
@@ -59,8 +56,7 @@ impl Pool {
         self.colorless - self.snow_colorless
     }
 
-    /// Takes one unit of color `i`, a plain one first so that snow units stay
-    /// for `{S}`. Returns whether the unit was snow.
+    // Takes a plain unit first so snow units stay available for `{S}`. Returns whether it was snow.
     fn take_colored(&mut self, i: usize) -> Option<bool> {
         if self.plain_colored(i) > 0 {
             self.colored[i] -= 1;
@@ -138,7 +134,6 @@ fn color_index(letter: &str) -> Option<usize> {
     LETTERS.iter().position(|l| *l == letter)
 }
 
-/// One half of a hybrid symbol.
 fn half(text: &str) -> Option<Branch> {
     if let Some(i) = color_index(text) {
         Some(Branch::Color(i))
@@ -149,9 +144,8 @@ fn half(text: &str) -> Option<Branch> {
     }
 }
 
-/// The ways to pay the text inside one pair of braces, cheapest first: mana
-/// of a color, then generic mana, then life. `None` for `{X}`, which the bot
-/// resolves with `resolve_x` before it plans, and for anything it does not know.
+// Cheapest first: colored mana, then generic mana, then life. `{X}` gives `None` because
+// `resolve_x` replaces it before planning.
 fn branches(symbol: &str) -> Option<Vec<Branch>> {
     let mut found = match symbol.split('/').collect::<Vec<_>>().as_slice() {
         ["S"] => vec![Branch::Snow],
@@ -174,13 +168,11 @@ fn symbols(mana: &str) -> Option<Vec<&str>> {
     mana.split('{').skip(1).map(|part| part.strip_suffix('}')).collect()
 }
 
-/// A cost with every `{X}` replaced by the chosen value.
 pub(crate) fn resolve_x(mana: &str, x: u32) -> String {
     mana.replace("{X}", &format!("{{{x}}}"))
 }
 
-/// The mana value of a cost with `{X}` as 0 (CR 202.3e), a hybrid symbol as its
-/// largest half (CR 202.3f) and a Phyrexian symbol as 1 (CR 202.3g).
+// CR 202.3e, CR 202.3f, CR 202.3g
 pub(crate) fn mana_value(mana: &str) -> Option<u32> {
     let mut total = 0;
     for symbol in symbols(mana)? {
@@ -200,13 +192,11 @@ pub(crate) fn mana_value(mana: &str) -> Option<u32> {
 
 struct Search {
     options: Vec<Vec<Branch>>,
-    /// The most life the plan may spend.
     life_budget: u32,
 }
 
 impl Search {
-    /// Pays `options[index..]` from `left`. At the end, the generic total is
-    /// paid from what is left, plain units before snow ones.
+    // Generic mana is paid last, from what is left, plain units before snow ones.
     fn pay(&self, index: usize, left: Pool, units: &mut Vec<Unit>, generic: u32, life: u32) -> Option<u32> {
         let Some(branches) = self.options.get(index) else {
             return self.pay_generic(left, units, generic).then_some(life);
@@ -268,9 +258,8 @@ impl Search {
     }
 }
 
-/// A plan for `cost` from `pool`, or `None` if the bot cannot make one. Mana
-/// comes first, then each additional cost in the order the Decision lists
-/// them. `life_budget` is the most life the plan may spend on Phyrexian symbols.
+/// A plan for `cost` from `pool`, or `None` if the bot cannot make one. `life_budget` caps
+/// the life spent on Phyrexian symbols.
 pub(crate) fn plan_payment(cost: &Value, pool: &Pool, life_budget: u32, source: Option<&Value>) -> Option<(Vec<Value>, Pool)> {
     let mut payments = Vec::new();
     let mut spent = Pool::default();
@@ -360,7 +349,6 @@ mod tests {
     fn hybrid_takes_whichever_half_the_pool_has() {
         assert!(plan("{W/U}", &[colored("blue")], 0).is_some());
         assert!(plan("{W/U}", &[colored("red")], 0).is_none());
-        // {2/W} costs one white or two of anything.
         let one = plan("{2/W}", &[colored("white"), colorless(), colorless()], 0).unwrap();
         assert_eq!(mana_payment(&one)["units"].as_array().unwrap().len(), 1);
         assert!(plan("{2/W}", &[colored("red"), colorless()], 0).is_some());
@@ -386,7 +374,6 @@ mod tests {
 
     #[test]
     fn phyrexian_stays_inside_the_life_budget() {
-        // {1}{B/P}{B/P} with one black and one other: one pip by mana, one by life.
         let plan_ = plan("{1}{B/P}{B/P}", &[colored("black"), colored("red")], 2).unwrap();
         assert_eq!(mana_payment(&plan_)["phyrexian_life"], 2);
         assert!(plan("{B/P}", &[], 1).is_none(), "1 life cannot fund a 2 life pip");
@@ -406,7 +393,6 @@ mod tests {
         assert!(plan("{S}", &[colored("green")], 0).is_none());
         let paid = plan("{S}", &[colored("green"), snow("green")], 0).unwrap();
         assert_eq!(mana_payment(&paid)["units"][0]["kind"], "snow_colored");
-        // {1}{S}: the generic part takes the plain unit and leaves the snow one for {S}.
         let both = plan("{1}{S}", &[snow("green"), colored("green")], 0).unwrap();
         let kinds: Vec<_> = mana_payment(&both)["units"].as_array().unwrap().iter().map(|u| u["kind"].clone()).collect();
         assert_eq!(kinds.iter().filter(|k| *k == "snow_colored").count(), 1);

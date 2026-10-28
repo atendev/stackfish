@@ -1,6 +1,5 @@
-//! The `setup` message and the checks that turn it into a `GameConfig`. The
-//! Session validates structure only: deck legality (size, singleton, color
-//! identity, bans) stays with the deck builder.
+//! The `setup` message and the checks that turn it into a `GameConfig`. Only structure is
+//! validated; deck legality stays with the deck builder. See `docs/DESIGN.md`.
 
 use std::collections::HashMap;
 
@@ -10,9 +9,9 @@ use stackfish_engine::{CardDefinition, GameConfig, GameSettings, PlayerConfig, P
 use crate::card_source::CardSource;
 use crate::wire::U64;
 
-/// Engine steps one `advance` or `answer` call may run when the setup does not
-/// set `step_cap`. It only stops a runaway from freezing the host. TODO: CR
-/// 104.4b loop detection is separate work.
+/// Engine steps one `advance` or `answer` call may run when the setup sets no `step_cap`.
+/// It only stops a runaway from freezing the host.
+// TODO: loop detection; the cap does not detect a draw. CR 104.4b
 pub const DEFAULT_STEP_CAP: u64 = 100_000;
 
 #[derive(Deserialize, Debug)]
@@ -85,9 +84,8 @@ impl SettingOverrides {
     }
 }
 
-/// A Seat tied to no player. `omniscient` lets it see every hand and library,
-/// as a replay viewer of a finished game does. The host decides it here, and a
-/// player Seat can never have it.
+/// A Seat tied to no player. `omniscient` shows every hand and library, as a replay viewer
+/// needs; only the host sets it, and a player Seat never has it.
 #[derive(Deserialize, Default, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SpectatorSetup {
@@ -95,9 +93,8 @@ pub struct SpectatorSetup {
     pub omniscient: bool,
 }
 
-/// The body of a `setup` request. `players` is in turn order: the first entry
-/// plays first (CR 103.1), and player `i` gets `PlayerId(i)` and Seat `i`.
-/// Spectator Seats follow the player Seats, in the order listed.
+/// The body of a `setup` request. `players` is in turn order, and player `i` gets
+/// `PlayerId(i)` and Seat `i`. Spectator Seats follow the player Seats. CR 103.1
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SetupBody {
@@ -111,12 +108,9 @@ pub struct SetupBody {
     pub step_cap: Option<u64>,
 }
 
-/// Why the Session refused a well-formed setup. The message names the cause.
 #[derive(Debug)]
 pub struct SetupError(pub String);
 
-/// A format preset: the settings it fills in and whether it has commander
-/// slots.
 struct Format {
     settings: GameSettings,
     commander_slots: bool,
@@ -124,9 +118,9 @@ struct Format {
 
 fn format_preset(name: &str) -> Option<Format> {
     match name {
-        // CR 103.4: 20 life, no free mulligan.
+        // CR 103.4
         "standard" => Some(Format { settings: GameSettings::default(), commander_slots: false }),
-        // CR 903.7 and CR 103.5c: 40 life and one free mulligan.
+        // CR 903.7, CR 103.5c
         "commander" => Some(Format {
             settings: GameSettings { starting_life: 40, free_mulligans: 1, ..GameSettings::default() },
             commander_slots: true,
@@ -135,7 +129,6 @@ fn format_preset(name: &str) -> Option<Format> {
     }
 }
 
-/// What the Session keeps from a valid setup.
 pub struct Built {
     pub config: GameConfig,
     pub step_cap: u64,
@@ -147,7 +140,6 @@ struct Resolver<'a> {
 }
 
 impl Resolver<'_> {
-    /// Asks the source once per distinct key.
     fn resolve(&mut self, key: &str) -> Result<CardDefinition, SetupError> {
         if let Some(card) = self.loaded.get(key) {
             return Ok(card.clone());
@@ -187,8 +179,7 @@ pub fn build(body: &SetupBody, source: &dyn CardSource) -> Result<Built, SetupEr
     let mut resolver = Resolver { source, loaded: HashMap::new() };
     let mut players = Vec::with_capacity(body.players.len());
     for (index, player) in body.players.iter().enumerate() {
-        // Library order is the decklist order. The engine shuffles when the
-        // settings say so.
+        // Library order is decklist order; the engine shuffles if the settings say so.
         let mut library = Vec::new();
         for entry in &player.deck {
             let card = resolver.resolve(&entry.card)?;

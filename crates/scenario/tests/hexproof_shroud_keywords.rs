@@ -1,5 +1,5 @@
-//! A scenario file's `keywords = [...]` list accepts `Hexproof` and `Shroud`
-//! (CR 702.11, 702.18), and an unknown name still fails loudly.
+//! A scenario `keywords` list accepts `Hexproof` and `Shroud`, and an unknown name panics.
+//! CR 702.11, CR 702.18
 
 use stackfish_scenario::{parse, run, AssertionOutcome, EntryOutcome, StepOutcome};
 

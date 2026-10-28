@@ -1,10 +1,7 @@
 use stackfish_engine::*;
 
-/// A `CardDefinition` with every field at its most inert default
-/// (vanilla, no keywords, no target requirement, no effect). Callers
-/// override whichever fields their test actually cares about with struct
-/// update syntax, e.g.:
-/// `CardDefinition { supertypes: SupertypeSet::BASIC, ..testutil::minimal_card_definition(1, "Forest", "forest", ManaCost { symbols: Vec::new() }, CardTypeSet::LAND) }`
+/// A vanilla `CardDefinition` with no keywords, target requirement or effect.
+/// Override fields with struct update syntax: `CardDefinition { supertypes: SupertypeSet::BASIC, ..testutil::minimal_card_definition(..) }`
 pub fn minimal_card_definition(
     definition_id: u64,
     name: impl Into<String>,

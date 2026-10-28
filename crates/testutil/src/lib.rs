@@ -1,6 +1,5 @@
-//! Shared fixture builders for `crates/engine/tests/*.rs` — a single home
-//! for the `two_player_state`/`card_object`/`drain`-style helpers most of
-//! those test files otherwise define for themselves.
+//! Fixture builders shared by the engine's integration tests: states, zones, objects and
+//! snapshot assertions. See `docs/DESIGN.md`.
 
 mod atomic;
 mod card;
