@@ -1,5 +1,5 @@
-//! `execute_command`'s `DeclareAttackers`/`DeclareBands`/`DeclareBlockers`
-//! arm bodies, split out of the original monolithic `commands.rs`.
+//! The `DeclareAttackers`, `DeclareBands` and `DeclareBlockers` command bodies.
+//! See `DESIGN.md` for the rest.
 
 use crate::script::ScriptRuntime;
 use crate::types::card::CardTypeSet;
@@ -32,8 +32,9 @@ pub(crate) fn validate_declare_attackers(
     actor: PlayerId,
     attackers: Vec<(ObjectId, Target)>,
 ) -> Result<Validated, Rejected> {
-    // CR 508.1: a turn-based action of the active player, only
-    // during the declare attackers step, and only once per combat.
+    // CR 508.1
+    // A turn-based action of the active player, in the declare attackers step, once
+    // per combat.
     if actor != state.active_player {
         return Err(Rejected::IllegalAction(
             "only the active player declares attackers".to_string(),
@@ -51,12 +52,12 @@ pub(crate) fn validate_declare_attackers(
         ));
     }
 
-    // CR 508.1: "if at any point ... unable to comply ... the
-    // declaration is illegal" - validate every attacker before
-    // mutating anything, so an illegal batch taps nobody.
+    // CR 508.1
+    // Validate every attacker before mutating anything, so an illegal batch taps
+    // nobody.
     let mut seen_attackers = Vec::with_capacity(attackers.len());
     for (attacker, target) in &attackers {
-        // CR 508.1: each creature is declared as an attacker once.
+        // CR 508.1
         if seen_attackers.contains(attacker) {
             return Err(Rejected::IllegalAction(
                 "the same creature can't be declared as an attacker twice".to_string(),
@@ -66,13 +67,12 @@ pub(crate) fn validate_declare_attackers(
         attacker_can_attack(state, script_runtime, actor, *attacker)?;
         attack_target_is_legal(state, script_runtime, actor, target)?;
     }
-    // CR 508.1d: a creature that attacks each combat if able can't stay home.
+    // CR 508.1d
     attack_declaration_is_legal(state, script_runtime, actor, &attackers)?;
 
-    // CR 508.1f: tapping an attacker isn't a cost - attacking
-    // simply causes it. CR 702.20a: Vigilance means attacking
-    // doesn't tap it. effective_keywords so a granted Vigilance is
-    // respected too, not just the printed keyword.
+    // CR 508.1f/702.20a
+    // Tapping an attacker is not a cost; attacking causes it, except with Vigilance.
+    // effective_keywords respects a granted Vigilance too.
     let attackers = attackers
         .into_iter()
         .map(|(attacker, target)| {
@@ -131,9 +131,9 @@ pub(crate) fn validate_declare_bands(
     actor: PlayerId,
     bands: Vec<Vec<ObjectId>>,
 ) -> Result<Validated, Rejected> {
-    // CR 508.1e/702.22c: same window as DeclareAttackers itself -
-    // active player, only during the declare attackers step, only
-    // once attackers actually exist to group.
+    // CR 508.1e/702.22c
+    // The same window as DeclareAttackers: active player, declare attackers step,
+    // once attackers exist to group.
     if actor != state.active_player {
         return Err(Rejected::IllegalAction(
             "only the active player declares bands".to_string(),
@@ -153,13 +153,11 @@ pub(crate) fn validate_declare_bands(
         let mut target: Option<Target> = None;
         let mut banding_members = 0u32;
         let mut non_banding_members = 0u32;
-        // CR 702.22c's second band-formation path: one or more
-        // members with "bands with other [quality]" for some
-        // quality Q, plus any number of other members whose own
-        // subtypes include Q. `member_subtypes`/`bands_with_other`
-        // collected per member below, checked once the whole band
-        // is known (a member's own quality can qualify a bandmate
-        // that comes later in the list).
+        // CR 702.22c
+        // Second band-formation path: members with "bands with other [quality]" for some
+        // quality Q, plus members whose subtypes include Q. Collected per member and
+        // checked once the band is known, since a member's quality can qualify a later
+        // bandmate.
         let mut member_subtypes: Vec<Vec<crate::Subtype>> = Vec::new();
         let mut member_supertypes: Vec<SupertypeSet> = Vec::new();
         let mut member_bands_with_other: Vec<Vec<crate::Subtype>> = Vec::new();
@@ -177,8 +175,8 @@ pub(crate) fn validate_declare_bands(
             }
             seen.push(*member);
 
-            // CR 702.22d/802.3b: every member of a band must attack
-            // the same player, planeswalker, or battle.
+            // CR 702.22d/802.3b
+            // Every band member must attack the same player, planeswalker or battle.
             match target {
                 None => target = Some(*member_target),
                 Some(t) if t == *member_target => {}
@@ -205,15 +203,12 @@ pub(crate) fn validate_declare_bands(
             member_bands_with_other_supertypes.push(characteristics.bands_with_other_supertypes);
         }
 
-        // CR 702.22c, first path: one or more attacking creatures
-        // with banding, plus up to one attacking creature without
-        // banding.
+        // CR 702.22c
+        // First path: one or more banding attackers plus at most one without banding.
         let plain_banding_shape = banding_members >= 1 && non_banding_members <= 1;
-        // CR 702.22c, second path ("bands with other [quality]"): at
-        // least one member has bands-with-other for some quality Q,
-        // and every *other* member's own subtypes include Q. Tries
-        // every quality named by any member in turn - the band is
-        // legal if any one of them makes every other member match.
+        // CR 702.22c
+        // Second path: at least one member has bands-with-other for some quality Q and
+        // every other member's subtypes include Q. Tries each named quality in turn.
         let quality_shape = member_bands_with_other.iter().enumerate().any(|(i, qualities)| {
             qualities.iter().any(|quality| {
                 member_subtypes
@@ -222,10 +217,9 @@ pub(crate) fn validate_declare_bands(
                     .all(|(j, subtypes)| j == i || subtypes.contains(quality))
             })
         });
-        // CR 702.22c/m's supertype form ("bands with other Legends," i.e.
-        // Legendary): same "any one named quality makes every other member
-        // match" shape as the subtype form above, checked against each
-        // member's own `supertypes` bitset instead of a `Vec<Subtype>`.
+        // CR 702.22c/m
+        // The supertype form: the same any-one-quality shape, against each member's
+        // `supertypes` bitset.
         let supertype_quality_shape =
             member_bands_with_other_supertypes.iter().enumerate().any(|(i, qualities)| {
                 qualities.iter().any(|quality| {
@@ -288,23 +282,20 @@ pub(crate) fn validate_declare_blockers(
             "this player has already declared blockers this combat".to_string(),
         ));
     }
-    // CR 509.1: a turn-based action, one per defending player (CR
-    // 508.5a - multiplayer can have more than one defending player
-    // this combat, each individually determined by which attacker
-    // is aimed at them or a planeswalker/battle they control, CR
-    // 506.4d). `command.actor` is only legal here if some attacker
-    // is actually aimed at them.
-    // CR 508.5a: "defending player" is resolved against a targeted
-    // permanent's *current* controller.
+    // CR 509.1/508.5a/506.4d
+    // A turn-based action, one per defending player. Multiplayer can have several,
+    // each determined by which attacker is aimed at them or at a permanent they
+    // control. `command.actor` is legal here only if some attacker is aimed at them,
+    // resolving "defending player" against a targeted permanent's current
+    // controller.
     if !is_defending_player(state, script_runtime, combat, actor) {
         return Err(Rejected::IllegalAction(
             "this player is not a defending player this combat".to_string(),
         ));
     }
 
-    // CR 509.1a: "the defending player chooses one creature for it
-    // to block" - a blocker can only appear once across this
-    // declaration.
+    // CR 509.1a
+    // A blocker can appear only once across the declaration.
     let mut seen_blockers = Vec::with_capacity(blocks.len());
     for (blocker, attacker) in &blocks {
         if seen_blockers.contains(blocker) {
@@ -322,22 +313,16 @@ pub(crate) fn validate_declare_blockers(
     // entries share `blockers_needed` with this check.
     block_declaration_is_legal(state, script_runtime, &blocks)?;
 
-    // CR 702.22h: banding - once a band member has been directly
-    // blocked by a creature in this submission, every other member
-    // of its band becomes blocked by that same creature too,
-    // regardless of that member's own evasion/protection (the
-    // worked example under CR 702.22h blocks a swampwalker this way
-    // even though the defending player controls a Swamp - the
-    // propagated block bypasses every per-pair check this loop just
-    // ran, and the whole-batch Menace check above). Deliberately
-    // scoped to direct blocks from *this* submission only - CR
-    // 702.22d already forces every band member to share one
-    // defending player, so no earlier submission this combat could
-    // contain a same-band pairing. A member still gets a
-    // *propagated* block from every band-mate's own direct block,
-    // even one it's already otherwise blocked by (CR 702.22h has no
-    // "unless already blocked" carve-out) - only an exact duplicate
-    // (blocker, member) pair is skipped.
+    // CR 702.22h
+    // Banding: once a band member is directly blocked in this submission, every
+    // other member of its band becomes blocked by that creature too, bypassing every
+    // per-pair check above and the whole-batch menace check (the CR 702.22h
+    // swampwalker example blocks despite a Swamp). Scoped to direct blocks from this
+    // submission because CR 702.22d makes every band member share one defending
+    // player, so no earlier submission holds a same-band pairing. A member gets a
+    // propagated block from every band-mate's direct block even if it is already
+    // blocked otherwise, because CR 702.22h has no carve-out; only an exact
+    // duplicate (blocker, member) pair is skipped.
     let mut propagated: Vec<(ObjectId, ObjectId)> = Vec::new();
     for (blocker, attacker) in &blocks {
         let Some(band) = combat.bands.iter().find(|band| band.contains(attacker)) else { continue };
@@ -379,21 +364,17 @@ pub(crate) fn apply_declare_blockers(
     })
 }
 
-/// CR 509.1h/702.22i: makes `target` become blocked via an effect (`Ability
-/// Effect::BecomeBlocked` — not a declared blocker), by recording it in
-/// `CombatState.effect_blocked` rather than `blocks` (there's no real
-/// blocker to pair it with). No-op if `target` isn't currently an attacker
-/// at all (see `AbilityEffect::BecomeBlocked`'s own doc comment for why
-/// this can't be caught earlier, at target-legality time) or if there's no
-/// combat happening. CR 603.2e: "becomes" blocked only fires on a real
-/// state change, so an attacker already blocked — whether by a declared
-/// blocker or an earlier effect — is left untouched, not re-added.
+/// CR 509.1h/702.22i: makes `target` become blocked by an effect
+/// (`AbilityEffect::BecomeBlocked`, not a declared blocker), recorded in
+/// `CombatState.effect_blocked` because there is no real blocker to pair it with.
+/// A no-op if `target` is not an attacker or there is no combat (see
+/// `AbilityEffect::BecomeBlocked` for why target legality cannot catch this
+/// earlier). CR 603.2e: "becomes blocked" fires only on a real state change, so
+/// an already-blocked attacker is left untouched.
 ///
-/// CR 702.22i: unlike CR 702.22h's declared-blocker propagation (which
-/// gives every band member the *same* blocker), this only propagates the
-/// blocked *state* — every other living, still-attacking member of
-/// `target`'s own band independently becomes blocked by no one, exactly
-/// like `target` itself.
+/// CR 702.22i: unlike CR 702.22h's propagation of the same blocker, this
+/// propagates only the blocked state: every other living, still-attacking member
+/// of `target`'s band becomes blocked by no one, like `target`.
 pub(crate) fn mark_effect_blocked(state: &mut GameState, target: ObjectId) {
     let Some(combat) = state.combat.as_mut() else { return };
     if !combat.attackers.iter().any(|(id, _)| *id == target) {
@@ -456,13 +437,11 @@ pub(crate) fn attacker_can_attack(
             "a chosen attacker has summoning sickness".to_string(),
         ));
     }
-    // CR 302.6b/702.3b: a creature with defender can't attack -
-    // effective_keywords so a granted/removed Defender is respected, not
-    // just the printed keyword. A creature with an applicable
-    // IgnoreKeyword(DEFENDER) grant (e.g. Assault Formation's
-    // "Walls you control can attack as though they didn't have
-    // defender") still has Defender - it's just exempt from the
-    // restriction it imposes, see that primitive's own doc comment.
+    // CR 302.6b/702.3b
+    // A creature with defender cannot attack. effective_keywords respects a granted
+    // or removed Defender. An applicable IgnoreKeyword(DEFENDER) grant (Assault
+    // Formation) leaves Defender in place but exempts the creature from the
+    // restriction (see that primitive).
     if effective_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
         && !ignored_keywords(state, script_runtime, object.object_id).contains(KeywordSet::DEFENDER)
     {
@@ -520,9 +499,9 @@ pub(crate) fn attack_target_is_legal(
                 ));
             }
         }
-        // CR 506.4/508.1a: an attacker is declared against a player, a
-        // planeswalker, or a battle - never an activated/triggered
-        // ability (nothing in Magic attacks a spell/ability).
+        // CR 506.4/508.1a
+        // An attacker is declared against a player, planeswalker or battle, never an
+        // ability.
         Target::Ability(_) => return Err(Rejected::InvalidTarget),
     }
     Ok(())
@@ -590,11 +569,10 @@ pub(crate) fn block_is_legal(
         ));
     }
 
-    // CR 702.9b: an attacker with flying can only be blocked by
-    // a creature with flying and/or reach. Reads through
-    // effective_keywords (CR 613 layer 6) - a continuous effect
-    // granting/removing Flying/Reach now actually changes
-    // blocking legality, not just the printed KeywordSet.
+    // CR 702.9b
+    // An attacker with flying can be blocked only by a creature with flying or
+    // reach. Reads effective_keywords (CR 613 layer 6), so a granted or removed
+    // Flying or Reach changes legality.
     let attacker_object = state.object(attacker).ok_or(Rejected::InvalidTarget)?;
     let attacker_keywords = effective_keywords(state, script_runtime, attacker_object.object_id);
     let blocker_keywords = effective_keywords(state, script_runtime, blocker_object.object_id);
@@ -608,19 +586,17 @@ pub(crate) fn block_is_legal(
         ));
     }
 
-    // CR 702.16d's own protection check below already needs both
-    // objects' full effective_characteristics - computed here
-    // instead, once, so Fear/Intimidate's color/card-type checks
-    // (which need the same live values) can reuse them too.
+    // CR 702.16d's protection check below needs both objects'
+    // effective_characteristics, so they are computed once here and Fear and
+    // Intimidate reuse them.
     let attacker_characteristics =
         crate::layers::effective_characteristics(state, script_runtime, attacker_object.object_id);
     let blocker_characteristics =
         crate::layers::effective_characteristics(state, script_runtime, blocker_object.object_id);
 
-    // CR 702.36b/702.13b: Fear/Intimidate - can't be blocked
-    // except by an artifact creature and/or (Fear: a black
-    // creature; Intimidate: a creature sharing a color with the
-    // attacker).
+    // CR 702.36b/702.13b
+    // Fear: only artifact or black creatures can block. Intimidate: only artifact
+    // creatures or creatures sharing a color with the attacker.
     if attacker_keywords.contains(KeywordSet::FEAR)
         && !(blocker_characteristics.card_types.contains(CardTypeSet::ARTIFACT)
             || blocker_characteristics.colors.contains(ColorSet::BLACK))
@@ -642,8 +618,9 @@ pub(crate) fn block_is_legal(
         ));
     }
 
-    // CR 702.28b: Shadow - symmetric, a shadow creature can only
-    // block/be blocked by another shadow creature.
+    // CR 702.28b
+    // Shadow is symmetric: a shadow creature blocks and is blocked only by shadow
+    // creatures.
     if attacker_keywords.contains(KeywordSet::SHADOW) != blocker_keywords.contains(KeywordSet::SHADOW) {
         return Err(Rejected::IllegalAction(
             "shadow creatures can only block or be blocked by other shadow \
@@ -652,9 +629,9 @@ pub(crate) fn block_is_legal(
         ));
     }
 
-    // CR 702.31b: Horsemanship - can't be blocked by a creature
-    // without horsemanship (a horsemanship creature may itself
-    // block anything, no restriction on that direction).
+    // CR 702.31b
+    // Horsemanship: cannot be blocked by a creature without it. A horsemanship
+    // creature may block anything.
     if attacker_keywords.contains(KeywordSet::HORSEMANSHIP)
         && !blocker_keywords.contains(KeywordSet::HORSEMANSHIP)
     {
@@ -665,13 +642,11 @@ pub(crate) fn block_is_legal(
         ));
     }
 
-    // CR 702.14c: landwalk - a creature with landwalk can't be
-    // blocked at all while the defending player controls at
-    // least one land with the specified subtype. Unlike
-    // Fear/Intimidate/Shadow/Horsemanship above, this checks the
-    // *defending player's own battlefield*, not the blocker's
-    // own characteristics - see EffectiveCharacteristics::
-    // landwalk_subtypes' own doc comment for why.
+    // CR 702.14c
+    // Landwalk makes the attacker unblockable while the defending player controls a
+    // land with the specified subtype. Unlike Fear, Intimidate, Shadow and
+    // Horsemanship above, this checks the defending player's battlefield and not
+    // the blocker (see EffectiveCharacteristics::landwalk_subtypes).
     if !attacker_characteristics.landwalk_subtypes.is_empty() || !attacker_characteristics.landwalk_qualities.is_empty() {
         let defender_controls_matching_land = state.objects.values().any(|land| {
             if land.zone != ZoneKind::Battlefield
@@ -681,11 +656,9 @@ pub(crate) fn block_is_legal(
             }
             let land_characteristics = crate::layers::effective_characteristics(state, script_runtime, land.object_id);
             land_characteristics.subtypes.iter().any(|s| attacker_characteristics.landwalk_subtypes.contains(s))
-                // CR 702.14a's combination forms - the land must
-                // satisfy every field the matched `LandwalkQuality`
-                // specifies, in addition to being a land at all
-                // (the "[type]" is always "land plus ...", never
-                // just "artifact"/"snow" alone).
+                // CR 702.14a
+                // The combination forms: the land must satisfy every field the matched
+                // `LandwalkQuality` specifies, besides being a land.
                 || attacker_characteristics.landwalk_qualities.iter().any(|quality| {
                     land_characteristics.card_types.contains(CardTypeSet::LAND)
                         && quality.subtypes.iter().all(|s| land_characteristics.subtypes.contains(s))
@@ -703,20 +676,13 @@ pub(crate) fn block_is_legal(
         }
     }
 
-    // CR 702.16d: an attacker with protection from a quality
-    // (color, 702.16e, card type, subtype, name, 702.16a,
-    // "everything," 702.16j, or a specific player, 702.16k)
-    // can't be blocked by a creature matching that quality.
-    // Reuses attacker_characteristics/blocker_characteristics
-    // computed above (Fear/Intimidate's own doc comment) - a
-    // granted color/type/subtype/name or a granted protection
-    // all change blocking legality for real, not just the
-    // printed values. The player quality compares raw
-    // GameObject.controller fields (attacker_object/
-    // blocker_object, already in scope), resolved relative to
-    // the attacker's own controller - same "You"/"Opponent"
-    // resolution target_has_protection_from's own player check
-    // uses.
+    // CR 702.16d
+    // An attacker with protection from a quality (color 702.16e, card type, subtype,
+    // name 702.16a, everything 702.16j, or a specific player 702.16k) cannot be
+    // blocked by a creature matching it. Reuses the characteristics computed above,
+    // so granted colors, types, subtypes, names and protections count. The player
+    // quality compares raw GameObject.controller fields relative to the attacker's
+    // controller, as target_has_protection_from does.
     if attacker_characteristics.protection_everything
         || attacker_characteristics.protection_colors.intersects(blocker_characteristics.colors)
         || attacker_characteristics

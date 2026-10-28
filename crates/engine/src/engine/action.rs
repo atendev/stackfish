@@ -1,5 +1,5 @@
-//! `submit_action`'s validation entry point, `CommandId` allocation, and the
-//! `ProcessState::PendingAction` pipeline stage - split out of `engine.rs`.
+//! `submit_action` validation, `CommandId` allocation and the
+//! `ProcessState::PendingAction` pipeline stage. See `DESIGN.md`.
 
 use crate::commands::{self, find_ability, Internal, PendingPaymentRequest, PriorityHandoff};
 use crate::engine_context::{PipelineContext, PipelineExit};
@@ -19,49 +19,23 @@ impl Engine {
         id
     }
 
-    /// Validates `action` is legal right now (right player, matches what's
-    /// actually available) and queues it for the next `step()` to act on.
-    /// Does not itself advance the ledger — `step()` does that.
+    /// Validates `action` against the current state and queues it for the next
+    /// `step()`. A rejection leaves the engine untouched and the player keeps
+    /// priority (CR 733.1/733.2).
     ///
-    /// Checks "are we even waiting for an action right now", "is it this
-    /// player's priority" (CR 117.3a), and then the command itself with
-    /// `commands::validate_command` (timing, costs, targets, combat rules).
-    /// Any refusal leaves the engine exactly as it was (CR 733.1/733.2, 024,
-    /// 035) and the player keeps priority.
-    ///
-    /// CR 508.1/509.1/510.1 exception: `DeclareAttackers`/`DeclareBlockers`/
-    /// `AssignCombatDamage` are turn-based actions that explicitly "don't
-    /// use the stack" and aren't a priority decision at all - the defending
-    /// player has no reason to hold priority when blockers are declared
-    /// (508.2: priority stays with the active player through the declare-
-    /// attackers step), and combat damage is dealt automatically as the
-    /// combat damage step opens (510.1/510.2), not in response to a
-    /// priority window. Skipping the priority check for these three and
-    /// leaving the actor check entirely to `validate_command` (active player
-    /// / defending player, per CR 506.2) is a deliberate simplification -
-    /// the fully correct model would have these fire automatically on
-    /// entering their step, before any priority window opens, which this
-    /// engine doesn't have a pipeline stage for yet (`ProcessState`/
-    /// `AdvanceTurnStep` only open a generic priority window on every step,
-    /// combat steps included).
+    /// Declare-attackers, declare-blockers and combat damage skip the priority
+    /// check and leave the actor check to `validate_command`: they are
+    /// turn-based actions that don't use the stack (CR 508.1, 509.1, 510.1).
+    // TODO: fire these on entering their step, before any priority window opens (CR 508.1, 510.1)
     pub fn submit_action(&mut self, action: PlayerAction) -> Result<(), ActionError> {
         // Every rejection below runs before the first mutation, including the
-        // payment suspension in the nested mana-ability arm (024).
+        // payment suspension in the nested mana-ability arm.
         let mut suspend_payment = false;
         match &self.process_state {
             ProcessState::PriorityWindow => {}
-            // CR 601.2g/605.3a: a mana ability may be activated "even if
-            // it's in the middle of casting or resolving a spell or
-            // activating or resolving an ability" that itself needs a mana
-            // payment - the one exception to "only in a real priority
-            // window", and only for the payer's own mana abilities, never
-            // any other action (a second spell, a non-mana ability, or
-            // anyone but the payer trying to interject). `suspend_current_payment`
-            // stashes the interrupted `AwaitingPayment` (plus the
-            // `pipeline_context`/`pipeline_exit` this nested action's own
-            // `handle_pending_action` call is about to overwrite) onto
-            // `suspended_payments`, resumed by `resume_suspended_payment_or`
-            // once this nested action's own pipeline run settles.
+            // CR 605.3a: the payer's own mana abilities may interrupt a pending
+            // payment; any other action is refused. The interrupted payment is
+            // stashed on `suspended_payments` and resumed once the nested action settles.
             ProcessState::AwaitingPayment { payer, .. }
                 if action.player == *payer && self.is_mana_ability_activation(&action.kind) =>
             {
@@ -93,10 +67,8 @@ impl Engine {
                 "pregame actions use submit_mulligan_decision / submit_bottom_cards".to_string(),
             ));
         }
-        // 035: the command is checked in full before it is queued, so the answer
-        // does not depend on the caller (the Session, a test or a scenario). A
-        // rejection returns here with nothing changed, the pending payment
-        // included.
+        // Checked in full before queueing so the answer doesn't depend on the
+        // caller; a rejection leaves the pending payment untouched.
         commands::validate_command(&self.state, &self.script_runtime, action.player, action.kind.clone())
             .map_err(ActionError::Rejected)?;
         if suspend_payment {
@@ -106,16 +78,9 @@ impl Engine {
         Ok(())
     }
 
-    /// CR 605.1a/605.3a: `submit_action`'s own scope-check for its nested-
-    /// mid-payment exception - `true` only for an `ActivateAbility` whose
-    /// target ability is a real mana ability (`AddMana`/`AddManaChoice`),
-    /// same effect-shape dispatch `commands::activate::execute_activate_ability`
-    /// itself already branches on. `false` (not just "no such ability") for
-    /// a bad `source`/`ability_index` too - either way, `submit_action`
-    /// rejects up front rather than queuing something `execute_command`
-    /// would just reject again downstream, since a downstream rejection
-    /// would (harmlessly, but pointlessly) still suspend the outer payment
-    /// first via `handle_pending_action`'s error-arm fallback.
+    /// CR 605.1a: true only for an `ActivateAbility` on a real mana ability.
+    /// A bad `source` or `ability_index` is false too, so it is rejected up
+    /// front instead of suspending the outer payment first.
     fn is_mana_ability_activation(&self, kind: &PlayerActionKind) -> bool {
         let PlayerActionKind::ActivateAbility { source, ability_index, .. } = kind else {
             return false;
@@ -126,17 +91,9 @@ impl Engine {
         matches!(ability.effect, Some(AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. }))
     }
 
-    /// `submit_action`'s own nested-mid-payment branch: pulls the current
-    /// `AwaitingPayment` (and the `pipeline_context`/`pipeline_exit` the
-    /// about-to-run nested `PendingAction` would otherwise clobber - see
-    /// `Engine::suspended_payments`' own doc comment) off the live fields
-    /// and onto the suspension stack, leaving `process_state` set to
-    /// whatever the caller assigns next (`submit_action` always follows
-    /// this with `ProcessState::PendingAction(action)`, same as the normal
-    /// `PriorityWindow` branch). `mem::take`/`mem::replace`, not `.clone()`
-    /// - nothing reads the live fields again before the nested action's own
-    /// `handle_pending_action` call overwrites them anyway, so there's
-    /// nothing to preserve in place.
+    /// Moves the current `AwaitingPayment` and the pipeline fields the nested
+    /// action would overwrite onto `suspended_payments`. Takes the values
+    /// rather than cloning since nothing reads the live fields before they are overwritten.
     fn suspend_current_payment(&mut self) {
         let ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
@@ -155,8 +112,7 @@ impl Engine {
     /// `state`, then hands off to `ReplacementCheck` for the events it
     /// proposed.
     pub(super) fn handle_pending_action(&mut self, action: PlayerAction) -> StepStatus {
-        // The id is only consumed once the command is accepted, so a
-        // rejected action leaves `next_command_id` as it was (024).
+        // The id is consumed only once the command is accepted.
         let command_id = CommandId(self.next_command_id);
         let since_ledger = self.state.ledger.len();
         let command = EngineCommand { command_id, actor: action.player, action: action.kind };
@@ -164,13 +120,10 @@ impl Engine {
         let mut outcome = match commands::execute_command(&mut self.state, &self.script_runtime, command) {
             Ok(outcome) => outcome,
             Err(err) => {
-                // `submit_action` validated this command with the same
-                // `validate_command`, so a rejection here means the state
-                // changed between the two, or the engine broke (035). Either
-                // way it is an `Internal` error, and fatal. The process state
-                // is still reset, and a nested mana ability's outer payment
-                // resumed, so a host that inspects the engine finds it
-                // consistent.
+                // `submit_action` ran the same `validate_command`, so a rejection
+                // here means the state changed in between or the engine broke:
+                // fatal either way. The process state is reset and a nested mana
+                // ability's outer payment resumed so a host finds the engine consistent.
                 let internal = match err {
                     commands::CommandError::Internal(internal) => internal,
                     commands::CommandError::Rejected(rejected) => {
@@ -183,37 +136,13 @@ impl Engine {
             }
         };
 
-        // CommandOutcome::battlefield_entries - execute_command
-        // takes &ScriptRuntime as of the layer-engine-cda slice (for
-        // effective_power/effective_keywords's read-only CDA
-        // resolution), but that's an immutable borrow - it still
-        // can't run a card's self-registering script itself
-        // (run_card_script needs &mut ScriptRuntime to load into the
-        // registry), so it just reports which ids became new
-        // battlefield permanents; this is the "one place performs
-        // the side effect" half, same split priority_handoff/broke_pass_chain
-        // already use. A script error here is logged as a
-        // GameEventKind::ScriptError (record_script_error) rather than
-        // silently dropped - see its own doc comment for why that is not a
-        // rejection.
+        // `execute_command` only reports new battlefield permanents; running their
+        // scripts needs `&mut ScriptRuntime`, so it happens here. A script error is
+        // logged as a `ScriptError` event instead of rejecting the command.
         //
-        // CR 603.6d/614.1c: `battlefield_entries` is only ever
-        // populated by `PlayLand` (a hand->battlefield move) as of
-        // this writing - once the script above has (possibly)
-        // self-registered an EntersTapped/EntersWithCounters effect
-        // targeting this same object, apply it (and any externally
-        // granted one already sitting in state.replacement_effects)
-        // right here, same call `move_resolving_spell`'s own
-        // ResolveStackTop caller makes.
-        // TODO(`phase5/devour-amplify-search-entry`): no
-        // `replacement::pending_devour_choice`/`pending_amplify_choice`
-        // check here, unlike `Search`'s own battlefield-entry loop - and
-        // deliberately so, not just unimplemented. This loop only ever runs
-        // for `PlayLand` (a land entering the battlefield), and a land can
-        // never carry CR 702.82a Devour or CR 702.38a Amplify text (both are
-        // creature-only replacement effects) - there is no real card this
-        // could ever matter for. Revisit only if this loop is ever
-        // generalized to a non-land battlefield-entry producer.
+        // CR 603.6d, 614.1c: apply enters-the-battlefield replacements once the
+        // script has registered its own.
+        // TODO: devour/amplify choice here if this loop ever handles non-land entries (CR 702.82a, 702.38a)
         for object_id in &outcome.battlefield_entries {
             if let Some(definition) = self.state.object(*object_id).map(|o| o.definition.clone()) {
                 let result = self.script_runtime.run_card_script(&mut self.state, &definition, *object_id);
@@ -235,35 +164,22 @@ impl Engine {
             caused_by_command: Some(command_id),
             parent_event: None,
         });
-        // See `pending_payment`'s doc comment - read here (this
-        // command's own outcome) rather than inferred later, since
-        // CommitEvents has no way to know "was this a CastSpell"
-        // without it.
+        // Read from this outcome because `CommitEvents` can't tell a cast apart.
         self.set_pending_payment(outcome.requires_payment);
 
-        // engine.rs owns state.priority_player entirely now -
-        // execute_command just reports intent (CommandOutcome::
-        // priority_handoff, commands.rs) instead of writing the
-        // field itself.
+        // Only the engine writes `priority_player`; commands just report intent.
         if let PriorityHandoff::To(player) = outcome.priority_handoff {
             self.state.priority_player = player;
         }
 
-        // engine.rs owns state.consecutive_passes entirely now -
-        // execute_command just reports whether its variant broke
-        // the chain (CommandOutcome::broke_pass_chain, commands.rs)
-        // instead of mutating the counter itself, so there's one
-        // place deciding what "everyone just passed" means rather
-        // than relying on every match arm in execute_command
-        // remembering to reset it.
+        // One place decides what "everyone just passed" means, so no command arm
+        // has to remember to reset the counter.
         if outcome.broke_pass_chain {
             self.state.consecutive_passes = 0;
             self.pipeline_exit = PipelineExit::BackToPriority;
         } else {
             self.state.consecutive_passes += 1;
-            // CR 800.4b: an eliminated player is never asked for
-            // priority, so "everyone passed" only needs a pass from
-            // each player still in the game.
+            // CR 800.4b: only players still in the game need to pass.
             self.pipeline_exit = if self.state.consecutive_passes as usize
                 >= commands::non_eliminated_players(&self.state).len()
             {

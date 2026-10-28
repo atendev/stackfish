@@ -1,26 +1,5 @@
-//! CR 700.2d: resolving 2+ chosen modes of one spell or ability, in printed
-//! order.
-//!
-//! Each mode is handed to the same `resolve_ability_effect` dispatcher a
-//! single effect uses, against a per-mode view of the stack object
-//! (`mode_view`), so a mode behaves exactly like that effect standing alone.
-//! Synchronous modes just return their events and the loop moves on. A mode
-//! that needs the event pipeline (a zone move, a draw, a player choice, a CR
-//! 616.1 ordering pause) ends in `ReplacementCheck` -> `CommitEvents` like
-//! every other resolution, and every one of those tails finishes with the
-//! stack object's `StackObjectResolved`. `Engine::modal_continuation` stores
-//! the rest of the modes; `resolve_commit_events_state` sees that marker,
-//! drops it from the ledger (the object hasn't resolved yet) and calls
-//! `resume_modal_resolution` instead of leaving for the SBA loop. Nothing in
-//! between runs state-based actions or collects triggers (CR 608.2c).
-//!
-//! The target words of all modes form one flat list (`TargetSpec::Multiple`);
-//! `words[i]` of them belong to mode i (`AbilityEffect::Modal`).
-//!
-//! `AbilityEffect::Chain` (CR 608.2c) uses the same loop with every entry
-//! "chosen". Its entries share the ability's one target requirement and one
-//! legal-target set (`ModalContinuation::shared_legal`), so no per-entry
-//! target words exist.
+//! CR 700.2d: resolving 2+ chosen modes in printed order. Each mode runs through the
+//! normal dispatcher against a per-mode view of the stack object. See `DESIGN.md`.
 
 use std::ops::{ControlFlow, Range};
 
@@ -33,8 +12,10 @@ use crate::types::target::TargetSpec;
 
 use super::super::{Engine, ProcessState, StepStatus};
 
-/// The modes of a `Modal` resolution still to run after the one currently in
-/// the pipeline. See this module's doc comment.
+/// The modes still to run after the one in the pipeline. A mode needing the event
+/// pipeline ends in `ReplacementCheck` and `CommitEvents`; `resolve_commit_events_state`
+/// drops the `StackObjectResolved` marker and calls `resume_modal_resolution`. Nothing
+/// between runs SBAs or collects triggers (CR 608.2c). `Chain` shares one legal set.
 #[derive(Debug)]
 pub(in crate::engine) struct ModalContinuation {
     /// The whole stack object, not a per-mode view.
@@ -113,10 +94,8 @@ fn mode_view(top: &StackObject, effect: &AbilityEffect, range: Range<usize>, leg
 }
 
 impl Engine {
-    /// CR 700.2d — 2+ chosen modes, combined. See `AbilityEffect::Modal`'s
-    /// own doc comment for the shape invariant (one entry per chosen mode,
-    /// `words[i]` target words each, `modal_chunk_legals` precomputed by the
-    /// caller with one legal-target chunk per word).
+    /// CR 700.2d: 2+ chosen modes. `words[i]` target words belong to mode i, and the
+    /// caller precomputed one legal chunk per word in `modal_chunk_legals`.
     pub(super) fn resolve_modal_effect(
         &mut self,
         top: &StackObject,

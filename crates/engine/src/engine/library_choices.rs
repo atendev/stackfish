@@ -1,7 +1,5 @@
-//! Answers to CR 701.22/701.23/701.25 library-manipulation pauses (Scry,
-//! Surveil, Search) and the CR 303.4f/301.5e/301.6 entry-attach choice a
-//! battlefield-destined search can raise mid-loop — split out of
-//! `engine.rs`.
+//! Answers to scry, surveil and search pauses and the entry-attach choice a
+//! battlefield-bound search can raise. See `DESIGN.md`.
 
 use std::collections::{HashSet, VecDeque};
 
@@ -21,20 +19,9 @@ use super::{
 };
 
 impl Engine {
-    /// Answers a pending CR 701.22 `Game.Ops.Scry(n)` pause raised by
-    /// `StepStatus::AwaitingScryChoice` — `kept_on_top`/`put_bottom`
-    /// together must contain exactly the pending `cards` set once each (see
-    /// `is_exact_partition`), each in the caller's chosen order.
-    /// `kept_on_top[0]` becomes the new top of the library; `put_bottom`'s
-    /// order stacks upward from the library's existing bottom (so
-    /// `put_bottom`'s last entry ends up the new absolute bottom card).
-    /// Deliberately a separate entry point from `submit_action`, same reason
-    /// `submit_replacement_choice`/`submit_legend_rule_choice` are.
-    ///
-    /// Pure reorder within the library — no zone change, no new `ObjectId`s
-    /// (same "mutate `Zone.contents` directly" convention `shuffle_library`
-    /// already uses), so replacement effects never see this at all (there's
-    /// nothing in real Magic that replaces a scry anyway).
+    /// Answers a scry pause (CR 701.22). The two piles must partition the offered
+    /// cards; `kept_on_top[0]` becomes the top card and `put_bottom`'s last entry
+    /// the bottom card. A pure reorder, so replacement effects never see it.
     pub fn submit_scry_choice(
         &mut self,
         kept_on_top: Vec<ObjectId>,
@@ -75,15 +62,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Answers a pending CR 701.25 `Game.Ops.Surveil(n)` pause raised by
-    /// `StepStatus::AwaitingSurveilChoice` — same shape as
-    /// `submit_scry_choice` except `put_graveyard` is a real library ->
-    /// graveyard move (CR 400.7 new `ObjectId` per card), same convention
-    /// `submit_discard` already established, rather than a bottom-of-library
-    /// reorder. Departed triggered abilities are stashed for consistency
-    /// (same "captured but practically dormant, no Hand/Library-departure
-    /// LKI condition exists yet" stance `retire_object`'s own doc comment
-    /// already takes for `draw_step`'s library-side retirement).
+    /// Answers a surveil pause (CR 701.25). Like scry except `put_graveyard` is a
+    /// real library-to-graveyard move (CR 400.7).
     pub fn submit_surveil_choice(
         &mut self,
         kept_on_top: Vec<ObjectId>,
@@ -101,10 +81,7 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        // Remove every offered card from the library up front (both
-        // piles), then put the kept-on-top pile straight back - a pure
-        // reorder, no zone change, no new ObjectIds (same convention
-        // submit_scry_choice's own top pile uses).
+        // Both piles leave the library, then the kept pile goes back on top.
         if let Some(lib) = self.state.zone_mut(ZoneKind::Library, Some(controller)) {
             for id in &cards {
                 lib.remove(*id);
@@ -155,21 +132,9 @@ impl Engine {
         Ok(())
     }
 
-    /// Answers a pending CR 701.23 `Game.Ops.Search(...)` pause raised by
-    /// `StepStatus::AwaitingSearchChoice` — `chosen` must be a subset of the
-    /// pending `candidates` (already pre-filtered against the search's own
-    /// `FilterSpec`, so no re-filtering happens here), no duplicates, and no
-    /// more than `count` entries (CR 701.23b: fewer, including zero, is
-    /// always legal). Moves each found card Library -> the pause's own
-    /// `destination` (CR 400.7 new `ObjectId` per card): `Hand` mirrors
-    /// `submit_surveil_choice`'s graveyard-move convention (`retire_object`,
-    /// no script); `Battlefield` mirrors `move_resolving_spell`'s own
-    /// battlefield-entry convention instead (`remap_abilities`, a real ETB
-    /// `run_card_script`, `controlled_since_turn` set to the current turn,
-    /// `tapped` applied as requested). Shuffles the library afterward iff
-    /// `shuffle_after` (CR 701.24a), via the existing `shuffle_library`
-    /// helper — same "already logs its own events" convention
-    /// `AbilityEffect::Shuffle` itself already relies on.
+    /// Answers a search pause (CR 701.23). `chosen` must be distinct candidates and
+    /// at most `count` of them; fewer, including none, is legal (CR 701.23b). The
+    /// library is shuffled afterwards if the search says so (CR 701.24a).
     pub fn submit_search_choice(&mut self, chosen: Vec<ObjectId>) -> Result<(), SearchChoiceError> {
         let ProcessState::AwaitingSearchChoice { candidates, count, .. } = &self.process_state else {
             return Err(SearchChoiceError::NotAwaitingChoice);
@@ -202,33 +167,9 @@ impl Engine {
         Ok(())
     }
 
-    /// The real body of `submit_search_choice`'s battlefield/hand-entry
-    /// loop, factored out so `submit_entry_attach_choice` can resume it
-    /// after answering a CR 303.4f/301.5e/301.6 pause raised partway
-    /// through. Processes `remaining` one card at a time (`VecDeque::
-    /// pop_front`, so a card already processed before a pause is never
-    /// revisited); if a `SearchDestination::Battlefield { enters_attached:
-    /// true, .. }` Aura/Equipment/Fortification entry finds 2+ legal attach
-    /// candidates (`commands::legal_entry_attach_candidates`), this returns
-    /// `ProcessState::AwaitingEntryAttachChoice` with everything still needed
-    /// to pick back up (`remaining`, `destination`, the accumulated
-    /// `events_so_far`, ...) - `submit_entry_attach_choice` calls back in
-    /// with the same `remaining` queue once the choice is answered. A CR
-    /// 702.82a Devour / CR 702.38a Amplify choice (`phase5/devour-amplify-
-    /// search-entry`) pauses the same way, via `AwaitingSearchDevourChoice`/
-    /// `AwaitingSearchAmplifyChoice` - see `replacement::pending_devour_
-    /// choice`'s own doc comment for why this producer, unlike `PlayLand`/
-    /// `CreateToken`, is wired up. Reaching the end of `remaining` with no
-    /// pause finalizes exactly like the old inline loop did: `shuffle_after`,
-    /// then `StackObjectResolved`, then `ReplacementCheck`.
-    ///
-    /// Returns the `ProcessState` to install - callers assign it to
-    /// `self.process_state` themselves, same convention `continue_scripted_
-    /// zone_move`/`continue_create_token` already use (rather than mutating
-    /// `self.process_state` directly), since `Engine::continue_scripted_
-    /// zone_move`'s own `ScriptedZoneMoveThen::SearchResume` arm needs to
-    /// call this and use the result without an intervening `self.process_
-    /// state` write of its own.
+    /// Moves the found cards one at a time so a pause for an entry-attach choice
+    /// or a devour/amplify choice can resume with the unprocessed `remaining`
+    /// (CR 303.4f, 702.82a, 702.38a). Returns the state for the caller to install.
     pub(in crate::engine) fn continue_search_battlefield_entry(
         &mut self,
         mut remaining: VecDeque<ObjectId>,
@@ -262,9 +203,7 @@ impl Engine {
                         .expect("hand zone must exist")
                         .push_bottom(new_id);
                     self.state.objects.insert(new_id, new_object);
-                    // CR 702.29b: a tutored-to-hand card's own script
-                    // self-registers any hand-only ability now, same as
-                    // every other Library->Hand producer.
+                    // CR 702.29b: a hand-only ability registers when the card reaches hand.
                     self.run_card_script_for(new_id);
                     events_so_far.push(GameEventKind::ZoneChange {
                         object: new_id,
@@ -274,18 +213,8 @@ impl Engine {
                     });
                 }
                 SearchDestination::Battlefield { tapped, enters_attached } => {
-                    // CR 303.4f/g/301.5e/301.6: computed *before* any state
-                    // mutation, and before this permanent's own new
-                    // `ObjectId` even exists - a not-yet-inserted permanent
-                    // can never appear as a candidate of its own scan (see
-                    // `legal_entry_attach_candidates`'s own doc comment for
-                    // why that's the right call, not a gap).
-                    // `card` (the pre-move library id) is passed as the
-                    // "source" for CR 115.4's "another target" exclusion -
-                    // harmless either way, since a library object is never
-                    // battlefield-zoned and so never a legal candidate in
-                    // the first place. `new_id` doesn't exist yet at this
-                    // point, so there's nothing more precise to pass.
+                    // CR 303.4f, 301.5e: computed before the permanent gets its new id so
+                    // it can't be a candidate of its own scan.
                     let attach_candidates = enters_attached
                         .then(|| {
                             commands::legal_entry_attach_candidates(
@@ -298,14 +227,8 @@ impl Engine {
                         })
                         .flatten();
                     if let Some(candidates) = &attach_candidates {
-                        // CR 303.4g: an Aura with no legal enchant target,
-                        // whose current zone (library) isn't the stack,
-                        // remains right where it is - nothing to move; skip
-                        // straight to the next card. Equipment/Fortification
-                        // with zero legal candidates instead still enters
-                        // the battlefield unattached (CR 301.5e/301.6) - that
-                        // case falls through to the normal move below and is
-                        // handled by the `0 =>` arm further down.
+                        // CR 303.4g: an Aura with no legal target stays in the library.
+                        // Equipment with none enters unattached (CR 301.5e).
                         if candidates.is_empty() && commands::is_aura(&last_known_info.definition) {
                             continue;
                         }
@@ -339,14 +262,8 @@ impl Engine {
                         to: ZoneKind::Battlefield,
                         last_known_info: Some(last_known_info),
                     });
-                    // CR 702.82a/702.38a (`phase5/devour-amplify-search-
-                    // entry`): checked before `apply_enters_battlefield_
-                    // modifiers`, same "only the call site that can actually
-                    // pause should call this" posture `continue_permanent_
-                    // entry`'s own resolving-spell path already established
-                    // - see `pending_devour_choice`/`pending_amplify_choice`'s
-                    // own doc comments. Devour checked first, matching that
-                    // same sibling ordering.
+                    // CR 702.82a, 702.38a: devour is checked before amplify, and both before
+                    // the enters-the-battlefield modifiers.
                     if let Some((per_creature, candidates)) = replacement::pending_devour_choice(
                         &self.state,
                         &self.script_runtime,
@@ -385,14 +302,8 @@ impl Engine {
                             shuffle_after,
                         };
                     }
-                    // CR 603.6d/614.1c: same post-script apply step
-                    // `move_resolving_spell`'s caller and the PlayLand
-                    // battlefield_entries loop both take - `tapped` above is
-                    // this search's own explicit destination flag (CR
-                    // 701.23), unrelated to and independent of a card's own
-                    // "enters tapped" ability, so both can stack (either
-                    // already tapping it is harmless - EntersTapped is
-                    // idempotent).
+                    // CR 603.6d: `tapped` is the search's own flag, independent of an
+                    // enters-tapped ability; applying both is harmless.
                     let counter_events = replacement::apply_enters_battlefield_modifiers(
                         &mut self.state,
                         &self.script_runtime,
@@ -404,11 +315,8 @@ impl Engine {
 
                     if let Some(candidates) = attach_candidates {
                         match candidates.len() {
-                            // CR 301.5e/301.6: no legal object to attach
-                            // to - the Equipment/Fortification (an Aura
-                            // never reaches here with an empty list, see the
-                            // early `continue` above) just enters unattached.
-                            // Nothing more to do.
+                            // CR 301.5e: no legal object, so it enters unattached. An Aura
+                            // with none was skipped above.
                             0 => {}
                             1 => match candidates[0] {
                                 Target::Object(target_id) => {
@@ -420,18 +328,12 @@ impl Engine {
                                     commands::attach_permanent_to_player(&mut self.state, new_id, player);
                                     events_so_far.push(GameEventKind::AttachedToPlayer { object: new_id, player });
                                 }
-                                // Attach candidates are only ever objects or
-                                // players (legal_entry_attach_candidates),
-                                // never an ability.
+                                // Attach candidates are objects or players only.
                                 Target::Ability(_) => unreachable!("attach candidates are never abilities"),
                             },
                             _ => {
-                                // CR 303.4f: 2+ legal candidates - the
-                                // entering player chooses. `new_id` is
-                                // already a real battlefield permanent
-                                // (unattached) at this point, same "already
-                                // a permanent, then gets attached" order the
-                                // cast-time Aura-ETB-attach path uses.
+                                // CR 303.4f: with 2+ candidates the entering player chooses; the
+                                // permanent is already on the battlefield, unattached.
                                 return ProcessState::AwaitingEntryAttachChoice {
                                     attaching: new_id,
                                     controller,
@@ -457,16 +359,8 @@ impl Engine {
         ProcessState::ReplacementCheck { remaining: events_so_far.into(), checked: Vec::new() }
     }
 
-    /// Answers a pending CR 303.4f/301.5e/301.6 entry attach choice raised by
-    /// `StepStatus::AwaitingEntryAttachChoice` — `chosen` must be one of
-    /// that status's `candidates`. Unlike `submit_attach_choice`, this
-    /// resumes a real continuation: `continue_search_battlefield_entry`
-    /// picks back up with whatever cards were still left in the search that
-    /// raised this pause. `chosen` is `Target`-shaped since
-    /// `phase5/aura-enters-attached-player` — an Aura's own candidates can
-    /// be players (CR 303.4f/b); dispatches to `attach_permanent`/
-    /// `attach_permanent_to_player` the same way `ResolveStackTop`'s own
-    /// cast-time attach branch already does.
+    /// Answers an entry-attach pause (CR 303.4f) and resumes the search with the
+    /// cards still unprocessed. `chosen` is a candidate object or player.
     pub fn submit_entry_attach_choice(&mut self, chosen: Target) -> Result<(), AttachChoiceError> {
         let ProcessState::AwaitingEntryAttachChoice { candidates, .. } = &self.process_state else {
             return Err(AttachChoiceError::NotAwaitingChoice);
@@ -489,8 +383,7 @@ impl Engine {
                 commands::attach_permanent_to_player(&mut self.state, attaching, player);
                 events_so_far.push(GameEventKind::AttachedToPlayer { object: attaching, player });
             }
-            // `candidates` only ever holds Object/Player entries (checked
-            // above via candidates.contains).
+            // Candidates hold objects and players only.
             Target::Ability(_) => unreachable!("attach candidates are never abilities"),
         }
         self.process_state =
@@ -498,19 +391,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Answers a pending CR 702.82a Devour choice raised mid-`Search` by
-    /// `StepStatus::AwaitingSearchDevourChoice` (`phase5/devour-amplify-
-    /// search-entry`) — same validation shape as `submit_devour_choice`
-    /// (`sacrificed` any subset of `candidates`, no duplicates), and the same
-    /// `apply_one_replacement`/`CounterAdded`/`continue_scripted_zone_move`
-    /// sequence, except the `candidate_event`'s `from` is `ZoneKind::Library`
-    /// (matching how `pending_devour_choice` found this effect in the first
-    /// place, not `ZoneKind::Stack`), and the sacrifice's own finalization is
-    /// `ScriptedZoneMoveThen::SearchResume` rather than `StackResolution` -
-    /// once the sacrifices (and any nested CR 616.1 ordering choice they
-    /// themselves raise) settle, control returns to `continue_search_
-    /// battlefield_entry`'s own still-pending candidates instead of
-    /// finalizing early.
+    /// Answers a devour pause raised mid-search (CR 702.82a). The sacrifices
+    /// resume the search afterwards instead of finalizing the resolution.
     pub fn submit_search_devour_choice(&mut self, sacrificed: Vec<ObjectId>) -> Result<(), DevourChoiceError> {
         let ProcessState::AwaitingSearchDevourChoice { candidates, .. } = &self.process_state else {
             return Err(DevourChoiceError::NotAwaitingChoice);
@@ -552,13 +434,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Answers a pending CR 702.38a Amplify choice raised mid-`Search` by
-    /// `StepStatus::AwaitingSearchAmplifyChoice` (`phase5/devour-amplify-
-    /// search-entry`) — same relationship to `submit_amplify_choice` that
-    /// `submit_search_devour_choice` above has to `submit_devour_choice`.
-    /// Unlike Devour, revealing doesn't move anything, so this resumes
-    /// straight into `continue_search_battlefield_entry` rather than
-    /// `continue_scripted_zone_move`.
+    /// Answers an amplify pause raised mid-search (CR 702.38a). Revealing moves
+    /// nothing, so it resumes the search directly.
     pub fn submit_search_amplify_choice(&mut self, revealed: Vec<ObjectId>) -> Result<(), AmplifyChoiceError> {
         let ProcessState::AwaitingSearchAmplifyChoice { candidates, .. } = &self.process_state else {
             return Err(AmplifyChoiceError::NotAwaitingChoice);

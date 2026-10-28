@@ -1,13 +1,6 @@
-//! Carries out already-validated `EngineCommand`s against `GameState`.
-//!
-//! Split out of a single `commands.rs` into this directory for readability:
-//! this file keeps the small error/outcome types plus `execute_command`
-//! itself as a dispatcher; each `PlayerActionKind` arm's real body lives in
-//! a sibling module - `legality` (sorcery-speed/legality predicates, target
-//! validation), `attach` (ability lookup, retirement, Aura/Equipment/
-//! Fortification attach helpers), `zone_ops` (zone-move propose/commit,
-//! cost payment, damage application), `land`/`cast`/`activate` (one arm
-//! each), and `combat` (the four combat-related arms).
+//! Carries out validated `EngineCommand`s against `GameState`. This file holds the
+//! outcome types and the `execute_command` dispatcher; each arm's body lives in a
+//! sibling module. See `DESIGN.md` for the rest.
 
 use crate::script::ScriptRuntime;
 use crate::types::command::{EngineCommand, PlayerActionKind};
@@ -28,10 +21,8 @@ mod legality;
 mod tests;
 mod zone_ops;
 
-// Re-exports so `crate::commands::X` keeps resolving for every path
-// `engine.rs` (and, for `propose_attach`/`AttachProposal`, an external
-// integration test) already reaches through this module - see each
-// submodule for the real definition and its own doc comment.
+// Re-exports keep `crate::commands::X` resolving for the engine and for the
+// integration test that reaches `propose_attach` and `AttachProposal`.
 pub(crate) use attach::{
     apply_copy_additional_counters, attach_permanent, attach_permanent_to_player, find_ability,
     find_ability_by_id, grant_linked_copy_ability, is_aura, is_equipment, legal_aura_entry_candidates, legal_entry_attach_candidates,
@@ -52,11 +43,10 @@ pub(crate) use zone_ops::{
     apply_damage_event, collect_cost_zone_moves, commit_payment, commit_zone_move, propose_draw, propose_zone_move,
 };
 
-/// Why a command was turned down before it changed anything (CR 733.1,
-/// 733.2). Only the validation half of a command builds one: every `validate_*`
-/// function returns `Result<_, Rejected>`, and every `apply_*` function returns
-/// `Result<_, Internal>`, so a mutating step cannot report "rejected" by type.
-/// The player keeps priority and may try again.
+/// Why a command was turned down before it changed anything (CR 733.1, 733.2).
+/// Only validation builds one: `validate_*` returns `Result<_, Rejected>` and
+/// `apply_*` returns `Result<_, Internal>`, so a mutating step cannot report
+/// "rejected" by type. The player keeps priority and may try again.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Rejected {
     InvalidTarget,
@@ -96,107 +86,75 @@ impl From<Internal> for CommandError {
     }
 }
 
-/// Whether/how priority should move as a result of one `EngineCommand`.
-/// Returned explicitly by `execute_command` rather than the command
-/// mutating `state.priority_player` itself, so `engine.rs` is the one
-/// place that actually writes that field — same reasoning as
-/// `CommandOutcome::broke_pass_chain` not mutating `consecutive_passes`
-/// directly.
+/// How priority moves after one `EngineCommand`. Returned instead of written to
+/// `state.priority_player` so the engine is the only place that writes it.
 #[derive(Debug)]
 pub enum PriorityHandoff {
     /// Most variants: priority stays with whoever currently has it.
     Unchanged,
     /// `PassPriority` (CR 117.3c): priority moves to the next player in
-    /// `state.turn_order`. Carries the resolved target player rather than
-    /// engine.rs re-deriving "next" from `turn_order`, so `execute_command`
-    /// (which already has `state` to hand) stays the single place that
-    /// knows the rotation rule.
+    /// `state.turn_order`. Carries the resolved player so `execute_command` is
+    /// the only place that knows the rotation rule.
     To(PlayerId),
 }
 
-/// What carrying out one `EngineCommand` produced, for `engine.rs` to act
-/// on. Returned explicitly rather than left for `engine.rs` to infer from
-/// `state` afterward — see `broke_pass_chain`/`priority_handoff` below.
+/// What carrying out one `EngineCommand` produced, for the engine to act on.
+/// Returned explicitly rather than inferred from `state` afterward.
 #[derive(Debug)]
 pub struct CommandOutcome {
-    /// Proposed events, not yet final — `engine.rs` runs these through
-    /// `ReplacementCheck` -> `CommitEvents` to allocate ids and append to
-    /// `state.ledger`. See `execute_command`'s doc comment for why this
-    /// function doesn't write the ledger itself.
+    /// Proposed events, not yet final. The engine runs them through
+    /// `ReplacementCheck` and `CommitEvents`, so this function never writes the
+    /// ledger.
     pub events: Vec<GameEventKind>,
-    /// `false` only for `PassPriority`; `true` for every other variant.
-    /// CR 117.3c: taking any action other than passing breaks a
-    /// consecutive-pass count. `engine.rs` owns `state.consecutive_passes`
-    /// entirely (increment on `false`, reset on `true`) and decides "did
-    /// everyone just pass" from that — this flag is the one thing it needs
-    /// from execution to do so, rather than relying on every match arm
-    /// here remembering to mutate `consecutive_passes` itself correctly.
+    /// `false` only for `PassPriority` (CR 117.3c). The engine owns
+    /// `state.consecutive_passes` and counts passes from this flag, so no match
+    /// arm has to remember to update it.
     pub broke_pass_chain: bool,
     /// See `PriorityHandoff`. `engine.rs` applies this to
     /// `state.priority_player` itself.
     pub priority_handoff: PriorityHandoff,
-    /// CR 601.2a puts a spell on the stack *before* its cost is determined/
-    /// paid (601.2f-h) — set by `CastSpell` once it's pushed `stack_id` onto
-    /// `state.stack`, so `engine.rs` can pause the rest of this pipeline run
-    /// on `ProcessState::AwaitingPayment` until `Engine::submit_payment`
-    /// answers, rather than this function deducting mana synchronously
-    /// (which would assume the cost is always payable/free, and skip the
-    /// CR 118.5a "must explicitly acknowledge a {0} cost" requirement).
-    /// `None` for every other variant — nothing else here puts something on
-    /// the stack pending payment.
+    /// Set by `CastSpell` once the spell is on the stack, which CR 601.2a does
+    /// before the cost is paid (CR 601.2f-h). The engine pauses on
+    /// `ProcessState::AwaitingPayment` until `Engine::submit_payment` answers, so
+    /// a {0} cost is still acknowledged (CR 118.5a). `None` for every other
+    /// command.
     pub requires_payment: Option<PendingPaymentRequest>,
-    /// Object ids that just became new battlefield permanents this command
-    /// (CR 400.7 mints a fresh id per zone change) — `engine.rs` runs each
-    /// one's card script (`ScriptRuntime::run_card_script`) right after this
-    /// outcome is applied. Empty for every variant except `PlayLand`, since
-    /// `execute_command` (`state: &mut GameState` only) can't reach
-    /// `ScriptRuntime` itself — same "one place decides, one place performs
-    /// the side effect" split `priority_handoff`/`broke_pass_chain` already
-    /// use. `ResolveStackTop`'s permanent-entry branch lives directly in
-    /// `engine.rs`, so it calls `run_card_script` itself without needing
-    /// this field.
+    /// Ids that just became battlefield permanents (CR 400.7 gives each a fresh
+    /// id). The engine runs their card scripts because `execute_command` holds
+    /// only `GameState` and cannot reach `ScriptRuntime`. Empty except for
+    /// `PlayLand`; `ResolveStackTop` runs scripts itself.
     pub battlefield_entries: Vec<ObjectId>,
 }
 
-/// See `CommandOutcome::requires_payment`'s doc comment for why this exists
-/// as its own pause rather than a synchronous deduction.
+/// A cost that waits on `Engine::submit_payment` instead of being deducted
+/// inside the command. See `CommandOutcome::requires_payment`.
 #[derive(Debug)]
 pub struct PendingPaymentRequest {
     pub stack_id: ObjectId,
     pub payer: PlayerId,
     pub cost: CostSpec,
-    /// The object whose activation/cast this cost belongs to —
-    /// `AdditionalCost::TapSelf` validates against this specifically (CR
-    /// 602.5a: an activated ability's own `{T}` always taps *this* object,
-    /// never a filter choice). For `CastSpell`, this is the spell's own
-    /// `stack_id` — harmless as a placeholder since a spell's `CostSpec`
-    /// never contains `TapSelf`.
+    /// The object whose cast or activation this cost belongs to.
+    /// `AdditionalCost::TapSelf` validates against it (CR 602.5a). For
+    /// `CastSpell` it is the spell's `stack_id`, which is harmless because a
+    /// spell's `CostSpec` never has `TapSelf`.
     pub source: ObjectId,
-    /// What to do once this cost fully commits — see `PaymentResolution`'s
-    /// own doc comment. Almost always `StackObject` (a real `StackObject`
-    /// is already sitting on `state.stack` at `stack_id`, waiting for normal
-    /// stack resolution) — `ManaAbility` is the one exception (CR
-    /// 605.1a/605.3b: a mana ability with a real cost still needs an
-    /// explicit payment step, same as any other ability, but never reaches
-    /// the stack at all).
+    /// What to do once the cost commits. Almost always `StackObject`, whose
+    /// object is already on `state.stack` at `stack_id`. `ManaAbility` is the
+    /// exception (CR 605.1a, 605.3b): it pays like any ability but never reaches
+    /// the stack.
     pub on_paid: PaymentResolution,
 }
 
-/// See `PendingPaymentRequest::on_paid`'s doc comment. `stack_id` on the
-/// enclosing `PendingPaymentRequest` is only a real, resolvable `StackObject`
-/// id for the `StackObject` case — for `ManaAbility` it's an opaque handle
-/// (freshly allocated, CR 400.7-style) that nothing on `state.stack` will
-/// ever match, since a mana ability with a real cost still pauses for
-/// payment exactly like any other ability, but nothing is ever pushed onto
-/// the stack for it to resolve later.
+/// `stack_id` on the enclosing `PendingPaymentRequest` is a resolvable stack
+/// object only for `StackObject`. For `ManaAbility` it is a freshly allocated
+/// handle (CR 400.7) that nothing on `state.stack` matches.
 #[derive(Debug)]
 pub enum PaymentResolution {
     StackObject,
-    /// CR 605's mana units to add once this cost commits — already fully
-    /// resolved (a fixed `AddMana` list, or an `AddManaChoice`'s
-    /// `chosen_colors` already validated and converted) at command-execution
-    /// time, same as the free (no-cost) mana-ability path already did before
-    /// this existed; paying a cost doesn't change *which* mana comes out.
+    /// CR 605's mana units to add once the cost commits. They are resolved at
+    /// execution time (a fixed `AddMana` list, or an `AddManaChoice` with
+    /// validated `chosen_colors`), since paying does not change which mana comes
+    /// out.
     ManaAbility { controller: PlayerId, units: Vec<ManaUnit> },
 }
 
@@ -216,7 +174,7 @@ pub(crate) enum Validated {
 }
 
 /// Checks `action` against `state` without changing anything. Every rejection
-/// of a command comes from here (024, 035), so `Engine::submit_action` and
+/// of a command comes from here, so `Engine::submit_action` and
 /// `execute_command` cannot disagree.
 pub(crate) fn validate_command(
     state: &GameState,
@@ -292,21 +250,16 @@ pub(crate) fn apply_command(state: &mut GameState, validated: Validated) -> Resu
     }
 }
 
-/// Executes one already-accepted `EngineCommand` against `state`, mutating
-/// non-ledger state directly (zones, etc.) and returning a
-/// `CommandOutcome`. Per the rationale in `command.rs`: this does not
-/// decompose `command` into further sub-commands — the sub-steps of
-/// carrying it out are events, not commands.
+/// Executes one accepted `EngineCommand` against `state`, mutating non-ledger
+/// state directly and returning a `CommandOutcome`. Runs `validate_command`
+/// first and `apply_command` second. A `Rejected` result has changed nothing
+/// and an `Internal` one is fatal.
 ///
-/// Does NOT append to `state.ledger` and does NOT allocate `EventId`s/
-/// `SequenceNo`s — those, plus replacement/prevention checks (CR 614-616),
-/// are engine.rs's job (`ReplacementCheck` -> `CommitEvents`) so there is
-/// exactly one place that writes the ledger. Does NOT mutate
-/// `state.consecutive_passes` or `state.priority_player` either — see
-/// `CommandOutcome::broke_pass_chain`/`priority_handoff`.
-///
-/// 024/035: runs `validate_command` first and `apply_command` second. A
-/// `Rejected` result has changed nothing; an `Internal` one is fatal.
+/// It does not append to `state.ledger`, allocate `EventId`s, or touch
+/// `state.consecutive_passes` or `state.priority_player`. The engine owns those
+/// (replacement checks CR 614-616, then `CommitEvents`) so one place writes the
+/// ledger. It does not split `command` into sub-commands: the sub-steps are
+/// events.
 pub fn execute_command(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,

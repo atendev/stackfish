@@ -1,7 +1,5 @@
-//! `execute_command`'s `PassPriority`/`MakeChoice`/`PlayLand` arm bodies,
-//! split out of the original monolithic `commands.rs`. `PassPriority` and
-//! `MakeChoice` are trivial enough to share this file with `PlayLand`
-//! rather than each getting their own.
+//! The `PassPriority`, `MakeChoice` and `PlayLand` command bodies. See
+//! `DESIGN.md` for the rest.
 
 use crate::script::ScriptRuntime;
 use crate::types::card::CardTypeSet;
@@ -19,16 +17,13 @@ pub(super) fn validate_pass_priority(
     script_runtime: &ScriptRuntime,
     actor: PlayerId,
 ) -> Result<Validated, Rejected> {
-    // CR 117.3c: priority moves to the next player in turn_order
-    // after whoever just passed - skipping anyone eliminated (CR
-    // 800.4b). Read-only against turn_order - does not touch
-    // state.priority_player/consecutive_passes, both of which
-    // engine.rs owns (see PriorityHandoff/broke_pass_chain doc
-    // comments above).
+    // CR 117.3c/800.4b
+    // Priority goes to the next non-eliminated player in turn_order. This only reads turn_order, because the engine owns priority_player and consecutive_passes.
     if !state.turn_order.contains(&actor) {
         return Err(Rejected::IllegalAction("actor not in turn_order".to_string()));
     }
-    // CR 508.1d: passing would skip the declaration of a creature that must attack.
+    // CR 508.1d
+    // Passing would skip the declaration of a creature that must attack.
     if super::combat::pass_would_skip_a_required_attack(state, script_runtime, actor) {
         return Err(Rejected::IllegalAction(
             "a creature that attacks each combat if able must be declared as an attacker".to_string(),
@@ -51,13 +46,7 @@ pub(super) fn apply_pass_priority(state: &GameState, actor: PlayerId) -> Result<
 // TODO: `MakeChoice` accepts any call, even with no choice pending. It should be
 // rejected here once something raises a choice through a `PlayerAction`.
 pub(super) fn apply_make_choice() -> Result<CommandOutcome, Internal> {
-    // Real choice application is genuinely generic - "depends
-    // entirely on what asked for the choice" (see the TODO block
-    // below) - no fixed event shape exists yet, so this produces
-    // none. Exists as a minimal non-PassPriority stub so
-    // broke_pass_chain's reset wiring (CR 117.3c) has something
-    // other than PassPriority to exercise in tests; not a real
-    // implementation of MakeChoice itself.
+    // No fixed event shape exists because applying a choice depends on what asked for it (see the TODO above). This stub gives broke_pass_chain's reset (CR 117.3c) a command other than PassPriority to exercise in tests.
     Ok(CommandOutcome {
         events: Vec::new(),
         broke_pass_chain: true,
@@ -75,10 +64,8 @@ pub(crate) struct LandPlan {
 }
 
 pub(super) fn validate_play_land(state: &GameState, actor: PlayerId, card: ObjectId) -> Result<Validated, Rejected> {
-    // CR 305.1: lands aren't spells, so this goes straight to the
-    // battlefield - no stack object. Playing a land is still
-    // restricted to sorcery speed (CR 305.1/305.3, via
-    // is_sorcery_speed) and to once per turn (CR 305.2).
+    // CR 305.1/305.3
+    // A land is not a spell, so it skips the stack but still needs sorcery speed.
     if !is_sorcery_speed(state, actor) {
         return Err(Rejected::IllegalAction(
             "a land can only be played at sorcery speed: actor's turn, a main phase, \
@@ -86,8 +73,8 @@ pub(super) fn validate_play_land(state: &GameState, actor: PlayerId, card: Objec
                 .to_string(),
         ));
     }
-    // CR 305.2: normally one land per turn, raised by any applicable
-    // LandPlayModifier (e.g. "you may play an additional land each turn").
+    // CR 305.2
+    // One land per turn, raised by any applicable LandPlayModifier.
     let already_played = *state.lands_played_this_turn.get(&actor).unwrap_or(&0);
     let limit = crate::types::player::effective_land_play_limit(&state.land_play_modifiers, actor);
     if already_played >= limit {
@@ -95,24 +82,14 @@ pub(super) fn validate_play_land(state: &GameState, actor: PlayerId, card: Objec
     }
 
     let object = state.object(card).ok_or(Rejected::InvalidTarget)?;
-    // TODO: reads CardDefinition.card_types directly rather than
-    // layers::effective_characteristics (CR 613 layer 4, real as of
-    // the layer-engine-types-colors slice) - a continuous effect
-    // granting Land type to a card still in hand would not make it
-    // playable here. Deliberately not wired this slice: this
-    // object is in ZoneKind::Hand, and every real consumer in this
-    // codebase so far (sba.rs's creature-type check, combat's
-    // power/keyword checks) targets a battlefield permanent, not a
-    // hand card - flagged rather than silently wired to an
-    // untested shape.
+    // TODO: reads CardDefinition.card_types instead of layers::effective_characteristics, so a continuous effect that grants Land to a card in hand does not make it playable (CR 613)
     if !object.definition.card_types.contains(CardTypeSet::LAND) {
         return Err(Rejected::IllegalAction("card is not a Land".to_string()));
     }
     if object.zone != ZoneKind::Hand || object.controller != actor {
         return Err(Rejected::IllegalAction("card is not in actor's hand".to_string()));
     }
-    // Every zone the move touches is looked up here, so `apply_play_land` has
-    // nothing left that can fail (024).
+    // Every zone the move touches is looked up here, so `apply_play_land` has nothing left that can fail.
     if state.zone(ZoneKind::Hand, Some(actor)).is_none() {
         return Err(Rejected::IllegalAction("actor has no hand zone".to_string()));
     }
@@ -125,16 +102,12 @@ pub(super) fn validate_play_land(state: &GameState, actor: PlayerId, card: Objec
 pub(super) fn apply_play_land(state: &mut GameState, plan: LandPlan) -> Result<CommandOutcome, Internal> {
     let LandPlan { actor, card } = plan;
     let object = state.object(card).ok_or_else(|| Internal::new("play land: the validated card is gone"))?;
-    // Snapshot before the move - CR 603.10's last_known_info (see
-    // GameEventKind::ZoneChange's doc comment).
+    // CR 603.10
+    // Snapshot before the move, for last_known_info.
     let last_known_info = object.clone();
 
-    // CR 400.7: this zone change creates a new object - mint a fresh
-    // ObjectId rather than reusing `card`'s, and link back to it via
-    // ObjectLineage. `card`'s entry in state.objects is removed
-    // entirely once moved; anything that still needs to know what it
-    // looked like in the hand must use `last_known_info` above, not
-    // a live lookup by the old id.
+    // CR 400.7
+    // The move makes a new object: mint a fresh ObjectId linked back through ObjectLineage. `card`'s entry in state.objects is removed, so later reads of the hand version must use last_known_info.
     let new_id = state.allocate_object_id();
     let mut new_object = last_known_info.clone();
     new_object.object_id = new_id;

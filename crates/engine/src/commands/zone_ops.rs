@@ -1,5 +1,5 @@
-//! Zone-move proposal/commit helpers, cost-payment application, and combat
-//! damage application - split out of the original monolithic `commands.rs`.
+//! Zone-move proposal and commit helpers, cost-payment application, and combat
+//! damage application. See `DESIGN.md` for the rest.
 
 use crate::script::ScriptRuntime;
 use crate::types::ability::RegisteredAbility;
@@ -14,55 +14,34 @@ use crate::types::zone::ZoneKind;
 use super::attach::retire_object;
 use super::legality::effective_keywords;
 
-/// CR 601.2h/616.1/514.1: a card moving to a graveyard or exile - whether
-/// via a `Sacrifice`/`Discard`/`Exile` cost payment or CR 514.1's cleanup
-/// hand-size discard - is itself a replaceable zone-change proposal ("if a
-/// permanent you control would be sacrificed, exile it instead" is a real,
-/// if unusual, card pattern). This builds the *proposed* event only,
-/// mirroring `sba::resolve_deaths`'/`Engine::continue_scripted_zone_move`'s
-/// own "propose, then replacement-check, then commit" split rather than
-/// mutating directly the way this function's predecessor
-/// (`move_to_graveyard_for_cost`, folded into `commit_payment` itself) used
-/// to. Two callers: `Engine::continue_cost_zone_moves` (cost payments) and
-/// `Engine::continue_discard_moves` (cleanup discard, `phase5/replaceable-
-/// cleanup-discard`) - see either's own doc comment for its full pipeline.
-///
-/// `to` was a hardcoded `Graveyard` before `phase5/escape-alternative-cost`
-/// (every prior caller happened to end there) - widened to a real parameter
-/// once `AdditionalCost::ExileFromGraveyard`'s own `CostPayment::Exile`
-/// needed a `Graveyard -> Exile` proposal through this same pipeline.
+/// CR 601.2h/616.1/514.1: a card moving to a graveyard or exile (a `Sacrifice`,
+/// `Discard` or `Exile` cost payment, or CR 514.1's cleanup discard) is a
+/// replaceable zone-change proposal. This builds the proposed event only, so
+/// callers can replacement-check it before `commit_zone_move`. Callers are
+/// `Engine::continue_cost_zone_moves` and `Engine::continue_discard_moves`; see
+/// their doc comments for the pipeline. `to` is a parameter because
+/// `AdditionalCost::ExileFromGraveyard` proposes Graveyard to Exile through the
+/// same path.
 pub(crate) fn propose_zone_move(state: &GameState, id: ObjectId, from: ZoneKind, to: ZoneKind) -> Option<GameEventKind> {
     let last_known_info = state.object(id)?.clone();
     Some(GameEventKind::ZoneChange { object: id, from, to, last_known_info: Some(last_known_info) })
 }
 
-/// CR 504.1/616.1: drawing a card is itself a replaceable zone-change
-/// proposal (e.g. Notion Thief-style "you draw instead" effects) - same
-/// "propose, then replacement-check, then commit" split `propose_zone_move`
-/// established, generalized to `to: Hand` (the other real destination a
-/// zone-move proposal in this codebase starts with, alongside
-/// `propose_zone_move`'s own `Graveyard`). `Engine::commit_zone_move`
-/// already handles the commit side correctly with no changes needed - its
-/// zone-owner derivation treats Library/Hand as per-player, same as every
-/// zone besides Battlefield/Exile.
+/// CR 504.1/616.1: drawing a card is a replaceable zone-change proposal (Library
+/// to Hand), split from its commit as in `propose_zone_move`.
+/// `Engine::commit_zone_move` already handles the commit, because its zone-owner
+/// derivation treats Library and Hand as per-player.
 ///
-/// CR 704.5b: an empty library still sets `PlayerState.drew_from_empty_library`
-/// here (not itself a zone-change) - the same flag the old direct-mutation
-/// `Engine::draw_one_card` used to set. `Game.Ops.DrawCards(n)`'s
-/// `ResolveStackTop` arm now routes through this function + `commit_zone_move`
-/// (see `Engine::continue_draw_cards`). Takes `&mut GameState` rather than
-/// `propose_zone_move`'s `&GameState` for exactly this one side effect -
-/// nothing else about this function mutates state.
+/// CR 704.5b: an empty library sets `PlayerState.drew_from_empty_library` here,
+/// which is why this takes `&mut GameState` where `propose_zone_move` takes
+/// `&GameState`.
 ///
-/// CR 121.2b: this is the one choke point both `Engine::continue_draw_cards`
-/// (effect-driven draws) and the turn-based `Step::Draw` handling already
-/// share, so a "can't draw more than N cards each turn" check belongs here,
-/// not duplicated at each caller. Returning `None` once `player`'s own
-/// `DrawLimitModifier` limit is already met reuses the exact same "no draw
-/// happens" path the empty-library case below already takes - `continue_
-/// draw_cards`'s per-card loop already treats that as license to stop, which
-/// is exactly CR 121.2b's "instructions to draw multiple cards may still be
-/// partially carried out."
+/// CR 121.2b: `Engine::continue_draw_cards` and the turn-based `Step::Draw` both
+/// go through here, so a "can't draw more than N cards each turn" limit belongs
+/// here. Returning `None` once `player`'s `DrawLimitModifier` limit is met takes
+/// the same no-draw path as an empty library, and `continue_draw_cards` stops
+/// its per-card loop on it, which CR 121.2b allows (multi-card draws may be
+/// partly carried out).
 pub(crate) fn propose_draw(state: &mut GameState, player: PlayerId) -> Option<GameEventKind> {
     if let Some(limit) = crate::types::player::effective_draw_limit(&state.draw_limit_modifiers, player) {
         if crate::types::player::cards_drawn_this_turn(state, player) >= limit {
@@ -80,28 +59,21 @@ pub(crate) fn propose_draw(state: &mut GameState, player: PlayerId) -> Option<Ga
     Some(GameEventKind::ZoneChange { object: card, from: ZoneKind::Library, to: ZoneKind::Hand, last_known_info: Some(last_known_info) })
 }
 
-/// Commits `event` (a `propose_zone_move` proposal, already
-/// replacement-checked by the caller — `to` may have been rewritten by a
-/// `ReplaceZoneDestination` payload) — CR 400.7 fresh `ObjectId`, same
-/// convention every other zone move in this codebase uses, and purges any
-/// ability/continuous-effect the old id left behind (`retire_object` - no
-/// remap follows a sacrifice/discard, same as a SBA-driven death).
+/// Commits `event`, a `propose_zone_move` proposal already replacement-checked
+/// by the caller (`to` may have been rewritten by a `ReplaceZoneDestination`).
+/// CR 400.7 gives a fresh `ObjectId`, and `retire_object` purges the old id's
+/// abilities and effects (no remap follows a sacrifice or discard, as with
+/// SBA-driven death).
 ///
-/// `from`/`to`'s owner for the `state.zone_mut` lookup is derived from the
-/// zone kind, not carried separately - Battlefield/Exile are shared zones
-/// (owner: `None`), everything else (Hand, Graveyard, ...) is per-player -
-/// same convention `Engine::commit_scripted_zone_move`'s own Exile arm
-/// already established for its destination-side lookup, mirrored here for
-/// both sides since a source zone can be shared too (Battlefield, for a
-/// sacrifice).
+/// The owner for the `state.zone_mut` lookup comes from the zone kind:
+/// Battlefield and Exile are shared (`None`), everything else is per-player.
+/// Both sides are derived because a source zone can be shared too (Battlefield,
+/// for a sacrifice).
 ///
-/// Returns the departed `Triggered`-kind abilities alongside the finished
-/// `GameEvent` (CR 603.10) — for a `Sacrifice` (Battlefield→Graveyard, the
-/// common case), this is what lets `Dies`/`LeavesBattlefield` fire the same
-/// way they do off an SBA-driven death. For a `Discard` (Hand→Graveyard),
-/// the departed abilities let `DiscardsCard`/`EachDiscardsCard`
-/// (player-relative) and `Discarded` (self-referential,
-/// `phase5/discarded-trigger`) fire the same way.
+/// Returns the departed `Triggered` abilities with the finished `GameEvent`
+/// (CR 603.10), so `Dies` and `LeavesBattlefield` fire for a `Sacrifice` as for
+/// an SBA death, and `DiscardsCard`, `EachDiscardsCard` and `Discarded` fire for
+/// a `Discard`.
 pub(crate) fn commit_zone_move(state: &mut GameState, event: GameEventKind) -> (GameEvent, Vec<RegisteredAbility>) {
     let GameEventKind::ZoneChange { object: old_id, from, to, last_known_info } = event else {
         unreachable!("propose_zone_move only ever proposes a ZoneChange");
@@ -148,19 +120,15 @@ pub(crate) fn commit_zone_move(state: &mut GameState, event: GameEventKind) -> (
     (committed, departed_triggered)
 }
 
-/// Performs the real side effect of every *immediate* `CostPayment` in an
-/// already-validated `PaymentPlan` (`PaymentPlan::validate` must have
-/// confirmed the whole plan first — same "trusts validate, doesn't recheck"
-/// contract `cost::spend` documents for mana). `Sacrifice`/`Discard` are
-/// deliberately not handled here — unlike mana/tap/life, they're zone-change
-/// proposals, themselves subject to CR 601.2h/616.1 replacement checking
-/// (see `propose_zone_move`'s own doc comment) — `Engine::submit_payment`
-/// collects them separately and drives them through `Engine::
-/// continue_cost_zone_moves` instead of this function.
+/// Performs the side effect of every immediate `CostPayment` in a validated
+/// `PaymentPlan`. `PaymentPlan::validate` must have confirmed the plan first, and
+/// this does not recheck it, as `cost::spend` does for mana. `Sacrifice` and
+/// `Discard` are not handled here: they are zone-change proposals subject to
+/// replacement checking (CR 601.2h/616.1), so `Engine::submit_payment` drives
+/// them through `Engine::continue_cost_zone_moves`.
 ///
-/// Returns the `GameEventKind`s for the caller (`Engine::submit_payment`) to
-/// append to the ledger — same "commands decide, engine.rs writes the
-/// ledger" split every other command path in this file follows.
+/// Returns the `GameEventKind`s for `Engine::submit_payment` to append to the
+/// ledger.
 pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &[CostPayment]) -> Vec<GameEventKind> {
     let mut events = Vec::new();
     for payment in payments {
@@ -186,8 +154,7 @@ pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &
                 events.push(GameEventKind::Tapped { object: *id });
             }
             CostPayment::Sacrifice(_) | CostPayment::Discard(_) | CostPayment::Exile(_) => {
-                // Handled by Engine::continue_cost_zone_moves instead - see
-                // this function's own doc comment.
+                // Handled by Engine::continue_cost_zone_moves instead.
             }
             CostPayment::Life(amount) => {
                 if let Some(player) = state.player_mut(payer) {
@@ -196,23 +163,21 @@ pub(crate) fn commit_payment(state: &mut GameState, payer: PlayerId, payments: &
                 events.push(GameEventKind::LifeChanged { player: payer, delta: -(*amount as i32) });
             }
             CostPayment::Other { .. } => {
-                // PaymentPlan::validate never accepts a plan containing
-                // this variant (see AdditionalCost::Other's doc comment) -
-                // unreachable in practice, no-op rather than panicking if
-                // it somehow got here anyway.
+                // PaymentPlan::validate never accepts a plan with this variant (see
+                // AdditionalCost::Other), so this is a no-op and not a panic if one slips
+                // through.
             }
         }
     }
     events
 }
 
-/// `PendingZoneMove` (`Engine::continue_cost_zone_moves`'s own queue
-/// entry) - collects every `Sacrifice`/`Discard`/`Exile` payment in
-/// `payments` into an `(id, source zone, destination zone)` triple, ready
-/// for `propose_zone_move`. Kept as a standalone pass (not folded into
-/// `commit_payment` above) since it must run *before* any
-/// replacement-checked commit happens - `PaymentPlan::validate` has already
-/// confirmed every id here really is in the zone it claims to be.
+/// The `PendingZoneMove` entries (`Engine::continue_cost_zone_moves`'s queue):
+/// every `Sacrifice`, `Discard` and `Exile` payment in `payments` as an
+/// `(id, source zone, destination zone)` triple for `propose_zone_move`. A
+/// separate pass from `commit_payment` because it must run before any
+/// replacement-checked commit; `PaymentPlan::validate` already confirmed each id
+/// is in the zone it claims.
 pub(crate) fn collect_cost_zone_moves(payments: &[CostPayment]) -> Vec<(ObjectId, ZoneKind, ZoneKind)> {
     payments
         .iter()
@@ -225,22 +190,16 @@ pub(crate) fn collect_cost_zone_moves(payments: &[CostPayment]) -> Vec<(ObjectId
         .collect()
 }
 
-/// Performs the real effect of one already-committed `GameEventKind::
-/// DamageDealt` event (CR 510.2/119/702.15/702.80/702.90) — mark damage on
-/// a creature or lose life on a player, folding in Lifelink/Wither/Infect/
-/// Deathtouch off the source's effective keywords (CR 613 layer 6, so a
-/// granted keyword applies here too, not just the printed `KeywordSet`).
+/// Performs the effect of one committed `GameEventKind::DamageDealt`
+/// (CR 510.2/119/702.15/702.80/702.90): marks damage on a creature or makes a
+/// player lose life, applying Lifelink, Wither, Infect and Deathtouch from the
+/// source's effective keywords (CR 613 layer 6, so granted keywords count).
 ///
-/// Called from `engine.rs`'s `CommitEvents` once `event` is in its final,
-/// post-replacement form — CR 614-616 says damage is itself a replaceable/
-/// preventable event, so this can't run any earlier than that (`amount`
-/// might have been reduced to 0, or `target` redirected, by a
-/// `ReplacementEffect` in between the moment `AssignCombatDamage` proposed
-/// it and the moment it's actually committed). `AssignCombatDamage` itself
-/// (this file) only ever *proposes* `DamageDealt` events now — it must not
-/// also mutate `damage_marked`/life directly, or a prevention/redirection
-/// effect would rewrite the ledger's record of what happened without
-/// stopping the mutation that already happened.
+/// `CommitEvents` calls it once `event` is in its final post-replacement form
+/// (CR 614-616), because `amount` may have been reduced to 0 or `target`
+/// redirected in between. `AssignCombatDamage` only proposes `DamageDealt` events
+/// and must not mutate `damage_marked` or life itself, or a prevention or
+/// redirection would rewrite the ledger without stopping the mutation.
 pub(crate) fn apply_damage_event(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
@@ -249,18 +208,17 @@ pub(crate) fn apply_damage_event(
     amount: u32,
     is_combat_damage: bool,
 ) {
-    // CR 702.15/702.80/702.90: looked up once, up front, so the borrow ends
-    // before the target mutations below (which may need a mutable borrow of
-    // the same GameState).
+    // CR 702.15/702.80/702.90
+    // Looked up once up front so the borrow ends before the target mutations below.
     let source_keywords = effective_keywords(state, script_runtime, source);
     let has_lifelink = source_keywords.contains(KeywordSet::LIFELINK);
     let replaces_with_counters = source_keywords.intersects(KeywordSet::WITHER | KeywordSet::INFECT);
     let is_infect = source_keywords.contains(KeywordSet::INFECT);
     let has_deathtouch = source_keywords.contains(KeywordSet::DEATHTOUCH);
-    // CR 702.15b: lifelink's life gain goes to whoever *currently* controls
-    // the damage source (layers::effective_controller), not whoever
-    // controlled it when the damage was dealt if a GainControl effect has
-    // since changed hands - though in practice these are the same instant.
+    // CR 702.15b
+    // Lifelink gains life for whoever controls the source now
+    // (layers::effective_controller), not whoever controlled it when the damage was
+    // dealt.
     let source_controller = state
         .object(source)
         .map(|_| crate::layers::effective_controller(state, script_runtime, source));
@@ -268,17 +226,12 @@ pub(crate) fn apply_damage_event(
 
     match target {
         Target::Player(pid) => {
-            // CR 903.10a: a commander's *combat* damage to a player
-            // accumulates regardless of how that damage otherwise manifests
-            // (life loss below, or poison via infect) - a parallel tracking
-            // system, not a redirect of the life-loss/poison branching, so
-            // this runs unconditionally before that branch rather than
-            // inside either arm of it. Keyed by name, not ObjectId - see
-            // PlayerState::commander_damage_taken's own doc comment for why
-            // (mirrors commander_casts' own already-solved identity
-            // problem); the name is read here, before source_is_commander's
-            // own borrow of `state` ends, so it survives into the
-            // `player_mut` borrow below.
+            // CR 903.10a
+            // Commander combat damage to a player accumulates whether it becomes life loss
+            // or, with infect, poison, so this runs before that branch and not inside it.
+            // Keyed by name and not ObjectId (see PlayerState::commander_damage_taken). The
+            // name is read before source_is_commander's borrow of `state` ends, so it
+            // survives into the `player_mut` borrow below.
             if is_combat_damage && source_is_commander && amount > 0 {
                 if let Some(name) = state.object(source).map(|o| o.definition.name.clone()) {
                     if let Some(player) = state.player_mut(pid) {
@@ -289,8 +242,7 @@ pub(crate) fn apply_damage_event(
                     }
                 }
             }
-            // CR 702.90b: Infect damage to a player becomes poison
-            // counters, not life loss.
+            // CR 702.90b
             if is_infect {
                 let timestamp = state.allocate_sequence_no();
                 if let Some(player) = state.player_mut(pid) {
@@ -301,16 +253,11 @@ pub(crate) fn apply_damage_event(
             }
         }
         Target::Object(id) => {
-            // TODO(planeswalker/battle damage, CR 120.3c/d): damage to
-            // those marks loyalty/defense loss, not damage_marked -
-            // GameObject has no loyalty/defense-damage path wired yet, so
-            // only creature targets are functional this slice.
+            // TODO: damage to planeswalkers and battles marks loyalty or defense loss and not damage_marked, and GameObject has no loyalty or defense damage path, so only creature targets work (CR 120.3c/d)
             let timestamp = state.allocate_sequence_no();
             if let Some(object) = state.object_mut(id) {
                 if object.definition.card_types.contains(CardTypeSet::CREATURE) {
-                    // CR 702.80a/702.90c: Wither/Infect damage to a
-                    // creature becomes -1/-1 counters instead of marked
-                    // damage.
+                    // CR 702.80a/702.90c
                     if replaces_with_counters {
                         object.counters.add(CounterKind::MinusOneMinusOne, amount as i32, timestamp);
                     } else {
@@ -322,14 +269,13 @@ pub(crate) fn apply_damage_event(
                 }
             }
         }
-        // CR 702/119: damage is dealt to a permanent or a player, never to
-        // an ability - nothing in Magic deals damage to a spell/ability.
+        // CR 702/119: damage is dealt to a permanent or a player, never to an ability.
         Target::Ability(_) => unreachable!("damage is never dealt to an ability"),
     }
 
-    // CR 702.15b: Lifelink's life gain happens "in addition to any other
-    // results that damage causes" - applies to damage dealt to a player or
-    // an object alike.
+    // CR 702.15b
+    // Lifelink's gain is in addition to any other result of the damage, to a player
+    // or an object alike.
     if has_lifelink && amount > 0 {
         if let Some(controller) = source_controller {
             if let Some(player) = state.player_mut(controller) {

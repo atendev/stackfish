@@ -1,11 +1,5 @@
-//! `resolve_ability_effect`'s library-touching arms — `DrawCards`,
-//! `Shuffle`, `Scry`, `Surveil`, `Search`, `Mill`. `DrawCards` delegates to
-//! `Engine::continue_draw_cards`, `Shuffle` to `Engine::shuffle_library`
-//! (both already `pub(in crate::engine)`, in `replacement_resume.rs` and
-//! `pregame.rs` respectively); `Scry`/`Surveil`/`Search` each peek their own
-//! candidates and pause on a dedicated `AwaitingXChoice` `ProcessState` only
-//! when there's a real decision to make (CR 701.22b/701.25c: an empty peek
-//! or `n == 0` is a no-op, no pause, no event).
+//! The library arms: `DrawCards`, `Shuffle`, `Scry`, `Surveil`, `Search`, `Mill`.
+//! Scry, surveil and search pause only when a real decision exists. See `DESIGN.md`.
 
 use std::collections::VecDeque;
 use std::ops::ControlFlow;
@@ -35,10 +29,8 @@ impl Engine {
         amount: u32,
         events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        // "Target player draws N" draws for the targeted player, and a
-        // player target that is gone draws nobody. An ability whose words
-        // name no player ("destroy target creature, then draw a card") leaves
-        // the controller drawing.
+        // "Target player draws N" draws for the targeted player; a gone target draws
+        // nobody. Words that name no player leave the controller drawing.
         let names_a_player = match &top.target_requirement {
             None => false,
             Some(TargetSpec::Primitive(req)) => word_names_a_player(req),
@@ -52,11 +44,9 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 701.17a/b: `Game.Ops.Mill(n)`. The batch is the top `min(n, library
-    /// size)` cards of the affected player's library (see `affected_player`),
-    /// moved Library -> Graveyard through `ScriptedZoneMoveKind::Mill`. An empty
-    /// library or a zero count moves nothing and is not a draw, so CR 704.5b
-    /// never applies.
+    /// CR 701.17a: the top `min(n, library size)` cards of the affected player,
+    /// moved to the graveyard. An empty library moves nothing and isn't a draw, so
+    /// CR 704.5b never applies.
     pub(super) fn resolve_mill_effect(
         &mut self,
         top: &StackObject,
@@ -155,12 +145,7 @@ impl Engine {
             .unwrap_or_default()
             .into_iter()
             .filter(|id| {
-                // A library card's `.controller`
-                // always equals its owner in this
-                // engine (no GainControl effect
-                // targets a non-battlefield card,
-                // CR 108.4) - the raw field is
-                // exactly correct here.
+                // CR 108.4: a library card's controller is its owner.
                 self.state.object(*id).is_some_and(|obj| filter.matches(obj, obj.controller, top.controller))
             })
             .collect();

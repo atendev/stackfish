@@ -1,6 +1,5 @@
-//! `execute_command`'s combat-related arms (`DeclareAttackers`/
-//! `DeclareBands`/`DeclareBlockers`/`AssignCombatDamage`), split out of the
-//! original monolithic `commands.rs` into `declare`/`damage`.
+//! The combat arms of `execute_command`: `declare` for attackers, bands and
+//! blockers, `damage` for damage assignment. See `DESIGN.md` for the rest.
 
 mod damage;
 mod declare;

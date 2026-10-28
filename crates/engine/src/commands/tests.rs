@@ -105,11 +105,9 @@ fn dummy_continuous_effect(source: ObjectId) -> ContinuousEffect {
     }
 }
 
-/// `phase5/static-regeneration`: a `Repeatable` `WouldDie`/`Regenerate`
-/// shield, the shape `Game.CreateReplacementEffect` produces — the first
-/// durable `state.replacement_effects` entry that ever needed
-/// `retire_object` to purge it (every prior entry was `OneShot`/
-/// `LimitedUses` and self-consumed via `apply_one_replacement`).
+/// A `Repeatable` `WouldDie`/`Regenerate` shield, the shape
+/// `Game.CreateReplacementEffect` produces: a durable `state.replacement_effects`
+/// entry that `retire_object` must purge.
 fn dummy_replacement_effect(source: ObjectId) -> ReplacementEffect {
     ReplacementEffect {
         source,

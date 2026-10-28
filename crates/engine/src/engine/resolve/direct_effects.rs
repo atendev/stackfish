@@ -1,8 +1,5 @@
-//! `resolve_ability_effect`'s synchronous-only `AbilityEffect` arms — the
-//! ones that mutate `GameState`/push events and fall straight through to the
-//! shared tail, never pausing mid-resolution: `GainLife`, `Damage`,
-//! `Fight`, `Bite`, `Counters`, `Pump`, `GainControl`, `Regenerate`, `LoseLife`, and the tap/untap family
-//! (`Tap`, `Untap`, `TapSelf`, `UntapSelf`, `TapAll`, `UntapAll`). `Modal` lives in `modal.rs`.
+//! The synchronous `AbilityEffect` arms: life, damage, fight, counters, pump, control,
+//! regenerate, tap and untap. They never pause. `Modal` lives in `modal.rs`. See `DESIGN.md`.
 
 use std::ops::ControlFlow;
 
@@ -21,12 +18,10 @@ use crate::types::zone::ZoneKind;
 
 use super::super::{Engine, StepStatus};
 
-/// Which player a `Mill`/`LoseLife` acts on. Decided by whether the ability
-/// declared a target spec, not by whether `legal_targets` is empty: with no
-/// spec the player is the controller ("you mill 2"); with a spec it is the
-/// first legal `Target::Player` ("target player mills 2"), and `None` when
-/// that target is gone or the spec chose nothing, so a target that became
-/// illegal never turns into a controller effect.
+/// The player a `Mill` or `LoseLife` acts on. Decided by whether the ability
+/// declared a target spec: none means the controller; a spec means the first legal
+/// player target, or `None` when it is gone, so an illegal target never becomes
+/// a controller effect.
 pub(super) fn affected_player(top: &StackObject, legal_targets: &[Target]) -> Option<PlayerId> {
     if top.target_requirement.is_none() {
         return Some(top.controller);
@@ -50,10 +45,8 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// CR 119.3: `Game.Ops.LoseLife(n)`. Subtracts `n` from the affected
-    /// player (see `affected_player`) without clamping, and pushes a
-    /// `LifeChanged` event already applied to state. Zero life lost is not a
-    /// life change, so it pushes nothing.
+    /// CR 119.3: subtracts `n` from the affected player without clamping and pushes an
+    /// applied `LifeChanged`. Zero life lost pushes nothing.
     pub(super) fn resolve_lose_life_effect(
         &mut self,
         top: &StackObject,
@@ -67,8 +60,7 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// Applies one life loss and records it. Shared with
-    /// `ForEachPlayer { LoseLife }`.
+    /// Applies one life loss and records it. Shared with `ForEachPlayer`.
     pub(in crate::engine) fn lose_life_now(&mut self, player: PlayerId, amount: u32, events: &mut Vec<GameEventKind>) {
         let delta = i32::try_from(amount).unwrap_or(i32::MAX);
         if delta == 0 {
@@ -98,18 +90,10 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// CR 701.14 fight / bite: `Game.Ops.Fight` (`mutual: true`) and
-    /// `Game.Ops.Bite` (`mutual: false`). See `AbilityEffect::Fight` for the
-    /// three target-spec shapes that pick the two creatures.
-    ///
-    /// The pair comes from the per-word legal chunks (`modal_chunk_legals`)
-    /// for a two-word spec, so an illegal word leaves its chunk empty and
-    /// the whole effect does nothing (CR 701.14b). A single word uses the
-    /// flattened `legal_targets`, which only holds the still-legal picks.
-    /// Both creatures must still be creatures on the battlefield. Each
-    /// amount is read through the layer engine before any event is pushed,
-    /// then the events go out together so the damage is simultaneous and
-    /// every keyword reads the creature as the damage source.
+    /// CR 701.14: fight (`mutual`) and bite. A two-word spec reads the per-word legal
+    /// chunks, so an illegal word voids the effect (CR 701.14b); one word uses the
+    /// flattened list. Amounts are read through the layer engine before any event is
+    /// pushed so the damage is simultaneous.
     pub(super) fn resolve_fight_effect(
         &mut self,
         top: &StackObject,
@@ -130,11 +114,9 @@ impl Engine {
                 }
             }
             Some(TargetSpec::Primitive(req)) if !req.up_to && !req.at_least => match (req.count, legal_targets) {
-                // "Two target creatures fight each other." A bite has no
-                // dealer in this shape.
+                // Two target creatures fight; a bite has no dealer in this shape.
                 (2, [first, second]) if mutual => object_of(first).zip(object_of(second)),
-                // "It fights / deals damage to target creature": the
-                // ability's own source is the first creature.
+                // The ability's own source is the first creature.
                 (1, [target]) => object_of(target).map(|id| (top.source, id)),
                 _ => None,
             },
@@ -142,7 +124,7 @@ impl Engine {
         };
         let Some((first, second)) = pair else { return ControlFlow::Continue(events) };
 
-        // CR 701.14b: both must still be creatures on the battlefield.
+        // CR 701.14b
         let is_creature_on_battlefield = |id: ObjectId| {
             self.state.object(id).is_some_and(|object| object.zone == ZoneKind::Battlefield)
                 && crate::layers::effective_characteristics(&self.state, &self.script_runtime, id)
@@ -153,8 +135,7 @@ impl Engine {
             return ControlFlow::Continue(events);
         }
 
-        // Both amounts are fixed before any event goes out. Power of 0 or
-        // less, or an unresolved power, deals no damage (CR 120.8).
+        // Amounts are fixed up front; power of 0 or less, or unresolved, deals none (CR 120.8).
         let power_of = |id: ObjectId| {
             commands::effective_power(&self.state, &self.script_runtime, id).filter(|power| *power > 0).map(|power| power as u32)
         };
@@ -170,8 +151,7 @@ impl Engine {
             });
         };
         if first == second {
-            // CR 701.14c: fighting itself is one event of twice its power.
-            // Bite never doubles: it is a single damage instance.
+            // CR 701.14c: fighting itself is one event of twice its power; a bite never doubles.
             if let Some(power) = first_power {
                 push_damage(first, first, if mutual { power * 2 } else { power });
             }
@@ -202,13 +182,9 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// CR 701.26a/b: flips `id` to `tap` (true = tapped) if it is a
-    /// battlefield permanent currently in the opposite state, and pushes the
-    /// matching `Tapped`/`Untapped` event. Anything else is a no-op with no
-    /// event ("only untapped permanents can be tapped", "only tapped
-    /// permanents can be untapped"; CR 110.5d: cards off the battlefield
-    /// have no tapped status), so a later "becomes tapped" trigger can't fire
-    /// on a no-op (CR 603.2e).
+    /// CR 701.26: flips `id` if it is a battlefield permanent in the opposite state,
+    /// pushing the event. Anything else is a no-op so a "becomes tapped" trigger
+    /// can't fire (CR 603.2e).
     fn flip_tapped(&mut self, id: ObjectId, tap: bool, events: &mut Vec<GameEventKind>) {
         let Some(object) = self.state.object_mut(id) else { return };
         if object.zone != ZoneKind::Battlefield || object.tapped == tap {
@@ -218,9 +194,7 @@ impl Engine {
         events.push(if tap { GameEventKind::Tapped { object: id } } else { GameEventKind::Untapped { object: id } });
     }
 
-    /// CR 701.26: `Game.Ops.Tap` / `Game.Ops.Untap` - every legal object
-    /// target of the resolving ability. A `Target::Player` is skipped, same
-    /// stance as `Counters`/`Pump`.
+    /// CR 701.26: every legal object target; players are skipped.
     pub(super) fn resolve_tap_effect(
         &mut self,
         legal_targets: &[Target],
@@ -234,9 +208,7 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// CR 701.26/400.7: `Game.Ops.TapSelf` / `Game.Ops.UntapSelf` - the
-    /// ability's own source. A source that already left the battlefield is a
-    /// new object, so the stale id finds nothing.
+    /// CR 701.26: the ability's own source; a stale id finds nothing (CR 400.7).
     pub(super) fn resolve_tap_self_effect(
         &mut self,
         top: &StackObject,
@@ -247,10 +219,8 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// CR 701.26/601.2c: `Game.Ops.TapAll(filter)` / `UntapAll(filter)` -
-    /// every battlefield object matching `filter`, no targets. `filter` is
-    /// matched against the raw `controller` field (see
-    /// `matches_effect_filter`), not the layer-resolved one.
+    /// CR 701.26: every battlefield object matching `filter`, no targets. `filter`
+    /// matches the raw `controller` field, not the layer-resolved one.
     pub(super) fn resolve_tap_all_effect(
         &mut self,
         top: &StackObject,
@@ -309,12 +279,8 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// CR 509.1h/702.22i: every legal target independently becomes blocked
-    /// via `commands::mark_effect_blocked` — see that function's own doc
-    /// comment for the CR 702.22i band-propagation and CR 603.2e idempotency
-    /// details. A `Target::Player` (shouldn't be reachable — this effect's
-    /// `target_requirement` only ever asks for a creature) is skipped, same
-    /// "silent no-op" stance every other arm here takes.
+    /// CR 509.1h: every legal target becomes blocked via `mark_effect_blocked`
+    /// (band propagation, CR 702.22i). Players are skipped.
     pub(super) fn resolve_become_blocked_effect(
         &mut self,
         legal_targets: &[Target],

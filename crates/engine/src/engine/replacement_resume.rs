@@ -1,7 +1,6 @@
-//! CR 616.1 replacement-ordering-choice answers, CR 704.5j/903.9a SBA-driven
-//! choice answers, the `SbaLoop`/`CleanupSbaCheck` pipeline stages, and the
-//! scripted zone-move/draw resume helpers they all share — split out of
-//! `engine.rs`.
+//! Replacement-ordering and SBA choice answers, the `SbaLoop` and
+//! `CleanupSbaCheck` stages, and the scripted zone-move and draw resume helpers.
+//! See `DESIGN.md`.
 
 use std::collections::VecDeque;
 use std::ops::ControlFlow;
@@ -25,13 +24,9 @@ use super::{
 };
 
 impl Engine {
-    /// Answers a pending CR 616.1 ordering choice raised by
-    /// `StepStatus::AwaitingReplacementChoice` — `chosen` must be one of
-    /// that status's `candidates` (a `replacement::ReplacementCandidate` —
-    /// a real registered effect or CR 702.16e protection). Deliberately a
-    /// separate entry point from `submit_action`: this isn't a
-    /// `PlayerAction`/priority decision, it's a sub-decision mid-pipeline,
-    /// so it can't go through `submit_action`'s `PriorityWindow`-only gate.
+    /// Answers a replacement ordering pause (CR 616.1). `chosen` must be one of
+    /// the offered candidates. A separate entry point from `submit_action` because
+    /// it answers a sub-decision, not a priority action.
     pub fn submit_replacement_choice(
         &mut self,
         chosen: replacement::ReplacementCandidate,
@@ -49,48 +44,29 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        // Apply the chosen effect, exclude it from matching this same event
-        // again (CR 616.1), then re-run resolution on the result (CR 616's
-        // stabilization requirement - the rewritten form may match yet
-        // another effect, including needing a further ordering choice of
-        // its own) - carrying `excluded` forward rather than starting a
-        // fresh exclusion set, so an effect already applied before this
-        // pause can't reapply to the same event after it. `chosen` names
-        // either a real registered effect or CR 702.16e protection -
-        // apply_one_replacement_or_protection dispatches on the
-        // `ReplacementCandidate` variant directly, same as
-        // apply_replacements_from's own single-match branch.
+        // Apply the chosen effect, exclude it from this event, then re-run resolution
+        // on the result (CR 616.1). `excluded` carries forward so an effect already
+        // applied can't reapply after the pause.
         let rewritten = replacement::apply_one_replacement_or_protection(&mut self.state, chosen, pending_event);
         excluded.push(chosen);
-        // is_destroy is per-resume-target: a ReplacementCheck-originated
-        // event is never a destroy proposal (see replacement.rs's own doc
-        // comment on why); an SbaDeath resume carries its own paused-event
-        // tag forward (sba::DyingCandidate's own doc comment).
+        // Only an `SbaDeath` resume can be a destroy proposal; it carries its own tag.
         let is_destroy = match &resume {
             ReplacementResumeTarget::ReplacementCheck { .. } => false,
             ReplacementResumeTarget::SbaDeath { is_destroy, .. } => *is_destroy,
             ReplacementResumeTarget::ScriptedZoneMove { kind, .. } => *kind == ScriptedZoneMoveKind::Destroy,
-            // CR 614.8: a Sacrifice/Discard cost payment is never genuine
-            // destruction (Sacrifice/Discard are each their own zone-change
-            // verb) - a regeneration shield never intercepts one.
+            // CR 614.8: a sacrifice or discard cost is never destruction.
             ReplacementResumeTarget::CostZoneMove { .. } => false,
-            // CR 614.8: cleanup discard isn't destruction either.
+            // CR 614.8
             ReplacementResumeTarget::CleanupDiscard { .. } => false,
-            // CR 614.8: "put it into your graveyard" (CR 702.35a's decline
-            // branch) is its own zone-change verb, not destruction.
+            // CR 614.8
             ReplacementResumeTarget::MadnessDecline { .. } => false,
-            // CR 614.8: drawing a card isn't destruction either.
+            // CR 614.8
             ReplacementResumeTarget::Draw { .. } => false,
-            // CR 614.8: a scripted DrawCards(n) ability is also just a draw,
-            // not destruction.
+            // CR 614.8
             ReplacementResumeTarget::ScriptedDraw { .. } => false,
-            // CR 614.8: a targeted CR 701.9 discard isn't destruction either.
+            // CR 614.8
             ReplacementResumeTarget::TargetedDiscard { .. } => false,
-            // CR 614.8: a would-be Battlefield destination redirect is a
-            // ZoneChange proposal, never a destroy proposal - same reasoning
-            // as ReplacementCheck above (this is that exact same kind of
-            // proposal, just paused one level earlier, before
-            // move_resolving_spell ever runs).
+            // CR 614.8: a destination redirect is a zone change, never a destroy proposal.
             ReplacementResumeTarget::PermanentEntry { .. } => false,
         };
         let outcome =
@@ -212,9 +188,7 @@ impl Engine {
                 ReplacementOutcome::Resolved(event) => {
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
-                    // CR 702.29b: same hand-entry self-registration as the
-                    // unpaused draw path (turn.rs) - this is its CR 616.1
-                    // ordering-choice-delayed sibling.
+                    // CR 702.29b: hand-entry self-registration, as on the unpaused draw path.
                     if let GameEventKind::ZoneChange { object, .. } = committed.kind {
                         self.run_card_script_for(object);
                     }
@@ -236,8 +210,7 @@ impl Engine {
                     ReplacementOutcome::Resolved(event) => {
                         let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                         self.departed_triggered_abilities.extend(departed);
-                        // CR 702.29b: same hand-entry self-registration as
-                        // continue_draw_cards' own unpaused commit below.
+                        // CR 702.29b
                         if let GameEventKind::ZoneChange { object, .. } = committed.kind {
                             self.run_card_script_for(object);
                         }
@@ -263,10 +236,7 @@ impl Engine {
             ReplacementResumeTarget::TargetedDiscard { player, remaining_count, stack_id, events_so_far } => {
                 match outcome {
                     ReplacementOutcome::Resolved(event) => {
-                        // CR 702.35a: same Madness-compatibility as every
-                        // other real discard producer - see
-                        // discard::continue_targeted_discard's own doc
-                        // comment.
+                        // CR 702.35a
                         let madness = replacement::madness_marker_event(&self.state, &event);
                         let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                         self.departed_triggered_abilities.extend(departed);
@@ -302,10 +272,7 @@ impl Engine {
                         }
                     }
                 }
-                // Defensive - same "a WouldMoveZone candidate's own matching
-                // payloads only ever rewrite it back into a ZoneChange"
-                // reasoning resolve_permanent_entry's own fresh-path check
-                // already documents; unreachable in practice.
+                // Defensive: a would-move candidate only rewrites back into a zone change.
                 ReplacementOutcome::Resolved(_) => ProcessState::ReplacementCheck {
                     remaining: VecDeque::from([GameEventKind::StackObjectResolved { stack_id: top.stack_id }]),
                     checked: Vec::new(),
@@ -324,20 +291,9 @@ impl Engine {
         Ok(())
     }
 
-    /// Answers a pending CR 704.5j legend-rule choice raised by
-    /// `StepStatus::AwaitingLegendRuleChoice` — `kept` must be one of that
-    /// status's `candidates` (the legendary permanent this player keeps).
-    /// Deliberately a separate entry point from `submit_action`, same reason
-    /// `submit_replacement_choice` is.
-    ///
-    /// Every other candidate is put into `pending_deaths` and resolved via
-    /// the same `resume_sba_death` helper `submit_replacement_choice` already
-    /// uses for `ReplacementResumeTarget::SbaDeath` — the losers' actual
-    /// destruction is ordinary SBA-driven death (real replacement checking,
-    /// CR 400.7 new object id, `retire_object`), not bespoke logic. A
-    /// replacement effect on one of the losers (e.g. "if this would die,
-    /// exile it instead") correctly re-pauses on `AwaitingReplacementChoice`
-    /// via that same helper, rather than being silently skipped.
+    /// Answers a legend rule pause (CR 704.5j). `kept` must be a candidate; the
+    /// others die through `resume_sba_death`, so a replacement effect on a loser
+    /// can still re-pause.
     pub fn submit_legend_rule_choice(&mut self, kept: ObjectId) -> Result<(), LegendRuleChoiceError> {
         let ProcessState::AwaitingLegendRuleChoice { candidates, .. } = &self.process_state else {
             return Err(LegendRuleChoiceError::NotAwaitingChoice);
@@ -351,9 +307,7 @@ impl Engine {
             unreachable!("checked above");
         };
 
-        // CR 704.5j is "put into its owner's graveyard," not "destroy" -
-        // never interceptable by a regeneration shield, same as 704.5f/k
-        // (see sba::DyingCandidate's own doc comment).
+        // CR 704.5j: puts into the graveyard rather than destroying, so regeneration can't intercept.
         let losers: VecDeque<sba::DyingCandidate> = candidates
             .into_iter()
             .filter(|id| *id != kept)
@@ -363,19 +317,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Answers a pending CR 903.9a commander-return choice raised by
-    /// `StepStatus::AwaitingCommanderReturnChoice`. `returned = true`
-    /// performs the zone move (`sba::move_commander_to_command_zone`);
-    /// `false` declines, leaving the card exactly where it is. Either way,
-    /// the commander is marked in `GameState::commander_return_offered` so
-    /// this exact arrival isn't re-asked about on a later pass.
-    ///
-    /// Deliberately a separate entry point from `submit_action`, same
-    /// reason `submit_legend_rule_choice` is. Doesn't route through
-    /// `resume_sba_death`/`resolve_deaths` like that method does — there's
-    /// no "death" here to replacement-check, just a direct zone move (see
-    /// `move_commander_to_command_zone`'s own doc comment for why that move
-    /// itself skips CR 614-616 replacement checking).
+    /// Answers a commander return pause (CR 903.9a). `returned` moves the card to
+    /// the command zone; `false` leaves it. Either way the arrival is recorded in
+    /// `commander_return_offered` so it isn't asked again. This is a direct zone
+    /// move with no death to replacement-check.
     pub fn submit_commander_return_choice(
         &mut self,
         returned: bool,
@@ -406,11 +351,8 @@ impl Engine {
         Ok(())
     }
 
-    /// `ProcessState::SbaLoop` — CR 704.3's fixed-point loop: runs one SBA
-    /// pass and either re-enters `SbaLoop` (something happened) or moves on
-    /// to `CollectTriggers` (nothing did), via `finish_sba_loop`. Pauses on
-    /// `AwaitingReplacementChoice`/`AwaitingLegendRuleChoice`/
-    /// `AwaitingCommanderReturnChoice` if this pass needs one.
+    /// CR 704.3: runs one SBA pass and either loops again or moves on to
+    /// `CollectTriggers`, pausing when the pass needs a choice.
     pub(super) fn resolve_sba_loop_state(&mut self) -> StepStatus {
         self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
             SbaOutcome::Progressed(events, departed) => self.finish_sba_loop(events, departed),
@@ -423,10 +365,7 @@ impl Engine {
                 pending_deaths,
                 resolved_so_far,
             } => {
-                // Unaffected by the pause below (player-loss events,
-                // plus any deaths already resolved earlier in this
-                // same pass) - commit them now rather than holding
-                // them hostage to a choice about a different death.
+                // Commit what the pause doesn't affect rather than hold it for an unrelated choice.
                 self.state.ledger.extend(resolved_so_far);
                 ProcessState::AwaitingReplacementChoice {
                     affected_player,
@@ -441,8 +380,7 @@ impl Engine {
                 }
             }
             SbaOutcome::NeedsLegendRuleChoice { player, candidates, resolved_so_far } => {
-                // Unaffected by the pause below, same reasoning as
-                // NeedsOrderingChoice's own resolved_so_far above.
+                // Unaffected by the pause, as above.
                 self.state.ledger.extend(resolved_so_far);
                 ProcessState::AwaitingLegendRuleChoice { player, candidates, then: SbaResumeThen::SbaLoop }
             }
@@ -458,11 +396,8 @@ impl Engine {
         StepStatus::Progressed
     }
 
-    /// `ProcessState::CleanupSbaCheck` — CR 514.3's cleanup-step SBA pass,
-    /// same shape as `resolve_sba_loop_state` but finishing through
-    /// `finish_cleanup_sba_check` (routes to `PipelineExit::CleanupCheck`
-    /// instead of re-entering the loop) and tagging every pause's `then`
-    /// with this pass's own `since_ledger`.
+    /// CR 514.3: the cleanup-step SBA pass. Finishes through
+    /// `finish_cleanup_sba_check` and tags each pause with `since_ledger`.
     pub(super) fn resolve_cleanup_sba_check_state(&mut self) -> StepStatus {
         let since_ledger = self.state.ledger.len();
         self.process_state = match sba::check_state_based_actions(&mut self.state, &self.script_runtime) {
@@ -511,20 +446,13 @@ impl Engine {
         StepStatus::Progressed
     }
 
-    /// `SbaLoop`'s own "what happens once this pass's events are known"
-    /// transition — pulled out so a resumed CR 616.1 pause
-    /// (`resume_sba_death`) and a fresh pass (`SbaLoop`'s own arm) agree on
-    /// it instead of duplicating the branch.
+    /// Shared by a fresh pass and a resumed pause (`resume_sba_death`) so both reach
+    /// the same transition.
     fn finish_sba_loop(&mut self, events: Vec<GameEvent>, departed: Vec<RegisteredAbility>) -> ProcessState {
-        // Accumulate across every SbaLoop pass in this pipeline run (CR
-        // 704.3's fixed point may take several passes, each killing more
-        // creatures) - cleared by end_pipeline_run once CollectTriggers/
-        // PutTriggersApnap have both had a chance to consult it.
+        // Accumulates across passes; `end_pipeline_run` clears it after trigger collection.
         self.departed_triggered_abilities.extend(departed);
         let next = if events.is_empty() {
-            // CR 610.3: state-based actions have settled, so any "until
-            // [source] leaves the battlefield" exile whose source is gone
-            // returns now, then the loop runs once more.
+            // CR 610.3: linked exiles whose source left return once SBAs settle.
             if let Some(returning) = self.return_linked_exiles() {
                 return self.game_over_check(returning);
             }
@@ -532,26 +460,16 @@ impl Engine {
             ProcessState::CollectTriggers { since }
         } else {
             self.state.ledger.extend(events);
-            // Re-enter SbaLoop next step() - CR 704.3's fixed point, not a
-            // single pass.
+            // CR 704.3: loop until no SBA fires.
             ProcessState::SbaLoop
         };
         self.game_over_check(next)
     }
 
-    /// CR 104.2a/104.4a: overrides `next` with `GameOver` if at most one
-    /// player remains in a game that started with more than one — checked
-    /// after every SBA pass commits its events, since `sba::
-    /// apply_player_loss` (the only place `PlayerState.eliminated` flips)
-    /// always runs inside one of those passes. `winner` is the sole
-    /// remainder, or `None` if the last players standing were eliminated
-    /// simultaneously (a draw).
-    ///
-    /// The `turn_order.len() < 2` guard matters: a single-player test
-    /// fixture (many exist, unrelated to this feature) has exactly one
-    /// never-eliminated player, which would otherwise read as "game over"
-    /// after the very first SBA pass — CR 104.2a presupposes opponents to
-    /// win against, so there's nothing to end here.
+    /// CR 104.2a: overrides `next` with `GameOver` when at most one player remains.
+    /// `winner` is `None` if the last players were eliminated together (CR 104.4a).
+    /// Skipped for fewer than two players in turn order, since one player alone
+    /// has no opponent to win against.
     fn game_over_check(&self, next: ProcessState) -> ProcessState {
         if self.state.turn_order.len() < 2 {
             return next;
@@ -564,27 +482,10 @@ impl Engine {
         }
     }
 
-    /// `CleanupSbaCheck`'s own "what happens once this pass's events (and
-    /// any dying-creature choice) are known" transition — pulled out for the
-    /// same reason `finish_sba_loop` is, and shared the same way between a
-    /// fresh pass (the `CleanupSbaCheck` arm) and one resumed after a paused
-    /// CR 616.1/704.5j choice (`resume_sba_death`).
-    ///
-    /// Stashes `departed` (CR 603.10 dies-trigger abilities) into
-    /// `departed_triggered_abilities` and routes through the real
-    /// `CollectTriggers`/`PutTriggersApnap` stages via
-    /// `PipelineExit::CleanupCheck` instead of deciding priority-vs-advance
-    /// right here — this cleanup path used to bypass `CollectTriggers`
-    /// entirely (backlog item 7a's cleanup half), silently dropping any
-    /// trigger a cleanup-step SBA raised. `since_ledger` (captured before
-    /// this pass began) is what `PipelineExit::CleanupCheck` later compares
-    /// the ledger against to decide CR 514.3's priority-vs-advance question.
-    ///
-    /// TODO: CR 514.3 says another cleanup step begins after a priority
-    /// window opens here and its stack empties - currently
-    /// advance_turn_step's (Ending, Cleanup) arm rotates the turn instead,
-    /// skipping re-running discard/effect-expiry. Correct once a case
-    /// actually reaches this branch.
+    /// Shared by a fresh cleanup SBA pass and one resumed after a paused choice.
+    /// Stashes `departed` (CR 603.10) and routes through `CollectTriggers` via
+    /// `CleanupCheck`, which compares the ledger against `since_ledger` for CR 514.3.
+    // TODO: another cleanup step begins after this priority window empties the stack; the turn rotates instead (CR 514.3a)
     fn finish_cleanup_sba_check(
         &mut self,
         events: Vec<GameEvent>,
@@ -597,24 +498,10 @@ impl Engine {
         self.game_over_check(ProcessState::CollectTriggers { since: since_ledger })
     }
 
-    /// Continues `sba::resolve_deaths` after a paused CR 616.1 ordering
-    /// choice was answered for one dying creature — `already_resolved` is
-    /// that creature's own just-committed death event; `pending_deaths` is
-    /// the rest of this SBA pass's dying-creature list. Finishes into
-    /// whichever state originally started this pass (`then`), via
-    /// `finish_sba_loop`/`finish_cleanup_sba_check`, so a resumed pause and
-    /// a fresh pass reach the exact same "nothing more to do" transition.
-    /// Commits one scripted zone-move target's already-replacement-checked
-    /// `final_event` — `Destroy`/`Sacrifice` reuse the same
-    /// `commit_death_or_regeneration`/`commit_death` helpers every SBA-driven
-    /// death already goes through; `Exile` is inlined (unchanged from the
-    /// pre-`ScriptedZoneMove` Exile arm's own body) since its destination is
-    /// the shared Exile zone (`owner: None`), not a per-player zone
-    /// `commit_death`'s `zone_mut(to, Some(owner))` call assumes.
-    ///
-    /// Returns events owed to the caller's `trailing` list. Only `Reanimate`
-    /// produces any (`CounterAdded` from enters-with-counters effects and the
-    /// `Attached` event of an entering Aura); every other kind returns none.
+    /// Commits one replacement-checked scripted zone move. Destroy and sacrifice reuse
+    /// the SBA death helpers. Exile is inlined because its zone has no owner. Returns
+    /// the events owed to `trailing`: counters and an Aura's `Attached`, from
+    /// `Reanimate` only.
     fn commit_scripted_zone_move(&mut self, kind: ScriptedZoneMoveKind, final_event: GameEventKind) -> Vec<GameEventKind> {
         let mut entry_events = Vec::new();
         match kind {
@@ -654,9 +541,7 @@ impl Engine {
                 }
                 let departed = commands::retire_object(&mut self.state, old_id);
                 self.departed_triggered_abilities.extend(departed);
-                // Exile is a shared zone (owner = None); per-player
-                // graveyard/hand need Some(owner) - this lookup must use
-                // None or the object silently disappears.
+                // Exile is a shared zone, so the owner lookup must be `None`.
                 let exile_owner = match to {
                     ZoneKind::Exile => None,
                     _ => Some(owner),
@@ -665,8 +550,7 @@ impl Engine {
                     zone.push_bottom(new_id);
                 }
                 self.state.objects.insert(new_id, new_object);
-                // CR 610.3: only a card that really landed in exile is linked
-                // (a replacement may have sent it elsewhere).
+                // CR 610.3: only a card that landed in exile is linked.
                 if let ScriptedZoneMoveKind::ExileUntilLeaves { source } = kind {
                     if to == ZoneKind::Exile {
                         self.state.linked_exiles.push(LinkedExile { source, exiled: new_id });
@@ -689,13 +573,9 @@ impl Engine {
                 };
                 self.state.ledger.push(committed);
             }
-            // CR 400.3: a permanent returned to hand goes to its owner's
-            // hand. Retires the old id (purging its abilities, collecting its
-            // departed triggers like Exile) and clears battlefield-only state
-            // on the fresh object - it is a new object (CR 400.7), not the
-            // permanent with its counters/damage/attachments. The card's
-            // hand abilities register on the next sweep
-            // (`sync_off_battlefield_scripts`).
+            // CR 400.3: returns to the owner's hand as a new object (CR 400.7) with
+            // battlefield-only state cleared. Hand abilities register on the next
+            // `sync_off_battlefield_scripts` sweep.
             ScriptedZoneMoveKind::Bounce => {
                 let GameEventKind::ZoneChange { object: old_id, from, to, last_known_info, .. } = final_event else {
                     unreachable!("apply_replacements only rewrites ZoneChange fields, never the kind");
@@ -744,31 +624,18 @@ impl Engine {
                     parent_event: None,
                 });
             }
-            // CR 701.9a (`phase5/mass-choice-effects`): moves a card off a
-            // player's Hand rather than a permanent off the Battlefield —
-            // can't reuse `sba::commit_death`/`commit_death_or_regeneration`
-            // (both hardcode removing from `ZoneKind::Battlefield`) or
-            // `Exile`'s own arm just above (same hardcode in its final
-            // committed event's `from`), so this mirrors their generic
-            // "retire the old id, mint a fresh one in the destination zone"
-            // shape with `kind.from_zone()` (Hand) in both spots instead. No
-            // dies-trigger bookkeeping to fold in (a discarded card was never
-            // a permanent) — CR 701.9's own "whenever you discard a card"
-            // triggers key off the `ZoneChange` event this pushes, the same
-            // generic trigger-collection path every other zone move already
-            // feeds, not anything special-cased here.
-            // CR 701.17a: Library -> Graveyard (or wherever a replacement
-            // sent it). `commit_zone_move` derives each zone's owner lookup
-            // from the zone kind, so a redirect to the shared Exile zone
-            // lands correctly, unlike the Discard arm below which hardcodes
-            // `Some(owner)` for the destination.
+            // CR 701.9a: a discard moves from hand, which the death helpers hardcode as
+            // battlefield, so it retires the id and mints a new one itself. Discard
+            // triggers key off the `ZoneChange` it pushes.
+            // CR 701.17a: library to graveyard, or wherever a replacement sent it.
+            // `commit_zone_move` derives the owner from the zone kind, so a redirect to
+            // exile lands correctly.
             ScriptedZoneMoveKind::Mill => {
                 let (event, departed) = commands::commit_zone_move(&mut self.state, final_event);
                 self.departed_triggered_abilities.extend(departed);
                 self.state.ledger.push(event);
             }
-            // CR 110.2a/400.7/614.12: Graveyard or Exile -> Battlefield, or
-            // wherever a replacement sent it.
+            // CR 110.2a, 400.7: graveyard or exile to battlefield, or wherever a replacement sent it.
             ScriptedZoneMoveKind::Reanimate { controller, tapped } => {
                 entry_events = self.commit_reanimate(final_event, controller, tapped);
             }
@@ -816,13 +683,9 @@ impl Engine {
         entry_events
     }
 
-    /// CR 610.3: the second one-shot effect of every "exile until [source]
-    /// leaves the battlefield". Takes each `GameState::linked_exiles` entry
-    /// whose source is no longer on the battlefield and returns its card to
-    /// the battlefield under its owner's control (CR 610.3c) as one batch
-    /// (CR 610.3d), replacement-checked like any reanimation. A card that is
-    /// no longer in exile (`continue_scripted_zone_move` skips it) or never
-    /// was (a token) just drops out. Returns `None` when nothing is due.
+    /// CR 610.3: returns each `linked_exiles` card whose source left the battlefield
+    /// to the battlefield under its owner's control (CR 610.3c) as one replacement-checked
+    /// batch (CR 610.3d). Cards no longer in exile drop out. `None` when nothing is due.
     fn return_linked_exiles(&mut self) -> Option<ProcessState> {
         let (due, waiting): (Vec<LinkedExile>, Vec<LinkedExile>) =
             std::mem::take(&mut self.state.linked_exiles).into_iter().partition(|link| {
@@ -841,17 +704,12 @@ impl Engine {
         ))
     }
 
-    /// `ScriptedZoneMoveKind::Reanimate`'s commit: puts a returned card onto
-    /// the battlefield the way a resolving permanent spell lands there
-    /// (`Engine::continue_permanent_entry`), minus the stack-bound Copy,
-    /// Devour and Amplify pauses (TODO on `AbilityEffect::ReturnToBattlefield`).
-    ///
-    /// `final_event` is the replacement-checked `ZoneChange`. If a
-    /// replacement rewrote `to`, the card goes there instead and nothing
-    /// battlefield-specific runs. The graveyard object's `controller` was
-    /// set temporarily by `continue_scripted_zone_move` so entry replacement
-    /// filters see the entering player; this function resets it to the owner
-    /// first, on every path, including an Aura that stays put.
+    /// Commit for `Reanimate`: lands a returned card as a resolving permanent spell
+    /// would, minus the stack-bound copy, devour and amplify pauses.
+    /// `continue_scripted_zone_move` set the controller temporarily so entry filters
+    /// see the entering player; this resets it to the owner first on every path.
+    // TODO: enter-as-a-copy pause for a reanimated permanent (CR 707.9)
+    // TODO: devour and amplify pauses for a reanimated permanent (CR 702.82a, 702.38a)
     fn commit_reanimate(
         &mut self,
         final_event: GameEventKind,
@@ -880,11 +738,8 @@ impl Engine {
         let owner = last_known_info.owner;
         let entering_controller = controller.unwrap_or(owner);
 
-        // CR 303.4f/g: an Aura picks its host before it enters. One legal
-        // host attaches; none leaves it where it is. TODO(CR 303.4f): two or
-        // more hosts need a controller choice and also leave it where it is
-        // (the "Aura with several hosts" TODO on `AbilityEffect::
-        // ReturnToBattlefield`).
+        // CR 303.4f: an Aura with one legal host attaches, with none stays put.
+        // TODO: an Aura with two or more hosts needs a controller choice; it stays put instead (CR 303.4f)
         let mut attach_to = None;
         if commands::is_aura(&last_known_info.definition) {
             let hosts = commands::legal_aura_entry_candidates(
@@ -906,12 +761,11 @@ impl Engine {
         new_object.lineage = ObjectLineage { previous: Some(old_id) };
         new_object.zone = ZoneKind::Battlefield;
         new_object.timestamp = self.state.allocate_sequence_no();
-        // CR 400.7: no memory of the old object (also resets controller to
-        // the owner and `entered_via_escape`), then CR 110.2a's controller.
+        // CR 400.7: a new object with no memory of the old one, then CR 110.2a's controller.
         new_object.reset_for_new_object();
         new_object.controller = entering_controller;
         new_object.tapped = tapped;
-        // CR 302.6: summoning sick.
+        // CR 302.6
         new_object.controlled_since_turn = self.state.turn_number;
 
         let from_owner = if from == ZoneKind::Exile { None } else { Some(owner) };
@@ -940,9 +794,8 @@ impl Engine {
             parent_event: None,
         });
 
-        // The card's script registers its abilities and its own entry
-        // replacement effects (CR 113.6h, 614.12), then the modifier family
-        // reads them. Sunburst gets no colors: nothing was cast (CR 702.44b).
+        // The script registers abilities and entry replacements for the modifier
+        // family. Sunburst gets no colors since nothing was cast (CR 702.44b).
         self.run_card_script_for(new_id);
         let mut entry_events =
             replacement::apply_enters_battlefield_modifiers(&mut self.state, &self.script_runtime, new_id, from, ColorSet::empty());
@@ -961,28 +814,10 @@ impl Engine {
         entry_events
     }
 
-    /// Drains `remaining` scripted zone-move targets one at a time — CR
-    /// 616.1's ordering-choice pause can be raised by any of them, not just
-    /// the first, since each target independently proposes+replacement-
-    /// checks+commits its own `ZoneChange` (`commit_scripted_zone_move`).
-    /// Returns the same `ReplacementCheck { remaining: [..trailing, StackObjectResolved] }`
-    /// transition the pre-`ScriptedZoneMove` non-pausing path already used
-    /// once the queue empties, or pauses immediately on
-    /// `AwaitingReplacementChoice` the instant one target needs an ordering
-    /// choice, carrying the rest of the queue in `ReplacementResumeTarget::
-    /// ScriptedZoneMove` for `submit_replacement_choice` to continue later.
-    /// `trailing` (CR 702.82a, Devour): extra not-yet-committed events owed
-    /// once the queue empties — empty for every caller except
-    /// `submit_devour_choice`, which still needs `events_so_far` (this
-    /// resolution's own pre-choice progress) and a `CounterAdded` to reach
-    /// `ReplacementCheck` too, not just the sacrifices this function itself
-    /// drives.
-    ///
-    /// `pub(in crate::engine)`: `choice_answers.rs`'s `submit_devour_choice`/
-    /// `submit_search_devour_choice` also call this, and a later pass will
-    /// call it from `engine/resolve/destruction.rs` once `ResolveStackTop`
-    /// itself moves out of `mod.rs` — making it accessible now avoids
-    /// needing to touch this file again for that.
+    /// Drains the scripted zone-move targets one at a time, since any can raise an
+    /// ordering pause (CR 616.1); the rest of the queue rides in
+    /// `ReplacementResumeTarget::ScriptedZoneMove`. `trailing` holds events owed once
+    /// the queue empties, such as a devour counter (CR 702.82a).
     pub(in crate::engine) fn continue_scripted_zone_move(
         &mut self,
         kind: ScriptedZoneMoveKind,
@@ -994,28 +829,23 @@ impl Engine {
             let Some(last_known_info) =
                 self.state.object(id).filter(|obj| kind.accepts_source_zone(obj.zone)).cloned()
             else {
-                // Target already left its expected zone (or never resolved)
-                // - nothing to move, same "skip rather than guess" stance
-                // every other arm here takes.
+                // Target already left its zone; skip rather than guess.
                 continue;
             };
             if let ScriptedZoneMoveKind::Reanimate { controller, .. } = kind {
-                // CR 400.4a: an instant or sorcery that would enter the
-                // battlefield stays in its previous zone.
+                // CR 400.4a
                 if last_known_info.definition.card_types.intersects(CardTypeSet::INSTANT | CardTypeSet::SORCERY) {
                     continue;
                 }
-                // Temporary: entry replacement filters read the object's
-                // controller, so the entering player is written onto the
-                // card now. `commit_reanimate` resets it to the owner.
+                // Entry replacement filters read the controller, so it is set temporarily;
+                // `commit_reanimate` resets it.
                 let entering = controller.unwrap_or(last_known_info.owner);
                 if let Some(object) = self.state.object_mut(id) {
                     object.controller = entering;
                 }
             }
             if kind == ScriptedZoneMoveKind::Destroy {
-                // CR 702.12b: an indestructible permanent can't be destroyed
-                // at all - not a replacement effect, checked up front.
+                // CR 702.12b: checked up front; indestructible isn't a replacement effect.
                 let indestructible =
                     commands::effective_keywords(&self.state, &self.script_runtime, id)
                         .contains(KeywordSet::INDESTRUCTIBLE);
@@ -1031,9 +861,7 @@ impl Engine {
             };
             let from = last_known_info.zone;
             let proposed = GameEventKind::ZoneChange { object: id, from, to, last_known_info: Some(last_known_info) };
-            // CR 614.8: only Destroy is genuine destruction - a regeneration
-            // shield can intercept it and only it (Sacrifice/Exile are each
-            // their own real zone-change verb, neither is destruction).
+            // CR 614.8: only destroy can be regenerated.
             let is_destroy = kind == ScriptedZoneMoveKind::Destroy;
             match replacement::apply_replacements(&mut self.state, &self.script_runtime, proposed, is_destroy) {
                 ReplacementOutcome::Resolved(final_event) => {
@@ -1056,24 +884,15 @@ impl Engine {
                 final_events.push_back(GameEventKind::StackObjectResolved { stack_id });
                 ProcessState::ReplacementCheck { remaining: final_events, checked: Vec::new() }
             }
-            // CR 614.12a wired into Search (`phase5/devour-amplify-search-
-            // entry`): the chosen sacrifices are done - hand control back to
-            // the search's own still-pending candidates instead of
-            // finalizing here; `continue_search_battlefield_entry` pushes
-            // its own `StackObjectResolved` once *its* queue drains, same as
-            // every other real exit from that function.
+            // CR 614.12a: hand control back to the search's pending candidates, which
+            // push their own `StackObjectResolved` when drained.
             ScriptedZoneMoveThen::SearchResume { controller, remaining, destination, stack_id, shuffle_after } => self
                 .continue_search_battlefield_entry(remaining, destination, controller, stack_id, shuffle_after, trailing),
-            // `phase5/mass-choice-effects`: this batch is done - run the
-            // chained second batch (`chain_pending_zone_moves`'s own tail),
-            // handing it the same `trailing` events since neither batch on
-            // its own is the "real" one; whichever finishes last is the one
-            // that actually reaches ScriptedZoneMoveThen::StackResolution.
+            // Run the chained batch with the same `trailing`; whichever finishes last reaches `StackResolution`.
             ScriptedZoneMoveThen::ThenScriptedZoneMove { kind, remaining, then } => {
                 self.continue_scripted_zone_move(kind, remaining, *then, trailing)
             }
-            // CR 610.3: the returned permanents' own events (`trailing`) go
-            // straight into the ledger, then the SBA loop runs again.
+            // CR 610.3: the returned permanents' events go to the ledger, then SBAs rerun.
             ScriptedZoneMoveThen::SbaLoop => {
                 self.log_events(trailing);
                 ProcessState::SbaLoop
@@ -1081,21 +900,9 @@ impl Engine {
         }
     }
 
-    /// `phase5/mass-choice-effects`: performs 0-2 zone-move batches from a
-    /// script operation's own `sacrifice_chosen`/`discard_chosen` result
-    /// (`OperationOutcome::PendingZoneMoves`) — `Sacrifice`/`Discard` are
-    /// different `ScriptedZoneMoveKind`s (different `from_zone()`), and
-    /// `continue_scripted_zone_move` only ever drains one `kind` per call, so
-    /// two non-empty batches are chained via `ScriptedZoneMoveThen::
-    /// ThenScriptedZoneMove` rather than attempted in one call. Empty
-    /// batches are dropped rather than chained (nothing to move); an empty
-    /// `moves` altogether falls through to `continue_scripted_zone_move`'s
-    /// own "queue already empty" tail, which just applies `then` immediately
-    /// — same as if this function had never been called. Shared by
-    /// `misc_effects::resolve_misc_or_script_effect` (a standalone script
-    /// operation's own result, moved immediately - no batching context) and
-    /// `each_player::resolve_for_each_player_effect` (the *final* combined
-    /// batch once every player in a `ForEachPlayer` loop has chosen).
+    /// Runs the 0-2 zone-move batches of a script operation's sacrifice and discard
+    /// results. Different kinds are chained through `ThenScriptedZoneMove` because
+    /// `continue_scripted_zone_move` drains one kind per call. Empty batches drop out.
     pub(in crate::engine) fn chain_pending_zone_moves(
         &mut self,
         moves: Vec<(ScriptZoneMoveKind, Vec<ObjectId>)>,
@@ -1124,20 +931,10 @@ impl Engine {
         self.continue_scripted_zone_move(first_kind, first_remaining, chained_then, trailing)
     }
 
-    /// CR 120.3/121/616.1: drains `remaining` scripted draws one at a time,
-    /// each proposed via `commands::propose_draw`, replacement-checked, and
-    /// committed inline. A CR 616.1 ordering choice pauses on any individual
-    /// draw, carrying the rest of the count in `ReplacementResumeTarget::
-    /// ScriptedDraw` so `submit_replacement_choice` can resume. The draw
-    /// events themselves are pushed directly to the ledger (not queued in
-    /// `events_so_far`) so they are never re-checked a second time against a
-    /// fresh, empty `excluded` set; `events_so_far` carries only the rest of
-    /// this resolution's already-produced events (e.g. an instant/sorcery
-    /// spell's Stack->Graveyard move) so they still reach the normal
-    /// `ReplacementCheck`->`CommitEvents` pipeline once the draws finish.
-    ///
-    /// `pub(in crate::engine)`: `mod.rs`'s still-inlined `ResolveStackTop`
-    /// arm (`AbilityEffect::DrawCards`) also calls this directly.
+    /// CR 121: drains scripted draws one at a time, each replacement-checked and
+    /// committed inline; an ordering pause (CR 616.1) carries the remaining count in
+    /// `ScriptedDraw`. Draw events go straight to the ledger so they aren't checked
+    /// twice; `events_so_far` still goes through the normal pipeline afterwards.
     pub(in crate::engine) fn continue_draw_cards(
         &mut self,
         mut remaining: u32,
@@ -1159,9 +956,7 @@ impl Engine {
                 ReplacementOutcome::Resolved(event) => {
                     let (committed, departed) = commands::commit_zone_move(&mut self.state, event);
                     self.departed_triggered_abilities.extend(departed);
-                    // CR 702.29b: a Game.Ops.DrawCards(n)-drawn card's own
-                    // script self-registers any hand-only ability now, same
-                    // as every other Library->Hand producer.
+                    // CR 702.29b
                     if let GameEventKind::ZoneChange { object, .. } = committed.kind {
                         self.run_card_script_for(object);
                     }
@@ -1196,6 +991,9 @@ impl Engine {
         }
     }
 
+    /// Continues `sba::resolve_deaths` after a paused ordering choice for one dying
+    /// creature, then finishes into `then` so a resumed pause and a fresh pass reach
+    /// the same transition.
     fn resume_sba_death(
         &mut self,
         pending_deaths: VecDeque<sba::DyingCandidate>,
@@ -1222,8 +1020,7 @@ impl Engine {
                 is_destroy,
                 pending_deaths,
             } => {
-                // already_resolved (this pass's progress so far) commits now
-                // - it's unaffected by this further pause.
+                // Unaffected by this further pause, so commit it now.
                 self.state.ledger.extend(already_resolved);
                 ProcessState::AwaitingReplacementChoice {
                     affected_player,

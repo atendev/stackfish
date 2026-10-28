@@ -1,12 +1,8 @@
-//! Builds the entries a Decision lists for the player who holds priority. Each
-//! check mirrors the one `execute_cast_spell`, `execute_activate_ability` and
-//! `execute_play_land` run before they change anything, so an entry is listed
-//! exactly when the command would get past its timing, zone and target checks.
-//! The engine does not check affordability here (ticket 003).
-//!
-//! TODO: a rule that changes timing or zone permission through a continuous
-//! effect ("as though it had flash", "play lands from your graveyard") is not
-//! represented in the commands either, so entries inherit that gap.
+//! Builds the entries a priority Decision lists, mirroring the checks the cast,
+//! activate and play-land commands run so an entry is listed exactly when the
+//! command would pass. See `DESIGN.md` for the rest.
+
+// TODO: timing or zone permission granted by a continuous effect ("as though it had flash", "play lands from your graveyard") is not represented in the commands or the entries
 
 use std::collections::HashMap;
 
@@ -64,11 +60,12 @@ fn cast_entries(state: &GameState, script_runtime: &ScriptRuntime, player: Playe
         if definition.card_types.contains(CardTypeSet::LAND) {
             continue;
         }
-        // CR 903.8: a commander may be cast from the command zone by its
-        // owner. Every other normal cast comes from the hand.
+        // CR 903.8
+        // The owner may cast a commander from the command zone. Every other normal cast comes from the hand.
         let normal = (object.zone == ZoneKind::Hand && object.controller == player)
             || (object.is_commander && object.zone == ZoneKind::Command && object.owner == player);
-        // CR 601.2b: an alternative cost also grants the zone it casts from.
+        // CR 601.2b
+        // An alternative cost also grants the zone it casts from.
         let alternative_costs: Vec<usize> = if object.controller == player {
             definition
                 .alternative_costs
@@ -85,8 +82,8 @@ fn cast_entries(state: &GameState, script_runtime: &ScriptRuntime, player: Playe
         if !normal && alternative_costs.is_empty() {
             continue;
         }
-        // CR 117.1a/702.8b: instants and flash are castable whenever the
-        // player holds priority. Everything else needs the sorcery window.
+        // CR 117.1a/702.8b
+        // Instants and flash are castable whenever the player holds priority. Everything else needs the sorcery window.
         let instant_speed = definition.card_types.contains(CardTypeSet::INSTANT)
             || definition.keywords.contains(KeywordSet::FLASH);
         let timing_ok = if instant_speed { state.priority_player == player } else { is_sorcery_speed(state, player) };
@@ -195,8 +192,8 @@ fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: P
             continue;
         }
 
-        // CR 602.1/112.6/113.6: Battlefield unless Cycling's discard cost or a
-        // script's `SetFunctionsFrom` says otherwise.
+        // CR 602.1/112.6/113.6
+        // Battlefield unless Cycling's discard cost or a script's `SetFunctionsFrom` says otherwise.
         let cost = ability.cost.as_ref();
         let requires_hand = cost.is_some_and(|c| c.additional.iter().any(|a| matches!(a, AdditionalCost::DiscardSelf)));
         let required_zone = state
@@ -207,7 +204,7 @@ fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: P
         if source.zone != required_zone {
             continue;
         }
-        // CR 702.6a: Equip is sorcery-speed.
+        // CR 702.6a
         if matches!(ability.effect, Some(AbilityEffect::Attach)) && !is_sorcery_speed(state, player) {
             continue;
         }
@@ -219,8 +216,8 @@ fn activate_entries(state: &GameState, script_runtime: &ScriptRuntime, player: P
         } else {
             cost.is_some_and(|c| c.additional.iter().any(|a| matches!(a, AdditionalCost::TapSelf)))
         };
-        // CR 602.5a/302.6: a {T} cost needs an untapped source, and a creature
-        // also needs to be free of summoning sickness.
+        // CR 602.5a/302.6
+        // A {T} cost needs an untapped source, and a creature also needs to be free of summoning sickness.
         if taps_source
             && (source.tapped
                 || (source.definition.card_types.contains(CardTypeSet::CREATURE)

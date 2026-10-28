@@ -1,10 +1,5 @@
-//! `resolve_ability_effect`'s remaining arms that don't fit the other
-//! themed siblings: `Attach` (CR 702.6a Equip), `BecomeCopy` (CR 707.2/
-//! 707.3), `ExchangeTextBoxes` (CR 612.5), the `AddMana`/`AddManaChoice`/
-//! `Script` unreachable-shape no-ops, and the `None`-effect fallback that
-//! invokes the real Lua script bridge (`ScriptRuntime::invoke_operation`),
-//! pausing on `ProcessState::AwaitingScriptChoice` if the script itself
-//! yields mid-resolution (backlog item 9's `Game.SelectTargets`).
+//! The remaining `AbilityEffect` arms: `Attach` (Equip), `BecomeCopy`, `ExchangeTextBoxes`,
+//! unreachable-shape no-ops and the `None` fallback into the Lua script bridge. See `DESIGN.md`.
 
 use std::ops::ControlFlow;
 
@@ -21,16 +16,8 @@ use crate::types::zone::ZoneKind;
 use super::super::{Engine, ProcessState, ScriptedZoneMoveThen, StepStatus};
 
 impl Engine {
-    /// CR 702.6a: Equip's own resolution - attaches `top.source` (the
-    /// Equipment) to its first (only, per CR 702.6a's singular "target
-    /// creature") already legality-checked (CR 608.2b, by the caller)
-    /// target. Same `commands::attach_permanent` + `GameEventKind::Attached`
-    /// convention the Aura ETB-attach path (the `Spell`-kind zone-move
-    /// block) already established - `attach_permanent`'s own reattach-
-    /// safety fix (`phase5/equip-ability`) means retargeting an already-
-    /// equipped Equipment cleans up the old target's attachments list for
-    /// free. Object targets only, same "silent no-op" stance every other
-    /// arm here takes for an unreachable target shape.
+    /// CR 702.6a: attaches `top.source` to its one legality-checked target like the
+    /// Aura attach path. `attach_permanent` cleans up a retarget. Players are skipped.
     pub(super) fn resolve_attach_effect(
         &mut self,
         top: &StackObject,
@@ -44,15 +31,10 @@ impl Engine {
         ControlFlow::Continue(events)
     }
 
-    /// CR 707.2/707.3/613.1a (layer 1): `top.source` becomes a copy of its
-    /// first chosen target's current copiable values - a real mutation
-    /// written once (`GameObject.copiable_override`), not a live-queried
-    /// `ContinuousEffect` (see that field's own doc comment for why layer 1
-    /// can't fit the other layers' shape). CR 707.4: this never triggers
-    /// ETB/LTB (`top.source` stays on the battlefield, same `ObjectId`) -
-    /// but CR 707.2a's abilities are copiable, so whatever `top.source` had
-    /// self-registered under its pre-copy identity is purged first and
-    /// `run_card_script` re-runs against the new snapshot right after.
+    /// CR 707.2: `top.source` becomes a copy of its first target's copiable values,
+    /// written once to `copiable_override` since layer 1 can't be live-queried
+    /// (CR 613.1a). It triggers no enters or leaves effects (CR 707.4). The old
+    /// self-registered abilities are purged and the script re-runs on the snapshot.
     pub(super) fn resolve_become_copy_effect(
         &mut self,
         top: &StackObject,
@@ -61,10 +43,7 @@ impl Engine {
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         if let Some(Target::Object(target_id)) = top.targets.first().copied() {
             let source_id = top.source;
-            // CR 707.9c/d: the copying object's own
-            // true pre-copy definition, for
-            // retain_name/retain_color to fall back
-            // to - captured before anything mutates.
+            // CR 707.9c: captured before anything mutates, for `retain_name` and `retain_color`.
             let original_definition = self.state.object(source_id).map(|o| o.definition.clone());
             let snapshot = self
                 .state
@@ -75,8 +54,7 @@ impl Engine {
                 let became_copy = self.state.objects.get_mut(&source_id).is_some_and(|source_obj| {
                     if source_obj.zone == ZoneKind::Battlefield {
                         source_obj.copiable_override = Some(snapshot.clone());
-                        // CR 707.9e/g: a real, distinct copy application -
-                        // see GameObject::copy_generation's own doc comment.
+                        // CR 707.9e
                         source_obj.copy_generation += 1;
                         true
                     } else {
@@ -87,22 +65,12 @@ impl Engine {
                     commands::purge_granted_abilities(&mut self.state, source_id);
                     let result = self.script_runtime.run_card_script(&mut self.state, &snapshot, source_id);
                     self.record_script_error(source_id, &snapshot.script_ref, result);
-                    // CR 707.9a: Vesuvan Doppelganger's own
-                    // "except it has [linked upkeep
-                    // ability]" - see
-                    // grant_linked_copy_ability's own doc
-                    // comment.
+                    // CR 707.9a: Vesuvan's linked upkeep ability.
                     let generation = self.state.object(source_id).map(|o| o.copy_generation).unwrap_or(0);
                     commands::grant_linked_copy_ability(&mut self.state, source_id, exceptions, generation);
-                    // CR 707.9e: Spark Double's own "enters with an
-                    // additional +1/+1 counter" - see
-                    // apply_copy_additional_counters's own doc comment.
-                    // `top.x_value` (`phase5/altered-ego-x-counters`) is
-                    // plumbed through for symmetry with the EntersAsCopy/
-                    // submit_copy_choice path, though no real BecomeCopy
-                    // producer (Vesuvan's triggered ability) needs
-                    // CounterAmount::X - TODO: unexercised by a real card,
-                    // proven only by direct construction if a test needs it.
+                    // CR 707.9e: Spark Double's extra counter. `x_value` is plumbed
+                    // through for parity with `EntersAsCopy`.
+                    // TODO: no real `BecomeCopy` producer uses `CounterAmount::X`
                     if let Some(counter_event) =
                         commands::apply_copy_additional_counters(source_id, exceptions, top.x_value)
                     {
@@ -112,35 +80,20 @@ impl Engine {
                 }
             }
         }
-        // else: no target, or a Target::Player
-        // (BecomeCopy only ever targets a permanent)
-        // - silent no-op, same stance every other
-        // arm here takes for an unreachable target
-        // shape.
+        // No target, or a player: a silent no-op.
         ControlFlow::Continue(events)
     }
 
-    /// CR 612.5: inherently pairwise, unlike a uniform multi-word spell
-    /// (Plague Spores' "destroy target creature and target land," where
-    /// each surviving legal target is still independently destroyed) -
-    /// rechecks both targets directly against their own
-    /// `TargetRequirement` rather than consuming the flattened
-    /// `legal_targets` list, which loses the positional pairing this
-    /// role-differentiated effect needs (see `ExchangeTextBoxes`'s own doc
-    /// comment). Anything short of two still-legal `Target::Object` targets
-    /// is a silent no-op - no partner to exchange with.
+    /// CR 612.5: pairwise, so both targets are rechecked against their own
+    /// requirement rather than the flattened list, which loses the pairing. Fewer
+    /// than two legal objects is a no-op.
     pub(super) fn resolve_exchange_text_boxes_effect(
         &mut self,
         top: &StackObject,
         mut events: Vec<GameEventKind>,
     ) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
-        // Not `is_legal_now` (the caller's own closure, in
-        // `resolve_stack_top`) - reusing it here would extend its
-        // captured `&self.state` borrow across every `&mut
-        // self.state` use in every other arm of the original match,
-        // since the borrow checker can't see that match arms are
-        // mutually exclusive at runtime. Same `target_is_legal`
-        // call, inlined instead.
+        // Inlined `target_is_legal` instead of the caller's closure, whose borrow of
+        // `self.state` would span every other match arm.
         let is_legal_now = |t: &Target, req: &TargetRequirement| {
             commands::target_is_legal(
                 &self.state,
@@ -192,28 +145,14 @@ impl Engine {
                 }
             }
         }
-        // else: fewer than two Target::Object
-        // targets, or the requirement isn't
-        // Multiple([_, _]) - silent no-op, same
-        // stance BecomeCopy's own arm takes above.
+        // Fewer than two object targets, or the wrong shape: a no-op.
         ControlFlow::Continue(events)
     }
 
-    /// `AddMana`/`AddManaChoice` are only ever set on a mana ability, which
-    /// resolves immediately and never reaches the stack (CR 605.1a/605.3b),
-    /// so no `StackObject` of any kind should ever carry either variant.
-    /// `CastSpell` always unpacks `AbilityEffect::Script` into
-    /// `operation`/`effect: None` at push time (see that variant's own doc
-    /// comment), so no `StackObject` should ever actually carry it on its
-    /// `effect` field either. Both are defensive no-ops rather than a panic.
-    ///
-    /// `None` is the real, reachable case: look up `top.operation`
-    /// (`ScriptHandle`) and invoke it via `ScriptRuntime::invoke_operation`
-    /// to actually carry out whatever the spell/ability says (CR 602.2b/
-    /// 603.4/608.2m's resolution proper) - `top.effect`'s Rust-native fast
-    /// path (the other arms in this dispatch) covers a growing set of
-    /// recognized primitives without a Lua call at all, and only falls back
-    /// here when none matched.
+    /// Mana abilities never reach the stack (CR 605.3b) and `CastSpell` unpacks
+    /// `Script` at push time, so those variants are defensive no-ops. `None` is the
+    /// reachable case: it invokes `top.operation` through the script bridge, after
+    /// the native fast paths found no match.
     pub(super) fn resolve_misc_or_script_effect(
         &mut self,
         top: &StackObject,
@@ -225,40 +164,11 @@ impl Engine {
             }
             Some(AbilityEffect::Script(_)) => ControlFlow::Continue(events),
             _ => {
-                // A script error here is logged as a GameEventKind::
-                // ScriptError rather than silently dropped - no path from
-                // ResolveStackTop back to a StepStatus error exists for a
-                // mid-resolution script failure, so the resolving spell/
-                // ability still falls through to StackObjectResolved/
-                // ReplacementCheck as though its effect ran (unchanged
-                // fallback), but the failure is now visible in the ledger.
-                // Skipped for `ScriptHandle(0)` - `cast.rs`'s own
-                // `(operation, effect) = match effect { Some(Script(handle))
-                // => (handle, None), other => (ScriptHandle(0), other) }`
-                // uses it as "nothing real bound to it," the placeholder
-                // every permanent/vanilla spell and every hand-built
-                // RegisteredAbility with no script operation carries;
-                // logging there would be a guaranteed false "failure" for
-                // the overwhelmingly common case rather than a real script
-                // bug. Not a fully reserved sentinel, though - confirmed by
-                // a real regression while building this slice:
-                // `Game.Ops.ForEachPlayer(fn)`'s own wrapped-function
-                // handle (`decode_operation_value`'s `ForEachPlayerTag::
-                // Function` arm) is a genuinely different, separately
-                // allocated handle that `cast.rs`'s match above still
-                // discards down to this same `ScriptHandle(0)` (a real,
-                // pre-existing bug in that unpacking, not something this
-                // slice attempts to fix) - so a `ForEachPlayer`-wrapped
-                // custom function is *always* invoked through
-                // `each_player.rs`'s own path, never reaches here, and this
-                // guard's only real gap is the narrow, pre-existing
-                // ambiguity `phase5_script_operation.rs`'s own
-                // `operation_function_decodes_a_custom_function_to_a_real_handle`
-                // test comment already named: a plain (non-`ForEachPlayer`)
-                // custom-function operation that happens to be the very
-                // first script handle a fresh `ScriptRuntime` ever allocates
-                // would coincidentally read as this same placeholder if it
-                // errors. Narrower and pre-existing, not introduced here.
+                // A script error is logged as a `ScriptError` event; resolution carries
+                // on since no path leads back to a `StepStatus` error.
+                // Skipped for `ScriptHandle(0)`, the placeholder `cast.rs` leaves on
+                // vanilla spells, which would log a false failure every time.
+                // TODO: `cast.rs` collapses a `ForEachPlayer`-wrapped handle to `ScriptHandle(0)`, so a plain custom function that is the runtime's first handle reads as the placeholder
                 let outcome = self.script_runtime.invoke_operation(top.operation, &mut self.state, top.source, top.controller);
                 if let Err(ref e) = outcome {
                     if top.operation != ScriptHandle(0) {
@@ -269,18 +179,8 @@ impl Engine {
                 }
                 match outcome {
                     Ok(OperationOutcome::Finished) | Err(_) => ControlFlow::Continue(events),
-                    // Backlog item 9: the script called
-                    // Game.SelectTargets and yielded mid-
-                    // resolution - pause the whole pipeline
-                    // run right here rather than falling
-                    // through to StackObjectResolved/
-                    // ReplacementCheck below. events (this
-                    // resolution's own progress so far, e.g.
-                    // a permanent's ETB ZoneChange) moves
-                    // into events_so_far untouched -
-                    // submit_script_choice pushes the real
-                    // StackObjectResolved and continues into
-                    // ReplacementCheck once answered.
+                    // The script yielded mid-resolution: pause the run here. `events` moves
+                    // into `events_so_far` and `submit_script_choice` finishes the resolution.
                     Ok(OperationOutcome::NeedsChoice { thread, request }) => {
                         self.process_state = ProcessState::AwaitingScriptChoice {
                             thread,
@@ -293,31 +193,19 @@ impl Engine {
                         };
                         ControlFlow::Break(StepStatus::Progressed)
                     }
-                    // `deal_damage`/`add_counters` - no pause, so the
-                    // constructed events just fold straight into this
-                    // resolution's own accumulated list and continue
-                    // exactly as `Finished` does.
+                    // No pause: the events fold into this resolution's list like `Finished`.
                     Ok(OperationOutcome::PendingEvents(new_events)) => {
                         let mut events = events;
                         events.extend(new_events);
                         ControlFlow::Continue(events)
                     }
-                    // `draw_cards`, with no `ForEachPlayer` context (this
-                    // call site never has one) - same real pipeline
-                    // Game.Ops.DrawCards(n)'s own primitive-tag fast path
-                    // uses (resolve_draw_cards_effect).
+                    // `draw_cards` with no `ForEachPlayer` context.
                     Ok(OperationOutcome::PendingDraw { amount }) => {
                         self.process_state = self.continue_draw_cards(amount, top.controller, top.stack_id, events);
                         ControlFlow::Break(StepStatus::Progressed)
                     }
-                    // `phase5/mass-choice-effects`: a standalone (not
-                    // ForEachPlayer-wrapped) script operation's own
-                    // sacrifice_chosen/discard_chosen result - unlike
-                    // resolve_for_each_player_effect's own handling of the
-                    // same outcome, there's no batching context here (this
-                    // is the only player whose choice this resolution will
-                    // ever ask for), so each verb's ids move immediately via
-                    // the normal continue_scripted_zone_move pipeline.
+                    // A standalone script operation has no batching context, so each
+                    // verb's ids move immediately.
                     Ok(OperationOutcome::PendingZoneMoves(moves)) => {
                         self.process_state = self.chain_pending_zone_moves(
                             moves,
@@ -326,9 +214,7 @@ impl Engine {
                         );
                         ControlFlow::Break(StepStatus::Progressed)
                     }
-                    // `Game.Ops.CastSpell`'s own result, with no `ForEachPlayer`
-                    // context (this call site never has one) - see
-                    // `resolve_pending_cast`'s own doc comment.
+                    // `Game.Ops.CastSpell` with no `ForEachPlayer` context.
                     Ok(OperationOutcome::PendingCast { card, modes, targets, x_value, free }) => {
                         self.process_state =
                             self.resolve_pending_cast(card, modes, targets, x_value, free, top.stack_id, top.controller, events);
@@ -339,31 +225,11 @@ impl Engine {
         }
     }
 
-    /// Shared tail for `Game.Ops.CastSpell`'s own result (`OperationOutcome::
-    /// PendingCast`) - called both from a standalone operation's immediate
-    /// result (`resolve_misc_or_script_effect` above) and from a resumed
-    /// coroutine's result once it stops yielding (`settle_script_operation_
-    /// outcome`, `each_player.rs` - e.g. a script that calls `Game.
-    /// SelectTargets` first to pick the cast's own targets, then returns
-    /// `Game.Ops.CastSpell(...)` once resumed with the answer). Same
-    /// synthetic-`PlayerActionKind::CastSpell`-via-`commands::execute_command`
-    /// shape `Engine::submit_cascade_cast`/`submit_madness_cast` already
-    /// establish for their own Rust-driven equivalents (see those two
-    /// methods' `choice_answers.rs` bodies) - unlike those two, every caller
-    /// here runs *inside* an already-active pipeline run (this whole
-    /// resolution is itself `resolve_stack_top`'s own tail, whether directly
-    /// or via a resumed coroutine), so `self.pipeline_context` - already set
-    /// for this pass by `resolve_stack_top` itself - is deliberately left
-    /// untouched, unlike the two Rust-driven callers (each a fresh top-level
-    /// entry point answering a raised pause, not a nested call).
-    ///
-    /// A script-requested cast that turns out illegal (bad target, wrong
-    /// zone, ...) is logged as a `GameEventKind::ScriptError` rather than
-    /// silently dropped - same fallback `resolve_misc_or_script_effect`'s
-    /// own `invoke_operation` arm takes. There's still no path back to the
-    /// script itself to report why the cast didn't happen (`OperationOutcome
-    /// ::PendingCast` is fire-and-forget); this only makes the failure
-    /// observable in the ledger.
+    /// Shared tail for a script's `CastSpell` result, from an immediate result or a
+    /// resumed coroutine. Runs a synthetic `CastSpell` through `execute_command` like
+    /// the cascade and madness casts, but inside an active pipeline run, so
+    /// `pipeline_context` is left untouched. An illegal cast is logged as a
+    /// `ScriptError`; the script is not told why.
     pub(super) fn resolve_pending_cast(
         &mut self,
         card: ObjectId,
@@ -399,8 +265,7 @@ impl Engine {
             Err(err) => {
                 self.state.pending_timing_bypass = None;
                 self.state.pending_free_cast = None;
-                // A rejected cast is the script's mistake and is logged below. A
-                // broken invariant is the engine's, and fatal (035).
+                // A rejected cast is the script's mistake and is logged below; a broken invariant is fatal.
                 if let commands::CommandError::Internal(internal) = &err {
                     self.poison(internal.clone());
                 }
