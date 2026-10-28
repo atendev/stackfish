@@ -4,7 +4,7 @@
 # (PlayerState.commander_damage_taken, real since item 10's slice but never
 # written to until this one). The non-combat-damage and non-commander
 # exclusion cases, Infect interaction, and the 21-damage loss SBA are
-# exercised exhaustively in crates/engine/tests/phase5_commander_damage.rs -
+# exercised exhaustively in crates/engine/tests/commander_damage.rs -
 # this fixture only proves the real end-to-end pipeline (TOML -> Engine ->
 # CLI) wires the commander-damage write through correctly.
 seed = 1

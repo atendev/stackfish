@@ -2,7 +2,7 @@
 # with 3 generic (covering the resolved X) + 1 red. Exercises CardSpec.has_x
 # (the mana-cost side) together with cast_spell's pre-existing x_value field
 # and submit_payment's mana.units (the payment side) end to end via TOML -
-# see phase5_x_costs.rs for the same mechanism driven directly against the
+# see x_costs.rs for the same mechanism driven directly against the
 # engine instead.
 seed = 1
 

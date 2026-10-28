@@ -2,7 +2,7 @@
 # scenario-crate gap the engine side already had covered - mode-selection
 # itself (CastSpell's `modes` field, chosen mode's own target_requirement/
 # effect used instead of the card's singular fields) was already real and
-# exhaustively tested in crates/engine/tests/phase5_script_modal_spells.rs
+# exhaustively tested in crates/engine/tests/script_modal_spells.rs
 # via direct CardDefinition struct literals; this fixture only proves the
 # TOML -> CardSpec.modes -> CardDefinition.modes wiring connects for real,
 # same "prove the pipeline, not the logic" convention

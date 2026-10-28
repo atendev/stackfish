@@ -4,7 +4,7 @@
 # normal CR 608.2b-checked resolution (target still legal - resolves
 # exactly as before this slice, no fizzle). The reject/fizzle paths
 # themselves are exercised exhaustively in
-# crates/engine/tests/phase5_targeting_basics.rs - this fixture only proves
+# crates/engine/tests/targeting_basics.rs - this fixture only proves
 # the real end-to-end pipeline (TOML -> Engine -> CLI) wires the new
 # CardSpec.target_requirement field through correctly.
 seed = 1

@@ -2,7 +2,7 @@
 # function fills in CardDefinition.effect - proving the scenario-crate wiring
 # end to end (PendingScriptOperation / register_script_operation), not just
 # the engine-side ScriptRuntime::build_operation decode (already covered
-# directly in crates/engine/tests/phase5_script_operation.rs). CardSpec has
+# directly in crates/engine/tests/script_operation.rs). CardSpec has
 # no TOML field for a card's own effect at all, so this is the only way a
 # scenario fixture can give a plain sorcery/instant a real resolution effect.
 seed = 1

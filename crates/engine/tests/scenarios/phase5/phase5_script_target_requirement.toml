@@ -4,7 +4,7 @@
 # scenario-crate wiring end to end (PendingScriptTargetRequirement /
 # register_script_target_requirement), not just the engine-side
 # ScriptRuntime::build_target_requirement decode (already covered directly in
-# crates/engine/tests/phase5_script_target_requirement.rs).
+# crates/engine/tests/script_target_requirement.rs).
 #
 # Uses a plain "target creature" restriction rather than a subtype-gated one
 # (e.g. a real "Enchant Wall") - CardSpec has no TOML field for a card's own
