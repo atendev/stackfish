@@ -1,13 +1,6 @@
-//! The step-able rules processor: the `Engine` struct, its pipeline-state
-//! dispatcher (`advance`), and the pieces that don't belong to any one
-//! functional cluster (error types, struct plumbing) — split out of the
-//! original single-file `engine.rs`. Every non-trivial `ProcessState` match
-//! arm below delegates to a `pub(super)`/`pub(in crate::engine)` method
-//! defined in a sibling module; see each sibling's own module doc comment
-//! for which cluster it owns. `ProcessState::ResolveStackTop` (CR 608.2m/
-//! 601.2c/602.2b resolution, the single largest and most complex arm in the
-//! whole engine) delegates into the `resolve/` subdirectory rather than a
-//! single sibling file — see `resolve`'s own module doc comment.
+//! The `Engine` struct, its pipeline dispatcher (`advance`), error types and
+//! plumbing. Each `ProcessState` arm delegates to a sibling module or `resolve/`.
+//! See `DESIGN.md`.
 
 use crate::commands::{Internal, PendingPaymentRequest, Rejected};
 use crate::engine_context::{PipelineContext, PipelineExit};
@@ -42,11 +35,9 @@ mod atomicity_tests;
 
 pub use process_state::*;
 
-/// Why `submit_action` rejected a `PlayerAction` outright (wrong player has
-/// priority, action doesn't match what's currently legal, etc). Since ticket
-/// 035 this also carries the command's own rejection (`Rejected`), so every
-/// refusal of a player action comes out of `submit_action`. A broken engine
-/// invariant is different: it surfaces as `StepStatus::Error(Internal)`.
+/// Why `submit_action` rejected a `PlayerAction`: wrong player, or the command
+/// itself was illegal (`Rejected`). A broken invariant surfaces as
+/// `StepStatus::Error` instead.
 #[derive(Debug)]
 pub enum ActionError {
     NotYourTurn,
@@ -76,13 +67,8 @@ pub enum LegendRuleChoiceError {
     InvalidCandidate,
 }
 
-/// Why `submit_attach_choice` rejected an answer to a CR 303.4d "an Aura
-/// can't enchant more than one object or player" choice. Dormant as of
-/// this slice — no effect in this engine ever computes more than one
-/// simultaneous attach candidate for one Aura (see `commands::propose_attach`'s
-/// own doc comment), so this pause is only ever reached by a test
-/// constructing `ProcessState::AwaitingAttachChoice` directly, not through
-/// real gameplay.
+/// Why `submit_attach_choice` rejected an answer to a CR 303.4d choice. Only
+/// reachable by constructing `AwaitingAttachChoice` directly.
 #[derive(Debug)]
 pub enum AttachChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingAttachChoice`.
@@ -113,23 +99,19 @@ pub enum DevourChoiceError {
     NotAwaitingChoice,
     /// One of `sacrificed` wasn't one of the offered `candidates`.
     InvalidCandidate,
-    /// The same id appeared twice in `sacrificed` — each creature can only
-    /// be sacrificed once, same "no duplicate choice" stance the rest of
-    /// this engine's multi-select choices take.
+    /// The same id appeared twice in `sacrificed`.
     DuplicateCandidate,
 }
 
-/// Why `submit_amplify_choice` rejected an answer to a CR 702.38a Amplify
-/// choice. Same shape as `DevourChoiceError` — see that type's own doc
-/// comment.
+/// Why `submit_amplify_choice` rejected an answer to a CR 702.38a choice. Same shape
+/// as `DevourChoiceError`.
 #[derive(Debug)]
 pub enum AmplifyChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingAmplifyChoice`.
     NotAwaitingChoice,
     /// One of `revealed` wasn't one of the offered `candidates`.
     InvalidCandidate,
-    /// The same id appeared twice in `revealed` — each card can only be
-    /// revealed once.
+    /// The same id appeared twice in `revealed`.
     DuplicateCandidate,
 }
 
@@ -139,35 +121,24 @@ pub enum AmplifyChoiceError {
 pub enum MadnessChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingMadnessChoice`.
     NotAwaitingChoice,
-    /// `card` has no `AlternativeCost::Replacement { from_zone: Exile, .. }`
-    /// entry — shouldn't happen for a real madness card (its own static
-    /// ability is what put it in this pause in the first place), but a
-    /// defensive check rather than an `unreachable!` since nothing actually
-    /// enforces the two halves of Madness are always declared together.
+    /// `card` has no exile alternative cost. Defensive: nothing enforces that a
+    /// madness card declares both halves.
     NoMadnessCost,
-    /// `commands::execute_command` rejected the synthetic `CastSpell` (bad
-    /// targets, unpayable cost, ...) — the pause is left untouched so the
-    /// caller can retry with different targets/modes or call
-    /// `decline_madness_cast` instead.
+    /// `execute_command` rejected the synthetic `CastSpell`; the pause stays open.
     IllegalCast(Rejected),
     /// Casting broke an engine invariant. Fatal: `Engine::fatal_error` has the detail.
     Internal,
 }
 
-/// Why `decline_cascade_cast`/`submit_cascade_cast` rejected an answer to a
-/// CR 702.85a Cascade choice. Same shape as `MadnessChoiceError` — see that
-/// type's own doc comment.
+/// Why `decline_cascade_cast`/`submit_cascade_cast` rejected an answer to a CR 702.85a
+/// choice.
 #[derive(Debug)]
 pub enum CascadeChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingCascadeChoice`.
     NotAwaitingChoice,
-    /// `submit_cascade_cast` was called but the library walk found no
-    /// qualifying candidate (`candidate: None`) — nothing to cast, only
-    /// `decline_cascade_cast` is legal.
+    /// There was no candidate, so only `decline_cascade_cast` is legal.
     NoCandidate,
-    /// `commands::execute_command` rejected the synthetic `CastSpell` (bad
-    /// targets, ...) — the pause is left untouched so the caller can retry
-    /// with different targets/modes or call `decline_cascade_cast` instead.
+    /// `execute_command` rejected the synthetic `CastSpell`; the pause stays open.
     IllegalCast(Rejected),
     /// Casting broke an engine invariant. Fatal: `Engine::fatal_error` has the detail.
     Internal,
@@ -180,22 +151,14 @@ pub enum CascadeChoiceError {
 pub enum UnlessPaidError {
     /// Engine isn't sitting in `ProcessState::AwaitingUnlessPaidChoice`.
     NotAwaitingChoice,
-    /// The submitting player isn't the current front of `payer_queue` — only
-    /// whoever is currently being asked may answer.
+    /// The submitting player isn't the front of `payer_queue`.
     NotCurrentPayer,
-    /// The submitted `PaymentPlan` doesn't validate against the pending
-    /// `cost` — the pause is left untouched, same no-partial-payment stance
-    /// `submit_payment`'s own `PaymentError::InvalidPlan` already takes, so
-    /// the caller can retry with a different plan or call
-    /// `decline_unless_paid` instead.
+    /// The plan doesn't cover the pending `cost`; the pause stays open.
     InvalidPlan,
 }
 
-/// Why `submit_copy_choice` rejected an answer to a CR 707.6/614.12a "enter
-/// as a copy" choice (Clone itself). No `DuplicateCandidate` variant, unlike
-/// `DevourChoiceError`/`AmplifyChoiceError` — this is "which one, if any,"
-/// an `Option<ObjectId>`, not a multi-select `Vec` that duplicates could
-/// even appear in.
+/// Why `submit_copy_choice` rejected an answer to a CR 707.9 choice. No duplicate
+/// variant since the answer is a single `Option`.
 #[derive(Debug)]
 pub enum CopyChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingCopyChoice`.
@@ -212,16 +175,11 @@ pub enum ModeChoiceError {
     NotAwaitingChoice,
     /// `modes.len()` fell outside the announced `min..=max` range.
     InvalidCount,
-    /// The same mode index appeared twice - CR 700.2e doesn't grant CR
-    /// 700.2d's "same mode twice" exception on its own; combining both stays
-    /// unmodeled (see `ModeChoice`'s own doc comment).
+    /// The same mode index appeared twice (CR 700.2e).
     DuplicateMode,
     /// One of `modes` wasn't a valid index into the card's own mode list.
     NoSuchMode,
-    /// 2+ modes chosen, but combining them hit the same synchronous-effect-
-    /// kind narrowing `commands::mode_can_join_others` already enforces for
-    /// the caster-chosen variants (`ModeChoice::Exactly`/`UpTo`/
-    /// `*Repeatable`).
+    /// 2+ modes chosen but combining them hit `mode_can_join_others`'s narrowing.
     UnsupportedModeCombination,
 }
 
@@ -233,21 +191,14 @@ pub enum CommanderReturnChoiceError {
     NotAwaitingChoice,
 }
 
-/// Why `submit_script_choice` rejected an answer to a backlog-item-9
-/// `Game.SelectTargets` pause.
+/// Why `submit_script_choice` rejected an answer to a `Game.SelectTargets` pause.
 #[derive(Debug)]
 pub enum ScriptChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingScriptChoice`.
     NotAwaitingChoice,
-    /// `chosen` doesn't satisfy the request's own `TargetFilter` (CR 115) —
-    /// same legality check `target_is_legal` already performs for a spell's
-    /// static target requirement, reused here rather than a second bespoke
-    /// check.
+    /// `chosen` fails the request's `TargetFilter` (CR 115).
     InvalidCandidate,
-    /// The pending request doesn't match the answer shape submitted — e.g.
-    /// `submit_script_choice` (a `Target` answer) called while the pause is
-    /// actually a `ScriptChoiceRequest::MayChoose` (backlog item 9a), or
-    /// vice versa via `submit_script_may_choice`.
+    /// The answer shape doesn't match the pending request (target versus may-choice).
     WrongRequestKind,
 }
 
@@ -257,13 +208,9 @@ pub enum ScriptChoiceError {
 pub enum TriggerOrderError {
     /// Engine isn't sitting in `ProcessState::AwaitTriggerOrderChoice`.
     NotAwaitingChoice,
-    /// `chosen_order`'s length doesn't match the offered group's — caller
-    /// must supply a reordering of the exact group, not a different set.
+    /// `chosen_order` has the wrong length.
     WrongLength,
-    /// Same length as the offered group, but not the same multiset of
-    /// `PendingTrigger`s — length matching alone doesn't rule out the caller
-    /// substituting/dropping/duplicating a trigger while keeping the count
-    /// right, so this is checked separately (see `is_permutation`).
+    /// Right length but not the same triggers; checked by `is_permutation`.
     NotAPermutation,
 }
 
@@ -273,29 +220,22 @@ pub enum TriggerOrderError {
 pub enum TriggerTargetsError {
     /// Engine isn't sitting in `ProcessState::AwaitingTriggerTargets`.
     NotAwaitingChoice,
-    /// `chosen` failed `commands::validate_single_target_requirement` -
-    /// wrong count, a duplicate, or an id/player not among the offered
-    /// `candidates`.
+    /// `chosen` failed `validate_single_target_requirement`.
     InvalidTargets,
 }
 
-/// Why `submit_trigger_mode_choice` rejected an answer to a CR 603.3c modal
-/// triggered-ability mode choice — same shape `ModeChoiceError` already
-/// takes for a spell's own CR 700.2e "chosen by opponent" pause.
+/// Why `submit_trigger_mode_choice` rejected an answer to a CR 603.3c mode choice.
 #[derive(Debug)]
 pub enum TriggerModeChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingTriggerModeChoice`.
     NotAwaitingChoice,
     /// `modes.len()` fell outside the announced `min..=max` range.
     InvalidCount,
-    /// The same mode index appeared twice and `mode_choice` isn't one of
-    /// CR 700.2d's `*Repeatable` variants.
+    /// The same mode index appeared twice and the choice isn't repeatable (CR 700.2d).
     DuplicateMode,
     /// One of `modes` wasn't a valid index into the ability's own mode list.
     NoSuchMode,
-    /// 2+ modes chosen, but combining them hit `commands::
-    /// combine_chosen_modes`'s own synchronous-effect-kind/multi-target
-    /// narrowing (see that function's own doc comment).
+    /// 2+ modes chosen but combining them hit `combine_chosen_modes`'s narrowing.
     UnsupportedModeCombination,
 }
 
@@ -305,11 +245,7 @@ pub enum TriggerModeChoiceError {
 pub enum PaymentError {
     /// Engine isn't sitting in `ProcessState::AwaitingPayment`.
     NotAwaitingPayment,
-    /// `plan` didn't validate against the pending cost (see
-    /// `PaymentPlan::validate`) — wrong/missing/extra payments, or the
-    /// payer's pool can't actually cover it. State is left untouched either
-    /// way: no partial deduction ever happens (see `cost.rs`'s `PaymentPlan`
-    /// doc).
+    /// The plan doesn't validate against the pending cost. State is untouched.
     InvalidPlan,
 }
 
@@ -333,23 +269,17 @@ pub enum DiscardError {
 pub enum ScryChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingScryChoice`.
     NotAwaitingChoice,
-    /// `kept_on_top`/`put_bottom` together don't contain exactly the pending
-    /// `cards` set once each — missing a card, duplicating one, or
-    /// including an id that wasn't offered.
+    /// The two piles don't hold exactly the pending cards, once each.
     WrongCards,
 }
 
-/// Why `submit_surveil_choice` rejected an answer to a CR 701.25
-/// `ProcessState::AwaitingSurveilChoice` pause. Same shape as
-/// `ScryChoiceError` — kept as its own type rather than shared, same "one
-/// error type per pause shape" precedent `ScriptChoiceError` vs
-/// `LegendRuleChoiceError` already set.
+/// Why `submit_surveil_choice` rejected an answer to a CR 701.25 pause. Its own type,
+/// one per pause shape.
 #[derive(Debug)]
 pub enum SurveilChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingSurveilChoice`.
     NotAwaitingChoice,
-    /// `kept_on_top`/`put_graveyard` together don't contain exactly the
-    /// pending `cards` set once each.
+    /// The two piles don't hold exactly the pending cards, once each.
     WrongCards,
 }
 
@@ -359,11 +289,9 @@ pub enum SurveilChoiceError {
 pub enum SearchChoiceError {
     /// Engine isn't sitting in `ProcessState::AwaitingSearchChoice`.
     NotAwaitingChoice,
-    /// `chosen.len()` exceeds the pending `count` — CR 701.23b allows
-    /// choosing fewer (including zero), never more.
+    /// More than `count` chosen (CR 701.23b allows fewer).
     TooMany,
-    /// A chosen id isn't one of the pending `candidates`, or the same id
-    /// was chosen more than once.
+    /// A chosen id isn't a candidate, or is repeated.
     NotACandidate,
 }
 
@@ -377,8 +305,7 @@ pub enum MulliganError {
     /// Player submitted `TakeMulligan` but has already reached
     /// `GameSettings::max_mulligans`. They must keep.
     MaxMulligansReached,
-    /// `action.kind` wasn't `KeepHand` or `TakeMulligan` — only those two
-    /// are valid during a mulligan decision window.
+    /// Only `KeepHand` and `TakeMulligan` are valid here.
     InvalidAction,
 }
 
@@ -389,8 +316,7 @@ pub enum BottomCardsError {
     NotAwaitingChoice,
     /// `action.player` isn't the player who needs to bottom cards right now.
     WrongPlayer,
-    /// `cards.len()` != the `count` in `AwaitingBottomCardChoice`. Must be
-    /// exactly `count` — no more, no fewer.
+    /// `cards.len()` isn't exactly `count`.
     WrongCount { expected: usize, got: usize },
     /// A card id in `cards` isn't currently in the player's hand.
     CardNotInHand,
@@ -398,16 +324,9 @@ pub enum BottomCardsError {
     DuplicateCard,
 }
 
-/// One frame of `Engine::suspended_payments` — everything needed to resume
-/// an outer `ProcessState::AwaitingPayment` once the nested mana-ability
-/// activation that paused it (CR 601.2g/605.3a) fully settles. `request`
-/// carries the same fields `AwaitingPayment` itself does; `pipeline_context`/
-/// `pipeline_exit` are the outer run's own values, saved off because
-/// `handle_pending_action` unconditionally overwrites both live fields the
-/// moment the nested `PendingAction` runs (see `Engine::pipeline_context`'s
-/// own doc comment) - without this, the outer run's trigger-collection
-/// window and post-settle destination would silently pick up the nested
-/// run's values instead of its own once resumed.
+/// One frame of `Engine::suspended_payments`: what resumes an outer
+/// `AwaitingPayment` after a nested mana ability settles (CR 605.3a). The pipeline
+/// fields are saved because the nested `PendingAction` overwrites the live ones.
 #[derive(Debug)]
 struct SuspendedPayment {
     request: PendingPaymentRequest,
@@ -415,108 +334,57 @@ struct SuspendedPayment {
     pipeline_exit: PipelineExit,
 }
 
-/// The step-able rules processor (DESIGN.md's "step-able core"). Wraps
-/// `GameState` (pure data) with the actual turn/phase/priority/stack
-/// advancement logic. Live play drives `step()` in a tight loop between
-/// player decisions; a replay viewer re-feeds the same seed + action stream
-/// into a fresh `Engine` and calls `step()` one at a time to pause/scrub.
+/// The step-able rules processor. Wraps `GameState` with the turn, priority and
+/// stack logic. A replay re-feeds the seed and actions into a fresh `Engine` and
+/// calls `step()` one at a time.
 pub struct Engine {
     state: GameState,
     process_state: ProcessState,
-    /// `None` while sitting in `PriorityWindow` with nothing in flight; set
-    /// when a pipeline run begins (`PendingAction`/`ResolveStackTop`), read
-    /// by `CommitEvents`/`CollectTriggers`, and MUST be reset back to
-    /// `None` by `PutTriggersApnap` (the run's last stage) — otherwise the
-    /// next run's `CommitEvents`/`CollectTriggers` would silently read this
-    /// run's stale `since_ledger`/`caused_by_command`/`parent_event`.
+    /// Set when a pipeline run begins, read by `CommitEvents` and `CollectTriggers`.
+    /// `PutTriggersApnap` must reset it, or the next run reads stale values.
     pipeline_context: Option<PipelineContext>,
-    /// Decided when a pipeline run begins; consumed once that run's
-    /// trigger-placement stage finishes to pick the next `ProcessState`.
+    /// Chosen when a run begins; picks the next state once trigger placement finishes.
     pipeline_exit: PipelineExit,
-    /// CR 603.10 last-known-information stash: every `Triggered`-kind
-    /// ability captured off an object that died during this pipeline run's
-    /// `SbaLoop`, *after* `commands::retire_object` already purged it from
-    /// `state.abilities` — same "transient process state, not
-    /// `GameState`" contract `pipeline_context` establishes. `collect_
-    /// triggers`/`PutTriggersApnap`'s ability lookup both fall back to this
-    /// list when a live `state.abilities` lookup misses. Populated by
-    /// `finish_sba_loop`/`resume_sba_death` as deaths are committed; MUST be
-    /// cleared by `end_pipeline_run` (the run's last stage) for the same
-    /// reason `pipeline_context` must be — otherwise a later pipeline run
-    /// would see this run's stale entries piled up alongside its own.
+    /// CR 603.10: triggered abilities captured off objects that died this run, after
+    /// `retire_object` purged them. Trigger lookup falls back to it. `end_pipeline_run`
+    /// must clear it, or a later run sees stale entries.
     departed_triggered_abilities: Vec<RegisteredAbility>,
-    /// First ledger index of a `BecameTarget` event logged while triggered
-    /// abilities were being put on the stack (CR 603.3d), still waiting to be
-    /// scanned for triggers of its own (Ward). `push_ordered_triggers` takes it
-    /// when its queue empties and re-enters `CollectTriggers` from there.
+    /// First ledger index of a `BecameTarget` logged while triggers were put on the
+    /// stack (CR 603.3d), still to be scanned (Ward). Taken when the queue empties.
     recollect_triggers_since: Option<usize>,
-    /// Dedicated monotonic counter for `CommandId` allocation — see the
-    /// same rationale as `GameState::allocate_event_id`; was previously
-    /// derived from `ledger.len()`, which doesn't even make sense for
-    /// command ids (commands aren't ledger entries).
+    /// Monotonic `CommandId` counter; commands aren't ledger entries.
     next_command_id: u64,
-    /// The first broken invariant (035). Once set, `step()` only reports it, so a
-    /// host that ignores one `Internal` error cannot go on playing a half-changed
-    /// game. The text is for logs and never goes to a player.
+    /// The first broken invariant. Once set, `step()` only reports it so a host can't
+    /// keep playing a half-changed game. The text is for logs, never a player.
     fatal: Option<Internal>,
-    /// Set by `PendingAction` when `execute_command`'s outcome carries a
-    /// `CommandOutcome::requires_payment` (currently only `CastSpell`),
-    /// consumed (`Option::take`) by `CommitEvents` once this run's events
-    /// have committed — that's the point this run either continues straight
-    /// into `SbaLoop` (nothing pending) or pauses on `ProcessState::
-    /// AwaitingPayment` (something pending). Kept as its own field rather
-    /// than folded into `pipeline_context`, since unlike that field's
-    /// since_ledger/causal refs, this is specific to one command's outcome,
-    /// not "this pipeline run" in general — `ResolveStackTop` runs never set
-    /// it, and it's already `None` by the time they reach `CommitEvents`.
+    /// Set by `PendingAction` from `requires_payment`, taken by `CommitEvents` to
+    /// decide between `SbaLoop` and `AwaitingPayment`. Separate from `pipeline_context`
+    /// because it belongs to one command's outcome.
     pending_payment: Option<PendingPaymentRequest>,
     /// CR 700.2d: the modes of a multi-mode resolution still to run after the
     /// one currently in the pipeline. Set by `resolve::modal`, taken by
     /// `resolve_commit_events_state`.
     modal_continuation: Option<resolve::ModalContinuation>,
-    /// CR 601.2g/605.3a: a mana ability may be activated "even if it's in
-    /// the middle of casting or resolving a spell or activating or
-    /// resolving an ability" that itself requires a mana payment - so
-    /// `submit_action` (see its own doc comment) may accept a nested
-    /// `ActivateAbility` for a mana ability while `process_state` is already
-    /// `AwaitingPayment` for something else. Each entry is one suspended
-    /// outer payment, LIFO - a real-cost (Treasure-style) mana ability
-    /// activated mid-payment can itself pause on a fresh `AwaitingPayment`
-    /// for its own cost, nesting one level deeper. Popped by
-    /// `resume_suspended_payment_or` (the one place both `end_pipeline_run`'s
-    /// `BackToPriority` arm and `handle_pending_action`'s error arm check
-    /// before falling back to their old unconditional behavior) once the
-    /// nested action's own pipeline run fully settles.
+    /// CR 605.3a: outer payments suspended by a nested mana-ability activation, LIFO.
+    /// A cost-bearing mana ability can nest another level. Popped by
+    /// `resume_suspended_payment_or`.
     suspended_payments: Vec<SuspendedPayment>,
-    /// Settings that govern automated pregame behavior and format-level thresholds
-    /// (life totals, poison threshold, max hand size). Stored on `Engine`, not
-    /// `GameState`, because they're configuration for this session, not mutable
-    /// game state that rules affect. `Engine::new` uses `GameSettings::default()`;
-    /// `Engine::new_game` sets this from `GameConfig::settings`.
+    /// Pregame and format settings. Held here rather than in `GameState` because they
+    /// configure the session and no rule changes them.
     pub settings: GameSettings,
-    /// `true` once pregame setup (shuffle/draw/mulligan) is complete or was
-    /// deliberately skipped. `Engine::new_game` initializes this to `false` so
-    /// the first `step()` call triggers `run_pregame_setup`. `Engine::new`
-    /// (legacy test constructor) initializes to `true` to preserve existing
-    /// tests that build `GameState` directly with `phase: PreGame` and expect
-    /// the old pass-through behavior where PreGame was a no-op.
+    /// True once pregame setup is done or skipped. `new_game` starts false so the
+    /// first `step()` runs setup; `Engine::new` starts true for tests that build
+    /// `GameState` directly in `PreGame`.
     pregame_setup_done: bool,
-    /// Embedded Lua VM + loaded callbacks (see `script.rs`). One per
-    /// `Engine`, not per-game rule per DESIGN.md — but this is a per-`Engine`
-    /// field rather than a global since there's currently no other place
-    /// with the right lifetime to own it, and nothing yet shares one
-    /// `ScriptRuntime` across multiple `Engine`s.
+    /// One Lua VM per `Engine`; nothing shares a runtime across engines.
     script_runtime: ScriptRuntime,
-    /// Decision id counter for the `decision` facade. TODO(B3): moves into
-    /// the Session.
+    /// Decision id counter for the `decision` facade.
+    // TODO: move into the Session
     pub(crate) decisions: crate::decision::DecisionTracker,
 }
 
-/// Everything a rejected input must leave exactly as it was (024: validate
-/// before mutate). `state` is compared structurally; the engine-side fields
-/// that have no `PartialEq` (pipeline stage, suspended payments, ...) are
-/// compared through their `Debug` rendering, which is stable for an
-/// unmodified value. Taken by `Engine::snapshot`.
+/// What a rejected input must leave unchanged. `state` is compared structurally and
+/// the engine fields without `PartialEq` through their `Debug` rendering.
 #[derive(Clone, PartialEq, Debug)]
 pub struct EngineSnapshot {
     pub state: GameState,
@@ -526,7 +394,7 @@ pub struct EngineSnapshot {
 }
 
 impl Engine {
-    /// Captures the state a rejection must not change. See `EngineSnapshot`.
+    /// Captures the state a rejection must not change.
     pub fn snapshot(&self) -> EngineSnapshot {
         EngineSnapshot {
             state: self.state.clone(),
@@ -576,8 +444,8 @@ impl Engine {
         &self.state
     }
 
-    /// The broken invariant that made the engine fatal, if one did. Detail for a
-    /// host's log: it can name hidden cards, so it must not reach a player.
+    /// The invariant that made the engine fatal, for a host's log. It can name hidden
+    /// cards, so it must not reach a player.
     pub fn fatal_error(&self) -> Option<&Internal> {
         self.fatal.as_ref()
     }
@@ -597,20 +465,13 @@ impl Engine {
         &self.script_runtime
     }
 
-    /// `true` until the first `step()` has run pregame setup. No Decision is
-    /// open before then, even though `process_state` is `PriorityWindow`.
+    /// True until the first `step()` runs pregame setup; no Decision is open before then.
     pub(crate) fn awaiting_pregame_setup(&self) -> bool {
         self.state.phase == Phase::PreGame && !self.pregame_setup_done
     }
 
-    /// CR 601.2f-h/605.3b: the cost currently awaiting `submit_payment`, and
-    /// the object it belongs to (`PendingPaymentRequest::source`'s own
-    /// doc comment - the `AdditionalCost::TapSelf` target, not necessarily
-    /// `stack_id`) - `None` outside `ProcessState::AwaitingPayment`. Exposes
-    /// exactly the `CostSpec` `PaymentPlan::validate` itself already checks
-    /// a submitted plan against, so a caller building a plan on the fly (an
-    /// auto-pay convenience, say) has one real source of truth instead of a
-    /// second, potentially-drifting way to re-derive the pending cost.
+    /// CR 601.2f: the cost awaiting `submit_payment` and its source object (the
+    /// `TapSelf` target, not necessarily `stack_id`). `None` outside `AwaitingPayment`.
     pub fn pending_payment_cost(&self) -> Option<(&CostSpec, ObjectId)> {
         match &self.process_state {
             ProcessState::AwaitingPayment { cost, source, .. } => Some((cost, *source)),
@@ -618,60 +479,31 @@ impl Engine {
         }
     }
 
-    /// The real script bridge exists (`run_card_script_for` below, via
-    /// `Game.CreateTriggeredAbility`/`Game.CreateActivatedAbility`/`Game.
-    /// CreateManaAbility`) but only self-registers as an object's own script
-    /// runs on zone entry - callers building a game from `CardDefinition`s
-    /// outside the manual scenario-fixture path (e.g. `new_game`, before
-    /// anything has entered a zone that triggers a script run) still need a
-    /// way to seed `RegisteredAbility` entries directly.
+    /// Mutable access to the state. Scripts register abilities as objects enter
+    /// zones, so a host building a game from definitions needs this to seed
+    /// `RegisteredAbility` entries directly.
     pub fn state_mut(&mut self) -> &mut GameState {
         &mut self.state
     }
 
-    /// Runs `object_id`'s card script now that it has just entered the hand
-    /// zone (CR 400.7 fresh id already minted by the caller), self-
-    /// registering any ability that — like CR 702.29 Cycling — only
-    /// functions from hand. The hand-zone counterpart to `action.rs`'s own
-    /// `battlefield_entries` loop, which does the identical `run_card_script`
-    /// call for a Hand->Battlefield move; this one covers every real
-    /// Library->Hand producer instead (draw, opening hand, search-to-hand) —
-    /// see each call site for why that producer needs it. Same "silently
-    /// drop a script error" gap `battlefield_entries`' own call already
-    /// carries, not new here.
-    ///
-    /// Deliberately narrow: only Library->Hand entry calls this. A card
-    /// leaving hand for any other zone still purges its `RegisteredAbility`
-    /// entries via the pre-existing `retire_object` convention, same as
-    /// every other ability in this engine — CR 702.29b's "the ability
-    /// continues to exist... in all other zones" has no real consumer today
-    /// (no filter/effect in this engine ever queries "does this object have
-    /// an activated ability"), so that half is a named, unobserved gap
-    /// rather than something this method attempts.
+    /// CR 702.29b: runs the script of a card that just entered the hand so a hand-only
+    /// ability (cycling) registers. Covers every library-to-hand producer. Leaving
+    /// hand purges the abilities as for any zone change.
+    // TODO: abilities that continue to exist in other zones have no consumer yet (CR 702.29b)
     pub(in crate::engine) fn run_card_script_for(&mut self, object_id: ObjectId) {
         if let Some(definition) = self.state.object(object_id).map(|o| o.definition.clone()) {
-            // Marks the run done so `sync_off_battlefield_scripts` doesn't
-            // register the same abilities a second time for this id.
+            // Marks the run done so `sync_off_battlefield_scripts` won't register it twice.
             self.state.off_battlefield_scripts_run.insert(object_id);
             let result = self.script_runtime.run_card_script(&mut self.state, &definition, object_id);
             self.record_script_error(object_id, &definition.script_ref, result);
         }
     }
 
-    /// CR 113.6/604.3: runs the card script of every object sitting in a hand,
-    /// library, graveyard or exile that hasn't had it run yet, so an ability declared with
-    /// `:SetFunctionsFrom("Graveyard"/"Exile")` registers. Called at the start
-    /// of trigger collection (`resolve_collect_triggers_state`) rather than at
-    /// each graveyard/exile producer - death, discard, mill, spell resolution
-    /// and exile effects all commit zone moves through different paths, and a
-    /// sweep covers every one of them (and fixture-placed cards) without a
-    /// per-site hook. Every pipeline run passes through trigger collection
-    /// before priority is given, so the ability exists before it can be used.
-    /// Undeclared abilities are discarded by `run_card_script` in these zones,
-    /// so a card with none costs one script evaluation and is then marked done.
+    /// CR 113.6, 604.3: runs the script of every object in a hand, library,
+    /// graveyard or exile that hasn't had it run, so `SetFunctionsFrom` abilities
+    /// register. A sweep at trigger collection covers every zone-move path.
     pub(in crate::engine) fn sync_off_battlefield_scripts(&mut self) {
-        // Sorted: `objects` iteration order isn't deterministic, and each run
-        // allocates ability ids.
+        // Sorted because `objects` order isn't deterministic and each run allocates ability ids.
         let mut pending: Vec<ObjectId> = self
             .state
             .objects
@@ -691,21 +523,10 @@ impl Engine {
         }
     }
 
-    /// Stores `request` as `pending_payment`, and - if it's a spell that was
-    /// just put on the stack - runs its card script for the stack zone first.
-    /// CR 601.2a: a spell's abilities (e.g. Cascade's "when you cast this
-    /// spell") exist from the moment it's on the stack, before it ever
-    /// resolves, so a script must be able to self-register them here. Safe to
-    /// run in addition to the hand-entry and battlefield-entry runs: every
-    /// script-registered ability is dropped again by
-    /// `commands::remap_abilities` on the next zone change, and
-    /// `run_card_script` never lets a non-battlefield run register a static
-    /// effect, replacement effect or modifier.
-    ///
-    /// The one funnel for all four real `CastSpell` producers (the normal
-    /// action, Madness, Cascade, and a script-requested cast). An activated
-    /// ability shares `PaymentResolution::StackObject`, so the stack entry's
-    /// own kind is what gates this.
+    /// Stores `request` as `pending_payment`, first running a spell's script for the
+    /// stack zone. CR 601.2a: a spell's abilities (Cascade's cast trigger) exist from
+    /// the moment it is on the stack. The one funnel for all `CastSpell` producers;
+    /// the stack entry's kind gates it since abilities share `PaymentResolution::StackObject`.
     pub(in crate::engine) fn set_pending_payment(&mut self, request: Option<PendingPaymentRequest>) {
         if let Some(request) = &request {
             let is_spell = matches!(request.on_paid, crate::commands::PaymentResolution::StackObject)
@@ -721,33 +542,10 @@ impl Engine {
         self.pending_payment = request;
     }
 
-    /// Logs a `run_card_script` failure as a `GameEventKind::ScriptError`
-    /// ledger event instead of silently dropping it (the "a script error
-    /// here is silently dropped" gap named across `engine/action.rs`,
-    /// `engine/choice_answers.rs`, `engine/payment.rs`, `engine/resolve/
-    /// tokens.rs`, `engine/resolve/misc_effects.rs`, `engine/
-    /// library_choices.rs`). Mirrors the exact message convention
-    /// `triggers::collect_triggers`'s own `invoke_condition` call already
-    /// established for a script error — the caller's existing conservative
-    /// fallback (proceed as though nothing happened) is unchanged; this
-    /// only makes a *real* failure observable in the ledger rather than
-    /// invisible. A script error is not a rejected input (024), so the
-    /// resolution that hit it carries on and nothing is rolled back.
-    ///
-    /// Deliberately skips logging when `script_ref` is `ByKey` or an empty
-    /// `Inline` source — `run_card_script`'s own doc comment documents
-    /// `ByKey` as *always* erroring in this engine ("real integration is
-    /// expected to always hand this engine an already-resolved `Inline`
-    /// source"), and the scenario-TOML loader defaults an unset `script`
-    /// field to `Inline("")`, which fails to eval to a table the same way.
-    /// Both are the ordinary, deliberate shape of a "vanilla card, no real
-    /// script" fixture used throughout this engine's own test suite (e.g.
-    /// `stackfish_testutil::minimal_card_definition`'s `ByKey` default) —
-    /// not a real script bug, and every permanent that resolves onto the
-    /// battlefield runs through here (`payment.rs`'s `run_script` flag), so
-    /// logging unconditionally would flood the ledger with a "failure" for
-    /// nearly every existing fixture rather than surfacing the genuine
-    /// "a real script threw" case this cluster is actually about.
+    /// Logs a `run_card_script` failure as a `ScriptError` event so it is observable;
+    /// resolution carries on, as a script error isn't a rejected input. Skips a
+    /// `ByKey` or empty `Inline` source, the ordinary shape of a vanilla fixture
+    /// card, which would otherwise flood the ledger.
     pub(in crate::engine) fn record_script_error<T>(
         &mut self,
         source: ObjectId,
@@ -764,28 +562,18 @@ impl Engine {
         }
     }
 
-    /// Loads a standalone Lua callback (see `ScriptRuntime::load_function`)
-    /// into this `Engine`'s script runtime, returning a `ScriptHandle` a
-    /// caller can then put on a `RegisteredAbility`'s `condition`/`operation`
-    /// field directly. For callers hand-building a `RegisteredAbility` via
-    /// `state_mut` rather than through a real card script's own `Game.
-    /// CreateTriggeredAbility`/etc. call — same "no self-registration
-    /// happened, so the caller wires it up by hand" shape `state_mut`'s own
-    /// doc comment already describes for `state.abilities`.
+    /// Loads a standalone Lua callback and returns a handle for hand-built
+    /// `RegisteredAbility` fields.
     pub fn load_script(&mut self, source: &str) -> Result<ScriptHandle, ScriptError> {
         self.script_runtime.load_function(source)
     }
 
-    /// Loads a condition source string — either a `Game.Conditions.*`
-    /// one-liner or a full custom function — into this `Engine`'s script
-    /// runtime. See `ScriptRuntime::load_condition`.
+    /// Loads a condition source (a `Game.Conditions.*` one-liner or custom function).
     pub fn load_condition(&mut self, source: &str) -> Result<ConditionSpec, ScriptError> {
         self.script_runtime.load_condition(source)
     }
 
-    /// Loads an operation source string — either a `Game.Ops.*` one-liner or
-    /// a full custom function — into this `Engine`'s script runtime. See
-    /// `ScriptRuntime::load_operation`.
+    /// Loads an operation source (a `Game.Ops.*` one-liner or custom function).
     pub fn load_operation(
         &mut self,
         source: &str,
@@ -793,17 +581,9 @@ impl Engine {
         self.script_runtime.load_operation(source)
     }
 
-    /// A card's own base target requirement (an Aura's "Enchant [quality]"
-    /// line, etc.), as declared by its script's optional `target_requirement()`
-    /// function — see `ScriptRuntime::build_target_requirement`'s own doc
-    /// comment for the full convention, including the scripted-predicate
-    /// `filter` form. `&self`, not `&mut self`, despite that form needing to
-    /// register a function in the script registry — same `Rc<RefCell<
-    /// ScriptRegistry>>` interior mutability every other builder method
-    /// already relies on. Whatever `ScriptHandle` this returns is only ever
-    /// valid against *this* `Engine`'s own `script_runtime` — the same
-    /// caller trap `docs/implementation/05-script-bridge.md` already names
-    /// for a custom-function handle in general.
+    /// A card's base target requirement from its script's `target_requirement()`.
+    /// Takes `&self` since registering a scripted predicate uses interior mutability.
+    /// A returned `ScriptHandle` is only valid against this engine's runtime.
     pub fn build_target_requirement(
         &self,
         source: &str,
@@ -811,10 +591,7 @@ impl Engine {
         self.script_runtime.build_target_requirement(source)
     }
 
-    /// A plain spell's own resolution effect (Armageddon's "Destroy all
-    /// lands," etc.), as declared by its script's optional `operation()`
-    /// function — see `ScriptRuntime::build_operation`'s own doc comment for
-    /// the full convention.
+    /// A plain spell's resolution effect from its script's `operation()`.
     pub fn build_operation(
         &self,
         source: &str,
@@ -822,10 +599,7 @@ impl Engine {
         self.script_runtime.build_operation(source)
     }
 
-    /// A card's own alternative costs (flashback/escape-style, CR 601.2b), as
-    /// declared by its script's optional `alternative_costs()` function — see
-    /// `ScriptRuntime::build_alternative_costs`'s own doc comment for the
-    /// full convention.
+    /// A card's alternative costs (CR 601.2b) from its script's `alternative_costs()`.
     pub fn build_alternative_costs(
         &self,
         source: &str,
@@ -833,18 +607,13 @@ impl Engine {
         self.script_runtime.build_alternative_costs(source)
     }
 
-    /// A card's own Buyback cost (CR 702.27a), as declared by its script's
-    /// optional `buyback_cost()` function — see `ScriptRuntime::
-    /// build_buyback_cost`'s own doc comment for the full convention.
+    /// A card's buyback cost (CR 702.27a) from its script's `buyback_cost()`.
     pub fn build_buyback_cost(&self, source: &str) -> Result<Option<crate::types::mana::ManaCost>, ScriptError> {
         self.script_runtime.build_buyback_cost(source)
     }
 
-    /// Diagnostic for tests/replay tooling: whether `pipeline_context` is
-    /// currently set. Should be `false` whenever `process_state` is
-    /// `PriorityWindow` - `end_pipeline_run` is the only place that clears
-    /// it, and `PriorityWindow` is only ever reached through there (or
-    /// `AdvanceTurnStep`, which also doesn't set it).
+    /// Diagnostic: whether `pipeline_context` is set. Should be false at
+    /// `PriorityWindow`, since only `end_pipeline_run` clears it.
     pub fn pipeline_context_active(&self) -> bool {
         self.pipeline_context.is_some()
     }
@@ -862,13 +631,7 @@ impl Engine {
         StepResult { events_added: events_start..self.state.ledger.len(), status }
     }
 
-    /// Wraps each `GameEventKind` into a `GameEvent` (allocating its
-    /// `event_id`/`sequence_no`) and pushes it to the ledger. Pulled out of
-    /// the `AdvanceTurnStep` arm so the same wrapping logic isn't repeated
-    /// for the base step transition, `untap_step`, and `draw_step` alike.
-    ///
-    /// `pub(in crate::engine)`: also called from `turn.rs` and
-    /// `triggers_pipeline.rs`.
+    /// Wraps each kind in a `GameEvent`, allocating its ids, and pushes it to the ledger.
     pub(in crate::engine) fn log_events(&mut self, events: Vec<GameEventKind>) {
         for kind in events {
             let event_id = self.state.allocate_event_id();
@@ -883,15 +646,8 @@ impl Engine {
         }
     }
 
-    /// CR 603.2/702.21a: logs one `BecameTarget` per distinct battlefield
-    /// object that `stack_id`'s spell or ability targets (CR 603.2c: naming
-    /// the same object under two target words is still one event). Called
-    /// only once the stack object is really on the stack and paid for, from
-    /// `submit_payment` and `push_trigger_stack_object`. A stack object that
-    /// is gone, or targets nothing, logs nothing.
-    ///
-    /// `pub(in crate::engine)`: also called from `payment.rs` and
-    /// `triggers_pipeline.rs`.
+    /// CR 603.2: logs one `BecameTarget` per distinct battlefield object `stack_id`
+    /// targets (CR 603.2c). Called once the object is on the stack and paid for.
     pub(in crate::engine) fn log_became_target(&mut self, stack_id: ObjectId) {
         let Some(stack_object) = self.state.stack.iter().find(|s| s.stack_id == stack_id) else {
             return;
@@ -911,10 +667,7 @@ impl Engine {
     }
 
     fn advance(&mut self) -> StepStatus {
-        // `PriorityWindow` has no payload, so it's a cheap placeholder to
-        // swap in while we take ownership of whatever state we're actually
-        // in — every other variant gets explicitly replaced below before
-        // this function returns.
+        // `PriorityWindow` is a payload-free placeholder; every other variant is replaced below.
         match std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow) {
             ProcessState::PriorityWindow => {
                 if self.state.phase == Phase::PreGame && !self.pregame_setup_done {
@@ -934,10 +687,7 @@ impl Engine {
             }
 
             ProcessState::AwaitingReplacementChoice { affected_player, pending_event, candidates, excluded, resume } => {
-                // Nothing to do until submit_replacement_choice answers -
-                // put the exact same state back and tell the caller who
-                // needs to be prompted, mirroring PriorityWindow's
-                // AwaitingAction pattern.
+                // Re-presents the pause, leaving the state in place until the answer arrives.
                 let status = StepStatus::AwaitingReplacementChoice {
                     player: affected_player,
                     candidates: candidates.clone(),
@@ -953,26 +703,18 @@ impl Engine {
             }
 
             ProcessState::AwaitingLegendRuleChoice { player, candidates, then } => {
-                // Nothing to do until submit_legend_rule_choice answers -
-                // same "put the exact same state back" pattern
-                // AwaitingReplacementChoice above already uses.
                 let status = StepStatus::AwaitingLegendRuleChoice { player, candidates: candidates.clone() };
                 self.process_state = ProcessState::AwaitingLegendRuleChoice { player, candidates, then };
                 status
             }
 
             ProcessState::AwaitingCommanderReturnChoice { player, commander, then } => {
-                // Nothing to do until submit_commander_return_choice
-                // answers - same "put the exact same state back" pattern.
                 let status = StepStatus::AwaitingCommanderReturnChoice { player, commander };
                 self.process_state = ProcessState::AwaitingCommanderReturnChoice { player, commander, then };
                 status
             }
 
             ProcessState::AwaitingAttachChoice { aura, controller, candidates } => {
-                // Nothing to do until submit_attach_choice answers - same
-                // "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status =
                     StepStatus::AwaitingAttachChoice { player: controller, aura, candidates: candidates.clone() };
                 self.process_state = ProcessState::AwaitingAttachChoice { aura, controller, candidates };
@@ -982,9 +724,6 @@ impl Engine {
             ProcessState::AwaitingEntryAttachChoice {
                 attaching, controller, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
             } => {
-                // Nothing to do until submit_entry_attach_choice answers -
-                // same "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingEntryAttachChoice {
                     player: controller,
                     attaching,
@@ -999,9 +738,6 @@ impl Engine {
             ProcessState::AwaitingTokenAttachChoice {
                 attaching, controller, candidates, stack_id, events_so_far, remaining_count, spec, copy_snapshot,
             } => {
-                // Nothing to do until submit_token_attach_choice answers -
-                // same "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingTokenAttachChoice {
                     player: controller,
                     attaching,
@@ -1014,9 +750,6 @@ impl Engine {
             }
 
             ProcessState::AwaitingDevourChoice { object, controller, per_creature, candidates, stack_id, events_so_far } => {
-                // Nothing to do until submit_devour_choice answers - same
-                // "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingDevourChoice {
                     player: controller,
                     object,
@@ -1029,9 +762,6 @@ impl Engine {
             }
 
             ProcessState::AwaitingAmplifyChoice { object, controller, per_card, candidates, stack_id, events_so_far } => {
-                // Nothing to do until submit_amplify_choice answers - same
-                // "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingAmplifyChoice {
                     player: controller,
                     object,
@@ -1044,18 +774,12 @@ impl Engine {
             }
 
             ProcessState::AwaitingMadnessChoice { player, card, stack_id, events_so_far } => {
-                // Nothing to do until decline_madness_cast/submit_madness_cast
-                // answers - same "put the exact same state back" pattern
-                // every other choice-pause above already uses.
                 let status = StepStatus::AwaitingMadnessChoice { player, card };
                 self.process_state = ProcessState::AwaitingMadnessChoice { player, card, stack_id, events_so_far };
                 status
             }
 
             ProcessState::AwaitingCascadeChoice { player, candidate, exiled, stack_id, events_so_far } => {
-                // Nothing to do until decline_cascade_cast/submit_cascade_cast
-                // answers - same "put the exact same state back" pattern
-                // every other choice-pause above already uses.
                 let status = StepStatus::AwaitingCascadeChoice { player, candidate };
                 self.process_state =
                     ProcessState::AwaitingCascadeChoice { player, candidate, exiled, stack_id, events_so_far };
@@ -1063,13 +787,7 @@ impl Engine {
             }
 
             ProcessState::AwaitingUnlessPaidChoice { payer_queue, cost, otherwise, target_id, source, stack_id, events_so_far } => {
-                // Nothing to do until decline_unless_paid/
-                // submit_unless_paid_payment answers - same "put the exact
-                // same state back" pattern every other choice-pause above
-                // already uses. `payer_queue` is never empty while this
-                // pause is live - decline_unless_paid dispatches `otherwise`
-                // and leaves ProcessState instead of re-raising once it
-                // would go empty.
+                // `payer_queue` is never empty while paused; `decline_unless_paid` leaves the state before it would be.
                 let payer = *payer_queue.front().expect("payer_queue is never empty while paused");
                 let status = StepStatus::AwaitingUnlessPaidChoice { payer, cost: cost.clone(), otherwise: otherwise.clone() };
                 self.process_state = ProcessState::AwaitingUnlessPaidChoice {
@@ -1085,9 +803,6 @@ impl Engine {
             }
 
             ProcessState::AwaitingDiscardChoice { player, candidates, remaining_count, stack_id, events_so_far } => {
-                // Nothing to do until submit_discard_choice answers - same
-                // "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingDiscardChoice { player, candidates: candidates.clone(), remaining_count };
                 self.process_state =
                     ProcessState::AwaitingDiscardChoice { player, candidates, remaining_count, stack_id, events_so_far };
@@ -1097,9 +812,6 @@ impl Engine {
             ProcessState::AwaitingSearchDevourChoice {
                 object, controller, per_creature, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
             } => {
-                // Nothing to do until submit_search_devour_choice answers -
-                // same "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingSearchDevourChoice {
                     player: controller,
                     object,
@@ -1115,9 +827,6 @@ impl Engine {
             ProcessState::AwaitingSearchAmplifyChoice {
                 object, controller, per_card, candidates, stack_id, events_so_far, remaining, destination, shuffle_after,
             } => {
-                // Nothing to do until submit_search_amplify_choice answers -
-                // same "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingSearchAmplifyChoice {
                     player: controller,
                     object,
@@ -1131,9 +840,6 @@ impl Engine {
             }
 
             ProcessState::AwaitingCopyChoice { object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent, carry_forward_if_declined, x_value } => {
-                // Nothing to do until submit_copy_choice answers - same
-                // "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingCopyChoice { player: controller, object, candidates: candidates.clone() };
                 self.process_state = ProcessState::AwaitingCopyChoice {
                     object, controller, exceptions, candidates, stack_id, events_so_far, colors_spent, carry_forward_if_declined, x_value,
@@ -1142,9 +848,6 @@ impl Engine {
             }
 
             ProcessState::AwaitingScriptChoice { thread, request, stack_id, source, controller, events_so_far, each_player } => {
-                // Nothing to do until submit_script_choice answers - same
-                // "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingScriptChoice { player: controller, request: request.clone() };
                 self.process_state = ProcessState::AwaitingScriptChoice {
                     thread, request, stack_id, source, controller, events_so_far, each_player,
@@ -1153,9 +856,6 @@ impl Engine {
             }
 
             ProcessState::AwaitingScryChoice { stack_id, controller, events_so_far, cards } => {
-                // Nothing to do until submit_scry_choice answers - same
-                // "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingScryChoice { player: controller, cards: cards.clone() };
                 self.process_state =
                     ProcessState::AwaitingScryChoice { stack_id, controller, events_so_far, cards };
@@ -1187,19 +887,12 @@ impl Engine {
             ProcessState::CommitEvents { checked } => self.resolve_commit_events_state(checked),
 
             ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid } => {
-                // Nothing to do until submit_payment answers - put the
-                // exact same state back and tell the caller who needs to be
-                // prompted, mirroring AwaitingReplacementChoice/
-                // AwaitTriggerOrderChoice.
                 let status = StepStatus::AwaitingPayment { player: payer, stack_id };
                 self.process_state = ProcessState::AwaitingPayment { stack_id, payer, cost, source, on_paid };
                 status
             }
 
             ProcessState::AwaitingModeChoice { stack_id, chooser, min, max } => {
-                // Nothing to do until submit_mode_choice answers - same
-                // "put the exact same state back" shape as AwaitingPayment
-                // above.
                 let status = StepStatus::AwaitingModeChoice { player: chooser, stack_id, min, max };
                 self.process_state = ProcessState::AwaitingModeChoice { stack_id, chooser, min, max };
                 status
@@ -1214,9 +907,6 @@ impl Engine {
             }
 
             ProcessState::AwaitTriggerOrderChoice { player, group, ordered, pending_groups } => {
-                // Nothing to do until submit_trigger_order answers - put
-                // the exact same state back and tell the caller who needs
-                // to be prompted, mirroring AwaitingReplacementChoice.
                 let status =
                     StepStatus::AwaitingTriggerOrderChoice { player, group: group.clone() };
                 self.process_state =
@@ -1225,9 +915,6 @@ impl Engine {
             }
 
             ProcessState::AwaitingTriggerTargets { trigger, spec, candidates, remaining, modal_effect } => {
-                // Nothing to do until submit_trigger_targets answers - same
-                // "put the exact same state back" pattern every other
-                // choice-pause above already uses.
                 let status = StepStatus::AwaitingTriggerTargets {
                     player: trigger.controller,
                     spec: spec.clone(),
@@ -1239,13 +926,7 @@ impl Engine {
             }
 
             ProcessState::AwaitingTriggerModeChoice { trigger, modes, mode_choice, remaining, chooser } => {
-                // Nothing to do until submit_trigger_mode_choice answers -
-                // same "put the exact same state back" pattern every other
-                // choice-pause above already uses. `chooser` (not
-                // `trigger.controller`) is who's actually prompted - CR
-                // 700.2e's own "chosen by opponent" case already resolved
-                // this to the real other player, before this pause was ever
-                // constructed.
+                // `chooser`, not the controller, is prompted; CR 700.2e was resolved before the pause.
                 let (min, max, _repeatable) = mode_choice.bounds();
                 let status = StepStatus::AwaitingTriggerModeChoice {
                     player: chooser,

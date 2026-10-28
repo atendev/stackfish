@@ -1,16 +1,6 @@
-//! 024/025: a bad answer to a pause changes nothing. Each case builds one
-//! pause directly (the way `decision_tests.rs` does), sends an answer the
-//! engine must refuse, and compares `Engine::snapshot()` before and after.
-//!
-//! A hand-built pause is as good as a played one for this: a rejection
-//! happens before the code reads anything beyond the pause's own fields. The
-//! pauses a scripted game reaches (payment, discard, Madness, Cascade, Scry,
-//! Search) also have tests that play to them: `tests/phase5_atomicity_submit.rs`
-//! and the proof-game test in `crates/host`.
-//!
-//! Not covered here, because every answer is legal: `submit_commander_return_choice`
-//! (either boolean) and the Madness and Cascade declines.
-
+//! A bad answer to a pause changes nothing: each case builds one pause, sends an answer the
+//! engine must refuse and compares `Engine::snapshot()`. Played flows live in `tests/`.
+//! Commander return and the madness and cascade declines are skipped, as every answer is legal.
 use std::collections::VecDeque;
 
 use super::tests::{minimal_state, trigger};
@@ -422,7 +412,7 @@ fn a_bad_answer_to_any_pause_is_refused_and_changes_nothing() {
     }
 }
 
-// ---- 035: Rejected and Internal -----------------------------------------------------
+// Rejected and Internal
 
 use crate::commands::{apply_command, validate_command, Internal, Rejected};
 use crate::types::zone::Zone;

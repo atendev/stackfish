@@ -1,6 +1,5 @@
-//! CR 103.5 pregame setup: building a fresh `Engine` from a `GameConfig`,
-//! shuffling/opening-hand-drawing, and the mulligan/bottoming decision loop
-//! — split out of `engine.rs`.
+//! Pregame setup: building an `Engine` from a `GameConfig`, opening hands and
+//! the mulligan loop. See `DESIGN.md`.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -25,11 +24,8 @@ use crate::types::zone::{Zone, ZoneKind};
 use super::{BottomCardsError, Engine, MulliganError, ProcessState};
 
 impl Engine {
-    /// Builds a fresh `Engine` from a `GameConfig`: creates zones and
-    /// `GameObject`s for each player's library, sets starting life from
-    /// `config.settings.starting_life` (or per-player `life_override`), and
-    /// starts in `Phase::PreGame` / `ProcessState::PriorityWindow`. The first
-    /// `step()` call will enter `run_pregame_setup`.
+    /// Builds an `Engine` from `config`, starting in `Phase::PreGame`. The first
+    /// `step()` runs `run_pregame_setup`.
     pub fn new_game(config: GameConfig) -> Engine {
         let settings = config.settings;
         let starting_player = config.turn_order[0];
@@ -98,9 +94,7 @@ impl Engine {
             zones.push(Zone::new(ZoneKind::Hand, Some(pid)));
             zones.push(Zone::new(ZoneKind::Graveyard, Some(pid)));
 
-            // CR 903.6: commander(s) go to the command zone, not the
-            // library - minted the same way library cards just were above,
-            // just with is_commander: true and a different destination.
+            // CR 903.6: commanders start in the command zone, not the library.
             let mut command_zone = Zone::new(ZoneKind::Command, Some(pid));
             for card_def in &player_cfg.commanders {
                 let obj_id = ObjectId(next_object_id);
@@ -128,8 +122,7 @@ impl Engine {
                     controlled_since_turn: 1,
                     is_token: false,
                     is_commander: true,
-                    // CR 408: the command zone's contents are public, same
-                    // default as the battlefield/graveyard/exile.
+                    // CR 408: command zone contents are public.
                     visibility: VisibilityPolicy { public: true, visible_to: Vec::new() },
                     copy_generation: 0,
                     entered_via_escape: false,
@@ -140,7 +133,6 @@ impl Engine {
             zones.push(command_zone);
         }
 
-        // Shared zones
         zones.push(Zone::new(ZoneKind::Battlefield, None));
         zones.push(Zone::new(ZoneKind::Exile, None));
 
@@ -205,24 +197,11 @@ impl Engine {
         engine
     }
 
-    /// Copies what each card's script declares for a plain spell onto its
-    /// `CardDefinition`: `s.operation()` becomes `effect` (CR 608.2m) and
-    /// `s.target_requirement()` becomes `target_requirement`. Both are read
-    /// once per distinct script, not per zone entry like `register_abilities`,
-    /// because a spell is cast from the hand, before any script has run.
-    ///
-    /// Without this, a spell written only in Lua (Shock, Peek, Rampant
-    /// Growth) was cast with no target and resolved doing nothing. The
-    /// scenario crate did this wiring for its own fixtures; `new_game` is the
-    /// one place every other host builds cards through. A value already set in
-    /// Rust wins over the script, so a card that declares its modes or effect
-    /// in Rust keeps them.
-    ///
-    /// The values must come from this engine's own runtime: a custom-function
-    /// `ScriptHandle` is only valid against the runtime that decoded it.
-    ///
-    /// TODO: `alternative_costs()` and `buyback_cost()` are the same kind of
-    /// script declaration and are not loaded here yet.
+    /// Copies a script's `operation()` and `target_requirement()` onto each card's
+    /// definition once per distinct script, since a spell is cast from hand before
+    /// any script has run. A value already set in Rust wins. Values must come from
+    /// this engine's runtime because a custom-function `ScriptHandle` is only valid there.
+    // TODO: load `alternative_costs()` and `buyback_cost()` script declarations
     fn load_script_declarations(&mut self) {
         // Sorted: `objects` is a `HashMap`, and a failing script logs an event.
         let mut ids: Vec<ObjectId> = self.state.objects.keys().copied().collect();
@@ -275,13 +254,8 @@ impl Engine {
         }
     }
 
-    /// Accepts a `KeepHand` or `TakeMulligan` action from the player whose
-    /// turn it is to decide during pregame. Only valid when
-    /// `process_state == AwaitingMulliganDecision { player }` and
-    /// `action.player == player`. On `TakeMulligan`, increments
-    /// `mulligans_taken`, shuffles the hand back into the library, and draws a
-    /// new opening hand immediately. Advances to the next deciding player or
-    /// (if all have kept) to the bottoming phase.
+    /// Accepts keep or mulligan from the player being asked (CR 103.5). A mulligan
+    /// reshuffles and redraws immediately.
     pub fn submit_mulligan_decision(&mut self, action: PlayerAction) -> Result<(), MulliganError> {
         let ProcessState::AwaitingMulliganDecision { player } = self.process_state else {
             return Err(MulliganError::NotAwaitingDecision);
@@ -310,10 +284,8 @@ impl Engine {
                 self.return_hand_to_library(player);
                 self.shuffle_library(player);
                 self.draw_opening_hand(player);
-                // Advance to the next undecided player after this one (circular).
-                // Using next_after rather than next_mulligan_player because this
-                // player is still !hand_kept (they mulliganed, not kept), so
-                // next_mulligan_player would return them again immediately.
+                // The mulliganing player is still undecided, so `next_mulligan_player`
+                // would return them again.
                 let next = self.next_mulligan_player_after(player);
                 self.process_state =
                     ProcessState::AwaitingMulliganDecision { player: next.expect("player must be in turn_order") };
@@ -323,12 +295,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Accepts a `BottomCards` action from the player who must bottom cards
-    /// after keeping with paid mulligans. Only valid when
-    /// `process_state == AwaitingBottomCardChoice { player, .. }` and
-    /// `action.player == player`. Validates count and card membership, moves
-    /// the cards to the bottom of the player's library in submission order,
-    /// then advances to the next bottoming player or to `AdvanceTurnStep`.
+    /// Accepts the cards a player puts on the bottom after keeping a paid mulligan.
+    /// Validates count and membership, then advances to the next bottoming player.
     pub fn submit_bottom_cards(&mut self, action: PlayerAction) -> Result<(), BottomCardsError> {
         let ProcessState::AwaitingBottomCardChoice { player, count, .. } = self.process_state else {
             return Err(BottomCardsError::NotAwaitingChoice);
@@ -342,7 +310,6 @@ impl Engine {
         if cards.len() != count {
             return Err(BottomCardsError::WrongCount { expected: count, got: cards.len() });
         }
-        // Duplicate check
         let mut seen: Vec<ObjectId> = Vec::with_capacity(cards.len());
         for &card in &cards {
             if seen.contains(&card) {
@@ -350,14 +317,13 @@ impl Engine {
             }
             seen.push(card);
         }
-        // Validate each card is in the player's hand
         for &card in &cards {
             let obj = self.state.object(card).ok_or(BottomCardsError::CardNotInHand)?;
             if obj.zone != ZoneKind::Hand || obj.owner != player {
                 return Err(BottomCardsError::CardNotInHand);
             }
         }
-        // Move each card hand → library bottom (CR 400.7 new ObjectId per move)
+        // CR 400.7: each move mints a new id.
         for card in &cards {
             let card = *card;
             let last_known = self.state.object(card).expect("validated above").clone();
@@ -388,7 +354,6 @@ impl Engine {
                 parent_event: None,
             });
         }
-        // Advance the bottoming queue
         let ProcessState::AwaitingBottomCardChoice { mut remaining, .. } =
             std::mem::replace(&mut self.process_state, ProcessState::PriorityWindow)
         else {
@@ -409,14 +374,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Called from `step()` when `phase == PreGame && process_state ==
-    /// PriorityWindow`. Runs all automatic pregame actions: shuffles libraries
-    /// (if `settings.shuffle_libraries`), draws opening hands for all players,
-    /// then either transitions to `AwaitingMulliganDecision` for the first
-    /// player in turn order (normal path) or directly to `AdvanceTurnStep`
-    /// (if `settings.skip_mulligan`).
-    ///
-    /// `pub(super)`: `mod.rs`'s inline `PriorityWindow` arm calls this.
+    /// Shuffles, draws opening hands, then asks for mulligans or skips straight
+    /// to the first turn when `settings.skip_mulligan` is set.
     pub(super) fn run_pregame_setup(&mut self) {
         let turn_order: Vec<PlayerId> = self.state.turn_order.clone();
         if self.settings.shuffle_libraries {
@@ -438,21 +397,11 @@ impl Engine {
         }
     }
 
-    /// Shuffles `player`'s library zone in-place using `state.rng`. Logs a
-    /// `LibraryShuffled` event and an `RngDrawn` event per shuffle draw so
-    /// the replay is fully deterministic. Uses Fisher-Yates over the zone's
-    /// `VecDeque` contents.
-    ///
-    /// `pub(in crate::engine)`: `library_choices.rs`'s
-    /// `continue_search_battlefield_entry` also calls this (CR 701.24a), and
-    /// `mod.rs`'s still-inlined `ResolveStackTop` arm calls it for
-    /// `AbilityEffect::Shuffle`. A later pass will also call it from
-    /// `engine/resolve/library_effects.rs`/`engine/resolve/direct_effects.rs`
-    /// once `ResolveStackTop` itself moves — making it accessible now avoids
-    /// needing to touch this file again for that.
+    /// Fisher-Yates shuffle of `player`'s library from `state.rng`, logging an
+    /// `RngDrawn` per draw so a replay is deterministic (CR 701.24a).
     pub(in crate::engine) fn shuffle_library(&mut self, player: PlayerId) {
         let len = self.state.zone(ZoneKind::Library, Some(player)).map_or(0, |z| z.contents.len());
-        // Generate all swap targets first — can't hold &mut zone while calling next_rng()
+        // Swaps are drawn first because `next_rng` can't run while the zone is borrowed.
         let mut swaps: Vec<(usize, usize)> = Vec::with_capacity(len);
         for i in (1..len).rev() {
             let rng_val = self.next_rng();
@@ -483,19 +432,9 @@ impl Engine {
         });
     }
 
-    /// CR 702.85a Cascade's own "put all cards exiled this way that weren't
-    /// cast on the bottom of your library in a random order" — `cards` are
-    /// currently sitting in exile (`resolve_cascade_effect`'s own library
-    /// walk); each is moved Exile -> Library (per-player, so
-    /// `commit_zone_move`'s own owner derivation reads it off the card's
-    /// own `last_known_info.owner`, no separate `player` parameter needed)
-    /// in a freshly Fisher-Yates-shuffled order — same swap-and-log
-    /// technique `shuffle_library` above already establishes, just applied
-    /// to this small input list instead of the whole library, so the *rest*
-    /// of the library's own order is left untouched. Same "no replacement-
-    /// check, direct commit" posture every other library-zone mover in this
-    /// engine already takes (`continue_search_battlefield_entry`) - library
-    /// moves aren't replaceable anywhere in this codebase today.
+    /// CR 702.85a: puts the exiled `cards` on the bottom of their owners' libraries
+    /// in random order. Library moves aren't replaceable, so there is no
+    /// replacement check.
     pub(in crate::engine) fn bottom_cards_in_random_order(&mut self, mut cards: Vec<ObjectId>) {
         for i in (1..cards.len()).rev() {
             let rng_val = self.next_rng();
@@ -520,9 +459,8 @@ impl Engine {
         }
     }
 
-    /// Returns all cards from `player`'s hand to the top of their library
-    /// (no particular order required by CR 103.5 — placed top for consistency).
-    /// Logs a ZoneChange per card. Used before a mulligan redraw.
+    /// Puts the hand back on top of the library before a mulligan redraw; CR 103.5
+    /// doesn't constrain the order.
     fn return_hand_to_library(&mut self, player: PlayerId) {
         let hand_ids: Vec<ObjectId> = self.state
             .zone(ZoneKind::Hand, Some(player))
@@ -558,8 +496,6 @@ impl Engine {
         }
     }
 
-    /// Moves `settings.starting_hand_size` cards from the top of `player`'s
-    /// library to their hand zone, logging a `ZoneChange` per card.
     fn draw_opening_hand(&mut self, player: PlayerId) {
         for _ in 0..self.settings.starting_hand_size {
             let Some(card) = self.state.zone(ZoneKind::Library, Some(player))
@@ -579,11 +515,7 @@ impl Engine {
             self.state.zone_mut(ZoneKind::Hand, Some(player)).expect("hand zone").push_bottom(new_id);
             self.state.objects.insert(new_id, new_obj);
             commands::remap_abilities(&mut self.state, card, new_id);
-            // CR 702.29b: an opening-hand card's own script self-registers
-            // any hand-only ability now, same as every other Library->Hand
-            // producer - remap_abilities just above is a no-op today (no
-            // producer ever registers an ability against a still-in-library
-            // object), so this is what actually populates it.
+            // CR 702.29b: a hand-only ability registers when the card reaches hand.
             self.run_card_script_for(new_id);
             let event_id = self.state.allocate_event_id();
             let seq = self.state.allocate_sequence_no();
@@ -602,18 +534,13 @@ impl Engine {
         }
     }
 
-    /// Returns the first player in `state.turn_order` whose `hand_kept` is
-    /// `false`. Returns `None` when all players have kept (mulligan phase
-    /// complete).
     fn next_mulligan_player(&self) -> Option<PlayerId> {
         self.state.turn_order.iter().copied()
             .find(|&pid| !self.state.player(pid).map_or(false, |p| p.hand_kept))
     }
 
-    /// Returns the first `!hand_kept` player found in circular turn order
-    /// starting AFTER `current`. Used after `TakeMulligan` to advance to the
-    /// next player who hasn't kept, wrapping around to the current player if
-    /// they're the only undecided one remaining.
+    /// The next undecided player after `current` in turn order, wrapping to
+    /// `current` if they are the only one left.
     fn next_mulligan_player_after(&self, current: PlayerId) -> Option<PlayerId> {
         let order = &self.state.turn_order;
         let n = order.len();
@@ -624,16 +551,11 @@ impl Engine {
                 return Some(pid);
             }
         }
-        None // all players have kept (shouldn't be reachable after a TakeMulligan)
+        None
     }
 
-    /// Advances `state.rng` by one step and returns the raw u64. Uses
-    /// splitmix64 so the sequence is deterministic from `seed` alone and
-    /// every output is logged as `RngDrawn`. `pub(in crate::engine)` (widened
-    /// by `phase5/mass-choice-effects`) rather than private to this file —
-    /// `engine::resolve::destruction`/`discard`'s own `SacrificeRandom`/
-    /// `DiscardRandom` need the same deterministic, ledger-logged draws
-    /// `shuffle_library` already uses, not a second RNG source.
+    /// Advances `state.rng` (splitmix64) and returns the draw. Every consumer goes
+    /// through here so the sequence stays deterministic from the seed.
     pub(in crate::engine) fn next_rng(&mut self) -> u64 {
         self.state.rng.draws_consumed += 1;
         let mut z = self.state.rng.seed.wrapping_add(
@@ -644,12 +566,8 @@ impl Engine {
         z ^ (z >> 31)
     }
 
-    /// Builds the bottoming queue: collects every player (in turn order) whose
-    /// paid mulligan count (`mulligans_taken` minus `settings.free_mulligans`,
-    /// clamped to 0) is > 0. If the queue is empty, transitions directly to
-    /// `AdvanceTurnStep`; otherwise sets `process_state` to
-    /// `AwaitingBottomCardChoice` for the first player in the queue, with
-    /// `remaining` holding the rest.
+    /// Queues each player with paid mulligans (taken minus free) to bottom cards,
+    /// or goes straight to the first turn when nobody owes any.
     fn transition_to_bottoming(&mut self) {
         let free = self.settings.free_mulligans;
         let mut queue: VecDeque<(PlayerId, usize)> = self.state.turn_order.iter().copied()

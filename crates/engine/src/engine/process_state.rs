@@ -1,7 +1,5 @@
-//! The pipeline stage state machine driving `Engine::advance` — split out of
-//! `engine.rs` for readability. See `ProcessState`'s own doc comment for the
-//! overview; every doc comment below is preserved verbatim from the original
-//! single-file layout.
+//! The pipeline stage state machine behind `Engine::advance`. See `ProcessState`
+//! and `DESIGN.md`.
 
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -27,271 +25,108 @@ use crate::types::zone::ZoneKind;
 pub enum StepStatus {
     /// Made progress; safe to call `step()` again immediately.
     Progressed,
-    /// Needs a `PlayerAction` from `player` before it can continue — the
-    /// caller should prompt and `submit_action`, then `step()` again.
+    /// Needs a `PlayerAction` from `player`; `submit_action`, then `step()`.
     AwaitingAction { player: PlayerId },
-    /// CR 616.1: more than one replacement/prevention effect matched the
-    /// same event mid-`ReplacementCheck` — the caller should prompt `player`
-    /// to pick one of `candidates` (each a `replacement::ReplacementCandidate`
-    /// — a real registered effect or CR 702.16e protection, see that type's
-    /// own doc comment) and call `submit_replacement_choice`, then `step()`
-    /// again. Distinct from `AwaitingAction`: this isn't a `PlayerAction`/
-    /// priority decision, it's a sub-decision mid-pipeline that
-    /// `submit_action` must keep rejecting while it's pending (see
-    /// `submit_action`'s `PriorityWindow`-only check).
+    /// CR 616.1: several replacement effects matched one event; `player` picks one
+    /// of `candidates` via `submit_replacement_choice`. This is a sub-decision, so
+    /// `submit_action` keeps rejecting while it is pending.
     AwaitingReplacementChoice { player: PlayerId, candidates: Vec<replacement::ReplacementCandidate> },
-    /// CR 704.5j: `player` controls 2+ legendary permanents sharing a name
-    /// (`candidates`) and must choose which one to keep — the caller should
-    /// prompt and call `submit_legend_rule_choice`, then `step()` again. Same
-    /// "not a `PlayerAction`/priority decision, its own entry point" rationale
-    /// as `AwaitingReplacementChoice`.
+    /// CR 704.5j: `player` keeps one of the same-named legendary `candidates` via
+    /// `submit_legend_rule_choice`.
     AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId> },
-    /// CR 903.9a: `commander` (owned by `player`) is in a graveyard or exile
-    /// and `player` may put it into the command zone — the caller should
-    /// prompt and call `submit_commander_return_choice`, then `step()`
-    /// again. Same "not a `PlayerAction`/priority decision, its own entry
-    /// point" rationale as `AwaitingReplacementChoice`/
-    /// `AwaitingLegendRuleChoice`.
+    /// CR 903.9a: `player` may return `commander` to the command zone via
+    /// `submit_commander_return_choice`.
     AwaitingCommanderReturnChoice { player: PlayerId, commander: ObjectId },
-    /// CR 303.4d: `commands::propose_attach` found more than one candidate
-    /// for a single Aura's attachment at once — `aura`'s controller
-    /// (`player`) must choose which of `candidates` it becomes attached to,
-    /// then call `submit_attach_choice`. Dormant as of this slice (see
-    /// `AttachChoiceError`'s own doc comment) — no real effect in this
-    /// engine ever produces more than one simultaneous candidate, so this
-    /// is only ever reached by directly constructing
-    /// `ProcessState::AwaitingAttachChoice`.
+    /// CR 303.4d: several attach candidates for one Aura; `player` picks via
+    /// `submit_attach_choice`. Only reachable by constructing the state directly,
+    /// since no effect produces simultaneous candidates.
     AwaitingAttachChoice { player: PlayerId, aura: ObjectId, candidates: Vec<ObjectId> },
-    /// CR 303.4f/301.5e/301.6: `commands::legal_entry_attach_candidates`
-    /// found 2+ legal attach targets for an Aura/Equipment/Fortification
-    /// entering the battlefield via
-    /// `SearchDestination::Battlefield::enters_attached` — `player` must
-    /// choose which of `candidates` `attaching` becomes attached to, then
-    /// call `submit_entry_attach_choice`. Real (not dormant) — the search
-    /// pathway is a genuine producer. `candidates` is `Target`-shaped (not
-    /// `ObjectId`) since `phase5/aura-enters-attached-player` — an Aura's
-    /// own enchant ability can name a player (CR 303.4f/b); Equipment/
-    /// Fortification candidates are always `Target::Object` in practice (CR
-    /// 301.5a/301.6 forbid attaching either to a player), same as before.
+    /// CR 303.4f: 2+ legal attach targets for an Aura, Equipment or Fortification
+    /// entering through a search; `player` picks via `submit_entry_attach_choice`.
+    /// Candidates are `Target`s since an Aura can enchant a player (CR 303.4b).
     AwaitingEntryAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<Target> },
-    /// CR 303.4f/301.5e/301.6, extended to token creation
-    /// (`phase5/token-enters-attached`): `commands::legal_entry_attach_
-    /// candidates` found 2+ legal attach targets for a freshly created
-    /// token that's an Aura/Equipment/Fortification (realistically only
-    /// reachable via `TokenSpec::CopyOf` — a plain `Named`/`Creature` token
-    /// spec can never resolve to one) — `player` must choose which of
-    /// `candidates` `attaching` (already a real battlefield token by this
-    /// point) becomes attached to, then call `submit_token_attach_choice`.
-    /// A separate variant from `AwaitingEntryAttachChoice` rather than a
-    /// shared one — that pause's own resume always re-enters Search's
-    /// `VecDeque<ObjectId>`-based library loop, which token creation's own
-    /// `count`-driven loop has no equivalent of.
+    /// CR 303.4f: the token-creation counterpart, answered by
+    /// `submit_token_attach_choice`. Separate from `AwaitingEntryAttachChoice`
+    /// because token creation resumes a count, not the search's library loop.
     AwaitingTokenAttachChoice { player: PlayerId, attaching: ObjectId, candidates: Vec<Target> },
-    /// CR 702.82a (Devour): `replacement::pending_devour_choice` found a
-    /// registered Devour effect on `object` (already a real battlefield
-    /// permanent by this point) with 1+ creatures `player` controls to
-    /// choose from — `player` picks any subset of `candidates` (including
-    /// none) to sacrifice, then calls `submit_devour_choice`. `object`
-    /// enters with `per_creature` counters times however many were chosen.
+    /// CR 702.82a: `player` sacrifices any subset of `candidates` for `object`'s
+    /// devour (`per_creature` counters each) via `submit_devour_choice`.
     AwaitingDevourChoice { player: PlayerId, object: ObjectId, per_creature: i32, candidates: Vec<ObjectId> },
-    /// CR 702.38a (Amplify): `replacement::pending_amplify_choice` found a
-    /// registered Amplify effect on `object` (already a real battlefield
-    /// permanent by this point) with 1+ hand cards `player` could reveal —
-    /// `player` picks any subset of `candidates` (including none) to
-    /// reveal, then calls `submit_amplify_choice`. `object` enters with
-    /// `per_card` counters times however many were revealed; revealed cards
-    /// stay in hand untouched.
+    /// CR 702.38a: `player` reveals any subset of `candidates` for `object`'s
+    /// amplify (`per_card` counters each) via `submit_amplify_choice`.
     AwaitingAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
-    /// Same as `AwaitingDevourChoice` above, but raised by a Devour creature
-    /// fetched onto the battlefield via `Search` rather than resolved off
-    /// the stack — call `submit_search_devour_choice` to answer instead of
-    /// `submit_devour_choice` (`phase5/devour-amplify-search-entry`).
+    /// `AwaitingDevourChoice` raised by a search, answered by `submit_search_devour_choice`.
     AwaitingSearchDevourChoice { player: PlayerId, object: ObjectId, per_creature: i32, candidates: Vec<ObjectId> },
-    /// Same as `AwaitingAmplifyChoice` above, but raised by an Amplify
-    /// creature fetched onto the battlefield via `Search` — call
-    /// `submit_search_amplify_choice` to answer instead of
-    /// `submit_amplify_choice` (`phase5/devour-amplify-search-entry`).
+    /// `AwaitingAmplifyChoice` raised by a search, answered by `submit_search_amplify_choice`.
     AwaitingSearchAmplifyChoice { player: PlayerId, object: ObjectId, per_card: i32, candidates: Vec<ObjectId> },
-    /// CR 702.35a (Madness): the madness triggered ability resolved and
-    /// found `card` still sitting in exile (its own live descendant of the
-    /// departed hand object, located via `ObjectLineage`) — `player` (its
-    /// controller) must either call `Engine::submit_madness_cast` to cast it
-    /// paying its madness cost, or `Engine::decline_madness_cast` to put it
-    /// into their graveyard instead. Unlike `AwaitingDevourChoice`/
-    /// `AwaitingAmplifyChoice`, this isn't a `Vec<ObjectId>` candidate
-    /// choice — the "yes" branch is a full nested cast (its own targets/
-    /// modes/payment), so `card`/`player` are all the caller needs to decide
-    /// which of the two entry points to call.
+    /// CR 702.35a: `player` casts `card` from exile via `submit_madness_cast` or
+    /// declines via `decline_madness_cast`. A cast is a nested cast, not a candidate pick.
     AwaitingMadnessChoice { player: PlayerId, card: ObjectId },
-    /// CR 702.85a (Cascade): the cascade trigger's own library walk
-    /// finished — `candidate` is the first nonland card found whose mana
-    /// value was less than the cascade spell's own (`None` if the library
-    /// ran out first). `player` (the cascade spell's own controller) must
-    /// either call `Engine::submit_cascade_cast` (only legal if `candidate`
-    /// is `Some`) to cast it for free, or `Engine::decline_cascade_cast` to
-    /// put every exiled card on the bottom of their library in a random
-    /// order. Same "not a `Vec<ObjectId>` candidate choice, the 'yes'
-    /// branch is a full nested cast" shape `AwaitingMadnessChoice` above
-    /// already established.
+    /// CR 702.85a: `player` casts `candidate` for free via `submit_cascade_cast`
+    /// (only if it is `Some`) or declines via `decline_cascade_cast`.
     AwaitingCascadeChoice { player: PlayerId, candidate: Option<ObjectId> },
-    /// CR 118.12/118.12a (`AbilityEffect::UnlessPaid`) — see that type's own
-    /// doc comment for the full shape shared by Ward/Mana Leak/Echo. `payer`
-    /// (the front of `ProcessState::AwaitingUnlessPaidChoice`'s own
-    /// `payer_queue` — always a single fixed player for both real producers
-    /// this slice builds) may call `Engine::submit_unless_paid_payment`
-    /// with a `PaymentPlan` covering `cost` to stop `otherwise` from
-    /// happening, or `Engine::decline_unless_paid` to advance the queue (or,
-    /// once empty, trigger it). Same "not a `Vec<ObjectId>` candidate
-    /// choice, a real yes/no decision" shape `AwaitingMadnessChoice`/
-    /// `AwaitingCascadeChoice` already establish.
+    /// CR 118.12: `payer` may pay `cost` via `submit_unless_paid_payment` to stop
+    /// `otherwise`, or decline via `decline_unless_paid`.
     AwaitingUnlessPaidChoice { payer: PlayerId, cost: CostSpec, otherwise: UnlessPaidConsequence },
-    /// CR 701.9/701.9b (`AbilityEffect::Discard`): `player` (the *targeted*
-    /// player, not necessarily this resolving ability's own controller) may
-    /// call `Engine::submit_discard_choice` with one of `candidates` (their
-    /// own current hand) to discard it - `remaining_count` more picks are
-    /// still owed after this one. See `ProcessState::AwaitingDiscardChoice`'s
-    /// own doc comment for the full shape.
+    /// CR 701.9: the targeted `player` discards one of `candidates` via
+    /// `submit_discard_choice`; `remaining_count` more picks are owed after it.
     AwaitingDiscardChoice { player: PlayerId, candidates: Vec<ObjectId>, remaining_count: u32 },
-    /// CR 707.6/614.12a (Clone itself): `replacement::pending_copy_choice`
-    /// found a registered `EntersAsCopy` effect on `object` (already a real
-    /// battlefield permanent by this point) with 1+ creatures on the
-    /// battlefield `player` could copy — `player` picks at most one of
-    /// `candidates` (or none, CR 707.6's "may") to become a copy of, then
-    /// calls `submit_copy_choice`.
+    /// CR 707.9: `player` picks one of `candidates` for `object` to copy, or none,
+    /// via `submit_copy_choice`.
     AwaitingCopyChoice { player: PlayerId, object: ObjectId, candidates: Vec<ObjectId> },
-    /// Backlog item 9: a card script (via `Game.SelectTargets`) yielded
-    /// mid-resolution, asking `player` to choose a real target matching
-    /// `request` before the operation can finish — the caller should prompt
-    /// and call `submit_script_choice`, then `step()` again. Same "not a
-    /// `PlayerAction`/priority decision, its own entry point" rationale as
-    /// `AwaitingReplacementChoice`/`AwaitingLegendRuleChoice`.
+    /// A card script yielded mid-resolution asking `player` for a choice matching
+    /// `request`; answered by `submit_script_choice`.
     AwaitingScriptChoice { player: PlayerId, request: ScriptChoiceRequest },
-    /// Backlog item 14a, CR 701.22: a `Game.Ops.Scry(n)` primitive is
-    /// resolving and needs `player` to decide which of `cards` (the top `n`
-    /// of their library, front = top) go on the bottom versus back on top,
-    /// and in what order — the caller should prompt and call
-    /// `submit_scry_choice`, then `step()` again. Same "not a `PlayerAction`/
-    /// priority decision, its own entry point" rationale as
-    /// `AwaitingReplacementChoice`/`AwaitingLegendRuleChoice`.
+    /// CR 701.22: `player` orders the top `cards` between top and bottom via
+    /// `submit_scry_choice`.
     AwaitingScryChoice { player: PlayerId, cards: Vec<ObjectId> },
-    /// Same as `AwaitingScryChoice`, for CR 701.25's `Game.Ops.Surveil(n)` —
-    /// the only difference is `submit_surveil_choice` sends the "not kept on
-    /// top" pile to the graveyard instead of the bottom of the library.
+    /// CR 701.25: like `AwaitingScryChoice`, but the other pile goes to the graveyard.
     AwaitingSurveilChoice { player: PlayerId, cards: Vec<ObjectId> },
-    /// Backlog item 14b, CR 701.23: a `Game.Ops.Search(...)` primitive is
-    /// resolving and needs `player` to choose up to `count` of `candidates`
-    /// (already pre-filtered to ids matching the search's own `FilterSpec`)
-    /// — the caller should prompt and call `submit_search_choice`, then
-    /// `step()` again. CR 701.23b: choosing fewer than `count` (including
-    /// zero) is always legal.
+    /// CR 701.23: `player` chooses up to `count` of `candidates` via
+    /// `submit_search_choice`; fewer, including none, is legal (CR 701.23b).
     AwaitingSearchChoice { player: PlayerId, candidates: Vec<ObjectId>, count: u32 },
-    /// CR 603.3b: `player` controls more than one trigger that matched the
-    /// same batch of events and must choose the order to put them on the
-    /// stack — the caller should prompt and call `submit_trigger_order`,
-    /// then `step()` again.
+    /// CR 603.3b: `player` orders their simultaneous triggers via `submit_trigger_order`.
     AwaitingTriggerOrderChoice { player: PlayerId, group: Vec<PendingTrigger> },
-    /// CR 603.3d: a triggered ability about to go on the stack has a real
-    /// target requirement (`spec` - any `TargetSpec`, single- or multi-word)
-    /// and every word has at least its own minimum legal candidates —
-    /// `player` (the trigger's own controller) must choose from `candidates`
-    /// (one legal-candidate list per word, positionally paired with `spec`'s
-    /// own words) and call `submit_trigger_targets` with one flat list
-    /// (split internally the same way `CastSpell`/`ActivateAbility`'s own
-    /// submitted `targets` already are), then `step()` again. Unlike
-    /// `CastSpell`/`ActivateAbility`, nothing initiated this ability with
-    /// player-submitted targets already attached — it was detected and
-    /// queued by the trigger pipeline itself, so the choice has to happen
-    /// here, mid-pipeline, the first time this engine asks for one this way.
+    /// CR 603.3d: a trigger needs targets; `candidates` has one legal list per word
+    /// of `spec`. `player` answers with one flat list via `submit_trigger_targets`.
     AwaitingTriggerTargets { player: PlayerId, spec: TargetSpec, candidates: Vec<Vec<Target>> },
-    /// CR 603.3c: a triggered ability about to go on the stack is itself
-    /// modal (`RegisteredAbility.modes` non-empty) — `player` (normally the
-    /// trigger's own controller, but CR 700.2e's "chosen by opponent" is
-    /// real for a trigger's own modes too, so `player` is the resolved
-    /// other-player chooser in that case — see `ProcessState::
-    /// AwaitingTriggerModeChoice`'s own `chooser` field) must choose between
-    /// `min` and `max` of `modes` and call `Engine::submit_trigger_mode_choice`,
-    /// then `step()` again. Raised *before* `AwaitingTriggerTargets` in
-    /// `push_ordered_triggers` — CR 603.3c's own mode choice happens before
-    /// 603.3d's target choice (mirrors 601.2b before 601.2c for a cast
-    /// spell) — so a chosen mode needing a target chains into that same
-    /// pause afterward rather than needing its own separate target-selection
-    /// machinery.
+    /// CR 603.3c: a modal trigger needs its mode choice, raised before the target
+    /// choice. `player` is the chooser, which is another player under CR 700.2e.
+    /// Answered by `submit_trigger_mode_choice`.
     AwaitingTriggerModeChoice { player: PlayerId, modes: Vec<SpellMode>, mode_choice: ModeChoice, min: u32, max: u32 },
-    /// CR 601.2f-h: `player` cast a spell that's now on the stack
-    /// (`stack_id`) but hasn't paid its cost yet — the caller should look
-    /// up the cost (e.g. via the card's `CardDefinition.mana_cost` off
-    /// `stack_id`), prompt `player` to build a `PaymentPlan`, and call
-    /// `submit_payment`, then `step()` again. Same "not a `PlayerAction`/
-    /// priority decision" rationale as `AwaitingReplacementChoice` — it has
-    /// its own entry point rather than going through `submit_action`.
+    /// CR 601.2f: `player` cast a spell (`stack_id`) and must pay via
+    /// `submit_payment`. A sub-decision with its own entry point.
     AwaitingPayment { player: PlayerId, stack_id: ObjectId },
-    /// CR 700.2e: a modal spell (`stack_id`) whose `ModeChoice` defers the
-    /// mode choice to a player other than its controller
-    /// (`ExactlyChosenByOpponent`/`UpToChosenByOpponent`) reached resolution
-    /// with no mode chosen yet — `ResolveStackTop` peeked at the top of the
-    /// stack (without popping it) and found `StackObject::pending_mode_choice`
-    /// still `Some`. The caller should prompt `player` (the "other player"
-    /// CR 700.2e names, resolved at cast time) to choose between `min` and
-    /// `max` modes and call `submit_mode_choice`, then `step()` again. Same
-    /// "not a `PlayerAction`/priority decision" rationale as
-    /// `AwaitingReplacementChoice`.
+    /// CR 700.2e: a modal spell (`stack_id`) reached resolution with its mode choice
+    /// deferred to `player`, who picks between `min` and `max` modes via
+    /// `submit_mode_choice`.
     AwaitingModeChoice { player: PlayerId, stack_id: ObjectId, min: u32, max: u32 },
-    /// CR 514.1: `player`'s hand exceeds `max_hand_size` (normally 7) at the
-    /// start of cleanup — the caller should prompt `player` to choose exactly
-    /// `hand_size - max_hand_size` cards to discard and call `submit_discard`,
-    /// then `step()` again. Separate entry point from `submit_action` for the
-    /// same reason as `AwaitingPayment` — this is a mandatory cleanup action,
-    /// not a priority decision.
+    /// CR 514.1: `player`'s hand exceeds `max_hand_size`; they discard the excess via
+    /// `submit_discard`.
     AwaitingDiscard { player: PlayerId, hand_size: usize, max_hand_size: usize },
-    /// A broken engine invariant: carrying out a command that had passed
-    /// validation failed, or a queued action was rejected after
-    /// `submit_action` accepted it. Fatal: the state may be half-changed and
-    /// the host must stop using this engine. An input rejection never lands
-    /// here; `submit_action` and the other `submit_*` methods refuse a bad
-    /// input up front and change nothing (024, 035). A script error during
-    /// resolution is logged as a `ScriptError` event and resolution continues.
+    /// A broken engine invariant. Fatal: the state may be half-changed and the host
+    /// must stop using the engine. A bad input is rejected up front and never lands
+    /// here. A script error during resolution is logged as a `ScriptError` event instead.
     Error(Internal),
     GameOver { winner: Option<PlayerId> },
-    /// CR 103.5 pregame: `player` must submit `KeepHand` or `TakeMulligan`
-    /// via `Engine::submit_mulligan_decision` before `step()` can continue.
+    /// CR 103.5: `player` keeps or mulligans via `submit_mulligan_decision`.
     AwaitingMulliganDecision { player: PlayerId },
-    /// CR 103.5 pregame: `player` must put exactly `count` cards from their
-    /// hand onto the bottom of their library via `Engine::submit_bottom_cards`.
+    /// CR 103.5: `player` bottoms `count` cards via `submit_bottom_cards`.
     AwaitingBottomCardChoice { player: PlayerId, count: usize },
 }
 
-/// Result of one `step()` call. `events_added` indexes into
-/// `Engine::state().ledger` rather than cloning events out, since the
-/// ledger already holds them — this just tells the caller which slice is
-/// new since the call.
+/// Result of one `step()`. `events_added` indexes into the ledger rather than
+/// cloning events out.
 pub struct StepResult {
     pub events_added: Range<usize>,
     pub status: StepStatus,
 }
 
-/// The pipeline stage `Engine` is currently sitting in — the explicit
-/// state machine behind `step()`. One `step()` call generally advances by
-/// one variant; `SbaLoop` is the exception, re-entering itself across
-/// multiple `step()` calls until CR 704.3's fixed point is reached, so a
-/// replay viewer can observe each individual SBA pass rather than the loop
-/// being opaque.
-///
-/// `COLLECT_ACTIONS` and `PRIORITY_WINDOW` (in the human-design version
-/// this came from) are merged into `PriorityWindow` here.
-/// `Engine::legal_actions()` exists now, but it reads the state on demand
-/// (`decision::open_decision` calls it), so it still has no pause of its own.
-///
-/// Which scripted zone-move op a `ReplacementResumeTarget::ScriptedZoneMove`
-/// pause is resuming — each commits its resolved event differently:
-/// `Destroy`/`Sacrifice` reuse `sba::commit_death_or_regeneration`/
-/// `commit_death` (the same helpers every SBA-driven death already goes
-/// through), `Exile` can't reuse either (its destination is the shared
-/// Exile zone, `owner: None`, not a per-player zone `commit_death`'s
-/// `zone_mut(to, Some(owner))` call assumes) so it's committed inline.
-/// `Discard` (`phase5/mass-choice-effects`, CR 701.9) is the odd one out of
-/// the four: every other kind moves a permanent off the Battlefield, this
-/// one moves a card off a player's Hand — `Engine::continue_scripted_
-/// zone_move` reads `from_zone()` below instead of hardcoding Battlefield.
+/// Which scripted zone-move op a `ReplacementResumeTarget::ScriptedZoneMove` is
+/// resuming. Destroy and sacrifice commit through the SBA death helpers. Exile is
+/// committed inline because its zone has no owner. Discard moves a card off a hand
+/// rather than a permanent off the battlefield (CR 701.9), so `from_zone()` is read
+/// instead of assuming the battlefield.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ScriptedZoneMoveKind {
     Destroy,
@@ -300,17 +135,11 @@ pub enum ScriptedZoneMoveKind {
     Discard,
     /// CR 400.3: Battlefield -> owner's Hand (`AbilityEffect::ReturnToHand`).
     Bounce,
-    /// CR 701.17a: Library -> owner's Graveyard (`AbilityEffect::Mill`).
-    /// Committed through `commands::commit_zone_move`, not the Discard arm,
-    /// so a replacement that rewrites the destination (to Exile) still
-    /// lands in the right zone.
+    /// CR 701.17a: library to graveyard (`AbilityEffect::Mill`). Committed through
+    /// `commit_zone_move` so a redirect to exile lands in the right zone.
     Mill,
-    /// CR 400.7/110.2a: Graveyard (or Exile) -> Battlefield
-    /// (`AbilityEffect::ReturnToBattlefield` / `ReturnAllToBattlefield`).
-    /// `controller` is the player the permanent enters under (`None` means
-    /// each card's own owner); `tapped` makes it enter tapped. The commit arm
-    /// runs the full battlefield-entry treatment, see
-    /// `Engine::commit_scripted_zone_move`.
+    /// CR 110.2a, 400.7: graveyard or exile to battlefield. `controller` is who it
+    /// enters under (`None` is the owner); `tapped` enters it tapped.
     Reanimate { controller: Option<PlayerId>, tapped: bool },
     /// CR 610.3: `Exile` that also links each card landing in exile to
     /// `source`, so it returns once `source` leaves the battlefield
@@ -319,11 +148,8 @@ pub enum ScriptedZoneMoveKind {
 }
 
 impl ScriptedZoneMoveKind {
-    /// Whether an object currently in `zone` is a legal source for this kind.
-    /// Most kinds have exactly their `from_zone()`; `Exile` and `Bounce` take
-    /// whatever zone the target actually sits in (battlefield or graveyard,
-    /// plus exile for `Bounce`), so "return target card from a graveyard" and
-    /// "exile target card from a graveyard" resolve against the real zone.
+    /// Whether an object in `zone` can be a source for this kind. Exile and bounce
+    /// take the zone the target actually sits in.
     pub(in crate::engine) fn accepts_source_zone(self, zone: ZoneKind) -> bool {
         match self {
             ScriptedZoneMoveKind::Exile => matches!(zone, ZoneKind::Battlefield | ZoneKind::Graveyard),
@@ -335,9 +161,7 @@ impl ScriptedZoneMoveKind {
         }
     }
 
-    /// Which zone `Engine::continue_scripted_zone_move` should find each
-    /// queued id sitting in before it'll propose a move for it — Battlefield
-    /// for every permanent-facing verb, Hand for `Discard` alone (CR 701.9a).
+    /// The zone each queued id must sit in: the battlefield, or the hand for discard (CR 701.9a).
     pub(in crate::engine) fn from_zone(self) -> ZoneKind {
         match self {
             ScriptedZoneMoveKind::Discard => ZoneKind::Hand,
@@ -354,31 +178,15 @@ impl ScriptedZoneMoveKind {
     }
 }
 
-/// What `Engine::continue_scripted_zone_move` does once its own `remaining`
-/// queue drains — added by `phase5/devour-amplify-search-entry` so a CR
-/// 702.82a Devour sacrifice raised mid-`Search` (not just mid-`ResolveStackTop`)
-/// can finish by resuming the search's own battlefield-entry loop instead of
-/// unconditionally finalizing into `ReplacementCheck`. Same "generalize the
-/// resume target" shape `SbaResumeThen` already established for
-/// `SbaDeath`/`resume_sba_death`.
+/// What `continue_scripted_zone_move` does once its queue drains, so a devour
+/// sacrifice raised mid-search can resume the search instead of finalizing.
 #[derive(Debug)]
 pub enum ScriptedZoneMoveThen {
-    /// The pre-existing behavior: `stack_id` is a resolving spell/ability
-    /// (`ResolveStackTop`'s own `top.stack_id`, already popped off
-    /// `state.stack` by the time any of this runs — see `continue_scripted_
-    /// zone_move`'s own doc comment) — once the queue drains, push
-    /// `StackObjectResolved { stack_id }` and hand off to `ReplacementCheck`.
+    /// `stack_id` is a resolving object already popped off the stack; push
+    /// `StackObjectResolved` and hand off to `ReplacementCheck`.
     StackResolution { stack_id: ObjectId },
-    /// CR 614.12a wired into `Search` (`phase5/devour-amplify-search-entry`):
-    /// a Devour choice raised mid-`continue_search_battlefield_entry` needs
-    /// its chosen sacrifices performed via the shared scripted-zone-move
-    /// pipeline (so CR 616.1 ordering and dies-triggers apply exactly as
-    /// they do for the resolving-spell path), then control must return to
-    /// the search's own still-pending candidates instead of finalizing —
-    /// `controller`/`remaining`/`destination`/`stack_id`/`shuffle_after` are
-    /// exactly `continue_search_battlefield_entry`'s own parameters, carried
-    /// through the sacrifice (and any nested CR 616.1 pause it itself
-    /// raises) so it can be called again once the sacrifices settle.
+    /// CR 614.12a: resume `continue_search_battlefield_entry` with these parameters
+    /// once the devour sacrifices, and any nested ordering pause, settle.
     SearchResume {
         controller: PlayerId,
         remaining: VecDeque<ObjectId>,
@@ -386,34 +194,18 @@ pub enum ScriptedZoneMoveThen {
         stack_id: ObjectId,
         shuffle_after: bool,
     },
-    /// `phase5/mass-choice-effects`: chains a *second* scripted zone-move
-    /// batch after the first one's own queue (and any CR 616.1 ordering
-    /// pause it raises) fully settles — `Engine::chain_pending_zone_moves`'
-    /// own tail for a script operation's `sacrifice_chosen`+`discard_chosen`
-    /// result (`OperationOutcome::PendingZoneMoves`), since each is a
-    /// different `ScriptedZoneMoveKind` (different `from_zone()`) and
-    /// `continue_scripted_zone_move` only ever drains one `kind` per call.
-    /// Once `kind`/`remaining` themselves drain, `continue_scripted_zone_
-    /// move` recurses into `*then` — chains of length > 2 work for free the
-    /// same way, though nothing here builds one longer than 2.
+    /// Chains a second batch of a different kind after the first fully settles,
+    /// since `continue_scripted_zone_move` drains one kind per call.
     ThenScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, then: Box<ScriptedZoneMoveThen> },
-    /// CR 610.3: the returns of `Engine::return_linked_exiles` happen at the
-    /// end of an `SbaLoop` pass, so once they settle the loop starts again
-    /// (the returned permanents get checked). `trailing` events are logged to
-    /// the ledger first. TODO: the cleanup-step SBA check
-    /// (`finish_cleanup_sba_check`) doesn't return linked exiles.
+    /// CR 610.3: linked-exile returns end an `SbaLoop` pass, so the loop starts
+    /// again afterwards. `trailing` events are logged first.
+    // TODO: the cleanup-step SBA check (`finish_cleanup_sba_check`) doesn't return linked exiles
     SbaLoop,
 }
 
-/// One card still to propose+replacement-check+commit — shared queue entry
-/// for `Engine::continue_cost_zone_moves` (a `Sacrifice`/`Discard`/`Exile`
-/// `CostPayment`, built by `commands::collect_cost_zone_moves` from an
-/// already-validated `PaymentPlan`) and `Engine::continue_discard_moves`
-/// (CR 514.1's cleanup hand-size discard, `phase5/replaceable-cleanup-
-/// discard`). `from`/`to` are the zones the card is claimed to move between
-/// (`Battlefield`->`Graveyard` for `Sacrifice`, `Hand`->`Graveyard` for
-/// `Discard`/cleanup discard, `Graveyard`->`Exile` for `Exile`) — the caller
-/// already confirmed `id` is really sitting in `from` before queuing it.
+/// One card to propose, replacement-check and commit, shared by cost payments and
+/// the cleanup discard. `from` and `to` are the zones it is claimed to move
+/// between, confirmed by the caller before queueing.
 #[derive(Clone, Copy, Debug)]
 pub struct PendingZoneMove {
     pub id: ObjectId,
@@ -421,177 +213,72 @@ pub struct PendingZoneMove {
     pub to: ZoneKind,
 }
 
-/// Which pipeline a paused `ProcessState::AwaitingReplacementChoice` should
-/// resume into once `Engine::submit_replacement_choice` answers — the pause
-/// itself (event/candidates/excluded) is identical either way; only what
-/// happens *after* the choice differs.
+/// Which pipeline a paused `AwaitingReplacementChoice` resumes into. The pause is
+/// identical either way; only what happens after the choice differs.
 #[derive(Debug)]
 pub enum ReplacementResumeTarget {
-    /// Reached from a command's own proposed events (`CastSpell`/
-    /// `ActivateAbility`/combat damage's `DamageDealt`, ...) —
-    /// `remaining`/`checked` carry the rest of the same `ReplacementCheck`
-    /// run, same contract that struct's own fields already had.
+    /// A command's proposed events; `remaining` and `checked` carry the run.
     ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
-    /// Reached from inside an SBA pass instead (`sba::resolve_deaths`, CR
-    /// 614.13's "if this would die, instead ..."). `pending_deaths` is the
-    /// rest of this pass's dying-creature list still to check; `then` says
-    /// which state originally started this pass, since `SbaLoop`'s and
-    /// `CleanupSbaCheck`'s own "nothing more to do" transitions differ.
-    /// `is_destroy` is the currently-paused event's own destroy-tag (CR
-    /// 614.8's regeneration only intercepts genuine destruction - see
-    /// `sba::DyingCandidate`'s own doc comment) - already popped off
-    /// `pending_deaths` by the time this pause fires, so it can't be
-    /// re-derived from the queue.
+    /// Inside an SBA pass (CR 614.13). `pending_deaths` is the rest of the list and
+    /// `then` names the pass that started it. `is_destroy` is the paused event's
+    /// destroy tag (CR 614.8), already popped so it can't be re-derived.
     SbaDeath { pending_deaths: VecDeque<sba::DyingCandidate>, is_destroy: bool, then: SbaResumeThen },
-    /// Reached from the scripted `Destroy`/`Sacrifice`/`Exile` ops inside
-    /// `ResolveStackTop` (`Engine::continue_scripted_zone_move`), or (since
-    /// `phase5/devour-amplify-search-entry`) from a Devour sacrifice raised
-    /// mid-`Search`. Unlike `ReplacementCheck`, there's no pre-built batch of
-    /// proposed events to resume into — each target proposes and
-    /// inline-commits its own `ZoneChange` independently (the "already
-    /// happened" convention every scripted zone-move op here uses), so
-    /// `remaining` is just the rest of this same op's own target list, not
-    /// yet proposed. `then` says what to do once every target's been
-    /// processed — see `ScriptedZoneMoveThen`'s own doc comment; carried
-    /// through this pause unchanged, same as `remaining`. `trailing` (CR
-    /// 702.82a, Devour): extra events still owed once every target's
-    /// processed — e.g. `submit_devour_choice`'s own `events_so_far` plus a
-    /// `CounterAdded`, which must survive a CR 616.1 ordering-choice pause
-    /// raised mid-sacrifice just as intact as `remaining`/`then` do. Empty
-    /// for every other caller (`Destroy`/`Exile`/the plain
-    /// `AbilityEffect::Sacrifice` path), which have nothing to carry
-    /// forward.
+    /// A scripted zone-move op inside `ResolveStackTop`, or a devour sacrifice raised
+    /// mid-search. Each target proposes and commits independently, so `remaining` is
+    /// the targets not yet proposed. `then` says what follows. `trailing` holds events
+    /// still owed once every target is processed (CR 702.82a).
     ScriptedZoneMove { kind: ScriptedZoneMoveKind, remaining: VecDeque<ObjectId>, then: ScriptedZoneMoveThen, trailing: Vec<GameEventKind> },
-    /// Reached from `Engine::continue_cost_zone_moves` (`Engine::
-    /// submit_payment`'s own `Sacrifice`/`Discard` handling). Same "each
-    /// target proposes+commits independently" shape `ScriptedZoneMove`
-    /// already has - `remaining` is the rest of this payment's own
-    /// `PendingZoneMove` queue. `payer` is needed for the final
-    /// `CostPaid` event once every zone-moving payment's been processed
-    /// (`stack_id`'s `costs_paid` was already set before this pause could
-    /// first fire, so it doesn't need to be threaded through here too).
-    /// `on_paid` carries `PendingPaymentRequest::on_paid` through the pause
-    /// unchanged - a cost-bearing mana ability (`PaymentResolution::
-    /// ManaAbility`) sacrificing itself as part of its own cost, say, still
-    /// needs to know to add its mana once every zone move (including any
-    /// nested CR 616.1 choice this pause itself represents) finally settles.
+    /// A sacrifice or discard cost payment. `remaining` is the rest of the queue,
+    /// `payer` is for the final `CostPaid`, and `on_paid` rides through so a
+    /// self-sacrificing mana ability still adds its mana afterwards.
     CostZoneMove {
         remaining: VecDeque<PendingZoneMove>,
         payer: PlayerId,
         stack_id: ObjectId,
         on_paid: PaymentResolution,
-        /// CR 702.29c/f: threaded through unchanged from `Engine::
-        /// submit_payment`'s own `AdditionalCost::DiscardSelf` check, so a
-        /// CR 616.1 ordering choice raised mid-cycling-cost-payment doesn't
-        /// lose track of which payment (if any) is the Cycling ability's
-        /// own self-discard once this pause resolves.
+        /// CR 702.29c: keeps track of the cycling self-discard across the pause.
         cycling_source: Option<ObjectId>,
     },
-    /// Reached from `Engine::continue_discard_moves` (`Engine::
-    /// submit_discard`'s own CR 514.1 cleanup hand-size discard). Same
-    /// shape `CostZoneMove` has - `remaining` is the rest of this
-    /// discard's own `PendingZoneMove` queue. `since_ledger` is the ledger
-    /// length from *before* the first card in this discard committed -
-    /// carried through the pause so the eventual `ProcessState::
-    /// CollectTriggers { since }` transition (once the queue empties) still
-    /// sees this discard's own earlier-committed `ZoneChange`s, not just
-    /// whatever comes after the choice.
+    /// The cleanup hand-size discard. `since_ledger` predates the first committed
+    /// card so the trigger window still sees the whole discard.
     CleanupDiscard { remaining: VecDeque<PendingZoneMove>, since_ledger: usize },
-    /// Reached from `Engine::decline_madness_cast`'s own Exile -> Graveyard
-    /// proposal (CR 702.35a's "if you don't, put it into your graveyard").
-    /// A single proposal, not a queue - same "nothing left to loop over"
-    /// shape `Draw` above has. `stack_id`/`events_so_far` are the madness
-    /// trigger's own paused-resolution state (this trigger's own
-    /// `StackObjectResolved` hasn't been pushed yet) - once this resolves,
-    /// both are folded into the normal `ReplacementCheck` tail, same as the
-    /// synchronous (no CR 616.1 collision) path already does.
+    /// The decline branch of madness (CR 702.35a): one proposal, not a queue.
+    /// `stack_id` and `events_so_far` fold into the normal tail once it resolves.
     MadnessDecline { card: ObjectId, stack_id: ObjectId, events_so_far: Vec<GameEventKind> },
-    /// Reached from `ProcessState::AdvanceTurnStep`'s own `Step::Draw`
-    /// handling (CR 504.1's turn-based draw, `phase5/replaceable-draw`) -
-    /// a single proposal, not a queue (`draw_step` is always exactly one
-    /// card), so there's nothing left to loop over once this resolves -
-    /// resuming just means committing and continuing on to
-    /// `Engine::enter_priority_via_replacement_check`. `tail_events` is
-    /// this same `step()` call's own `TurnStarted`/`PhaseStarted`/
-    /// `StepStarted` markers, still unlogged - carried through so they
-    /// still reach the real pipeline (and, downstream, trigger collection)
-    /// once the choice is answered. `since_ledger` was captured *before*
-    /// the draw's own proposal, so the eventual trigger-collection window
-    /// covers both the draw and these markers regardless of which commits
-    /// (or logs) first - same reasoning `CleanupDiscard`'s own
-    /// `since_ledger` field documents.
+    /// The draw step's turn-based draw (CR 504.1): one proposal. `tail_events` are
+    /// the step markers still unlogged. `since_ledger` predates the draw so the
+    /// trigger window covers both.
     Draw { tail_events: Vec<GameEventKind>, since_ledger: usize },
-    /// Reached from `ResolveStackTop`'s `AbilityEffect::DrawCards(n)` arm
-    /// (CR 120.3/121, `Game.Ops.DrawCards`). Unlike `Draw` above, this is
-    /// a count-based queue inside a resolving spell/ability - each draw
-    /// re-peeks the library's current top, and a CR 616.1 pause can fire
-    /// on any individual card. `remaining` is the number of cards still to
-    /// draw *after* the currently paused one; `events_so_far` carries the
-    /// spell's own Stack->Graveyard `ZoneChange` (if any) so it reaches the
-    /// normal `ReplacementCheck`/`CommitEvents` pipeline once the draws are
-    /// done. The draw events themselves are committed inline (like every
-    /// other replacement-checked zone move) so they are not re-checked a
-    /// second time against an empty `excluded` set.
+    /// A scripted `DrawCards(n)` (CR 121): `remaining` draws are left after the
+    /// paused one. The draws commit inline so they aren't re-checked; `events_so_far`
+    /// reaches the normal pipeline afterwards.
     ScriptedDraw {
         remaining: u32,
         player: PlayerId,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// Reached from `ResolveStackTop`'s `AbilityEffect::Discard` arm (CR
-    /// 701.9/701.9b) once `player` has already answered `Engine::
-    /// submit_discard_choice` for the currently-in-flight card - same
-    /// per-pick shape `ScriptedDraw` has (a choice-driven queue inside a
-    /// resolving spell/ability, not a pre-built batch), except each pick
-    /// needs a real player choice first (which `ScriptedDraw`'s own "always
-    /// the library's current top" shape never does), so this only ever
-    /// carries the choice *after* it's been made - the choice itself lives
-    /// on `ProcessState::AwaitingDiscardChoice`, a separate pause.
-    /// `remaining_count` is how many more discards (after the one this
-    /// pause represents) `player` still owes; `events_so_far` carries the
-    /// resolving ability's own tail, same role `ScriptedDraw`'s own field
-    /// plays.
+    /// A scripted discard after a choice was made (CR 701.9): `remaining_count` more
+    /// are owed, and `events_so_far` is the resolving ability's tail. The choice
+    /// itself lives on `AwaitingDiscardChoice`.
     TargetedDiscard {
         player: PlayerId,
         remaining_count: u32,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// CR 614/616.1: reached from `permanent_entry::resolve_permanent_entry`'s
-    /// own would-be-Battlefield redirect proposal — two or more registered
-    /// `ReplaceZoneDestination` effects both matching the same entering
-    /// permanent's destination. Unlike every other resume target above,
-    /// nothing has been placed on the battlefield (or anywhere else) yet at
-    /// this pause point — the popped `StackObject` (`top`) hasn't even had
-    /// its zone move committed, so the *entire* object, not just a scalar id,
-    /// has to be carried through the pause. `legal_targets` is `top`'s own
-    /// CR 608.2b-rechecked target list (needed for the CR 303.4b Aura-attach
-    /// step once the destination is finally settled); `events` is whatever
-    /// this resolution had already accumulated before the redirect proposal
-    /// (empty for every real caller today, carried anyway so the shape
-    /// matches every other resume target's own "this run's progress so far"
-    /// field). Resumed by `Engine::continue_permanent_entry`, the same
-    /// continuation the non-paused path already calls once its own
-    /// destination is decided synchronously.
+    /// CR 614, 616.1: two or more `ReplaceZoneDestination` effects matched an
+    /// entering permanent. Nothing has moved yet, so the whole popped `top` is
+    /// carried. `legal_targets` is its rechecked list (CR 608.2b), for the Aura
+    /// attach step. Resumed by `continue_permanent_entry`.
     PermanentEntry { top: StackObject, legal_targets: Vec<Target>, events: Vec<GameEventKind> },
 }
 
-/// `phase5/mass-choice-effects`, CR 101.4: the rest of a `Game.Ops.
-/// ForEachPlayer(fn)` loop still to run once the *current* player's own
-/// `Game.SelectTargets`/`Game.ChooseN`/`Game.MayChoose` ask (an
-/// `AwaitingScriptChoice` pause with this struct attached) is answered.
-/// `source`/`operation` are exactly what `engine::resolve::each_player::
-/// resolve_for_each_player_effect` was invoking `fn` with — needed to
-/// re-invoke it for whichever player is next, since the stack object itself
-/// is already popped off `state.stack` by this point (same reason
-/// `AwaitingScriptChoice`'s own `stack_id`/`controller` are carried rather
-/// than re-derived). `remaining_players` is this loop's own CR 101.4 APNAP
-/// order queue, not yet asked. `sacrifice_ids`/`discard_ids` accumulate every
-/// player's own `sacrifice_chosen`/`discard_chosen` answers so far (see
-/// `OperationOutcome::PendingZoneMoves`) — *not* applied as each player
-/// finishes, only once `remaining_players` finally empties, so CR 101.4's
-/// "then the actions happen simultaneously" holds for the whole loop, not
-/// just within one player's own choice.
+/// CR 101.4: the rest of a `ForEachPlayer` loop once the current player's choice is
+/// answered. `source` and `operation` re-invoke the function for the next player,
+/// since the stack object is already popped. `sacrifice_ids` and `discard_ids`
+/// accumulate and apply only when `remaining_players` empties, so the actions
+/// happen simultaneously.
 #[derive(Debug)]
 pub struct EachPlayerLoop {
     pub source: ObjectId,
@@ -601,47 +288,31 @@ pub struct EachPlayerLoop {
     pub discard_ids: Vec<ObjectId>,
 }
 
-/// See `ReplacementResumeTarget::SbaDeath`'s own doc comment. `CleanupSbaCheck`
-/// carries `since_ledger` (the value `ProcessState::CleanupSbaCheck` captured
-/// before this SBA pass began) through the pause, so `resume_sba_death` can
-/// still hand it to `finish_cleanup_sba_check`/`PipelineExit::CleanupCheck`
-/// once the paused choice is answered.
+/// See `ReplacementResumeTarget::SbaDeath`. `CleanupSbaCheck` carries
+/// `since_ledger` through the pause for `finish_cleanup_sba_check`.
 #[derive(Debug)]
 pub enum SbaResumeThen {
     SbaLoop,
     CleanupSbaCheck { since_ledger: usize },
 }
 
+/// The pipeline stage the engine is in, behind `step()`. One `step()` advances one
+/// variant; `SbaLoop` re-enters itself so a replay viewer sees each SBA pass
+/// (CR 704.3). `legal_actions()` reads state on demand, so it has no pause of its own.
 #[derive(Debug)]
 pub enum ProcessState {
     PriorityWindow,
-    /// Accepted by `submit_action`, waiting for the next `step()` to
-    /// execute it via `commands::execute_command`.
+    /// Accepted by `submit_action`; the next `step()` runs it.
     PendingAction(PlayerAction),
-    /// All players passed in a row with a non-empty stack (CR 117.4) —
-    /// resolve the top `StackObject` next.
+    /// CR 117.4: all players passed with a non-empty stack; resolve the top object.
     ResolveStackTop,
-    /// Proposed events waiting on replacement/prevention checks (CR
-    /// 614-616) before they're allowed to commit. `checked` accumulates
-    /// events already resolved by earlier iterations of this same
-    /// `ReplacementCheck` run; `remaining` is what's still unprocessed — a
-    /// `VecDeque` so it can be drained front-to-back (`pop_front`) in the
-    /// order it was built, rather than a `Vec`'s `pop()` silently reversing
-    /// processing order.
+    /// Proposed events awaiting replacement checks (CR 614-616). `checked` holds
+    /// those already resolved; `remaining` is a queue so processing keeps its order.
     ReplacementCheck { remaining: VecDeque<GameEventKind>, checked: Vec<GameEventKind> },
-    /// CR 616.1: paused because `pending_event` matched more than one
-    /// replacement/prevention effect (`candidates`, each a `replacement::
-    /// ReplacementCandidate`) and `affected_player` must choose which
-    /// applies first. `excluded` is `replacement::ReplacementOutcome::
-    /// NeedsOrderingChoice`'s own per-event exclusion set (CR 616.1: an
-    /// effect applies at most once to a given event) — carried here so
-    /// resuming doesn't forget which effects already applied earlier in this
-    /// same event's resolution. `resume` says what to do once
-    /// `submit_replacement_choice` answers — this pause is reached from two
-    /// different pipelines (a command's own events via `ReplacementCheck`,
-    /// or a dying creature's zone-change via `sba::resolve_deaths`), and
-    /// only `resume` distinguishes them; the pause itself is identical
-    /// either way.
+    /// CR 616.1: `pending_event` matched several effects and `affected_player` picks
+    /// which applies first. `excluded` carries the effects already applied to this
+    /// event. `resume` says what follows the answer, the only difference between the
+    /// pipelines that reach this pause.
     AwaitingReplacementChoice {
         affected_player: PlayerId,
         pending_event: GameEventKind,
@@ -649,53 +320,20 @@ pub enum ProcessState {
         excluded: Vec<replacement::ReplacementCandidate>,
         resume: ReplacementResumeTarget,
     },
-    /// CR 704.5j: paused because `sba::find_legend_rule_group` found `player`
-    /// controlling 2+ legendary permanents sharing a name (`candidates`) —
-    /// `player` must choose which to keep. `then` says which SBA pass
-    /// originally raised this (same role it plays on `SbaDeath` above) so
-    /// `submit_legend_rule_choice` knows whether to resume `SbaLoop` or
-    /// `CleanupSbaCheck` once the losers are resolved via the same
-    /// `resume_sba_death` helper `submit_replacement_choice` already uses.
+    /// CR 704.5j: `player` keeps one of `candidates`. `then` names the SBA pass that
+    /// raised it; the losers resolve through `resume_sba_death`.
     AwaitingLegendRuleChoice { player: PlayerId, candidates: Vec<ObjectId>, then: SbaResumeThen },
-    /// CR 903.9a: paused because `sba::find_commander_return_candidate`
-    /// found `commander` (owned by `player`) sitting in a graveyard or
-    /// exile, not yet offered the "may return" choice. `then` plays the
-    /// same role it does on `AwaitingLegendRuleChoice` above.
+    /// CR 903.9a: `commander` sits in a graveyard or exile and `player` hasn't been
+    /// offered the return. `then` is as above.
     AwaitingCommanderReturnChoice { player: PlayerId, commander: ObjectId, then: SbaResumeThen },
-    /// CR 303.4d: paused because `commands::propose_attach` found more than
-    /// one simultaneous candidate for a single Aura's attachment. No `then`
-    /// continuation, unlike `AwaitingLegendRuleChoice`/
-    /// `AwaitingCommanderReturnChoice` above — there's no real producer to
-    /// dictate which pipeline this resumes into (see `AttachChoiceError`'s
-    /// own doc comment), so `submit_attach_choice` resumes to the generic
-    /// `PriorityWindow` once the chosen candidate is attached.
+    /// CR 303.4d: several candidates for one Aura. It has no `then` because no
+    /// producer dictates a pipeline, so the answer resumes `PriorityWindow`.
     AwaitingAttachChoice { aura: ObjectId, controller: PlayerId, candidates: Vec<ObjectId> },
-    /// CR 303.4f/301.5e/301.6: paused mid-`submit_search_choice` because a
-    /// found Aura/Equipment/Fortification card entering the battlefield with
-    /// `SearchDestination::Battlefield::enters_attached` set found 2+ legal
-    /// attach candidates (`commands::legal_entry_attach_candidates`) —
-    /// `controller` must choose which of `candidates` `attaching` becomes
-    /// attached to, then call `submit_entry_attach_choice`. Unlike
-    /// `AwaitingAttachChoice` above, this *does* have a real continuation to
-    /// resume: `stack_id`/`events_so_far`/`remaining`/`destination`/
-    /// `shuffle_after` are exactly what `submit_search_choice`'s own
-    /// battlefield-entry loop had already built before pausing on this card
-    /// - `attaching` itself has already been moved onto the battlefield
-    /// (unattached) by the time this pause is raised, same "already a real
-    /// permanent, then gets attached" order the cast-time Aura-ETB-attach
-    /// path (`ResolveStackTop`) already uses. A separate variant from
-    /// `AwaitingAttachChoice` rather than reusing it — that one's
-    /// `submit_attach_choice` deliberately has no continuation (nothing
-    /// produces it in real gameplay yet, per its own doc comment); giving it
-    /// one here would mean threading this search-specific continuation
-    /// through a pause type named for a different CR clause. Named for the
-    /// generic "entering already attached" event rather than "Aura" once
-    /// Equipment/Fortification joined it (`phase5/attach-entry-equipment-
-    /// fortification`) — keeping the old Aura-specific name would have
-    /// misled the next reader into thinking it was still Aura-only.
-    /// `candidates` is `Target`-shaped since `phase5/aura-enters-attached-
-    /// player` (an Aura's own candidates can be players, CR 303.4f/b) —
-    /// Equipment/Fortification candidates are always `Target::Object`.
+    /// CR 303.4f: a found Aura, Equipment or Fortification entering through a
+    /// search has 2+ legal attach candidates; `controller` picks. The search's loop
+    /// state rides along for the resume, and `attaching` is already on the
+    /// battlefield, unattached. Candidates are `Target`s since an Aura can enchant a
+    /// player (CR 303.4b); Equipment and Fortification candidates are objects.
     AwaitingEntryAttachChoice {
         attaching: ObjectId,
         controller: PlayerId,
@@ -706,19 +344,9 @@ pub enum ProcessState {
         destination: SearchDestination,
         shuffle_after: bool,
     },
-    /// CR 303.4f/301.5e/301.6, extended to token creation
-    /// (`phase5/token-enters-attached`): paused mid-`continue_create_token`
-    /// (the resumable loop body `resolve_create_token_effect`'s own
-    /// `for`-style loop was factored into) — `commands::legal_entry_attach_
-    /// candidates` found 2+ legal attach targets for `attaching` (already a
-    /// real battlefield token, unattached, by this point). `spec`/
-    /// `copy_snapshot` are exactly what `continue_create_token` needs to
-    /// keep building any further tokens still owed by the original
-    /// `count`; `remaining_count` is how many of those are left *after*
-    /// `attaching` itself (which `submit_token_attach_choice` finishes).
-    /// No `remaining: VecDeque<ObjectId>`/`destination`/`shuffle_after`
-    /// unlike `AwaitingEntryAttachChoice` above — token creation has no
-    /// library queue or shuffle step to resume, just a plain count.
+    /// CR 303.4f: the token-creation counterpart. `spec` and `copy_snapshot` build
+    /// the further tokens owed; `remaining_count` is how many follow `attaching`.
+    /// There is no library queue or shuffle to resume, only a count.
     AwaitingTokenAttachChoice {
         attaching: ObjectId,
         controller: PlayerId,
@@ -729,18 +357,10 @@ pub enum ProcessState {
         spec: TokenSpec,
         copy_snapshot: Option<CardDefinition>,
     },
-    /// CR 702.82a (Devour): paused mid-`ResolveStackTop`, right where
-    /// `apply_enters_battlefield_modifiers` would otherwise run for `object`
-    /// — `replacement::pending_devour_choice` found a registered Devour
-    /// effect on it with 1+ legal creature candidates. `stack_id`/
-    /// `events_so_far` are exactly what this resolution had already built
-    /// before reaching this point (same "not yet committed, still a local
-    /// `Vec`" state `AwaitingScriptChoice` below carries for the identical
-    /// reason) — `submit_devour_choice` resumes by performing the chosen
-    /// sacrifices (`Engine::continue_scripted_zone_move`, so CR 616.1's
-    /// ordering choice and dies-triggers all apply for free), then folding
-    /// `events_so_far` plus a `CounterAdded` (if any creatures were
-    /// sacrificed) into that same continuation's own tail.
+    /// CR 702.82a: raised where the enters-the-battlefield modifiers would run for
+    /// `object`, with 1+ creature candidates. `stack_id` and `events_so_far` are the
+    /// resolution's uncommitted progress. The answer sacrifices through
+    /// `continue_scripted_zone_move` and folds a `CounterAdded` into its tail.
     AwaitingDevourChoice {
         object: ObjectId,
         controller: PlayerId,
@@ -749,18 +369,9 @@ pub enum ProcessState {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// CR 702.38a (Amplify): paused mid-`ResolveStackTop`, right where
-    /// `apply_enters_battlefield_modifiers` would otherwise run for `object`
-    /// — `replacement::pending_amplify_choice` found a registered Amplify
-    /// effect on it with 1+ legal hand-card candidates. `stack_id`/
-    /// `events_so_far` are exactly what this resolution had already built
-    /// before reaching this point, same "not yet committed, still a local
-    /// `Vec`" state `AwaitingDevourChoice` above carries. Unlike Devour,
-    /// `submit_amplify_choice` needs no `continue_scripted_zone_move` at
-    /// all — revealing changes nothing about the chosen cards' zone — it
-    /// folds `events_so_far` plus a `CounterAdded` (if any cards were
-    /// revealed) straight into the same `StackObjectResolved`/
-    /// `ReplacementCheck` tail every non-pausing resolution already ends on.
+    /// CR 702.38a: like devour with hand-card candidates. Revealing moves nothing, so
+    /// the answer folds `events_so_far` and a `CounterAdded` straight into the
+    /// resolved tail.
     AwaitingAmplifyChoice {
         object: ObjectId,
         controller: PlayerId,
@@ -769,24 +380,9 @@ pub enum ProcessState {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// CR 702.82a (Devour), wired into `Search` (`phase5/devour-amplify-
-    /// search-entry`): paused mid-`continue_search_battlefield_entry`, right
-    /// where `apply_enters_battlefield_modifiers` would otherwise run for
-    /// `object` (a card just fetched onto the battlefield) — same trigger
-    /// condition `AwaitingDevourChoice` above checks, just from the second
-    /// real producer. A separate variant rather than reusing
-    /// `AwaitingDevourChoice` — same "the resume differs, so the pause type
-    /// does too" precedent `AwaitingTokenAttachChoice`'s own doc comment
-    /// already established relative to `AwaitingEntryAttachChoice`:
-    /// `submit_search_devour_choice` must resume back into the search's own
-    /// `remaining`/`destination`/`shuffle_after` loop state once the chosen
-    /// sacrifices settle, which `AwaitingDevourChoice`'s own resume (straight
-    /// to `ReplacementCheck` once `continue_scripted_zone_move`'s queue
-    /// drains) has no way to do. `stack_id`/`events_so_far` are exactly what
-    /// `continue_search_battlefield_entry` had already built before reaching
-    /// this point, same role they play on `AwaitingDevourChoice`;
-    /// `remaining`/`destination`/`controller`/`shuffle_after` are that same
-    /// function's own parameters, needed to call it again on resume.
+    /// CR 702.82a: devour raised by a search. A separate variant because the answer
+    /// must resume the search's `remaining`, `destination`, `controller` and
+    /// `shuffle_after` instead of finalizing; `stack_id` and `events_so_far` are as above.
     AwaitingSearchDevourChoice {
         object: ObjectId,
         controller: PlayerId,
@@ -798,15 +394,8 @@ pub enum ProcessState {
         destination: SearchDestination,
         shuffle_after: bool,
     },
-    /// CR 702.38a (Amplify), wired into `Search`
-    /// (`phase5/devour-amplify-search-entry`): same relationship to
-    /// `AwaitingAmplifyChoice` that `AwaitingSearchDevourChoice` above has to
-    /// `AwaitingDevourChoice` — a separate variant since
-    /// `submit_search_amplify_choice` must resume the search's own loop
-    /// state instead of finalizing straight to `ReplacementCheck`. Unlike
-    /// Devour, no zone move is involved (revealing doesn't move anything),
-    /// so the resume is a direct call into `continue_search_battlefield_
-    /// entry`, not a `continue_scripted_zone_move` round trip.
+    /// CR 702.38a: amplify raised by a search. Resumes `continue_search_battlefield_entry`
+    /// directly since revealing moves nothing.
     AwaitingSearchAmplifyChoice {
         object: ObjectId,
         controller: PlayerId,
@@ -818,31 +407,17 @@ pub enum ProcessState {
         destination: SearchDestination,
         shuffle_after: bool,
     },
-    /// CR 702.35a (Madness): paused mid-`ResolveStackTop` once the madness
-    /// triggered ability's own `MadnessCastOrDiscard` effect located its
-    /// live exile-zone descendant — `stack_id`/`events_so_far` are exactly
-    /// what this resolution had already built before reaching this point,
-    /// same "not yet committed, still a local `Vec`" state its Devour/
-    /// Amplify siblings above carry (both `Engine::decline_madness_cast`/
-    /// `Engine::submit_madness_cast` push this trigger's own
-    /// `StackObjectResolved { stack_id }` into `events_so_far` on resume,
-    /// same as every other pause here does for its own triggering
-    /// resolution). `card` is the live exile object (not `player`'s
-    /// original hand object, which no longer resolves) — `submit_madness_
-    /// cast` reads its own `alternative_costs` off this id directly.
+    /// CR 702.35a: the madness trigger found its card in exile. `card` is the live
+    /// exile object, not the original hand object, and its `alternative_costs` are
+    /// read from this id. Both answers push `StackObjectResolved` into `events_so_far`.
     AwaitingMadnessChoice {
         player: PlayerId,
         card: ObjectId,
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// CR 702.85a (Cascade): paused once `resolve_cascade_effect`'s own
-    /// synchronous library walk finished — `exiled` is every card the walk
-    /// moved to exile (in walk order), `candidate` the first nonland one
-    /// with mana value less than the cascade spell's own (`None` if the
-    /// library ran dry first). `stack_id`/`events_so_far` are this trigger's
-    /// own paused-resolution state, same role they play on
-    /// `AwaitingMadnessChoice` above.
+    /// CR 702.85a: the cascade library walk finished. `exiled` is every card moved
+    /// in walk order; `candidate` is the first nonland card of lower mana value.
     AwaitingCascadeChoice {
         player: PlayerId,
         candidate: Option<ObjectId>,
@@ -850,23 +425,10 @@ pub enum ProcessState {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// CR 118.12/118.12a (`AbilityEffect::UnlessPaid`) — see that type's own
-    /// doc comment for the shared shape. `payer_queue` is built in CR 101.4
-    /// APNAP order when this pause is first raised (a single-element queue
-    /// for both of this slice's real producers); `Engine::
-    /// submit_unless_paid_payment` only accepts a plan from whoever is at
-    /// its front, and `Engine::decline_unless_paid` pops that front and
-    /// either re-raises this same pause for the next candidate or, once the
-    /// queue is empty, dispatches `otherwise`. `target_id` (the *targeted*
-    /// `StackObject`'s own `stack_id`, not `stack_id` below) is only
-    /// meaningful when `otherwise` is `Counter`; `source` (only meaningful
-    /// for `SacrificeSelf`) is this ability's own source object — both
-    /// resolved once up front rather than re-derived on every candidate's
-    /// answer, same "resolve legal_targets once, not on every resume" stance
-    /// `AwaitingCascadeChoice`'s own `candidate` already takes. `stack_id`/
-    /// `events_so_far` are this resolution's own paused-progress state, same
-    /// role they play on `AwaitingCascadeChoice`/`AwaitingMadnessChoice`
-    /// above.
+    /// CR 118.12: `payer_queue` is built in APNAP order (CR 101.4), and only its
+    /// front may answer; a decline pops it and dispatches `otherwise` once empty.
+    /// `target_id` (the targeted stack object, for `Counter`) and `source` (for
+    /// `SacrificeSelf`) are resolved once up front.
     AwaitingUnlessPaidChoice {
         payer_queue: VecDeque<PlayerId>,
         cost: CostSpec,
@@ -876,14 +438,8 @@ pub enum ProcessState {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// CR 701.9/701.9b (`AbilityEffect::Discard`): `player` (the *targeted*
-    /// player) may call `Engine::submit_discard_choice` with one of
-    /// `candidates` (their own current hand, re-derived fresh before every
-    /// pick rather than cached - `Game.ChooseN`'s own repeated-pick
-    /// convention) to discard it. `remaining_count` is how many more picks
-    /// `player` still owes after this one - `0` means this is the last.
-    /// `stack_id`/`events_so_far` are this resolution's own paused-progress
-    /// state, same role they play on every other choice pause above.
+    /// CR 701.9: the targeted `player` discards one of `candidates`, re-derived from
+    /// their hand before every pick. `remaining_count` more picks follow.
     AwaitingDiscardChoice {
         player: PlayerId,
         candidates: Vec<ObjectId>,
@@ -891,34 +447,16 @@ pub enum ProcessState {
         stack_id: ObjectId,
         events_so_far: Vec<GameEventKind>,
     },
-    /// CR 707.6/614.12a (Clone itself): paused mid-`ResolveStackTop`, right
-    /// where `apply_enters_battlefield_modifiers` would otherwise run for
-    /// `object` — `replacement::pending_copy_choice` found a registered
-    /// `EntersAsCopy` effect on it with 1+ legal battlefield-creature
-    /// candidates. `stack_id`/`events_so_far` are exactly what this
-    /// resolution had already built before reaching this point, same
-    /// "not yet committed, still a local `Vec`" state its siblings above
-    /// carry. `exceptions` and `colors_spent` are carried through the pause
-    /// too — `exceptions` for `submit_copy_choice` to apply if a copy is
-    /// chosen, `colors_spent` (derived from the entering spell's own real
-    /// `costs_paid` at the point this pause is raised) so a copied Sunburst
-    /// creature still gets a real count once `apply_enters_battlefield_
-    /// modifiers` runs on resume.
+    /// CR 707.9: raised where the enters-the-battlefield modifiers would run for
+    /// `object`, with 1+ creature candidates. `exceptions` apply if a copy is chosen;
+    /// `colors_spent` comes from the spell's `costs_paid` so a copied sunburst
+    /// creature still gets a count.
     ///
-    /// `carry_forward_if_declined` (CR 707.9e, `phase5/chained-copy-effects`)
-    /// is `None` for every *first* pause (the object hasn't copied anything
-    /// yet, so there's nothing to supersede). It's only ever `Some` when
-    /// `submit_copy_choice` itself detects a *chain* — the just-copied
-    /// definition has its own `EntersAsCopy` — and re-enters this same
-    /// variant instead of finishing: it holds the outer round's own
-    /// already-applied-copy-but-not-yet-applied-additional-effect
-    /// `CopyExceptions`, to be applied after all if this new pause's choice
-    /// is declined (CR 707.9e's own condition, "another copy effect is
-    /// applied... after," was never actually met in that case). If instead
-    /// this pause's choice picks a real target, the outer round's exception
-    /// is conclusively superseded and `submit_copy_choice` discards this
-    /// field for good, keeping only its own newly-applied round's exceptions
-    /// as the next `carry_forward_if_declined` candidate.
+    /// `carry_forward_if_declined` is `None` on a first pause. When
+    /// `submit_copy_choice` detects a chain (the copied definition is itself an
+    /// `EntersAsCopy`), it re-enters this variant holding the outer round's deferred
+    /// exceptions: applied if this pause is declined, superseded if a copy is
+    /// chosen (CR 707.9e).
     AwaitingCopyChoice {
         object: ObjectId,
         controller: PlayerId,
@@ -928,37 +466,15 @@ pub enum ProcessState {
         events_so_far: Vec<GameEventKind>,
         colors_spent: ColorSet,
         carry_forward_if_declined: Option<CopyExceptions>,
-        /// CR 107.3b/707.9e (`phase5/altered-ego-x-counters`): `object`'s own
-        /// paid X (`StackObject.x_value` at the point this pause was first
-        /// raised) - resolves `CounterAmount::X` in whichever round's
-        /// exceptions end up applied. `object` never changes across a
-        /// chained re-pause (only the *candidate* being copied does), so
-        /// this is captured once and carried through unchanged, same
-        /// invariant-through-the-chain treatment `colors_spent` already
-        /// gets.
+        /// CR 707.9e: `object`'s paid X, resolving `CounterAmount::X`. It is
+        /// captured once because it never changes across a chain.
         x_value: Option<u32>,
     },
-    /// Backlog item 9: paused because `ScriptRuntime::invoke_operation`
-    /// yielded (`OperationOutcome::NeedsChoice`) mid-`ResolveStackTop` —
-    /// `thread`/`request` are the suspended coroutine's own handle and its
-    /// decoded ask; `stack_id`/`controller`/`events_so_far` are exactly what
-    /// `ResolveStackTop` had already built for this same resolution before
-    /// hitting the ask (the stack object is already popped off `state.stack`
-    /// by this point, same as any other in-progress resolution), carried
-    /// here so `submit_script_choice` can pick up in the same spot — push
-    /// the final `StackObjectResolved` and continue into `ReplacementCheck`
-    /// — rather than re-deriving them. `each_player` (`phase5/mass-choice-
-    /// effects`) is `Some` only when this ask came from inside a
-    /// `Game.Ops.ForEachPlayer` per-player invocation — see `EachPlayerLoop`'s
-    /// own doc comment for what `submit_script_choice`/`submit_script_may_
-    /// choice` do differently once `controller`'s own answer resumes the
-    /// thread. `None` (every pre-existing pause shape) behaves exactly as
-    /// before. `source` (`phase5/operation-result-draw-damage-counters`) is
-    /// the operation's own source object — needed so a resumed coroutine
-    /// can still return `deal_damage`/`add_counters` after yielding once
-    /// (`ScriptRuntime::resume_operation`/`resume_operation_bool` need it
-    /// to build a real `GameEventKind`, and nothing about a suspended
-    /// coroutine remembers its own source on its own).
+    /// A script operation yielded mid-resolution (`NeedsChoice`). `thread` and
+    /// `request` are the suspended coroutine and its ask. `stack_id`, `controller` and
+    /// `events_so_far` are the popped resolution's progress. `each_player` is set only
+    /// inside a `ForEachPlayer` invocation. `source` is kept because a resumed
+    /// coroutine needs it to build `deal_damage` and `add_counters` events.
     AwaitingScriptChoice {
         thread: ScriptHandle,
         request: ScriptChoiceRequest,
@@ -968,37 +484,24 @@ pub enum ProcessState {
         events_so_far: Vec<GameEventKind>,
         each_player: Option<EachPlayerLoop>,
     },
-    /// Backlog item 14a: paused mid-`ResolveStackTop` because the resolving
-    /// `StackObject`'s effect was `AbilityEffect::Scry(n)` — `cards` is the
-    /// top `n` library ids peeked read-only (front = top; `n` already
-    /// clamped to the library's actual size). `stack_id`/`controller`/
-    /// `events_so_far` are carried through exactly like
-    /// `AwaitingScriptChoice`'s own fields, for the same reason: this
-    /// resolution already popped its `StackObject` and built some events
-    /// before hitting the pause, so `submit_scry_choice` can resume in the
-    /// same spot rather than re-deriving them.
+    /// An `AbilityEffect::Scry(n)` pause. `cards` is the top `n` library ids,
+    /// clamped to the library size. `stack_id`, `controller` and `events_so_far`
+    /// are carried as for `AwaitingScriptChoice`.
     AwaitingScryChoice {
         stack_id: ObjectId,
         controller: PlayerId,
         events_so_far: Vec<GameEventKind>,
         cards: Vec<ObjectId>,
     },
-    /// Same as `AwaitingScryChoice`, for `AbilityEffect::Surveil(n)`.
+    /// As `AwaitingScryChoice`, for `AbilityEffect::Surveil(n)`.
     AwaitingSurveilChoice {
         stack_id: ObjectId,
         controller: PlayerId,
         events_so_far: Vec<GameEventKind>,
         cards: Vec<ObjectId>,
     },
-    /// Backlog item 14b: paused mid-`ResolveStackTop` because the resolving
-    /// `StackObject`'s effect was `AbilityEffect::Search { .. }` —
-    /// `candidates` is every library id already pre-filtered against the
-    /// search's own `FilterSpec` (evaluated with the controller as
-    /// `viewer`); `count`/`destination`/`shuffle_after` are copied straight
-    /// off the effect so `submit_search_choice` doesn't need the original
-    /// `FilterSpec` at all (the pre-filtering already happened). `stack_id`/
-    /// `controller`/`events_so_far` carried through for the same reason
-    /// `AwaitingScryChoice` carries them.
+    /// An `AbilityEffect::Search` pause. `candidates` are pre-filtered, so
+    /// `submit_search_choice` doesn't need the `FilterSpec`.
     AwaitingSearchChoice {
         stack_id: ObjectId,
         controller: PlayerId,
@@ -1008,85 +511,43 @@ pub enum ProcessState {
         destination: SearchDestination,
         shuffle_after: bool,
     },
-    /// Checked events ready to become real `GameEvent`s in the ledger.
     CommitEvents { checked: Vec<GameEventKind> },
-    /// CR 704.3's fixed-point loop.
+    /// CR 704.3
     SbaLoop,
-    /// Collecting triggered abilities that matched ledger events from
-    /// index `since` onward.
     CollectTriggers { since: usize },
-    /// Triggers collected and grouped by controller in APNAP order
-    /// (`triggers::group_apnap`) — waiting to be pushed to the stack.
-    /// `ordered` accumulates groups already finalized (each in that
-    /// controller's chosen intra-group order); `pending_groups` is what's
-    /// left, still in APNAP order.
-    /// `pending_groups` is a `VecDeque` for the same reason
-    /// `ReplacementCheck::remaining` is: drained front-to-back in APNAP
-    /// order, not reversed by a `Vec::pop()`.
+    /// Triggers grouped in APNAP order (`group_apnap`), waiting for the stack.
+    /// `ordered` holds finalized groups; `pending_groups` is a queue so APNAP order holds.
     PutTriggersApnap {
         ordered: Vec<PendingTrigger>,
         pending_groups: VecDeque<(PlayerId, Vec<PendingTrigger>)>,
     },
-    /// CR 603.3b: paused mid-`PutTriggersApnap` because `group` (all
-    /// controlled by `player`) has more than one trigger and `player` must
-    /// choose the order to put them on the stack. `ordered`/`pending_groups`
-    /// carry the rest of the same `PutTriggersApnap` run so it can resume
-    /// once `submit_trigger_order` answers.
+    /// CR 603.3b: `group` has several triggers and `player` orders them.
+    /// `ordered` and `pending_groups` carry the rest of the run.
     AwaitTriggerOrderChoice {
         player: PlayerId,
         group: Vec<PendingTrigger>,
         ordered: Vec<PendingTrigger>,
         pending_groups: VecDeque<(PlayerId, Vec<PendingTrigger>)>,
     },
-    /// CR 603.3d: paused mid-`PutTriggersApnap`'s own final push loop
-    /// (`Engine::push_ordered_triggers`) because `trigger`'s own ability
-    /// needs a real target chosen before it can be pushed to the stack —
-    /// `spec`/`candidates` mirror `StepStatus::AwaitingTriggerTargets`
-    /// exactly (see that variant's own doc comment); `remaining` is every
-    /// other trigger in this same push run still to process afterward, same
-    /// "queue survives the pause" convention `AwaitTriggerOrderChoice`'s own
-    /// `pending_groups` already established.
+    /// CR 603.3d: `trigger` needs targets before it can be pushed. `spec` and
+    /// `candidates` mirror `StepStatus::AwaitingTriggerTargets`; `remaining` is the
+    /// rest of the push run.
     AwaitingTriggerTargets {
         trigger: PendingTrigger,
         spec: TargetSpec,
         candidates: Vec<Vec<Target>>,
         remaining: VecDeque<PendingTrigger>,
-        /// `None` for the plain (non-modal) path this variant originally
-        /// shipped with - `push_trigger_stack_object` falls back to the
-        /// ability's own `effect` field, unchanged. `Some(effect)` means
-        /// this pause was reached via `Engine::submit_trigger_mode_choice`
-        /// (CR 603.3c) instead - `effect` is the already-combined modal
-        /// effect (via `commands::combine_chosen_modes`), which must be
-        /// used verbatim instead of re-deriving from the ability (a modal
-        /// `RegisteredAbility`'s own `effect` field is a meaningless
-        /// placeholder - see `RegisteredAbility::modes`'s own doc comment).
-        /// The inner `Option` is real, not a second "was this set" flag - a
-        /// single script-driven chosen mode can legitimately combine to
-        /// `effect: None` (CR 603.3c has no "no effect at all" restriction,
-        /// same as `SpellMode::effect`/`RegisteredAbility::effect` already
-        /// allow).
+        /// `None` for a non-modal trigger, which uses the ability's own `effect`.
+        /// `Some(effect)` comes from a mode choice (CR 603.3c) and is used verbatim,
+        /// since a modal ability's own `effect` is a placeholder. The inner `Option`
+        /// is real: a chosen mode can combine to no effect.
         modal_effect: Option<Option<AbilityEffect>>,
     },
-    /// CR 603.3c: paused mid-`PutTriggersApnap`'s own final push loop
-    /// (`Engine::push_ordered_triggers`) because `trigger`'s own ability is
-    /// modal (`modes` — its `RegisteredAbility::modes`, non-empty) and
-    /// `chooser` hasn't announced a mode choice yet. Checked *before* the
-    /// `AwaitingTriggerTargets` check in the same loop — `modes`/
-    /// `mode_choice` are the ability's own fields, cloned out the same way
-    /// `AwaitingTriggerTargets`'s own `spec` is; `remaining` is every other
-    /// trigger in this same push run still to process afterward, same
-    /// "queue survives the pause" convention every other trigger-pipeline
-    /// pause already established.
-    ///
-    /// `chooser`: `trigger.controller` for `ModeChoice::Exactly`/`UpTo`/
-    /// `*Repeatable` — but CR 700.2e's "a player other than their controller
-    /// chooses" (`ExactlyChosenByOpponent`/`UpToChosenByOpponent`) is real
-    /// for a trigger's own modes now too (`phase5/trigger-mode-chosen-by-
-    /// opponent`), so `push_ordered_triggers` resolves the real chooser
-    /// *before* constructing this pause rather than the dispatch side
-    /// assuming `trigger.controller` unconditionally — same "resolved once,
-    /// at the point the choice is raised" shape `CastSpell`'s own
-    /// `PendingModeChoice::chooser` already established for a spell.
+    /// CR 603.3c: `trigger` is modal and `chooser` hasn't announced modes yet.
+    /// Checked before the target pause. `modes` and `mode_choice` are cloned from the
+    /// ability; `remaining` is the rest of the push run. `chooser` is the controller
+    /// unless the choice is opponent-chosen (CR 700.2e), resolved before this pause
+    /// is raised.
     AwaitingTriggerModeChoice {
         trigger: PendingTrigger,
         modes: Vec<SpellMode>,
@@ -1094,43 +555,22 @@ pub enum ProcessState {
         remaining: VecDeque<PendingTrigger>,
         chooser: PlayerId,
     },
-    /// All players passed with an empty stack — advance turn/phase/step
-    /// (CR 500-514) before priority reopens.
+    /// CR 500-514: all players passed with an empty stack; advance the turn position.
     AdvanceTurnStep,
-    /// CR 103.5: pregame mulligan round — waiting for `player` to submit
-    /// `KeepHand` or `TakeMulligan`. Players are polled in turn order; once
-    /// all have kept the engine moves to bottoming (or to `Beginning` if no
-    /// bottoming is needed).
+    /// CR 103.5: pregame mulligan round. Players are polled in turn order.
     AwaitingMulliganDecision { player: PlayerId },
-    /// CR 103.5: `player` kept their hand after taking `count` paid mulligans
-    /// (i.e. mulligans beyond `GameSettings::free_mulligans`) and must now put
-    /// exactly `count` cards from their hand on the bottom of their library.
-    /// `remaining` holds the rest of the bottoming queue (same pattern as
-    /// `PutTriggersApnap::pending_groups`).
+    /// CR 103.5: `player` bottoms `count` cards (paid mulligans beyond
+    /// `free_mulligans`). `remaining` is the rest of the queue.
     AwaitingBottomCardChoice { player: PlayerId, count: usize, remaining: VecDeque<(PlayerId, usize)> },
-    /// CR 514.1: cleanup's discard-to-hand-size turn-based action found the
-    /// active player's hand exceeds `max_hand_size` — waiting for
-    /// `Engine::submit_discard` to answer before continuing.
+    /// CR 514.1: awaiting `submit_discard` for `excess` cards.
     AwaitingDiscard { player: PlayerId, excess: usize },
-    /// CR 514.3: cleanup's turn-based actions (discard, effect expiry) are
-    /// done — run one SBA pass, then (via `PipelineExit::CleanupCheck`) route
-    /// through the real `CollectTriggers`/`PutTriggersApnap` stages so any
-    /// CR 603.10 dies-trigger etc raised by that pass actually gets a chance
-    /// to be placed, before deciding whether priority opens (something
-    /// happened) or the turn advances silently (normal case, nothing did).
-    /// Previously bypassed `CollectTriggers` entirely — backlog item 7a's
-    /// cleanup half, closed here.
+    /// CR 514.3: cleanup's turn-based actions are done. Runs one SBA pass, then
+    /// routes through trigger collection (via `CleanupCheck`) to decide whether
+    /// priority opens or the turn advances silently.
     CleanupSbaCheck,
-    /// CR 601.2f-h: paused mid-pipeline because `CastSpell` pushed
-    /// `stack_id` onto the stack but its cost (`cost`) hasn't been paid yet
-    /// — `payer` must submit a `PaymentPlan` via `Engine::submit_payment`
-    /// before this run can continue (CR 118.5a: even a `{0}` cost needs an
-    /// explicit empty plan, no auto-pay). Set from `CommitEvents` reading
-    /// `Engine::pending_payment` rather than carried in this variant's own
-    /// construction path — see that field's doc comment. `source` is the
-    /// object whose activation/cast this cost belongs to (see
-    /// `commands::PendingPaymentRequest::source`'s doc comment) — needed by
-    /// `PaymentPlan::validate` to check `AdditionalCost::TapSelf`.
+    /// CR 601.2f: `stack_id` is on the stack with `cost` unpaid; `payer` submits a
+    /// plan via `submit_payment`. Even a `{0}` cost needs an explicit empty plan
+    /// (CR 118.5a). `source` is needed by `PaymentPlan::validate` for `TapSelf`.
     AwaitingPayment {
         stack_id: ObjectId,
         payer: PlayerId,
@@ -1138,20 +578,11 @@ pub enum ProcessState {
         source: ObjectId,
         on_paid: PaymentResolution,
     },
-    /// CR 700.2e: paused because `ProcessState::ResolveStackTop` peeked at
-    /// the top of the stack (without popping it) and found a `StackObject`
-    /// whose `pending_mode_choice` is still `Some` — `chooser` must submit
-    /// between `min` and `max` mode indices via `Engine::submit_mode_choice`
-    /// before this spell can actually resolve. See `StackObject::
-    /// pending_mode_choice`'s own doc comment for how the pause is raised
-    /// and answered.
+    /// CR 700.2e: the top stack object's `pending_mode_choice` is still set;
+    /// `chooser` submits between `min` and `max` modes via `submit_mode_choice`.
     AwaitingModeChoice { stack_id: ObjectId, chooser: PlayerId, min: u32, max: u32 },
-    /// CR 104.2a/104.4a: at most one non-eliminated player remains —
-    /// `winner` is that player, or `None` if the last remaining players were
-    /// eliminated simultaneously (a draw). Terminal: `step()` keeps
-    /// returning `StepStatus::GameOver` without mutating anything further,
-    /// same "frozen once reached" contract `Error` already has, and
-    /// `submit_action` already rejects new actions outside `PriorityWindow`
-    /// so nothing more can be submitted either.
+    /// CR 104.2a: at most one player remains; `winner` is `None` if the last
+    /// players were eliminated together (CR 104.4a). Terminal: `step()` returns
+    /// `GameOver` without mutating anything.
     GameOver { winner: Option<PlayerId> },
 }

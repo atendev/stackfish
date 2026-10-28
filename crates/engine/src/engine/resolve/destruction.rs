@@ -1,13 +1,5 @@
-//! `resolve_ability_effect`'s always-pausing zone-move arms — `Sacrifice`,
-//! `Destroy`, `DestroyAll`, `Exile`. Every one of these hands its target
-//! queue to `Engine::continue_scripted_zone_move` (already `pub(in
-//! crate::engine)` in `replacement_resume.rs`) and always returns
-//! `ControlFlow::Break` — `continue_scripted_zone_move` itself sets
-//! `self.process_state` (either an `AwaitingReplacementChoice` CR 616.1
-//! ordering pause or straight through to `ReplacementCheck`), so there's
-//! nothing left in the shared `events` accumulator for these arms to
-//! contribute — same as the original inlined code, which called these with
-//! a literal `Vec::new()` trailing rather than threading `events` through.
+//! The always-pausing zone-move arms: sacrifice, destroy, destroy-all, exile. Each hands
+//! its queue to `continue_scripted_zone_move`, which sets `process_state`. See `DESIGN.md`.
 
 use std::collections::VecDeque;
 use std::ops::ControlFlow;
@@ -40,11 +32,8 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 701.21a: `Game.Ops.SacrificeSelf` - the resolving ability's own
-    /// source, through the same `ScriptedZoneMoveKind::Sacrifice` pipeline.
-    /// A stale id does nothing (CR 400.7). A source still on the battlefield
-    /// under someone else's control is not sacrificed either: a player can't
-    /// sacrifice a permanent they don't control, and nothing targeted it.
+    /// CR 701.21a: the resolving ability's own source. A stale id does nothing
+    /// (CR 400.7), and a source under another player's control isn't sacrificed.
     pub(super) fn resolve_sacrifice_self_effect(&mut self, top: &StackObject, events: Vec<GameEventKind>) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let on_battlefield = self.state.object(top.source).is_some_and(|o| o.zone == ZoneKind::Battlefield);
         let controlled = !on_battlefield
@@ -117,10 +106,9 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 610.3: `Game.Ops.ExileUntilSourceLeaves` - `resolve_exile_effect`
-    /// plus a link from each exiled card to `top.source`. CR 610.3a/b: if the
-    /// source already left the battlefield (it has a new id, or none), the
-    /// "until" event has happened and nothing is exiled.
+    /// CR 610.3: `resolve_exile_effect` plus a link to `top.source`. If the source
+    /// already left the battlefield the "until" event has happened, so nothing is
+    /// exiled (CR 610.3a).
     pub(super) fn resolve_exile_until_source_leaves_effect(
         &mut self,
         top: &StackObject,
@@ -145,8 +133,7 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 400.3: `Game.Ops.ReturnToHand()` - moves each legal battlefield
-    /// target to its owner's hand. Mirrors `resolve_exile_effect`.
+    /// CR 400.3: moves each legal battlefield target to its owner's hand.
     pub(super) fn resolve_return_to_hand_effect(
         &mut self,
         top: &StackObject,
@@ -165,9 +152,7 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 400.3/400.7: `Game.Ops.ReturnSelfToHand()` - the resolving
-    /// ability's own source. A source that already left its zone has a new
-    /// id, so the lookup in `continue_scripted_zone_move` finds nothing.
+    /// CR 400.7: the resolving ability's own source; a stale id finds nothing.
     pub(super) fn resolve_return_self_to_hand_effect(&mut self, top: &StackObject, events: Vec<GameEventKind>) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = VecDeque::from([top.source]);
         self.process_state =
@@ -175,9 +160,7 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 400.3/601.2c: `Game.Ops.ReturnAllToHand(filter, zone)` - every
-    /// object in `zone` (all players' graveyards for `Graveyard`) matching
-    /// `filter`. Mirrors `resolve_destroy_all_effect`.
+    /// CR 400.3: every object in `zone` matching `filter`.
     pub(super) fn resolve_return_all_to_hand_effect(
         &mut self,
         top: &StackObject,
@@ -191,8 +174,7 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 406.2/400.7: `Game.Ops.ExileSelf()` - the resolving ability's own
-    /// source. Same stale-id behavior as `resolve_return_self_to_hand_effect`.
+    /// CR 406.2: the resolving ability's own source; a stale id finds nothing.
     pub(super) fn resolve_exile_self_effect(&mut self, top: &StackObject, events: Vec<GameEventKind>) -> ControlFlow<StepStatus, Vec<GameEventKind>> {
         let targets: VecDeque<ObjectId> = VecDeque::from([top.source]);
         self.process_state =
@@ -200,9 +182,7 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 406.2/601.2c: `Game.Ops.ExileAll(filter, zone)` - every object in
-    /// `zone` matching `filter`, moved simultaneously through
-    /// `ScriptedZoneMoveKind::Exile`.
+    /// CR 406.2: every object in `zone` matching `filter`, moved simultaneously.
     pub(super) fn resolve_exile_all_effect(
         &mut self,
         top: &StackObject,
@@ -216,9 +196,7 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 110.2a/400.7: `Game.Ops.ReturnToBattlefield(opts?)` - moves each
-    /// legal graveyard or exile target onto the battlefield through
-    /// `ScriptedZoneMoveKind::Reanimate`. A `Target::Player` is skipped.
+    /// CR 110.2a: moves each legal graveyard or exile target onto the battlefield. Players are skipped.
     pub(super) fn resolve_return_to_battlefield_effect(
         &mut self,
         top: &StackObject,
@@ -243,8 +221,7 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// CR 601.2c/110.2a: `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)`
-    /// - every object in `zone` matching `filter`, no targets.
+    /// CR 110.2a: every object in `zone` matching `filter`, no targets.
     pub(super) fn resolve_return_all_to_battlefield_effect(
         &mut self,
         top: &StackObject,
@@ -264,8 +241,7 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// Every object in any zone of `kind` (all players' graveyards for
-    /// `Graveyard`) that `filter` matches relative to the resolving ability.
+    /// Every object in any zone of `kind` that `filter` matches relative to the ability.
     fn objects_in_zone_matching(&self, top: &StackObject, filter: &EffectFilter, zone: ZoneKind) -> VecDeque<ObjectId> {
         self.state
             .zones
@@ -280,14 +256,9 @@ impl Engine {
             .collect()
     }
 
-    /// CR 701.21 (Sacrifice) + "at random" — `Game.Ops.SacrificeRandom(filter,
-    /// count)`. Draws via `pick_sacrifice_random_ids` below, then hands the
-    /// result straight to `continue_scripted_zone_move` for the single-player
-    /// case (a bare `Game.Ops.ForEachPlayer(Game.Ops.SacrificeRandom(...))`,
-    /// `phase5/mass-choice-effects`, calls the picking half directly instead
-    /// — see `each_player::resolve_for_each_player_effect`'s own doc comment
-    /// for why merging every player's picks before the one real zone move is
-    /// both simpler and already CR 101.4-"simultaneous" for free).
+    /// CR 701.21: draws via `pick_sacrifice_random_ids`, then hands the result to
+    /// `continue_scripted_zone_move`. `ForEachPlayer` calls the picking half directly
+    /// so every player's picks merge before the one zone move (CR 101.4).
     pub(super) fn resolve_sacrifice_random_effect(
         &mut self,
         top: &StackObject,
@@ -305,23 +276,10 @@ impl Engine {
         ControlFlow::Break(StepStatus::Progressed)
     }
 
-    /// The picking half of `resolve_sacrifice_random_effect` above, split out
-    /// (`phase5/mass-choice-effects`) so a bare-tag `Game.Ops.ForEachPlayer`
-    /// can draw one player's own random picks without also performing the
-    /// real zone move on the spot (that only happens once, after every
-    /// player's own picks are merged — see `AbilityEffect::ForEachPlayer`'s
-    /// own doc comment). Candidates matching `filter` (relative to `source`/
-    /// `controller`, same as `resolve_destroy_all_effect`'s own convention)
-    /// are collected into a plain `Vec` (not the `VecDeque` the caller
-    /// ultimately needs) so `next_rng`'s modulus can index into it directly
-    /// and `Vec::remove` can pop the chosen one out without disturbing the
-    /// rest; `count` of them (or fewer, if `count` exceeds however many
-    /// matched — same "as many as possible" stance CR 701.17b's mill takes)
-    /// are drawn without replacement, each draw logged as a `RngDrawn` event
-    /// exactly like `Engine::shuffle_library` already does. Pure synchronous
-    /// Rust, no Lua involved — can't pause mid-computation the way a
-    /// `Game.ChooseN`-driven pick can, so a caller merging several players'
-    /// worth of these never needs to consider an intermediate pause.
+    /// The picking half of `resolve_sacrifice_random_effect`. Collects matching
+    /// candidates into a `Vec` so `next_rng` can index it, then draws `count`
+    /// without replacement, or fewer if fewer matched, logging each as `RngDrawn`.
+    /// Synchronous, so a caller merging several players' picks never sees a pause.
     pub(in crate::engine) fn pick_sacrifice_random_ids(
         &mut self,
         source: ObjectId,
@@ -364,8 +322,7 @@ impl Engine {
     }
 }
 
-/// CR 110.2a: `You` enters under the resolving ability's controller; `Owner`
-/// leaves the controller unset so each card enters under its own owner.
+/// CR 110.2a: `You` enters under the ability's controller; `Owner` under each card's owner.
 fn reanimate_kind(top: &StackObject, control: EntryControl, tapped: bool) -> ScriptedZoneMoveKind {
     let controller = match control {
         EntryControl::You => Some(top.controller),

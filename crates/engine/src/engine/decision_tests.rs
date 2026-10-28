@@ -1,6 +1,5 @@
-//! Unit tests for the `decision` facade. These build pause states directly,
-//! the way `tests.rs` does, so they cover pauses no scripted game reaches
-//! cheaply. `tests/phase5_decision_answer_facade.rs` covers real flows.
+//! Unit tests for the `decision` facade, building pause states directly. Real flows are
+//! covered in `tests/phase5_decision_answer_facade.rs`.
 
 use std::collections::VecDeque;
 
@@ -76,9 +75,7 @@ fn free_cost() -> CostSpec {
     CostSpec::mana_only(ManaCost { symbols: Vec::new() })
 }
 
-// ---------------------------------------------------------------------------
 // Building Decisions from pauses
-// ---------------------------------------------------------------------------
 
 #[test]
 fn a_priority_window_is_an_action_decision_for_the_priority_player() {
@@ -297,9 +294,7 @@ fn madness_and_cascade_offer_a_cast() {
     assert!(matches!(engine_in(cascade).open_decision().unwrap().shape, ReplyShape::MayCast { card: None }));
 }
 
-// ---------------------------------------------------------------------------
 // Decision ids
-// ---------------------------------------------------------------------------
 
 #[test]
 fn ids_start_at_one_and_repeat_until_the_decision_is_answered() {
@@ -315,9 +310,7 @@ fn ids_start_at_one_and_repeat_until_the_decision_is_answered() {
     assert_eq!(engine.open_decision().unwrap().id, DecisionId(2));
 }
 
-// ---------------------------------------------------------------------------
 // Rejections change nothing
-// ---------------------------------------------------------------------------
 
 #[test]
 fn answering_with_no_decision_open_is_not_open() {
@@ -434,9 +427,7 @@ fn engine_validation_failures_map_to_invalid_choice_and_keep_the_pause() {
     assert_eq!(engine.open_decision().unwrap().id, id);
 }
 
-// ---------------------------------------------------------------------------
 // Routing accepted Answers
-// ---------------------------------------------------------------------------
 
 #[test]
 fn a_yes_no_routes_to_the_commander_return_entry_point() {
@@ -480,9 +471,7 @@ fn cannot_pay_routes_to_unwind_payment() {
     };
     let mut engine = engine_in(cast);
     let id = engine.open_decision().unwrap().id;
-    // The stack object is absent in this synthetic state, which
-    // `unwind_payment` treats as already unwound. The full unwind is covered
-    // by `phase5_payment_unwind.rs` and the integration test for this slice.
+    // The synthetic state has no stack object, which `unwind_payment` treats as already unwound.
     engine.answer(P0, answer(id, Reply::Payment(None))).unwrap();
     assert!(!matches!(engine.process_state, ProcessState::AwaitingPayment { .. }));
 }

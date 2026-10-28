@@ -110,12 +110,7 @@ fn submit_trigger_order_rejects_non_permutation_and_accepts_real_reordering() {
     assert!(matches!(engine.process_state, ProcessState::PutTriggersApnap { .. }));
 }
 
-// ---------------------------------------------------------------------
-// Replacement/prevention (CR 614-616) - real ReplacementCheck/
-// AwaitingReplacementChoice pipeline wiring, driven directly (not
-// through combat/SBA - see docs/implementation.md's own note on why
-// those two producers can't exercise this for real yet).
-// ---------------------------------------------------------------------
+// Replacement and prevention, driven directly through the pipeline
 
 fn dummy_object(id: ObjectId, controller: PlayerId) -> crate::types::object::GameObject {
     use crate::types::card::{CardTypeSet, KeywordSet, ModeChoice, PTValue, ScriptReference, SupertypeSet};
@@ -279,14 +274,7 @@ fn submit_replacement_choice_applies_chosen_then_resolves_the_other_and_commits(
     assert!(matches!(last.kind, GameEventKind::DamageDealt { amount: 0, .. }));
 }
 
-// ---------------------------------------------------------------------
-// CR 303.4d attach choice - dormant as of this slice (see
-// AttachChoiceError's own doc comment): no real effect in this engine
-// ever produces more than one simultaneous attach candidate for one
-// Aura, so - same as AwaitingReplacementChoice's own unit tests above -
-// these drive the pause by constructing ProcessState::AwaitingAttachChoice
-// directly rather than through a real card/spell pipeline.
-// ---------------------------------------------------------------------
+// CR 303.4d attach choice, driven by constructing the pause directly since no effect produces one
 
 #[test]
 fn submit_attach_choice_rejects_invalid_candidate_and_not_awaiting() {
@@ -338,14 +326,7 @@ fn attach_choice_surfaces_via_step_and_a_valid_answer_attaches_and_resumes() {
     assert!(!engine.state().object(candidate_b).unwrap().attachments.contains(&aura));
 }
 
-// ---------------------------------------------------------------------
-// CR 101.4/118.12 AwaitingUnlessPaidChoice's own payer_queue - dormant as
-// of this slice (see AbilityEffect::UnlessPaid's own doc comment): both
-// real producers (Ward, Echo) only ever build a single-element queue, so
-// no real card/Lua path can reach a longer one yet. Same posture
-// AwaitingAttachChoice's own tests above already take - the pause is
-// driven directly rather than through a real card/spell pipeline.
-// ---------------------------------------------------------------------
+// CR 118.12 `payer_queue`, driven directly since both producers build single-element queues
 
 fn multi_player_state(n: u32) -> GameState {
     let ids: Vec<PlayerId> = (0..n).map(PlayerId).collect();
