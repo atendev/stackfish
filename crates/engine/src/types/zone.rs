@@ -2,10 +2,8 @@ use std::collections::VecDeque;
 
 use crate::{ObjectId, PlayerId};
 
-/// Per CR 400. `Command` includes the commander sub-zone in commander games.
-/// The Stack is the one exception not represented as a `Zone` here — it
-/// needs `StackObject` metadata (targets, modes, costs paid), not just an
-/// ordered id list, so it's tracked separately on `GameState`.
+/// CR 400. `Stack` has no `Zone`: stack objects carry targets, modes and
+/// costs paid, so `GameState` tracks them separately.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ZoneKind {
     Library,
@@ -17,12 +15,9 @@ pub enum ZoneKind {
     Command,
 }
 
-/// One zone instance. Per-player zones (library/hand/graveyard/command) have
-/// `owner = Some(_)`; shared zones (battlefield/exile) have `owner = None`.
-/// `contents` is the single source of truth for what's in the zone and in
-/// what order — nothing else (notably not `GameObject`) duplicates that
-/// ordering. `GameObject` only carries the `ZoneKind` classification, not a
-/// `Zone` itself, to avoid embedding this list inside every object in it.
+/// Per-player zones have `owner = Some(_)`; shared zones have `None`.
+/// `contents` is the only record of order. `GameObject` holds just the
+/// `ZoneKind`.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Zone {
     pub kind: ZoneKind,
@@ -43,7 +38,6 @@ impl Zone {
         self.contents.push_back(object);
     }
 
-    /// Removes `object` from wherever it sits in `contents`, if present.
     pub fn remove(&mut self, object: ObjectId) -> Option<ObjectId> {
         let idx = self.contents.iter().position(|&id| id == object)?;
         self.contents.remove(idx)

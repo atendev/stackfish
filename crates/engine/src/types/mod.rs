@@ -1,6 +1,5 @@
-//! Strictly data types — structs/enums with no behavior. Logic (the step-able
-//! rules processor, script bridge, etc.) lives in sibling top-level modules,
-//! not in here, as those get built out in later phases.
+//! Plain data types with no rules behavior. The rules processor and script
+//! bridge live in sibling modules; see `docs/DESIGN.md`.
 
 pub mod ability;
 pub mod card;

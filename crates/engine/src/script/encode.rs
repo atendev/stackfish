@@ -1,7 +1,6 @@
-//! Rust -> Lua encoders — the hidden-information-safe boundary every
-//! state-aware `ScriptRuntime::invoke_*` call passes through, split out of
-//! the original monolithic `script.rs`. See `state_to_lua`'s own doc
-//! comment for what is and isn't exposed here.
+//! Rust-to-Lua encoders, the hidden-information-safe boundary every
+//! state-aware `ScriptRuntime::invoke_*` call passes through. See
+//! `state_to_lua` for what is exposed.
 
 use mlua::{Lua, Value};
 
@@ -14,14 +13,11 @@ use crate::types::zone::ZoneKind;
 
 use super::types::ScriptError;
 
-/// Bridges the one event shape this slice's condition scripts need to read —
-/// `GameEventKind::ZoneChange` becomes a Lua table with `kind`/`object`/
-/// `from`/`to` fields (zone names as lowercase strings). Every other
-/// `GameEventKind` variant becomes `Value::Nil` for now.
+/// Bridges `GameEventKind::ZoneChange` into a Lua table with `kind`, `object`,
+/// `from` and `to` (lowercase zone names). Every other `GameEventKind` becomes
+/// `Value::Nil`.
 ///
-/// TODO: extend as real conditions need more event shapes bridged (damage
-/// dealt, life changed, tapped, ...) - this only covers what "did `source`
-/// just enter the battlefield" needs to read.
+/// TODO: more event shapes (damage dealt, life changed, tapped) as conditions need them
 pub(crate) fn event_to_lua<'lua>(lua: &'lua Lua, event: Option<&GameEvent>) -> Result<Value<'lua>, ScriptError> {
     let Some(event) = event else {
         return Ok(Value::Nil);
@@ -41,41 +37,31 @@ pub(crate) fn event_to_lua<'lua>(lua: &'lua Lua, event: Option<&GameEvent>) -> R
     }
 }
 
-/// State snapshot passed as the trailing arg to every state-aware `invoke_*`
-/// call (`invoke_condition`, `invoke_intervening_if`, `invoke_cda`,
-/// `invoke_continuous_affects`, `invoke_continuous_effect`) — same "convert
-/// to a plain Lua table snapshot, not a live handle" convention `event_to_lua`
-/// already established. This is the real resolution of backlog item 8's
-/// hidden-information-safe `ScriptContext` question (see DESIGN.md's open
-/// question, and `ScriptContext`'s own doc comment for why the Rust-side
-/// struct didn't need narrowing — this function is the actual boundary).
+/// State snapshot passed as the trailing argument to every state-aware
+/// `invoke_*` (`invoke_condition`, `invoke_intervening_if`, `invoke_cda`,
+/// `invoke_continuous_affects`, `invoke_continuous_effect`): a plain Lua table
+/// and not a live handle, as `event_to_lua` does. This is the hidden-information
+/// boundary, and `ScriptContext` needs no narrowing.
 ///
-/// Per CR 400.2/402.3: battlefield/graveyard/exile/command are public zones —
-/// full contents exposed as one card-summary table per object (see
-/// `zone_cards_to_lua`/`card_summary_to_lua`). Hand/library are hidden zones
-/// per CR 400.2 (even a fully-revealed hand stays modeled as hidden) — only a
-/// *count* is exposed (`hand_count`/`library_count`), matching CR 402.3's
-/// "may count those cards at any time, but can't look at them" split. There
-/// is deliberately no binding anywhere that returns hand/library contents —
-/// the legitimate ways to see into a hidden zone (search, scry, surveil) are
-/// already their own dedicated `Game.Ops.*` primitives (CR 701.23/701.22d/
-/// 701.25d) that commit a real zone change, not a live peek from an arbitrary
-/// condition/CDA/static-ability script.
+/// CR 400.2, 402.3: battlefield, graveyard, exile and command are public and
+/// exposed in full as card-summary tables (`zone_cards_to_lua`,
+/// `card_summary_to_lua`). Hand and library are hidden (even a revealed hand
+/// stays modeled as hidden), so only counts are exposed (`hand_count`,
+/// `library_count`), matching CR 402.3. No binding returns hand or library
+/// contents; search, scry and surveil are their own `Game.Ops.*` primitives
+/// that commit a zone change (CR 701.23, 701.22d, 701.25d).
 ///
-/// Card summaries are base (`CardDefinition`, netted against counters) values
-/// only, not layer-resolved `effective_characteristics` — computing another
-/// object's *effective* P/T to answer this snapshot would mean invoking
-/// *that* object's own CDA/continuous-effect scripts too, which would build
-/// their own snapshot right back through this same function: unbounded
-/// recursion the moment any card on the battlefield has a CDA or scripted
-/// continuous effect. Deferred as a named follow-up (a single-object
-/// effective-characteristics query binding, invoked directly rather than
-/// folded into a whole-board snapshot) rather than guessed at with an ad hoc
-/// depth limit.
+/// Card summaries are base values (`CardDefinition` netted against counters),
+/// not layer-resolved `effective_characteristics`. Resolving another object's
+/// effective P/T would invoke its own CDA and effect scripts, which build a
+/// snapshot through this function again, recursing without bound once any
+/// battlefield card has one.
+/// TODO: a single-object effective-characteristics query binding, invoked directly and not folded into the whole-board snapshot, instead of a depth limit
 ///
-/// The stack (CR 400.2, also public) isn't included — `StackObject` isn't
-/// `GameObject`-shaped (its characteristics come from `source`/`source_lki`),
-/// so it needs its own decode, split out rather than bolted on here.
+/// The stack (CR 400.2, also public) is not included, since a `StackObject`
+/// takes its characteristics from `source` and `source_lki` and needs its own
+/// decode.
+/// TODO: stack contents in the snapshot
 pub(crate) fn state_to_lua<'lua>(lua: &'lua Lua, state: &GameState) -> Result<Value<'lua>, ScriptError> {
     let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     let life = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
@@ -116,13 +102,10 @@ pub(crate) fn state_to_lua<'lua>(lua: &'lua Lua, state: &GameState) -> Result<Va
 }
 
 /// One public zone's contents as a 1-indexed array of `card_summary_to_lua`
-/// tables, in zone order. `owner` is `None` for the shared battlefield/exile
-/// zones, `Some(player)` for the per-player graveyard/command zones — same
-/// split `Zone`'s own doc comment establishes. An object id present in
-/// `zone.contents` with no matching `GameState::object` entry is skipped
-/// rather than panicking — shouldn't happen (zone contents and the object
-/// store are supposed to stay in sync) but this is a read-only snapshot, not
-/// the place to newly enforce that invariant (Phase 6).
+/// tables, in zone order. `owner` is `None` for the shared battlefield and
+/// exile and `Some(player)` for a per-player graveyard or command zone. An id
+/// in `zone.contents` with no `GameState::object` entry is skipped, since this
+/// read-only snapshot isn't where to enforce that invariant.
 fn zone_cards_to_lua<'lua>(
     lua: &'lua Lua,
     state: &GameState,
@@ -142,14 +125,13 @@ fn zone_cards_to_lua<'lua>(
     Ok(Value::Table(table))
 }
 
-/// One object's public-safe summary: id, name, base power/toughness (netted
-/// against `+1/+1`/`-1/-1` counters via `PTValue::net_with_counters` — public
-/// information, CR 121.3 — but not layer-resolved, see `state_to_lua`'s own
-/// doc comment for why), whether it's a creature, controller, and (CR 303.4m)
-/// attachment state. Narrower than the full `EffectiveCharacteristics` shape
-/// (no mana cost/colors/full type or keyword set) — named as a follow-up
-/// rather than guessed at; this slice's own tests only need power/toughness/
-/// creature-ness/attachment.
+/// One object's public-safe summary: id, name, base power and toughness
+/// (netted against `+1/+1` and `-1/-1` counters through
+/// `PTValue::net_with_counters`, CR 121.3, but not layer-resolved; see
+/// `state_to_lua`), whether it is a creature, controller, and attachment state
+/// (CR 303.4m). Narrower than `EffectiveCharacteristics`, with no mana cost,
+/// colors, full type set or keywords.
+/// TODO: the rest of the effective characteristics
 fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'lua>, ScriptError> {
     let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     table.set("id", obj.object_id.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
@@ -161,27 +143,16 @@ fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'
     table
         .set("is_creature", obj.definition.card_types.contains(CardTypeSet::CREATURE))
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    // `phase5/mass-choice-effects`: the raw card type list (e.g. `{"Land"}`),
-    // same name strings a filter table's own `card_types` key accepts - added
-    // alongside `is_creature` (not replacing it) since a `ForEachPlayer` body
-    // computing something like Balance's "how many lands does each player
-    // control" needs to distinguish more than just creature-or-not from this
-    // snapshot. `is_creature` stays for whatever already reads it.
+    // The raw card type list (`{"Land"}`), in the same name strings a filter table's `card_types` accepts, beside `is_creature`. A `ForEachPlayer` body such as Balance's land count needs more than creature-or-not.
     table
         .set("card_types", card_type_names_to_lua(lua, obj.definition.card_types)?)
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     table.set("controller", obj.controller.0).map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    // CR 303.4m/703.4b: what this object is attached to (an Aura/Equipment/
-    // Fortification's own "enchanted"/"equipped" reference), and what's
-    // attached to it (e.g. an enchanted creature's own Auras) - both public
-    // information.
+    // CR 303.4m, 703.4b: what this object is attached to and what is attached to it, both public.
     table
         .set("attached_to", obj.attached_to.map(|id| id.0))
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-    // CR 303.4b/m (phase5/aura-enchants-a-player): the player half of
-    // `attached_to` above, when this object enchants a player instead of
-    // an object - mutually exclusive with `attached_to`, same as the two
-    // Rust-side fields themselves.
+    // CR 303.4b, 303.4m: the player half of `attached_to`, exclusive with it.
     table
         .set("attached_to_player", obj.attached_to_player.map(|id| id.0))
         .map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
@@ -193,11 +164,9 @@ fn card_summary_to_lua<'lua>(lua: &'lua Lua, obj: &GameObject) -> Result<Value<'
     Ok(Value::Table(table))
 }
 
-/// `CardTypeSet` -> the same name-string vocabulary a filter table's own
-/// `card_types` key accepts (`decode::parse_card_type_name`'s inverse) - a
-/// 1-indexed array of every type this object has, in a fixed check order.
-/// `phase5/mass-choice-effects`'s own `card_summary_to_lua` is the only
-/// caller so far.
+/// `CardTypeSet` to the name strings a filter table's `card_types` accepts (the
+/// inverse of `decode::parse_card_type_name`), as a 1-indexed array in a fixed
+/// check order.
 fn card_type_names_to_lua<'lua>(lua: &'lua Lua, types: CardTypeSet) -> Result<Value<'lua>, ScriptError> {
     let table = lua.create_table().map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     let mut i = 1i64;

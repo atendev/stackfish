@@ -5,22 +5,15 @@ use crate::types::cost::AdditionalCost;
 use crate::types::counter::{CounterKind, CounterSet};
 use crate::types::mana::{ColorSet, ManaCost};
 
-/// Printed/base value for power, toughness, loyalty, or defense. `*`-style
-/// values (and `* + 1` etc — the modifier is folded into whatever number the
-/// characteristic-defining ability script returns, there's no separate
-/// "base star plus offset" case to represent) are characteristic-defining
-/// abilities: the number isn't known until the script callback runs against
-/// current game state, so it can't be stored as a plain `i32`.
+/// Printed or base power, toughness, loyalty or defense. A `*` value is a
+/// characteristic-defining ability (CR 604.3, 208.2a) whose number comes from
+/// a script run against game state, so it cannot be a plain `i32`. A `+ 1`
+/// offset is folded into the script's result.
 ///
-/// `CharacteristicDefining.script` mirrors `CardDefinition.script_ref`'s own
-/// `Inline`/`ByKey` split (CR 604.3, 208.2a) rather than a pre-loaded
-/// `ScriptHandle` — this type is meant to stay plain, runtime-independent
-/// data, same as `CardDefinition` itself. `None` means no script was
-/// supplied (nothing can resolve the number - `layers::effective_characteristics`
-/// treats it exactly like an unresolvable script, "skip rather than guess",
-/// not a panic). `display` is unchanged from before this field existed —
-/// literal oracle text (`"*"`, `"*+1"`) for UI/debugging only, never
-/// consulted for resolution.
+/// `script` mirrors `CardDefinition.script_ref` and keeps this type plain
+/// data. `None` counts as an unresolvable script, which
+/// `layers::effective_characteristics` skips. `display` is the oracle text
+/// (`"*+1"`), for UI and debugging only.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PTValue {
     Fixed(i32),
@@ -28,10 +21,8 @@ pub enum PTValue {
 }
 
 impl PTValue {
-    /// `Some` only for `Fixed` — a CDA's number isn't known without running
-    /// its script callback against current game state, which this can't do.
-    /// See `layers::effective_characteristics` for where a `CharacteristicDefining`
-    /// with a real `script` actually gets resolved.
+    /// `Some` only for `Fixed`. A CDA needs its script run; see
+    /// `layers::effective_characteristics`.
     pub fn as_fixed(&self) -> Option<i32> {
         match self {
             PTValue::Fixed(n) => Some(*n),
@@ -39,24 +30,17 @@ impl PTValue {
         }
     }
 
-    /// `as_fixed`, netted against `+1/+1`/`-1/-1` counters (CR 121.3's
-    /// counters-affect-characteristics rule) — `None` for the same reason
-    /// `as_fixed` is `None`. Doesn't merge/annihilate opposing counters out
-    /// of `counters` itself (CR 704.5q's state-based action does that as a
-    /// real mutation) — this only nets them arithmetically for a read,
-    /// which gives the same effective number without needing that SBA
-    /// implemented yet.
+    /// `as_fixed` netted against `+1/+1` and `-1/-1` counters (CR 121.3). It
+    /// nets arithmetically for the read and does not annihilate the counters
+    /// (CR 704.5q).
     pub fn net_with_counters(&self, counters: &CounterSet) -> Option<i32> {
         let base = self.as_fixed()?;
         Some(net_counters(base, counters))
     }
 }
 
-/// CR 121.3: nets `+1/+1`/`-1/-1` counters against an already-resolved base
-/// value. Shared by `PTValue::net_with_counters` (base = a `Fixed` literal)
-/// and `layers::effective_characteristics`'s CDA resolution (base = a
-/// script-resolved number, CR 613.4a) — same formula, two different sources
-/// for `base`.
+/// CR 121.3: nets `+1/+1` and `-1/-1` counters against a resolved base, from
+/// a `Fixed` literal or a script-resolved CDA (CR 613.4a).
 pub(crate) fn net_counters(base: i32, counters: &CounterSet) -> i32 {
     base + counters.count(&CounterKind::PlusOnePlusOne) - counters.count(&CounterKind::MinusOneMinusOne)
 }
@@ -73,9 +57,9 @@ bitflags! {
         const LAND         = 1 << 4;
         const SORCERY      = 1 << 5;
         const KINDRED      = 1 << 6;
-        /// Stub: not implemented v1, slot reserved per DESIGN.md non-goals.
+        /// Reserved slot, a non-goal in `DESIGN.md`.
         const PLANESWALKER = 1 << 7;
-        /// Stub: not implemented v1, slot reserved per DESIGN.md non-goals.
+        /// Reserved slot, a non-goal in `DESIGN.md`.
         const BATTLE       = 1 << 8;
     }
 }
@@ -92,17 +76,12 @@ bitflags! {
 }
 
 bitflags! {
-    /// Bitmask of `Keyword`, per CR 702. Only the subset that changes how an
-    /// existing engine checkpoint behaves (blocking legality, summoning
-    /// sickness, timing, SBA lethal-checks, damage application) — this is
-    /// deliberately NOT meant to grow to cover all ~140 CR 702 keywords.
-    /// Keywords that are really just sugar for an activated/triggered
-    /// ability (Cycling, Equip, Persist, Undying, ...) don't belong here at
-    /// all; they're registered as an ordinary `RegisteredAbility` instead.
-    /// See the TODO in `script_api.rs` for the still-unbuilt keyword-name ->
-    /// primitive-or-ability mapping layer that would let a card's script
-    /// just say `Game.GrantKeyword(card, "Flying")` instead of every card's
-    /// script constructing a `KeywordSet` by hand.
+    /// Bitmask of `Keyword` (CR 702), limited to keywords that change an
+    /// existing engine checkpoint: blocking legality, summoning sickness,
+    /// timing, SBA lethal checks and damage. Keywords that are sugar for an
+    /// activated or triggered ability (Cycling, Equip, Persist) are registered
+    /// as a `RegisteredAbility` instead.
+    /// TODO: a keyword-name to primitive-or-ability mapping, so a script can say `Game.GrantKeyword(card, "Flying")`
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub struct KeywordSet: u32 {
         /// CR 702.9 - evasion: blockable only by Flying/Reach.
@@ -145,22 +124,14 @@ bitflags! {
         /// `FIRST_STRIKE` - a creature only needs this bit set to
         /// participate in both steps, it doesn't also need `FIRST_STRIKE`.
         const DOUBLE_STRIKE = 1 << 13;
-        /// CR 702.19 - modifies combat damage assignment: once every
-        /// blocker is assigned lethal damage, the controller may assign the
-        /// rest to the defending player instead. Trample-over-planeswalkers
-        /// (CR 702.19c/e/f/g) is a separate keyword, not modeled - this bit
-        /// only ever spills excess to a `Target::Player`, never a
-        /// planeswalker/battle `Target::Object` (unmodeled per DESIGN.md).
+        /// CR 702.19: damage beyond lethal to every blocker may go to the
+        /// defending player. Trample over planeswalkers (CR 702.19c-g) is not
+        /// modeled, so the excess spills only to a `Target::Player`.
         const TRAMPLE       = 1 << 14;
-        /// CR 701.19c - a regeneration shield can't be *created* for this
-        /// permanent (checked at the moment `AbilityEffect::Regenerate`
-        /// would create one, not a `ReplacementEffect` shape itself - CR
-        /// 701.19c is explicit that the shield-creating spell/ability still
-        /// resolves normally, only the shield itself fails to come into
-        /// being). Deliberately not modeled as "shields can't apply" -
-        /// 701.19c's own wording is about *creation*, and this engine has no
-        /// shields sitting around unused to make "can't apply" meaningfully
-        /// different from "was never created" anyway.
+        /// CR 701.19c: no regeneration shield can be created for this
+        /// permanent. Checked when `AbilityEffect::Regenerate` would create
+        /// one, and the spell or ability still resolves. Modeled as creation
+        /// and not application, since this engine keeps no unused shields.
         const CANT_BE_REGENERATED = 1 << 15;
         /// CR 702.36 - evasion: can't be blocked except by artifact and/or
         /// black creatures.
@@ -175,48 +146,34 @@ bitflags! {
         /// CR 702.31 - evasion: can't be blocked by creatures without
         /// horsemanship (a horsemanship creature may itself block anything).
         const HORSEMANSHIP  = 1 << 19;
-        /// CR 702.22 - a static ability modifying combat's blocking and
-        /// damage-assignment rules once grouped into a "band"
-        /// (`CombatState::bands`, declared via `PlayerActionKind::
-        /// DeclareBands`) rather than a per-creature blocking restriction
-        /// like the other bits in this set. Only the plain form is
-        /// representable - CR 702.22b/c's "bands with other [quality]"
-        /// variant needs a parameter (which quality) - same reasoning
-        /// `EffectiveCharacteristics::landwalk_subtypes`'s doc comment gives
-        /// for keeping Landwalk off this bitflag entirely; it would need
-        /// its own field/`EffectPrimitive` rather than a plain bit here,
-        /// and isn't modeled yet.
+        /// CR 702.22: modifies blocking and damage assignment once creatures
+        /// are grouped into a band (`CombatState::bands`, from
+        /// `DeclareBands`). Only the plain form is representable. "Bands with
+        /// other [quality]" (CR 702.22b, 702.22c) needs a parameter, so it
+        /// would need its own field, as Landwalk does.
         const BANDING       = 1 << 20;
-        /// CR 702.11b - this permanent can't be the target of spells or
-        /// abilities its controller's opponents control. Enforced in
-        /// `commands::target_is_legal` (cast, activation, trigger
-        /// candidate scan and the CR 608.2b resolution recheck), read
-        /// through `layers::effective_characteristics` so a granted or
-        /// removed keyword counts. Doesn't stop untargeted effects
-        /// (CR 601.2c), and doesn't make an attached Aura or Equipment fall
-        /// off (those SBA checks skip it, unlike protection's CR 702.16d).
+        /// CR 702.11b: can't be the target of spells or abilities an opponent
+        /// controls. Enforced in `commands::target_is_legal` (cast,
+        /// activation, trigger scan and the CR 608.2b recheck) through
+        /// `layers::effective_characteristics`, so granted and removed
+        /// keywords count. It doesn't stop untargeted effects (CR 601.2c) or
+        /// detach an Aura or Equipment, unlike protection (CR 702.16d).
         ///
-        /// TODO(CR 702.11d-g): "hexproof from [quality]" needs a
-        /// parameter (which quality), so like Landwalk and "bands with
-        /// other" it can't be a plain bit and isn't modeled.
-        /// TODO(CR 702.11c): no hexproof on players; players have no
-        /// keyword set here.
+        /// TODO: "hexproof from [quality]" needs a parameter, so it is not a plain bit (CR 702.11d-g)
+        /// TODO: no hexproof on players, which have no keyword set here (CR 702.11c)
         const HEXPROOF      = 1 << 21;
-        /// CR 702.18a - this permanent can't be the target of any spell or
-        /// ability, including its own controller's. Same enforcement and
-        /// exclusions as `HEXPROOF`.
+        /// CR 702.18a: can't be the target of any spell or ability, including
+        /// its controller's. Same enforcement and exclusions as `HEXPROOF`.
         ///
-        /// TODO(CR 702.18a): no shroud on players.
+        /// TODO: no shroud on players (CR 702.18a)
         const SHROUD        = 1 << 22;
-        /// CR 508.1d - the "attacks each combat if able" requirement. Not a
-        /// CR 702 keyword, but a static requirement on the creature's own
-        /// declaration, so it rides the same layer-6 fold as a keyword and
-        /// a granted or removed requirement counts. Enforced by
-        /// `commands::combat::predicate`, which also lets the declare
-        /// attackers entries mark the creature `required`.
+        /// CR 508.1d: "attacks each combat if able". Not a CR 702 keyword but
+        /// a static requirement on declaration, so it shares the layer-6 fold
+        /// and a granted or removed requirement counts. Enforced by
+        /// `commands::combat::predicate`, which also marks the creature
+        /// `required` in the declare-attackers entries.
         ///
-        /// TODO(026-followup): "attacks a specific player if able" and
-        /// "blocks if able" (CR 509.1c) need a parameter or a second bit.
+        /// TODO: "attacks a specific player if able" and "blocks if able" need a parameter or a second bit (CR 509.1c)
         const ATTACKS_EACH_COMBAT = 1 << 23;
     }
 }
@@ -241,11 +198,9 @@ pub enum Keyword {
     DoubleStrike,
 }
 
-/// Newtype over the subtype string (creature types, land types, spell
-/// subtypes, etc.). The full subtype space is large and open-ended (new
-/// creature types are added over time), so this stays string-backed rather
-/// than a fixed enum — the wrapper exists for type-fill/compile-time
-/// distinction from arbitrary `String`s, not to enumerate every value.
+/// Subtype string (creature type, land type, spell subtype). The space is
+/// open-ended, so it stays string-backed. The wrapper only distinguishes it
+/// from arbitrary `String`s.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Subtype(pub String);
 
@@ -270,91 +225,53 @@ pub struct CardDefinition {
     pub card_types: CardTypeSet,
     pub subtypes: Vec<Subtype>,
     pub oracle_text: String,
-    /// Oracle/printed base power. `None` for non-creatures. This is the base
-    /// value layer 7 starts from, not the live in-game value — see
-    /// `EffectiveCharacteristics` in `effect.rs` for the latter (which is
-    /// always a resolved `i32` — by query time any CDA has already run).
+    /// Printed base power, `None` for non-creatures. Layer 7 starts here. The
+    /// live value is in `EffectiveCharacteristics` (`effect.rs`).
     pub power: Option<PTValue>,
     /// Oracle/printed base toughness. See `power` doc above.
     pub toughness: Option<PTValue>,
-    /// Stub: planeswalker loyalty, unused v1.
+    /// Reserved for planeswalker loyalty, a non-goal in `DESIGN.md`.
     pub loyalty: Option<PTValue>,
-    /// Stub: battle defense, unused v1.
+    /// Reserved for battle defense, a non-goal in `DESIGN.md`.
     pub defense: Option<PTValue>,
     pub script_ref: ScriptReference,
-    /// Printed CR 702 keywords this card has natively - see `KeywordSet`'s
-    /// own doc comment for what is and isn't represented here.
+    /// Printed CR 702 keywords. See `KeywordSet` for what is represented.
     pub keywords: KeywordSet,
-    /// `None` means this card requires no targets (CR 601.2c: "a spell may
-    /// require some targets only if... otherwise the spell is cast as
-    /// though it did not require those targets" — this engine doesn't model
-    /// modes/kicker yet, so a card either always requires this or never
-    /// does). See `TargetRequirement`/`TargetSpec` (target.rs) for what's
-    /// and isn't representable here.
+    /// `None` means no targets (CR 601.2c). A card either always requires
+    /// this or never does. See `TargetSpec` for what is representable.
     pub target_requirement: Option<crate::types::target::TargetSpec>,
-    /// CR 601.2b's alternative costs this card grants (flashback, escape,
-    /// etc — see `AlternativeCost`'s own doc comment for which of those are
-    /// actually representable yet). Empty for the overwhelming majority of
-    /// cards, which only ever pay their printed `mana_cost`. Indexed by
-    /// `PlayerActionKind::CastSpell::alternative_cost` — the caster
-    /// announces which one (if any) they're invoking, same "announced at
-    /// cast time" pattern as `x_value`.
+    /// CR 601.2b alternative costs this card grants (flashback, escape).
+    /// Empty for most cards. Indexed by `CastSpell::alternative_cost`; see
+    /// `AlternativeCost`.
     pub alternative_costs: Vec<crate::types::cost::AlternativeCost>,
-    /// CR 702.27a Buyback's "you may pay an additional [cost] as you cast
-    /// this spell" — `None` for the overwhelming majority of cards.
-    /// Announced via `PlayerActionKind::CastSpell::pay_buyback`, same
-    /// "announced at cast time" pattern `alternative_cost`/`x_value` already
-    /// use. Distinct from `alternative_costs` above: this is paid *in
-    /// addition to* whatever cost already applies (usually the printed
-    /// `mana_cost`), never a replacement for it - so it's its own field,
-    /// not another `AlternativeCost` variant. Scoped to a flat `ManaCost`
-    /// rather than the fuller `CostSpec` `AlternativeCost::Replacement` uses
-    /// - every real Buyback card is a flat mana amount, and a `CostSpec`
-    /// here would mean inventing a "merge two `CostSpec`s" primitive with no
-    /// other caller.
+    /// CR 702.27a: an additional cost paid as the spell is cast, announced
+    /// via `CastSpell::pay_buyback`. A separate field from `alternative_costs`
+    /// because it is paid in addition to the cost, not instead of it. A flat
+    /// `ManaCost` because every real Buyback card is one, and a `CostSpec`
+    /// would need a merge primitive with no other caller.
     pub buyback_cost: Option<ManaCost>,
-    /// A spell's Rust-native fast-path effect (CR 608.2m resolution) —
-    /// same `AbilityEffect` shape `RegisteredAbility.effect` already uses
-    /// for activated/triggered abilities, e.g. `Some(AbilityEffect::
-    /// Damage(2))` for "Shock deals 2 damage to any target". `None` means
-    /// this spell's effect can only be carried out via the script bridge —
-    /// same gap as `script_ref`'s `operation` lookup, which doesn't exist
-    /// yet either (see `commands::CastSpell`'s own `ScriptHandle(0)`
-    /// placeholder comment). A permanent spell (creature/artifact/
-    /// enchantment) has no use for this field — CR 608.2m says it simply
-    /// enters the battlefield; any ETB behavior is a separate `Triggered`-
-    /// kind `RegisteredAbility`, not this field.
-    ///
-    /// Ignored (should be left `None`) for a modal card — see `modes` below,
-    /// which carries the per-mode effect instead once `modes` is non-empty.
+    /// A spell's Rust-native fast-path effect (CR 608.2m), in the
+    /// `AbilityEffect` shape `RegisteredAbility.effect` uses, such as
+    /// `Damage(2)` for Shock. `None` leaves the effect to the script bridge.
+    /// A permanent spell has no use for it, since ETB behavior is a triggered
+    /// `RegisteredAbility`. Leave `None` for a modal card, whose `modes` carry
+    /// the effects.
     pub effect: Option<AbilityEffect>,
-    /// CR 700.2 modal spells — empty for the overwhelming majority of
-    /// cards (non-modal), which use `target_requirement`/`effect` above
-    /// directly. Non-empty means "Choose N —"-style (`mode_choice` below
-    /// says how many): the caster picks that many entries
-    /// (`PlayerActionKind::CastSpell::modes` supplies that many valid
-    /// indices into this `Vec` — non-repeating unless `mode_choice` is one
-    /// of the `*Repeatable` variants, CR 700.2d), and each chosen mode's own
-    /// `target_requirement`/`effect` are used for the rest of casting and
-    /// resolution instead of this struct's own singular fields — see
-    /// `commands::CastSpell`'s own doc comment for how 2+ chosen modes
-    /// combine (CR 700.2d, `phase5/modal-multi-mode`).
+    /// CR 700.2 modal spells. Empty for non-modal cards, which use
+    /// `target_requirement` and `effect` above. Otherwise the caster picks as
+    /// many entries as `mode_choice` allows (`CastSpell::modes` holds the
+    /// indices, non-repeating unless `*Repeatable`, CR 700.2d), and each
+    /// chosen mode's own fields replace this struct's singular ones. See
+    /// `commands::CastSpell` for how 2+ modes combine.
     ///
-    /// CR 700.2i (pawprint mode budgets) is real now too — see
-    /// `ModeChoice::PawprintBudget`. The scenario TOML wiring
-    /// (`CardSpec::mode_pawprint_budget`/`SpellModeSpec::pawprint_weight`)
-    /// is real too now. CR 700.2h (a mode's own additional cost) is real
-    /// now too — see `SpellMode::additional_cost`. CR 700.2e (another player
-    /// chooses) is real now too, narrowly — see
-    /// `ModeChoice::ExactlyChosenByOpponent`'s own doc comment.
-    /// TODO: CR 700.2b (a modal *activated/triggered* ability, as opposed
-    /// to a modal spell) is untouched — `RegisteredAbility` has no `modes`
-    /// field of its own yet.
+    /// Also covers pawprint budgets (CR 700.2i, `ModeChoice::PawprintBudget`),
+    /// per-mode additional costs (CR 700.2h, `SpellMode::additional_cost`) and
+    /// another player choosing (CR 700.2e, narrowly, see
+    /// `ModeChoice::ExactlyChosenByOpponent`).
+    /// TODO: CR 700.2b, a modal activated or triggered ability as opposed to a modal spell; `RegisteredAbility` has no `modes` field of its own
     pub modes: Vec<SpellMode>,
-    /// How many of `modes` above must be chosen — meaningless (but still
-    /// must be set; `CardDefinition` has no `Default` impl) when `modes` is
-    /// empty. `ModeChoice::Exactly(1)` is the pre-existing "Choose one —"
-    /// behavior every modal card used before `phase5/modal-multi-mode`.
+    /// How many of `modes` must be chosen. Set even when `modes` is empty,
+    /// because `CardDefinition` has no `Default`.
     pub mode_choice: ModeChoice,
 }
 
@@ -363,64 +280,34 @@ pub struct CardDefinition {
 pub struct SpellMode {
     pub target_requirement: Option<crate::types::target::TargetSpec>,
     pub effect: Option<AbilityEffect>,
-    /// CR 700.2h: "some modal spells have one or more modes with a cost
-    /// listed before the effect of that mode" — paid as part of the overall
-    /// cast, alongside the mana cost, only if this mode is chosen.
-    /// `commands::execute_command`'s `CastSpell` arm appends every chosen
-    /// mode's own `additional_cost` (if any) to the spell's `CostSpec.
-    /// additional`, reusing the exact same generic `AdditionalCost` payment
-    /// machinery an activated ability's own additional costs already go
-    /// through (`PaymentPlan::validate`/`Engine::submit_payment` don't
-    /// distinguish a spell's cost from an ability's) — no new payment code
-    /// needed, only new population of an existing, already-generic field.
-    /// `None` (the common case) for a mode with no cost of its own.
+    /// CR 700.2h: a cost paid with the mana cost only if this mode is chosen.
+    /// The `CastSpell` arm appends each chosen mode's cost to the spell's
+    /// `CostSpec.additional`, reusing the generic `AdditionalCost` payment
+    /// path. `None` for most modes.
     pub additional_cost: Option<AdditionalCost>,
-    /// CR 700.2i: this mode's own printed pawprint ({P}) weight, consulted
-    /// only when the card's own `mode_choice` is `ModeChoice::
-    /// PawprintBudget` — meaningless (but still must be set, no `Default`
-    /// impl on this struct) otherwise, same "set even when it doesn't apply
-    /// yet" stance `CardDefinition::mode_choice` itself already takes.
+    /// CR 700.2i: this mode's pawprint ({P}) weight. Read only under
+    /// `ModeChoice::PawprintBudget`, but always set because the struct has no
+    /// `Default`.
     pub pawprint_weight: u32,
 }
 
-/// CR 700.2's "Choose one —"/"Choose two —"/"Choose one or more —" instruction
-/// preceding a modal spell/ability's bulleted mode list — see
-/// `CardDefinition::mode_choice`. `Exactly(n)`: the caster must choose
-/// exactly `n` distinct modes (`n == 1` is the common "Choose one —" case).
-/// `UpTo(n)`: the caster may choose any number from 1 to `n` distinct modes
-/// (e.g. "Choose one or both —" is `UpTo(2)`) — CR 700.2a still requires at
-/// least one mode be chosen either way ("choose a number of those options,"
-/// never zero); a spell with no legal mode at all simply can't be cast
-/// (601.2b), same as any other spell with no legal choice.
+/// CR 700.2's "Choose one" instruction before a modal spell's modes; see
+/// `CardDefinition::mode_choice`. `Exactly(n)` chooses exactly `n` distinct
+/// modes. `UpTo(n)` chooses 1 to `n`, never zero (CR 700.2a), and a spell with
+/// no legal mode cannot be cast (CR 601.2b).
 ///
-/// `ExactlyRepeatable(n)`/`UpToRepeatable(n)` are CR 700.2d's reminder-text-
-/// gated exception ("You may choose the same mode more than once," e.g.
-/// Profane Command) — same count semantics as `Exactly`/`UpTo`, but a
-/// repeated mode index is allowed rather than rejected. Added as new variants
-/// rather than a field on `Exactly`/`UpTo` (which would break every existing
-/// `ModeChoice::Exactly(1)` construction site) or on `CardDefinition` itself
-/// (~120 test files construct it as a bare struct literal with no `Default`
-/// impl — the same ripple class `phase5/modal-multi-mode` already hit once).
+/// `ExactlyRepeatable` and `UpToRepeatable` allow a repeated mode index
+/// (CR 700.2d, Profane Command). They are variants because a field would
+/// break every `Exactly(1)` site, and `CardDefinition` has ~120 literal sites.
 ///
-/// `ExactlyChosenByOpponent(n)`/`UpToChosenByOpponent(n)` are CR 700.2e's
-/// "some spells and abilities specify that a player other than their
-/// controller chooses a mode for it" exception. Same count semantics again,
-/// but the mode(s) aren't supplied by the caster's own `CastSpell` action at
-/// all — `commands::execute_command`'s `CastSpell` arm defers the choice to
-/// a new resolution-time pause (`ProcessState::AwaitingModeChoice`,
-/// `Engine::submit_mode_choice`) answered by the other player instead, since
-/// `PlayerActionKind::CastSpell` is a single-actor atomic command (87
-/// construction sites) that can't be restructured to accept a second
-/// player's input mid-action. Narrowed on purpose, checked at cast time:
-/// every mode on the card must have `target_requirement: None` and
-/// `additional_cost: None` (supporting either would mean deferring target
-/// selection and/or cost computation to the same late pause — real
-/// additional plumbing this slice doesn't build), and the game must have
-/// exactly two non-eliminated players (CR 700.2e's own "if there's more than
-/// one other player, the controller decides which" sub-clause needs a
-/// further choice mechanism no 3+-player test scaffolding exists for yet).
-/// Combining with `*Repeatable` isn't supported either — no real card needs
-/// both at once.
+/// `ExactlyChosenByOpponent` and `UpToChosenByOpponent` are CR 700.2e, where
+/// another player chooses. The `CastSpell` arm defers the choice to a
+/// resolution-time pause (`ProcessState::AwaitingModeChoice`,
+/// `Engine::submit_mode_choice`), because `CastSpell` is a single-actor
+/// command. Checked at cast: every mode must have no target requirement and no
+/// additional cost, and exactly two players must remain, since the
+/// multiplayer sub-clause of CR 700.2e has no choice mechanism. They do not
+/// combine with `*Repeatable`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ModeChoice {
     Exactly(u32),
@@ -429,42 +316,25 @@ pub enum ModeChoice {
     UpToRepeatable(u32),
     ExactlyChosenByOpponent(u32),
     UpToChosenByOpponent(u32),
-    /// CR 700.2i: choose modes whose combined `SpellMode::pawprint_weight`
-    /// doesn't exceed this budget — a constraint on total *weight*, not
-    /// mode *count*, so it's deliberately not folded into `bounds()` below
-    /// (that method has no access to the modes list, and couldn't derive a
-    /// meaningful count bound from a weight budget alone: a budget of 3
-    /// could mean "at most 1 mode" or "at most 3," depending on individual
-    /// weights). Every real validation site special-cases this variant with
-    /// its own weight-sum check before ever calling `bounds()`, the same
-    /// way `ExactlyChosenByOpponent`/`UpToChosenByOpponent` are already
-    /// special-cased ahead of it. CR 700.2i's own wording ("can choose any
-    /// number of modes such that... not greater than") sets no floor,
-    /// unlike every other variant here — choosing zero modes is legal.
-    /// Narrowed: no repeatable pawprint-budget modes and no "chosen by
-    /// opponent" combination — no real card combines either with this
-    /// shape.
+    /// CR 700.2i: modes whose combined `SpellMode::pawprint_weight` fits this
+    /// budget. It limits weight, not count, so it stays out of `bounds()`,
+    /// which cannot derive a count from a budget. Each validation site sums
+    /// weights before calling `bounds()`, as it special-cases the
+    /// opponent-chosen variants. There is no floor, so zero modes is legal.
+    /// Repeatable and opponent-chosen forms are not supported.
     PawprintBudget(u32),
 }
 
 impl ModeChoice {
-    /// `(min, max, repeatable)` — CR 700.2a's "choose a number of those
-    /// options" floor is always at least 1 (`UpTo`/`UpToRepeatable`/
-    /// `UpToChosenByOpponent` never mean "or none"), never 0. Purely a
-    /// numeric decode of the variant itself — doesn't distinguish *who*
-    /// makes the choice (caster/controller vs. CR 700.2e's "chosen by
-    /// opponent"), since that's a pipeline-level routing decision each
-    /// caller already makes on its own (`commands::cast::execute_cast_spell`
-    /// branches on the `*ChosenByOpponent` variants before ever reaching
-    /// this method; `Engine::push_ordered_triggers`/
-    /// `submit_trigger_mode_choice` deliberately don't, a named narrowing —
-    /// see `RegisteredAbility::mode_choice`'s own doc comment).
+    /// `(min, max, repeatable)`. The floor is at least 1 for `UpTo*`
+    /// (CR 700.2a). It decodes only the numbers, not who chooses: callers
+    /// route that themselves (`commands::cast::execute_cast_spell` branches on
+    /// `*ChosenByOpponent` first, and see `RegisteredAbility::mode_choice` for
+    /// triggers).
     ///
-    /// `PawprintBudget` has no real count bound (see its own doc comment) —
-    /// callers needing a *display*-only hint (not real enforcement) get
-    /// `(0, budget, false)` here, with `max` understood to mean "pawprint
-    /// budget," not "mode count," for this one variant; real enforcement is
-    /// each call site's own explicit weight-sum check, never this method.
+    /// `PawprintBudget` returns `(0, budget, false)` as a display hint only,
+    /// with `max` meaning the budget. Real enforcement is each site's weight
+    /// sum.
     pub(crate) fn bounds(&self) -> (u32, u32, bool) {
         match *self {
             ModeChoice::Exactly(n) => (n, n, false),
@@ -479,8 +349,8 @@ impl ModeChoice {
 }
 
 impl CardDefinition {
-    /// Per CR 105.2a: color comes from mana cost symbols and/or an explicit
-    /// `color_indicator`, not stored as its own redundant field.
+    /// CR 105.2a: color comes from the mana cost or `color_indicator`, not a
+    /// stored field.
     pub fn colors(&self) -> ColorSet {
         match self.color_indicator {
             Some(indicator) => indicator,

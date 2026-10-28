@@ -1,8 +1,5 @@
-//! Lua value/table -> Rust type decoders, plus the `parse_*_name` string
-//! lookups they're built from — split out of the original monolithic
-//! `script.rs`. Two clusters in the original file (one near the top, one
-//! right before `bind_game_globals`) are combined here since they're all
-//! "Lua value -> Rust type" decoders regardless of where they used to sit.
+//! Lua value and table to Rust type decoders, plus the `parse_*_name` string
+//! lookups they use.
 
 use mlua::{Function, Lua, Table, Value};
 
@@ -22,13 +19,11 @@ use super::tags::{
 };
 use super::types::{ScriptChoiceRequest, ScriptError, ScriptRegistry};
 
-/// Shared by `ScriptRuntime::load_condition` (decoding a freshly-`eval`'d
-/// chunk) and `TriggeredAbilityBuilder::SetCondition` (decoding a value
-/// already in hand, passed as a Lua call argument) — same two recognized
-/// shapes either way: a `Game.Conditions.*` tag, or a custom function. Any
-/// other value (including a bare `nil`, e.g. a typo'd `Game.Conditions.Typo`)
-/// is a load error, not guessed at — see `RegisteredAbility::condition`'s
-/// doc comment for why `nil` isn't silently treated as "always".
+/// Shared by `ScriptRuntime::load_condition` (a freshly eval'd chunk) and
+/// `TriggeredAbilityBuilder::SetCondition` (a value passed as a Lua argument).
+/// Two shapes either way: a `Game.Conditions.*` tag or a custom function.
+/// Anything else, including a bare `nil` from a typo'd `Game.Conditions.Typo`,
+/// is a load error (see `RegisteredAbility::condition`).
 pub(crate) fn decode_condition_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
@@ -36,9 +31,7 @@ pub(crate) fn decode_condition_value(
 ) -> Result<ConditionSpec, ScriptError> {
     match value {
         Value::UserData(ud) => {
-            // Try the plain tag first, then its once-per-turn-wrapped
-            // sibling - see OncePerTurnTag's own doc comment for why these
-            // are two distinct UserData types rather than one with a flag.
+            // Try the plain tag first, then its once-per-turn wrapper; they are distinct `UserData` types (see `OncePerTurnTag`).
             if let Ok(tag) = ud.borrow::<ConditionTag>() {
                 return Ok(ConditionSpec::Primitive(tag.0.clone()));
             }
@@ -95,11 +88,7 @@ pub(crate) fn decode_operation_value(
     value: Value,
 ) -> Result<(Option<AbilityEffect>, ScriptHandle), ScriptError> {
     match value {
-        // `phase5/mass-choice-effects`: `Game.Ops.ForEachPlayer(x)` returns a
-        // `ForEachPlayerTag` - checked ahead of the plain `OperationTag` case
-        // below since it's a different concrete `UserData` type (see that
-        // tag's own doc comment for why it can't just be an `OperationTag`
-        // either way).
+        // `Game.Ops.ForEachPlayer(x)` returns a `ForEachPlayerTag`, a different `UserData` type than `OperationTag` (see its doc), so check it first.
         Value::UserData(ref ud) if ud.is::<ForEachPlayerTag>() => {
             let tag: ForEachPlayerTag =
                 ud.borrow::<ForEachPlayerTag>().map_err(|e| ScriptError::LoadError(e.to_string()))?.clone();
@@ -136,14 +125,10 @@ pub(crate) fn decode_operation_value(
     }
 }
 
-/// Same shape as `decode_condition_value`/`decode_operation_value`, for
-/// `Game.Costs.*` — no `Script` fallback (neither `AdditionalCost` nor
-/// `ManaCost` has such a variant), so a bare custom function isn't accepted
-/// here, unlike the condition/operation decoders. Shared by
-/// `ActivatedAbilityBuilder::AddCost` and (indirectly, via a plain one-liner
-/// eval) any future standalone-cost loader, same convention
-/// `decode_condition_value` follows for `load_condition`/
-/// `TriggeredAbilityBuilder::SetCondition`.
+/// Like `decode_condition_value` and `decode_operation_value`, for
+/// `Game.Costs.*`. There is no `Script` fallback, since neither
+/// `AdditionalCost` nor `ManaCost` has one, so a bare custom function is
+/// rejected. Shared by `ActivatedAbilityBuilder::AddCost`.
 pub(crate) fn decode_cost_component_value(value: Value) -> Result<CostComponent, ScriptError> {
     match value {
         Value::UserData(ud) => {
@@ -161,17 +146,14 @@ pub(crate) fn decode_cost_component_value(value: Value) -> Result<CostComponent,
     }
 }
 
-/// `ScriptRuntime::build_alternative_costs`'s per-entry table decoder — one
-/// `s.alternative_costs()` return-table entry becomes one
-/// `AlternativeCost::Replacement`. `costs` accumulates the same way
-/// `ActivatedAbilityBuilder::AddCost` does (one `Game.Costs.*` value per
-/// array entry, via `decode_cost_component_value` above) rather than
-/// inventing a second cost-table shape — `Game.Costs.Mana` may appear at
-/// most once, same "an activated ability has only one mana-cost component"
-/// rule `AddCost` already enforces. `from_zone` reuses `parse_zone_kind_name`
-/// below. `exile_on_leaving_stack`/`escape` default to `false` when omitted —
-/// the overwhelming majority of `Replacement` alternatives (anything that
-/// isn't Flashback/Escape) need neither.
+/// Decodes one `s.alternative_costs()` return-table entry into an
+/// `AlternativeCost::Replacement`, called by
+/// `ScriptRuntime::build_alternative_costs`. `costs` accumulates as
+/// `ActivatedAbilityBuilder::AddCost` does (one `Game.Costs.*` value per array
+/// entry, through `decode_cost_component_value`), and `Game.Costs.Mana` may
+/// appear at most once. `from_zone` uses `parse_zone_kind_name`.
+/// `exile_on_leaving_stack` and `escape` default to `false`, since most
+/// alternatives (anything but Flashback and Escape) need neither.
 pub(crate) fn decode_alternative_cost_table(table: Table) -> Result<AlternativeCost, ScriptError> {
     let description: String = table.get("description").map_err(|e| {
         ScriptError::LoadError(format!("alternative_costs() entry missing required 'description': {e}"))
@@ -213,13 +195,11 @@ pub(crate) fn decode_alternative_cost_table(table: Table) -> Result<AlternativeC
     Ok(AlternativeCost::Replacement { description, cost, from_zone, exile_on_leaving_stack, escape })
 }
 
-/// `ActivatedAbilityBuilder`'s `:AddCost`/`Game.Costs.Sacrifice`/`Discard`/
-/// `TapPermanents`/`Game.Ops.Search` filter argument — a plain Lua table
+/// The filter argument of `:AddCost`, `Game.Costs.Sacrifice`, `Discard`,
+/// `TapPermanents` and `Game.Ops.Search`: a plain Lua table
 /// (`{controller=.., card_types={..}, supertypes={..}, subtypes={..},
-/// random=..}`, every key optional), same convention `decode_affected_value`
-/// already established for `StaticAbilityBuilder::SetAffected`. `extra` is
-/// never settable from Lua this slice (see `FilterSpec::extra`'s own doc
-/// comment) — always `None`.
+/// random=..}`, every key optional), like `decode_affected_value`. `extra` is
+/// never settable from Lua (see `FilterSpec::extra`) and is always `None`.
 pub(crate) fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptError> {
     let controller_name: Option<String> =
         table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
@@ -279,12 +259,10 @@ pub(crate) fn decode_filter_table(table: Table) -> Result<FilterSpec, ScriptErro
     })
 }
 
-/// `CardTypeSet` names, by CR 108-ish printed card type — mirrors
-/// `crates/scenario/src/lib.rs`'s `parse_card_types`, duplicated here rather
-/// than shared since that's a separate crate with no common string-parsing
-/// utility today. Single-type-at-a-time (`Game.Effects.AddCardType(name)`
-/// takes one name, unlike the scenario crate's `Vec<String>`-per-card
-/// shape) — `decode_affected_value`'s `card_types` list unions these.
+/// `CardTypeSet` names by printed card type. Mirrors `parse_card_types` in the
+/// scenario crate, duplicated because that crate shares no string-parsing
+/// utility. One type at a time (`Game.Effects.AddCardType(name)`), and
+/// `decode_affected_value`'s `card_types` list unions them.
 pub(crate) fn parse_card_type_name(name: &str) -> Result<CardTypeSet, ScriptError> {
     Ok(match name {
         "Artifact" => CardTypeSet::ARTIFACT,
@@ -300,8 +278,8 @@ pub(crate) fn parse_card_type_name(name: &str) -> Result<CardTypeSet, ScriptErro
     })
 }
 
-/// `KeywordSet` names, by CR 702 keyword — mirrors the scenario crate's
-/// `parse_keywords`, same duplication rationale as `parse_card_type_name`.
+/// `KeywordSet` names by CR 702 keyword. Mirrors `parse_keywords` in the
+/// scenario crate, duplicated for the same reason as `parse_card_type_name`.
 pub(crate) fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> {
     Ok(match name {
         "Flying" => KeywordSet::FLYING,
@@ -331,13 +309,9 @@ pub(crate) fn parse_keyword_name(name: &str) -> Result<KeywordSet, ScriptError> 
     })
 }
 
-/// `ColorSet` by single WUBRG letter — same duplication rationale as
-/// `parse_card_type_name`.
-/// `CounterKind` names, by CR 122.3's common-kind list. Unlike
-/// `parse_card_type_name`/`parse_keyword_name`, an unrecognized name is not
-/// an error — `CounterKind`'s own doc comment already declares `Custom` the
-/// fallback for "the long tail of flavor-named counters," so this mirrors
-/// that rather than rejecting a legitimate flavor counter name.
+/// `CounterKind` names, from CR 122.3's common kinds. An unknown name is not
+/// an error, since `CounterKind::Custom` covers the long tail of flavor-named
+/// counters.
 pub(crate) fn parse_counter_kind_name(name: &str) -> CounterKind {
     match name {
         "PlusOnePlusOne" => CounterKind::PlusOnePlusOne,
@@ -362,10 +336,8 @@ pub(crate) fn parse_color_letter(letter: &str) -> Result<ColorSet, ScriptError> 
     })
 }
 
-/// Same letters as `parse_color_letter` above, but returning a single
-/// `Color` rather than a `ColorSet` — needed by `CostModifierTarget::Colored`
-/// (`phase5/cost-modifier-colored-pip`), which names exactly one color, not
-/// a combinable set.
+/// `parse_color_letter`'s letters returning a single `Color` and not a
+/// `ColorSet`, for `CostModifierTarget::Colored`, which names exactly one.
 pub(crate) fn parse_single_color_letter(letter: &str) -> Result<Color, ScriptError> {
     Ok(match letter {
         "W" => Color::White,
@@ -377,11 +349,10 @@ pub(crate) fn parse_single_color_letter(letter: &str) -> Result<Color, ScriptErr
     })
 }
 
-/// `ReplacementPayloads.ReplaceZoneDestination(name)`'s argument decoder —
-/// same match-on-string-with-a-real-error pattern every other `parse_*_name`
-/// helper here uses. No such parser existed in `script.rs` before this slice
-/// (the `scenario` crate has its own, separate `parse_zone_kind` for TOML
-/// fixtures - not reused here, different crate, different error type).
+/// `ReplacementPayloads.ReplaceZoneDestination(name)`'s argument decoder, a
+/// string match with a real error like the other `parse_*_name` helpers. The
+/// scenario crate has its own `parse_zone_kind`, not shared since it is a
+/// separate crate with its own error type.
 pub(crate) fn parse_zone_kind_name(name: &str) -> Result<ZoneKind, ScriptError> {
     Ok(match name {
         "Library" => ZoneKind::Library,
@@ -432,15 +403,12 @@ pub(crate) fn decode_subtypes(val: Value) -> Result<Vec<String>, ScriptError> {
     }
 }
 
-/// Same "string or table" shape as `decode_subtypes`, for `Game.Effects.
-/// SetCardTypes` specifically — unlike `AddCardType`'s single-name-at-a-time
-/// convention (safe since additive composition across several registered
-/// static abilities works fine), a "set" overwrite must express its whole
-/// resulting type line in one call (e.g. "becomes an artifact creature" is
-/// two card types set together) - two separate `SetCardTypes` registrations
-/// wouldn't compose, the later one would just wipe out the earlier one's
-/// result entirely (see `layers::effective_characteristics`'s own layer-4
-/// fold).
+/// The `decode_subtypes` shape (string or table), for
+/// `Game.Effects.SetCardTypes`. Unlike `AddCardType`'s one name at a time, a
+/// "set" must express the whole resulting type line in one call ("becomes an
+/// artifact creature" sets two types), because two `SetCardTypes`
+/// registrations wouldn't compose: the later wipes the earlier (see the layer
+/// 4 fold in `layers::effective_characteristics`).
 pub(crate) fn decode_card_type_names(val: Value) -> Result<Vec<String>, ScriptError> {
     match val {
         Value::String(s) => Ok(vec![s.to_str().map_err(|e| ScriptError::LoadError(e.to_string()))?.to_string()]),
@@ -464,12 +432,9 @@ pub(crate) fn parse_color_string(colors: &str) -> Result<ColorSet, ScriptError> 
     Ok(out)
 }
 
-/// `Game.Ops.AddMana`'s single-symbol vocabulary — WUBRG plus `"C"` for
-/// colorless (`ManaUnit::Colorless`, CR 605's actual literal-unit shape, not
-/// a `Color` at all). No `SnowColored`/`SnowColorless` letter yet - real
-/// snow-producing lands are rare enough to defer rather than invent an
-/// unvalidated letter convention for them now (named in this slice's own
-/// UNRESOLVED note).
+/// `Game.Ops.AddMana`'s symbol vocabulary: WUBRG plus `"C"` for colorless
+/// (`ManaUnit::Colorless`, the literal-unit shape of CR 605).
+/// TODO: snow letters for `SnowColored` and `SnowColorless`; snow-producing lands are rare enough that no unvalidated convention was invented
 pub(crate) fn parse_mana_unit_letter(letter: &str) -> Result<ManaUnit, ScriptError> {
     Ok(match letter {
         "W" => ManaUnit::Colored(Color::White),
@@ -517,15 +482,14 @@ pub(crate) fn decode_creature_token_opts(
     Ok((keywords, name, additional_types, additional_supertypes))
 }
 
-/// CR 702.14a's landwalk combination forms - `Game.Effects.
-/// AddLandwalkQuality(opts)`'s `opts` table. Same `{subtypes/card_types/
-/// supertypes/excluded_supertypes}` key vocabulary `decode_filter_table`'s
-/// `"object"` branch already establishes for `TargetFilter::Object`, minus
-/// `controller`/`zone` (a landwalk quality has no such axes - it's always
-/// checked against the defending player's own battlefield). Every field is
-/// optional; an empty table decodes to `LandwalkQuality::default()` (matches
-/// any land at all, i.e. plain "landwalk" - not a real keyword, but harmless
-/// to allow rather than reject).
+/// CR 702.14a's landwalk combination forms: `Game.Effects.AddLandwalkQuality(opts)`'s
+/// `opts` table. It uses the `{subtypes, card_types, supertypes,
+/// excluded_supertypes}` keys of the `"object"` branch of
+/// `decode_filter_table`, without `controller` and `zone`, since a landwalk
+/// quality is always checked against the defending player's battlefield.
+/// Every field is optional, and an empty table decodes to
+/// `LandwalkQuality::default()`, which matches any land and is harmless to
+/// allow.
 pub(crate) fn decode_landwalk_quality(opts: mlua::Table) -> Result<LandwalkQuality, ScriptError> {
     let mut subtypes = Vec::new();
     if let Ok(Some(t)) = opts.get::<_, Option<mlua::Table>>("subtypes") {
@@ -569,15 +533,14 @@ pub(crate) fn decode_landwalk_quality(opts: mlua::Table) -> Result<LandwalkQuali
     Ok(LandwalkQuality { subtypes, card_types, supertypes, excluded_supertypes })
 }
 
-/// CR 707.9's copy-effect exceptions/modifications - shared by
-/// `Game.Ops.BecomeCopy(opts?)` and `Game.Tokens.CopyOf(objectId, opts?)`.
-/// `opts` is `{ power = N, toughness = N }` (707.9b, both fields required
-/// together - a P/T override wouldn't mean anything with only one), and/or
-/// `{ keywords = { "Flying", ... } }` (707.9a), and/or `{ retain_name = true
-/// }`/`{ retain_color = true }` (707.9c/d - the copy keeps its own original
-/// name/color instead of the copied source's; a no-op for `CopyOf`, which
-/// has no prior "own identity" to retain from - see `CopyExceptions::apply`'s
-/// own doc comment). `None`/omitted is a bare copy - `CopyExceptions::default()`.
+/// CR 707.9 copy-effect exceptions, shared by `Game.Ops.BecomeCopy(opts?)` and
+/// `Game.Tokens.CopyOf(objectId, opts?)`. `opts` holds
+/// `{ power = N, toughness = N }` (CR 707.9b, both required together, since a
+/// lone P/T override means nothing), `{ keywords = { "Flying", ... } }`
+/// (CR 707.9a) and `{ retain_name = true }` or `{ retain_color = true }`
+/// (CR 707.9c, 707.9d: keep the copy's own name or color). Retaining is a
+/// no-op for `CopyOf`; see `CopyExceptions::apply`. `None` is a bare copy,
+/// `CopyExceptions::default()`.
 pub(crate) fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyExceptions, ScriptError> {
     let Some(opts) = opts else { return Ok(CopyExceptions::default()) };
     let power: Option<i32> = opts.get("power").ok().flatten();
@@ -599,23 +562,10 @@ pub(crate) fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyEx
     }
     let retain_name: bool = opts.get::<_, Option<bool>>("retain_name").ok().flatten().unwrap_or(false);
     let retain_color: bool = opts.get::<_, Option<bool>>("retain_color").ok().flatten().unwrap_or(false);
-    // CR 707.9a: Vesuvan Doppelganger's own "except it has [linked upkeep
-    // ability]" - see CopyExceptions::grant_recurring_copy_trigger's own doc
-    // comment. Only meaningful on `EntersAsCopy`/`BecomeCopy` in practice (a
-    // freshly created `CopyOf` token could carry it too, though no real card
-    // needs a token-generator with this shape).
+    // CR 707.9a: Vesuvan Doppelganger's "except it has [linked upkeep ability]" (see `CopyExceptions::grant_recurring_copy_trigger`). A `CopyOf` token could carry it, though no real card needs that.
     let grant_recurring_copy_trigger: bool =
         opts.get::<_, Option<bool>>("grant_recurring_copy_trigger").ok().flatten().unwrap_or(false);
-    // CR 707.9e: Spark Double's own "enters with an additional +1/+1
-    // counter" - see CopyExceptions::enters_with_additional_counters's own
-    // doc comment. `{ counter_kind = "PlusOnePlusOne", counter_amount = 1 }`,
-    // both required together (same "set together, not just one" stance
-    // power/toughness above already takes). `counter_amount` may also be the
-    // string `"X"` (Altered Ego, `phase5/altered-ego-x-counters`) for
-    // `CounterAmount::X` instead of a fixed number - mlua's own `Value`
-    // coercion means a plain `.get::<u32>()` would silently fail to match a
-    // string, so `counter_amount` is read as a raw `mlua::Value` first and
-    // matched by hand.
+    // CR 707.9e: Spark Double's "enters with an additional +1/+1 counter" (see `CopyExceptions::enters_with_additional_counters`): `{ counter_kind = "PlusOnePlusOne", counter_amount = 1 }`, both required together as power and toughness are. `counter_amount` may be the string `"X"` (Altered Ego) for `CounterAmount::X`. It is read as a raw `mlua::Value` and matched by hand, because `.get::<u32>()` would silently fail to match a string.
     let counter_kind: Option<String> = opts.get("counter_kind").ok().flatten();
     let counter_amount_value: Option<mlua::Value> = opts.get("counter_amount").ok();
     let counter_amount = match counter_amount_value {
@@ -648,9 +598,8 @@ pub(crate) fn decode_copy_exceptions(opts: Option<mlua::Table>) -> Result<CopyEx
     })
 }
 
-/// `TriggeredAbilityBuilder`'s `:SetLayer` decoder — only a `Game.Layers.*`
-/// tag is accepted (no custom-function fallback; unlike condition/operation,
-/// there's no `Layer::Script` concept to fall back to).
+/// `:SetLayer`'s decoder. Only a `Game.Layers.*` tag is accepted, with no
+/// custom-function fallback, since there is no `Layer::Script`.
 pub(crate) fn decode_layer_value(value: Value) -> Result<Layer, ScriptError> {
     match value {
         Value::UserData(ud) => {
@@ -668,14 +617,12 @@ pub(crate) fn decode_layer_value(value: Value) -> Result<Layer, ScriptError> {
     }
 }
 
-/// `StaticAbilityBuilder`'s `:SetEffect` decoder — same two-shapes pattern
-/// `decode_condition_value`/`decode_operation_value` already established: a
-/// `Game.Effects.*` tag decodes to `EffectPayload::Primitive` with zero
-/// further evaluation, a custom function is registered and returned as
-/// `EffectPayload::Script` (invoked later via
-/// `ScriptRuntime::invoke_continuous_effect`). Needs `&mut ScriptRegistry` to
-/// register the function, same as `decode_condition_value`/
-/// `decode_operation_value`.
+/// `StaticAbilityBuilder`'s `:SetEffect` decoder, in the two-shapes pattern of
+/// `decode_condition_value`: a `Game.Effects.*` tag decodes to
+/// `EffectPayload::Primitive` with no further evaluation, and a custom
+/// function is registered and returned as `EffectPayload::Script`, invoked
+/// later through `ScriptRuntime::invoke_continuous_effect`. It needs
+/// `&mut ScriptRegistry` to register the function.
 pub(crate) fn decode_effect_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
@@ -707,34 +654,24 @@ pub(crate) fn decode_effect_value(
     }
 }
 
-/// `StaticAbilityBuilder`'s `:SetAffected` decoder — same two-shapes pattern
-/// as `decode_effect_value` above: a plain Lua table (`{controller=..,
-/// card_types={..}, self_only=..}`, every key optional) decodes to
-/// `AffectedFilter::Primitive` with zero further evaluation, matching how
-/// `EffectFilter`/the scenario TOML's `ContinuousEffectSpec` already read as
-/// a flat option bag. Omitting the table entirely (or every key in it) means
-/// "no filter, applies to everything" — a real, if unusual, shape (see
-/// `EffectFilter`'s own fields, all optional/defaulted there too). A custom
-/// function is registered and returned as `AffectedFilter::Script` (invoked
-/// later via `ScriptRuntime::invoke_continuous_affects`), same registration
-/// as every other function-fallback decoder in this file.
+/// The `controller`, `card_types` and `self_only` part of `:SetAffected`'s
+/// filter table, decoded to an `EffectFilter`. Shared by
+/// `decode_affected_value` (for `AffectedFilter::Primitive`) and
+/// `Game.Ops.DestroyAll`'s filter argument, which has no `enchanted_only` or
+/// function-predicate case (CR 701.8's "destroy all X" is never "enchanted
+/// X").
 ///
-/// CR 303.4m: `{ enchanted_only = true }` short-circuits to
-/// `AffectedFilter::EnchantedOnly` before any of `controller`/`card_types`/
-/// `self_only` are even read — same "no real card needs both" narrowing
-/// `EnchantedOnly`'s own doc comment already states, so combining it with
-/// the other keys is simply ignored rather than rejected. `{
-/// enchanted_player_controls = true }` mirrors it for `AffectedFilter::
-/// EnchantedPlayerControls` (CR 303.4m's player-side sibling, e.g. Curse of
-/// Vitality's "Creatures enchanted player controls have lifelink"), checked
-/// second so an (invalid, but not rejected) table setting both keys
-/// deterministically prefers `enchanted_only`.
-/// The `controller`/`card_types`/`self_only` portion of `:SetAffected`'s
-/// filter table, decoded straight to a bare `EffectFilter` - shared by
-/// `decode_affected_value` (below, for `AffectedFilter::Primitive`) and
-/// `Game.Ops.DestroyAll`'s own filter argument, which needs the identical
-/// shape but has no `enchanted_only`/function-predicate cases to consider
-/// (CR 701.8's "destroy all X" is never phrased as "enchanted X").
+/// `decode_affected_value` (`:SetAffected`) takes the shapes of
+/// `decode_effect_value`. A plain table (`{controller=.., card_types={..},
+/// self_only=..}`, every key optional) decodes to `AffectedFilter::Primitive`,
+/// and omitting every key means no filter, so it applies to everything. A
+/// custom function becomes `AffectedFilter::Script`, invoked later through
+/// `ScriptRuntime::invoke_continuous_affects`. CR 303.4m: `{ enchanted_only =
+/// true }` short-circuits to `AffectedFilter::EnchantedOnly` before the other
+/// keys are read, and `{ enchanted_player_controls = true }` does the same for
+/// `AffectedFilter::EnchantedPlayerControls` (Curse of Vitality), checked
+/// second so a table setting both prefers `enchanted_only`. Other keys beside
+/// them are ignored, not rejected.
 pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, ScriptError> {
     let controller_name: Option<String> =
         table.get("controller").map_err(|e| ScriptError::LoadError(e.to_string()))?;
@@ -754,9 +691,7 @@ pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, 
         None => None,
     };
 
-    // CR 205.4b: "destroy all Zombies" / "Walls get -1/-0" - same plain
-    // subtype-name-list shape decode_filter_table's TargetFilter::Object
-    // branch already uses for its own `subtypes` key.
+    // CR 205.4b: a plain list of subtype names, the shape `decode_filter_table`'s `TargetFilter::Object` branch uses for `subtypes`.
     let subtypes_table: Option<Table> =
         table.get("subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
     let subtypes = match subtypes_table {
@@ -770,8 +705,7 @@ pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, 
         None => None,
     };
 
-    // CR 601.2c/115/205.4b's negated form - "destroy all nonbasic lands,"
-    // same shape/table key `subtypes` just above uses.
+    // CR 601.2c, 115, 205.4b negated ("nonbasic lands"): same shape and key as `subtypes`.
     let excluded_subtypes_table: Option<Table> =
         table.get("excluded_subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
     let excluded_subtypes = match excluded_subtypes_table {
@@ -785,9 +719,7 @@ pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, 
         None => None,
     };
 
-    // CR 205.4a: "destroy all legendary permanents," same shape/table key
-    // `decode_filter_table`'s `TargetFilter::Object` branch already uses for
-    // its own `supertypes` key.
+    // CR 205.4a: same shape and key as `decode_filter_table`'s `supertypes`.
     let supertypes_table: Option<Table> =
         table.get("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
     let supertypes = match supertypes_table {
@@ -802,8 +734,7 @@ pub(crate) fn decode_effect_filter_table(table: &Table) -> Result<EffectFilter, 
         None => None,
     };
 
-    // CR 601.2c/115/205.4a's negated form - "destroy all nonbasic lands,"
-    // same shape/table key `supertypes` just above uses.
+    // CR 601.2c, 115, 205.4a negated: same shape and key as `supertypes`.
     let excluded_supertypes_table: Option<Table> =
         table.get("excluded_supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
     let excluded_supertypes = match excluded_supertypes_table {
@@ -869,16 +800,14 @@ pub(crate) fn decode_affected_value(
     }
 }
 
-/// Decodes `Game.SelectTargets`/`Game.MayChoose`/`Game.ChooseN`'s yielded
-/// request table — `{ op = "select_target", filter = ... }` or `{ op =
-/// "may_choose" }`. An unrecognized op is a real error, not guessed at, same
-/// stance `decode_condition_value` takes for an unrecognized shape. `lua`/
-/// `registry` (`phase5/mass-choice-effects` follow-up) are needed because
-/// `filter` can now be a scripted predicate (a bare function, or `{type=
-/// "player", filter=fn}`) same as `:SetTarget`'s own filter argument — see
-/// `decode_target_filter_value`'s own doc comment for the full shape; a
-/// script-backed filter needs its function registered into the registry the
-/// same way any other custom-function value does.
+/// Decodes `Game.SelectTargets`, `Game.MayChoose` and `Game.ChooseN`'s yielded
+/// request table: `{ op = "select_target", filter = ... }` or
+/// `{ op = "may_choose" }`. An unknown op is a real error, as in
+/// `decode_condition_value`. `lua` and `registry` are needed because `filter`
+/// can be a scripted predicate (a bare function, or
+/// `{type="player", filter=fn}`) like `:SetTarget`'s; see
+/// `decode_target_filter_value`. Its function is registered like any other
+/// custom-function value.
 pub(crate) fn decode_script_choice_request(
     lua: &Lua,
     registry: &mut ScriptRegistry,
@@ -889,12 +818,7 @@ pub(crate) fn decode_script_choice_request(
         "select_target" => {
             let filter_value: Value =
                 table.get("filter").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
-            // `phase5/mass-choice-effects`: `Game.ChooseN`'s Lua loop grows
-            // this by one id per iteration so a repeat ask can't hand back
-            // an object already picked this batch - see `ScriptChoiceRequest
-            // ::SelectTarget`'s own doc comment for why this lives here
-            // rather than on `TargetFilter` itself. Absent for a bare
-            // `Game.SelectTargets` call, same as every pre-existing script.
+            // `Game.ChooseN`'s Lua loop grows this by one id per iteration so a repeat ask can't return an object already picked this batch (see `ScriptChoiceRequest::SelectTarget`). Absent for a bare `Game.SelectTargets` call.
             let exclude_ids: Option<Vec<i64>> =
                 table.get("exclude_ids").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
             let exclude_ids =
@@ -909,13 +833,12 @@ pub(crate) fn decode_script_choice_request(
     }
 }
 
-/// Decodes one `{kind, id}` picked-target table — the same shape
-/// `ScriptRuntime::resume_operation`'s own encode side produces as the
-/// answer to a `Game.SelectTargets`/`Game.ChooseN` yield (`kind` one of
-/// `"object"`/`"player"`/`"ability"`). Used by `Game.Ops.CastSpell`'s
-/// `opts.targets` decode (`handle_operation_result`) to turn a script's
-/// already-picked targets (gathered via its own prior `Game.SelectTargets`/
-/// `Game.ChooseN` calls) back into a real `Target`.
+/// Decodes one `{kind, id}` picked-target table, the shape
+/// `ScriptRuntime::resume_operation` encodes as the answer to a
+/// `Game.SelectTargets` or `Game.ChooseN` yield (`kind` is `"object"`,
+/// `"player"` or `"ability"`). `Game.Ops.CastSpell`'s `opts.targets` decode
+/// (`handle_operation_result`) uses it to turn a script's already-picked
+/// targets back into a `Target`.
 pub(crate) fn decode_target_pick(table: &Table) -> Result<Target, ScriptError> {
     let kind: String = table.get("kind").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
     let id: u64 = table.get("id").map_err(|e| ScriptError::RuntimeError(e.to_string()))?;
@@ -927,18 +850,14 @@ pub(crate) fn decode_target_pick(table: &Table) -> Result<Target, ScriptError> {
     }
 }
 
-/// `Game.SelectTargets`'s filter argument — same flat option-bag shape
-/// `decode_affected_value`/`decode_filter_table` already use for their own
-/// filter tables, plus a `type` discriminator (`"object"` default/`"player"`/
-/// `"any"`/`"ability"`) matching the scenario crate's own TOML `target_requirement.filter`
-/// convention (`crates/scenario/src/lib.rs`'s `build_target_requirement`)
-/// exactly, rather than inventing a second vocabulary. `type` defaults to
-/// `"object"` so every pre-existing script that omits it (this slice's own
-/// predecessor) keeps working unchanged. `zone` (`phase5/mass-choice-effects`,
-/// e.g. `Game.ChooseN({ zone = "Hand", ... }, n)` for CR 701.9 discard) is a
-/// zone name string parsed via `parse_zone_kind_name`, same names/casing the
-/// TOML fixture format already uses - `None` still defaults to `Battlefield`
-/// exactly as before for every filter that omits it.
+/// `Game.SelectTargets`'s filter argument: the flat option-bag of
+/// `decode_affected_value` and `decode_filter_table`, plus a `type`
+/// discriminator (`"object"` default, `"player"`, `"any"`, `"ability"`)
+/// matching the scenario crate's TOML `target_requirement.filter`
+/// (`build_target_requirement`). `type` defaults to `"object"` so scripts that
+/// omit it still work. `zone` is a zone name parsed by `parse_zone_kind_name`,
+/// as in the TOML fixtures (`Game.ChooseN({ zone = "Hand", ... }, n)` for
+/// CR 701.9 discard), and `None` still means the battlefield.
 pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, ScriptError> {
     let kind: Option<String> = table.get("type").map_err(|e| ScriptError::LoadError(e.to_string()))?;
     match kind.as_deref().unwrap_or("object") {
@@ -949,8 +868,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
             Ok(TargetFilter::Player { controller })
         }
         "any" => Ok(TargetFilter::AnyTarget),
-        // CR 113.9/701.6a: "counter target activated or triggered ability"
-        // (Stifle, Trickbind) - see TargetFilter::Ability's own doc comment.
+        // CR 113.9, 701.6a: "counter target activated or triggered ability" (Stifle, Trickbind); see `TargetFilter::Ability`.
         "ability" => Ok(TargetFilter::Ability),
         // CR 702.21a (Ward): the spell or ability that triggered this one.
         "triggering" => Ok(TargetFilter::TriggeringStackObject),
@@ -973,12 +891,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
                 None => None,
             };
 
-            // CR 205.4b: "target Human"/"Equip Dragons" - a plain list of
-            // subtype name strings, same shape card_types just above uses,
-            // matched as an "or" (TargetFilter::Object::subtypes's own doc
-            // comment). No parser needed - Subtype is a bare string newtype,
-            // same "any string is legal" stance AddProtectionSubtype/
-            // AddProtectionName already took.
+            // CR 205.4b: "target Human", "Equip Dragons": a plain list of subtype names, matched as an "or" (see `TargetFilter::Object::subtypes`). No parser, since `Subtype` is a bare string newtype.
             let subtypes_table: Option<Table> =
                 table.get("subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let subtypes = match subtypes_table {
@@ -992,8 +905,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
                 None => None,
             };
 
-            // CR 205.4a: "target legendary creature" - same shape/table key
-            // decode_filter_table's own supertypes decode already uses.
+            // CR 205.4a: same shape and key as `decode_filter_table`'s `supertypes`.
             let supertypes_table: Option<Table> =
                 table.get("supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let supertypes = match supertypes_table {
@@ -1008,8 +920,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
                 None => None,
             };
 
-            // CR 601.2c/115's negated form - "target nonland permanent,"
-            // same shape/table key `card_types` just above uses.
+            // CR 601.2c, 115 negated ("target nonland permanent"): same shape and key as `card_types`.
             let excluded_card_types_table: Option<Table> =
                 table.get("excluded_card_types").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let excluded_card_types = match excluded_card_types_table {
@@ -1024,9 +935,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
                 None => None,
             };
 
-            // CR 601.2c/115/205.4b's negated form - "target creature that
-            // isn't a Wall," same shape/table key `subtypes` just above
-            // uses.
+            // CR 601.2c, 115, 205.4b negated ("target creature that isn't a Wall"): same shape and key as `subtypes`.
             let excluded_subtypes_table: Option<Table> =
                 table.get("excluded_subtypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let excluded_subtypes = match excluded_subtypes_table {
@@ -1040,8 +949,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
                 None => None,
             };
 
-            // CR 601.2c/115/205.4a's negated form - "target nonlegendary
-            // creature," same shape/table key `supertypes` just above uses.
+            // CR 601.2c, 115, 205.4a negated ("target nonlegendary creature"): same shape and key as `supertypes`.
             let excluded_supertypes_table: Option<Table> =
                 table.get("excluded_supertypes").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let excluded_supertypes = match excluded_supertypes_table {
@@ -1059,17 +967,7 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
             let zone_name: Option<String> = table.get("zone").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let zone = zone_name.map(|name| parse_zone_kind_name(&name)).transpose()?;
 
-            // CR 202.3: "target spell with mana value X (or less/or
-            // greater)" - three independent optional keys (matching
-            // `up_to`/`at_least`'s own flat-boolean-flags convention rather
-            // than a nested comparison table), each accepting either a plain
-            // number (`ManaValueBound::Fixed`) or the literal string "X"
-            // (`ManaValueBound::X`, resolving against whatever this
-            // cast/resolution's own announced X is - see `ManaValueBound`'s
-            // own doc comment). At most one is expected to be set on any
-            // real card; if more than one is, `equals` wins over `at_most`
-            // over `at_least`, same "no validation, just precedence" stance
-            // `at_least` already takes over `up_to` elsewhere in this file.
+            // CR 202.3: "target spell with mana value X (or less, or greater)". Three independent optional keys, flat like `up_to` and `at_least`, each a plain number (`ManaValueBound::Fixed`) or the string "X" (`ManaValueBound::X`, the cast or resolution's announced X). If several are set, `equals` wins over `at_most` over `at_least`, with no validation, as `at_least` over `up_to`.
             let mana_value_equals: Option<Value> =
                 table.get("mana_value_equals").map_err(|e| ScriptError::LoadError(e.to_string()))?;
             let mana_value_at_most: Option<Value> =
@@ -1104,12 +1002,9 @@ pub(crate) fn decode_target_filter_table(table: Table) -> Result<TargetFilter, S
     }
 }
 
-/// `mana_value_equals`/`mana_value_at_most`/`mana_value_at_least`'s shared
-/// value decode — a nonnegative integer (`ManaValueBound::Fixed`) or the
-/// literal string `"X"` (`ManaValueBound::X`). Any other shape (a negative
-/// number, a bool, some other string) is a loud load-time error, same
-/// "typo'd input fails to load rather than silently guessing" stance every
-/// other decoder in this file already takes.
+/// Shared value decode of `mana_value_equals`, `mana_value_at_most` and
+/// `mana_value_at_least`: a nonnegative integer (`ManaValueBound::Fixed`) or
+/// the string `"X"` (`ManaValueBound::X`). Anything else is a load-time error.
 fn decode_mana_value_bound(value: Value) -> Result<ManaValueBound, ScriptError> {
     match value {
         Value::Integer(n) if n >= 0 => Ok(ManaValueBound::Fixed(n as u32)),
@@ -1121,27 +1016,18 @@ fn decode_mana_value_bound(value: Value) -> Result<ManaValueBound, ScriptError> 
     }
 }
 
-/// `ScriptRuntime::build_target_requirement`'s return-table decoder — the
-/// `count`/`up_to`/`at_least`/`exclude_source` siblings `TargetRequirement`
-/// needs beyond a bare `TargetFilter`, same field names/defaults the
-/// scenario crate's `TargetRequirementSpec` TOML shape already uses.
+/// `ScriptRuntime::build_target_requirement`'s return-table decoder, adding
+/// `count`, `up_to`, `at_least` and `exclude_source` to a bare `TargetFilter`,
+/// with the field names and defaults of the scenario crate's
+/// `TargetRequirementSpec`.
 ///
-/// The filter portion supports two shapes, checked via an explicit `filter`
-/// key: if present, its value is handed to `decode_target_filter_value` —
-/// the same table-or-function-or-`{type="player",filter=fn}` decoder
-/// `ActivatedAbilityBuilder::SetTarget` already uses, so a card's own base
-/// target requirement can be a scripted predicate too (e.g. "Enchant
-/// creature with power 4 or greater," not expressible as a flat option-bag
-/// table) — see `TargetFilter::Script`'s own doc comment, already read
-/// generically off any `CardDefinition.target_requirement` regardless of
-/// where it came from, so no engine-side change was needed for this, only
-/// this decode entry point. If `filter` is absent, this falls back to the
-/// original flat shape unchanged: the *same* table (not a nested one) is
-/// handed to `decode_target_filter_table`, which only reads the keys it
-/// recognizes (`type`/`card_types`/`subtypes`/...), so the count/mode keys
-/// read here don't need to be stripped out first — every pre-existing
-/// script/TOML fixture that never sets a `filter` key keeps working exactly
-/// as before.
+/// An explicit `filter` key goes to `decode_target_filter_value`, the
+/// table-or-function-or-`{type="player", filter=fn}` decoder of
+/// `ActivatedAbilityBuilder::SetTarget`, so a card's base target requirement
+/// can be a scripted predicate too ("Enchant creature with power 4 or
+/// greater"). See `TargetFilter::Script`. Without `filter`, the same table
+/// goes to `decode_target_filter_table`, which reads only the keys it knows,
+/// so the count and mode keys needn't be stripped.
 pub(crate) fn decode_target_requirement_table(
     lua: &Lua,
     registry: &mut ScriptRegistry,
@@ -1168,18 +1054,17 @@ pub(crate) fn decode_target_requirement_table(
     Ok(TargetRequirement { filter, count, up_to, at_least, exclude_source })
 }
 
-/// `ScriptRuntime::build_target_requirement`'s whole-return decoder:
-/// either one requirement table (any table with no array part, decoded
-/// exactly as `decode_target_requirement_table` always did, into
-/// `TargetSpec::Primitive`) or a sequence of requirement tables, one per
-/// distinct "target" word in card order (`TargetSpec::Multiple`, e.g. "target
-/// creature you control fights target creature you don't control"). A
-/// one-entry sequence is the same single word as a bare table, so it decodes
-/// to `Primitive` too.
+/// `ScriptRuntime::build_target_requirement`'s whole-return decoder: one
+/// requirement table (a table with no array part, decoded by
+/// `decode_target_requirement_table` into `TargetSpec::Primitive`) or a
+/// sequence of them, one per "target" word in card order
+/// (`TargetSpec::Multiple`, "target creature you control fights target
+/// creature you don't control"). A one-entry sequence is a single word and
+/// decodes to `Primitive`.
 ///
-/// Rejected with a clear error: an empty table, a table that mixes array
-/// entries with other keys (such as `count`), a sequence with gaps, and a
-/// sequence entry that is not a table.
+/// Rejected with an error: an empty table, a table mixing array entries with
+/// other keys (such as `count`), a sequence with gaps, and a sequence entry
+/// that is not a table.
 pub(crate) fn decode_target_spec_table(
     lua: &Lua,
     registry: &mut ScriptRegistry,
@@ -1294,25 +1179,19 @@ pub(crate) fn check_chain_words(
     }
 }
 
-/// `ActivatedAbilityBuilder::SetTarget`'s argument decoder — a `Value`
-/// rather than `decode_target_filter_table`'s bare `Table`, same table-or-
-/// function fallback `decode_affected_value` established for `:SetAffected`.
-/// A bare function is registered and returned as `TargetFilter::Script`
-/// (invoked later via `ScriptRuntime::invoke_target_legal`), for a legality
-/// shape the flat option-bag table can't express (e.g. "target creature
-/// with power 4 or greater").
+/// `ActivatedAbilityBuilder::SetTarget`'s argument decoder, taking a `Value`
+/// and not `decode_target_filter_table`'s bare `Table`, with the
+/// table-or-function fallback of `decode_affected_value`. A bare function is
+/// registered and returned as `TargetFilter::Script` (invoked later through
+/// `ScriptRuntime::invoke_target_legal`), for a legality shape the flat table
+/// can't express ("power 4 or greater").
 pub(crate) fn decode_target_filter_value(
     lua: &Lua,
     registry: &mut ScriptRegistry,
     value: Value,
 ) -> Result<TargetFilter, ScriptError> {
     match value {
-        // `{ type = "player", filter = function(player, source, controller,
-        // state) -> bool }` — `TargetFilter::PlayerScript`'s Lua entry
-        // point. Checked ahead of the plain flat-option-bag decode below
-        // since a bare `{type="player"}` (no `filter` function) must still
-        // fall through to `decode_target_filter_table`'s existing
-        // `TargetFilter::Player` path unchanged.
+        // `{ type = "player", filter = function(player, source, controller, state) -> bool }`, the Lua entry point of `TargetFilter::PlayerScript`. Checked before the flat decode so a bare `{type="player"}` still reaches `TargetFilter::Player` through `decode_target_filter_table`.
         Value::Table(ref table) if matches!(table.get::<_, Option<String>>("type"), Ok(Some(ref k)) if k == "player")
             && matches!(table.get::<_, Value>("filter"), Ok(Value::Function(_))) =>
         {

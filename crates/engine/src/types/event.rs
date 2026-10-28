@@ -3,269 +3,144 @@ use crate::types::ids::{CommandId, EventId, ObjectId, PlayerId, SequenceNo, Targ
 use crate::types::object::GameObject;
 use crate::types::zone::ZoneKind;
 
-/// Ledger granularity (DESIGN.md open question): logs every micro-step, not
-/// just card-level moves, so the replay viewer can scrub at fine resolution
-/// and the live action log can filter/group from a single underlying stream.
-/// This variant list is a first pass — expect additions as Phase 5 dry runs
-/// surface gaps.
+/// Ledger events, one per micro-step, so a replay viewer can scrub finely and
+/// the action log can group from a single stream.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEventKind {
-    /// `last_known_info` (CR 603.10): a snapshot of `object` exactly as it
-    /// was in `from`, captured by whoever produces this event *before*
-    /// mutating anything — `None` only when the producer is certain nothing
-    /// downstream needs it (rare; default to capturing it). Without this,
-    /// a leaves-the-battlefield trigger evaluated after `CommitEvents`/
-    /// `SbaLoop` settle would have to look `object` up live in
-    /// `GameState.objects` — but a battlefield -> graveyard move mints a
-    /// *new* `ObjectId` (see `ObjectLineage`), so the old id may already be
-    /// gone, or whatever still answers to it may have already lost
-    /// characteristics (e.g. an aura-granted ability) that justified the
-    /// trigger in the first place. Same shape of gap `StackObject.
-    /// source_lki` (CR 608.2b) already solves on the stack side - this is
-    /// the zone-change-event equivalent.
+    /// `last_known_info` (CR 603.10) is a snapshot of `object` as it was in
+    /// `from`, taken before anything mutates. Leaves-the-battlefield triggers
+    /// need it, because the move mints a new `ObjectId` and the old one may be
+    /// gone. `None` only when no consumer needs it.
     ZoneChange { object: ObjectId, from: ZoneKind, to: ZoneKind, last_known_info: Option<GameObject> },
     LifeChanged { player: PlayerId, delta: i32 },
-    /// `is_combat_damage` (CR 903.10a): whether this damage was dealt via
-    /// CR 510 combat damage (`commands::AssignCombatDamage`, the only
-    /// producer that sets `true`) rather than a spell/ability's own damage
-    /// effect (the script bridge's `Game.Ops.Damage`, always `false`) — a
-    /// commander's *combat* damage to a player counts toward CR 903.10a's
-    /// 21-damage loss condition, but the same commander's damage from an
-    /// activated/triggered ability never does, even though `source` is
-    /// identical either way. `apply_damage_event` is the only reader.
+    /// `is_combat_damage` (CR 903.10a) is set only by `AssignCombatDamage`.
+    /// Commander combat damage to a player counts toward the 21-damage loss,
+    /// but ability damage from the same source does not. `apply_damage_event`
+    /// is the only reader.
     DamageDealt { source: ObjectId, target: Target, amount: u32, is_combat_damage: bool },
     CounterAdded { object: ObjectId, kind: CounterKind, amount: i32 },
-    /// First real tap producer (CR 602.5a's tap-cost activation, e.g. a
-    /// mana ability) — nothing minted this event before now.
+    /// Produced by a tap cost such as a mana ability (CR 602.5a).
     Tapped { object: ObjectId },
-    /// CR 502.3: one per permanent untapped as the untap step's turn-based
-    /// action. Same shape as `Tapped` — first real producer on the untap
-    /// side.
+    /// CR 502.3: one per permanent untapped by the untap step.
     Untapped { object: ObjectId },
-    /// `units`: the exact literal mana added (CR 605), same "literal
-    /// units, not a cost shape" vocabulary `CostPaid`/`CostPayment::Mana`
-    /// already use — retargeted from a `ManaCost`-shaped `amount` (unused
-    /// anywhere until this slice) for consistency.
+    /// `units` are the literal mana added (CR 605), the same vocabulary as
+    /// `CostPayment::Mana`.
     ManaAdded { player: PlayerId, units: Vec<crate::mana::ManaUnit> },
-    /// CR 508.1m/508.2a: one per creature declared as an attacker. Exists
-    /// so a future trigger-collection pass has something concrete to match
-    /// "whenever X attacks"-style conditions against — `collect_triggers`
-    /// itself stays `todo!()` for `Triggered`-kind abilities regardless
-    /// (same script-bridge gap as everywhere else).
+    /// CR 508.1m, 508.2a: one per declared attacker, for "whenever X attacks"
+    /// conditions.
     AttackerDeclared { attacker: ObjectId, target: Target },
     /// CR 509.1i: one per blocker/attacker pairing declared.
     BlockerDeclared { blocker: ObjectId, attacker: ObjectId },
-    /// CR 601.2i/118: `payer` committed a `PaymentPlan` covering
-    /// `stack_id`'s cost - the ledger fact that completes the cast process
-    /// `CastSpell`'s own events started (card moved to stack), distinct from
-    /// those since payment is its own decision point (see command.rs's
-    /// `SubmitPayment` doc).
+    /// CR 601.2i, 118: `payer` committed a `PaymentPlan` for `stack_id`'s cost,
+    /// completing the cast that `CastSpell` started. Payment is its own
+    /// decision point (see `SubmitPayment`).
     CostPaid { stack_id: ObjectId, payer: PlayerId },
     PrioritySet { player: PlayerId },
     PriorityPassed { player: PlayerId },
     StackObjectPushed { stack_id: ObjectId },
     StackObjectResolved { stack_id: ObjectId },
-    /// CR 608.2b: every target of `stack_id`, for its one instance of the
-    /// word "target," was illegal by the time it would resolve - it doesn't
-    /// resolve at all. Emitted instead of (not alongside) `StackObjectResolved`
-    /// - 608.2b is explicit the spell/ability "doesn't resolve." A fizzled
-    /// spell still leaves the stack (see the accompanying `ZoneChange` to its
-    /// owner's graveyard, pushed just before this); a fizzled ability just
-    /// stops existing, no `ZoneChange` for it.
+    /// CR 608.2b: every target of `stack_id` for one "target" word was
+    /// illegal, so it doesn't resolve. Emitted instead of
+    /// `StackObjectResolved`. A fizzled spell's `ZoneChange` to the graveyard
+    /// comes just before, and an ability just ceases to exist.
     Fizzled { stack_id: ObjectId },
-    /// CR 701.6a: `stack_id` was removed from the stack by
-    /// `AbilityEffect::Counter` rather than resolving - it doesn't resolve
-    /// and none of its effects occur (CR 701.6a's own second sentence). Same
-    /// "emitted instead of `StackObjectResolved`, with an accompanying
-    /// `ZoneChange` to the countered spell's owner's graveyard/exile pushed
-    /// just before this only when it was a `Spell`" shape `Fizzled` already
-    /// establishes - a countered ability just stops existing, no
-    /// `ZoneChange`. Distinct from `Fizzled` (CR 608.2b, this object's own
-    /// targets/intervening-if became illegal) since real cards care about
-    /// the difference (e.g. "if a spell would be countered, counter it
-    /// instead" replacement effects, or "whenever a spell is countered this
-    /// way" triggers - neither modeled yet, see `AbilityEffect::Counter`'s
-    /// own doc comment for what's out of scope this slice). TODO: no
-    /// `ConditionPrimitive` matches this event yet - same "primitive ships
-    /// before its own trigger condition" precedent `Damage`/`Scry` already
-    /// set; no real card built so far needs "whenever a spell is countered."
+    /// CR 701.6a: `AbilityEffect::Counter` removed `stack_id` without
+    /// resolving it. Emitted instead of `StackObjectResolved`, with a
+    /// preceding `ZoneChange` only for a spell. Distinct from `Fizzled`
+    /// because cards care about the difference.
+    /// TODO: no `ConditionPrimitive` matches this event, and "would be countered" replacements are not modeled
     Countered { stack_id: ObjectId },
-    /// CR 601.6: `Engine::unwind_payment` abandoned `stack_id`'s cast/
-    /// activation rather than paying its cost - the game "returns to the
-    /// moment before [it] was proposed." Same "emitted instead of/alongside
-    /// a `ZoneChange` depending on what's leaving the stack" shape `Fizzled`
-    /// already establishes: a spell's `stack_id` gets an accompanying
-    /// `ZoneChange` back to hand (pushed just before this), an activated
-    /// ability's doesn't (it just stops existing, same as a fizzled
-    /// ability). Not a true CR 733 state rewind (this engine's ledger is
-    /// append-only, no undo primitive exists anywhere) - an honest forward
-    /// zone-change/removal instead, flagged not silently guessed.
+    /// CR 601.6: `Engine::unwind_payment` abandoned `stack_id`'s cast or
+    /// activation. A spell gets a preceding `ZoneChange` back to hand and an
+    /// ability just ceases to exist. This is a forward removal, not a CR 733
+    /// rewind, because the ledger is append-only.
     CastingUnwound { stack_id: ObjectId },
     TriggerQueued { source: ObjectId, controller: PlayerId },
     ReplacementApplied { source: ObjectId, original_event: EventId },
     StateBasedActionApplied { description: String },
-    /// A Lua script call failed mid-resolution and the engine fell back to
-    /// its default (no-effect/"condition false") behavior rather than
-    /// guessing at what the script would have returned - same shape as
-    /// `StateBasedActionApplied` (a free-text diagnostic, not itself a
-    /// gameplay-mutating fact). Logged only from sites that already have
-    /// `&mut Engine`/a real mutation pipeline to log through - the pure
-    /// characteristic-query call graph (`layers.rs`'s `applicable_effects_
-    /// in_layer`/`resolve_primitive`) has no such path without threading
-    /// error-reporting through every one of `effective_characteristics`'s
-    /// many callers, so those sites are a deliberate, named exception, not
-    /// silently unfixed (`phase5/script-error-surfacing`, docs/
-    /// implementation.md). No matching `ConditionPrimitive` exists to
-    /// trigger off this - same "ships with no matching case yet" precedent
-    /// `StateBasedActionApplied` itself already set before this slice.
+    /// A Lua call failed mid-resolution and the engine used the no-effect or
+    /// "condition false" default. A free-text diagnostic, not a gameplay fact.
+    /// The pure query path in `layers.rs` cannot log it, since it holds no
+    /// `&mut Engine`.
     ScriptError { message: String },
     TurnStarted { player: PlayerId, turn_number: u32 },
     PhaseStarted { phase: crate::turn::Phase },
     StepStarted { step: crate::turn::Step },
     PlayerEliminated { player: PlayerId },
     RngDrawn { purpose: String, value: u64 },
-    /// CR 103.3: logged once per player whose library was shuffled during
-    /// pregame setup. Useful for replay (marks where the randomness happened)
-    /// and for any future "whenever a library is shuffled" triggers.
+    /// CR 103.3: one per library shuffled during setup, marking where
+    /// randomness happened for replay.
     LibraryShuffled { player: PlayerId },
-    /// CR 701.22a/701.22d: `player` finished a `Game.Ops.Scry(n)` pause
-    /// (`Engine::submit_scry_choice`) — `kept_on_top`/`put_bottom` are the
-    /// two chosen piles, each in the player's chosen order. One event per
-    /// scry (not per card), same granularity `LibraryShuffled` already uses
-    /// — the reorder itself isn't a `ZoneChange` (nothing left the library).
+    /// CR 701.22a, 701.22d: `player` finished a `Game.Ops.Scry(n)` pause
+    /// (`Engine::submit_scry_choice`). One event per scry, each pile in the
+    /// chosen order. The reorder is not a `ZoneChange`.
     CardsScried { player: PlayerId, kept_on_top: Vec<ObjectId>, put_bottom: Vec<ObjectId> },
-    /// CR 701.25a/701.25d: `player` finished a `Game.Ops.Surveil(n)` pause
-    /// (`Engine::submit_surveil_choice`). `put_graveyard` holds the *new*
-    /// `ObjectId`s minted for the real library -> graveyard move (CR 400.7);
-    /// a separate `ZoneChange` per card is logged alongside this summary
-    /// event, same "summary event plus the real per-object `ZoneChange`s"
-    /// shape `submit_discard` already establishes.
+    /// CR 701.25a, 701.25d: `player` finished a `Game.Ops.Surveil(n)` pause.
+    /// `put_graveyard` holds the new ids from the library-to-graveyard moves
+    /// (CR 400.7), each also logged as a `ZoneChange`.
     CardsSurveiled { player: PlayerId, kept_on_top: Vec<ObjectId>, put_graveyard: Vec<ObjectId> },
-    /// CR 707.2/613.1a (layer 1): `object` became a copy of `copied`'s
-    /// current copiable values (`Engine`'s `AbilityEffect::BecomeCopy`
-    /// resolution). No "whenever this becomes a copy" trigger condition
-    /// exists yet to match this — same "primitive ships before its own
-    /// trigger condition" precedent `Scry`/`Surveil` already set for their
-    /// own events.
+    /// CR 707.2, 613.1a: `object` became a copy of `copied`'s current copiable
+    /// values (`AbilityEffect::BecomeCopy`). No trigger condition matches it.
     BecameCopy { object: ObjectId, copied: ObjectId },
-    /// CR 612.5 (layer 3): `a` and `b` exchanged text boxes -
-    /// `Engine`'s `AbilityEffect::ExchangeTextBoxes` resolution. Pure ledger
-    /// record, same "already mutated, log it" shape as `BecameCopy` above -
-    /// no "whenever text boxes are exchanged" trigger condition exists yet
-    /// to match this either.
+    /// CR 612.5 (layer 3): `a` and `b` exchanged text boxes
+    /// (`AbilityEffect::ExchangeTextBoxes`). A record of a mutation already
+    /// made. No trigger condition matches it.
     TextBoxesExchanged { a: ObjectId, b: ObjectId },
-    /// CR 614.8/701.19: a regeneration shield intercepted `object`'s
-    /// destruction — emitted by `replacement::ReplacementEffect::apply`
-    /// *instead of* the `ZoneChange` that was proposed, per CR 614.6 ("if an
-    /// event is replaced, it never happens - a modified event occurs
-    /// instead"). Not a `ZoneChange`: the permanent never leaves the
-    /// battlefield, so unlike every real death in this engine, no new
-    /// `ObjectId` is minted (CR 400.7 only applies to an actual zone move).
-    /// `sba::commit_regeneration` is this event's only producer/committer -
-    /// see its own doc comment for the CR 701.19a/b side effects (damage
-    /// removed, tapped, removed from combat).
+    /// CR 614.8, 701.19: a regeneration shield replaced `object`'s destruction
+    /// (CR 614.6), emitted by `ReplacementEffect::apply` in place of the
+    /// `ZoneChange`. The permanent stays, so it keeps its `ObjectId`
+    /// (CR 400.7). `sba::commit_regeneration` is the only producer, and it also
+    /// removes damage, taps the permanent and removes it from combat
+    /// (CR 701.19a, 701.19b).
     Regenerated { object: ObjectId },
-    /// CR 704.5d: `object` (a token, `GameObject.is_token`) was sitting in a
-    /// zone other than the battlefield and ceased to exist as a state-based
-    /// action. Not a `ZoneChange`: nothing to move to, no new `ObjectId`
-    /// minted — `object` simply stops existing. `sba::collect_ceasing_tokens`/
-    /// `commit_token_cessation` are this event's only producer/committer.
-    /// CR 111.7's own parenthetical ("applicable triggered abilities will
-    /// trigger before the token ceases to exist") is satisfied by *when*
-    /// this check runs, not by anything in the event's own shape — see
-    /// `collect_ceasing_tokens`'s own doc comment for why a token that just
-    /// died this same pass is never included here.
+    /// CR 704.5d: a token outside the battlefield ceased to exist. Not a
+    /// `ZoneChange`, since there is nowhere to move it. Produced by
+    /// `sba::collect_ceasing_tokens` and `commit_token_cessation`, which skip
+    /// a token that died this same pass so its triggers fire first (CR 111.7).
     TokenCeased { object: ObjectId },
-    /// CR 303.4b/702.6a: `object` (an Aura, `commands::is_aura`, or an
-    /// Equipment, `commands::is_equipment`) became attached to
-    /// `attached_to` — either as an Aura resolved onto the battlefield or
-    /// an `AbilityEffect::Attach` (Equip) resolved (`engine.rs`'s
-    /// `ResolveStackTop`, the only two producers today). Not a
-    /// `ZoneChange`: nothing moves zones, no new `ObjectId` minted, same
-    /// "pure mutation, own event" shape `Regenerated` already established.
-    /// `commands::attach_permanent` is the sole writer of `GameObject.
-    /// attached_to`/`.attachments` — this event is logged alongside that
-    /// call, not by it (that function has no `&mut GameState`-to-event
-    /// pipeline of its own to log through). No matching `ConditionPrimitive`
-    /// exists to trigger off this yet — same "ships before its own trigger
-    /// condition" precedent `BecameCopy`/`Regenerated` already set.
+    /// CR 303.4b, 702.6a: `object`, an Aura or Equipment, became attached to
+    /// `attached_to`, as an Aura entered or an Equip resolved. Not a
+    /// `ZoneChange`. Logged beside `commands::attach_permanent`, which has no
+    /// event pipeline of its own. No trigger condition matches it.
     Attached { object: ObjectId, attached_to: ObjectId },
-    /// CR 303.4b's "or player" half of `Attached` above — `object` (an
-    /// Aura, `commands::is_aura`; Equipment/Fortification can never enchant
-    /// a player, CR 301.5a/301.6) became attached to `player` instead of an
-    /// object. Same "pure mutation, own event" shape, produced alongside
+    /// CR 303.4b: the player-attached twin of `Attached`, for an Aura
+    /// enchanting a player (CR 301.5a, 301.6). Produced beside
     /// `commands::attach_permanent_to_player`.
     AttachedToPlayer { object: ObjectId, player: PlayerId },
-    /// CR 704.5n: `object` (an Equipment or Fortification, `commands::
-    /// is_equipment`) was attached to `was_attached_to`, which is now an
-    /// illegal permanent to be equipped by it - it becomes unattached and
-    /// *stays on the battlefield* (unlike CR 704.5m's Aura equivalent,
-    /// which dies - see `sba::collect_illegally_attached_equipment`'s own
-    /// doc comment for why this is a structurally different SBA shape from
-    /// `collect_illegally_attached_auras`). Not a `ZoneChange`: nothing
-    /// moves zones, no new `ObjectId` minted, same "pure mutation, own
-    /// event" shape `Regenerated`/`Attached` already established.
-    /// `sba::commit_unattach` is this event's only producer.
+    /// CR 704.5n: `object`, an Equipment or Fortification, became unattached
+    /// from `was_attached_to`, which is no longer a legal host. It stays on the
+    /// battlefield, unlike an illegal Aura (CR 704.5m). Not a `ZoneChange`.
+    /// Produced by `sba::commit_unattach`.
     Unattached { object: ObjectId, was_attached_to: ObjectId },
-    /// CR 702.89a (Umbra armor): `aura`'s own umbra armor intercepted
-    /// `enchanted`'s destruction — emitted by `replacement::ReplacementEffect
-    /// ::apply` *instead of* the `ZoneChange` that was proposed for
-    /// `enchanted`, same CR 614.6 "a modified event occurs instead"
-    /// substitution `Regenerated` already established. Not a `ZoneChange`
-    /// for `enchanted`: like regeneration, it never leaves the battlefield,
-    /// no new `ObjectId` minted for it. Unlike `Regenerated`, this event
-    /// alone doesn't cover every real side effect — `aura` itself is
-    /// genuinely destroyed as a consequence (a real, separate `ZoneChange`
-    /// event, `commands::retire_object` and all), which is why
-    /// `sba::commit_umbra_armor` (this event's only producer/committer)
-    /// returns more than one committed event for a single resolved
-    /// replacement — see that function's own doc comment.
+    /// CR 702.89a: `aura`'s umbra armor replaced `enchanted`'s destruction
+    /// (CR 614.6), emitted by `ReplacementEffect::apply` in place of the
+    /// `ZoneChange`. `enchanted` stays and keeps its id. `aura` is destroyed
+    /// separately, so `sba::commit_umbra_armor` returns several events.
     UmbraArmorConsumed { enchanted: ObjectId, aura: ObjectId },
-    /// CR 702.29c/f: `object` was discarded specifically to pay a Cycling/
-    /// Typecycling ability's own `AdditionalCost::DiscardSelf` cost —
-    /// logged alongside (not instead of) the ordinary `ZoneChange` that
-    /// same discard already produces, same "pure marker, own event" shape
-    /// `Attached`/`BecameCopy` already established. `last_known_info` is a
-    /// snapshot of `object` exactly as it was in hand (CR 603.10), same
-    /// reason `ZoneChange` itself carries one — the card's own "when you
-    /// cycle this card" ability has already been purged from `state.
-    /// abilities` by the time this is checked. `Engine::
-    /// continue_cost_zone_moves` is this event's only producer.
+    /// CR 702.29c, 702.29f: `object` was discarded to pay a Cycling or
+    /// Typecycling `AdditionalCost::DiscardSelf`. Logged beside the ordinary
+    /// discard `ZoneChange`. `last_known_info` (CR 603.10) is needed because
+    /// the card's own cycling trigger has already left `state.abilities`.
+    /// Produced by `Engine::continue_cost_zone_moves`.
     Cycled { object: ObjectId, last_known_info: GameObject },
-    /// CR 702.35a: `object` was discarded and, because its own madness
-    /// static ability's `ReplaceZoneDestination(Exile)` redirect won,
-    /// exiled instead — logged alongside (not instead of) the ordinary
-    /// `ZoneChange` that same discard already produces, same "pure marker,
-    /// own event" shape `Cycled` above already established. `last_known_info`
-    /// is a snapshot of `object` exactly as it was in hand (CR 603.10), same
-    /// reason `Cycled` carries one — the card's own madness triggered
-    /// ability has already been purged from `state.abilities` by the time
-    /// this is checked. `replacement::madness_marker_event` is this event's
-    /// only producer.
+    /// CR 702.35a: `object` was discarded and exiled by its madness redirect.
+    /// Logged beside the discard `ZoneChange`. `last_known_info` (CR 603.10)
+    /// is needed because the card's madness trigger has already left
+    /// `state.abilities`. Produced by `replacement::madness_marker_event`.
     MadnessExiled { object: ObjectId, last_known_info: GameObject },
-    /// CR 601.2i: `object` (a spell, `StackEntryKind::Spell`) has become
-    /// cast — every step of CR 601.2a-h (moved to the stack, costs paid)
-    /// has completed. Unlike `Cycled`/`MadnessExiled`, no `last_known_info`
-    /// - the spell is still alive on the stack at the moment this is
-    /// checked (nothing purges it), so a live `state.object()` lookup
-    /// already works fine, same as any ordinary trigger condition. Logged
-    /// once per real cast, whether or not it needed a payment pause - see
-    /// `Engine::maybe_log_spell_cast`'s own doc comment for the two commit
-    /// points this fires from. Purpose-built for CR 702.85 Cascade's "when
-    /// you cast this spell" trigger, but deliberately general (not
-    /// Cascade-specific) - the same "when you cast a spell" hook Storm-style
-    /// keywords would need too.
+    /// CR 601.2i: `object` has been cast, with every step of CR 601.2a-h done.
+    /// It has no `last_known_info` because the spell is still on the stack.
+    /// Logged once per cast from the two commit points in
+    /// `Engine::maybe_log_spell_cast`. A general "when you cast a spell" hook,
+    /// used by Cascade (CR 702.85).
     SpellCast { object: ObjectId },
-    /// CR 603.2/702.21a: `object` (a permanent) has become the target of the
-    /// spell or ability `by` (its `StackObject::stack_id`), controlled by
-    /// `by_controller`. One event per distinct object per spell or ability,
-    /// however many target words name it (CR 603.2c). Logged once the spell
-    /// is cast (CR 601.2i), the activation's cost is paid (CR 602.2) or the
-    /// trigger is put on the stack (CR 603.3d), never at the proposal step,
-    /// so a cast that is unwound never fires it. `by_controller` is carried
-    /// because a `ConditionPrimitive` only sees the event, and Ward's "an
-    /// opponent controls" needs it. Players aren't permanents, so only
-    /// `Target::Object` targets produce it.
+    /// CR 603.2, 702.21a: permanent `object` became the target of `by` (its
+    /// `StackObject::stack_id`), controlled by `by_controller`. One event per
+    /// distinct object per spell or ability (CR 603.2c). Logged once the cast
+    /// completes (CR 601.2i), the cost is paid (CR 602.2) or the trigger goes
+    /// on the stack (CR 603.3d), so an unwound cast never fires it.
+    /// `by_controller` is carried because a `ConditionPrimitive` sees only the
+    /// event, and Ward needs it. Only `Target::Object` produces it.
     BecameTarget { object: ObjectId, by: ObjectId, by_controller: PlayerId },
     /// CR 701.20a: `player` revealed `cards` from `zone`. The cards stay where
     /// they are, so this is not a `ZoneChange`. Each card carries a snapshot,
@@ -294,9 +169,8 @@ pub struct GameEvent {
 }
 
 impl GameEvent {
-    /// Caller sets `caused_by_command`/`parent_event` after construction via
-    /// struct update syntax if this event needs a causal ref, e.g.
-    /// `GameEvent { caused_by_command: Some(id), ..GameEvent::new(...) }`.
+    /// Set `caused_by_command` and `parent_event` afterwards with struct
+    /// update syntax.
     pub fn new(event_id: EventId, sequence_no: SequenceNo, kind: GameEventKind) -> Self {
         GameEvent { event_id, sequence_no, kind, caused_by_command: None, parent_event: None }
     }

@@ -6,13 +6,9 @@ use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
 use crate::types::mana::ManaPool;
 use crate::types::zone::ZoneKind;
 
-/// Emblems live in a player's command zone (CR 114.1) but aren't cards from
-/// the external database — no `CardDefinition`, no mana cost/types, never
-/// move zones, never get targeted. Modeling them as a lightweight struct
-/// directly on the player rather than forcing them through the
-/// `CardDefinition`-backed `GameObject` model, which would need a definition
-/// they don't have. Revisit if the zone model ever needs to enumerate
-/// "everything in the command zone" uniformly.
+/// CR 114.1: an emblem lives in the command zone but is not a card, so it has
+/// no `CardDefinition`, never moves zones and is never targeted. A plain
+/// struct on the player avoids a `GameObject` with no definition.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Emblem {
     pub emblem_id: ObjectId,
@@ -34,39 +30,24 @@ pub struct PlayerState {
     /// Player-level counters: poison, energy, experience, etc. (CR 121.5).
     pub counters: CounterSet,
     pub emblems: Vec<Emblem>,
-    /// Commander-specific: cumulative combat damage taken from each commander
-    /// source. 21+ from a single source means this player loses (CR 903.10a).
-    /// Keyed by `CardDefinition.name` rather than `ObjectId` - same reasoning
-    /// `commander_casts`' own doc comment gives: CR 400.7 mints a new id
-    /// every cast (and every CR 903.9a return), so an id can't track "the
-    /// same commander" across a cast/die/return/recast cycle the way a
-    /// card's name can. Partner commanders get independent entries
-    /// automatically, since they have different names.
+    /// Cumulative commander combat damage taken per source (CR 903.10a, lose
+    /// at 21). Keyed by `CardDefinition.name` because CR 400.7 mints a new id
+    /// on every cast and return. Partners have different names, so they get
+    /// separate entries.
     pub commander_damage_taken: Vec<(String, u32)>,
     pub eliminated: bool,
-    /// CR 704.5b/120.3: set by `commands::propose_draw` when a draw is
-    /// attempted against an empty (or missing) library zone. Once `true`,
-    /// `sba::apply_player_loss` eliminates this player on the next SBA pass
-    /// - sticky, never cleared once set (same permanence 704.5a's
-    /// life-based elimination already has).
+    /// CR 704.5b, 120.3: set by `commands::propose_draw` on a draw from an
+    /// empty library. `sba::apply_player_loss` eliminates the player on the
+    /// next pass. Never cleared.
     pub drew_from_empty_library: bool,
-    /// Number of mulligans this player took during pregame (CR 103.5). Used
-    /// after the player keeps their hand to determine how many cards they must
-    /// put on the bottom of their library. Reset is not needed — this value is
-    /// only read once (during the bottoming step) and the pregame phase never
-    /// repeats.
+    /// Mulligans taken in pregame (CR 103.5), read once to size the bottoming
+    /// step.
     pub mulligans_taken: u32,
-    /// Set to `true` when this player submits `KeepHand` during pregame.
-    /// `next_mulligan_player` skips players where this is `true`; all players
-    /// start `false` so they all get a decision before the first turn.
+    /// Set by `KeepHand`. `next_mulligan_player` skips players with this set.
     pub hand_kept: bool,
-    /// CR 903.8 (commander tax): how many times this player has cast each
-    /// commander from the command zone so far this game, keyed by
-    /// `CardDefinition.name` rather than `ObjectId` — CR 400.7 mints a new
-    /// id every cast (and every 903.9a return), so an id can't track "the
-    /// same commander" across a cast/death/return/recast cycle the way a
-    /// card's name can. Partner commanders (CR 702.124d) get independent
-    /// entries automatically, since they have different names.
+    /// CR 903.8: times each commander was cast from the command zone, keyed
+    /// by `CardDefinition.name` for the same reason as
+    /// `commander_damage_taken` (Partners, CR 702.124d).
     pub commander_casts: std::collections::HashMap<String, u32>,
 }
 
@@ -88,9 +69,7 @@ impl PlayerState {
     }
 
     pub fn lose_life(&mut self, amount: i32) {
-        // CR 119: negative life isn't special-cased in the rules text - 0-or-
-        // less life is what the CR 704.5a SBA checks for, so this just
-        // subtracts; no clamping to 0 here.
+        // CR 119, 704.5a: no clamp, since the SBA checks for 0 or less.
         self.life -= amount;
     }
 
@@ -98,80 +77,50 @@ impl PlayerState {
         self.life += amount;
     }
 
-    /// Commander damage from a single source reaching 21 means this player
-    /// loses (CR 903.10a) — exposed as a query so the SBA loop can check it
-    /// without duplicating the threshold elsewhere. Takes the commander's
-    /// own name (see `commander_damage_taken`'s own doc comment for why),
-    /// not an `ObjectId` - a caller holding a live object still needs one
-    /// lookup (`object.definition.name`) to get there.
+    /// CR 903.10a: commander damage from one source, so the SBA loop does not
+    /// repeat the 21 threshold. Takes the commander's name
+    /// (`object.definition.name`), not an id.
     pub fn commander_damage_from(&self, source_name: &str) -> u32 {
         self.commander_damage_taken.iter().find(|(s, _)| s == source_name).map(|(_, n)| *n).unwrap_or(0)
     }
 }
 
-/// CR 402.2's two real shapes: "you have no maximum hand size" and "your
-/// maximum hand size is N" — deliberately not a third generic "delta" shape
-/// (no real card says "your maximum hand size is two more"), matching this
-/// engine's "model the shapes that exist" stance elsewhere.
+/// CR 402.2: "no maximum hand size" or "maximum hand size is N". There is no
+/// relative shape, since no real card says "two more".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HandSizeEffect {
     NoMaximum,
     SetTo(u32),
 }
 
-/// CR 402.2/303.4m: which player(s) a `HandSizeModifier` affects — either
-/// the same `FilterController` (you/opponent/any) perspective `CostModifier`
-/// already uses, or `EnchantedPlayer`, resolved fresh against `source`'s own
-/// live `attached_to_player` every time (CR 303.4m: "an ability of a
-/// permanent that refers to the 'enchanted player' refers to whatever player
-/// that permanent is attached to"). A sibling variant, not a widened
-/// `FilterController` itself — `FilterController` is CR 108.4's own "you"/
-/// "opponent"/"any" vocabulary, unrelated to attachment, and this engine's
-/// established precedent (`AffectedFilter::EnchantedOnly`, `phase5/enchanted-
-/// reference`) already treats "enchanted" as a separate concept from a
-/// controller-relative filter rather than folding it into one. Mirrors
-/// `AffectedFilter::EnchantedOnly`'s own `source.attached_to == Some(object.
-/// object_id)` check exactly, just the player-attach sibling field
-/// (`attached_to_player`) and resolved via `GameState` lookup rather than an
-/// already-borrowed `&GameObject`, since `effective_max_hand_size` only ever
-/// had a bare `PlayerId` to check against before this variant existed.
+/// CR 402.2, 303.4m: which players a `HandSizeModifier` affects.
+/// `EnchantedPlayer` resolves against `source`'s live `attached_to_player`.
+/// It is a sibling of `FilterController` because that is the CR 108.4
+/// you/opponent/any vocabulary, unrelated to attachment (as with
+/// `AffectedFilter::EnchantedOnly`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HandSizeAffected {
     Filter(FilterController),
     EnchantedPlayer,
 }
 
-/// CR 402.2: a static "you/each player/your opponents have no maximum hand
-/// size"-style effect — deliberately **not** a `ContinuousEffect`/CR 613
-/// layer, same reasoning `cost.rs`'s `CostModifier` already established for
-/// cost modification: hand size isn't a characteristic query, and `Layer` is
-/// meant to be exactly the CR 613.1 layer list, nothing else. `controller`/
-/// `affected` mirror `CostModifier`'s own `controller`/`filter.controller`
-/// split exactly — whose "you"/"opponent" perspective this modifier's text
-/// is written from, and which player(s) it actually affects.
+/// CR 402.2: a static maximum-hand-size effect. Not a CR 613 layer, because
+/// hand size is not a characteristic (as with `CostModifier`). `controller` is
+/// whose "you" the text uses, and `affected` is who it hits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HandSizeModifier {
     pub source: ObjectId,
     pub controller: PlayerId,
     pub affected: HandSizeAffected,
     pub effect: HandSizeEffect,
-    /// CR 613.7-style "latest wins" tiebreak between two conflicting
-    /// modifiers that both apply to the same player — hand size isn't a CR
-    /// 613 layer at all, so there's no dependency (613.8) analysis to do,
-    /// only this same timestamp-order convention every other flat-override
-    /// continuous effect in this engine already uses.
+    /// "Latest wins" tiebreak between conflicting modifiers (CR 613.7 style).
+    /// No CR 613.8 dependency analysis applies outside the layers.
     pub timestamp: SequenceNo,
 }
 
-/// CR 402.2: `player`'s current maximum hand size, given whatever
-/// `HandSizeModifier`s currently apply — `None` means "no maximum hand
-/// size." Multiple applicable modifiers don't stack; the one with the
-/// latest `timestamp` wins outright (see `HandSizeModifier::timestamp`'s own
-/// doc comment). `base` is normally 7 (CR 402.2) — the caller's problem, not
-/// this function's, same "base value supplied by the caller" split
-/// `cost::apply_cost_modifiers` already uses for `ManaCost`. `state` is only
-/// needed to resolve `HandSizeAffected::EnchantedPlayer` (`phase5/enchanted-
-/// player-hand-size`) — every other `affected` shape ignores it.
+/// CR 402.2: `player`'s maximum hand size, `None` for no maximum. Modifiers
+/// do not stack, and the latest `timestamp` wins. The caller supplies `base`
+/// (normally 7). `state` is used only for `HandSizeAffected::EnchantedPlayer`.
 pub fn effective_max_hand_size(state: &GameState, modifiers: &[HandSizeModifier], player: PlayerId, base: u32) -> Option<u32> {
     let winner = modifiers
         .iter()
@@ -193,65 +142,37 @@ pub fn effective_max_hand_size(state: &GameState, modifiers: &[HandSizeModifier]
     }
 }
 
-/// CR 701.20/701.18c/303.4m: which player(s) a `HandRevealModifier` affects —
-/// same two-shape split `HandSizeAffected` already established
-/// (`FilterController`'s you/opponent/any, or `EnchantedPlayer` resolved
-/// fresh against `source`'s own live `attached_to_player`). A genuinely
-/// separate sibling type, not shared with `HandSizeAffected` despite the
-/// identical shape — this is only the *second* mechanism needing it
-/// (`hand_size_modifiers`/`cost_modifiers` are the other two player-directed
-/// modifier mechanisms, neither the same domain), and sharing a type across
-/// two unrelated CR concepts on their second occurrence would be premature;
-/// worth extracting into one shared `PlayerFilter`-style type if a third
-/// mechanism ever needs the identical shape.
+/// CR 701.20, 701.18c, 303.4m: which players a `HandRevealModifier` affects.
+/// A separate type from `HandSizeAffected` despite the same shape, because
+/// they serve unrelated rules. Extract a shared type if a third mechanism
+/// needs it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HandRevealAffected {
     Filter(FilterController),
     EnchantedPlayer,
 }
 
-/// CR 701.20a/701.18c: a static "plays with hand revealed"-style effect
-/// (Telepathy's own worked example under CR 701.20c: "Your opponents play
-/// with their hands revealed") — deliberately **not** a `ContinuousEffect`/CR
-/// 613 layer, same reasoning `HandSizeModifier` already established (this
-/// isn't a characteristic query). No `effect` field the way `HandSizeModifier`
-/// has `HandSizeEffect` — CR 701.20a's "reveal" has no magnitude, existence
-/// of an applicable modifier alone means "revealed."
+/// CR 701.20a, 701.18c: a static "plays with hand revealed" effect, such as
+/// Telepathy (CR 701.20c). Not a CR 613 layer. It has no `effect` field,
+/// because any applicable modifier means revealed.
 ///
-/// `phase5/hand-reveal-modifier`: deliberately a mechanism only, not wired to
-/// any real enforcement — this engine has no consumer that could act on it
-/// yet. `GameObject.visibility`/`VisibilityPolicy::is_visible_to` is the
-/// obvious candidate but still has zero callers, and
-/// `script::encode::state_to_lua`/`card_summary_to_lua` don't parameterize by
-/// viewer at all — they structurally never encode hand *contents* for any
-/// player, revealed or not (only a `hand_count`), so there's nothing today
-/// for "revealed" to change from that consumer's perspective. Same "real but
-/// currently unreachable, named not hidden" stance `VisibilityPolicy` itself
-/// already takes — proven here only via `is_hand_revealed`'s own direct unit
-/// tests, not an end-to-end gameplay consumer.
+/// Nothing enforces it yet: `VisibilityPolicy::is_visible_to` has no callers,
+/// and `script::encode::state_to_lua` encodes only `hand_count`, never hand
+/// contents. Only `is_hand_revealed`'s unit tests exercise it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HandRevealModifier {
     pub source: ObjectId,
     pub controller: PlayerId,
     pub affected: HandRevealAffected,
-    /// Same CR 613.7-style ordering convention `HandSizeModifier::timestamp`
-    /// carries, kept for consistency even though `is_hand_revealed`'s own OR
-    /// semantics (see its own doc comment) never actually need to break a
-    /// tie by it - nothing about "revealed" conflicts the way a hand-size
-    /// `SetTo`/`NoMaximum` override can.
+    /// Kept for consistency with `HandSizeModifier::timestamp`.
+    /// `is_hand_revealed` ORs every modifier, so nothing breaks ties.
     pub timestamp: SequenceNo,
 }
 
-/// CR 701.20a: whether `player`'s hand is currently revealed to all players,
-/// given whatever `HandRevealModifier`s currently apply. Plain boolean OR
-/// across every applicable modifier — unlike `effective_max_hand_size`'s
-/// "latest timestamp wins" override resolution, reveal has no magnitude to
-/// conflict over (CR 701.20c: "a card that is currently revealed may be
-/// revealed again" - two reveal sources simply both hold, neither overrides
-/// the other). No `viewer` parameter, unlike a "look at" effect (CR 701.20e,
-/// scry/surveil's own shape) - CR 701.20a's "show that card to *all*
-/// players" means reveal is never scoped to one specific viewer, the actual
-/// textual distinction between "reveal" and "look."
+/// CR 701.20a: whether `player`'s hand is revealed to all players. An OR
+/// across applicable modifiers, since reveal has no magnitude to conflict
+/// (CR 701.20c). There is no `viewer` parameter: reveal shows to all, unlike
+/// a "look at" effect (CR 701.20e).
 pub fn is_hand_revealed(state: &GameState, modifiers: &[HandRevealModifier], player: PlayerId) -> bool {
     modifiers.iter().any(|m| match m.affected {
         HandRevealAffected::Filter(FilterController::You) => player == m.controller,
@@ -263,46 +184,30 @@ pub fn is_hand_revealed(state: &GameState, modifiers: &[HandRevealModifier], pla
     })
 }
 
-/// CR 121.2b: which player(s) a `DrawLimitModifier` affects. Narrowed to
-/// `Filter(FilterController)` only, unlike `HandSizeAffected`/
-/// `HandRevealAffected`'s two-shape split - no known real card needs an
-/// `EnchantedPlayer` form of this effect (both those siblings had a real
-/// worked example driving that variant; this one doesn't), so it's left out
-/// rather than spec-built ahead of a real case. Add it the same way
-/// `HandRevealAffected` mirrored `HandSizeAffected` if one ever turns up.
+/// CR 121.2b: which players a `DrawLimitModifier` affects. Only `Filter`,
+/// because no real card needs an `EnchantedPlayer` form. Add one like
+/// `HandRevealAffected` if one appears.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DrawLimitAffected {
     Filter(FilterController),
 }
 
-/// CR 121.2b: a static "player can't draw more than one card each turn"-
-/// style effect - the third player-level continuous effect in this cluster,
-/// same "distinct mechanism from the CR 613 layer system" reasoning
-/// `HandSizeModifier`/`HandRevealModifier` already established (this isn't a
-/// characteristic query either). Unlike `HandRevealModifier`, this one has a
-/// real enforcement consumer from the start: `commands::propose_draw`, the
-/// one choke point both `Engine::continue_draw_cards` and the turn-based
-/// `Step::Draw` handling already share.
+/// CR 121.2b: a static "can't draw more than one card each turn" effect. Not
+/// a CR 613 layer. `commands::propose_draw` enforces it, the one choke point
+/// for `Engine::continue_draw_cards` and `Step::Draw`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DrawLimitModifier {
     pub source: ObjectId,
     pub controller: PlayerId,
     pub affected: DrawLimitAffected,
-    /// CR 121.2b's own text is always "more than one," but this is a plain
-    /// magnitude rather than a hardcoded `1` - costs nothing extra and
-    /// matches `HandSizeEffect::SetTo(u32)`'s own precedent of not
-    /// hardcoding the one real number every printed card happens to use.
+    /// CR 121.2b: the cap per turn, a magnitude and not a hardcoded 1.
     pub limit: u32,
-    /// Same CR 613.7-style "latest wins" tiebreak `HandSizeModifier::
-    /// timestamp` documents - two conflicting limits on the same player
-    /// (rare, but no rules reason to forbid it) resolve the same way.
+    /// "Latest wins" tiebreak, as in `HandSizeModifier::timestamp`.
     pub timestamp: SequenceNo,
 }
 
-/// CR 121.2b: `player`'s current per-turn draw limit, given whatever
-/// `DrawLimitModifier`s currently apply - `None` means no limit. Mirrors
-/// `effective_max_hand_size`'s own "latest timestamp wins outright, no
-/// stacking" resolution exactly.
+/// CR 121.2b: `player`'s per-turn draw limit, `None` for none. The latest
+/// timestamp wins, as in `effective_max_hand_size`.
 pub fn effective_draw_limit(modifiers: &[DrawLimitModifier], player: PlayerId) -> Option<u32> {
     modifiers
         .iter()
@@ -315,47 +220,30 @@ pub fn effective_draw_limit(modifiers: &[DrawLimitModifier], player: PlayerId) -
         .map(|m| m.limit)
 }
 
-/// CR 305.2: which player(s) a `LandPlayModifier` affects — same narrowed
-/// `Filter(FilterController)`-only shape `DrawLimitAffected` already takes,
-/// same reasoning (no real card needs an `EnchantedPlayer` form of this
-/// effect either).
+/// CR 305.2: which players a `LandPlayModifier` affects. Only `Filter`, as in
+/// `DrawLimitAffected`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LandPlayAffected {
     Filter(FilterController),
 }
 
-/// CR 305.2: a static "you may play an additional land each turn"-style
-/// effect (Exploration, Azusa, ...) — same "distinct mechanism from the CR
-/// 613 layer system" reasoning `DrawLimitModifier` and its siblings already
-/// establish. Deliberately **not** shaped like `DrawLimitModifier` despite
-/// looking similar: CR 305.2's land-play increases genuinely *stack* — two
-/// Explorations on the battlefield at once means 3 land plays a turn, not 2
-/// (the max of the two) — so `total_additional_land_plays` below sums every
-/// matching modifier rather than taking the latest timestamp, and there's no
-/// `timestamp` field here at all (nothing to tiebreak when every matching
-/// modifier counts). `commands::retire_object` purges this list (and its
-/// `DrawLimitModifier`/`HandSizeModifier`/`HandRevealModifier` siblings) by
-/// `source` once the granting permanent leaves the battlefield (CR 611.3b:
-/// a static ability's continuous effect only applies while its source
-/// remains on the battlefield) — `phase5/modifier-source-cleanup`.
+/// CR 305.2: a static "play an additional land" effect (Exploration, Azusa).
+/// Not a CR 613 layer. Unlike `DrawLimitModifier`, increases stack (two
+/// Explorations give 3 land plays), so `effective_land_play_limit` sums them
+/// and there is no `timestamp`. `commands::retire_object` purges this list
+/// and its sibling modifier lists by `source` once the permanent leaves the
+/// battlefield (CR 611.3b).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LandPlayModifier {
     pub source: ObjectId,
     pub controller: PlayerId,
     pub affected: LandPlayAffected,
-    /// How many *additional* land plays this grants (CR 305.2's own text is
-    /// always "an additional land," i.e. 1, but this is a plain magnitude
-    /// rather than a hardcoded `1` - same "don't hardcode the one real
-    /// number every printed card happens to use" precedent `DrawLimitModifier
-    /// ::limit` already set).
+    /// Additional land plays granted, a magnitude and not a hardcoded 1.
     pub additional: u32,
 }
 
-/// CR 305.2's effective per-turn land-play limit for `player`: `1 +` the sum
-/// of every applicable `LandPlayModifier::additional` - stacking, unlike
-/// `effective_draw_limit`'s "latest wins" resolution (see `LandPlayModifier`'s
-/// own doc comment for why the two mechanisms diverge despite looking
-/// structurally similar).
+/// CR 305.2: `player`'s land-play limit, `1` plus the sum of applicable
+/// `additional`. Stacking, unlike `effective_draw_limit`.
 pub fn effective_land_play_limit(modifiers: &[LandPlayModifier], player: PlayerId) -> u32 {
     1 + modifiers
         .iter()
@@ -368,17 +256,11 @@ pub fn effective_land_play_limit(modifiers: &[LandPlayModifier], player: PlayerI
         .sum::<u32>()
 }
 
-/// CR 121.2b's own "this turn" scope: how many cards `player` has drawn so
-/// far in the current turn - bounded by the most recent `GameEventKind::
-/// TurnStarted` in `state.ledger`, same append-only-ledger-scan convention
-/// `replacement::opponent_damaged_this_turn` already established for CR
-/// 702.54a Bloodthirst (no `TurnStarted` yet scans from the beginning
-/// instead of treating the count as unknowable). Counts `ZoneChange { from:
-/// Library, to: Hand, .. }` events whose `last_known_info.owner` is
-/// `player` - a draw always moves a card from a player's own library to
-/// their own hand, so ownership (not `state.objects` liveness, which the
-/// card may have already left by now) is the correct, always-available
-/// signal.
+/// CR 121.2b: cards `player` has drawn this turn, counted from the ledger
+/// after the latest `TurnStarted` (the same scan as
+/// `replacement::opponent_damaged_this_turn`). Counts library-to-hand
+/// `ZoneChange` events by `last_known_info.owner`, since the card may no
+/// longer be in `state.objects`.
 pub fn cards_drawn_this_turn(state: &GameState, player: PlayerId) -> u32 {
     let turn_start = state.ledger.iter().rposition(|e| matches!(e.kind, GameEventKind::TurnStarted { .. }));
     let scan_from = turn_start.map(|i| i + 1).unwrap_or(0);
