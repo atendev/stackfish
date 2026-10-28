@@ -1,14 +1,6 @@
-//! `Engine::open_decision` and `Engine::answer`. An Answer is checked in this
-//! order: a Decision is open, the Answer names that Decision's id, it comes
-//! from the player the Decision names, its reply variant matches the shape,
-//! and the choice is legal. The first four checks and the Pick checks run
-//! here. Everything else is the engine's own validation, which leaves the
-//! pause untouched when it fails, so a rejected Answer changes nothing.
-//!
-//! Every typed engine error that survives the checks above maps to
-//! `invalid_choice`. The `NotAwaiting*`, `NotCurrentPlayer` and `WrongPlayer`
-//! variants cannot occur here because the open pause and the player were
-//! already confirmed.
+//! `Engine::open_decision` and `Engine::answer`: the checks on an Answer and the
+//! routing of it to the engine's `submit_*` methods. See `DESIGN.md` for the
+//! rest.
 
 use std::fmt::Debug;
 
@@ -35,6 +27,10 @@ impl Engine {
     /// Decision. On success the engine still has to be stepped to run on to
     /// its next pause. On rejection nothing changes and the Decision stays
     /// open.
+    ///
+    /// Checks run in this order: a Decision is open, the id matches, the player
+    /// matches, the reply variant fits the shape, and the choice is legal.
+    /// The engine's own validation covers the rest without touching the pause.
     pub fn answer(&mut self, player: PlayerId, answer: Answer) -> Result<(), Rejection> {
         let Some(described) = open::describe(self) else {
             return Err(Rejection::new(RejectionCode::NotOpen, "no Decision is open"));
@@ -238,8 +234,8 @@ fn shape_matches(shape: &ReplyShape, reply: &Reply) -> bool {
     )
 }
 
-/// The engine broke while carrying out an Answer (035). The detail stays on the
-/// engine (`Engine::fatal_error`); this text can reach a Seat.
+/// The detail stays on the engine (`Engine::fatal_error`) because this text can
+/// reach a Seat.
 fn internal() -> Rejection {
     Rejection::new(RejectionCode::Internal, "the engine hit an internal error")
 }
@@ -258,6 +254,9 @@ fn cascade_error(error: CascadeChoiceError) -> Rejection {
     }
 }
 
+// Every typed engine error that gets past the checks in `answer` is an invalid
+// choice. The `NotAwaiting*`, `NotCurrentPlayer` and `WrongPlayer` variants
+// cannot occur because the open pause and the player were already confirmed.
 fn invalid<E: Debug>(error: E) -> Rejection {
     Rejection::new(RejectionCode::InvalidChoice, format!("the engine rejected the answer: {error:?}"))
 }

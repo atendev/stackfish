@@ -1,15 +1,6 @@
-//! The host-facing facade over the engine's pauses. A `Decision` says who must
-//! choose and what shape the reply takes; an `Answer` is that player's reply.
-//! `Engine::open_decision` builds the Decision from the current
-//! `ProcessState`, and `Engine::answer` routes an Answer to the matching
-//! `submit_*`/`decline_*` method. The engine's typed pauses and error enums
-//! stay as they are; this module is the only place that maps them onto reply
-//! shapes and rejection codes.
-//!
-//! Decision ids come from a counter on `Engine`. The host `Session` is its only
-//! caller, so ids stay in step and replay rebuilds the same ids from the same
-//! seed. Mixing direct `submit_*` calls with `answer` on one `Engine` leaves
-//! the counter out of step.
+//! The host-facing facade over the engine's pauses: `Decision`, `Answer` and the
+//! mapping from `ProcessState` and engine errors to reply shapes and rejection
+//! codes. See `DESIGN.md` for the rest.
 
 mod answer;
 mod check;
@@ -36,11 +27,9 @@ pub struct DecisionId(pub u64);
 
 /// What a Pick Decision offers and what a Pick Answer names. Most picks are
 /// objects or players, so those reuse the engine's `Target`. A CR 616.1
-/// replacement choice picks between effects, which are not targets.
-///
-/// Deviation from ticket 005, which names `Object | Player`: `Target` also
-/// has `Ability` (an ability on the stack, CR 113.9), which a trigger or
-/// script can legally target.
+/// replacement choice picks between effects, which are not targets. `Target`
+/// includes `Ability` (CR 113.9) because a trigger or script can legally target
+/// an ability on the stack.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Candidate {
     Target(Target),
@@ -155,7 +144,7 @@ pub enum RejectionCode {
     StaleDecision,
     /// The reply variant does not match the open Decision's shape.
     WrongAnswerShape,
-    /// The engine broke while carrying out the Answer (035). Unlike every other
+    /// The engine broke while carrying out the Answer. Unlike every other
     /// code this one gives no guarantee that nothing changed: the engine is
     /// fatal (`Engine::fatal_error`) and `step()` only reports the error.
     Internal,
@@ -175,6 +164,8 @@ impl RejectionCode {
     }
 }
 
+/// A refused Answer: a stable `code` for hosts to branch on and a `message`
+/// for people.
 #[derive(Clone, Debug)]
 pub struct Rejection {
     pub code: RejectionCode,
@@ -187,7 +178,10 @@ impl Rejection {
     }
 }
 
-/// Hands out Decision ids and remembers which one is open.
+/// Hands out Decision ids and remembers which one is open. The host `Session`
+/// is the only caller, so replay from the same seed rebuilds the same ids.
+/// Mixing direct `submit_*` calls with `answer` on one `Engine` leaves the
+/// counter out of step.
 #[derive(Debug)]
 pub(crate) struct DecisionTracker {
     next: u64,
