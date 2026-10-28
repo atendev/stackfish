@@ -3,9 +3,9 @@ id: 036
 title: Mode-combination predicate
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question

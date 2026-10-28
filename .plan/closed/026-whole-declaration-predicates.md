@@ -3,9 +3,9 @@ id: 026
 title: Whole-declaration combat predicates
 type: task
 mode: HITL
-status: open
+status: closed
 blocked_by: []
-claimed: true
+claimed: false
 ---
 
 ## Question
