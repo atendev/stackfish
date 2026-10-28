@@ -25,6 +25,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 044: Trimmed comments across all 237 test files in `crates/engine/tests`, `crates/host/tests`, `crates/scenario/tests` and `crates/carddb/tests` to the `CLAUDE.md` comment rules (comment lines 17,977 -> 4,769, all 52 `TODO`s preserved, `comment_diff.py` exit 0).
 - 045: Measured `stackfish-engine` test build times (7.65s wall / 1m 53s CPU after touching `lib.rs`, 95% spent linking 224 test binaries totaling 16 GiB) and decided to proceed with both halves of 046: consolidating `crates/engine/tests/` into a single test binary (`tests/main.rs` with modules) and renaming `phase5_*` test files by feature.
 - 046: Consolidated 224 engine integration test files into a single binary (`crates/engine/tests/main.rs` with `autotests = false`) and stripped `phase5_` from all 229 Rust test files across `crates/engine/tests/` and `crates/host/tests/`. Incremental test rebuild after touching `crates/engine/src/lib.rs` dropped from 7.65s (1m 53s CPU) to 2.43s (4.64s CPU).
+- 047: Audited `crates/engine/src/` for missing local unit tests. About 200 pure helpers across 35 files lack `#[cfg(test)]` coverage; the densest gaps are in `types/`, `commands/legality.rs`, `commands/combat/*`, `script/decode.rs`, `sba.rs`, `replacement.rs`, and `triggers.rs`. [closed/047-missing-unit-tests-audit.md]
 
 ## Tracks
 
@@ -81,9 +82,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 047, 049, 050, 054, 055, 059
+- 048, 049, 050, 054, 055, 059
 
-Suggested order. Note that `049` was already unblocked when `040` closed; added to the frontier list here alongside `059` (unblocked by `046`).
+Suggested order. Start with 048 now that 047 is closed. The remaining research tickets (049, 050, 054, 055) and the grilling 059 can run in parallel or after 048 is done.
 
 ## Not yet specified
 
