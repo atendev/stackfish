@@ -1,7 +1,5 @@
-//! Exercises inline `[[setup]]` card fields (`inline_setup::expand`) end to
-//! end through the real engine - not just the TOML-merge unit tests in
-//! `inline_setup.rs` itself. Uses `stackfish_scenario::parse`, same as
-//! `card_templates_end_to_end.rs` does for its own expansion pass.
+//! Inline `[[setup]]` card fields work end to end through the engine. These tests use `parse`,
+//! which expands them.
 
 use rusqlite::Connection;
 use stackfish_scenario::{parse, run, AssertionOutcome, EntryOutcome};

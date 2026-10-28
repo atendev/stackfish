@@ -1,6 +1,5 @@
-//! Exercises `stackfish_scenario::run_db_tests`: every active `card_tests`
-//! row in a `stackfish-carddb` SQLite file is its own scenario TOML, run
-//! against the real card data living in that same file.
+//! `run_db_tests` runs every active `card_tests` row as its own scenario against the cards in
+//! the same SQLite file.
 
 use rusqlite::Connection;
 use stackfish_scenario::DbTestResult;
@@ -151,9 +150,7 @@ fn run_db_tests_reports_a_failing_assertion_as_a_hard_failure() {
     std::fs::remove_file(&db_path).ok();
 }
 
-/// `is_active = 0` rows are skipped entirely, and among active rows for the
-/// same `(oracle_id, test_name)` only the highest `version` runs - same
-/// convention `CardDb::load_script_ref` already uses for `card_scripts`.
+// Inactive rows are skipped, and only the highest active `version` of a test runs.
 #[test]
 fn run_db_tests_skips_inactive_rows_and_picks_the_highest_active_version() {
     let db_path = unique_temp_path("cards.sqlite");

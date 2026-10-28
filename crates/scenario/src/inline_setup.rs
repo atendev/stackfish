@@ -1,47 +1,15 @@
-//! Lets a `[[setup]]` entry carry `CardSpec` fields (including `template`/
-//! `db_script_id`) directly instead of needing a separate `[[cards]]` block
-//! for a one-off fixture card - pure TOML-level substitution, same "done
-//! before `ScenarioFile` is ever deserialized" trick `card_templates::expand`
-//! already uses for `template`. `SetupEntry` itself never sees any of these
-//! extra fields; by the time serde gets the table, they've already been
-//! moved into a synthesized `[[cards]]` entry keyed by the setup entry's own
-//! `card` value.
-//!
-//! ```toml
-//! [[setup]]
-//! player = 0
-//! zone = "battlefield"
-//! card = "forest"
-//! template = "test_land_green"
-//! ```
-//!
-//! is equivalent to writing out
-//!
-//! ```toml
-//! [[cards]]
-//! key = "forest"
-//! template = "test_land_green"
-//!
-//! [[setup]]
-//! player = 0
-//! zone = "battlefield"
-//! card = "forest"
-//! ```
-//!
-//! by hand. Runs *before* `card_templates::expand`, so a `template` field
-//! moved over this way still gets expanded normally afterward.
+//! Moves inline `CardSpec` fields on a `[[setup]]` entry into a synthesized `[[cards]]` entry
+//! before deserialization. It runs before `card_templates::expand`, so a moved `template`
+//! still expands. Format in `docs/scenario_format.md`.
 
 use toml::{Table, Value};
 
-/// `SetupEntry`'s own real fields - anything else on a `[[setup]]` table is
-/// treated as an inline `CardSpec` field and gets moved out.
+// Anything else on a `[[setup]]` table is an inline `CardSpec` field and gets moved out.
 const SETUP_FIELDS: &[&str] =
     &["player", "zone", "card", "controlled_since_turn", "damage_marked", "is_commander"];
 
-/// Expands every `[[setup]]` entry's inline card fields (if any) into a
-/// synthesized `[[cards]]` entry, in place. A no-op for any entry that only
-/// sets `SETUP_FIELDS` - i.e. every pre-existing scenario file is completely
-/// unaffected.
+/// Expands inline card fields into synthesized `[[cards]]` entries in place. An entry with
+/// only `SETUP_FIELDS` is untouched.
 pub(crate) fn expand(root: &mut Table) {
     let Some(Value::Array(setup_entries)) = root.get("setup") else { return };
 

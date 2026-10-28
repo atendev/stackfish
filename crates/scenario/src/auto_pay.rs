@@ -7,14 +7,9 @@ use crate::schema::*;
 use crate::actions::build_payment_plan;
 use crate::run::{StepOutcome, run_action, run_payment};
 
-/// Reduces `cost` to "N generic + these exact colored pips" - the only mana
-/// shape a scenario `[[cards]]` entry's `generic_cost`/`colors` fields can
-/// ever build (see `CardSpec`'s own doc comment: no hybrid/Phyrexian/snow
-/// symbol can be expressed in TOML yet). `None` for anything `auto_pay` isn't
-/// prepared to solve - a real `db_script_id` card's hybrid/Phyrexian mana, a
-/// bare `{C}` colorless-atom symbol, or any non-mana `additional`/
-/// `alternative` cost component - so the caller can report a clear "can't
-/// handle this" error instead of mis-paying.
+// Reduces `cost` to generic mana plus exact colored pips, the only shape a `[[cards]]` entry
+// can build. `None` for hybrid, Phyrexian, `{C}` or any non-mana component, so the caller
+// reports it instead of mis-paying.
 fn simple_mana_requirement(cost: &CostSpec) -> Option<(u32, Vec<Color>)> {
     if !cost.additional.is_empty() || !cost.alternative.is_empty() {
         return None;
@@ -32,12 +27,8 @@ fn simple_mana_requirement(cost: &CostSpec) -> Option<(u32, Vec<Color>)> {
     Some((generic, colors))
 }
 
-/// A player's floating mana, as a flat `[W, U, B, R, G, Colorless]` tally -
-/// the six plain (non-snow, non-restricted) `ManaPool` fields in one array so
-/// `auto_pay`'s own helpers below can index by color instead of matching on
-/// `Color` at every call site. Snow/restricted mana is ignored entirely -
-/// same "not representable in a scenario fixture yet" gap `CardSpec` already
-/// has, so a real `ManaPool` built from one always has both at zero.
+// Counts as `[W, U, B, R, G, Colorless]`. Snow and restricted mana is ignored because a
+// fixture pool never holds it.
 fn mana_tally(pool: &ManaPool) -> [u32; 6] {
     [pool.white, pool.blue, pool.black, pool.red, pool.green, pool.colorless]
 }
@@ -56,8 +47,6 @@ fn slot_letter(slot: usize) -> &'static str {
     ["W", "U", "B", "R", "G", "C"][slot]
 }
 
-/// True once `tally` has at least one unit of every required colored pip,
-/// with enough left over (regardless of color) to cover `generic` too.
 fn tally_covers(tally: &[u32; 6], generic: u32, pip_colors: &[Color]) -> bool {
     let mut remaining = *tally;
     for &color in pip_colors {
@@ -70,10 +59,7 @@ fn tally_covers(tally: &[u32; 6], generic: u32, pip_colors: &[Color]) -> bool {
     remaining.iter().sum::<u32>() >= generic
 }
 
-/// Which of `pip_colors` `tally` can't yet pay on its own - what a tapped
-/// mana source still needs to help with, used by `pick_mana_source` to
-/// prefer a source that actually closes a gap over one that would just add
-/// to an already-satisfied color.
+// Lets `pick_mana_source` prefer a source that closes a gap.
 fn missing_pip_colors(tally: &[u32; 6], pip_colors: &[Color]) -> Vec<Color> {
     let mut remaining = *tally;
     let mut missing = Vec::new();
@@ -88,12 +74,8 @@ fn missing_pip_colors(tally: &[u32; 6], pip_colors: &[Color]) -> Vec<Color> {
     missing
 }
 
-/// Builds the exact flat `units` list `PaymentPlan::validate` expects (CR
-/// 118.13a) from a tally already confirmed (by `tally_covers`) to hold
-/// enough: each colored pip spent as that exact color, `generic` more spent
-/// from whatever's left over afterward (W/U/B/R/G/Colorless, in that fixed
-/// order - an arbitrary but deterministic tie-break, not optimized to
-/// preserve any particular color for a later cost in the same scenario).
+// Generic mana comes from what is left in W/U/B/R/G/Colorless order, a deterministic tie-break.
+// CR 118.13a
 fn units_from_tally(mut tally: [u32; 6], generic: u32, pip_colors: &[Color]) -> Vec<String> {
     let mut units = Vec::new();
     for &color in pip_colors {
@@ -112,20 +94,9 @@ fn units_from_tally(mut tally: [u32; 6], generic: u32, pip_colors: &[Color]) -> 
     units
 }
 
-/// Finds one untapped, no-real-cost mana ability `payer` controls that can
-/// help pay the still-`missing` pip colors (or, once every pip is covered,
-/// just contribute toward the generic component) - `(source, ability_index)`
-/// ready to hand straight to `PlayerActionKind::ActivateAbility`.
-/// `ability_index` is this ability's own position among *all* of `source`'s
-/// registered abilities (matching `find_ability`'s `nth`-by-source lookup),
-/// not its position among just the mana ones.
-///
-/// Only ever considers a `CardSpec.mana_ability`-shaped ability - `kind:
-/// Activated, effect: Some(AddMana(_)), cost: None` (the implicit-tap,
-/// no-payment-pause shape `activate.rs` resolves synchronously) - a real
-/// costed mana ability (Treasure/Lotus-Petal-style sacrifice) is left
-/// untapped for a scenario author to handle by hand; see `resolve_auto_pay`'s
-/// own doc comment for why extending this is a TODO rather than done here.
+// Considers only an activated `AddMana` ability with no cost. `ability_index` counts all of
+// the source's abilities, matching `find_ability`, not just the mana ones.
+// TODO: consider a mana ability that has its own cost; see `resolve_auto_pay`
 fn pick_mana_source(
     state: &GameState,
     payer: PlayerId,
@@ -165,16 +136,9 @@ fn pick_mana_source(
     candidates.first().map(|(source, index, _)| (*source, *index))
 }
 
-/// The actual auto-pay algorithm: taps untapped no-cost mana sources `payer`
-/// controls until the pool covers `cost`, then returns the exact
-/// `PaymentPlan` to submit. Never touches anything outside `payer`'s own
-/// battlefield mana sources, and never guesses at a cost shape
-/// `simple_mana_requirement` doesn't recognize.
-///
-/// TODO: doesn't tap a real-cost mana ability (Treasure/Lotus-Petal-style) -
-/// `pick_mana_source` skips those entirely, so a scenario relying on one to
-/// fully pay a cost will get a clear "ran out of untapped mana sources"
-/// error here instead of a nested payment being solved automatically.
+/// Taps `payer`'s untapped no-cost mana sources until the pool covers `cost`, then returns
+/// the `PaymentPlan` to submit. It never guesses at a cost shape it does not recognize.
+// TODO: tap a mana ability that has its own cost (Treasure, Lotus Petal); `pick_mana_source` skips them
 pub(crate) fn resolve_auto_pay(engine: &mut Engine, payer: PlayerId, cost: &CostSpec) -> Result<PaymentPlan, String> {
     let (generic, pip_colors) = simple_mana_requirement(cost).ok_or_else(|| {
         "auto_pay can't handle this cost shape (hybrid/Phyrexian/snow mana, or a non-mana \
@@ -222,13 +186,8 @@ pub(crate) fn resolve_auto_pay(engine: &mut Engine, payer: PlayerId, cost: &Cost
     Ok(build_payment_plan(&ManaPaymentSpec { units }))
 }
 
-/// `CastSpell`/`ActivateAbility`'s own `auto_pay` field: once the base action
-/// has run, if it actually opened a payment pause (`Engine::
-/// pending_payment_cost`), automatically resolve and submit it via
-/// `resolve_auto_pay`/`run_payment` instead of leaving that to a separate
-/// `submit_payment` step. A no-op (returns `outcome` unchanged) if the base
-/// action didn't run cleanly, or didn't open a payment pause at all (a
-/// costless ability, say) - nothing to pay either way.
+/// Pays an open payment pause after a `CastSpell` or `ActivateAbility` with `auto_pay`. It
+/// returns `outcome` unchanged if the action failed or opened no pause.
 pub(crate) fn chain_auto_pay(engine: &mut Engine, payer: PlayerId, outcome: StepOutcome) -> StepOutcome {
     if !matches!(outcome, StepOutcome::Ran) {
         return outcome;

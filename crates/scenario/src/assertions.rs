@@ -40,12 +40,7 @@ pub(crate) fn check_assertion(
         AssertionSpec::ObjectZone { card, equals } => {
             let object_id = resolve_card(card, card_ids);
             let expected_kind = parse_zone_kind(equals);
-            // The stack isn't one of state.zones (it needs StackObject
-            // metadata - targets/modes/costs - not just an id list, see
-            // docs/implementation.md's zone notes), so a card sitting on
-            // the stack would never be found by the state.zones lookup
-            // alone. Fall back to state.stack so `equals = "stack"`
-            // actually means something here.
+            // The stack is not in `state.zones`, so fall back to `state.stack` for `"stack"`.
             let actual_kind = state
                 .zones
                 .iter()
@@ -171,17 +166,9 @@ pub(crate) fn check_assertion(
         }
         AssertionSpec::CommanderDamage { player, source_card, equals } => {
             let pid = PlayerId(*player);
-            // commander_damage_from now takes the commander's own name (see
-            // PlayerState::commander_damage_taken's own doc comment) - the
-            // source card's current ObjectId is only a means to read that
-            // name off its still-live GameObject, not the lookup key
-            // itself. `card_ids` is only remapped once, right after
-            // pregame - it can't follow a commander through a real CR
-            // 903.9a recast mid-scenario, so this assertion (like the rest
-            // of `resolve_card`'s callers) only supports asserting damage
-            // against a commander's *current* incarnation; a recast fixture
-            // would need a direct Rust test instead, same as
-            // phase5_commander_damage.rs's own recast coverage.
+            // The lookup key is the commander's name, read off its live object. `card_ids` is
+            // remapped only after pregame, so a recast mid-scenario cannot be followed.
+            // CR 903.9a
             let source_id = resolve_card(source_card, card_ids);
             let source_name = state.object(source_id).map(|o| o.definition.name.clone());
             let actual = source_name.and_then(|name| {

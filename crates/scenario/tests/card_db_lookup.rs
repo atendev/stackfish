@@ -1,8 +1,5 @@
-//! Exercises `CardSpec.db_script_id` / `ScenarioFile.card_db` end to end: a
-//! scenario TOML file can pull a real `CardDefinition` out of an external
-//! `stackfish-carddb` SQLite file instead of hand-writing every
-//! mana_cost/types/power/toughness/keywords field, keyed by the DB's stable
-//! `script_id` slug.
+//! `CardSpec.db_script_id` and `ScenarioFile.card_db` pull a real `CardDefinition` out of a
+//! card database by its `script_id` slug.
 
 use rusqlite::Connection;
 use stackfish_engine::{CardTypeSet, KeywordSet, PTValue, Subtype};
@@ -125,15 +122,8 @@ fn db_script_id_pulls_a_real_card_definition_into_a_scenario() {
     std::fs::remove_file(&db_path).ok();
 }
 
-/// `phase5/db-script-operation-fix`: a `db_script_id` card's own
-/// `s.operation()` (CR 608.2m) used to never get wired into
-/// `CardDefinition.effect` at all - `build_initial_state`'s `PendingScript
-/// Operation` collection only checked the TOML-inline `CardSpec.script`
-/// field, which is always `None` for a DB-sourced card, so the spell just
-/// resolved as a silent no-op regardless of what its real script said.
-/// Casts a DB-loaded Sorcery whose entire behavior is `s.operation()`
-/// returning `Game.Ops.GainLife(3)` and confirms the life gain actually
-/// happens - would fail (life stays 20) on the pre-fix code.
+// CR 608.2m
+// A DB card has no TOML `script`, so its `operation()` must still reach `CardDefinition.effect`.
 #[test]
 fn db_script_id_cards_own_operation_function_is_registered_and_runs() {
     let db_path = fixture_db_path();
@@ -225,15 +215,7 @@ fn db_script_id_without_card_db_panics_clearly() {
     let _ = build_initial_state(&file);
 }
 
-/// `card_db = "cards.sqlite"` (no directory component) must resolve against
-/// the scenario *file's own* directory (`ScenarioFile::base_dir`, set by
-/// `stackfish_scenario::load`), not the test process's current working
-/// directory — otherwise this would fail regardless of where `cargo test`
-/// happens to be invoked from, since neither the scenario TOML nor the DB
-/// file lives anywhere near the crate root. Deliberately uses `load()`
-/// (reads a real file from disk) rather than `toml::from_str` (what every
-/// other test in this file uses) - `toml::from_str` never sets `base_dir`,
-/// so it can't exercise this path at all.
+// Uses `load()` and not `toml::from_str`, which never sets `base_dir`.
 #[test]
 fn relative_card_db_path_resolves_against_scenario_file_directory_not_cwd() {
     let dir = unique_temp_path("relative-dir");

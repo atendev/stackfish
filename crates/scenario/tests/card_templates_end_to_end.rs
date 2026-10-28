@@ -1,9 +1,5 @@
-//! Exercises `template = "..."` on a `[[cards]]` entry end to end through
-//! the real engine — not just the TOML-merge unit tests in
-//! `card_templates.rs` itself. `stackfish_scenario::parse` (not
-//! `toml::from_str` directly) is what expands `template` before `CardSpec`
-//! ever sees the entry, so these use `parse` the same way `load`/
-//! `run_db_tests` do.
+//! `template = "..."` on a `[[cards]]` entry works end to end through the engine. These tests
+//! use `parse`, which expands the template, and not `toml::from_str`.
 
 use stackfish_scenario::{parse, run, AssertionOutcome, EntryOutcome};
 
@@ -62,9 +58,7 @@ fn template_land_taps_for_the_right_color() {
 
 #[test]
 fn entry_fields_override_the_template() {
-    // Named after the green template but overrides `mana_ability` to `U` -
-    // proves the entry's own field wins over the template's value for that
-    // same key, observable via which color actually lands in the pool.
+    // The green template with `mana_ability` set to `U`; the pool color shows which value won.
     let toml = r#"
         seed = 1
 

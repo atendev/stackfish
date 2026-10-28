@@ -20,23 +20,14 @@ pub enum EntryOutcome {
 pub struct EntryReport {
     pub description: String,
     pub outcome: EntryOutcome,
-    /// Mirrors `ScenarioStep::Action`'s own field - always `false` for an
-    /// assertion entry, or an action reached via the legacy `[[actions]]`/
-    /// `[[assertions]]` split (that shape has no way to set it).
+    /// Mirrors `ScenarioStep::Action`. Always `false` for an assertion or for the legacy
+    /// `[[actions]]` and `[[assertions]]` shape, which cannot set it.
     pub expect_error: bool,
 }
 
 impl EntryReport {
-    /// A "hard" failure is an assertion that actually ran and produced the
-    /// wrong answer, or an action outcome that didn't match what this entry
-    /// expected — the engine rejecting an action outright
-    /// (`StepOutcome::Errored` — per its own doc comment, "real code ran
-    /// and rejected the action on purpose") unless `expect_error` asked for
-    /// exactly that rejection, in which case the reverse (the engine
-    /// accepting it) is the failure instead. An action that's merely
-    /// unimplemented yet (`StepOutcome::Errored`'s sibling
-    /// `StepOutcome::NotImplemented`) is never a hard failure either way -
-    /// expected and shouldn't fail a Phase 4/5 test run.
+    /// A hard failure is a failed assertion, an engine rejection that `expect_error` did not
+    /// ask for, or an accepted action when `expect_error` did. `NotImplemented` is never one.
     pub fn is_hard_failure(&self) -> bool {
         match (&self.outcome, self.expect_error) {
             (EntryOutcome::Assertion(AssertionOutcome::Failed { .. }), _) => true,
@@ -57,15 +48,9 @@ impl ScenarioReport {
     }
 }
 
-/// CR 400.7: `PlayLand`/`CastSpell`/resolution all mint a *new* `ObjectId`
-/// for the moved object rather than reusing the old one - so a card's entry
-/// in `card_ids` (keyed by its TOML key, set once at setup time) goes stale
-/// the moment that card changes zones. Without this, any scenario action or
-/// assertion referencing a card by key after it's been cast/played would
-/// silently resolve to the wrong (or a now-nonexistent) id. Scans the ledger
-/// events `engine` just produced and follows each `ZoneChange`'s
-/// `last_known_info` (the pre-move snapshot, which still carries the old
-/// id) forward to its replacement.
+/// Follows each `ZoneChange` in `new_events` from the old id (in `last_known_info`) to the new
+/// one, since a zone change mints a new `ObjectId` and leaves the `card_ids` entry stale.
+// CR 400.7
 pub(crate) fn remap_moved_card_ids(card_ids: &mut HashMap<String, ObjectId>, new_events: &[GameEvent]) {
     for event in new_events {
         if let GameEventKind::ZoneChange { object: new_id, last_known_info: Some(old), .. } =

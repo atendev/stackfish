@@ -9,8 +9,6 @@ use crate::build::{build_continuous_effect, card_definition_from_spec, open_card
 use crate::report::remap_moved_card_ids;
 use crate::run::drain;
 
-/// Builds a `GameSettings` from a `GameSettingsSpec`, applying each present
-/// field as an override over `GameSettings::default()`.
 fn build_game_settings(spec: &GameSettingsSpec) -> GameSettings {
     let mut s = GameSettings::default();
     if let Some(v) = spec.shuffle_libraries { s.shuffle_libraries = v; }
@@ -24,15 +22,9 @@ fn build_game_settings(spec: &GameSettingsSpec) -> GameSettings {
     s
 }
 
-/// Builds an `Engine` via `Engine::new_game` from a `[game]` section.
-/// Also reconstructs `card_ids` so scenario steps can reference library
-/// cards by their `[[cards]]` key. `Engine::new_game` assigns object ids
-/// sequentially (one per library card, in player/library order starting at
-/// 0), so we track those initial ids here and then remap them through the
-/// pregame ledger events — `draw_opening_hand` and `return_hand_to_library`
-/// both log `ZoneChange` with `last_known_info`, so `remap_moved_card_ids`
-/// correctly follows each card to its post-pregame id and zone. Duplicate
-/// keys in a library get the last id (same as `[[setup]]` semantics).
+/// Builds an `Engine` through `Engine::new_game` and a map from `[[cards]]` keys to object
+/// ids. `new_game` numbers library cards sequentially, so the map starts from those ids and
+/// follows each card through the pregame moves. A key repeated in a library keeps its last id.
 pub(crate) fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (Engine, HashMap<String, ObjectId>) {
     let card_specs: HashMap<&str, &CardSpec> =
         file.cards.iter().map(|c| (c.key.as_str(), c)).collect();
@@ -41,9 +33,6 @@ pub(crate) fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (En
     let settings = build_game_settings(&game.settings);
     let rng_seed = game.rng_seed.or(file.seed).unwrap_or(0);
 
-    // Track initial object ids — Engine::new_game allocates sequentially
-    // starting at 0, one per library card, in the same player/card order
-    // we iterate here.
     let mut card_ids: HashMap<String, ObjectId> = HashMap::new();
     let mut next_id: u64 = 0;
 
@@ -55,11 +44,8 @@ pub(crate) fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (En
             next_id += 1;
             card_definition_from_spec(card_db.as_ref(), 0, spec)
         }).collect();
-        // CR 903.6: minted after this player's library, matching
-        // `Engine::new_game`'s own id-allocation order exactly (library
-        // cards first, then commanders, per player) - see this block's own
-        // leading comment on why `card_ids`/`next_id` have to mirror that
-        // order precisely.
+        // CR 903.6
+        // `new_game` mints a player's commander ids after that player's library, so mirror it.
         let commanders = gp.commanders.iter().map(|key| {
             let spec = card_specs.get(key.as_str())
                 .unwrap_or_else(|| panic!("game.players commanders references unknown card key '{key}'"));
@@ -77,18 +63,12 @@ pub(crate) fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (En
     };
 
     let mut engine = Engine::new_game(GameConfig { players: player_configs, turn_order, settings, rng_seed });
-    // Drive pregame automation (shuffle/draw/mulligan) to completion before
-    // any scenario step runs — `new_game` only sets up `Phase::PreGame`; the
-    // actual pregame actions happen on the first `step()` call, same as they
-    // would in live play.
+    // `new_game` only sets up the pregame phase; the shuffle, draw and mulligan run on the
+    // first steps.
     drain(&mut engine);
-    // Remap ids through pregame zone changes (draw_opening_hand and
-    // return_hand_to_library both mint new ObjectIds and log ZoneChange events).
+    // Drawing and returning cards mint new ObjectIds.
     remap_moved_card_ids(&mut card_ids, engine.state().ledger.as_slice());
-    // Same `mana_ability` -> `RegisteredAbility` workaround `build_initial_state`
-    // uses (no script bridge to register these from `CardDefinition` yet — see
-    // `Engine::state_mut`'s doc comment). Done after the remap above so each
-    // ability's `source` is the card's current (post-pregame) id.
+    // Register abilities after the remap so each `source` is the post-pregame id.
     for gp in &game.players {
         for key in &gp.library {
             let spec = card_specs[key.as_str()];
@@ -123,11 +103,7 @@ pub(crate) fn build_new_game_engine(file: &ScenarioFile, game: &GameSpec) -> (En
             if let Some(script) = spec.target_requirement.as_ref().and_then(|r| r.script.as_ref()) {
                 register_target_script(&mut engine, card_ids[key], script);
             }
-            // Same `resolved_script` reasoning as `build_initial_state` -
-            // `spec.script` alone misses a `db_script_id` card's real source,
-            // which only lives on the `CardDefinition` this card's own
-            // object already carries post-pregame (`phase5/db-script-
-            // operation-fix`).
+            // A `db_script_id` card's source lives only on its definition, not on `spec.script`.
             let resolved_script: Option<String> = match &engine
                 .state()
                 .object(card_ids[key])

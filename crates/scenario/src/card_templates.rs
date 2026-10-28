@@ -1,13 +1,5 @@
-//! `template = "name"` on a `[[cards]]` entry expands to a pre-written TOML
-//! table from `card_templates.toml` (this crate's own root, edit that file
-//! to add more) - lets a scenario fixture author a quick throwaway card
-//! ("a land that taps for green") without writing out every `CardSpec`
-//! field by hand. Pure TOML-level substitution done before `CardSpec` ever
-//! gets deserialized - `CardSpec` itself has no `template` field and never
-//! sees the word. The entry's own fields (anything besides `key`/`template`)
-//! are layered on top and win over the template's value for the same key,
-//! so a template can still be tweaked inline (e.g. `template =
-//! "test_creature_vanilla"` plus `power = 9` on the same entry).
+//! Expands `template = "name"` on a `[[cards]]` entry from `card_templates.toml` before
+//! deserialization. The entry's own fields win over the template's. See `docs/scenario_format.md`.
 
 use std::sync::OnceLock;
 use toml::{Table, Value};
@@ -22,8 +14,6 @@ fn templates() -> &'static Table {
     })
 }
 
-/// Expands every `[[cards]]` entry's `template` field in place, if present.
-/// A no-op if the scenario has no top-level `cards` array at all.
 pub(crate) fn expand(root: &mut Table) {
     let Some(Value::Array(cards)) = root.remove("cards") else { return };
     let expanded = cards.into_iter().map(expand_one).collect();
@@ -79,9 +69,7 @@ mod tests {
         };
 
         assert_eq!(result.get("key").unwrap().as_str(), Some("forest"));
-        // Entry's own `name` wins over the template's.
         assert_eq!(result.get("name").unwrap().as_str(), Some("Overridden Name"));
-        // Everything else comes from the template.
         assert_eq!(
             result.get("types").unwrap().as_array().unwrap()[0].as_str(),
             Some("Land")
@@ -90,7 +78,6 @@ mod tests {
             result.get("mana_ability").unwrap().as_array().unwrap()[0].as_str(),
             Some("G")
         );
-        // `template` itself doesn't leak into the merged table.
         assert!(!result.contains_key("template"));
     }
 
