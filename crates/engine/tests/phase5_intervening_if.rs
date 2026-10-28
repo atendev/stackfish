@@ -1,17 +1,5 @@
-//! Phase 5: CR 603.4's intervening-if clause ("When/Whenever/At X, if Y, Z"),
-//! backlog item 7's next sub-slice. Checked twice, independently: once when
-//! the trigger event fires (folded into `triggers::collect_triggers`,
-//! alongside but separate from the ability's own trigger-event `condition`),
-//! and again the instant it would resolve (`Engine`'s `ResolveStackTop`, CR
-//! 608.2a) - if false by then, the ability is removed from the stack and
-//! does nothing.
-//!
-//! `InterveningIfPrimitive::ControllerAtOrBelowLife(n)` is the one concrete
-//! shape this slice ships - real, common, and cleanly testable (nothing else
-//! needs constructing to flip it, just change life). The resolution-recheck
-//! test below is the actual proof this is two independent checks, not one
-//! cached result: a response spell changes life *between* the trigger being
-//! placed and it resolving.
+//! CR 603.4: an intervening-if clause is checked twice: when the trigger fires (in `collect_triggers`) and again as it would resolve (`ResolveStackTop`, CR 608.2a), and if false the ability is removed and does nothing.
+//! `ControllerAtOrBelowLife(n)` is the shape tested, and a response spell that changes life between the two checks proves they are independent.
 
 
 use stackfish_engine::engine::{Engine, StepStatus};
@@ -43,8 +31,6 @@ fn creature_definition(name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Heal: You gain 10 life." - the response spell used to invalidate
-/// the intervening-if between trigger-time and resolution.
 fn heal_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
@@ -86,10 +72,6 @@ fn interveningif_upkeep_ability(source: ObjectId, threshold: i32) -> RegisteredA
     }
 }
 
-/// Two-player state starting at `Phase::PreGame`/`Step::Untap`, p0 active,
-/// with `p0_life` as p0's starting life - mirrors
-/// `phase5_upkeep_triggers::two_player_state`, plus a Hand/Graveyard zone
-/// for the response spell.
 fn two_player_state(p0_life: i32) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -128,8 +110,7 @@ fn intervening_if_false_at_trigger_time_never_triggers_at_all() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let permanent = ObjectId(0);
-    // Life 10 > threshold 5 - the intervening-if is already false when
-    // upkeep begins.
+    // Life 10 > threshold 5, so the intervening-if is false when upkeep begins.
     let mut state = two_player_state(10);
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
@@ -184,22 +165,18 @@ fn a_response_spell_invalidating_the_condition_fizzles_the_trigger_at_resolution
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().stack.len(), 1, "intervening-if true at trigger time - collected and pushed");
 
-    // p0 holds priority with the upkeep trigger on the stack - responds by
-    // casting Test Heal, which goes on top (CR 601.2i/608.1: LIFO).
+    // p0 holds priority with the trigger on the stack and responds with Test Heal, which goes on top (CR 601.2i, 608.1).
     cast_spell(&mut engine, p0, heal);
     pay_free_and_drain(&mut engine);
     assert_eq!(engine.state().stack.len(), 2, "the heal spell sits on top of the still-pending upkeep trigger");
 
-    // Both pass: the heal spell (top of stack) resolves first, raising life
-    // to 13 - now above the threshold, before the trigger underneath it
-    // ever gets a chance to resolve.
+    // The heal resolves first and raises life to 13, above the threshold, before the trigger resolves.
     let status = pass_both(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().player(p0).unwrap().life, 13, "Test Heal resolved first");
     assert_eq!(engine.state().stack.len(), 1, "only the upkeep trigger remains");
 
-    // Now the upkeep trigger resolves - CR 608.2a's recheck sees life 13 >
-    // threshold 5, so it's removed from the stack and does nothing.
+    // The trigger's CR 608.2a recheck sees life 13 > threshold 5, so it is removed from the stack and does nothing.
     let status = pass_both(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty());

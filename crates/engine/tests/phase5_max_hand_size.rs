@@ -1,16 +1,4 @@
-//! Phase 5 vertical slice: CR 402.2 max hand size actually consults live
-//! `HandSizeModifier`s instead of a bare hardcoded `7`. Before this slice,
-//! `Engine::begin_cleanup_step` never looked at anything - a "you have no
-//! maximum hand size" or "your maximum hand size is N" effect had no way to
-//! change cleanup's discard behavior at all.
-//!
-//! `HandSizeModifier` is deliberately not a `ContinuousEffect`/CR 613 layer
-//! - same reasoning `cost.rs`'s `CostModifier` already established for cost
-//! modification: hand size isn't a characteristic query, and `Layer` is
-//! meant to be exactly the CR 613.1 layer list. No `Game.CreateHandSizeModifier`
-//! Lua builder yet - same "direct Rust struct-literal fixtures only"
-//! bootstrap stance `CostModifier` itself took before any script builder
-//! existed for it, so every test here constructs `HandSizeModifier` directly.
+//! CR 402.2: max hand size consults live `HandSizeModifier`s and not a hardcoded 7. It is not a CR 613 layer, as with `CostModifier`, and every test builds the modifier by struct literal.
 
 use std::collections::HashMap;
 
@@ -44,8 +32,6 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> GameObject {
     GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Hand) }
 }
 
-/// A two-player `GameState` sitting at `(Ending, End)` in `PriorityWindow`
-/// for `p0` (active player) - mirrors `phase5_ending_phase.rs::state_at_end_step`.
 fn state_at_end_step() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -146,10 +132,7 @@ fn two_conflicting_modifiers_resolve_by_latest_timestamp() {
     let p1 = PlayerId(1);
     let source = ObjectId(0);
     add_cards_to_hand(&mut state, p0, 12);
-    // SetTo(10) applies first (earlier timestamp), then NoMaximum starts
-    // applying later - the later one wins outright, same "latest timestamp"
-    // convention this engine's layer effects already use for a conflicting
-    // flat override.
+    // SetTo(10) applies first and NoMaximum later, and the later timestamp wins outright.
     state.hand_size_modifiers.push(HandSizeModifier {
         source,
         controller: p0,
@@ -181,9 +164,7 @@ fn opponent_scoped_modifier_does_not_affect_its_own_controller() {
     let p1 = PlayerId(1);
     let source = ObjectId(0);
     add_cards_to_hand(&mut state, p0, 12);
-    // "Your opponents have no maximum hand size" - controlled by p0, but
-    // p0's own cleanup (the active player here) must be unaffected by its
-    // own Opponent-scoped effect.
+    // "Your opponents have no maximum hand size": p0's own cleanup must be unaffected by its own Opponent-scoped effect.
     state.hand_size_modifiers.push(HandSizeModifier {
         source,
         controller: p0,
@@ -201,8 +182,7 @@ fn opponent_scoped_modifier_does_not_affect_its_own_controller() {
     );
 }
 
-/// "Test Destroy Permanent: Destroy target permanent." — used only to force
-/// a real `commands::retire_object` call on the modifier's own source.
+// Forces a real retire_object call on the modifier's source.
 fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -233,11 +213,8 @@ fn destroy_permanent_definition() -> CardDefinition {
     }
 }
 
-/// CR 611.3b: a static ability's continuous effect only applies while its
-/// source remains on the battlefield — the plain `Filter(FilterController)`
-/// shape this file exercises had zero liveness check before
-/// `phase5/modifier-source-cleanup` (unlike `EnchantedPlayer`'s own
-/// already-self-healing `state.object(m.source).is_some_and(...)` check).
+// CR 611.3b
+// A static ability's continuous effect applies only while its source is on the battlefield.
 #[test]
 fn a_filter_scoped_hand_size_modifier_is_purged_once_its_source_leaves_the_battlefield() {
     let p0 = PlayerId(0);

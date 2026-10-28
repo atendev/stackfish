@@ -1,11 +1,6 @@
-//! Phase 5 vertical slice: baseline `DeclareAttackers`/`DeclareBlockers`
-//! (CR 508.1/509.1), plus the CR 302.6/602.5a summoning-sickness check
-//! folded in (gates attacking here; `phase5_activate_ability_mana.rs`
-//! covers the tap-cost-ability side of the same check). No combat damage
-//! (CR 510), no triggered abilities beyond the `AttackerDeclared`/
-//! `BlockerDeclared` events themselves, no costs-to-attack/block, no
-//! restrictions (continuous-effects query gap, same as `is_sorcery_speed`'s
-//! existing TODO) - declarations only.
+//! CR 508.1, 509.1: `DeclareAttackers` and `DeclareBlockers`, with the summoning-sickness check (CR 302.6, 602.5a) gating attacks.
+//! Declarations only, with no damage, no triggers beyond the declared events, and no costs.
+// TODO: attack and block restrictions need a continuous-effects query
 
 use std::collections::HashMap;
 
@@ -44,12 +39,6 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId, controll
     GameObject { controlled_since_turn, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
 }
 
-/// Two players, `p0` active and attacking, `p1` defending, both turns
-/// already seeded into `last_active_turn_number` (turn 1 for `p0`, turn 0
-/// for `p1` - a never-active defending player still needs an entry, or
-/// every one of their creatures would look summoning sick by the `None`
-/// branch's conservative default). `Phase::Combat`/`Step::DeclareAttackers`
-/// so `DeclareAttackers` is immediately legal.
 fn combat_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -61,10 +50,7 @@ fn combat_state() -> GameState {
     }
 }
 
-/// Three players, `p0` active, `p1`/`p2` both nonactive - CR 508.5a's
-/// multiplayer case, where "the defending player" isn't a single
-/// engine-wide value but individually determined per attacker. Otherwise
-/// identical to `combat_state()`.
+// CR 508.5a: with three players the defending player is decided per attacker.
 fn combat_state_3p() -> GameState {
     let mut state = combat_state();
     let p2 = PlayerId(2);
@@ -130,12 +116,7 @@ fn try_declare_blockers(
     Ok(drain(engine))
 }
 
-/// Drives the real `AdvanceTurnStep` pipeline (both players passing with
-/// the empty stack combat declarations leave behind) until `state.step`
-/// reaches `DeclareBlockers` - there's no direct state-mutation shortcut
-/// for this from outside `engine.rs` (`Engine::state()` is read-only), and
-/// going through the real pipeline is also more honest: it's the same path
-/// a live game takes from "attackers declared" to "blockers step opens."
+// Goes through the real AdvanceTurnStep pipeline because Engine::state() is read-only.
 fn pass_to_declare_blockers(engine: &mut Engine) {
     for _ in 0..10 {
         if engine.state().step == Step::DeclareBlockers {
@@ -149,10 +130,6 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     }
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
-
-// ---------------------------------------------------------------------
-// DeclareAttackers
-// ---------------------------------------------------------------------
 
 #[test]
 fn declare_attackers_taps_and_records_combat_state() {
@@ -270,9 +247,7 @@ fn declare_attackers_rejects_summoning_sick_creature() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
-    // Controlled since turn 1 (the current turn) - combat_state seeds
-    // p0's most recent turn start at 1 too, so this hasn't been controlled
-    // since the turn *began*. Sick (CR 508.1a/302.6).
+    // Controlled since turn 1, the current turn, and not since it began, so it is sick (CR 508.1a, 302.6).
     let mut state = combat_state();
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear"), p0, 1));
 
@@ -332,10 +307,6 @@ fn declare_attackers_is_atomic_across_a_mixed_legal_illegal_batch() {
     assert!(!engine.state().object(legal).unwrap().tapped, "508.1: illegal batch taps nobody");
     assert!(engine.state().combat.is_none());
 }
-
-// ---------------------------------------------------------------------
-// DeclareBlockers
-// ---------------------------------------------------------------------
 
 #[test]
 fn declare_blockers_records_blocks() {
@@ -404,9 +375,7 @@ fn declare_blockers_rejects_wrong_step() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let blocker = ObjectId(1);
-    // Attackers already recorded (state.combat is Some), but the step
-    // hasn't advanced to DeclareBlockers yet - isolates the step check from
-    // the "no attackers declared" check covered separately below.
+    // Attackers are recorded but the step has not reached DeclareBlockers, which isolates the step check.
     let mut state = combat_state();
     state.combat = Some(CombatState {
         attackers: vec![(attacker, Target::Player(p1))],
@@ -435,8 +404,7 @@ fn declare_blockers_rejects_redeclaration() {
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     pass_to_declare_blockers(&mut engine);
     declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
-    // Step/phase haven't changed between calls (only AdvanceTurnStep moves
-    // those) - this isolates the `declared_defenders` redeclaration check.
+    // Only AdvanceTurnStep changes the step, which isolates the declared_defenders redeclaration check.
     let err = try_declare_blockers(&mut engine, p1, Vec::new()).unwrap_err();
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
@@ -515,10 +483,6 @@ fn declare_blockers_rejects_no_attackers_declared_yet() {
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
-// ---------------------------------------------------------------------
-// CombatState lifecycle
-// ---------------------------------------------------------------------
-
 #[test]
 fn combat_state_clears_at_end_of_combat() {
     let p0 = PlayerId(0);
@@ -531,11 +495,7 @@ fn combat_state_clears_at_end_of_combat() {
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]);
     assert!(engine.state().combat.is_some());
 
-    // Pass priority around until the all-pass empty-stack path advances
-    // through DeclareBlockers/CombatDamage/EndOfCombat into PostCombatMain.
-    // DeclareBlockers itself never got submitted (no PlayerAction has to
-    // run there for the step to advance) - this purely exercises
-    // AdvanceTurnStep's EndOfCombat clear.
+    // Passing priority advances through DeclareBlockers and CombatDamage into PostCombatMain, which exercises AdvanceTurnStep's EndOfCombat clear.
     for _ in 0..20 {
         if engine.state().step == Step::PostCombatMain {
             break;
@@ -549,11 +509,6 @@ fn combat_state_clears_at_end_of_combat() {
     assert_eq!(engine.state().step, Step::PostCombatMain);
     assert!(engine.state().combat.is_none(), "506.4: combat status ends with the combat phase");
 }
-
-// ---------------------------------------------------------------------
-// N-player DeclareBlockers (CR 508.5a: defending player individually
-// determined per attacker, not one engine-wide value)
-// ---------------------------------------------------------------------
 
 #[test]
 fn three_player_each_defending_player_declares_blockers_separately() {
@@ -584,8 +539,7 @@ fn three_player_each_defending_player_declares_blockers_separately() {
     assert_eq!(combat.blocks, vec![(blocker_p1, attacker_p1)]);
     assert_eq!(combat.declared_defenders, vec![p1]);
 
-    // p2 declares second - accumulates onto p1's block rather than
-    // overwriting it.
+    // p2 declares second and accumulates onto p1's block.
     let status = declare_blockers(&mut engine, p2, vec![(blocker_p2, attacker_p2)]);
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
     let combat = engine.state().combat.as_ref().unwrap();
@@ -624,9 +578,7 @@ fn declare_blockers_planeswalker_controller_is_the_defending_player() {
     put_on_battlefield(&mut state, permanent(planeswalker, pw_definition, p2, 0));
 
     let mut engine = Engine::new(state);
-    // p1 comes first in turn_order among the nonactive players, but the
-    // attacker is aimed at p2's planeswalker (CR 506.4d) - p2 is the real
-    // defending player here, not "the first nonactive player."
+    // The attacker is aimed at p2's planeswalker (CR 506.4d), so p2 is the defending player and not the first nonactive player.
     declare_attackers(&mut engine, p0, vec![(attacker, Target::Object(planeswalker))]);
     pass_to_declare_blockers(&mut engine);
 

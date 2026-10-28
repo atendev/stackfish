@@ -1,35 +1,6 @@
-//! Phase 5 vertical slice: CR 303.4m's "enchanted player" reference for
-//! continuous effects — the narrow first cut. Closes a gap named, and
-//! deliberately deferred, across three separate merged slices
-//! (`phase5/enchanted-reference`, `phase5/aura-enchants-a-player`,
-//! `phase5/aura-enters-attached-player`): this engine's continuous-effect
-//! machinery (`ContinuousEffect`/`layers::effective_characteristics`) is
-//! 100% object-only — there was no mechanism, partial or otherwise, that let
-//! a continuous effect target a *player* at all, let alone "whichever player
-//! this source is attached to."
-//!
-//! Rather than inventing a brand-new general "continuous effects affecting a
-//! player" subsystem in one sitting (a genuinely large, unscoped gap — no
-//! real card search or design-doc discussion ever sized it), this slice
-//! proves the "enchanted player" resolution *pattern* against the one
-//! player-directed modifier mechanism that already has a real, working,
-//! tested enforcement path: `HandSizeModifier`/CR 402.2 (`Engine::
-//! begin_cleanup_step`'s discard check). `HandSizeAffected::EnchantedPlayer`
-//! mirrors `AffectedFilter::EnchantedOnly`'s own `source.attached_to ==
-//! Some(object.object_id)` check exactly, just the player-attach sibling
-//! field (`attached_to_player`).
-//!
-//! Also closes a second, already-flagged, separate gap as a side effect:
-//! `HandSizeModifier` never had a `Game.CreateHandSizeModifier` Lua builder
-//! (`phase5_max_hand_size.rs`'s own header comment named this TODO) — this
-//! slice builds it, mirroring `Game.CreateCostModifier`'s queue-and-drain
-//! shape exactly, since an enchanted-player hand-size effect needs a real
-//! self-registration path a card script can use regardless.
-//!
-//! Explicit non-goal: no general `AffectedFilter`-for-players primitive —
-//! future player-level effect shapes (hand-reveal, draw-limiting, ...) will
-//! each need their own bespoke mechanism and enforcement point, same as this
-//! one did. This only proves the pattern once, on one real consumer.
+//! CR 303.4m: `HandSizeAffected::EnchantedPlayer` resolves the player a source is attached to (`attached_to_player`), the way `AffectedFilter::EnchantedOnly` resolves an object, and `begin_cleanup_step` enforces it (CR 402.2).
+//! `Game.CreateHandSizeModifier` is the Lua builder, with the same queue-and-drain shape as `Game.CreateCostModifier`.
+// TODO: a general player-affecting continuous-effect primitive, since each player-level shape has its own bespoke mechanism
 
 use std::collections::HashMap;
 
@@ -100,9 +71,6 @@ fn aura_definition(script: &str) -> CardDefinition {
     }
 }
 
-/// A two-player `GameState` sitting at `(Ending, End)` in `PriorityWindow`
-/// for `p0` (active player) - mirrors `phase5_max_hand_size.rs`'s own
-/// `state_at_end_step`.
 fn state_at_end_step() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -204,8 +172,7 @@ fn a_player_not_enchanted_by_the_modifiers_source_is_unaffected() {
     let p1 = PlayerId(1);
     let aura = ObjectId(1);
     add_cards_to_hand(&mut state, p0, 12);
-    // The Aura is attached to p1, not p0 - the modifier must not leak onto
-    // an unenchanted player just because it's the only one in play.
+    // The Aura is attached to p1 and not p0, so the modifier must not leak onto an unenchanted player.
     let mut aura_obj = card_object(aura, aura_definition(""), p1, ZoneKind::Battlefield);
     aura_obj.attached_to_player = Some(p1);
     put_on_battlefield(&mut state, aura_obj);
@@ -233,9 +200,7 @@ fn the_restriction_stops_applying_once_the_aura_is_no_longer_attached_to_that_pl
     let p1 = PlayerId(1);
     let aura = ObjectId(1);
     add_cards_to_hand(&mut state, p0, 12);
-    // Same source, same modifier, but the Aura fell off (attached_to_player
-    // cleared) before cleanup runs - re-resolved fresh every check, not
-    // cached from whenever the modifier was first registered.
+    // Same source and modifier, but the Aura fell off before cleanup, and the check re-resolves fresh each time.
     let aura_obj = card_object(aura, aura_definition(""), p1, ZoneKind::Battlefield);
     put_on_battlefield(&mut state, aura_obj);
     state.hand_size_modifiers.push(HandSizeModifier {

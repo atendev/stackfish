@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::Counter` (CR 701.6a) —
-//! `Game.Ops.Counter()`, e.g. "Counter target spell." Unlike every other
-//! single-target `AbilityEffect`, the affected object isn't reached through
-//! `continue_scripted_zone_move`'s usual battlefield-object path — it's a
-//! *different*, still-present `StackObject` in `state.stack` itself, found
-//! and removed by matching `stack_id` directly, then (for a spell, not an
-//! ability) sent to its owner's graveyard via the same `Engine::
-//! move_resolving_spell` helper the CR 608.2b fizzle branch already reuses.
-//!
-//! A spell on the stack already has a real `GameObject` at `zone: Stack`
-//! sharing its `StackObject`'s own `stack_id` (`commands::cast::
-//! execute_cast_spell`), so `TargetFilter::Object { zone: Some(ZoneKind::
-//! Stack), .. }` already targets it correctly via the ordinary targeting
-//! pipeline — no new targeting plumbing needed, just the resolution-side
-//! effect.
+//! CR 701.6a: `AbilityEffect::Counter` (`Game.Ops.Counter()`) finds a still-present `StackObject` by `stack_id`, removes it and sends a spell to its owner's graveyard.
+//! A spell on the stack has a `GameObject` at `zone: Stack`, so `TargetFilter::Object { zone: Some(Stack) }` already targets it.
 
 use std::collections::HashMap;
 
@@ -48,8 +35,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Counter: Counter target spell." No card_types restriction — any
-/// spell on the stack is a legal target (CR 701.6a's plain form).
 fn counterspell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -90,7 +75,6 @@ fn counterspell_definition() -> CardDefinition {
     }
 }
 
-/// Negate-style "Counter target noncreature spell."
 fn counter_noncreature_spell_definition() -> CardDefinition {
     CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
@@ -113,10 +97,7 @@ fn counter_noncreature_spell_definition() -> CardDefinition {
     }
 }
 
-/// "Test Exclude: Counter target spell with mana value X." A real `{X}`
-/// mana cost - CR 202.3/107.3a's "this casting's own announced X" is only
-/// meaningful on a card whose own cost actually has an `{X}` to announce a
-/// value for.
+// A real {X} cost, since CR 202.3 and 107.3a make the announced X meaningful only on a card with an {X} to announce.
 fn counter_mana_value_x_spell_definition() -> CardDefinition {
     CardDefinition {
         mana_cost: ManaCost { symbols: vec![ManaSymbol::X] },
@@ -152,20 +133,14 @@ fn two_player_state() -> GameState {
     }
 }
 
-/// Same as `two_player_state`, but p0 starts with `colorless` mana already
-/// in their pool - needed to actually pay a real `{X}` cost (`pay_free_and_
-/// drain`'s empty `PaymentPlan` only works for a `{0}` cost).
+// p0 starts with mana in the pool to pay a real {X} cost, since the empty PaymentPlan works only for {0}.
 fn two_player_state_with_p0_colorless(colorless: u32) -> GameState {
     let mut state = two_player_state();
     state.players[0].mana_pool.colorless = colorless;
     state
 }
 
-/// Puts a creature spell directly on the stack (bypassing the real cast/pay
-/// flow, same shortcut `phase5_cast_spell.rs`'s own
-/// `cast_instant_allowed_outside_main_phase_and_with_nonempty_stack` test
-/// uses) — this slice is testing `Counter`'s own resolution, not casting
-/// mechanics, so the target spell doesn't need a real cast history.
+// Pushes a creature spell directly onto the stack, because this tests Counter's resolution and not casting.
 fn push_creature_spell_on_stack(state: &mut GameState, stack_id: ObjectId, owner: PlayerId) {
     state.objects.insert(stack_id, card_object(stack_id, creature_definition(1, "Bear"), owner, ZoneKind::Stack));
     state.stack.push(StackObject {
@@ -190,10 +165,7 @@ fn push_creature_spell_on_stack(state: &mut GameState, stack_id: ObjectId, owner
     });
 }
 
-/// Same as `push_creature_spell_on_stack`, but with a caller-chosen
-/// `mana_cost` (and no `x_value` of its own - CR 202.3b's off-the-stack-only
-/// concern doesn't apply since this target is never itself an X spell in
-/// these tests) so the target's own mana value can be controlled.
+// Same, with a chosen mana_cost so the target's mana value can be controlled.
 fn push_spell_with_mana_value_on_stack(state: &mut GameState, stack_id: ObjectId, owner: PlayerId, mana_value: u32) {
     let mut definition = creature_definition(1, "Bear");
     definition.mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(mana_value))] };
@@ -314,8 +286,7 @@ fn counter_spell_fizzles_if_its_own_target_already_left_the_stack() {
     pay_free_and_drain(&mut engine);
     assert_eq!(engine.state().stack.len(), 2);
 
-    // CR 608.2b: the target leaves the stack (e.g. countered by something
-    // else, or otherwise removed) before this Counterspell would resolve.
+    // CR 608.2b: the target left the stack before the Counterspell would resolve.
     engine.state_mut().stack.retain(|so| so.stack_id != target);
     engine.state_mut().objects.remove(&target);
 
@@ -411,10 +382,7 @@ fn counter_with_mana_value_x_rejects_a_target_whose_mana_value_does_not_equal_x(
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
-    // Target's own mana value is 3, but this Counterspell announces X=2 -
-    // CR 601.2c/115: not a legal target at all, rejected before the cast
-    // even goes on the stack (same "checked at cast time, not just
-    // resolution" treatment every other TargetFilter key already gets).
+    // The target's mana value is 3 but this Counterspell announces X=2 (CR 601.2c, 115), so it is rejected at cast time.
     push_spell_with_mana_value_on_stack(&mut state, target, p1, 3);
 
     let card = ObjectId(2);

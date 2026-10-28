@@ -1,15 +1,5 @@
-//! Phase 5 vertical slice: real expiration for `EffectDuration::
-//! UntilEndOfCombat` (CR 511.2/500.5a) and `EffectDuration::UntilYourNextTurn`
-//! (CR 723.1-style "until your next turn"). Before this slice, both variants
-//! existed on the enum but nothing ever drained them - only `UntilEndOfTurn`
-//! had a real drain point (Cleanup, see `phase5_ending_phase.rs`'s own
-//! coverage of that).
-//!
-//! `WhileSourceOnBattlefield`/`UntilSourceLeaves` are deliberately not
-//! covered here - they already work today as a side effect of every zone
-//! change minting a fresh `ObjectId` (`layers::applicable_effects_in_layer`'s
-//! `state.object(e.source)` check already treats an unresolvable source as
-//! inapplicable), so they were never part of this gap.
+//! CR 511.2, 500.5a, 723.1: `EffectDuration::UntilEndOfCombat` and `UntilYourNextTurn` expire at a real drain point. `UntilEndOfTurn` is in phase5_ending_phase.rs.
+//! `WhileSourceOnBattlefield` and `UntilSourceLeaves` already work, because a zone change mints a fresh `ObjectId` and `applicable_effects_in_layer` treats an unresolvable source as inapplicable.
 
 use std::collections::HashMap;
 
@@ -17,18 +7,10 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn base_zones(p0: PlayerId, p1: PlayerId) -> Vec<Zone> {
     zones(p0, p1, &[ZoneKind::Library, ZoneKind::Hand, ZoneKind::Graveyard, ZoneKind::Command, ZoneKind::Battlefield, ZoneKind::Exile])
 }
 
-/// A minimal 2-player state sitting at `(Ending, End)`, active player
-/// `active`, priority with `active` first - same shape
-/// `phase5_ending_phase.rs::state_at_end_step` uses, parametrized on which
-/// player is active so "your next turn" tests can start from either side.
 fn state_at_end_step(active: PlayerId) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -44,9 +26,7 @@ fn state_at_end_step(active: PlayerId) -> GameState {
     }
 }
 
-/// A minimal 2-player state sitting at `(Combat, EndOfCombat)` with no
-/// attackers declared (`combat: None`) - CR 511.1 still opens a priority
-/// window here even though the step "has no turn-based actions."
+// CR 511.1: priority opens at End of Combat even though the step has no turn-based actions.
 fn state_at_end_of_combat() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -121,8 +101,6 @@ fn pass(engine: &mut Engine, player: PlayerId) {
         .expect("PassPriority should be accepted");
 }
 
-/// Drives both players' priority passes for whatever step the engine is
-/// currently paused at, returning whatever the resulting transition produces.
 fn pass_both_players(engine: &mut Engine, first: PlayerId, second: PlayerId) -> StepStatus {
     let s = step_until_pause(engine);
     assert!(
@@ -141,10 +119,7 @@ fn pass_both_players(engine: &mut Engine, first: PlayerId, second: PlayerId) -> 
     step_until_pause(engine)
 }
 
-// ---------------------------------------------------------------------------
-// CR 511.2/500.5a - "until end of combat"
-// ---------------------------------------------------------------------------
-
+// CR 511.2/500.5a
 #[test]
 fn until_end_of_combat_effect_survives_until_only_the_first_player_has_passed() {
     let mut state = state_at_end_of_combat();
@@ -155,8 +130,7 @@ fn until_end_of_combat_effect_survives_until_only_the_first_player_has_passed() 
     assert!(matches!(s, StepStatus::AwaitingAction { player } if player == PlayerId(0)));
     pass(&mut engine, PlayerId(0));
 
-    // CR 500.5a: expires at the end of the combat phase, not the beginning
-    // of the End of Combat step - still mid-step here, so still present.
+    // CR 500.5a: expires at the end of the combat phase, and this is still mid-step, so it is present.
     assert_eq!(engine.state().step, Step::EndOfCombat);
     assert_eq!(engine.state().continuous_effects.len(), 1);
 }
@@ -186,10 +160,7 @@ fn until_end_of_combat_effect_drains_when_the_combat_phase_actually_ends() {
         .all(|e| !matches!(e.duration, EffectDuration::UntilEndOfCombat)));
 }
 
-// ---------------------------------------------------------------------------
-// CR 723.1-style "until your next turn"
-// ---------------------------------------------------------------------------
-
+// CR 723.1
 #[test]
 fn until_your_next_turn_effect_survives_cleanup_into_the_opponents_turn() {
     let p0 = PlayerId(0);
@@ -201,8 +172,7 @@ fn until_your_next_turn_effect_survives_cleanup_into_the_opponents_turn() {
 
     pass_both_players(&mut engine, p0, p1);
 
-    // Cleanup rotated active_player to p1 - not the effect's controller
-    // (p0), so "your next turn" hasn't arrived yet.
+    // Cleanup rotated active_player to p1, who is not the effect's controller (p0), so "your next turn" has not arrived.
     assert_eq!(engine.state().active_player, p1);
     assert_eq!(engine.state().continuous_effects.len(), 1);
 }
@@ -211,9 +181,7 @@ fn until_your_next_turn_effect_survives_cleanup_into_the_opponents_turn() {
 fn until_your_next_turn_effect_drains_when_the_turn_cycles_back_to_its_controller() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // Active player is p1 here - the turn about to end belongs to the
-    // opponent of the effect's controller (p0), so cleanup's rotation lands
-    // squarely on p0: this is the beginning of p0's next turn.
+    // The turn about to end is the opponent's, so cleanup's rotation lands on p0: the beginning of p0's next turn.
     let mut state = state_at_end_step(p1);
     put_on_battlefield(&mut state, permanent(ObjectId(1), p0, p0));
     state.continuous_effects.push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
@@ -234,9 +202,7 @@ fn until_your_next_turn_effect_with_unresolvable_source_is_left_inert_rather_tha
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let mut state = state_at_end_step(p1);
-    // Source ObjectId(1) never placed anywhere - same "already left the
-    // stack/zone it was created from" shape a spell-sourced effect would hit
-    // once that spell resolves (known limitation, not fixed by this slice).
+    // Source ObjectId(1) is placed nowhere, like a spell-sourced effect after the spell resolves.
     state.continuous_effects.push(inert_effect(ObjectId(1), EffectDuration::UntilYourNextTurn));
     let mut engine = Engine::new(state);
 

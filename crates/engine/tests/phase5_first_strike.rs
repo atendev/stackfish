@@ -1,19 +1,5 @@
-//! Phase 5 vertical slice: first strike / double strike (CR 510.1a/702.7).
-//! CR 510.1: if any attacker or blocker has first strike or double strike,
-//! combat gets two damage steps (`Step::FirstStrikeDamage` then the regular
-//! `Step::CombatDamage`) instead of one - only first-strike/double-strike
-//! creatures assign/deal damage in the first step; everyone else (plus
-//! double strikers again) does so in the regular step. When nobody has
-//! either keyword, combat is unchanged: one step, same as before this slice.
-//!
-//! This also fixes a real pre-existing bug `AssignCombatDamage` carried:
-//! it hard-errored (`InvalidTarget`) on any attacker/blocker that no longer
-//! resolves in `state.objects` - harmless before first strike (rarely hit),
-//! fatal once first strike is real (a first-striker routinely kills its
-//! blocker in the first step, and that blocker's id genuinely won't resolve
-//! by the time the regular step's `AssignCombatDamage` runs). See
-//! `commands.rs`'s `participates_in_damage_step` and the filtering at the
-//! top of `AssignCombatDamage`.
+//! CR 510.1, 702.7: first strike and double strike. If any attacker or blocker has either, combat gets `Step::FirstStrikeDamage` before `Step::CombatDamage`, and with neither it stays one step.
+//! `AssignCombatDamage` skips attackers and blockers that no longer resolve in `state.objects`, since a first striker routinely kills its blocker in the first step.
 
 use std::collections::HashMap;
 
@@ -58,12 +44,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Two players, `p0` active/attacking, `p1` defending, `Phase::Combat`/
-/// `Step::DeclareAttackers` - same shape as `phase5_combat_declarations.rs`'s
-/// own `combat_state`, since this slice needs to drive the real
-/// `DeclareAttackers` -> `DeclareBlockers` -> (`FirstStrikeDamage`?) ->
-/// `CombatDamage` pipeline, not just construct a `CombatDamage`-step state
-/// directly - the whole point under test is which step(s) get inserted.
 fn combat_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -115,10 +95,7 @@ fn try_assign_combat_damage(
     Ok(drain(engine))
 }
 
-/// Drives the real `AdvanceTurnStep` pipeline (both players passing with an
-/// empty stack) until `state.step == target` - see
-/// `phase5_combat_declarations.rs`'s `pass_to_declare_blockers` for why
-/// there's no direct state-mutation shortcut for this.
+// Drives AdvanceTurnStep until state.step == target.
 fn pass_until_step(engine: &mut Engine, target: Step) {
     for _ in 0..20 {
         if engine.state().step == target {
@@ -131,12 +108,7 @@ fn pass_until_step(engine: &mut Engine, target: Step) {
     panic!("never reached {target:?} - state.step = {:?}", engine.state().step);
 }
 
-/// One full priority round (both players pass, in whichever order priority
-/// currently sits) - exactly one `AdvanceTurnStep` transition given an empty
-/// stack, so the step landed on afterward is the *immediate* next step, not
-/// however many hops `pass_until_step` needed. Used to prove the
-/// `FirstStrikeDamage` insertion happens (or doesn't) in a single hop from
-/// `DeclareBlockers`, not to prove eventual arrival.
+// One full priority round is exactly one AdvanceTurnStep transition, so the landed step is the immediate next one.
 fn pass_one_round(engine: &mut Engine) {
     for _ in 0..2 {
         let active = engine.state().priority_player;
@@ -144,10 +116,6 @@ fn pass_one_round(engine: &mut Engine) {
         drain(engine);
     }
 }
-
-// ---------------------------------------------------------------------
-// Step insertion (CR 510.1)
-// ---------------------------------------------------------------------
 
 #[test]
 fn no_first_or_double_strike_skips_straight_to_combat_damage() {
@@ -194,10 +162,6 @@ fn first_strike_attacker_inserts_the_first_strike_damage_step() {
         "510.1a: an attacker with first strike opens a first-strike damage step before the regular one"
     );
 }
-
-// ---------------------------------------------------------------------
-// Unblocked first strike / double strike
-// ---------------------------------------------------------------------
 
 #[test]
 fn unblocked_first_strike_attacker_deals_damage_in_first_strike_step_only() {
@@ -258,10 +222,6 @@ fn double_strike_attacker_deals_damage_in_both_steps() {
     assert_eq!(life_after_regular, 14, "702.4c: and again in the regular step - total damage is 2x power");
 }
 
-// ---------------------------------------------------------------------
-// Core interaction: first strike kills its blocker before it can strike back
-// ---------------------------------------------------------------------
-
 #[test]
 fn first_strike_attacker_kills_blocker_before_it_deals_damage_back() {
     let p0 = PlayerId(0);
@@ -295,10 +255,7 @@ fn first_strike_attacker_kills_blocker_before_it_deals_damage_back() {
          already dead before the regular step, and wasn't eligible for this step even if it weren't"
     );
 
-    // Regression coverage for the bug this slice fixes: before the filter,
-    // AssignCombatDamage hard-errored (InvalidTarget) the instant any
-    // attacker/blocker id in `combat` no longer resolved in state.objects -
-    // fatal now that a first-strike kill routinely produces exactly that.
+    // AssignCombatDamage must accept an id that no longer resolves in state.objects, which a first-strike kill produces.
     pass_until_step(&mut engine, Step::CombatDamage);
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
     assert!(
@@ -310,18 +267,11 @@ fn first_strike_attacker_kills_blocker_before_it_deals_damage_back() {
     assert_eq!(p1_life, 20, "the first-strike attacker (no double strike) doesn't strike again in the regular step");
 }
 
-// ---------------------------------------------------------------------
-// Multi-blocked split requirement is scoped to the current step
-// ---------------------------------------------------------------------
-
 #[test]
 fn multi_blocked_split_requirement_is_scoped_to_the_current_step() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // attacker_b exists purely to force a FirstStrikeDamage step to be
-    // inserted at all - attacker_a itself has no first/double strike, so
-    // the interesting question is what AssignCombatDamage requires of
-    // *its* split in each step.
+    // attacker_b forces a FirstStrikeDamage step to be inserted, and attacker_a has neither keyword.
     let attacker_a = ObjectId(0);
     let attacker_b = ObjectId(1);
     let blocker_1 = ObjectId(2);
@@ -345,9 +295,7 @@ fn multi_blocked_split_requirement_is_scoped_to_the_current_step() {
     declare_blockers(&mut engine, p1, vec![(blocker_1, attacker_a), (blocker_2, attacker_a)]);
     pass_until_step(&mut engine, Step::FirstStrikeDamage);
 
-    // attacker_a doesn't participate in the first-strike step at all (no
-    // first/double strike), so neither of its blockers needs a split here -
-    // an empty assignments list must be accepted.
+    // attacker_a skips the first-strike step, so neither of its blockers needs a split and an empty assignments list is accepted.
     let status = assign_combat_damage(&mut engine, p0, Vec::new());
     assert!(
         matches!(status, StepStatus::AwaitingAction { .. }),
@@ -357,9 +305,7 @@ fn multi_blocked_split_requirement_is_scoped_to_the_current_step() {
     assert_eq!(engine.state().object(blocker_2).unwrap().damage_marked, 0);
 
     pass_until_step(&mut engine, Step::CombatDamage);
-    // Now attacker_a does participate (regular step, no keyword needed) and
-    // is still blocked by both walls - the same split requirement
-    // pre-existing tests (phase5_combat_damage.rs) already cover applies.
+    // attacker_a participates in the regular step and is blocked by both walls, so the split requirement applies.
     let err = try_assign_combat_damage(&mut engine, p0, Vec::new()).unwrap_err();
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
         "a split is required once attacker_a actually participates in the regular step: got {err:?}");

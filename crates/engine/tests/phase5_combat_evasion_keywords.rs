@@ -1,22 +1,5 @@
-//! Phase 5 vertical slice: CR 702's remaining "who can block me" evasion
-//! keywords beyond Flying/Reach/Menace (already covered by
-//! `phase5_keyword_primitives.rs`) - Fear (702.36), Intimidate (702.13),
-//! Shadow (702.28), Horsemanship (702.31). Same shape as Flying/Menace:
-//! a `KeywordSet` bit checked in `commands::ActivateAbility`'s
-//! `DeclareBlockers` handler, through `effective_keywords`/
-//! `effective_characteristics` so a continuous-effect-granted instance
-//! (not just the printed one) is honored.
-//!
-//! `KeywordSet` widened from `u16` to `u32` to make room - every bit 0-15
-//! was already in use.
-//!
-//! Deliberately out of scope, named rather than guessed at: Landwalk (CR
-//! 702.14 - checks the *defending player's own battlefield* for a land
-//! type, not the blocker's own characteristics; parametrized by land type,
-//! closer to protection's dynamic-field shape than a plain bit) and Banding
-//! (CR 702.22 - a rules-heavy legacy mechanic that overrides combat-damage
-//! assignment order, essentially its own vertical slice). Flanking/Rampage
-//! are triggered abilities, not blocking restrictions - a different gap.
+//! CR 702 evasion keywords beyond Flying, Reach and Menace: Fear (702.36), Intimidate (702.13), Shadow (702.28) and Horsemanship (702.31).
+//! Each is a `KeywordSet` bit checked in the `DeclareBlockers` handler through `effective_keywords`, so granted instances count.
 
 use std::collections::HashMap;
 
@@ -121,10 +104,6 @@ fn assert_illegal_block(status: Result<StepStatus, ActionError>) {
     assert!(matches!(status, Err(ActionError::Rejected(Rejected::IllegalAction(_)))), "expected an illegal block, got {status:?}");
 }
 
-// ---------------------------------------------------------------------
-// Fear (CR 702.36)
-// ---------------------------------------------------------------------
-
 #[test]
 fn fear_attacker_rejects_a_colorless_nonartifact_blocker() {
     let attacker = creature_definition("Fearsome", KeywordSet::FEAR, None, CardTypeSet::empty());
@@ -145,10 +124,6 @@ fn fear_attacker_accepts_an_artifact_blocker() {
     let blocker = creature_definition("Golem", KeywordSet::empty(), None, CardTypeSet::ARTIFACT);
     assert_legal_block(attack_and_try_block(attacker, blocker));
 }
-
-// ---------------------------------------------------------------------
-// Intimidate (CR 702.13)
-// ---------------------------------------------------------------------
 
 #[test]
 fn intimidate_attacker_rejects_a_blocker_sharing_no_color() {
@@ -171,10 +146,6 @@ fn intimidate_attacker_accepts_an_artifact_blocker() {
     assert_legal_block(attack_and_try_block(attacker, blocker));
 }
 
-// ---------------------------------------------------------------------
-// Shadow (CR 702.28) - symmetric
-// ---------------------------------------------------------------------
-
 #[test]
 fn shadow_attacker_cannot_be_blocked_by_a_non_shadow_creature() {
     let attacker = creature_definition("Wraith", KeywordSet::SHADOW, None, CardTypeSet::empty());
@@ -195,10 +166,6 @@ fn shadow_attacker_can_be_blocked_by_another_shadow_creature() {
     let blocker = creature_definition("Spirit", KeywordSet::SHADOW, None, CardTypeSet::empty());
     assert_legal_block(attack_and_try_block(attacker, blocker));
 }
-
-// ---------------------------------------------------------------------
-// Horsemanship (CR 702.31)
-// ---------------------------------------------------------------------
 
 #[test]
 fn horsemanship_attacker_cannot_be_blocked_by_a_non_horsemanship_creature() {

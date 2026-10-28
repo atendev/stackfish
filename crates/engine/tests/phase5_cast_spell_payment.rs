@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: cost determination + payment (CR 601.2f-h) for
-//! `PlayerActionKind::CastSpell`. Builds on `phase5_cast_spell.rs`'s free-cost
-//! stub - the `CastSpell` arm now builds a real `CostSpec` from the card's
-//! `mana_cost` and pauses the pipeline on `ProcessState::AwaitingPayment`
-//! until `Engine::submit_payment` answers (see engine.rs/commands.rs/cost.rs).
-//! No mana abilities/tapping exist yet (CR 605, its own future slice) - test
-//! fixtures hand-set `PlayerState.mana_pool` directly, fake pre-seeded
-//! floating mana.
-//!
-//! `CostPayment::Mana` takes a `Vec<ManaUnit>` - the exact literal units
-//! spent (CR 118.13a's payment choice), not an echo of the cost's shape.
-//! A colored pip must be paid with that exact color; the generic component
-//! can be paid with any leftover units (extra of a required color, a
-//! different color entirely, or colorless) - see cost.rs's `PaymentPlan::
-//! validate` doc comment.
+//! CR 601.2f-h: cost determination and payment for `CastSpell`, pausing on `AwaitingPayment` until `submit_payment`.
+//! `CostPayment::Mana` carries the exact units spent (CR 118.13a). A colored pip needs that color, and generic can be covered by any leftover units.
 
 use std::collections::HashMap;
 
@@ -45,10 +32,6 @@ fn spell_definition(mana_cost: ManaCost) -> CardDefinition {
     }
 }
 
-/// One player, main phase, empty stack, a hand zone - `mana_pool` is
-/// hand-set per test (CR 605's mana abilities don't exist yet, so a fixture
-/// pre-seeding the pool directly is the only way to give a player mana to
-/// pay with this slice).
 fn state_with_pool(pool: ManaPool) -> GameState {
     let p0 = PlayerId(0);
     GameState {
@@ -88,9 +71,6 @@ fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     panic!("expected a ZoneChange event in the ledger");
 }
 
-/// Test case 1: affordable cost, pool has enough - succeeds, pool debited
-/// the right amounts, spell proceeds same as the free-cost slice already
-/// covers.
 #[test]
 fn affordable_payment_succeeds_and_debits_pool() {
     let p0 = PlayerId(0);
@@ -113,8 +93,7 @@ fn affordable_payment_succeeds_and_debits_pool() {
         other => panic!("expected AwaitingPayment, got {other:?}"),
     };
 
-    // 1 green for the {G} pip, 2 colorless covering the {2} - the payer's
-    // explicit choice (CR 118.13a), not an echo of the cost's shape.
+    // 1 green for the {G} pip and 2 colorless for the {2}, as the payer chose (CR 118.13a).
     let units = vec![ManaUnit::Colored(Color::Green), ManaUnit::Colorless, ManaUnit::Colorless];
     engine
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] })
@@ -128,10 +107,7 @@ fn affordable_payment_succeeds_and_debits_pool() {
     assert!(!engine.state().stack[0].costs_paid.is_empty(), "costs_paid recorded");
 }
 
-/// Test case 2: pool short on generic - rejected, pool unchanged. Submits a
-/// correctly-*shaped* plan (1 green pip + 2 generic-covering units, matching
-/// the cost exactly) so this tests real unaffordability, not a malformed
-/// plan - the pool just doesn't have a second unit to spare.
+// The plan is correctly shaped, so this tests real unaffordability and not a malformed plan.
 #[test]
 fn short_on_generic_is_rejected_and_pool_unchanged() {
     let p0 = PlayerId(0);
@@ -151,8 +127,6 @@ fn short_on_generic_is_rejected_and_pool_unchanged() {
     cast(&mut engine, p0, card);
     drain(&mut engine);
 
-    // Shape is correct (1 green pip + 2 generic-covering units) but the
-    // pool has no second unit to spend on the second one.
     let units = vec![ManaUnit::Colored(Color::Green), ManaUnit::Colorless, ManaUnit::Colored(Color::Blue)];
     let err = engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] }).unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
@@ -161,8 +135,6 @@ fn short_on_generic_is_rejected_and_pool_unchanged() {
     assert!(matches!(engine.state().stack[0].costs_paid.as_slice(), []), "cost not recorded");
 }
 
-/// Test case 3: pool has enough total mana but the wrong color (needs
-/// {G}, pool only has {U}) - rejected.
 #[test]
 fn wrong_color_is_rejected() {
     let p0 = PlayerId(0);
@@ -182,10 +154,8 @@ fn wrong_color_is_rejected() {
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "pool untouched");
 }
 
-/// CR 118.13a: a colored pip can't be substituted by another color, even
-/// when the *total* unit count would otherwise line up with the cost
-/// (1 pip + 1 generic = 2 units here, and 2 blue units are offered) - the
-/// {G} pip specifically must be paid with green.
+// CR 118.13a
+// Two blue units match the unit count, but the {G} pip must be paid with green.
 #[test]
 fn colored_pip_cannot_be_substituted_by_a_different_color() {
     let p0 = PlayerId(0);
@@ -211,9 +181,8 @@ fn colored_pip_cannot_be_substituted_by_a_different_color() {
     assert_eq!((pool.blue, pool.green), (2, 1), "pool untouched");
 }
 
-/// CR 118.13a's actual choice: the generic component can be covered by
-/// *any* leftover units, including a mix of different colors and colorless
-/// in the same payment - not just "one type of leftover."
+// CR 118.13a
+// Generic can be covered by any mix of leftover colors and colorless.
 #[test]
 fn generic_can_be_paid_with_a_mix_of_colors() {
     let p0 = PlayerId(0);
@@ -235,8 +204,8 @@ fn generic_can_be_paid_with_a_mix_of_colors() {
     assert_eq!((pool.white, pool.blue), (0, 0), "both units spent");
 }
 
-/// Test case 4: a {0}-cost spell still needs an explicit empty payment -
-/// not skipped/auto-cast (CR 118.5/118.5a).
+// CR 118.5, 118.5a
+// A {0} spell still needs an explicit empty payment.
 #[test]
 fn zero_cost_spell_requires_explicit_empty_payment() {
     let p0 = PlayerId(0);
@@ -259,7 +228,6 @@ fn zero_cost_spell_requires_explicit_empty_payment() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
 
-/// Test case 5: exact affordable amount - pool fully drained to 0, succeeds.
 #[test]
 fn exact_amount_drains_pool_to_zero() {
     let p0 = PlayerId(0);
@@ -289,8 +257,6 @@ fn exact_amount_drains_pool_to_zero() {
     assert_eq!((pool.red, pool.white), (0, 0), "pool drained to exactly zero");
 }
 
-/// Test case 6: submitting a payment while not `AwaitingPayment` is
-/// rejected, same shape as `ReplacementChoiceError::NotAwaitingChoice`.
 #[test]
 fn submit_payment_while_not_awaiting_is_rejected() {
     let p0 = PlayerId(0);
@@ -300,9 +266,7 @@ fn submit_payment_while_not_awaiting_is_rejected() {
     let _ = p0;
 }
 
-/// Test case 7: a plan that spends more units than the cost requires (extra
-/// payment beyond what's owed) is rejected, pool untouched - even though the
-/// pool could easily afford it.
+// A plan spending more units than owed is rejected, even though the pool could afford it.
 #[test]
 fn mismatched_plan_with_extra_payment_is_rejected() {
     let p0 = PlayerId(0);
@@ -316,8 +280,7 @@ fn mismatched_plan_with_extra_payment_is_rejected() {
     cast(&mut engine, p0, card);
     drain(&mut engine);
 
-    // 3 colorless units for a {1} cost - more than owed, not just
-    // "affordable from a big pool".
+    // 3 colorless units for a {1} cost is more than owed.
     let overpay = vec![ManaUnit::Colorless, ManaUnit::Colorless, ManaUnit::Colorless];
     let err =
         engine
@@ -329,9 +292,6 @@ fn mismatched_plan_with_extra_payment_is_rejected() {
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.colorless, 5, "pool untouched");
 }
 
-/// Test case 8: resolution after a paid cast still lands on the
-/// battlefield/graveyard correctly - cheap regression check against
-/// phase5_cast_spell.rs's existing coverage, now with a real (paid) cost.
 #[test]
 fn paid_cast_still_resolves_to_graveyard() {
     let p0 = PlayerId(0);
@@ -360,9 +320,8 @@ fn paid_cast_still_resolves_to_graveyard() {
     assert_eq!((from, to), (ZoneKind::Stack, ZoneKind::Graveyard));
 }
 
-/// Test case 9 (6a-ii): a Phyrexian pip paid via life (CR 107.4f) actually
-/// deducts life from the payer and records it in the ledger - not just a
-/// validator-only check.
+// CR 107.4f
+// A Phyrexian pip paid with life deducts it and records it in the ledger.
 #[test]
 fn phyrexian_pip_paid_with_life_deducts_life_and_logs_it() {
     let p0 = PlayerId(0);
@@ -391,8 +350,8 @@ fn phyrexian_pip_paid_with_life_deducts_life_and_logs_it() {
     assert!(logged, "expected a LifeChanged {{ player: p0, delta: -2 }} event in the ledger");
 }
 
-/// Test case 10 (6a-ii): CR 119.4 - can't pay more life toward a Phyrexian
-/// pip than the payer has, even though the payment is otherwise well-formed.
+// CR 119.4
+// A Phyrexian pip cannot take more life than the payer has.
 #[test]
 fn phyrexian_life_payment_rejected_below_zero_life() {
     let p0 = PlayerId(0);
@@ -417,10 +376,8 @@ fn phyrexian_life_payment_rejected_below_zero_life() {
     assert_eq!(engine.state().player(p0).unwrap().life, 1, "life untouched by a rejected plan");
 }
 
-/// Test case 11 (6a-iii): a `{S}` pip must debit the specific snow-tagged
-/// unit declared, not just any unit of the same color (CR 107.4h) - the
-/// pool here has both a snow and a non-snow white mana, only the snow one
-/// is a legal `{S}` payment.
+// CR 107.4h
+// An {S} pip must debit the declared snow unit, not any unit of that color.
 #[test]
 fn snow_pip_debits_the_snow_tagged_unit_specifically() {
     let p0 = PlayerId(0);
@@ -434,8 +391,7 @@ fn snow_pip_debits_the_snow_tagged_unit_specifically() {
     cast(&mut engine, p0, card);
     drain(&mut engine);
 
-    // Declaring the ordinary (non-snow) white unit for {S} is rejected -
-    // right color, wrong source.
+    // The non-snow white unit is the right color from the wrong source.
     let err = engine
         .submit_payment(PaymentPlan {
             payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::White)], phyrexian_life: 0 }],
@@ -445,8 +401,7 @@ fn snow_pip_debits_the_snow_tagged_unit_specifically() {
     let pool = &engine.state().player(p0).unwrap().mana_pool;
     assert_eq!((pool.white, pool.snow_white), (2, 1), "rejected plan leaves the pool untouched");
 
-    // Declaring the snow-tagged one is legal, and debits both the color
-    // total and the snow subcount together.
+    // The snow unit is legal and debits the color total and the snow subcount.
     engine
         .submit_payment(PaymentPlan {
             payments: vec![CostPayment::Mana {

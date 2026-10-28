@@ -1,15 +1,5 @@
-//! Phase 5 vertical slice: CR 613 continuous-effect layer engine, sub-slice
-//! B — layers 4 (`TypeChanging`) and 5 (`ColorChanging`), additive only (CR
-//! 613.3: layers 4/5 have no CR-defined lettered sublayers the way layer 7
-//! does, so a single `AddCardType`/`AddColor` primitive per layer is
-//! faithful to the rule, not a simplification of it). The overwrite shape
-//! (`SetCardTypes`/`SetColors`) and supertype/subtype grants
-//! (`AddSupertype`/`AddSubtype`) are covered by the sibling file
-//! `phase5_layer_engine_type_color_overwrite.rs` instead of here.
-//!
-//! Same "`ContinuousEffect`s built directly via struct literal" bootstrap
-//! pattern as `phase5_layer_engine_basics.rs` — no `Game.AddContinuousEffect`
-//! Lua binding yet.
+//! CR 613.3: layers 4 (`TypeChanging`) and 5 (`ColorChanging`), additive only, with one `AddCardType` or `AddColor` primitive per layer because those layers have no lettered sublayers.
+//! The overwrite shape and supertype/subtype grants are in phase5_layer_engine_type_color_overwrite.rs. Effects are built directly by struct literal.
 
 use std::collections::HashMap;
 
@@ -19,9 +9,7 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
-/// This slice's fixtures never register a `ReplacementEffect` on a dying
-/// creature - a real CR 616.1 pause here would mean the fixture itself is
-/// wrong, not something to handle gracefully.
+// No fixture registers a ReplacementEffect on a dying creature, so a CR 616.1 pause here would mean the fixture is wrong.
 fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     match outcome {
         SbaOutcome::Progressed(events, _) => events,
@@ -66,9 +54,6 @@ fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameOb
     card_object(id, creature_definition(power, toughness, KeywordSet::empty()), owner, ZoneKind::Battlefield)
 }
 
-/// A land - no power/toughness at all (mirrors a real land's printed
-/// values), base type `LAND` only. Stands in for the "target land becomes a
-/// creature" real-consumer tests below.
 fn land_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
@@ -176,11 +161,7 @@ fn base_case_no_continuous_effects_mirrors_card_definition() {
 
 #[test]
 fn printed_mana_cost_symbols_derive_base_color_per_cr_202_2() {
-    // Regression: effective_characteristics used to read color_indicator
-    // alone and ignore the mana cost entirely - a real colored card (which
-    // almost never sets color_indicator) would resolve as colorless. Fixed
-    // by routing through CardDefinition::colors(), which was already CR
-    // 105.2a-correct but had no real caller wiring it into the layer engine.
+    // effective_characteristics must derive color from the mana cost through CardDefinition::colors() (CR 105.2a), since colored cards rarely set color_indicator.
     let mut state = base_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
@@ -203,8 +184,7 @@ fn printed_mana_cost_symbols_derive_base_color_per_cr_202_2() {
 
 #[test]
 fn color_indicator_still_overrides_mana_cost_derived_color() {
-    // CR 105.2a: an explicit color_indicator wins outright, it doesn't union
-    // with the mana cost's own colors.
+    // CR 105.2a: an explicit color_indicator wins outright and does not union with the mana cost's colors.
     let mut state = base_state();
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
@@ -293,22 +273,13 @@ fn effect_filter_still_scopes_type_and_color_effects() {
     assert!(!opposing.card_types.contains(CardTypeSet::CREATURE), "an opponent's land should be untouched");
 }
 
-// ---------------------------------------------------------------------
-// Real consumer: sba::check_state_based_actions now reads card_types
-// through effective_characteristics, not straight off CardDefinition - a
-// land animated into a creature by AddCardType is actually subject to CR
-// 704.5g's lethal-damage check.
-// ---------------------------------------------------------------------
-
 #[test]
 fn a_plain_land_is_not_a_creature_and_is_untouched_by_the_lethal_damage_sba() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let plain_land = ObjectId(0);
     let mut object = land(plain_land, p0);
-    // Damage marked on a land shouldn't happen in real play, but this
-    // proves the SBA doesn't fire just because damage_marked is nonzero -
-    // it still requires an effective Creature type first.
+    // Damage marked on a land should not happen in play, and the SBA must not fire on damage_marked alone without an effective Creature type.
     object.damage_marked = 3;
     put_on_battlefield(&mut state, object);
 
@@ -326,10 +297,7 @@ fn a_land_animated_into_a_creature_by_add_card_type_dies_to_lethal_damage_via_sb
     let mut object = land(animated_land, p0);
     object.damage_marked = 3;
     put_on_battlefield(&mut state, object);
-    // "Target land becomes a 3/3 Elemental creature": layer 4's
-    // AddCardType(CREATURE) plus layer 7b's SetPT for the 3/3, both
-    // sourced from the land itself (self-sourced, same as a card's own
-    // static ability would be).
+    // "Target land becomes a 3/3 Elemental creature": layer 4 AddCardType(CREATURE) plus layer 7b SetPT, both sourced from the land itself.
     state.continuous_effects.push(continuous_effect(
         animated_land,
         Layer::TypeChanging,

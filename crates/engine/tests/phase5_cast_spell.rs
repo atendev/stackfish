@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: `PlayerActionKind::CastSpell` (CR 601), free-cost
-//! stub (no `CostSpec`/`PaymentPlan` flow yet - see commands.rs's TODO on
-//! this arm) plus the CR 608.2m resolution half (`ResolveStackTop` in
-//! engine.rs): a resolved permanent-type spell becomes a battlefield
-//! permanent, a resolved instant/sorcery goes to its owner's graveyard.
-//! Same struct-literal `GameState` construction pattern as
-//! `phase5_play_land.rs`, since the engine's own constructors are still
-//! `todo!()`.
+//! CR 601, 608.2m: `CastSpell` with a free cost, then resolution. A permanent spell becomes a battlefield permanent, and an instant or sorcery goes to its owner's graveyard.
+//! The TODO on this arm in commands.rs tracks the cost flow, which phase5_cast_spell_payment.rs covers.
 
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
@@ -38,18 +32,11 @@ fn creature_definition() -> CardDefinition {
     }
 }
 
-/// Two players, hand/battlefield/graveyard zones present for both, stack
-/// empty. Mirrors `phase5_play_land::two_player_state`.
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
 
-/// Every fixture card in this file has an empty `mana_cost` - this pays it
-/// via the explicit empty `PaymentPlan` CR 118.5a still requires (no
-/// auto-cast), then drains the rest of that pipeline run. Asserts the
-/// engine was actually sitting in `AwaitingPayment` first, so a test that
-/// stops calling this after a future cost-bearing fixture lands doesn't
-/// silently start asserting against the wrong pause.
+// Asserts the engine paused on `AwaitingPayment` before paying the empty plan CR 118.5a requires.
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(
@@ -60,9 +47,7 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-/// Reads the most recent `ZoneChange` event off the ledger (in `(object,
-/// from, to)` form) - `CastSpell`/resolution mint a new `ObjectId` per move
-/// (CR 400.7), so tests can't look the moved object up by its original id.
+// Each move mints a new ObjectId (CR 400.7), so tests read the last ZoneChange and not the original id.
 fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     for event in engine.state().ledger.iter().rev() {
         if let GameEventKind::ZoneChange { object, from, to, .. } = event.kind {
@@ -128,8 +113,7 @@ fn cast_spell_keeps_priority_with_caster() {
         .unwrap();
     drain(&mut engine);
 
-    // CR 601.2i: the controller held priority before casting, so they get
-    // it back - it never moved to begin with.
+    // CR 601.2i: the controller held priority before casting, so they get it back.
     assert_eq!(engine.state().priority_player, p0);
 }
 
@@ -138,9 +122,7 @@ fn cast_spell_breaks_pass_chain() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // p1 owns/controls the instant being cast - p0 passes first (passing
-    // priority has no ownership restriction), handing priority to p1, who
-    // then casts it. Mirrors phase5_play_land's play_land_breaks_pass_chain.
+    // p0 passes first, handing priority to p1, who then casts the instant.
     let card = ObjectId(0);
     state.objects.insert(card, card_object(card, instant_definition(), p1, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p1)).unwrap().push_bottom(card);
@@ -297,10 +279,8 @@ fn cast_instant_allowed_outside_main_phase_and_with_nonempty_stack() {
     assert_eq!(engine.state().stack.len(), 2);
 }
 
-/// Full cast -> all-pass -> resolve cycle: casts an instant, both players
-/// pass in a row (CR 117.4 with a nonempty stack resolves the top object
-/// instead of advancing the turn), and checks the spell ends in its owner's
-/// graveyard (CR 608.2m).
+// CR 117.4, 608.2m
+// Two passes in a row resolve the top object, and the instant ends in its owner's graveyard.
 #[test]
 fn cast_instant_resolves_to_owners_graveyard() {
     let mut state = two_player_state();
@@ -342,8 +322,8 @@ fn cast_instant_resolves_to_owners_graveyard() {
     assert!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.contains(&resolved_id));
 }
 
-/// Same cycle as above, but with a creature - CR 608.2m sends a permanent
-/// type to the battlefield instead of the graveyard.
+// CR 608.2m
+// A permanent spell goes to the battlefield.
 #[test]
 fn cast_creature_resolves_to_battlefield() {
     let mut state = two_player_state();

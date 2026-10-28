@@ -1,20 +1,6 @@
-//! Phase 5 vertical slice: CR 707.9e's variable-amount "additional effect"
-//! exception - Altered Ego's own worked example, "You may have this creature
-//! enter the battlefield as a copy of any creature on the battlefield,
-//! except it enters with X additional +1/+1 counters on it." Spark Double's
-//! fixed-count shape (`CounterAmount::Fixed`) was already real
-//! (`phase5/clone-enters-as-copy`); `phase5_chained_copy_effects.rs`'s own
-//! doc comment named the X-costed variant as out of scope, needing separate
-//! `x_value`-at-copy-time plumbing this slice adds.
-//!
-//! `CopyExceptions.enters_with_additional_counters`'s amount widened from a
-//! bare `u32` to `CounterAmount::{Fixed(u32), X}` - `X` resolves against the
-//! entering object's own `StackObject.x_value`, captured once when
-//! `ProcessState::AwaitingCopyChoice` is first raised
-//! (`continue_permanent_entry`) and carried unchanged through any chained
-//! re-pause (`Engine::submit_copy_choice`), since the X belongs to the
-//! entering permanent itself (paid once, at cast time), not to whichever
-//! candidate ends up copied at any one link in a chain.
+//! CR 707.9e: Altered Ego copies a creature "except it enters with X additional +1/+1 counters".
+//! The amount is `CounterAmount::X`, read from the entering object's own `x_value` and kept across chained copy choices.
+//! The fixed-count shape is in phase5_clone_enters_as_copy.rs.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -77,7 +63,6 @@ fn cast_with_x(engine: &mut Engine, player: PlayerId, card: ObjectId, x_value: u
         .expect("player holds priority, spell is in hand, main phase, empty stack");
 }
 
-/// Pays X generic mana (the card's own cost is a bare `{X}`) and drains.
 fn pay_x_and_drain(engine: &mut Engine, x: u32) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the cast's cost, got {status:?}");
@@ -95,8 +80,6 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-/// A plain Clone - no exceptions - used as a chain link in the declined-
-/// chain test, same fixture `phase5_chained_copy_effects.rs` already uses.
 const CLONE_SCRIPT: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -109,8 +92,6 @@ end
 return s
 "#;
 
-/// Altered Ego's own shape: `counter_amount = "X"` instead of a fixed
-/// number.
 const ALTERED_EGO_SCRIPT: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -126,10 +107,6 @@ return s
 fn x_mana_cost() -> ManaCost {
     ManaCost { symbols: vec![ManaSymbol::X] }
 }
-
-// ---------------------------------------------------------------------
-// Lua self-registration / decode.
-// ---------------------------------------------------------------------
 
 #[test]
 fn counter_amount_x_decodes_to_the_x_variant() {
@@ -169,10 +146,6 @@ return s
     let result = ScriptRuntime::new().run_card_script(&mut state, &definition, source);
     assert!(result.is_err(), "\"Y\" is neither a number nor \"X\" - should be rejected at registration time");
 }
-
-// ---------------------------------------------------------------------
-// End to end: cast with a real announced X, choose to copy, get X counters.
-// ---------------------------------------------------------------------
 
 #[test]
 fn choosing_to_copy_applies_x_additional_counters() {
@@ -252,9 +225,7 @@ fn declining_a_chained_copy_still_applies_the_original_x() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingCopyChoice { .. }), "expected the chained pause, got {status:?}");
 
-    // Decline the chained choice - no second copy effect was actually
-    // applied, so Altered Ego's own deferred exception fires, still using
-    // the X paid when Altered Ego itself was cast (not re-derived per link).
+    // Declining the chained choice fires Altered Ego's own exception with the X paid at cast time.
     engine.submit_copy_choice(None).expect("declining the chained choice is always legal");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "resolution finishes cleanly, got {status:?}");

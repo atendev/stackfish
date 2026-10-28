@@ -1,34 +1,11 @@
-//! Phase 5 vertical slice: backlog item 9, `Game.SelectTargets` — the first
-//! real end-to-end use of the Lua coroutine mechanism `phase5_coroutine_spike.rs`
-//! confirmed against real mlua. A card script's operation can now suspend
-//! mid-resolution to ask the player for a real target (`ScriptRuntime::
-//! invoke_operation` runs the operation as a coroutine; `Game.SelectTargets`
-//! is a plain Lua function that calls `coroutine.yield` directly - not a
-//! Rust-bound callback, since mlua 0.9 without the `async` feature can't
-//! yield from inside a Rust closure). `Engine::submit_script_choice` answers
-//! the pause, resuming the same suspended script with the chosen target.
-//!
-//! Scoped narrowly on purpose: exactly one request shape (`select_target`,
-//! count always 1) - modal spells and "may" abilities are still named
-//! follow-ups, not attempted here. Backlog item 9b (player-target selection,
-//! `Game.SelectTargets({ type = "player" })`/`{ type = "any" }`) is covered
-//! by this file's own player/any-target tests below.
-//!
-//! Uses real card-script self-registration (`Game.CreateActivatedAbility`,
-//! same mechanism `phase5_activated_ability_self_registration.rs` already
-//! proves) rather than pre-loading a script into a standalone `ScriptRuntime`
-//! - the operation must be registered through `Engine`'s own internal
-//! `ScriptRuntime` (a separate `ScriptRuntime` is a different Lua VM
-//! entirely; a `ScriptHandle` from one is meaningless to the other).
+//! `Game.SelectTargets`: a card script's operation suspends mid-resolution as a coroutine (`coroutine.yield`) to ask for a target, and `Engine::submit_script_choice` resumes it with the choice. It supports one request shape (`select_target`, count 1), including player and any-target filters.
+//! It uses self-registration (`Game.CreateActivatedAbility`) through the Engine's own `ScriptRuntime`, since a `ScriptHandle` from another runtime is meaningless.
 
 use stackfish_engine::engine::{Engine, ScriptChoiceError, StepStatus};
 use stackfish_engine::script::ScriptChoiceRequest;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, single_player_state};
 
-/// The chosen creature's own raw object id becomes the gain_life amount -
-/// proves the exact resumed value reached the script and its continuation
-/// ran with it, without needing a new effect-shape key just for this test.
 const SELF_REGISTERING_SELECT_TARGET_THEN_GAIN_LIFE: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -42,13 +19,6 @@ end
 return s
 "#;
 
-/// Backlog item 9b: a player/any-target filter. `target.kind` is folded into
-/// the resulting life total (100 added when `kind == "player"`) so a test
-/// can tell, from the life total alone, that the resumed answer really was
-/// tagged `"player"` rather than falling through to the `"object"` arm by
-/// accident - same "prove the exact resumed value reached the script"
-/// approach the object-only test above already established, no new
-/// effect-shape key needed for it.
 const SELF_REGISTERING_SELECT_PLAYER_THEN_GAIN_LIFE: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -186,11 +156,7 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Plays the self-registering land, then activates its (only) ability and
-/// pays its `{0}` cost - drains to whatever the operation's own execution
-/// produces next (normally either `AwaitingScriptChoice` or, for a script
-/// that never yields, straight back to `AwaitingAction`). Returns the land's
-/// real post-CR-400.7 battlefield id.
+// Plays the self-registering land, activates its ability, pays {0}, and drains. Returns the land's post-CR 400.7 battlefield id.
 fn play_activate_and_drain(engine: &mut Engine, player: PlayerId, land_in_hand: ObjectId) -> (ObjectId, StepStatus) {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::PlayLand { card: land_in_hand } })
@@ -199,9 +165,7 @@ fn play_activate_and_drain(engine: &mut Engine, player: PlayerId, land_in_hand: 
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected priority to reopen after playing the land");
     assert_eq!(engine.state().abilities.len(), 1, "the land's activated ability self-registered");
 
-    // The land is played (and re-minted, CR 400.7) after any creature a test
-    // pre-seeds directly onto the battlefield - push_bottom appends, so the
-    // land is always the *last* entry, never the first.
+    // The land is played and re-minted (CR 400.7) after any pre-seeded creature, and push_bottom appends, so it is the last entry.
     let land = *engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.back().unwrap();
     engine
         .submit_action(PlayerAction {
@@ -220,10 +184,7 @@ fn play_activate_and_drain(engine: &mut Engine, player: PlayerId, land_in_hand: 
     engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("empty plan pays a {0} cost");
     drain(engine);
 
-    // Paying the cost only commits it - the ability still sits on the stack
-    // until priority passes around (CR 117.4). Solo player's first pass
-    // already counts as "everyone passed" (consecutive_passes >=
-    // turn_order.len() == 1), same convention every other solo fixture uses.
+    // Paying the cost only commits it, and the ability sits on the stack until priority passes (CR 117.4). A solo player's first pass counts as everyone passing.
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
     (land, drain(engine))
 }
@@ -432,13 +393,6 @@ fn a_script_that_never_yields_still_resolves_synchronously() {
     );
     assert_eq!(engine.state().player(p0).unwrap().life, 21);
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: ScriptRuntime::invoke_operation directly, without driving the
-// whole Engine pipeline - confirms the coroutine rewrite is transparent for
-// a function that never yields (same "Ok(Finished)" outcome and observable
-// gain_life effect the old plain `.call()` implementation always had).
-// ---------------------------------------------------------------------
 
 #[test]
 fn invoke_operation_finishes_synchronously_when_the_script_never_yields() {

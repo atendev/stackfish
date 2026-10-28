@@ -1,19 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::Pump` — `Game.Ops.Pump(power,
-//! toughness, duration)`, the "target creature gets +X/+Y until <duration>"
-//! shape (CR 611.2a). Closes the other half of `phase5/effect-duration-
-//! expiration`: that slice built the drain paths for `EffectDuration::
-//! UntilYourNextTurn`/`UntilEndOfCombat`, but nothing could actually create
-//! an effect with either duration - `StaticAbilityBuilder` is setup-time/
-//! permanent-only. `Pump` is the first real creation path, mirroring
-//! `AbilityEffect::Damage`/`Counters`'s own "resolves against every legal
-//! target, no script call needed" shape rather than a generic continuous-
-//! effect builder.
-//!
-//! Same harness as `phase5_script_ops_damage.rs`: `CardDefinition.effect`
-//! set directly exercises the Rust-native fast path `ResolveStackTop`
-//! already takes for a recognized primitive, without needing the actual
-//! `Game.Ops.Pump` Lua binding invoked (same precedent every other
-//! `AbilityEffect` primitive's own test file already follows).
+//! CR 611.2a: `AbilityEffect::Pump` (`Game.Ops.Pump(power, toughness, duration)`) is the first creation path for `UntilYourNextTurn` and `UntilEndOfCombat` effects, resolving against every legal target like `Damage` and `Counters`.
+//! `CardDefinition.effect` is set directly to take the Rust fast path in `ResolveStackTop`, as in phase5_script_ops_damage.rs.
 
 use std::collections::HashMap;
 
@@ -48,7 +34,6 @@ fn creature_definition(definition_id: u64, name: &str, power: i32, toughness: i3
     }
 }
 
-/// "Test Growth: target creature gets +3/+3 until <duration>."
 fn growth_definition(duration: EffectDuration) -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -112,9 +97,7 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-/// Passes priority for whichever player the engine is waiting on until the
-/// active player rotates - i.e. until Cleanup has actually run, regardless
-/// of exactly how many steps (combat, end step, ...) sit in between.
+// Passes priority until the active player rotates, that is, until Cleanup has run.
 fn advance_to_next_turn(engine: &mut Engine) {
     let starting_turn = engine.state().turn_number;
     loop {

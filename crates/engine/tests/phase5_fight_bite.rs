@@ -1,20 +1,5 @@
-//! Phase 5 vertical slice: fight and bite (CR 701.14).
-//!
-//! `Game.Ops.Fight` makes two creatures each deal damage equal to their power
-//! to the other. `Game.Ops.Bite` is the one-sided cousin ("target creature
-//! you control deals damage equal to its power to target creature you don't
-//! control"); it is not a fight, so the biter takes nothing back.
-//!
-//! Each creature is the SOURCE of its own `DamageDealt` event, so deathtouch,
-//! lifelink, wither, infect, protection, prevention and "deals damage"
-//! triggers see the creature and not the spell. Both amounts are read through
-//! the layer engine before either event goes out, so the damage is
-//! simultaneous and state-based actions only run afterward.
-//!
-//! The pairing comes from the ability's target spec: a two-word
-//! `TargetSpec::Multiple` (first word acts on second word), one count-2 word
-//! (Fight only), or one count-1 word (the ability's source is the first
-//! creature).
+//! CR 701.14: `Game.Ops.Fight` makes two creatures each deal damage equal to their power to the other, and `Game.Ops.Bite` is one-sided.
+//! Each creature is the source of its own `DamageDealt` event, and both amounts are read before either event goes out, so damage is simultaneous. The pairing comes from the ability's target spec.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -25,9 +10,6 @@ const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
 const SPELL: ObjectId = ObjectId(100);
 
-// ---- Lua fixtures ---------------------------------------------------------
-
-/// "{0}: This creature fights target creature you don't control."
 const FIGHT_ABILITY: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -39,7 +21,6 @@ end
 return s
 "#;
 
-/// "{0}: This creature deals damage equal to its power to target creature you don't control."
 const BITE_ABILITY: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -73,7 +54,6 @@ end
 return s
 "#;
 
-/// Prey Upon.
 const PREY_UPON: &str = r#"
 local s = {}
 function s.target_requirement()
@@ -88,7 +68,6 @@ end
 return s
 "#;
 
-/// Bite-style: "Target creature you control deals damage equal to its power to target creature you don't control."
 const BITE_SPELL: &str = r#"
 local s = {}
 function s.target_requirement()
@@ -102,8 +81,6 @@ function s.operation()
 end
 return s
 "#;
-
-// ---- Card and state fixtures ----------------------------------------------
 
 struct Creature {
     id: u64,
@@ -260,8 +237,6 @@ fn prevent_damage_to(source: u64) -> ReplacementEffect {
     }
 }
 
-// ---- Driving the engine ---------------------------------------------------
-
 fn pass_both(engine: &mut Engine) {
     for player in [P0, P1] {
         engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
@@ -279,7 +254,6 @@ fn pass_until_stack_empty(engine: &mut Engine) {
     assert!(engine.state().stack.is_empty(), "stack should settle");
 }
 
-/// Casts `SPELL` at `targets` and pays its free cost, leaving it on the stack.
 fn cast(engine: &mut Engine, targets: Vec<Target>) -> Result<(), String> {
     engine
         .submit_action(PlayerAction {
@@ -320,7 +294,6 @@ fn activate_and_resolve(engine: &mut Engine, source: u64, targets: Vec<Target>) 
     pass_both(engine);
 }
 
-/// Every object-targeted `DamageDealt` in the ledger as (source, target, amount, is_combat).
 fn damage_events(engine: &Engine) -> Vec<(u64, u64, u32, bool)> {
     engine
         .state()
@@ -365,10 +338,6 @@ fn remove_from_battlefield(engine: &mut Engine, id: u64) {
     state.zone_mut(ZoneKind::Graveyard, Some(state.objects[&ObjectId(id)].owner)).unwrap().push_bottom(ObjectId(id));
     state.object_mut(ObjectId(id)).unwrap().zone = ZoneKind::Graveyard;
 }
-
-// ===========================================================================
-// Fight basics (CR 701.14a)
-// ===========================================================================
 
 #[test]
 fn each_creature_deals_damage_equal_to_its_power_to_the_other() {
@@ -539,10 +508,6 @@ fn an_ability_source_fights_its_target() {
     assert_eq!(marked(&engine, 1), 2);
 }
 
-// ===========================================================================
-// Keywords and the damage pipeline
-// ===========================================================================
-
 #[test]
 fn a_deathtouch_fighter_kills_a_larger_creature() {
     let mut engine = prey_upon_engine(creature(1, P0, 1, 1).keywords(KeywordSet::DEATHTOUCH), creature(2, P1, 5, 5));
@@ -622,10 +587,6 @@ fn deals_damage_and_is_dealt_damage_triggers_fire_for_fight_damage() {
     assert_eq!(life(&engine, P0), p0_before + 1, "creature 1 dealt damage");
     assert_eq!(life(&engine, P1), p1_before + 1, "creature 2 was dealt damage");
 }
-
-// ===========================================================================
-// Legality and resolution (CR 701.14b, 608.2b)
-// ===========================================================================
 
 #[test]
 fn targets_in_the_wrong_word_order_are_rejected_at_cast_time() {
@@ -770,10 +731,6 @@ fn a_self_source_fight_does_nothing_when_the_source_has_left() {
     assert_eq!(marked(&engine, 2), 0);
 }
 
-// ===========================================================================
-// Bite
-// ===========================================================================
-
 #[test]
 fn bite_deals_damage_to_the_target_and_the_biter_takes_none() {
     let mut engine = bite_engine(creature(1, P0, 3, 3), creature(2, P1, 2, 2));
@@ -862,10 +819,6 @@ fn a_creature_that_bites_itself_takes_its_power_once() {
 
     assert_eq!(damage_events(&engine), vec![(1, 1, 3, false)], "bite is one damage instance, never doubled");
 }
-
-// ===========================================================================
-// Lua surface
-// ===========================================================================
 
 #[test]
 fn fight_and_bite_decode_as_bare_tags() {

@@ -1,29 +1,6 @@
-//! Phase 5 vertical slice: CR 702.6 "Equip" as a real activated ability -
-//! the natural follow-up `phase5/aura-attach`'s own UNRESOLVED list named.
-//! Reuses that slice's `commands::attach_permanent`/`GameObject.
-//! attached_to`/`.attachments` wholesale; the new pieces are
-//! `AbilityEffect::Attach` (the resolution-time primitive), a CR 702.6a
-//! "activate only as a sorcery" check, and CR 704.5n's SBA cleanup - a
-//! structurally different shape from Auras' own CR 704.5m (an illegally-
-//! attached Equipment becomes unattached and *stays on the battlefield*,
-//! it doesn't die).
-//!
-//! Scoping notes:
-//! - CR 702.6a's timing restriction is enforced by matching on `effect ==
-//!   Some(AbilityEffect::Attach)` in `ActivateAbility`'s own command
-//!   handler, not a new `RegisteredAbility` field - see that variant's own
-//!   doc comment for why (~94 existing struct literals would need editing
-//!   for a restriction only this one effect shape needs today).
-//! - CR 704.5n's own legality recheck deliberately does *not* reuse the
-//!   equip ability's "creature you control" filter - CR 702.6c is explicit
-//!   that restriction only gates who may *activate* equip, not what stays
-//!   legally attached afterward. A creature changing controllers after
-//!   being equipped does not knock the Equipment off (tested below).
-//!
-//! Not attempted (named TODOs): CR 702.6c (further equip restrictions
-//! beyond "creature you control"), CR 702.6d (multiple equip abilities per
-//! card), CR 702.6e (Equip planeswalker), Fortifications, phasing (CR
-//! 702.26i).
+//! CR 702.6 Equip as an activated ability: `AbilityEffect::Attach` resolves it, CR 702.6a limits activation to sorcery speed, and CR 704.5n unattaches an illegally attached Equipment, which stays on the battlefield.
+//! The timing restriction matches on `effect == Some(AbilityEffect::Attach)` in `ActivateAbility`. CR 702.6c limits only who may activate, so a creature changing controllers does not knock the Equipment off.
+// TODO: further equip restrictions beyond "creature you control" (CR 702.6c), multiple equip abilities (CR 702.6d), Equip planeswalker (CR 702.6e) and phasing (CR 702.26i)
 
 use std::collections::HashMap;
 
@@ -71,11 +48,6 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
     }
 }
 
-/// "Test Equipment: Equip {0}." Green, so the protection-DEBT test has a
-/// real color to grant protection from. `script_ref` is `Inline` (rather
-/// than the usual `ByKey` placeholder) only for the one test that actually
-/// runs it (Lua self-registration) - every engine-driven test registers
-/// the equip ability directly via `equip_ability` instead.
 fn equipment_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
@@ -101,10 +73,6 @@ fn equipment_definition() -> CardDefinition {
     }
 }
 
-/// CR 702.6a's own ability, directly constructed - standing in for the
-/// ETB-registered version, same convention every other activated-ability
-/// test file in this repo uses. Free ({0}) cost, since cost payment isn't
-/// this slice's own concern.
 fn equip_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -209,10 +177,6 @@ fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     }
 }
 
-// ---------------------------------------------------------------------
-// Lua wiring
-// ---------------------------------------------------------------------
-
 #[test]
 fn game_ops_attach_self_registers_a_real_equip_ability() {
     let mut state = base_state();
@@ -239,10 +203,7 @@ fn game_ops_attach_self_registers_a_real_equip_ability() {
     ));
 }
 
-// ---------------------------------------------------------------------
-// CR 702.6a: activating Equip
-// ---------------------------------------------------------------------
-
+// CR 702.6a
 #[test]
 fn equipping_a_creature_you_control_attaches_it() {
     let mut state = base_state();
@@ -299,8 +260,7 @@ fn activating_equip_with_a_nonempty_stack_is_rejected() {
     put_on_battlefield(&mut state, permanent(equipment, equipment_definition(), p0));
     state.abilities.push(equip_ability(equipment));
 
-    // A dummy stack object, just to make state.stack non-empty - CR
-    // 702.6a's "activate only as a sorcery" needs an empty stack.
+    // A dummy stack object makes the stack non-empty, and CR 702.6a needs it empty.
     let already_on_stack = ObjectId(2);
     state.objects.insert(already_on_stack, permanent(already_on_stack, creature_definition(2, "Bystander", 1, 1), p0));
     state.stack.push(StackObject {
@@ -362,10 +322,7 @@ fn reequipping_to_a_different_creature_moves_the_attachment() {
     assert!(engine.state().object(bear2).unwrap().attachments.contains(&equipment));
 }
 
-// ---------------------------------------------------------------------
-// CR 704.5n: SBA cleanup for an illegally-attached Equipment
-// ---------------------------------------------------------------------
-
+// CR 704.5n
 #[test]
 fn an_equipped_creature_dying_makes_the_equipment_fall_off_but_stay_on_the_battlefield() {
     let mut state = base_state();
@@ -380,15 +337,13 @@ fn an_equipped_creature_dying_makes_the_equipment_fall_off_but_stay_on_the_battl
     equipment_obj.attached_to = Some(bear);
     put_on_battlefield(&mut state, equipment_obj);
 
-    // Pass 1: the creature dies (CR 704.5g) - same one-pass-behind timing
-    // as an Aura's own CR 704.5m check.
+    // Pass 1: the creature dies (CR 704.5g), one pass behind as with an Aura's CR 704.5m check.
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0].kind, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }));
     assert_eq!(state.object(equipment).unwrap().attached_to, Some(bear), "not yet noticed this same pass");
 
-    // Pass 2: the creature is gone - CR 704.5n unattaches the Equipment,
-    // but unlike an Aura it *stays on the battlefield*, no ZoneChange.
+    // Pass 2: the creature is gone, so CR 704.5n unattaches the Equipment, which stays on the battlefield with no ZoneChange.
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0].kind, GameEventKind::Unattached { object, was_attached_to } if object == equipment && was_attached_to == bear));
@@ -406,9 +361,7 @@ fn an_equipped_creatures_controller_changing_does_not_unattach_the_equipment() {
     let equipment = ObjectId(1);
     let mut bear_obj = permanent(bear, creature_definition(1, "Bear", 2, 2), p0);
     bear_obj.attachments.push(equipment);
-    // Simulates a control-change effect - CR 702.6c's own last sentence
-    // says the equip ability's "creature you control" restriction never
-    // re-applies once attached, only at activation time.
+    // Simulates a control change: CR 702.6c says the restriction applies only at activation.
     bear_obj.controller = p1;
     put_on_battlefield(&mut state, bear_obj);
     let mut equipment_obj = permanent(equipment, equipment_definition(), p0);
@@ -439,8 +392,7 @@ fn a_legally_equipped_creature_is_unaffected() {
 
 #[test]
 fn an_unattached_equipment_is_not_itself_a_violation() {
-    // CR 301.5b: Equipment can sit unattached indefinitely - unlike an
-    // Aura (CR 704.5m), there's no "must be attached" requirement.
+    // CR 301.5b: Equipment can sit unattached indefinitely, unlike an Aura (CR 704.5m).
     let mut state = base_state();
     let p0 = PlayerId(0);
     let equipment = ObjectId(0);
@@ -451,9 +403,7 @@ fn an_unattached_equipment_is_not_itself_a_violation() {
     assert!(events.is_empty(), "an unattached Equipment is legal on its own, got {:?}", events.iter().map(|e| &e.kind).collect::<Vec<_>>());
 }
 
-/// Bonus: closes the Equip half of CR 702.16's DEBT restriction, same as
-/// `phase5/aura-attach` closed the Enchant half - an equipped creature
-/// gaining protection from the Equipment's own color makes it fall off.
+// An equipped creature gaining protection from the Equipment's color makes it fall off (CR 702.16).
 #[test]
 fn an_equipped_creature_gaining_protection_from_the_equipment_makes_it_fall_off() {
     let mut state = base_state();

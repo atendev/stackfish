@@ -1,17 +1,5 @@
-//! Phase 5 vertical slice: CR 613.4c's literal text - "Effects and counters
-//! that modify power and/or toughness ... are applied" together, in layer
-//! 7c, timestamp-ordered against each other - rather than pre-netting
-//! `+1/+1`/`-1/-1` counters into the layer 7a base the way this engine used
-//! to. That older shape was a real bug, not just an approximation: a
-//! counter added before a `SetPT` ("becomes 0/1") effect got baked into a
-//! base the `SetPT` override then discarded outright, silently losing it -
-//! CR 613.5's own Gray Ogre example shows the counter must still contribute
-//! *after* the override, not disappear.
-//!
-//! `CounterSet` now tracks one timestamped batch per `add` call
-//! (`CounterSet::batches`) instead of one coalesced running total, so
-//! `layers::effective_characteristics`'s layer 7c fold can interleave them
-//! against real `ModifyPT`/`DoublePT` effects by timestamp.
+//! CR 613.4c, 613.5: power/toughness effects and counters apply together in layer 7c, ordered by timestamp, and a counter added before a `SetPT` override still contributes after it (Gray Ogre).
+//! `CounterSet::batches` tracks one timestamped batch per `add`, so the layer 7c fold in `effective_characteristics` can interleave them with `ModifyPT` and `DoublePT`.
 
 use std::collections::HashMap;
 
@@ -94,14 +82,8 @@ fn set(source: ObjectId, power: i32, toughness: i32, timestamp: u64) -> Continuo
     continuous_effect(source, Layer::PowerToughnessSetting, EffectPrimitive::SetPT { power, toughness }, timestamp)
 }
 
-/// CR 613.5's own worked example, reproduced exactly: Gray Ogre (2/2) gets a
-/// `+1/+1` counter, then "+4/+4 until end of turn" (a spell), then "+0/+2"
-/// (an enchantment) - all layer 7c, in that timestamp order - making it
-/// 7/9. Then "becomes 0/1 until end of turn" (layer 7b, `SetPT`) applies,
-/// but the three 7c contributions still apply *after* it (layers are
-/// structurally ordered - 7b always precedes 7c, regardless of timestamp),
-/// landing on the rules' own stated 5/8: 0/1 base, +4/+4 spell, +0/+2
-/// enchantment, +1/+1 counter.
+// CR 613.5
+// Gray Ogre (2/2) gets a +1/+1 counter, +4/+4, +0/+2, then becomes 0/1 in layer 7b, landing on 5/8 because 7b precedes 7c regardless of timestamp.
 #[test]
 fn cr_613_5_gray_ogre_worked_example() {
     let mut state = base_state();
@@ -119,12 +101,7 @@ fn cr_613_5_gray_ogre_worked_example() {
     assert_eq!(effective.toughness, Some(8));
 }
 
-/// A counter added before a later `SetPT` override must still contribute
-/// after it - the specific bug CR 613.5's example demonstrates (see this
-/// file's own doc comment). Narrower isolated case than the full worked
-/// example above: base 2/2, `+1/+1` counter (timestamp 1), then `SetPT`
-/// 0/0 (timestamp 2) - if the counter got pre-netted into the base and
-/// thrown away by the override, this would wrongly read 0/0.
+// A counter added before a later SetPT must still contribute after it. If it were pre-netted into the base it would read 0/0.
 #[test]
 fn counter_survives_a_later_setpt_override() {
     let mut state = base_state();
@@ -140,10 +117,8 @@ fn counter_survives_a_later_setpt_override() {
     assert_eq!(effective.toughness, Some(1));
 }
 
-/// CR 613.4c/613.8a: a counter added *before* a `DoublePT` gets doubled
-/// along with everything else already summed by that point - base 1/1,
-/// `ModifyPT` +1/+1 (timestamp 1), `+1/+1` counter (timestamp 2), `DoublePT`
-/// (timestamp 3): (1+1+1)*2 = 6/6.
+// CR 613.4c, 613.8a
+// A counter added before DoublePT is doubled with everything summed by then: (1+1+1)*2 = 6/6.
 #[test]
 fn counter_added_before_double_pt_gets_doubled() {
     let mut state = base_state();
@@ -160,11 +135,7 @@ fn counter_added_before_double_pt_gets_doubled() {
     assert_eq!(effective.toughness, Some(6));
 }
 
-/// Same shape, but the counter is added *after* the `DoublePT` instead -
-/// base 1/1, `ModifyPT` +1/+1 (timestamp 1), `DoublePT` (timestamp 2),
-/// `+1/+1` counter (timestamp 3): (1+1)*2 = 4, then +1 counter = 5/5. Proves
-/// the interleaving is real timestamp ordering, not just "counters always
-/// end up on one side or the other."
+// A counter added after DoublePT is not doubled: (1+1)*2 + 1 = 5/5, so this is timestamp ordering.
 #[test]
 fn counter_added_after_double_pt_is_not_doubled() {
     let mut state = base_state();
@@ -181,8 +152,7 @@ fn counter_added_after_double_pt_is_not_doubled() {
     assert_eq!(effective.toughness, Some(5));
 }
 
-/// Regression: a plain creature with just a counter and no other layer 7
-/// effects at all still works exactly as before this slice.
+// A counter with no other layer 7 effects still works.
 #[test]
 fn counter_alone_still_nets_into_the_final_value() {
     let mut state = base_state();

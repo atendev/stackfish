@@ -1,17 +1,5 @@
-//! Phase 5: CR 603.2h ("This ability triggers only once each turn"),
-//! backlog item 7's once-per-turn sub-piece — `ConditionSpec::
-//! PrimitiveOncePerTurn`/`Game.Conditions.OncePerTurn(tag)`, enforced in
-//! `triggers::collect_triggers` against `GameState::once_per_turn_triggered`.
-//!
-//! The subtle case this slice actually has to get right: two qualifying
-//! events in the very same batch (e.g. an attacker splitting combat damage
-//! across two blockers, CR 510.1c - one `AssignCombatDamage` command, one
-//! `CollectTriggers` pass, but two `DamageDealt` events). A naive "check
-//! once per `collect_triggers` call" implementation would still double-
-//! trigger here; the fix records a match into `GameState::
-//! once_per_turn_triggered` as soon as one event in the batch produces it,
-//! before the next event in that same batch is checked (see `Engine`'s
-//! `CollectTriggers` arm).
+//! CR 603.2h: "this ability triggers only once each turn", `ConditionSpec::PrimitiveOncePerTurn` (`Game.Conditions.OncePerTurn(tag)`) enforced in `collect_triggers` against `GameState::once_per_turn_triggered`.
+//! Two qualifying events in one batch (an attacker splitting damage across two blockers, CR 510.1c) must trigger once, so a match is recorded as soon as one event in the batch produces it.
 
 use std::collections::HashMap;
 
@@ -54,7 +42,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Mirrors `phase5_damage_dealt_triggers::combat_damage_state`.
 fn combat_damage_state(combat: CombatState) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -82,11 +69,7 @@ fn pass(engine: &mut Engine, player: PlayerId) {
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
 }
 
-/// Drives real priority passes (whoever `AwaitingAction` names next) through
-/// however many steps it takes for `turn_number` to roll over - the actual
-/// turn structure (Combat -> End -> Cleanup -> next Untap/Upkeep), not a
-/// shortcut. A safety cap keeps a genuine engine bug (stuck priority) a
-/// clear test failure instead of a hang.
+// Drives real priority passes until turn_number rolls over, with a safety cap so a stuck-priority engine bug fails and does not hang.
 fn pass_until_turn_advances(engine: &mut Engine, starting_turn: u32) -> StepStatus {
     let mut status = drain(engine);
     for _ in 0..64 {
@@ -122,9 +105,8 @@ fn dealsdamage_ability(source: ObjectId, once_per_turn: bool) -> RegisteredAbili
     }
 }
 
-/// CR 510.1c: an attacker with 2+ blockers splits its combat damage - one
-/// `AssignCombatDamage` command, one `CollectTriggers` pass, but two
-/// `DamageDealt` events (source = the attacker, both in the same batch).
+// CR 510.1c
+// An attacker with 2 blockers splits its damage: one AssignCombatDamage, one CollectTriggers pass, two DamageDealt events.
 #[test]
 fn once_per_turn_dealsdamage_trigger_fires_only_once_from_two_events_in_the_same_batch() {
     let p0 = PlayerId(0);
@@ -170,10 +152,7 @@ fn once_per_turn_dealsdamage_trigger_fires_only_once_from_two_events_in_the_same
     assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied exactly once");
 }
 
-/// Same setup, but without the once-per-turn cap - the same two events
-/// produce two separate triggers, confirming the capped test above isn't
-/// passing for some unrelated reason (e.g. only one DamageDealt event ever
-/// being produced).
+// Without the once-per-turn cap the same two events produce two triggers, so the capped test is not passing for an unrelated reason.
 #[test]
 fn without_the_cap_the_same_two_events_fire_the_trigger_twice() {
     let p0 = PlayerId(0);
@@ -195,9 +174,7 @@ fn without_the_cap_the_same_two_events_fire_the_trigger_twice() {
     let mut engine = Engine::new(state);
     let status = assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker1, 2), (blocker2, 1)])]);
 
-    // Both triggers share a controller (p0), so CR 603.3b pauses for p0 to
-    // choose their relative stack order rather than pushing both outright -
-    // the group size itself is the proof two separate triggers matched.
+    // Both triggers share a controller (p0), so CR 603.3b pauses for p0 to order them, and the group size proves two triggers matched.
     match status {
         StepStatus::AwaitingTriggerOrderChoice { player, group } => {
             assert_eq!(player, p0);
@@ -207,8 +184,8 @@ fn without_the_cap_the_same_two_events_fire_the_trigger_twice() {
     }
 }
 
-/// CR 603.2h's cap resets with the turn - a permanent that already
-/// triggered once this turn can trigger again next turn.
+// CR 603.2h
+// The cap resets with the turn.
 #[test]
 fn once_per_turn_trigger_resets_after_a_new_turn_begins() {
     let p0 = PlayerId(0);
@@ -226,9 +203,7 @@ fn once_per_turn_trigger_resets_after_a_new_turn_begins() {
     put_on_battlefield(&mut state, permanent(blocker1, creature_definition("Wall", 0, 5), p1));
     put_on_battlefield(&mut state, permanent(blocker2, creature_definition("Wall", 0, 5), p1));
     state.abilities.push(dealsdamage_ability(attacker, true));
-    // Simulate "already triggered earlier this same turn" directly, rather
-    // than re-deriving it via a first combat - this test only cares whether
-    // a fresh turn clears the record.
+    // Simulates "already triggered this turn" directly, since this test only checks whether a fresh turn clears the record.
     state.once_per_turn_triggered.insert(AbilityId(0));
 
     let mut engine = Engine::new(state);
@@ -236,8 +211,7 @@ fn once_per_turn_trigger_resets_after_a_new_turn_begins() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty(), "already-triggered-this-turn correctly suppressed it");
 
-    // Walk the real turn structure (Combat -> End -> Cleanup -> next
-    // Untap/Upkeep) until the turn actually rolls over.
+    // Walk the real turn structure until the turn rolls over.
     let status = pass_until_turn_advances(&mut engine, 1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1), "turn rotated, got {status:?}");
     assert_eq!(engine.state().turn_number, 2);

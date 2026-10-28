@@ -1,17 +1,9 @@
-//! Phase 5 dry-run slice: PassPriority + the minimal pipeline loop back to
-//! PriorityWindow (see docs/implementation.md, "Phase 5: Dry Run #2 -
-//! pass-priority-loop"). Builds `GameState` directly via struct literals
-//! (same pattern as `stackfish_scenario`, since the engine's own
-//! constructors are still `todo!()` past PassPriority) so each test has
-//! full access to `Engine`'s internals (`StepStatus`, `pipeline_context_active`)
-//! that the higher-level scenario-TOML harness abstracts away.
+//! PassPriority and the minimal pipeline loop back to PriorityWindow, with `GameState` built by struct literal for full access to `Engine` internals (`StepStatus`, `pipeline_context_active`).
 
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{drain, two_player_state as base_two_player_state};
 
-/// Bare pregame skeleton - no zones/objects at all, since these tests only
-/// exercise the priority pass-loop itself, not zone moves.
 fn two_player_state() -> GameState {
     GameState { phase: Phase::PreGame, zones: Vec::new(), next_object_id: 0, ..base_two_player_state(Vec::new()) }
 }
@@ -56,11 +48,7 @@ fn all_pass_with_empty_stack_advances_turn_step() {
         .unwrap();
     let status = drain(&mut engine);
 
-    // Both players passed in a row with an empty stack - CR 117.4 - so the
-    // engine should have driven itself through AdvanceTurnStep. CR 502.4:
-    // Untap opens no priority window, so it auto-chains straight into
-    // Upkeep and lands back on PriorityWindow there, without needing a
-    // third step() call from here.
+    // Both players passed in a row with an empty stack (CR 117.4), so the engine advances. CR 502.4: Untap opens no priority window, so it chains into Upkeep.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == PlayerId(0)));
     assert_eq!(engine.state().consecutive_passes, 0, "pass count resets once all-pass resolves");
     assert_eq!(engine.state().phase, Phase::Beginning);
@@ -68,10 +56,7 @@ fn all_pass_with_empty_stack_advances_turn_step() {
     assert_eq!(engine.state().priority_player, PlayerId(0), "priority reset to active player");
     assert!(!engine.pipeline_context_active(), "pipeline_context must be cleared once back at PriorityWindow");
 
-    // 2 PriorityPassed (one per pass) + PhaseStarted + StepStarted{Untap} +
-    // TurnStarted + StepStarted{Upkeep} (no second PhaseStarted - phase
-    // stays Beginning across Untap -> Upkeep). two_player_state() has no
-    // objects, so untap_step() produces no Untapped events here.
+    // 2 PriorityPassed, PhaseStarted, StepStarted{Untap}, TurnStarted and StepStarted{Upkeep}. The phase stays Beginning from Untap to Upkeep, and there are no objects to untap.
     assert_eq!(engine.state().ledger.len(), 6);
     assert!(matches!(
         engine.state().ledger[2].kind,
@@ -157,9 +142,7 @@ fn pipeline_context_clears_between_separate_runs() {
     engine
         .submit_action(PlayerAction { player: PlayerId(0), kind: PlayerActionKind::PassPriority })
         .unwrap();
-    // First step() call moves PendingAction -> ReplacementCheck, which is
-    // where pipeline_context gets set - check it's actually populated
-    // mid-run, not just (trivially) absent the whole time.
+    // The first step() moves PendingAction to ReplacementCheck, where pipeline_context is set, so check it is populated mid-run.
     let first = engine.step();
     assert!(matches!(first.status, StepStatus::Progressed));
     assert!(engine.pipeline_context_active(), "context must be set once a pipeline run begins");
@@ -188,9 +171,7 @@ fn non_pass_action_breaks_pass_chain() {
     assert_eq!(engine.state().consecutive_passes, 1, "one pass recorded, not yet all-pass");
     assert_eq!(engine.state().priority_player, PlayerId(1));
 
-    // Player 1 (who now holds priority) takes a non-pass action. CR 117.3c:
-    // any action other than passing breaks the chain immediately, even
-    // though the count hadn't reached turn_order.len() yet.
+    // Player 1 takes a non-pass action, which breaks the chain at once (CR 117.3c) before the pass count reaches turn_order.len().
     engine
         .submit_action(PlayerAction {
             player: PlayerId(1),
@@ -215,9 +196,7 @@ fn step_status_alternates_progressed_then_awaiting_action() {
         .submit_action(PlayerAction { player: PlayerId(0), kind: PlayerActionKind::PassPriority })
         .unwrap();
 
-    // PendingAction -> ReplacementCheck -> CommitEvents -> SbaLoop ->
-    // CollectTriggers -> PutTriggersApnap, each its own Progressed step()
-    // call, then AwaitingAction once back at PriorityWindow.
+    // PendingAction, ReplacementCheck, CommitEvents, SbaLoop, CollectTriggers and PutTriggersApnap are each a Progressed step(), then AwaitingAction at PriorityWindow.
     let mut progressed_count = 0;
     loop {
         let result = engine.step();

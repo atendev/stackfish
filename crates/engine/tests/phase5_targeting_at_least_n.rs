@@ -1,15 +1,4 @@
-//! Phase 5 vertical slice: CR 601.2c/115.6 "N or more" target counts —
-//! `TargetRequirement`'s third count shape alongside exact-count and "up to
-//! N" (`phase5_targeting_up_to_n.rs`). `TargetRequirement::at_least` lets a
-//! caster choose `count` or more targets, with no upper bound of its own
-//! (capped only by how many legal candidates the caster actually submits,
-//! same as every other shape — `commands::validate_targets` never
-//! enumerates "all possible legal targets" itself).
-//!
-//! No resolution-time fizzle-logic change needed — `ResolveStackTop`'s
-//! fizzle gate was already fixed to key off `!top.targets.is_empty()`
-//! rather than the requirement's own `count` field back in
-//! `targeting-up-to-n`, so it's shape-agnostic for free.
+//! CR 601.2c, 115.6: "N or more" target counts, `TargetRequirement::at_least`, with no upper bound beyond the legal candidates submitted. The fizzle gate keys off `!top.targets.is_empty()`, so it needs no change.
 
 use std::collections::HashMap;
 
@@ -44,7 +33,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Volley deals 1 damage to each of two or more target creatures."
 fn volley_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -126,8 +114,6 @@ fn damage_marked_on(engine: &Engine, id: ObjectId) -> u32 {
     engine.state().object(id).map(|o| o.damage_marked).unwrap_or(0)
 }
 
-/// `n` creatures on the battlefield (`p1`'s), a "Test Volley" card in `p0`'s
-/// hand.
 fn setup_with_creatures(n: u32) -> (GameState, Vec<ObjectId>, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);

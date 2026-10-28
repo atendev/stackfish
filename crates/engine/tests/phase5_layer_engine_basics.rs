@@ -1,16 +1,5 @@
-//! Phase 5 vertical slice: CR 613 continuous-effect layer engine, narrowed to
-//! layer 6 (ability adding) and layers 7b/7c (power/toughness set/modify) —
-//! see `layers.rs`'s own doc comment for why the rest of CR 613's layers
-//! (copy/control/text/type/color, plus 7a/7d/7e) aren't built yet, and for
-//! why ordering within a layer is timestamp-only (no CR 613.6-8 dependency
-//! detection).
-//!
-//! `ContinuousEffect`s here are built directly via struct literal, the same
-//! "bootstrap before the scripting slice exists" pattern every prior
-//! subsystem used (mana abilities before `Game.Costs.Tap`, triggered
-//! abilities before `Game.CreateTriggeredAbility`) — `Game.
-//! AddContinuousEffect`/static-ability self-registration are their own
-//! future slice (docs/implementation.md's backlog, item 3).
+//! CR 613: the layer engine for layer 6 (ability adding) and layers 7b and 7c (power/toughness set and modify), ordered by timestamp within a layer.
+//! `ContinuousEffect`s are built directly by struct literal.
 
 use std::collections::HashMap;
 
@@ -20,9 +9,7 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
-/// This slice's fixtures never register a `ReplacementEffect` on a dying
-/// creature - a real CR 616.1 pause here would mean the fixture itself is
-/// wrong, not something to handle gracefully.
+// No fixture registers a ReplacementEffect on a dying creature, so a CR 616.1 pause here would mean the fixture is wrong.
 fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     match outcome {
         SbaOutcome::Progressed(events, _) => events,
@@ -84,8 +71,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// A permanent-effect-shaped `ContinuousEffect` sourced from `source`,
-/// affecting anything matching `filter`, at `timestamp`.
 fn continuous_effect(
     source: ObjectId,
     layer: Layer,
@@ -183,8 +168,7 @@ fn set_pt_overrides_base_before_modify_pt_applies() {
         no_filter(),
         0,
     ));
-    // ... then layer 7c adds +2/+2 on top of the *set* value, not the
-    // original base - 7b must run before 7c regardless of timestamp order.
+    // ... then layer 7c adds +2/+2 on top of the set value, since 7b runs before 7c regardless of timestamp.
     state.continuous_effects.push(continuous_effect(
         modifier,
         Layer::PowerToughnessModifying,
@@ -267,9 +251,7 @@ fn self_only_filter_excludes_other_objects() {
     put_on_battlefield(&mut state, creature(equipment, p0, 0, 0));
     put_on_battlefield(&mut state, creature(equipped, p0, 2, 2));
     put_on_battlefield(&mut state, creature(bystander, p0, 2, 2));
-    // self_only models "equipped creature" as "the effect's own source" -
-    // so the effect's source here stands in for the equipped creature
-    // itself (see EffectFilter::self_only's doc comment).
+    // self_only models "equipped creature" as the effect's own source.
     state.continuous_effects.push(continuous_effect(
         equipment,
         Layer::PowerToughnessModifying,
@@ -302,12 +284,6 @@ fn cda_power_and_toughness_are_still_skipped_not_guessed() {
     assert_eq!(effective.power, None);
     assert_eq!(effective.toughness, None);
 }
-
-// ---------------------------------------------------------------------
-// Real consumer: sba::check_state_based_actions now reads toughness and
-// Indestructible through effective_characteristics, not straight off
-// CardDefinition.
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_modify_pt_boost_saves_a_creature_from_the_lethal_toughness_sba() {
@@ -374,12 +350,7 @@ fn a_granted_indestructible_survives_lethal_damage_via_sba() {
     assert!(state.object(bear).is_some());
 }
 
-/// Non-creature permanent standing in for an anthem/equipment source - not
-/// the object under test, just something for a `ContinuousEffect::source`
-/// to point at. Deliberately NOT a creature (unlike `creature()`'s 0/0
-/// shape would be) so `apply_creature_death`'s own 704.5f/g checks never
-/// apply to the source itself and confuse a test about the *bear's*
-/// survival.
+// A non-creature source, so apply_creature_death's CR 704.5f/g checks never apply to it and confuse a test about the bear.
 fn anthem_source(id: ObjectId, owner: PlayerId) -> GameObject {
     let mut object = creature(id, owner, 0, 0);
     object.definition.card_types = CardTypeSet::ENCHANTMENT;

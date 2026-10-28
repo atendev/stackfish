@@ -1,33 +1,6 @@
-//! Phase 5 vertical slice: CR 613.1a/707 layer 1 (copy effects) - backlog
-//! item 1.5c. Unlike every other layer (2, 4-7), layer 1 has no
-//! `ContinuousEffect`/`EffectPrimitive` case and is never queried through
-//! `layers::applicable_effects_in_layer` - CR 707.2b/707.2c require a copy's
-//! granted values to freeze at the moment it's applied, which the other
-//! layers' "re-derive from `state.continuous_effects` on every call" shape
-//! would violate outright. Real support is `GameObject.copiable_override`
-//! instead: a frozen snapshot written once by whichever of the two entry
-//! points below produced it, read by `layers::effective_characteristics`
-//! ahead of `definition`.
-//!
-//! Two entry points: `AbilityEffect::BecomeCopy` (an existing permanent
-//! re-copying another object, e.g. Vesuvan Doppelganger's "become a copy of
-//! target creature") and `TokenSpec::CopyOf` (a freshly created token that's
-//! a copy of another object, e.g. Clone-as-token-generator text). Both purge
-//! whatever the copying object had self-registered under its pre-copy
-//! identity and re-run `ScriptRuntime::run_card_script` against the new
-//! snapshot (CR 707.2a: abilities are copiable).
-//!
-//! CR 707.9's two most common real exception shapes are real now too
-//! (`phase5/copy-exceptions`): `CopyExceptions` (`set_power_toughness`/
-//! `add_keywords`), applied to the snapshot right before it's frozen, shared
-//! by both entry points.
-//!
-//! Narrower than the full rules text - see this slice's own pre-slice
-//! scoping notes in docs/implementation.md: CR 707.9's other shapes (9c
-//! excluded characteristics, 9e/9g linked-effect/trigger exceptions) stay
-//! unmodeled, no ETB-replacement "enters as a copy" path (Clone itself), no
-//! stack-copy (CR 707.10, Fork-style), no double-faced-card copying (CR
-//! 707.8).
+//! CR 613.1a, 707: layer 1 copy effects. A copy freezes its values when applied (CR 707.2b/c), so it is a `GameObject.copiable_override` snapshot that `effective_characteristics` reads ahead of `definition`, and not a `ContinuousEffect`.
+//! Two entry points write it, `AbilityEffect::BecomeCopy` and `TokenSpec::CopyOf`. Both purge the copier's pre-copy abilities, apply `CopyExceptions` (CR 707.9), and re-run `run_card_script` against the snapshot (CR 707.2a).
+// TODO: stack copies (CR 707.10, Fork) and double-faced-card copying (CR 707.8)
 
 use std::collections::{HashMap, VecDeque};
 
@@ -107,9 +80,7 @@ fn doppelganger_definition() -> CardDefinition {
         card_types: CardTypeSet::CREATURE,
         subtypes: Vec::new(),
         oracle_text: String::new(),
-        // CR 704.5f: a 0-toughness creature would die to SBAs before this
-        // slice's own machinery ever runs - nonzero so the doppelganger
-        // survives to actually activate BecomeCopy.
+        // CR 704.5f: nonzero toughness so the doppelganger survives to activate BecomeCopy.
         power: Some(PTValue::Fixed(1)),
         toughness: Some(PTValue::Fixed(1)),
         loyalty: None,
@@ -264,9 +235,6 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-/// Activates the ability (no cost), pays through the resulting
-/// `AwaitingPayment` pause with an empty plan, then passes priority once
-/// (sole player) so the pushed `ActivatedAbility` resolves.
 fn activate_pay_and_resolve(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Vec<Target>) {
     activate(engine, player, source, targets);
     pay_free_and_drain(engine);
@@ -290,12 +258,8 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-// ── AbilityEffect::BecomeCopy ───────────────────────────────────────────
-
-/// CR 707.2/707.3: activating "become a copy of target creature" changes
-/// the activator's *effective* characteristics (via `layers::
-/// effective_characteristics`, the same query every other layer uses) to
-/// the target's - name, P/T, and keywords all come from the copy.
+// CR 707.2, 707.3
+// "Become a copy of target creature" changes name, P/T and keywords through effective_characteristics.
 #[test]
 fn become_copy_changes_effective_characteristics() {
     let p0 = PlayerId(0);
@@ -323,13 +287,8 @@ fn become_copy_changes_effective_characteristics() {
     );
 }
 
-/// CR 707.9e/g: `GameObject::copy_generation` counts real, distinct copy
-/// applications on the same object - bumped once here (a single
-/// `BecomeCopy`), and again below by a second, independent activation.
-/// Both copy targets are scriptless (unlike `bear_definition`'s own
-/// unconditional self-registered trigger) so a second real activation in the
-/// same test doesn't leave an unrelated triggered ability sitting on the
-/// stack awaiting its own priority pass.
+// CR 707.9e, 707.9g
+// copy_generation counts distinct copy applications. The copy targets are scriptless so a second activation leaves no unrelated trigger on the stack.
 #[test]
 fn become_copy_bumps_copy_generation() {
     let p0 = PlayerId(0);
@@ -349,10 +308,7 @@ fn become_copy_bumps_copy_generation() {
     assert_eq!(engine.state().object(doppel).unwrap().copy_generation, 1, "one real copy application");
     assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Salamander");
 
-    // `become_copy_ability` (the ability that just resolved) was purged
-    // alongside every other pre-copy ability - re-granted here the same way
-    // a real card's own repeatable "you may have this become a copy again"
-    // text would be, to drive a second, independent BecomeCopy.
+    // become_copy_ability was purged with the pre-copy abilities, so it is re-granted to drive a second BecomeCopy.
     let target_b = ObjectId(2);
     engine.state_mut().objects.insert(target_b, card_object(target_b, doppelganger_definition(), p0, ZoneKind::Battlefield));
     engine.state_mut().abilities.push(become_copy_ability(doppel));
@@ -361,17 +317,8 @@ fn become_copy_bumps_copy_generation() {
     assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Doppelganger");
 }
 
-/// CR 707.9a: a `grant_recurring_copy_trigger` exception (Vesuvan
-/// Doppelganger's own linked ability, `phase5/vesuvan-linked-copy-ability`)
-/// re-grants itself on every real copy application - the old instance is
-/// gone (purged alongside every other pre-copy ability, same as
-/// `become_copy_purges_old_abilities_and_registers_the_copys_own` already
-/// proves for an ordinary copied-in ability) and a new one, tagged with the
-/// new `copy_generation`, takes its place. Demonstrates directly why
-/// `linked_ability_generation`'s own supersession check stays structurally
-/// unreached through this producer: the *old* `AbilityId` is deleted, not
-/// merely superseded, so nothing is ever left around for the tag to need to
-/// invalidate.
+// CR 707.9a
+// A recurring-copy exception (Vesuvan Doppelganger) is purged and re-granted on each copy with the new copy_generation, so linked_ability_generation's supersession check is never reached through this producer.
 #[test]
 fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_each_time() {
     let p0 = PlayerId(0);
@@ -397,9 +344,7 @@ fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_
     let target_b = ObjectId(2);
     engine.state_mut().objects.insert(target_b, card_object(target_b, doppelganger_definition(), p0, ZoneKind::Battlefield));
     engine.state_mut().abilities.push(become_copy_ability_with_exceptions(doppel, exceptions));
-    // ability_index 1, not 0 - the linked ability granted by the first copy
-    // (Triggered, not Activated) is still sitting at index 0 for this source
-    // until this very activation purges it.
+    // ability_index 1, since the linked ability from the first copy sits at index 0 until this activation purges it.
     engine
         .submit_action(PlayerAction {
             player: p0,
@@ -428,11 +373,8 @@ fn become_copy_with_grant_recurring_copy_trigger_regenerates_the_linked_ability_
     );
 }
 
-/// CR 707.2a: the copy's abilities come from the copied text, and the
-/// object doesn't keep its pre-copy abilities alongside them - the
-/// `BecomeCopy` ability itself (sourced from `doppel`) is purged by the
-/// same resolution that grants Bear's self-registered `GainLife(1)`
-/// trigger, so `doppel` ends up with exactly Bear's ability, not both.
+// CR 707.2a
+// The copy's abilities come from the copied text, so doppel ends with exactly Bear's ability and not both.
 #[test]
 fn become_copy_purges_old_abilities_and_registers_the_copys_own() {
     let p0 = PlayerId(0);
@@ -457,8 +399,8 @@ fn become_copy_purges_old_abilities_and_registers_the_copys_own() {
     assert!(events.iter().any(|e| matches!(e, GameEventKind::BecameCopy { object, copied } if *object == doppel && *copied == bear)));
 }
 
-/// CR 707.9b: a P/T exception overrides the copy's base power/toughness -
-/// everything else (name, keywords) still comes from the copied object.
+// CR 707.9b
+// A P/T exception overrides the copy's base power and toughness, and name and keywords still come from the copied object.
 #[test]
 fn become_copy_with_pt_exception_overrides_base_power_and_toughness() {
     let p0 = PlayerId(0);
@@ -483,8 +425,8 @@ fn become_copy_with_pt_exception_overrides_base_power_and_toughness() {
     assert!(chars.keywords.contains(KeywordSet::FLYING), "keywords still come from the copied object");
 }
 
-/// CR 707.9a: a keyword exception adds to whatever the copied object
-/// already grants, rather than replacing it.
+// CR 707.9a
+// A keyword exception adds to what the copied object grants and does not replace it.
 #[test]
 fn become_copy_with_keyword_exception_adds_the_keyword() {
     let p0 = PlayerId(0);
@@ -508,10 +450,8 @@ fn become_copy_with_keyword_exception_adds_the_keyword() {
     assert!(chars.keywords.contains(KeywordSet::TRAMPLE), "granted by the keyword exception");
 }
 
-/// CR 707.9e: Spark Double's own "additional effect" exception - the copy
-/// applies as normal, plus a real +1/+1 counter the copied object's own
-/// characteristics never granted (a `GameObject`-level mutation, not a
-/// `CardDefinition` one, unlike `set_power_toughness`/`add_keywords` above).
+// CR 707.9e
+// Spark Double's additional-effect exception adds a +1/+1 counter as a GameObject mutation, not a CardDefinition one.
 #[test]
 fn become_copy_with_additional_counter_exception_adds_a_real_counter() {
     let p0 = PlayerId(0);
@@ -538,8 +478,7 @@ fn become_copy_with_additional_counter_exception_adds_a_real_counter() {
     );
 }
 
-/// A bare copy (no exception set) grants no counter - regression guard
-/// against the exception applying unconditionally.
+// A bare copy grants no counter.
 #[test]
 fn become_copy_without_the_exception_grants_no_counter() {
     let p0 = PlayerId(0);
@@ -559,18 +498,15 @@ fn become_copy_without_the_exception_grants_no_counter() {
     assert_eq!(engine.state().object(doppel).unwrap().counters.count(&CounterKind::PlusOnePlusOne), 0);
 }
 
-/// CR 707.3: copying an object that's itself already a copy uses *that*
-/// object's current copiable values, not its own printed `CardDefinition` -
-/// a Clone copying a Vesuvan Doppelganger that already copied a Bear ends
-/// up a Bear, not a Doppelganger.
+// CR 707.3
+// Copying a copy uses its current copiable values, so a Clone copying a Doppelganger that copied a Bear ends up a Bear.
 #[test]
 fn become_copy_of_a_copy_uses_its_current_copiable_values() {
     let p0 = PlayerId(0);
     let clone_obj = ObjectId(0);
     let already_copied = ObjectId(1);
     let mut already_copied_obj = card_object(already_copied, doppelganger_definition(), p0, ZoneKind::Battlefield);
-    // Simulates `already_copied` having already become a copy of Bear
-    // before this test's own BecomeCopy resolves.
+    // already_copied has become a copy of Bear before this BecomeCopy resolves.
     already_copied_obj.copiable_override = Some(bear_definition());
     let state = one_player_state(
         vec![card_object(clone_obj, doppelganger_definition(), p0, ZoneKind::Battlefield), already_copied_obj],
@@ -584,11 +520,8 @@ fn become_copy_of_a_copy_uses_its_current_copiable_values() {
     assert_eq!(chars.name, "Bear", "should copy Bear's values, not the Doppelganger's own printed name");
 }
 
-/// CR 707.2b: once an object has been copied, changing the copiable values
-/// the *original* now grants (e.g. it becomes a copy of something else
-/// afterward) does not retroactively change the earlier copy - the frozen
-/// `copiable_override` snapshot is a real clone, not a live reference back
-/// to the source.
+// CR 707.2b
+// Changing the original's copiable values afterward does not change the earlier copy, since the snapshot is a clone.
 #[test]
 fn copying_the_original_again_later_does_not_change_an_earlier_copy() {
     let p0 = PlayerId(0);
@@ -618,9 +551,7 @@ fn copying_the_original_again_later_does_not_change_an_earlier_copy() {
     );
 }
 
-/// A `BecomeCopy` with no legal target (e.g. targeting a player) is a
-/// silent no-op, same "skip rather than guess" stance every other
-/// unreachable-target arm in this engine takes.
+// A BecomeCopy with no legal target, such as a player, is a silent no-op.
 #[test]
 fn become_copy_with_no_object_target_is_a_no_op() {
     let p0 = PlayerId(0);
@@ -652,12 +583,8 @@ fn become_copy_with_no_object_target_is_a_no_op() {
     assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), doppel).name, "Doppelganger");
 }
 
-// ── TokenSpec::CopyOf ───────────────────────────────────────────────────
-
-/// CR 707.10f: "create a token that's a copy of [object]" - the token's
-/// characteristics match the copied object's current copiable values, and
-/// (CR 707.2a) it self-registers the copied abilities, unlike every other
-/// `TokenSpec` (which has no script at all).
+// CR 707.10f, 707.2a
+// A copy token matches the copied object's current copiable values and self-registers its abilities.
 #[test]
 fn copy_token_matches_source_characteristics_and_abilities() {
     let mut state = two_player_state();
@@ -697,9 +624,8 @@ fn copy_token_matches_source_characteristics_and_abilities() {
     assert!(matches!(token_abilities[0].effect, Some(AbilityEffect::GainLife(1))));
 }
 
-/// CR 707.9b: a copy token's P/T exception overrides its base power/
-/// toughness - same as `BecomeCopy`'s own exception handling, applied
-/// before the snapshot is frozen as the token's `definition`.
+// CR 707.9b
+// A copy token's P/T exception overrides its base values before the snapshot is frozen.
 #[test]
 fn copy_token_with_pt_exception_overrides_base_power_and_toughness() {
     let mut state = two_player_state();
@@ -735,9 +661,7 @@ fn copy_token_with_pt_exception_overrides_base_power_and_toughness() {
     assert!(matches!(token.definition.toughness, Some(PTValue::Fixed(1))), "overridden by the P/T exception");
 }
 
-/// `TokenSpec::CopyOf` naming an `ObjectId` that doesn't resolve creates no
-/// token - "skip rather than guess," same stance every other unresolvable
-/// reference in this engine takes.
+// A CopyOf naming an unresolvable ObjectId creates no token.
 #[test]
 fn copy_token_of_a_missing_source_creates_nothing() {
     let mut state = two_player_state();
@@ -764,9 +688,6 @@ fn copy_token_of_a_missing_source_creates_nothing() {
 
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty(), "no token was created");
 }
-
-// ── Game.Ops.BecomeCopy(opts?) / Game.Tokens.CopyOf(objectId, opts?) Lua
-// binding decoding ─────────────────────────────────────────────────────
 
 #[test]
 fn game_ops_become_copy_decodes_pt_and_keyword_exceptions() {

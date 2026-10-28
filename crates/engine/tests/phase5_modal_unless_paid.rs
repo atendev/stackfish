@@ -1,11 +1,4 @@
-//! Phase 5 vertical slice: `UnlessPaid` as a mode of a multi-mode spell or of
-//! a modal triggered ability. The mode pauses on
-//! `StepStatus::AwaitingUnlessPaidChoice` for a payer who is not necessarily
-//! the controller (the countered spell's controller for `Counter`, the
-//! ability's controller for `SacrificeSelf`), and both answers
-//! (`submit_unless_paid_payment`, `decline_unless_paid`) end in the standard
-//! `ReplacementCheck` tail, so `Engine::modal_continuation` runs the
-//! remaining modes afterwards.
+//! `UnlessPaid` as a mode of a multi-mode spell or modal triggered ability. The mode pauses on `AwaitingUnlessPaidChoice` for a payer who may not be the controller, and both answers (`submit_unless_paid_payment`, `decline_unless_paid`) end in the `ReplacementCheck` tail so `modal_continuation` runs the remaining modes.
 
 use stackfish_engine::engine::{Engine, StepStatus, UnlessPaidError};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -66,8 +59,6 @@ fn everything() -> EffectFilter {
     EffectFilter { controller: None, card_types: None, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, self_only: false }
 }
 
-/// A bear on the battlefield (P1's), `p1_mana` colorless in P1's pool, and a
-/// creature spell controlled by P1 pushed straight onto the stack.
 fn base_state(p1_mana: u32) -> GameState {
     let mut state = GameState {
         step: Step::PreCombatMain,
@@ -103,7 +94,6 @@ fn push_victim_spell(state: &mut GameState) {
     });
 }
 
-/// The modal spell in P0's hand over P1's victim spell on the stack.
 fn spell_engine(modes: Vec<SpellMode>, p1_mana: u32) -> Engine {
     let mut state = base_state(p1_mana);
     push_victim_spell(&mut state);
@@ -157,8 +147,6 @@ fn resolved_markers(engine: &Engine) -> usize {
 fn countered(engine: &Engine) -> bool {
     engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Countered { .. }))
 }
-
-// ---- Counter unless the controller pays, as a spell mode ------------------------
 
 fn mana_leak_modes() -> Vec<SpellMode> {
     vec![mode(spell_on_the_stack(), unless_paid("{3}", UnlessPaidConsequence::Counter)), mode(None, AbilityEffect::GainLife(3))]
@@ -266,10 +254,6 @@ fn a_synchronous_mode_before_the_unless_paid_mode_resolves_first() {
     assert_eq!(resolved_markers(&engine), 1);
 }
 
-// ---- Echo-style: sacrifice this unless you pay, as a trigger mode ---------------------
-
-/// "At the beginning of your upkeep, choose two - * Sacrifice this unless you
-/// pay {2}. * You gain 3 life." with the Reaper (P0) as the source.
 fn echo_trigger_engine() -> Engine {
     let mut state = GameState {
         phase: Phase::PreGame,
@@ -293,8 +277,7 @@ fn echo_trigger_engine() -> Engine {
     Engine::new(state)
 }
 
-/// `p0_mana` goes into P0's pool only once the trigger is on the stack, since
-/// the pool empties as the game moves into the upkeep step.
+// p0_mana goes into the pool only once the trigger is on the stack, since the pool empties as the game enters upkeep.
 fn reach_the_unless_paid_pause(engine: &mut Engine, p0_mana: u32) -> StepStatus {
     let status = pass_both(engine);
     assert!(matches!(status, StepStatus::AwaitingTriggerModeChoice { .. }), "{status:?}");

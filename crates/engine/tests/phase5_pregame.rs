@@ -1,18 +1,7 @@
-//! Phase 5 vertical slice: PreGame automation (CR 103).
-//! Tests drive `Engine::new_game(GameConfig)` end-to-end rather than building
-//! raw `GameState` literals — this slice is specifically about the new_game
-//! constructor and the pregame pipeline it triggers.
-//!
-//! All tests here will panic with `todo!()` until Phase 7 implementation is
-//! complete. That is expected pre-implementation and is the deliberate state
-//! when this file is first committed. Passing all tests is the Phase 7 bar.
+//! CR 103: PreGame automation, driven end to end through `Engine::new_game(GameConfig)` and the pregame pipeline it triggers.
 
 use stackfish_engine::engine::{BottomCardsError, Engine, MulliganError, StepStatus};
 use stackfish_engine::*;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 fn plain_card_def(name: &str) -> CardDefinition {
     CardDefinition {
@@ -39,9 +28,6 @@ fn plain_card_def(name: &str) -> CardDefinition {
     }
 }
 
-/// Builds a `GameConfig` for a two-player game. `p0_cards` / `p1_cards` are
-/// the number of placeholder cards in each player's library (all distinct
-/// names so they can be identified by position after a non-shuffle draw).
 fn two_player_config(p0_cards: usize, p1_cards: usize, settings: GameSettings) -> GameConfig {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -66,7 +52,6 @@ fn two_player_config(p0_cards: usize, p1_cards: usize, settings: GameSettings) -
     }
 }
 
-/// Steps `engine` until it stops Progressing, returning the final StepStatus.
 fn run_until_pause(engine: &mut Engine) -> StepStatus {
     loop {
         let result = engine.step();
@@ -91,12 +76,6 @@ fn library_size(engine: &Engine, player: PlayerId) -> usize {
         .map_or(0, |z| z.contents.len())
 }
 
-// ---------------------------------------------------------------------------
-// Tests: skip_mulligan path (no interaction required)
-// ---------------------------------------------------------------------------
-
-/// With skip_mulligan=true, a single burst of step() calls must exit PreGame
-/// and land in Beginning/Untap without any player interaction.
 #[test]
 fn skip_mulligan_auto_advances_to_beginning() {
     let settings = GameSettings { skip_mulligan: true, ..GameSettings::default() };
@@ -113,8 +92,6 @@ fn skip_mulligan_auto_advances_to_beginning() {
     );
 }
 
-/// After skip_mulligan setup, each player's hand has starting_hand_size cards
-/// and their library shrank by the same amount.
 #[test]
 fn opening_hands_drawn() {
     let settings = GameSettings { skip_mulligan: true, ..GameSettings::default() };
@@ -129,9 +106,6 @@ fn opening_hands_drawn() {
     assert_eq!(library_size(&engine, p1), 3, "p1 library");
 }
 
-/// With shuffle disabled, the first `starting_hand_size` cards in the library
-/// input order end up in each player's hand (top of the config library = first
-/// card drawn).
 #[test]
 fn shuffle_disabled_preserves_library_order() {
     let settings = GameSettings {
@@ -143,11 +117,7 @@ fn shuffle_disabled_preserves_library_order() {
     run_until_pause(&mut engine);
 
     let p0 = PlayerId(0);
-    // With no shuffle, the 7 drawn cards came from the top of the library.
-    // Library now has cards 7-9 remaining (3 cards).
-    // We can't check which ObjectIds are in hand without card lookup, but we
-    // can verify the library still has exactly 3 entries (implying 7 were drawn
-    // from the correct end, not shuffled and randomly drawn).
+    // With no shuffle the 7 drawn cards come from the top, leaving 3 in the library.
     assert_eq!(library_size(&engine, p0), 3);
     // All 7 hand cards belong to p0.
     let hand_zone = engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap();
@@ -157,8 +127,6 @@ fn shuffle_disabled_preserves_library_order() {
     }
 }
 
-/// Custom starting_life_override on a PlayerConfig overrides the global
-/// settings.starting_life for that player only.
 #[test]
 fn life_override_per_player() {
     let p0 = PlayerId(0);
@@ -190,7 +158,6 @@ fn life_override_per_player() {
     assert_eq!(engine.state().player(p1).unwrap().life, 20);
 }
 
-/// Draw skip is seeded for the starting player once pregame exits.
 #[test]
 fn draw_skip_seeded_for_starting_player() {
     let settings = GameSettings { skip_mulligan: true, ..GameSettings::default() };
@@ -204,12 +171,6 @@ fn draw_skip_seeded_for_starting_player() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Tests: mulligan decision path
-// ---------------------------------------------------------------------------
-
-/// After new_game (no skip_mulligan), engine pauses at AwaitingMulliganDecision
-/// for the first player in turn order.
 #[test]
 fn pregame_pauses_for_mulligan_decision() {
     let mut engine = Engine::new_game(two_player_config(10, 10, GameSettings::default()));
@@ -221,7 +182,6 @@ fn pregame_pauses_for_mulligan_decision() {
     );
 }
 
-/// P0 keeps → engine advances to P1's mulligan decision.
 #[test]
 fn keep_advances_to_next_player() {
     let p0 = PlayerId(0);
@@ -242,7 +202,6 @@ fn keep_advances_to_next_player() {
     assert_eq!(engine.state().player(p0).unwrap().mulligans_taken, 0);
 }
 
-/// Wrong player submitting KeepHand returns WrongPlayer.
 #[test]
 fn keep_wrong_player_rejected() {
     let p1 = PlayerId(1);
@@ -255,8 +214,6 @@ fn keep_wrong_player_rejected() {
     assert!(matches!(err, MulliganError::WrongPlayer));
 }
 
-/// TakeMulligan redraws the hand and increments mulligans_taken; engine
-/// cycles back when others have already kept.
 #[test]
 fn take_mulligan_redraws_and_increments() {
     let p0 = PlayerId(0);
@@ -275,8 +232,6 @@ fn take_mulligan_redraws_and_increments() {
     assert_eq!(engine.state().player(p0).unwrap().mulligans_taken, 1);
 }
 
-/// Both players keep immediately → no bottoming (0 mulligans taken each) →
-/// engine advances to Beginning/Untap.
 #[test]
 fn both_keep_immediately_skips_bottoming() {
     let p0 = PlayerId(0);
@@ -297,12 +252,6 @@ fn both_keep_immediately_skips_bottoming() {
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
 }
 
-// ---------------------------------------------------------------------------
-// Tests: bottoming path
-// ---------------------------------------------------------------------------
-
-/// P0 takes 1 mulligan then keeps → AwaitingBottomCardChoice { count: 1 }
-/// (default free_mulligans = 0 so every mulligan costs a card).
 #[test]
 fn one_paid_mulligan_requires_bottoming() {
     let p0 = PlayerId(0);
@@ -331,7 +280,6 @@ fn one_paid_mulligan_requires_bottoming() {
     );
 }
 
-/// Correct bottoming moves the card to the library bottom and advances.
 #[test]
 fn bottoming_moves_card_to_library() {
     let p0 = PlayerId(0);
@@ -383,7 +331,6 @@ fn bottoming_moves_card_to_library() {
     assert_eq!(lib.contents.len(), lib_before + 1);
 }
 
-/// Submitting wrong card count returns WrongCount.
 #[test]
 fn bottoming_wrong_count_rejected() {
     let p0 = PlayerId(0);
@@ -415,8 +362,6 @@ fn bottoming_wrong_count_rejected() {
     assert!(matches!(err, BottomCardsError::WrongCount { expected: 1, got: 0 }));
 }
 
-/// free_mulligans=1 means one mulligan doesn't cost a card; taking exactly
-/// one mulligan then keeping produces no bottoming step.
 #[test]
 fn free_mulligan_skips_bottoming() {
     let p0 = PlayerId(0);
@@ -445,7 +390,6 @@ fn free_mulligan_skips_bottoming() {
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
 }
 
-/// max_mulligans=Some(1): second TakeMulligan returns MaxMulligansReached.
 #[test]
 fn max_mulligans_enforced() {
     let p0 = PlayerId(0);
@@ -471,8 +415,6 @@ fn max_mulligans_enforced() {
     assert!(matches!(err, MulliganError::MaxMulligansReached));
 }
 
-/// submit_action(PassPriority) during PreGame is rejected — no priority window
-/// exists during pregame.
 #[test]
 fn pass_priority_rejected_during_pregame() {
     let p0 = PlayerId(0);

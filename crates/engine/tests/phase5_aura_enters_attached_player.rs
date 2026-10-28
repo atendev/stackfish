@@ -1,38 +1,6 @@
-//! Phase 5 vertical slice: CR 303.4f/g's "or player" half for the
-//! search-entry path — an Aura entering the battlefield already attached via
-//! `SearchDestination::Battlefield::enters_attached` (not by resolving as a
-//! spell) can have its controller choose to enchant a *player*, not just an
-//! object. `phase5_aura_enters_attached.rs` closed the object half of this
-//! same entry path; `phase5_aura_enchants_a_player.rs` closed the player half
-//! of the *cast-and-resolve* path only, explicitly naming this exact gap
-//! (search/token entry for a player target) as deliberately deferred.
-//!
-//! `legal_aura_entry_candidates` (`commands/attach.rs`) already scans every
-//! object *and* now every non-eliminated player, reusing `target_is_legal` -
-//! already fully generic over `Target::Object`/`Target::Player` before this
-//! slice, since it's the same primitive the cast-time path already used.
-//! The actual gap closed here is purely upstream: `legal_aura_entry_
-//! candidates`'s own return type, `ProcessState`/`StepStatus::
-//! AwaitingEntryAttachChoice`'s `candidates` field, and `submit_entry_
-//! attach_choice`'s `chosen` parameter all widened from `Vec<ObjectId>`/
-//! `ObjectId` to `Vec<Target>`/`Target`.
-//!
-//! - 1 legal candidate: attaches immediately, no pause. Covered two ways: a
-//!   `PlayerScript` opponent-only predicate (`phase5/target-opponent`'s own
-//!   `TargetFilter::Player { controller }` field didn't exist when this test
-//!   was first written, so a scripted predicate was the only way to force
-//!   exactly one candidate), and the built-in `TargetFilter::Player {
-//!   controller: Some(FilterController::Opponent) }` shape that closed that
-//!   gap.
-//! - 2+ legal candidates (CR 303.4f): a plain `TargetFilter::Player` in a
-//!   2-player game offers both players — the real
-//!   `ProcessState::AwaitingEntryAttachChoice` pause, `submit_entry_attach_
-//!   choice` resumes the search's own remaining work afterward.
-//! - 0 legal candidates (CR 303.4g): a `PlayerScript` filter matching nobody
-//!   — the Aura stays in the library.
-//! - Rejecting an unoffered/wrong-shape candidate: `Target::Object(...)`
-//!   submitted against a player-only candidate set is rejected the same way
-//!   an unoffered object id already is.
+//! CR 303.4f/g, 303.4b: an Aura entering through `SearchDestination::Battlefield::enters_attached` may attach to a player.
+//! One candidate attaches at once, several pause on `AwaitingEntryAttachChoice`, and none leaves the Aura in the library.
+//! An object submitted against a player-only candidate set is rejected like any unoffered id.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -40,9 +8,6 @@ use stackfish_engine::engine::{AttachChoiceError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
 
-/// "Test Aura: enchant player" (CR 303.4b), parameterized by `filter` so
-/// each test can supply either a plain `TargetFilter::Player` or a scripted
-/// `TargetFilter::PlayerScript` predicate.
 fn aura_enchant_player_definition(id: u64, name: &str, filter: TargetFilter) -> CardDefinition {
     CardDefinition {
         definition_id: id,
@@ -142,14 +107,7 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-/// Builds the shared fixture: `aura` sits in `p0`'s library with a
-/// placeholder `TargetFilter::Player` requirement, `card` (the search
-/// sorcery) sits in `p0`'s hand. Returns the constructed `Engine` so a
-/// scripted-filter test can call `engine.load_script` against this exact
-/// `Engine`'s own runtime and patch the real filter on afterward — the same
-/// placeholder-then-patch timing fix documented for `register_target_script`
-/// (a `ScriptHandle` is only valid against the specific runtime that
-/// registered it).
+// Scripted-filter tests patch the real filter on after the fixture is built, because a `ScriptHandle` is valid only against its own runtime.
 fn engine_with_aura_in_library(aura: ObjectId, card: ObjectId) -> Engine {
     let p0 = PlayerId(0);
     let mut state = two_player_state(vec![aura]);
@@ -181,13 +139,7 @@ fn aura_enchant_opponent_only_with_one_legal_candidate_attaches_immediately_no_p
     let card = ObjectId(2);
     let mut engine = engine_with_aura_in_library(aura, card);
 
-    // A scripted opponent-only predicate - same outcome the built-in
-    // `TargetFilter::Player { controller: Some(FilterController::Opponent) }`
-    // shape now covers below (`aura_enchant_built_in_opponent_filter_with_
-    // one_legal_candidate_attaches_immediately_no_pause`); kept as its own
-    // test since `TargetFilter::PlayerScript` is still the only way to
-    // express something a flat controller filter can't (e.g. "opponent with
-    // 10 or less life").
+    // A scripted opponent-only predicate. Kept beside the built-in filter because only PlayerScript can express "opponent with 10 or less life".
     let handle = engine.load_script("return function(player, source, controller, state) return player ~= controller end").expect("predicate should load");
     engine.state_mut().objects.get_mut(&aura).unwrap().definition.target_requirement = Some(TargetSpec::Primitive(TargetRequirement {
         filter: TargetFilter::PlayerScript(handle),
@@ -222,10 +174,6 @@ fn aura_enchant_opponent_only_with_one_legal_candidate_attaches_immediately_no_p
     );
 }
 
-/// Same outcome as the scripted-predicate test above, but via the built-in
-/// `TargetFilter::Player { controller: Some(FilterController::Opponent) }`
-/// shape (`phase5/target-opponent`) instead of a hand-written Lua predicate -
-/// the common "target opponent" case no longer needs a script at all.
 #[test]
 fn aura_enchant_built_in_opponent_filter_with_one_legal_candidate_attaches_immediately_no_pause() {
     let p0 = PlayerId(0);

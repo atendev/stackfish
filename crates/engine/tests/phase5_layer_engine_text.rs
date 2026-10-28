@@ -1,16 +1,6 @@
-//! Phase 5 vertical slice: CR 613.1c/612 layer 3 (text-changing effects) -
-//! backlog item 1's final sub-slice (5d), narrowed to CR 612.8 name-setting
-//! only per that item's own pre-existing recommendation (the general CR
-//! 612.2 "correct usage" word-substitution case, and the CR 612.5-612.10
-//! single-card rules, stay unmodeled - see `Layer::TextChanging`'s doc
-//! comment). `EffectPrimitive::SetName(String)` mirrors `GainControl`/`SetPT`'s
-//! override-wins-outright semantics exactly (a later-timestamp `SetName`
-//! replaces an earlier one's result, it doesn't combine with it).
-//!
-//! `sba.rs`'s legend-rule grouping (`find_legend_rule_group`) already keys
-//! off `effective_characteristics(...).name`, not the raw `CardDefinition`
-//! field - a real gameplay consumer for free, same "turned out to need no
-//! new plumbing" finding as the layer-engine-consumers sub-slice.
+//! CR 612.8, 613.1c: layer 3 text-changing effects, narrowed to name-setting. `EffectPrimitive::SetName` overrides outright like `GainControl` and `SetPT`, so a later timestamp replaces an earlier result.
+//! The legend rule (`find_legend_rule_group`) keys off the effective name.
+// TODO: CR 612.2 word substitution
 
 use std::collections::HashMap;
 
@@ -106,9 +96,8 @@ fn a_set_name_effect_overrides_the_base_name() {
     assert_eq!(effective_characteristics(&state, &ScriptRuntime::new(), bear).name, "Renamed Bear");
 }
 
-/// CR 612.8/613.7: a later-timestamp `SetName` overrides an earlier one
-/// outright - not combined, same as `GainControl`/`SetPT`'s own override
-/// semantics.
+// CR 612.8, 613.7
+// A later-timestamp SetName overrides an earlier one outright and does not combine.
 #[test]
 fn later_timestamp_set_name_wins_outright() {
     let mut state = base_state();
@@ -152,19 +141,13 @@ fn effect_filter_still_scopes_a_set_name_effect() {
     );
 }
 
-// ---------------------------------------------------------------------
-// Real consumer: sba.rs's legend-rule grouping already reads the
-// effective name, not the raw CardDefinition field.
-// ---------------------------------------------------------------------
-
 #[test]
 fn renaming_a_legendary_to_match_another_triggers_the_legend_rule() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let a = ObjectId(0);
     let b = ObjectId(1);
-    // Two differently-named legendaries under the same controller - no
-    // legend rule violation yet.
+    // Two differently named legendaries under one controller are not yet a legend rule violation.
     put_on_battlefield(&mut state, permanent(a, p0, "Legend A", SupertypeSet::LEGENDARY, 0));
     put_on_battlefield(&mut state, permanent(b, p0, "Legend B", SupertypeSet::LEGENDARY, 1));
 

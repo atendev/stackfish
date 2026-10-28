@@ -1,46 +1,7 @@
-//! Phase 5 vertical slice: CR 702.22 Banding, narrowed to the plain form
-//! (CR 702.22b/c's "bands with other [quality]" variant needs a parameter -
-//! same shape gap `KeywordSet::BANDING`'s own doc comment documents for
-//! Landwalk - and isn't modeled).
-//!
-//! Four real pieces:
-//! - CR 508.1e/702.22c/d: `PlayerActionKind::DeclareBands` groups just-
-//!   declared attackers into `CombatState::bands`, validated (>=1 banding
-//!   member, <=1 non-banding member, everyone shares one attack target).
-//! - CR 702.22h: `DeclareBlockers` propagates a direct block onto every
-//!   other band member, bypassing every other evasion/protection check -
-//!   even a member that couldn't legally be blocked on its own.
-//! - CR 702.22j/k (`phase5/banding-split-actor`): who chooses a combat
-//!   damage split is no longer hardcoded to the active player.
-//!   `AssignCombatDamage` now computes a required chooser per split id -
-//!   the object's own controller by default (510.1c/d), flipped to the
-//!   *other* side when a `BANDING` creature is involved in that particular
-//!   block (702.22j: attacker blocked by a banding creature -> defending
-//!   player; 702.22k: blocker blocking a banding creature -> active
-//!   player). 702.22k's blocker-forced-multi-block case was already
-//!   correct before this slice, but only by accident: every band needs
-//!   >=1 banding member, so the old blanket-active-player hardcode always
-//!   happened to match.
-//!
-//! - `phase5/banding-two-actor-damage-split`: a combat damage step needing
-//!   splits chosen by *two different* players at once (e.g. a plain
-//!   multi-block plus a separate banding-blocked attacker, simultaneously)
-//!   is real now too - `CombatState::pending_damage_splits` accumulates
-//!   each required actor's own validated share across separate
-//!   `AssignCombatDamage` calls (the same `declared_defenders` precedent
-//!   `DeclareBlockers` already established for "this turn-based action can
-//!   need input from more than one player"), and only actually builds and
-//!   deals damage once every required id is covered (CR 510.2: still one
-//!   simultaneous batch, not per-actor). An actor still can't submit
-//!   anything but exactly their own still-pending share in one call - not
-//!   the whole step's assignments, not another actor's ids, not a partial
-//!   subset of their own.
-//!
-//! Deliberately unmodeled, named rather than guessed at: CR 702.22i
-//! (effect-triggered blocking propagation - no such effect exists yet in
-//! this engine), and the "bands with other [quality]" variant (needs a
-//! parameter, same gap `KeywordSet::BANDING`'s own doc comment names for
-//! Landwalk).
+//! CR 702.22 Banding in its plain form: band declaration, forced block propagation and who chooses a damage split.
+//! See DESIGN.md for the rest.
+// TODO: "bands with other [quality]" needs a keyword parameter KeywordSet cannot hold (CR 702.22b)
+// TODO: effect-triggered blocking propagation (CR 702.22i)
 
 use std::collections::HashMap;
 
@@ -169,10 +130,7 @@ fn assert_illegal(status: Result<StepStatus, ActionError>) {
     assert!(matches!(status, Err(ActionError::Rejected(Rejected::IllegalAction(_)))), "expected an illegal action, got {status:?}");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.22c/d: declaring bands
-// ---------------------------------------------------------------------
-
+// CR 702.22c/d
 #[test]
 fn a_band_needs_at_least_one_banding_member() {
     let p0 = PlayerId(0);
@@ -189,6 +147,7 @@ fn a_band_needs_at_least_one_banding_member() {
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![a, b]]));
 }
 
+// CR 702.22c/d
 #[test]
 fn a_band_allows_at_most_one_non_banding_member() {
     let p0 = PlayerId(0);
@@ -211,6 +170,7 @@ fn a_band_allows_at_most_one_non_banding_member() {
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![banding, bear1, bear2]]));
 }
 
+// CR 702.22c/d
 #[test]
 fn every_band_member_must_attack_the_same_target() {
     let p0 = PlayerId(0);
@@ -229,17 +189,13 @@ fn every_band_member_must_attack_the_same_target() {
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![banding, other]]));
 }
 
-// ---------------------------------------------------------------------
-// CR 702.22h: forced block propagation
-// ---------------------------------------------------------------------
-
+// CR 702.22h
 #[test]
 fn a_directly_blocked_band_member_forces_the_same_block_onto_a_shadow_bandmate() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let banding = ObjectId(0);
-    // Shadow: normally blockable only by another Shadow creature - CR
-    // 702.22h overrides that entirely once its bandmate is blocked.
+    // Shadow is normally blockable only by Shadow; the forced block overrides that.
     let shadow_mate = ObjectId(1);
     let blocker = ObjectId(2);
 
@@ -256,8 +212,7 @@ fn a_directly_blocked_band_member_forces_the_same_block_onto_a_shadow_bandmate()
     assert!(matches!(declare_bands(&mut engine, p0, vec![vec![banding, shadow_mate]]).unwrap(), StepStatus::AwaitingAction { .. }));
     pass_to_step(&mut engine, Step::DeclareBlockers);
 
-    // Directly blocking the shadow creature would be illegal on its own -
-    // only the non-shadow bandmate is submitted as a direct block.
+    // Blocking the shadow creature directly would be illegal, so only the bandmate is submitted.
     declare_blockers(&mut engine, p1, vec![(blocker, banding)]).unwrap();
 
     let combat = engine.state().combat.as_ref().expect("still in combat");
@@ -269,10 +224,7 @@ fn a_directly_blocked_band_member_forces_the_same_block_onto_a_shadow_bandmate()
     assert!(combat.blocks.contains(&(blocker, banding)));
 }
 
-// ---------------------------------------------------------------------
-// CR 702.22k: a band-forced multi-block splits the blocker's damage
-// ---------------------------------------------------------------------
-
+// CR 702.22k
 #[test]
 fn a_band_forced_blocker_must_split_its_damage_among_both_attackers() {
     let p0 = PlayerId(0);
@@ -298,19 +250,14 @@ fn a_band_forced_blocker_must_split_its_damage_among_both_attackers() {
 
     pass_to_step(&mut engine, Step::CombatDamage);
 
-    // Omitting the forced blocker's split is illegal (510.1e atomicity,
-    // now covering the blocker side too).
+    // The forced blocker's split is required too, so omitting it is illegal.
     assert_illegal(assign_combat_damage(&mut engine, p0, Vec::new()));
 
     let status = assign_combat_damage(&mut engine, p0, vec![(blocker, vec![(a, 3), (b, 1)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "expected the split to be accepted, got {status:?}");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.22j: an attacker blocked by a banding creature has its split
-// chosen by the defending player, not the active player.
-// ---------------------------------------------------------------------
-
+// CR 702.22j
 #[test]
 fn attacker_double_blocked_by_a_banding_creature_needs_the_defending_players_choice() {
     let p0 = PlayerId(0);
@@ -330,14 +277,15 @@ fn attacker_double_blocked_by_a_banding_creature_needs_the_defending_players_cho
     declare_blockers(&mut engine, p1, vec![(bander, attacker), (plain, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
-    // The active player no longer gets to choose this split - one of the
-    // attacker's blockers has banding.
+    // The attacker has a banding blocker, so the active player does not choose.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(bander, 2), (plain, 2)])]));
 
     let status = assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(bander, 2), (plain, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "expected the defending player's split to be accepted, got {status:?}");
 }
 
+// CR 702.22j
+// A lone blocker with trample still needs a lethal-versus-excess split (CR 702.19b).
 #[test]
 fn trampler_blocked_by_a_single_banding_creature_still_needs_the_defending_players_choice() {
     let p0 = PlayerId(0);
@@ -355,30 +303,13 @@ fn trampler_blocked_by_a_single_banding_creature_still_needs_the_defending_playe
     declare_blockers(&mut engine, p1, vec![(bander, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
-    // A single blocker with trample still needs a chosen lethal-vs-excess
-    // split (CR 702.19b) - and per 702.22j it's the defending player's
-    // choice here, since the lone blocker has banding.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(bander, 2)])]));
 
     let status = assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(bander, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "expected the defending player's split (2 lethal, 3 trampling) to be accepted, got {status:?}");
 }
 
-// ---------------------------------------------------------------------
-// A damage step needing splits chosen by two different players at once
-// (phase5/banding-two-actor-damage-split): neither player can submit the
-// *other* player's share, or the whole step's assignments in one call -
-// each must submit exactly their own still-pending share, separately.
-// ---------------------------------------------------------------------
-
-/// Shared two-actor fixture: `plain_attacker` (p0's) is double-blocked by
-/// two plain creatures (needs p0's own choice, the attacker's controller -
-/// no banding involved at all on that side). `banded_attacker` (also p0's)
-/// is *also* double-blocked (a real split is needed there too - CR 510.1c
-/// needs 2+ blockers, not just banding's presence, for an actual choice to
-/// exist), but one of its two blockers has `BANDING`, which flips the
-/// chooser to the defending player instead (CR 702.22j). Positioned at
-/// `Step::CombatDamage`, ready for `AssignCombatDamage`.
+// p0 owns a plain double-blocked attacker and a banding-blocked one, so two players must each choose a split.
 fn two_actor_split_fixture() -> (Engine, PlayerId, PlayerId, ObjectId, ObjectId, ObjectId, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -424,6 +355,7 @@ fn two_actor_split_fixture() -> (Engine, PlayerId, PlayerId, ObjectId, ObjectId,
     (engine, p0, p1, plain_attacker, plain_blocker_a, plain_blocker_b, banded_attacker, bander, plain_blocker_c)
 }
 
+// CR 702.22j
 #[test]
 fn submitting_the_whole_steps_assignments_from_one_actor_is_still_rejected() {
     let (mut engine, p0, p1, plain_attacker, plain_blocker_a, plain_blocker_b, banded_attacker, bander, plain_blocker_c) =
@@ -433,42 +365,38 @@ fn submitting_the_whole_steps_assignments_from_one_actor_is_still_rejected() {
         (plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)]),
         (banded_attacker, vec![(bander, 2), (plain_blocker_c, 2)]),
     ];
-    // Neither player can submit this in one shot - the two splits need
-    // different choosers (active player for the plain double-block,
-    // defending player for the banding-blocked one), and each actor may
-    // only ever submit their own share.
+    // Two players choose, and each may submit only their own share.
     assert_illegal(assign_combat_damage(&mut engine, p0, assignments.clone()));
     assert_illegal(assign_combat_damage(&mut engine, p1, assignments));
 }
 
+// CR 702.22j
 #[test]
 fn an_actor_cannot_submit_the_other_actors_share() {
     let (mut engine, p0, p1, plain_attacker, _plain_blocker_a, _plain_blocker_b, banded_attacker, bander, plain_blocker_c) =
         two_actor_split_fixture();
 
-    // p0 (the plain double-block's own chooser) tries to submit the
-    // banding-blocked attacker's split instead - not theirs to choose.
+    // p0 submits the banding-blocked attacker's split, which is not theirs.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(banded_attacker, vec![(bander, 2), (plain_blocker_c, 2)])]));
-    // p1 (the banding split's own chooser) tries the reverse.
+    // p1 submits the reverse.
     assert_illegal(assign_combat_damage(&mut engine, p1, vec![(plain_attacker, vec![])]));
 }
 
+// CR 510.2
 #[test]
 fn each_actor_submitting_only_their_own_share_deals_damage_once_both_are_in() {
     let (mut engine, p0, p1, plain_attacker, plain_blocker_a, plain_blocker_b, banded_attacker, bander, plain_blocker_c) =
         two_actor_split_fixture();
 
-    // p0 submits first - only their own share (the plain double-block).
+    // p0 submits only their own share.
     let status = assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "p0's own share should be accepted, got {status:?}");
-    // Nothing dealt yet - CR 510.2 damage is simultaneous, still waiting on
-    // p1's own share for the banding-blocked attacker.
+    // Nothing is dealt until p1's share is in.
     assert!(!engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
     assert_eq!(engine.state().object(plain_blocker_a).unwrap().damage_marked, 0);
     assert_eq!(engine.state().object(banded_attacker).unwrap().damage_marked, 0);
 
-    // p1 submits their own share (the banding-blocked attacker) - this
-    // completes the step, so both splits' damage lands together.
+    // p1's share completes the step, so both splits deal damage together.
     let status = assign_combat_damage(&mut engine, p1, vec![(banded_attacker, vec![(bander, 2), (plain_blocker_c, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "p1's own share should be accepted, got {status:?}");
     assert!(engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
@@ -480,12 +408,13 @@ fn each_actor_submitting_only_their_own_share_deals_damage_once_both_are_in() {
     assert_eq!(engine.state().object(banded_attacker).unwrap().damage_marked, 2);
 }
 
+// CR 510.2
 #[test]
 fn the_two_actors_can_submit_in_either_order_with_the_same_result() {
     let (mut engine, p0, p1, plain_attacker, plain_blocker_a, plain_blocker_b, banded_attacker, bander, plain_blocker_c) =
         two_actor_split_fixture();
 
-    // p1 (the banding split's own chooser) goes first this time.
+    // p1 goes first this time.
     let status = assign_combat_damage(&mut engine, p1, vec![(banded_attacker, vec![(bander, 2), (plain_blocker_c, 2)])]).unwrap();
     assert!(!matches!(status, StepStatus::Error(_)), "p1's own share should be accepted, got {status:?}");
     assert!(!engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
@@ -497,24 +426,21 @@ fn the_two_actors_can_submit_in_either_order_with_the_same_result() {
     assert_eq!(engine.state().object(bander).unwrap().damage_marked, 2);
 }
 
+// CR 702.22j
 #[test]
 fn an_actor_who_already_submitted_their_share_cannot_submit_again() {
     let (mut engine, p0, _p1, plain_attacker, plain_blocker_a, plain_blocker_b, _banded_attacker, _bander, _plain_blocker_c) =
         two_actor_split_fixture();
 
     assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 2), (plain_blocker_b, 2)])]).unwrap();
-    // p0 has nothing left to contribute this step - their own share is
-    // already recorded, and the banding-blocked attacker was never theirs
-    // to choose.
+    // p0's share is already recorded and the other split is not theirs.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(plain_attacker, vec![(plain_blocker_a, 4), (plain_blocker_b, 0)])]));
 }
 
+// CR 702.22j
 #[test]
 fn an_actor_cannot_submit_only_part_of_their_own_share() {
-    // A single actor required for 2+ ids (not the two-actor case above,
-    // but the same "exactly this actor's own share, no partial subset"
-    // atomicity, now scoped per-actor rather than step-wide) - two
-    // separate plain double-blocked attackers, both chosen by p0.
+    // One actor required for two ids must still submit exactly their own share.
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let attacker_a = ObjectId(0);
@@ -542,7 +468,6 @@ fn an_actor_cannot_submit_only_part_of_their_own_share() {
     ).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
-    // p0 is the sole chooser for both - but submits only attacker_a's
-    // split, leaving attacker_b's out entirely.
+    // p0 submits only attacker_a's split and leaves attacker_b's out.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker_a, vec![(blocker_a1, 2), (blocker_a2, 2)])]));
 }

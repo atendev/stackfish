@@ -1,25 +1,6 @@
-//! Phase 5 vertical slice: CR 707.9c/d — "some copy effects specifically
-//! state that they don't copy certain characteristics and the affected
-//! objects instead retain their original values." The inverse of the
-//! existing `CopyExceptions` fields (`set_power_toughness`/`add_keywords`
-//! *provide new* values; `retain_name`/`retain_color` *keep old* ones).
-//!
-//! `GameObject.definition` (the object's own true, never-overwritten
-//! characteristics) is already sitting right there at every copy call site,
-//! distinct from `copiable_override` (the frozen copy snapshot) — so
-//! `CopyExceptions::apply` just takes it as a new `Option<&CardDefinition>`
-//! parameter and reads it back when `retain_name`/`retain_color` is set.
-//! `None` only for `TokenSpec::CopyOf`: a freshly created token has no prior
-//! "own identity" to retain from at all, so both flags are a documented,
-//! tested no-op there.
-//!
-//! Narrowed to name/color (not all seven CR 707.2 copiable characteristics)
-//! — no real card combination needs retained P/T/types/subtypes yet, same
-//! "no real card" posture the original `set_power_toughness`/`add_keywords`
-//! fields were scoped with. CR 707.9e/g ("exception tied to the most recent
-//! copy effect") stays unmodeled — it needs a real `GameObject` schema
-//! addition (a copy generation/history), not just a new `CopyExceptions`
-//! field.
+//! CR 707.9c/d: a copy effect may state that the object retains certain original characteristics. `CopyExceptions::apply` takes the object's own definition and reads it back when `retain_name` or `retain_color` is set.
+//! `TokenSpec::CopyOf` passes `None`, since a new token has no prior identity, so both flags are a no-op there.
+// TODO: retain exceptions for P/T, types and subtypes (CR 707.9c/d, 707.2)
 
 use std::collections::{HashMap, VecDeque};
 
@@ -313,10 +294,6 @@ fn retain_name_and_retain_color_are_a_no_op_for_a_freshly_created_copy_token() {
     assert_eq!(chars.name, "Bear", "no prior identity to retain from - the token is fully the copied object's name");
     assert_eq!(chars.colors, ColorSet::RED, "same for color");
 }
-
-// ---------------------------------------------------------------------
-// Game.Ops.BecomeCopy Lua decoding.
-// ---------------------------------------------------------------------
 
 #[test]
 fn game_ops_become_copy_decodes_retain_name_and_retain_color() {

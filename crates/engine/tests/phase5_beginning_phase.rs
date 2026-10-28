@@ -1,10 +1,4 @@
-//! Phase 5 vertical slice: the Beginning phase (CR 502-504 - Untap, Upkeep,
-//! Draw). `Engine::untap_step`/`draw_step` (engine.rs) are exercised
-//! end-to-end here via the `AdvanceTurnStep` pipeline, not called directly -
-//! both are private and only ever invoked from that arm. Same struct-literal
-//! `GameState` construction pattern as `phase5_pass_priority_loop.rs`/
-//! `phase5_play_land.rs`, since the engine's own constructors are still
-//! `todo!()`.
+//! CR 502-504: Beginning phase steps (untap, upkeep, draw), driven through `AdvanceTurnStep` because `untap_step` and `draw_step` are private.
 
 
 use stackfish_engine::engine::{Engine, StepStatus};
@@ -61,11 +55,6 @@ fn land_definition(name: &str) -> CardDefinition {
     }
 }
 
-/// Two players with hand/library/battlefield zones present, defaulting to
-/// `Phase::PreGame`/`Step::Untap`/turn 1 (mirrors
-/// `phase5_pass_priority_loop::two_player_state`) - tests that need to start
-/// mid-Beginning-phase override `phase`/`step`/`turn_number` directly after
-/// construction, same as `phase5_play_land.rs`'s rejection tests do.
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -124,8 +113,7 @@ fn untap_only_untaps_active_players_tapped_permanents() {
     state.objects.insert(p1_creature, p1_obj);
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(p1_creature);
 
-    // active_player defaults to p0 - CR 502.3 untaps only the active
-    // player's permanents.
+    // active_player defaults to p0, and CR 502.3 untaps only that player's permanents.
     let mut engine = Engine::new(state);
     let status = pass_both(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
@@ -145,9 +133,7 @@ fn no_priority_during_untap() {
 
     let status = pass_both(&mut engine, p0, p1);
 
-    // CR 502.4: the untap step opens no priority window - one full 2-player
-    // pass-round from PreGame should land directly on Upkeep, never pausing
-    // at Untap.
+    // CR 502.4: the untap step opens no priority window, so one pass-round from PreGame lands on Upkeep.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().phase, Phase::Beginning);
     assert_eq!(engine.state().step, Step::Upkeep);
@@ -192,8 +178,7 @@ fn draw_skipped_on_turn_1_two_player() {
     state.phase = Phase::Beginning;
     state.step = Step::Upkeep;
     state.turn_number = 1; // CR 103.8a: starting player's first turn.
-    // Fixture starts at Upkeep, bypassing PreGame — seed the skip manually,
-    // since it's normally seeded by advance_turn_step's PreGame arm.
+    // The fixture starts at Upkeep, so the PreGame arm's skip is seeded by hand.
     state.pending_step_skips.push((p0, Step::Draw));
 
     let card = ObjectId(0);
@@ -202,10 +187,7 @@ fn draw_skipped_on_turn_1_two_player() {
 
     let mut engine = Engine::new(state);
     let status = pass_both(&mut engine, p0, p1);
-    // CR 500.7/500.8: a skipped step has no turn-based actions AND no priority
-    // window — the engine skips past Draw entirely and opens priority at
-    // PreCombatMain instead (old behavior opened priority at Draw with just the
-    // action omitted; this is the correct per-rule behavior).
+    // CR 500.7, 500.8: a skipped step has no turn-based actions and no priority window, so priority opens at PreCombatMain.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().phase, Phase::Main);
     assert_eq!(engine.state().step, Step::PreCombatMain, "skipped Draw, no priority window there");
@@ -227,12 +209,7 @@ fn draw_from_empty_library_is_a_noop_draw_not_a_panic() {
     let mut engine = Engine::new(state);
     let status = pass_both(&mut engine, p0, p1);
 
-    // CR 104.3c/704.5b: no panic on an empty library - it's a real state-
-    // based loss, not a crash. In a two-player game, the SBA pass that
-    // catches it (before the Draw step's priority window would otherwise
-    // open) immediately ends the game (CR 104.2a: sole opponent wins) -
-    // backlog item 11b closing the "eliminated player keeps getting turns"
-    // gap this test used to assert (see docs/implementation.md).
+    // CR 104.3c, 704.5b: an empty library is a state-based loss and not a panic. With two players the SBA pass ends the game before Draw opens priority (CR 104.2a).
     assert!(
         matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p1),
         "p0 attempted to draw from an empty library - p1 is the last player standing"

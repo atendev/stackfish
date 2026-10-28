@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: `EffectPrimitive::RemoveAllAbilities` (CR 613.1f,
-//! layer 6's ability-*removing* half — "~ loses all abilities"). Before this
-//! slice, layer 6 only had the additive `AddKeyword` shape; a card saying
-//! "loses all abilities" had no construction path (`Layer::TextChanging`'s
-//! own TODO flagged it, even though it's mechanically layer 6).
-//!
-//! Deliberately narrow: only strips `KeywordSet`/`protection_colors` (the
-//! latter added in parallel by `phase5/protection-from-color`, reconciled
-//! when the two branches merged - see this file's own
-//! `remove_all_abilities_also_strips_a_granted_protection_color` test), the
-//! layer-engine half of "abilities." A permanent's own custom triggered/
-//! activated `RegisteredAbility` entries are never filtered by continuous
-//! effects at all in this engine (`collect_triggers`/activation-legality
-//! checks read `state.abilities` directly) - not covered here, same shape
-//! the layer-2-control-consumers gap already named for a different layer.
+//! CR 613.1f: `EffectPrimitive::RemoveAllAbilities`, the ability-removing half of layer 6 ("~ loses all abilities"). It strips `KeywordSet` and `protection_colors`.
+// TODO: custom triggered and activated `RegisteredAbility` entries are not filtered by continuous effects, since `collect_triggers` and activation checks read `state.abilities` directly
 
 use std::collections::HashMap;
 
@@ -23,10 +10,6 @@ use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, zones, two_player_state as base_two_player_state};
-
-// ---------------------------------------------------------------------
-// Shared fixtures
-// ---------------------------------------------------------------------
 
 fn creature_definition(name: &str, power: i32, toughness: i32, keywords: KeywordSet) -> CardDefinition {
     CardDefinition {
@@ -90,10 +73,6 @@ fn self_only_effect(source: ObjectId, layer: Layer, effect: EffectPrimitive, tim
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: effective_characteristics's layer-6 fold
-// ---------------------------------------------------------------------
-
 #[test]
 fn remove_all_abilities_strips_a_printed_keyword() {
     let mut state = combat_state();
@@ -118,8 +97,7 @@ fn a_later_add_keyword_still_applies_after_an_earlier_remove_all_abilities() {
     state
         .continuous_effects
         .push(self_only_effect(bear, Layer::AbilityAdding, EffectPrimitive::RemoveAllAbilities, 0));
-    // Later timestamp - e.g. a second effect resolving after the strip -
-    // should still stick on top, same as a real strip-then-regrant.
+    // A later timestamp, such as a second effect resolving after the strip, still sticks on top.
     state.continuous_effects.push(self_only_effect(
         bear,
         Layer::AbilityAdding,
@@ -156,14 +134,8 @@ fn remove_all_abilities_also_strips_an_earlier_granted_keyword() {
     assert_eq!(effective.keywords, KeywordSet::empty(), "the earlier-granted Flying should be stripped too");
 }
 
-/// CR 613.1f names "ability-adding... and ability-removing effects"
-/// together, no carve-out for protection specifically - `protection_colors`
-/// is a separate field from `keywords` in the same layer-6 fold (added by
-/// `phase5/protection-from-color`, developed in parallel and merged
-/// together with this slice), so `RemoveAllAbilities` has to reset both or
-/// "loses all abilities" would leave protection behind. Same real
-/// interaction the two slices' own UNRESOLVED notes each flagged before
-/// either saw the other's code.
+// CR 613.1f
+// RemoveAllAbilities must reset `protection_colors` as well as `keywords`, which are separate fields in the layer 6 fold, or protection would survive "loses all abilities".
 #[test]
 fn remove_all_abilities_also_strips_a_granted_protection_color() {
     let mut state = combat_state();
@@ -184,12 +156,6 @@ fn remove_all_abilities_also_strips_a_granted_protection_color() {
 
     assert_eq!(effective.protection_colors, ColorSet::empty(), "the earlier-granted protection should be stripped too");
 }
-
-// ---------------------------------------------------------------------
-// Combat integration: printed Flying stripped by RemoveAllAbilities no
-// longer enforces blocking legality (mirrors phase5_layer_engine_consumers.
-// rs's own granted-Flying test, in reverse).
-// ---------------------------------------------------------------------
 
 fn declare_attackers(engine: &mut Engine, player: PlayerId, attackers: Vec<(ObjectId, Target)>) -> StepStatus {
     engine
@@ -266,10 +232,6 @@ fn without_the_strip_the_same_printed_flying_attacker_still_enforces_legality() 
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))),
         "no strip - printed Flying should still enforce blocking legality, got {err:?}");
 }
-
-// ---------------------------------------------------------------------
-// Lua wiring: Game.Effects.RemoveAllAbilities / self-registration
-// ---------------------------------------------------------------------
 
 const STRIPS_ITSELF: &str = r#"
 local s = {}

@@ -1,27 +1,5 @@
-//! Phase 5 vertical slice: CR 603.3c — a *modal* triggered ability's
-//! controller announces the mode choice when putting the ability on the
-//! stack, the same way `phase5/trigger-target-selection`/
-//! `phase5/trigger-multi-target` already made CR 603.3d's target choice a
-//! real pause instead of an unconditional `targets: Vec::new()`.
-//!
-//! `RegisteredAbility` gained its own `modes: Vec<SpellMode>`/`mode_choice:
-//! ModeChoice` (reused wholesale from `CardDefinition`'s own modal shape —
-//! see that field's own doc comment for why a parallel type wasn't needed).
-//! `Engine::push_ordered_triggers` now checks `ability.modes` *before*
-//! `ability.target` (CR 603.3c's mode choice precedes 603.3d's target
-//! choice, mirroring 601.2b before 601.2c for a cast spell), pausing on
-//! `ProcessState`/`StepStatus::AwaitingTriggerModeChoice` the moment a
-//! modal trigger is about to be pushed. `Engine::submit_trigger_mode_choice`
-//! combines the chosen mode(s) via `commands::combine_chosen_modes` (shared
-//! with `CastSpell`'s own caster-chosen branch, extracted this slice) and
-//! either chains straight into the *existing* `AwaitingTriggerTargets` pause
-//! if the combined mode(s) need a target, or pushes immediately if not.
-//!
-//! CR 700.2e "chosen by opponent" isn't supported for a triggered ability's
-//! own modes (a named gap — see `RegisteredAbility::mode_choice`'s own doc
-//! comment), nor is CR 700.2h's per-mode additional cost (a casting-cost
-//! concept that doesn't apply to a triggered ability going on the stack at
-//! all). Neither is exercised here.
+//! CR 603.3c: a modal triggered ability's controller announces the mode choice when it goes on the stack, before the target choice (CR 603.3d). `RegisteredAbility` carries `modes` and `mode_choice`, and `push_ordered_triggers` pauses on `AwaitingTriggerModeChoice`.
+//! `submit_trigger_mode_choice` combines modes via `combine_chosen_modes` (shared with `CastSpell`) and chains into `AwaitingTriggerTargets` if the combined modes need a target, or pushes at once.
 
 use stackfish_engine::engine::{Engine, StepStatus, TriggerModeChoiceError};
 use stackfish_engine::*;
@@ -52,8 +30,6 @@ fn creature_definition(name: &str) -> CardDefinition {
     }
 }
 
-/// Mirrors `phase5_trigger_target_selection::two_player_state` - starts at
-/// `Phase::PreGame`, so one `pass_both` lands exactly on Upkeep.
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -99,14 +75,7 @@ fn creature_target_requirement(exclude_source: bool) -> TargetSpec {
     })
 }
 
-/// "At the beginning of your upkeep, choose one/two/etc -
-///  * You gain 3 life.
-///  * Test Modal Trigger deals 2 damage to any target.
-///  * Destroy target creature."
-/// Mode 2 (Destroy) is deliberately an unsupported-inside-`AbilityEffect::
-/// Modal` effect kind (same as `phase5_modal_multi_mode.rs`'s own choice) -
-/// used only by the single-mode-chosen tests below (target-chaining, zero-
-/// legal-target), never combined with another mode.
+// Mode 2 (Destroy) is unsupported inside AbilityEffect::Modal, so it is used only by single-mode tests and never combined.
 fn modal_upkeep_ability(source: ObjectId, mode_choice: ModeChoice, destroy_excludes_source: bool) -> RegisteredAbility {
     RegisteredAbility {
         modes: vec![
@@ -159,8 +128,7 @@ fn single_mode_chosen_resolves_only_that_effect() {
 
     engine.submit_trigger_mode_choice(vec![0]).expect("mode 0 is in range");
     let status = drain(&mut engine);
-    // Mode 0 is targetless - pushed immediately, no AwaitingTriggerTargets
-    // detour.
+    // Mode 0 is targetless, so it is pushed at once with no AwaitingTriggerTargets detour.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
     assert_eq!(engine.state().stack.len(), 1);
 
@@ -185,9 +153,7 @@ fn two_modes_chosen_combine_and_resolve_both_against_their_own_targets() {
 
     engine.submit_trigger_mode_choice(vec![0, 1]).expect("modes 0 and 1 are both in range");
     let status = drain(&mut engine);
-    // Mode 1 needs a target - chains straight into the existing CR 603.3d
-    // pause, one combined TargetSpec::Multiple (a synthetic zero-count slot
-    // for mode 0, a real one for mode 1).
+    // Mode 1 needs a target, so it chains into the CR 603.3d pause with one combined TargetSpec::Multiple (a synthetic zero-count slot for mode 0).
     let StepStatus::AwaitingTriggerTargets { player, spec, candidates } = status else {
         panic!("expected the combined mode choice to chain into a CR 603.3d target pause, got {status:?}")
     };
@@ -219,9 +185,7 @@ fn a_single_chosen_mode_with_its_own_target_chains_into_real_target_selection() 
 
     let mut engine = Engine::new(state);
     pass_both(&mut engine, p0, p1);
-    // Mode 2 (Destroy target creature) - a single chosen mode passes its own
-    // effect/target_requirement through bare, unwrapped from
-    // AbilityEffect::Modal, same as the pre-existing "Choose one -" shape.
+    // A single chosen mode (Destroy target creature) passes its effect and target_requirement through unwrapped from Modal.
     engine.submit_trigger_mode_choice(vec![2]).expect("mode 2 is in range");
     let status = drain(&mut engine);
     let StepStatus::AwaitingTriggerTargets { player, candidates, .. } = status else {
@@ -254,8 +218,7 @@ fn a_chosen_mode_with_no_legal_target_removes_the_whole_ability_from_the_stack()
     let mut state = two_player_state();
     state.objects.insert(reaper, card_object(reaper, creature_definition("Reaper"), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(reaper);
-    // Mode 2's own Destroy target excludes the source, and Reaper is the
-    // only creature around - zero real candidates once mode 2 is chosen.
+    // Mode 2's Destroy target excludes the source, and Reaper is the only creature, so there are zero candidates.
     state.abilities.push(modal_upkeep_ability(reaper, ModeChoice::Exactly(1), true));
 
     let mut engine = Engine::new(state);
@@ -263,9 +226,7 @@ fn a_chosen_mode_with_no_legal_target_removes_the_whole_ability_from_the_stack()
     engine.submit_trigger_mode_choice(vec![2]).expect("mode 2 is in range");
     let status = drain(&mut engine);
 
-    // CR 603.3d: no legal choice for the chosen mode's own target - the
-    // ability is simply removed from the stack, never pushed, straight back
-    // to a fresh priority window.
+    // CR 603.3d: with no legal choice the ability is removed from the stack, never pushed, back to a fresh priority window.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
     assert!(engine.state().stack.is_empty(), "removed from the stack, not pushed");
     assert!(engine.state().object(reaper).is_some(), "Reaper itself untouched");

@@ -4,10 +4,6 @@ use stackfish_engine::engine::{DiscardError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, zones, two_player_state as base_two_player_state};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
     let definition = CardDefinition {
         definition_id: id.0,
@@ -35,8 +31,6 @@ fn vanilla_card(id: ObjectId, owner: PlayerId) -> (ObjectId, GameObject) {
     (id, obj)
 }
 
-/// Minimal 2-player `GameState` sitting at `(Ending, End)` in `PriorityWindow`
-/// for `p0`. `p0` is active player.
 fn state_at_end_step() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -50,7 +44,6 @@ fn state_at_end_step() -> GameState {
     }
 }
 
-/// Adds `count` vanilla cards to `player`'s hand. Returns their `ObjectId`s.
 fn add_cards_to_hand(state: &mut GameState, player: PlayerId, count: usize) -> Vec<ObjectId> {
     let mut ids = Vec::with_capacity(count);
     for _ in 0..count {
@@ -85,8 +78,6 @@ fn pass(engine: &mut Engine, player: PlayerId) {
         .expect("PassPriority should be accepted");
 }
 
-/// Drives through End step priority for both players, then returns whatever
-/// cleanup (or AdvanceTurnStep) produces.
 fn pass_through_end_step(engine: &mut Engine) -> StepStatus {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -107,10 +98,6 @@ fn pass_through_end_step(engine: &mut Engine) -> StepStatus {
 
     step_until_pause(engine)
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn cleanup_no_discard_needed_skips_priority_and_advances_turn() {

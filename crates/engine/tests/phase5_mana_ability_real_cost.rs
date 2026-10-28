@@ -1,20 +1,5 @@
-//! Phase 5 vertical slice: `Game.CreateManaAbility` (CR 605) - a card's own
-//! Lua `register_abilities(c)` can now self-register a real mana ability, the
-//! dedicated sibling `Game.CreateActivatedAbility` was never safe to reuse
-//! for this (see this builder's own doc comment in script.rs for why: no
-//! `:SetTarget` at all, and `:SetOperation` only accepts `Game.Ops.AddMana`/
-//! `AddManaChoice`).
-//!
-//! Also closes the real gap that motivated this slice: a mana ability with
-//! no `Game.Costs.*` component at all (`Game.CreateManaAbility(c):
-//! SetOperation(Game.Ops.AddMana("C")):Register()`, Wastes' own shape)
-//! reproduces `mana_ability` TOML's original hardcoded-tap, no-payment-pause
-//! behavior unchanged - but a mana ability with a *real* cost (`:AddCost`,
-//! e.g. a bare `Game.Costs.TapSelf`, or a Treasure/Lotus-Petal-style
-//! `Sacrifice`) now pauses for a real `Engine::submit_payment` step first,
-//! same as any other ability's cost, while still never reaching the stack
-//! (CR 605.1a/605.3b) - see `commands::PaymentResolution::ManaAbility` and
-//! `Engine::continue_cost_zone_moves`'s own tail.
+//! CR 605: `Game.CreateManaAbility` self-registers a real mana ability, with no `:SetTarget` and `:SetOperation` accepting only `Game.Ops.AddMana` or `AddManaChoice`.
+//! With no `:AddCost` it taps at once with no payment pause. With a real cost (`TapSelf`, `Sacrifice`) it pauses for `submit_payment` and still never reaches the stack (CR 605.1a, 605.3b).
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -143,11 +128,6 @@ fn land_definition(script: &str) -> CardDefinition {
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: ScriptRuntime::run_card_script's mana-ability registration
-// mechanics, without driving the whole Engine pipeline.
-// ---------------------------------------------------------------------
-
 #[test]
 fn run_card_script_self_registers_a_mana_ability_with_no_cost() {
     let mut state = base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)));
@@ -246,17 +226,10 @@ fn run_card_script_mana_ability_has_no_set_target_method() {
     assert!(state.abilities.is_empty());
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline.
-// ---------------------------------------------------------------------
-
 fn no_stack_object_pushed(engine: &Engine) -> bool {
     !engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::StackObjectPushed { .. }))
 }
 
-/// The Wastes shape: no `:AddCost` at all reproduces the original
-/// `mana_ability` TOML behavior exactly - immediate, hardcoded tap, no
-/// `Engine::submit_payment` step, never touches the stack.
 #[test]
 fn play_land_self_registered_mana_ability_with_no_cost_resolves_instantly() {
     let p0 = PlayerId(0);
@@ -290,8 +263,7 @@ fn play_land_self_registered_mana_ability_with_no_cost_resolves_instantly() {
         .expect("p0 controls the land and holds priority");
     let status = drain(&mut engine);
     assert!(
-        // CR 605.3a: activating a mana ability doesn't cause a player to
-        // lose priority - p0 still holds it, same as before activating.
+        // CR 605.3a: activating a mana ability does not cost p0 priority.
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "no-cost mana ability resolves instantly and p0 keeps priority - got {status:?}"
     );
@@ -302,8 +274,6 @@ fn play_land_self_registered_mana_ability_with_no_cost_resolves_instantly() {
     assert!(no_stack_object_pushed(&engine), "a mana ability must never push a StackObject");
 }
 
-/// A mana ability with an explicit `Game.Costs.TapSelf` cost now pauses for
-/// a real payment - still never touching the stack.
 #[test]
 fn activated_mana_ability_with_explicit_tap_cost_pauses_for_payment() {
     let p0 = PlayerId(0);
@@ -339,7 +309,7 @@ fn activated_mana_ability_with_explicit_tap_cost_pauses_for_payment() {
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Tap(rock)] })
         .expect("Tap(rock) pays the self-registered TapSelf cost");
     let status = drain(&mut engine);
-    // CR 605.3a: still p0's priority, same as the no-cost case.
+    // CR 605.3a: still p0's priority, as in the no-cost case.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     assert!(engine.state().object(rock).unwrap().tapped);
@@ -348,11 +318,7 @@ fn activated_mana_ability_with_explicit_tap_cost_pauses_for_payment() {
     assert!(no_stack_object_pushed(&engine), "a cost-bearing mana ability must still never push a StackObject");
 }
 
-/// Treasure/Lotus-Petal shape: `Sacrifice this artifact: Add one mana of any
-/// color.` Proves the existing Sacrifice-cost machinery
-/// (`Engine::continue_cost_zone_moves`) is fully reusable for a mana
-/// ability's own cost, and that the mana is added only once the sacrifice
-/// itself has actually committed.
+// Treasure shape: the Sacrifice cost machinery is reusable, and the mana is added only once the sacrifice has committed.
 #[test]
 fn activated_mana_ability_with_sacrifice_cost_resolves_without_ever_using_the_stack() {
     let p0 = PlayerId(0);

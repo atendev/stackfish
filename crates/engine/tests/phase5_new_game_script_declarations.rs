@@ -1,10 +1,4 @@
-//! `Engine::new_game` loads what a card's script declares for a plain spell:
-//! `s.operation()` (its resolution effect) and `s.target_requirement()`. The
-//! host builds every card through `new_game`, and nothing else copied these
-//! two values onto the `CardDefinition`, so a script-only spell such as Shock
-//! or Peek was cast with no target and resolved doing nothing. The proof-game
-//! atomicity work found it: no scry, search, mode or target Decision ever
-//! opened in 160 games.
+//! `Engine::new_game` copies a plain spell's `s.operation()` and `s.target_requirement()` onto its `CardDefinition`, so a script-only spell such as Shock casts with its target and resolves.
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::*;

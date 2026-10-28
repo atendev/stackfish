@@ -1,30 +1,11 @@
-//! Phase 5 vertical slice: backlog item 9a, `Game.MayChoose` (CR 608.2d) — a
-//! plain yes/no choice mid-resolution, same Lua coroutine mechanism backlog
-//! item 9 (`Game.SelectTargets`, see `phase5_script_target_selection.rs`)
-//! already built. `Game.MayChoose()` is a plain Lua function that calls
-//! `coroutine.yield({ op = "may_choose" })` directly, mirroring
-//! `Game.SelectTargets`'s own reason (mlua 0.9 without the `async` feature
-//! can't yield from inside a Rust-bound closure). `Engine::
-//! submit_script_may_choice(bool)` answers the pause, resuming the same
-//! suspended script with the chosen boolean.
-//!
-//! Scoped narrowly on purpose: a plain yes/no with no filter to satisfy (any
-//! `bool` answer is legal, unlike `SelectTarget`'s `target_is_legal` check).
-//! True modal spell mode-selection (CR 700.2a, chosen before the stack as
-//! part of casting) is a different, unattempted mechanism - see this
-//! backlog item's own split-off follow-up.
-//!
-//! Uses real card-script self-registration (`Game.CreateActivatedAbility`),
-//! same convention `phase5_script_target_selection.rs` already established.
+//! CR 608.2d: `Game.MayChoose` is a plain yes/no choice mid-resolution through the same coroutine mechanism as `Game.SelectTargets` (`coroutine.yield({ op = "may_choose" })`), answered by `Engine::submit_script_may_choice(bool)`.
+//! Any `bool` is legal, with no filter. It uses real card-script self-registration (`Game.CreateActivatedAbility`).
 
 use stackfish_engine::engine::{Engine, ScriptChoiceError, StepStatus};
 use stackfish_engine::script::ScriptChoiceRequest;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, single_player_state};
 
-/// Answering `true` gains 4 life, `false` gains 1 - two distinct,
-/// unambiguous life totals prove which branch the resumed boolean actually
-/// took, without needing a new effect-shape key just for this test.
 const SELF_REGISTERING_MAY_CHOOSE: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -89,11 +70,6 @@ fn base_state() -> GameState {
     )
 }
 
-/// Plays the self-registering land, then activates its (only) ability and
-/// pays its `{0}` cost - drains to whatever the operation's own execution
-/// produces next. Same shape as `phase5_script_target_selection.rs`'s own
-/// `play_activate_and_drain`, minus the pre-seeded target-eligible objects
-/// this slice's script never asks for.
 fn play_activate_and_drain(engine: &mut Engine, player: PlayerId, land_in_hand: ObjectId) -> StepStatus {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::PlayLand { card: land_in_hand } })

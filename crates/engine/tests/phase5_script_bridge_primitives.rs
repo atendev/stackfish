@@ -1,18 +1,4 @@
-//! Phase 5 vertical slice: `Game.Conditions.*`/`Game.Ops.*` primitives. A
-//! condition/operation source string may now be a one-liner referencing one
-//! of these Lua sugar tables (`return Game.Conditions.Enters`,
-//! `return Game.Ops.GainLife(1)`) instead of a full hand-written function -
-//! resolved once at load time into a Rust-native fast path (`ConditionSpec::
-//! Primitive`/`RegisteredAbility::effect`) that never calls into Lua again at
-//! trigger-check/resolve time. A full custom function remains fully
-//! supported (`ConditionSpec::Script`/`operation` fallback), unchanged from
-//! the prior slice.
-//!
-//! Registration itself is still Rust-side this slice (same as before) - a
-//! `RegisteredAbility` is pushed directly via a struct literal, referencing
-//! handles/specs obtained from `Engine::load_condition`/`Engine::load_operation`,
-//! not via card-script self-registration (`Game.CreateTriggeredAbility`,
-//! built in a later slice - see `script::builders`).
+//! `Game.Conditions.*` and `Game.Ops.*` one-liners (`return Game.Ops.GainLife(1)`) resolve at load time into a Rust fast path (`ConditionSpec::Primitive`, `RegisteredAbility::effect`) that never calls Lua at trigger or resolve time. A custom function still works as `ConditionSpec::Script`.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -47,7 +33,6 @@ fn bear_definition() -> CardDefinition {
     }
 }
 
-/// Mirrors `phase5_script_bridge_trigger::two_player_state`.
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
@@ -61,11 +46,6 @@ fn zone_change_event(object: ObjectId, from: ZoneKind, to: ZoneKind) -> GameEven
         parent_event: None,
     }
 }
-
-// ---------------------------------------------------------------------
-// load_condition: Game.Conditions.Enters behaves identically to the
-// hand-written Lua function from the prior slice.
-// ---------------------------------------------------------------------
 
 #[test]
 fn primitive_enters_condition_matches_the_bear_entering_the_battlefield() {
@@ -158,10 +138,6 @@ fn primitive_enters_condition_false_on_wrong_destination_zone() {
     assert!(pending.is_empty());
 }
 
-// ---------------------------------------------------------------------
-// load_condition: Game.Conditions.Always matches unconditionally.
-// ---------------------------------------------------------------------
-
 #[test]
 fn primitive_always_condition_matches_an_unrelated_event() {
     let p0 = PlayerId(0);
@@ -187,8 +163,7 @@ fn primitive_always_condition_matches_an_unrelated_event() {
         intervening_if: None,
     });
 
-    // A totally unrelated event kind - matches anyway, same as a `None`
-    // condition, but via an explicit Game.Conditions.Always spelling.
+    // An unrelated event kind matches anyway, like a None condition, through the explicit Game.Conditions.Always spelling.
     let event = GameEvent {
         event_id: EventId(0),
         sequence_no: SequenceNo(0),
@@ -200,17 +175,10 @@ fn primitive_always_condition_matches_an_unrelated_event() {
     assert_eq!(pending.len(), 1, "Game.Conditions.Always means no filter - any event matches");
 }
 
-// ---------------------------------------------------------------------
-// load_condition: a nil-producing chunk (e.g. a typo'd Game.Conditions.*
-// lookup) is a load error, not silently treated as unconditional.
-// ---------------------------------------------------------------------
-
 #[test]
 fn condition_script_returning_nil_is_a_load_error() {
     let mut runtime = ScriptRuntime::new();
-    // Game.Conditions.Typo doesn't exist - indexing a Lua table with an
-    // unknown key yields nil, not a runtime error, so this must be rejected
-    // by load_condition itself rather than silently becoming "always".
+    // Game.Conditions.Typo indexes nil and not a runtime error, so load_condition must reject it and not treat it as "always".
     let result = runtime.load_condition("return Game.Conditions.Typo");
     assert!(result.is_err(), "a nil-producing condition chunk must fail to load, not become unconditional");
 }
@@ -221,11 +189,6 @@ fn condition_script_returning_a_table_is_a_load_error() {
     let result = runtime.load_condition("return { not_a = \"condition\" }");
     assert!(result.is_err(), "an unrecognized return shape must fail to load");
 }
-
-// ---------------------------------------------------------------------
-// load_operation: Game.Ops.GainLife(1) decodes to a real AbilityEffect
-// primitive, and a nil-producing chunk is likewise a load error.
-// ---------------------------------------------------------------------
 
 #[test]
 fn operation_script_gain_life_decodes_to_the_ability_effect_primitive() {
@@ -241,12 +204,6 @@ fn operation_script_returning_nil_is_a_load_error() {
     let result = runtime.load_operation("return nil");
     assert!(result.is_err());
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: the effect fast path resolves without ever invoking the
-// operation callback - proven with an operation handle that would error if
-// invoked at all.
-// ---------------------------------------------------------------------
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
@@ -274,10 +231,7 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
     let mut engine = Engine::new(state);
     let condition =
         engine.load_condition("return Game.Conditions.Enters").expect("condition primitive loads");
-    // A real Lua function that errors if it's ever actually called - the
-    // operation field still has to point at *something* (RegisteredAbility::
-    // operation isn't itself Option), but ResolveStackTop must never reach
-    // it while `effect` is `Some`.
+    // A Lua function that errors if called, since operation is not an Option but ResolveStackTop must never reach it while effect is Some.
     let poison_pill_operation = engine
         .load_script("return function(source, controller) error('operation should never run when effect is Some') end")
         .expect("poison-pill script loads");
@@ -323,11 +277,6 @@ fn gain_life_effect_resolves_without_invoking_the_operation_script() {
          step() would have propagated its Lua error rather than reaching here at all"
     );
 }
-
-// ---------------------------------------------------------------------
-// Mixed case: one ability on the primitive path, one on the hand-written
-// script path, both firing correctly in the same game.
-// ---------------------------------------------------------------------
 
 #[test]
 fn primitive_and_script_abilities_both_fire_in_the_same_game() {

@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: CR 700.2d with every kind of mode. A multi-mode
-//! spell used to combine only the synchronous effects `Modal` could inline
-//! (`GainLife`/`Damage`/`Counters`/`Pump`/`GainControl`/`Shuffle`). Each chosen
-//! mode now goes through the same resolver a single effect uses, so the tap
-//! family, `LoseLife`, `Regenerate`, `Counter`, `Fight`/`Bite`, every scripted
-//! zone move (with its CR 616.1 ordering pauses), `DrawCards`, `Discard` and
-//! `Scry`/`Surveil` can all be a mode. The rest of the modes wait in
-//! `Engine::modal_continuation` and run when the mode before them settles.
+//! CR 700.2d with every kind of mode. Each chosen mode goes through the resolver a single effect uses, so the tap family, `LoseLife`, `Regenerate`, `Counter`, `Fight`, `Bite`, scripted zone moves (with CR 616.1 pauses), `DrawCards`, `Discard`, `Scry` and `Surveil` can be a mode.
+//! The remaining modes wait in `Engine::modal_continuation` until the mode before them settles.
 
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
@@ -79,8 +73,6 @@ fn modal_spell(modes: Vec<SpellMode>) -> CardDefinition {
     }
 }
 
-/// A bear and an artifact on the battlefield, `library` cards on each player's
-/// library, and the modal spell in P0's hand.
 fn engine_with(modes: Vec<SpellMode>, library: u64) -> Engine {
     let mut state = GameState {
         step: Step::PreCombatMain,
@@ -128,7 +120,6 @@ fn cast(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) {
     drain(engine);
 }
 
-/// Both players pass; returns the status after the second pass.
 fn pass_both(engine: &mut Engine) -> StepStatus {
     engine.submit_action(PlayerAction { player: P0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine);
@@ -173,8 +164,6 @@ fn redirect_battlefield_death(source: u64, to: ZoneKind) -> ReplacementEffect {
     }
 }
 
-// ---- Synchronous modes ------------------------------------------------------
-
 #[test]
 fn tap_and_lose_life_modes_both_resolve_against_their_own_targets() {
     let mut engine = engine_with(vec![mode(creature(), AbilityEffect::Tap), mode(player(), AbilityEffect::LoseLife(2))], 0);
@@ -211,8 +200,6 @@ fn untap_and_tap_modes_resolve_in_printed_order_on_one_object() {
     let tapped = ledger_position(&engine, |k| matches!(k, GameEventKind::Tapped { .. })).expect("tap logged");
     assert!(untapped < tapped, "CR 700.2d: printed order");
 }
-
-// ---- Zone-move modes --------------------------------------------------------
 
 #[test]
 fn a_destroy_mode_followed_by_a_synchronous_mode_both_resolve() {
@@ -295,8 +282,6 @@ fn a_mill_mode_and_a_tap_mode_resolve_together() {
     assert!(engine.state().object(BEAR).unwrap().tapped);
 }
 
-// ---- Library and hand modes -------------------------------------------------
-
 #[test]
 fn a_draw_mode_and_a_lose_life_mode_resolve_together() {
     let mut engine = engine_with(vec![mode(None, AbilityEffect::DrawCards(2)), mode(None, AbilityEffect::LoseLife(1))], 5);
@@ -336,8 +321,6 @@ fn a_scry_mode_pauses_for_its_choice_and_the_next_mode_runs_after_it() {
     assert_resolved_cleanly(&engine);
 }
 
-// ---- Rejection --------------------------------------------------------------
-
 #[test]
 fn a_mode_kind_that_still_cannot_be_combined_is_rejected_at_cast_time() {
     let mut engine = engine_with(vec![mode(None, AbilityEffect::GainLife(3)), mode(None, AbilityEffect::Cascade)], 0);
@@ -346,8 +329,6 @@ fn a_mode_kind_that_still_cannot_be_combined_is_rejected_at_cast_time() {
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "{err:?}");
     assert_eq!(zone_of_named(&engine, "Test Spell"), vec![ZoneKind::Hand], "state untouched");
 }
-
-// ---- One mode alone ---------------------------------------------------------
 
 #[test]
 fn a_single_chosen_mode_still_resolves_bare() {

@@ -1,13 +1,5 @@
-//! Phase 5 vertical slice: static abilities, replacement effects and
-//! player-level modifiers that function from the graveyard or exile
-//! (CR 113.6, Anger-style cards).
-//!
-//! `:SetFunctionsFrom("Graveyard"|"Exile")` is accepted on the static,
-//! replacement and modifier builders too. A declared registration is kept only
-//! while its source is in that zone (and not on the battlefield); an
-//! undeclared one still only functions on the battlefield. A zone change
-//! mints a new object id (CR 400.7), so `retire_object`'s purge-by-source
-//! removes the effect when the card leaves.
+//! CR 113.6, 400.7: `:SetFunctionsFrom("Graveyard"|"Exile")` on static, replacement and modifier builders keeps a registration only while its source is in that zone and not on the battlefield.
+//! A zone change mints a new object id, so `retire_object`'s purge-by-source removes the effect when the card leaves.
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::layers::effective_characteristics;
@@ -79,7 +71,6 @@ fn creature_definition() -> CardDefinition {
 const SOURCE: ObjectId = ObjectId(0);
 const CREATURE: ObjectId = ObjectId(1);
 
-/// `script`'s card sits in `zone`; a vanilla creature sits on the battlefield.
 fn state_with(zone: ZoneKind, script: &str) -> GameState {
     let p0 = PlayerId(0);
     let mut state = GameState {
@@ -182,9 +173,7 @@ return s
 
 #[test]
 fn the_static_is_gone_once_the_source_leaves_the_graveyard() {
-    // CR 400.7: exiling the static's card (as another graveyard card's cost)
-    // makes a new object; the old id's effect is purged and, since the script
-    // declared only Graveyard, nothing re-registers for the exile copy.
+    // CR 400.7: exiling the static's card makes a new object, so the old id's effect is purged and nothing re-registers for the exile copy.
     let exiler = ObjectId(2);
     let mut state = state_with(ZoneKind::Graveyard, &haste_static(r#"e:SetFunctionsFrom("Graveyard")"#));
     state.objects.insert(exiler, card_object(exiler, scripted(EXILER), PlayerId(0), ZoneKind::Graveyard));

@@ -1,21 +1,6 @@
-//! Phase 5 vertical slice: `Game.CreateCostModifier` (CR 601.2f). A card's
-//! own Lua `register_abilities(c)` can now call `Game.CreateCostModifier(c)` to
-//! register a real `CostModifier` onto `GameState.cost_modifiers` - mirrors
-//! `Game.CreateStaticAbility`/`Game.CreateReplacementEffect`'s own
-//! queue-and-drain builder shape exactly (`CostModifierBuilder` in
-//! script.rs). Building one by hand (a direct `CostModifier` struct literal)
-//! remains fully supported and unaffected - this only adds the missing Lua
-//! construction path the type's own doc comment named as a TODO since
-//! `phase5/cost-modifier-order`.
-//!
-//! `controller` (CR 601.2f's "you"/"opponent" perspective the modifier's own
-//! `filter` is relative to) can't be set from Lua directly - the builder has
-//! no `&GameState` inside a callback to read the source's live controller
-//! from, so `:Register()` queues a placeholder and `ScriptRuntime::
-//! run_card_script`'s drain step resolves the real value once it has one.
-//!
-//! Same self-registration call site as the static-ability slice (`PlayLand`,
-//! via `run_card_script`) - no new call site needed.
+//! CR 601.2f: `Game.CreateCostModifier(c)` in a card's `register_abilities` registers a `CostModifier` onto `GameState.cost_modifiers`, through the same queue-and-drain builder as static abilities.
+//! `controller` cannot be set from Lua, so `:Register()` queues a placeholder and the drain step in `run_card_script` resolves the real value.
+//! Closes the CostModifier TODO for a Lua construction path.
 
 use std::collections::HashMap;
 
@@ -35,9 +20,8 @@ end
 return s
 "#;
 
-/// `phase5/cost-modifier-colored-pip`: `:SetAmount(amount, color)`'s second
-/// argument targets a specific colored pip (CR 118.7b/c) instead of the
-/// generic component.
+// CR 118.7b/c
+// `:SetAmount(amount, color)`'s second argument targets a colored pip and not the generic component.
 const CREATURES_COST_W_LESS: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -158,11 +142,6 @@ fn pass(engine: &mut Engine, player: PlayerId) {
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: ScriptRuntime::run_card_script's cost-modifier self-
-// registration mechanics, without driving the whole Engine pipeline.
-// ---------------------------------------------------------------------
-
 #[test]
 fn run_card_script_self_registers_a_cost_modifier() {
     let mut state = two_player_state();
@@ -223,11 +202,6 @@ fn register_without_set_amount_is_an_error() {
     assert!(result.is_err(), "Register() with no SetAmount() must fail");
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline, PlayLand triggers self-registration,
-// the resulting CostModifier is picked up by a real cast's cost resolution.
-// ---------------------------------------------------------------------
-
 #[test]
 fn play_land_self_registered_cost_modifier_reduces_a_matching_spells_cost_end_to_end() {
     let p0 = PlayerId(0);
@@ -261,9 +235,7 @@ fn play_land_self_registered_cost_modifier_reduces_a_matching_spells_cost_end_to
         .expect("p0 holds priority, bear is in hand");
     let status = drain(&mut engine);
 
-    // Bear's printed cost is {1} - if the modifier weren't actually applied,
-    // an empty payment plan would be rejected here (CR 118.5a: a real,
-    // unreduced {1} generic component needs a unit spent on it).
+    // Bear's printed cost is {1}, so an empty payment plan is rejected unless the modifier applied (CR 118.5a).
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the (reduced) cast cost, got {status:?}");
     engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("cost modifier reduced {1} to {0} - empty plan pays it");
     drain(&mut engine);
@@ -274,8 +246,7 @@ fn play_land_self_registered_cost_modifier_reduces_a_matching_spells_cost_end_to
     drain(&mut engine);
 
     assert!(engine.state().stack.is_empty());
-    // Resolution mints a *new* ObjectId (CR 400.7) - check by card type/zone
-    // rather than the stale pre-cast id.
+    // Resolution mints a new ObjectId (CR 400.7), so check by card type and zone and not the pre-cast id.
     let creatures_on_battlefield = engine
         .state()
         .objects
@@ -318,9 +289,7 @@ fn play_land_self_registered_colored_cost_modifier_reduces_a_matching_spells_cos
         .expect("p0 holds priority, bear is in hand");
     let status = drain(&mut engine);
 
-    // The white bear's printed cost is {W} - CR 118.7 (not a generic
-    // reduction): an empty payment plan pays it, proving the {W} pip itself
-    // disappeared rather than a nonexistent generic component.
+    // The white bear's cost is {W} (CR 118.7): an empty plan pays it, so the {W} pip itself disappeared.
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "expected a pause for the (reduced) cast cost, got {status:?}");
     engine.submit_payment(PaymentPlan { payments: Vec::new() }).expect("colored cost modifier reduced {W} to {0} - empty plan pays it");
     drain(&mut engine);

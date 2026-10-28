@@ -1,16 +1,6 @@
-//! Phase 5 vertical slice: `Game.CreateActivatedAbility` (CR 602) - a card's
-//! own Lua `register_abilities(c)` can now build a real `RegisteredAbility` with
-//! `AbilityKind::Activated` and a general `CostSpec`, mirroring
-//! `Game.CreateTriggeredAbility`/`Game.CreateStaticAbility`'s builder/
-//! queued-registration mechanism exactly (`ActivatedAbilityBuilder` alongside
-//! them in script.rs). `:AddCost` accumulates one `Game.Costs.*` component
-//! per call, so a single activation can require more than one (e.g. `{T},
-//! Sacrifice a creature:`).
-//!
-//! Same queue as the triggered/static builders (`ScriptRegistry::
-//! pending_triggered`, drained into `state.abilities` regardless of
-//! `AbilityKind`) and the same 2 self-registration call sites (`PlayLand`,
-//! `ResolveStackTop`'s permanent-entry branch) - no new plumbing needed.
+//! CR 602: `Game.CreateActivatedAbility` builds an activated `RegisteredAbility` from a card script's `register_abilities`.
+//! `:AddCost` adds one `Game.Costs.*` component per call, so one activation can need several.
+//! It shares the triggered and static builders' registration queue and call sites.
 
 use std::collections::HashMap;
 
@@ -143,11 +133,6 @@ fn two_player_state() -> GameState {
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: ScriptRuntime::run_card_script's activated self-registration
-// mechanics, without driving the whole Engine pipeline.
-// ---------------------------------------------------------------------
-
 #[test]
 fn run_card_script_self_registers_an_activated_ability() {
     let mut state = two_player_state();
@@ -212,12 +197,6 @@ fn run_card_script_accumulates_multiple_add_cost_calls() {
     assert!(matches!(cost.additional[1], AdditionalCost::Sacrifice { .. }));
 }
 
-// ---------------------------------------------------------------------
-// Game.Costs.SacrificeSelf — "Sacrifice this permanent," always the
-// ability's own source (mirrors Game.Costs.TapSelf/DiscardSelf, distinct
-// from the filter-driven Game.Costs.Sacrifice(filter) above).
-// ---------------------------------------------------------------------
-
 #[test]
 fn run_card_script_self_registers_activated_ability_with_sacrifice_self_cost() {
     let mut state = two_player_state();
@@ -231,11 +210,6 @@ fn run_card_script_self_registers_activated_ability_with_sacrifice_self_cost() {
     let cost = state.abilities[0].cost.as_ref().expect("AddCost(SacrificeSelf) was called");
     assert!(matches!(cost.additional.as_slice(), [AdditionalCost::SacrificeSelf]));
 }
-
-// ---------------------------------------------------------------------
-// Game.Costs.Mana("{...}") — the mana-cost-string parser (6e), wired into
-// ActivatedAbilityBuilder::AddCost.
-// ---------------------------------------------------------------------
 
 #[test]
 fn run_card_script_self_registers_activated_ability_with_a_mana_cost() {
@@ -286,11 +260,6 @@ fn run_card_script_rejects_a_malformed_mana_cost_string() {
     assert!(result.is_err(), "\"{{Q}}\" isn't a recognized mana symbol");
     assert!(state.abilities.is_empty());
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline - activate, pay the self-registered
-// cost, resolve.
-// ---------------------------------------------------------------------
 
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
@@ -347,10 +316,6 @@ fn play_land_self_registered_activated_ability_can_be_activated_paid_and_resolve
     assert_eq!(engine.state().player(p0).unwrap().life, 21, "the self-registered GainLife(1) operation resolved");
 }
 
-/// End-to-end (6e): an ability whose self-registered cost has a real mana
-/// component (`Game.Costs.Mana("{1}{R}")`) alongside `TapSelf` - proves the
-/// parsed `ManaCost` reaches `PaymentPlan::validate` unmodified and is paid
-/// exactly like a spell's mana cost would be.
 #[test]
 fn play_land_self_registered_activated_ability_with_mana_cost_can_be_activated_paid_and_resolved() {
     let p0 = PlayerId(0);

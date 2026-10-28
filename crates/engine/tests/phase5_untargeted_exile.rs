@@ -1,9 +1,4 @@
-//! Phase 5 vertical slice: untargeted exile (CR 406.2, CR 601.2c).
-//!
-//! `Game.Ops.ExileSelf` moves the resolving ability's own source ("exile
-//! this card from your graveyard"), and `Game.Ops.ExileAll(filter, zone)`
-//! moves every matching object in the battlefield or the graveyards ("exile
-//! all creatures"). Both go through the same `Exile` zone move `Exile` uses.
+//! CR 406.2, 601.2c: `Game.Ops.ExileSelf` moves the ability's own source, and `ExileAll(filter, zone)` moves every matching object on the battlefield or in graveyards, both through the `Exile` zone move.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -208,8 +203,6 @@ fn exile_to_graveyard_instead() -> ReplacementEffect {
     }
 }
 
-// ---- ExileSelf --------------------------------------------------------------
-
 #[test]
 fn a_graveyard_card_exiles_itself() {
     let mut dead = placed(1, "Gravecrawler", CardTypeSet::CREATURE, P0, ZoneKind::Graveyard);
@@ -251,8 +244,6 @@ fn a_source_that_already_left_does_nothing() {
     assert_eq!(names_in(&engine, ZoneKind::Graveyard, Some(P0)), vec!["Bear"], "CR 400.7: the new graveyard object isn't the source");
     assert!(names_in(&engine, ZoneKind::Exile, None).is_empty());
 }
-
-// ---- ExileAll ---------------------------------------------------------------
 
 #[test]
 fn exile_all_exiles_every_matching_permanent_and_leaves_the_rest() {
@@ -355,8 +346,6 @@ fn exile_all_with_no_match_resolves_cleanly() {
     assert!(engine.state().stack.is_empty());
     assert_eq!(names_in(&engine, ZoneKind::Battlefield, None), vec!["Forest"]);
 }
-
-// ---- Lua --------------------------------------------------------------------
 
 #[test]
 fn lua_exile_all_defaults_to_the_battlefield() {

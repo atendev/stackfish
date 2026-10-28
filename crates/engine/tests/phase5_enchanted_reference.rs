@@ -1,27 +1,5 @@
-//! Phase 5 vertical slice: CR 303.4m — "an ability of a permanent that
-//! refers to the 'enchanted [object or player]' refers to whatever object
-//! or player that permanent is attached to." `GameObject.attached_to` already
-//! existed (maintained by the attach machinery, CR 303.4d-h) but nothing read
-//! it for continuous-effect matching - only SBA (CR 704.5m/n, "falls off if
-//! illegal") ever consulted it.
-//!
-//! `AffectedFilter::EnchantedOnly` is the Rust-native, common-case shape
-//! ("Enchanted creature gets +1/+1" needs no script at all): a new fieldless
-//! variant, not a field on `EffectFilter` (129 struct-literal construction
-//! sites with no `Default` impl - the same ripple class the modal-spell
-//! slices already avoided each time). `ContinuousEffect::applies_to` resolves
-//! it directly from the two full `&GameObject`s it's already given, no new
-//! state lookup. For a more complex scripted Aura, `ScriptRuntime::
-//! invoke_continuous_affects`/`invoke_continuous_effect` also gained a
-//! trailing `enchanted: Option<ObjectId>` argument (nil in Lua when `None`),
-//! and `card_summary_to_lua` now exposes `attached_to`/`attachments` on every
-//! card summary for general board-state visibility.
-//!
-//! Narrowed on purpose: CR 303.4m for a permanent enchanting a *player*
-//! stays unmodeled (`attached_to` is `ObjectId`-only); a replacement effect's
-//! own "enchanted permanent" reference (e.g. Umbra armor, CR 702.89a) stays
-//! unmodeled too (`ReplacementEffect.affected: EffectFilter`, a different,
-//! non-`AffectedFilter` type - out of scope here).
+//! CR 303.4m: an ability that refers to the "enchanted [object or player]" refers to what the permanent is attached to.
+//! `AffectedFilter::EnchantedOnly` resolves from `GameObject.attached_to` in `ContinuousEffect::applies_to`, and the scripted `invoke_continuous_affects` and `invoke_continuous_effect` get a trailing `enchanted: Option<ObjectId>`.
 
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -82,7 +60,6 @@ fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameOb
     card_object(id, creature_definition(power, toughness), owner, ZoneKind::Battlefield)
 }
 
-/// An Aura attached to `enchanted`, sitting on the battlefield.
 fn attached_aura(id: ObjectId, owner: PlayerId, enchanted: ObjectId, script_ref: ScriptReference) -> GameObject {
     GameObject { attached_to: Some(enchanted), ..card_object(id, aura_definition(script_ref), owner, ZoneKind::Battlefield) }
 }
@@ -111,10 +88,6 @@ fn enchanted_effect(source: ObjectId, effect: EffectPayload) -> ContinuousEffect
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: ContinuousEffect::applies_to / EnchantedOnly directly.
-// ---------------------------------------------------------------------
-
 #[test]
 fn enchanted_only_matches_only_the_attached_object() {
     let p0 = PlayerId(0);
@@ -131,18 +104,12 @@ fn enchanted_only_matches_only_the_attached_object() {
 fn enchanted_only_matches_nothing_when_the_source_is_unattached() {
     let p0 = PlayerId(0);
     let creature_a = creature(ObjectId(1), p0, 2, 2);
-    // A card with no attachment at all (attached_to: None) - e.g. an Aura
-    // that somehow lost its attachment target without yet being cleaned up
-    // by SBA, or simply any non-Aura source using this filter by mistake.
+    // A source with attached_to: None, such as an Aura that lost its target before SBA cleaned it up.
     let unattached = card_object(ObjectId(3), aura_definition(ScriptReference::ByKey("vanilla".to_string())), p0, ZoneKind::Battlefield);
     let effect = enchanted_effect(ObjectId(3), EffectPayload::Primitive(EffectPrimitive::ModifyPT { power: 1, toughness: 1 }));
 
     assert!(!effect.applies_to(&creature_a, &unattached), "nothing is enchanted, so nothing can match");
 }
-
-// ---------------------------------------------------------------------
-// Real consumer: effective_characteristics actually applies EnchantedOnly.
-// ---------------------------------------------------------------------
 
 #[test]
 fn enchanted_only_applies_through_effective_characteristics() {
@@ -163,10 +130,6 @@ fn enchanted_only_applies_through_effective_characteristics() {
     assert_eq!(effective_characteristics(&state, &script_runtime, creature_a).power, Some(3), "enchanted creature gets +1/+1");
     assert_eq!(effective_characteristics(&state, &script_runtime, creature_b).power, Some(2), "a different creature is untouched");
 }
-
-// ---------------------------------------------------------------------
-// Script bridge: the new trailing `enchanted` argument.
-// ---------------------------------------------------------------------
 
 #[test]
 fn invoke_continuous_affects_receives_the_enchanted_argument() {
@@ -206,10 +169,6 @@ fn invoke_continuous_effect_receives_the_enchanted_argument() {
     let decoded_unattached = runtime.invoke_continuous_effect(handle, &state, ObjectId(1), PlayerId(0), None).unwrap();
     assert_eq!(decoded_unattached, Some(EffectPrimitive::ModifyPT { power: 0, toughness: 0 }));
 }
-
-// ---------------------------------------------------------------------
-// Game.CreateStaticAbility builder: :SetAffected({ enchanted_only = true }).
-// ---------------------------------------------------------------------
 
 const SCRIPT_ENCHANTED_ONLY: &str = r#"
 local s = {}
@@ -256,10 +215,6 @@ fn scripted_enchanted_only_registration_applies_through_effective_characteristic
     assert_eq!(effective_characteristics(&state, &runtime, creature_a).power, Some(3), "the enchanted creature is buffed");
     assert_eq!(effective_characteristics(&state, &runtime, creature_b).power, Some(2), "an unenchanted creature is untouched");
 }
-
-// ---------------------------------------------------------------------
-// card_summary_to_lua: attached_to/attachments on a state snapshot.
-// ---------------------------------------------------------------------
 
 #[test]
 fn state_snapshot_exposes_attached_to_and_attachments() {

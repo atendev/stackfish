@@ -1,29 +1,6 @@
-//! Phase 5 vertical slice: a mechanism for CR 701.20a/701.18c "plays with
-//! hand revealed"-style effects (Telepathy's own worked example under CR
-//! 701.20c: "Your opponents play with their hands revealed") — the second
-//! player-level continuous-effect shape following `phase5/enchanted-player-
-//! hand-size`'s own explicit non-goal naming this as a separate future case.
-//!
-//! Deliberately a **mechanism only**, not wired to any real enforcement —
-//! confirmed during scoping that no consumer exists to hook into yet:
-//! `GameObject.visibility`/`VisibilityPolicy::is_visible_to` still has zero
-//! callers, and `script::encode::state_to_lua`/
-//! `card_summary_to_lua` don't parameterize by viewer at all — they
-//! structurally never encode hand *contents* for any player, revealed or
-//! not (only a `hand_count`), so there's nothing today for "revealed" to
-//! change from that consumer's perspective. Same "real but currently
-//! unreachable, named not hidden" stance `VisibilityPolicy` itself already
-//! takes. Proven here only via `is_hand_revealed`'s own direct unit tests.
-//!
-//! `HandRevealAffected`/`HandRevealModifier` mirror `HandSizeAffected`/
-//! `HandSizeModifier`'s exact shape (`Filter(FilterController)`/
-//! `EnchantedPlayer`, `EnchantedPlayer` resolved fresh against `source`'s
-//! own live `attached_to_player`) — a separate sibling type, not shared,
-//! since this is only the second occurrence of the identical shape.
-//! `is_hand_revealed` differs from `effective_max_hand_size` in one real way:
-//! plain boolean OR across every applicable modifier, no "latest timestamp
-//! wins" override — CR 701.20c's "a card that is currently revealed may be
-//! revealed again" means two reveal sources never conflict.
+//! CR 701.20a, 701.18c: `HandRevealModifier` for "plays with hand revealed" effects (Telepathy: "Your opponents play with their hands revealed", CR 701.20c), tested through `is_hand_revealed`.
+//! It mirrors `HandSizeModifier`, but `is_hand_revealed` ORs every applicable modifier with no latest-timestamp override, since a revealed card may be revealed again (CR 701.20c).
+// TODO: enforcement, since `VisibilityPolicy::is_visible_to` has no callers and `state_to_lua` never encodes hand contents
 
 use std::collections::HashMap;
 
@@ -124,8 +101,7 @@ fn the_reveal_stops_once_the_aura_is_no_longer_attached_to_that_player() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let aura = ObjectId(1);
-    // Same source, same modifier, but the Aura fell off - re-resolved fresh
-    // every check, not cached from whenever the modifier was registered.
+    // Same source and modifier, but the Aura fell off, and the check re-resolves fresh each time.
     let aura_obj = card_object(aura, aura_definition(""), p1, ZoneKind::Battlefield);
     put_on_battlefield(&mut state, aura_obj);
     state.hand_reveal_modifiers.push(HandRevealModifier {
@@ -167,9 +143,7 @@ fn two_independent_reveal_sources_never_conflict() {
     aura_obj.attached_to_player = Some(p0);
     put_on_battlefield(&mut state, aura_obj);
     put_on_battlefield(&mut state, card_object(telepathy_like, aura_definition(""), p1, ZoneKind::Battlefield));
-    // Two independent sources both revealing p0's hand - CR 701.20c: "a card
-    // that is currently revealed may be revealed again," no override/
-    // conflict the way HandSizeModifier's own SetTo/NoMaximum can have.
+    // Two independent sources both reveal p0's hand, and CR 701.20c lets a revealed card be revealed again, so they never conflict.
     state.hand_reveal_modifiers.push(HandRevealModifier {
         source: aura,
         controller: p1,
@@ -185,15 +159,12 @@ fn two_independent_reveal_sources_never_conflict() {
 
     assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "revealed via either source");
 
-    // Remove the earlier-timestamped source entirely (unlike hand size,
-    // there's no "latest wins" to worry about - the later Filter-based
-    // source alone still holds).
+    // Removing the earlier source leaves the later Filter-based source holding.
     state.hand_reveal_modifiers.retain(|m| m.source != aura);
     assert!(is_hand_revealed(&state, &state.hand_reveal_modifiers, p0), "still revealed via the remaining Filter-based source");
 }
 
-/// "Test Destroy Permanent: Destroy target permanent." — used only to force
-/// a real `commands::retire_object` call on the modifier's own source.
+// Forces a real retire_object call on the modifier's source.
 fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -224,8 +195,8 @@ fn destroy_permanent_definition() -> CardDefinition {
     }
 }
 
-/// CR 611.3b: a static ability's continuous effect only applies while its
-/// source remains on the battlefield — `phase5/modifier-source-cleanup`.
+// CR 611.3b
+// A static ability's continuous effect applies only while its source is on the battlefield.
 #[test]
 fn a_hand_reveal_modifier_is_purged_once_its_source_leaves_the_battlefield() {
     use stackfish_engine::engine::{Engine, StepStatus};

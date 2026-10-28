@@ -1,12 +1,5 @@
-//! Phase 5 vertical slice: script-registered characteristic-defining
-//! abilities (CR 604.3) and the Anger-style conditional graveyard static.
-//!
-//! `StaticAbilityBuilder:SetCharacteristicDefining()` marks a layer-4 subtype
-//! or layer-5 color static as a CDA: it registers in every zone a card script
-//! runs for, instead of only the battlefield, and is validated against CR
-//! 604.3a at `:Register()`. The last test folds in the "as long as you control
-//! a Mountain" condition on a graveyard-declared static (phase5/graveyard-
-//! exile-static-functions left it untested).
+//! CR 604.3: `StaticAbilityBuilder:SetCharacteristicDefining()` marks a layer 4 subtype or layer 5 color static as a CDA that registers in every zone, validated against CR 604.3a at `:Register()`.
+//! The last test adds the "as long as you control a Mountain" condition to a graveyard static.
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::layers::effective_characteristics;
@@ -150,8 +143,6 @@ return s
     let mut state = state_with_source(ZoneKind::Battlefield, script);
     assert!(run_script(&mut state).is_err());
 }
-
-// --- Anger: "as long as you control a Mountain" on a graveyard static ---
 
 const ANGER_LIKE: &str = r#"
 local s = {}

@@ -1,16 +1,4 @@
-//! Phase 5 vertical slice: CR 601.2c/115/205.4a negative supertype target
-//! filters — `TargetFilter::Object`'s last remaining negation gap
-//! (`excluded_card_types`/`excluded_subtypes` were added by
-//! `phase5/negative-target-filters`; `excluded_supertypes` was named there
-//! as a follow-up rather than guessed at, since no real card built at the
-//! time needed "nonlegendary").
-//!
-//! `TargetFilter::Object` gains `excluded_supertypes: Option<SupertypeSet>`
-//! ("target nonlegendary creature") — the negation of the existing
-//! `supertypes` intersection match, checked independently so a filter can
-//! combine a positive `card_types` with an `excluded_supertypes` (the worked
-//! example below: `card_types: Creature, excluded_supertypes: [Legendary],
-//! controller: Opponent`).
+//! CR 601.2c, 115, 205.4a: `TargetFilter::Object::excluded_supertypes` ("target nonlegendary creature") negates the `supertypes` match and combines with a positive `card_types` and a controller restriction.
 
 use std::collections::HashMap;
 
@@ -45,7 +33,6 @@ fn creature_definition(id: u64, name: &str, supertypes: SupertypeSet) -> CardDef
     }
 }
 
-/// "Test Purge deals 1 damage to target nonlegendary creature."
 fn purge_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -86,8 +73,6 @@ fn purge_definition() -> CardDefinition {
     }
 }
 
-/// This repo's own worked example for the negative-supertype-filter gap:
-/// "target creature you don't control that isn't legendary."
 fn smite_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,

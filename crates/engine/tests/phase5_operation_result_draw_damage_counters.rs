@@ -1,23 +1,6 @@
-//! Phase 5 vertical slice: a custom-function `s.operation()` can now return
-//! `draw_cards`/`deal_damage`/`add_counters` on its result table, not just
-//! `gain_life`/`sacrifice_chosen`/`discard_chosen` - the exact gap
-//! `ScriptRuntime::handle_operation_result`'s own TODO named.
-//!
-//! `draw_cards` hands back a real `OperationOutcome::PendingDraw`, resolved
-//! via the same `Engine::continue_draw_cards` pipeline `Game.Ops.
-//! DrawCards(n)`'s primitive-tag fast path already uses - including its own
-//! CR 616.1 ordering-choice pause when 2+ replacement effects compete for
-//! one draw. `deal_damage`/`add_counters` hand back `OperationOutcome::
-//! PendingEvents` - real `DamageDealt`/`CounterAdded` events folded into the
-//! resolution's own event list, going through the same `ReplacementCheck`/
-//! `CommitEvents` pipeline as the primitive-tag fast path, so prevention/
-//! lifelink/deathtouch and CR 613 counter application all apply for real,
-//! not just a marker.
-//!
-//! `ProcessState::AwaitingScriptChoice` gained a `source: ObjectId` field
-//! this slice needed - proven end to end by the yield-then-deal-damage test
-//! below (a script that first calls `Game.SelectTargets`, then returns
-//! `deal_damage` once resumed).
+//! A custom `s.operation()` may return `draw_cards`, `deal_damage` and `add_counters` on its result table, the gap named by the TODO in `ScriptRuntime::handle_operation_result`.
+//! `draw_cards` yields `OperationOutcome::PendingDraw` through `continue_draw_cards`, including its CR 616.1 ordering pause. `deal_damage` and `add_counters` yield `PendingEvents` through `ReplacementCheck` and `CommitEvents`, so prevention, lifelink, deathtouch and counter application apply.
+//! `AwaitingScriptChoice` carries a `source: ObjectId`, proven by a script that yields on `Game.SelectTargets` and then returns `deal_damage`.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -74,11 +57,7 @@ fn library_card_definition(definition_id: u64) -> CardDefinition {
     }
 }
 
-/// Same shape `phase5_script_operation.rs`'s own `pending_script_only_
-/// definition` establishes - `effect` is left `None`, patched in after
-/// `Engine::new` via `engine.build_operation(source)` so the decoded
-/// custom-function handle is valid against the engine's own runtime, not a
-/// throwaway one.
+// `effect` is patched in after Engine::new via build_operation, so the decoded handle is valid against the engine's own runtime.
 fn pending_script_only_definition(definition_id: u64, name: &str, source: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
@@ -138,10 +117,6 @@ fn build_pending_operation(engine: &mut Engine, card: ObjectId, source: &str) {
     let effect = primitive.or(Some(AbilityEffect::Script(handle)));
     engine.state_mut().objects.get_mut(&card).unwrap().definition.effect = effect;
 }
-
-// ---------------------------------------------------------------------
-// draw_cards
-// ---------------------------------------------------------------------
 
 const DRAW_TWO_SCRIPT: &str = r#"
 local s = {}
@@ -241,10 +216,6 @@ fn a_script_declared_draw_cards_still_pauses_for_a_cr_616_1_ordering_choice() {
     assert_eq!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.len(), 1, "the draw was redirected to exile");
 }
 
-// ---------------------------------------------------------------------
-// deal_damage
-// ---------------------------------------------------------------------
-
 const DEAL_DAMAGE_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
@@ -282,10 +253,6 @@ fn casting_a_script_declared_custom_function_that_deals_damage_resolves_via_the_
     );
 }
 
-// ---------------------------------------------------------------------
-// add_counters
-// ---------------------------------------------------------------------
-
 const ADD_COUNTERS_SCRIPT: &str = r#"
 local s = {}
 function s.operation()
@@ -318,10 +285,6 @@ fn casting_a_script_declared_custom_function_that_adds_counters_applies_a_real_c
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
     assert_eq!(engine.state().object(target).unwrap().counters.count(&CounterKind::PlusOnePlusOne), 2);
 }
-
-// ---------------------------------------------------------------------
-// Combined deal_damage + add_counters in one return table.
-// ---------------------------------------------------------------------
 
 const DEAL_DAMAGE_AND_ADD_COUNTERS_SCRIPT: &str = r#"
 local s = {}
@@ -359,12 +322,6 @@ fn a_single_return_table_can_combine_deal_damage_and_add_counters() {
     assert_eq!(engine.state().object(target).unwrap().damage_marked, 1);
     assert_eq!(engine.state().object(target).unwrap().counters.count(&CounterKind::PlusOnePlusOne), 1);
 }
-
-// ---------------------------------------------------------------------
-// Resumed-coroutine path: a script that yields via Game.SelectTargets
-// first, then returns deal_damage once resumed - proves `source` now
-// threads through ProcessState::AwaitingScriptChoice correctly.
-// ---------------------------------------------------------------------
 
 const SELECT_TARGET_THEN_DEAL_DAMAGE_SCRIPT: &str = r#"
 local s = {}

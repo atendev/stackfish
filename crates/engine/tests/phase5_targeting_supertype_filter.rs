@@ -1,20 +1,5 @@
-//! Phase 5 vertical slice: CR 205.4a supertype target restrictions ("target
-//! legendary creature") - closes the gap `target.rs`'s own doc comment
-//! named since `phase5/targeting-subtype-filter`: `FilterSpec` (cost.rs)
-//! already had a `supertypes` field, `TargetFilter` didn't.
-//!
-//! `TargetFilter::Object` gained a `supertypes: Option<SupertypeSet>` field,
-//! mirroring `cost.rs`'s `FilterSpec::supertypes` shape exactly (an
-//! intersection test against the target's *effective* supertypes, via
-//! `layers::effective_characteristics`, same treatment `card_types`/
-//! `subtypes` already get in `commands::target_is_legal`). Two consumers,
-//! both exercised below: a spell/ability's own cast-time target requirement
-//! (`TargetSpec::Primitive`, built directly via `CardDefinition.
-//! target_requirement`/`RegisteredAbility.target`), and `Game.
-//! SelectTargets`/`Game.CreateActivatedAbility:SetTarget`'s shared Lua table
-//! decoder (`decode_target_filter_table`). `SupertypeSet` is `Copy`
-//! (unlike `subtypes`' `Vec<Subtype>`), so this field addition needed no
-//! `Copy`-derive fallout - purely additive.
+//! CR 205.4a: supertype target restrictions ("target legendary creature") through `TargetFilter::Object::supertypes`, an intersection test against effective supertypes via `effective_characteristics`.
+//! Two consumers use it: a cast-time `TargetSpec::Primitive` and the shared Lua table decoder `decode_target_filter_table`.
 
 use std::collections::HashMap;
 
@@ -58,7 +43,6 @@ fn vanilla(id: u64, name: &str) -> CardDefinition {
     creature_definition(id, name, SupertypeSet::empty())
 }
 
-/// "Test Legend Bolt: deals 2 damage to target legendary creature."
 fn legend_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -206,10 +190,7 @@ fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets
         
 }
 
-// ---------------------------------------------------------------------
-// CR 205.4a: a spell's own "target legendary creature"
-// ---------------------------------------------------------------------
-
+// CR 205.4a
 #[test]
 fn casting_at_a_legendary_creature_is_accepted() {
     let mut state = base_state();
@@ -248,9 +229,7 @@ fn casting_at_a_non_legendary_creature_is_rejected() {
 
 #[test]
 fn spell_fizzles_when_target_leaves_before_resolution() {
-    // Re-checked fresh at resolution (CR 608.2b), same "target leaves the
-    // battlefield" recheck phase5_targeting_subtype_filter.rs's own version
-    // of this test already exercises for subtypes.
+    // Re-checked fresh at resolution (CR 608.2b), as phase5_targeting_subtype_filter.rs does for subtypes.
     let mut state = base_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -274,10 +253,6 @@ fn spell_fizzles_when_target_leaves_before_resolution() {
         "CR 608.2b: the spell's only target left the battlefield, so it must fizzle rather than resolve"
     );
 }
-
-// ---------------------------------------------------------------------
-// Shared Lua table decoder: "Equip legendary creature"
-// ---------------------------------------------------------------------
 
 #[test]
 fn game_selecttargets_decoder_accepts_a_supertypes_key_for_equip() {

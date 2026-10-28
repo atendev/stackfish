@@ -1,10 +1,4 @@
-//! Phase 5 vertical slice: CR 613 continuous-effect layer engine, layer 7e
-//! (`PowerToughnessSwitching`, CR 613.4d) — the last of backlog item 1's
-//! real-P/T sublayers (7a CDA, 7b set, 7c modify, 7e switch; 7d/counters
-//! stays the pre-existing base-level simplification, untouched). Same
-//! "`ContinuousEffect`s built directly via struct literal" bootstrap pattern
-//! as `phase5_layer_engine_types_colors.rs` — no `Game.AddContinuousEffect`
-//! Lua binding yet.
+//! CR 613.4d: layer 7e power/toughness switching, after 7a CDA, 7b set and 7c modify. Effects are built directly by struct literal.
 
 use std::collections::HashMap;
 
@@ -99,13 +93,8 @@ fn a_single_switch_swaps_power_and_toughness() {
     assert_eq!(effective.toughness, Some(1));
 }
 
-/// CR 613.4d's own first worked example: a 1/3 creature gets +0/+1 (layer
-/// 7c), then an effect switches its power and toughness (layer 7e) - new P/T
-/// is 4/1. A later effect gives it +5/+0 (also layer 7c, but a *later*
-/// timestamp than the switch). Its "unswitched" P/T would be 6/4, so its
-/// actual P/T is 4/6 - the +5/+0 still lands in the pre-switch sum, because
-/// 7c fully resolves as one pass before 7e's swap ever applies, regardless of
-/// the modify effect's timestamp relative to the switch.
+// CR 613.4d
+// A 1/3 gets +0/+1 (7c), then a switch (7e), then a later +5/+0 (7c). Its unswitched P/T is 6/4, so it ends 4/6, because 7c resolves as one pass before 7e swaps.
 #[test]
 fn a_later_modify_effect_still_contributes_to_the_pre_switch_sum() {
     let mut state = base_state();
@@ -134,8 +123,8 @@ fn a_later_modify_effect_still_contributes_to_the_pre_switch_sum() {
     assert_eq!(effective.toughness, Some(6));
 }
 
-/// CR 613.4d's own third worked example: two switch effects on the same
-/// object cancel out exactly, leaving the unswitched value.
+// CR 613.4d
+// Two switch effects on one object cancel out.
 #[test]
 fn two_switch_effects_on_the_same_object_cancel_out() {
     let mut state = base_state();
@@ -186,9 +175,7 @@ fn effect_filter_still_scopes_a_switch_effect() {
 
 #[test]
 fn a_switch_effect_is_a_noop_on_an_object_with_no_resolvable_power_or_toughness() {
-    // A noncreature permanent with no printed P/T and no SetPT applying to it
-    // - power/toughness are both None at this point in the query, so the
-    // switch has nothing to swap and must not panic or fabricate a value.
+    // A noncreature permanent with no P/T gives the switch nothing to swap, so it must not panic or fabricate a value.
     let mut state = base_state();
     let p0 = PlayerId(0);
     let mut artifact = creature(ObjectId(0), p0, 0, 0);

@@ -1,12 +1,4 @@
-//! Phase 5 vertical slice: CR 613.6-613.8 dependency system (backlog item
-//! 1.5a) — `layers::order_by_dependency` reorders a single layer's effects
-//! around real CR 613.8a dependency instead of plain timestamp order.
-//! `EffectPrimitive::DoublePT` (layer 7c, e.g. Berserk's "target creature's
-//! power is doubled") is the one primitive combination that can actually
-//! produce a dependency today — see that variant's own doc comment for why
-//! no other primitive pairing can. Same "`ContinuousEffect`s built directly
-//! via struct literal" bootstrap pattern as `phase5_layer_engine_switching.rs`
-//! - no `Game.AddContinuousEffect` Lua binding yet.
+//! CR 613.6-613.8: `layers::order_by_dependency` reorders one layer's effects around real dependency (CR 613.8a) and not timestamp. `EffectPrimitive::DoublePT` (Berserk) is the one primitive pairing that can produce a dependency.
 
 use std::collections::HashMap;
 
@@ -97,8 +89,7 @@ fn scripted(source: ObjectId, handle: ScriptHandle, timestamp: u64) -> Continuou
     }
 }
 
-/// Regression: two independent `ModifyPT`s (no dependency possible between
-/// them) still just sum in the new ordering path, same as before this slice.
+// Two independent ModifyPTs have no dependency and just sum.
 #[test]
 fn independent_modify_effects_still_sum_regardless_of_order() {
     let mut state = base_state();
@@ -114,10 +105,8 @@ fn independent_modify_effects_still_sum_regardless_of_order() {
     assert_eq!(effective.toughness, Some(3));
 }
 
-/// CR 613.8a/b: `DoublePT` always depends on a same-field `ModifyPT` in the
-/// same sublayer, so the modify must apply first even though it has the
-/// *later* timestamp - 2/2 base, +2/+2 (applied first, by dependency, not
-/// timestamp) = 4/4, then doubled = 8/8.
+// CR 613.8a, b
+// DoublePT depends on a same-field ModifyPT in the same sublayer, so the modify applies first despite its later timestamp: (2+2)*2 = 8/8.
 #[test]
 fn double_pt_waits_for_a_later_timestamp_modify_it_depends_on() {
     let mut state = base_state();
@@ -133,9 +122,7 @@ fn double_pt_waits_for_a_later_timestamp_modify_it_depends_on() {
     assert_eq!(effective.toughness, Some(8));
 }
 
-/// Same scenario, timestamps the other way around (modify already earlier
-/// than double) - dependency and timestamp agree here, same 8/8 result,
-/// confirming the prior test wasn't just an accident of tie-breaking.
+// Timestamps the other way around give the same 8/8, so the previous test was not tie-breaking luck.
 #[test]
 fn double_pt_applies_after_an_earlier_timestamp_modify_too() {
     let mut state = base_state();
@@ -151,9 +138,7 @@ fn double_pt_applies_after_an_earlier_timestamp_modify_too() {
     assert_eq!(effective.toughness, Some(8));
 }
 
-/// A `DoublePT{power: true, toughness: false}` only depends on/affects
-/// power - toughness is untouched by either the dependency ordering or the
-/// doubling itself.
+// A power-only DoublePT leaves toughness untouched.
 #[test]
 fn double_pt_scoped_to_one_field_leaves_the_other_alone() {
     let mut state = base_state();
@@ -169,13 +154,8 @@ fn double_pt_scoped_to_one_field_leaves_the_other_alone() {
     assert_eq!(effective.toughness, Some(4));
 }
 
-/// CR 613.8a (`phase5/script-effect-dependency`): a *scripted* `DoublePT`
-/// depends on a primitive `ModifyPT` in the same sublayer exactly like two
-/// primitives already do above - `depends_on` resolves the script through
-/// `layers::resolve_primitive` before comparing shapes, so the payload kind
-/// doesn't matter, only the resolved shape. Same 2/2 -> +2/+2 (dependency,
-/// not timestamp, forces this first) -> doubled = 8/8 as the all-primitive
-/// version.
+// CR 613.8a
+// A scripted DoublePT depends on a primitive ModifyPT the same way, since depends_on resolves the script through resolve_primitive first: 8/8.
 #[test]
 fn scripted_double_pt_waits_for_a_later_timestamp_modify_it_depends_on() {
     let mut state = base_state();
@@ -196,9 +176,7 @@ fn scripted_double_pt_waits_for_a_later_timestamp_modify_it_depends_on() {
     assert_eq!(effective.toughness, Some(8));
 }
 
-/// Same rule, the other direction: a *primitive* `DoublePT` depends on a
-/// *scripted* `ModifyPT` - confirms the fix isn't one-sided (only script
-/// depends on primitive), since `depends_on` resolves both sides uniformly.
+// The other direction: a primitive DoublePT depends on a scripted ModifyPT.
 #[test]
 fn primitive_double_pt_waits_for_a_scripted_modify_it_depends_on() {
     let mut state = base_state();
@@ -219,12 +197,7 @@ fn primitive_double_pt_waits_for_a_scripted_modify_it_depends_on() {
     assert_eq!(effective.toughness, Some(8));
 }
 
-/// A scripted effect that resolves to a non-dependency-participating shape
-/// (`AddKeyword`, wrong layer aside - this only exercises `depends_on`'s own
-/// resolution, so the mismatched layer doesn't matter here) must not be
-/// treated as depending on, or depended on by, a same-layer `ModifyPT` -
-/// still falls back to plain timestamp order, same as any other independent
-/// pairing.
+// A scripted effect that resolves to a non-participating shape (AddKeyword) is not depended on and falls back to timestamp order.
 #[test]
 fn scripted_non_double_pt_shape_introduces_no_spurious_dependency() {
     let mut state = base_state();
@@ -236,10 +209,7 @@ fn scripted_non_double_pt_shape_introduces_no_spurious_dependency() {
     let handle = script_runtime
         .load_function("return function(source, controller) return { switch_pt = true } end")
         .unwrap();
-    // Later timestamp than the modify - if this were spuriously treated as
-    // dependent, ordering wouldn't change the result anyway (switch_pt is a
-    // no-op read here), so the real assertion is just that this resolves
-    // without hanging/panicking and the modify still applies normally.
+    // A later timestamp than the modify. The assertion is only that this resolves without hanging or panicking and the modify still applies.
     state.continuous_effects.push(modify(bear, 1, 1, 0));
     state.continuous_effects.push(scripted(bear, handle, 1));
 
@@ -249,11 +219,8 @@ fn scripted_non_double_pt_shape_introduces_no_spurious_dependency() {
     assert_eq!(effective.toughness, Some(3));
 }
 
-/// CR 613.8b's last sentence: two `DoublePT`s mutually depend on each other
-/// (a 2-cycle) - dependency is ignored for them, falling back to timestamp
-/// order. Doubling is commutative, so both orders give the same 2/2 -> 4/4
-/// -> 8/8 result either way; the point of this test is that ordering
-/// doesn't hang or panic on the cycle, not that the number differs.
+// CR 613.8b
+// Two DoublePTs depend on each other (a 2-cycle), so dependency is ignored and timestamp order applies. The point is that ordering does not hang on the cycle.
 #[test]
 fn two_mutually_dependent_double_pt_effects_fall_back_to_timestamp_order() {
     let mut state = base_state();

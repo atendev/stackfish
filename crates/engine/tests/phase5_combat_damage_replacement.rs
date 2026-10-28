@@ -1,10 +1,4 @@
-//! Phase 5 vertical slice: backlog item 5a — `AssignCombatDamage`'s
-//! `DamageDealt` events now flow through the real replacement pipeline
-//! (CR 614-616) before the mutation (`damage_marked`/life) actually
-//! happens, instead of the mutation happening synchronously inside
-//! `execute_command` and the replacement check running "too late" against
-//! an already-applied effect. See docs/implementation.md's
-//! phase5-fix-replacement-bypasses slice notes for the bug this closes.
+//! CR 614-616: `AssignCombatDamage`'s `DamageDealt` events go through the replacement pipeline before `damage_marked` and life change.
 
 use std::collections::HashMap;
 

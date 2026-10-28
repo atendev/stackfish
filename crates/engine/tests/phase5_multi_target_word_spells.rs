@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: CR 601.2c/608.2b multi-target-word spells - a
-//! spell/ability that uses the word "target" in more than one place (e.g.
-//! CR 608.2b's own worked example, Plague Spores: "Destroy target nonblack
-//! creature and target land. They can't be regenerated.").
-//!
-//! `TargetSpec::Multiple(Vec<TargetRequirement>)` - a flat submitted-targets
-//! list split into one chunk per requirement, in order. This file covers
-//! only the all-exact-count case; combining `up_to`/`at_least` with
-//! multiple words is real too now - see
-//! `phase5_multi_target_word_variable_count.rs`. CR 115.3/601.2c dedup applies independently per
-//! word, never across words - the same object can legally be chosen for two
-//! different words. CR 608.2b: the spell fizzles only if every target
-//! across every word is illegal; a `Destroy`-style uniform-verb effect needs
-//! no new resolution code at all, since it already just iterates the
-//! concatenated per-word legal-target list.
+//! CR 601.2c, 608.2b: spells that use "target" in several places (Plague Spores). `TargetSpec::Multiple(Vec<TargetRequirement>)` splits the submitted list into one chunk per requirement.
+//! This file covers exact counts, and variable counts are in phase5_multi_target_word_variable_count.rs. CR 115.3 and 601.2c dedup applies per word, so one object may be chosen for two words, and the spell fizzles only if every target is illegal (CR 608.2b).
 
 use std::collections::HashMap;
 
@@ -110,7 +97,6 @@ fn land_word() -> TargetRequirement {
     }
 }
 
-/// "Test Plague Spores: Destroy target nonblack creature and target land."
 fn plague_spores_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -209,10 +195,7 @@ fn both_words_legal_destroys_both_targets() {
 
 #[test]
 fn the_same_permanent_can_be_chosen_for_two_different_words() {
-    // A creature that's also a land (an animated land, say) is a legal
-    // choice for *both* "target nonblack creature" and "target land" - CR
-    // 601.2c's own dedup rule only applies within one instance of the word
-    // "target", not across two different instances.
+    // An animated land is a legal choice for both "target nonblack creature" and "target land", since CR 601.2c dedup applies within one word.
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let mut manland = creature_definition(1, "Manland", ColorSet::GREEN);
@@ -250,9 +233,7 @@ fn one_word_going_illegal_before_resolution_only_skips_that_word() {
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(&mut engine);
 
-    // Between the cast and resolution, the creature leaves the battlefield -
-    // its "target nonblack creature" word becomes illegal, but the land
-    // word doesn't.
+    // The creature leaves before resolution, so its word is illegal and the land word is not.
     engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(creature);
     engine.state_mut().objects.remove(&creature);
 

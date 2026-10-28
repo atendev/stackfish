@@ -1,20 +1,4 @@
-//! Phase 5 vertical slice: CR 702.16j's "protection from everything," the
-//! last quality axis of `phase5/protection-from-color`/
-//! `phase5/protection-from-card-type`/`phase5/protection-from-subtype`/
-//! `phase5/protection-from-name`'s three enforcement sites (damage/
-//! targeting/blocking). Unlike the other four qualities, "everything" is a
-//! bare flag - `EffectiveCharacteristics.protection_everything: bool` -
-//! rather than a set/list to intersect against the source's own
-//! characteristics: CR 702.16j applies "regardless of that object's
-//! characteristic values," so every source matches unconditionally. This
-//! file only re-proves the "everything" half; the other four qualities (and
-//! the OR-composition mechanics) are already covered by their own test
-//! files.
-//!
-//! Same scoping as the earlier four slices: protection from a specific
-//! player stays unmodeled (the last remaining CR 702.16 quality), and
-//! Enchant/Equip (CR 702.16b) is out of scope (no attach/enchant machinery
-//! exists).
+//! CR 702.16j: protection from everything, the bare flag `EffectiveCharacteristics.protection_everything`, which matches every source regardless of its characteristics. The other qualities and the OR composition are in their own files.
 
 use std::collections::HashMap;
 
@@ -67,10 +51,6 @@ fn vanilla_creature(id: u64, name: &str, power: i32, toughness: i32) -> CardDefi
     creature_definition(id, name, power, toughness, ScriptReference::ByKey(name.to_string()))
 }
 
-/// "Test Bolt: deals 2 damage to target creature." Plain, unremarkable
-/// spell - the point of "protection from everything" is that *any* source
-/// matches, so the targeting tests don't need a specially-qualified spell
-/// the way the color/card-type/subtype/name slices did.
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -107,9 +87,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Directly-constructed protection, standing in for the ETB-registered
-/// version - the Lua wiring itself is proven separately, same convention
-/// every other static-ability-adjacent test file in this repo uses.
 fn protection_from_everything(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -216,10 +193,6 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
 
-// ---------------------------------------------------------------------
-// Lua wiring
-// ---------------------------------------------------------------------
-
 #[test]
 fn game_effects_add_protection_everything_self_registers_and_applies() {
     let mut state = base_state();
@@ -240,10 +213,7 @@ fn game_effects_add_protection_everything_self_registers_and_applies() {
     assert!(effective.protection_everything);
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16a: damage
-// ---------------------------------------------------------------------
-
+// CR 702.16a
 #[test]
 fn combat_damage_from_any_source_is_prevented_by_protection_from_everything() {
     let p0 = PlayerId(0);
@@ -267,10 +237,7 @@ fn combat_damage_from_any_source_is_prevented_by_protection_from_everything() {
     assert_eq!(ward.damage_marked, 0, "protection from everything prevents combat damage from any source, no exceptions");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16c: targeting
-// ---------------------------------------------------------------------
-
+// CR 702.16c
 #[test]
 fn casting_any_spell_at_a_protected_target_is_rejected() {
     let mut state = base_state();
@@ -304,10 +271,7 @@ fn spell_fizzles_when_target_gains_protection_from_everything_before_resolution(
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 702.16c is rechecked by the same CR 608.2b mechanism as any other
-    // target legality change - granting protection mid-stack, after the
-    // spell already targeted this creature, makes the target illegal by
-    // resolution time.
+    // CR 702.16c: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
     engine.state_mut().continuous_effects.push(protection_from_everything(target));
 
     pass_both_and_drain(&mut engine, p0, p1).unwrap();
@@ -319,10 +283,7 @@ fn spell_fizzles_when_target_gains_protection_from_everything_before_resolution(
     assert_eq!(engine.state().object(target).unwrap().damage_marked, 0, "a fizzled spell deals no damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16d: blocking
-// ---------------------------------------------------------------------
-
+// CR 702.16d
 #[test]
 fn an_attacker_with_protection_from_everything_cannot_be_blocked_by_any_creature() {
     let p0 = PlayerId(0);
@@ -344,12 +305,6 @@ fn an_attacker_with_protection_from_everything_cannot_be_blocked_by_any_creature
         "no creature can block an attacker with protection from everything, got {result:?}"
     );
 }
-
-// ---------------------------------------------------------------------
-// RemoveAllAbilities consistency (CR 613.1f covers protection_everything
-// too, same as the other four protection fields - see
-// phase5_lose_all_abilities.rs's own analogous test for the color half).
-// ---------------------------------------------------------------------
 
 #[test]
 fn remove_all_abilities_also_strips_a_granted_protection_from_everything() {

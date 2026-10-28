@@ -1,22 +1,7 @@
-//! Phase 5 vertical slice: "dies"/leaves-battlefield trigger conditions via
-//! last-known-information (CR 603.10, backlog item 7's third sub-slice).
-//!
-//! `commands::retire_object` purges a departing object's own `Triggered`
-//! abilities from `state.abilities` synchronously, as part of the very
-//! zone-move (`sba::commit_death`) that would produce the "dies"/"leaves the
-//! battlefield" event a trigger like this needs to match - by the time
-//! `collect_triggers` runs, both the object *and* its ability are already
-//! gone from live state. This slice threads the departing object's own
-//! `Triggered` abilities forward (via `Engine`'s transient
-//! `departed_triggered_abilities` stash) so `ConditionPrimitive::Dies`/
-//! `LeavesBattlefield` can still match them against the event's own
-//! `ZoneChange::last_known_info`.
-//!
-//! Scoped to the SBA-driven death path only (`sba::commit_death`) - sacrifice,
-//! discard-as-cost, and a resolving spell's other zone departures still
-//! discard `retire_object`'s return value this slice (see that function's own
-//! doc comment). Only source-identity conditions (Dies/LeavesBattlefield),
-//! not "whenever a creature you control dies"-style filtered conditions.
+//! CR 603.10: "dies" and leaves-the-battlefield conditions via last-known information.
+//! `retire_object` purges a departing object's triggered abilities, so `Engine` stashes them in `departed_triggered_abilities` for `Dies` and `LeavesBattlefield` to match against `ZoneChange::last_known_info`.
+// TODO: sacrifice, discard-as-cost and a resolving spell's other departures discard `retire_object`'s return value
+// TODO: filtered conditions such as "whenever a creature you control dies"
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -39,8 +24,6 @@ fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -
     }
 }
 
-/// Main phase, `PreCombatMain` step, battlefield/graveyard/exile zones -
-/// everywhere a dying or exiled creature needs to land.
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -51,10 +34,6 @@ fn base_state() -> GameState {
     }
 }
 
-/// Mirrors `phase5_damage_dealt_triggers::combat_damage_state` - a game
-/// sitting mid-combat-damage-step, for the regression test that needs a real
-/// `AssignCombatDamage` to produce both a `DamageDealt` and a lethal-damage
-/// death in the same pipeline run.
 fn combat_damage_state(combat: CombatState) -> GameState {
     let mut state = base_state();
     state.phase = Phase::Combat;
@@ -118,26 +97,18 @@ fn pass(engine: &mut Engine, player: PlayerId) {
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
 }
 
-// ---------------------------------------------------------------------
-// Dies: fires and resolves after a real SBA-driven lethal-damage death.
-// ---------------------------------------------------------------------
-
 #[test]
 fn dies_trigger_fires_and_resolves_after_real_lethal_damage() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let mut state = base_state();
-    // Lethal damage already marked - PassPriority cascades straight into
-    // SbaLoop, which finds this creature dying via CR 704.5g.
+    // Lethal damage is already marked, so PassPriority cascades into SbaLoop and CR 704.5g kills the creature.
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2));
     state.abilities.push(dies_ability(bear));
 
     let mut engine = Engine::new(state);
-    // A bare PassPriority always hands priority to the next player in
-    // turn_order (CR 117.3c), regardless of what the SBA/trigger pipeline
-    // finds along the way - so priority lands on p1 here even though the
-    // Dies trigger (from p0's own creature) was what actually fired.
+    // A bare PassPriority hands priority to the next player in turn order (CR 117.3c), so it lands on p1 even though p0's Dies trigger fired.
     pass(&mut engine, p0);
     let status = drain(&mut engine);
 
@@ -148,8 +119,7 @@ fn dies_trigger_fires_and_resolves_after_real_lethal_damage() {
     assert_eq!(engine.state().stack.len(), 1, "the Dies trigger was collected and pushed");
     assert!(engine.state().object(bear).is_none(), "the bear itself is gone - died to the graveyard");
 
-    // Both players have now passed with the trigger on the stack - it
-    // resolves, and priority returns to the active player (CR 117.3b).
+    // Both players passed with the trigger on the stack, so it resolves and priority returns to the active player (CR 117.3b).
     pass(&mut engine, p1);
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
@@ -175,11 +145,6 @@ fn ability_on_a_creature_that_does_not_die_never_fires() {
     assert!(engine.state().stack.is_empty(), "no death occurred, so the Dies trigger never matched");
     assert!(engine.state().object(bear).is_some(), "the bear is still alive");
 }
-
-// ---------------------------------------------------------------------
-// LeavesBattlefield: fires on a non-death departure (CR 614.13 "exile
-// instead" redirect), still through the same wired sba::commit_death path.
-// ---------------------------------------------------------------------
 
 #[test]
 fn leaves_battlefield_trigger_fires_when_a_replacement_exiles_instead_of_killing() {
@@ -211,9 +176,7 @@ fn leaves_battlefield_trigger_fires_when_a_replacement_exiles_instead_of_killing
 
 #[test]
 fn dies_does_not_fire_when_a_replacement_exiles_instead_of_killing() {
-    // The mirror image of the test above - Dies is specifically
-    // battlefield->graveyard, so a redirected-to-exile departure must not
-    // satisfy it even though the object did leave the battlefield.
+    // Dies is battlefield to graveyard, so a departure redirected to exile does not satisfy it.
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
@@ -229,12 +192,6 @@ fn dies_does_not_fire_when_a_replacement_exiles_instead_of_killing() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1));
     assert!(engine.state().stack.is_empty(), "Dies must not match a redirected-to-exile departure");
 }
-
-// ---------------------------------------------------------------------
-// Regression: a live DealsDamage trigger (damage-dealt-triggers slice) and
-// a departed-abilities Dies trigger both fire correctly out of the same
-// CollectTriggers pass, from real combat.
-// ---------------------------------------------------------------------
 
 #[test]
 fn deals_damage_and_dies_triggers_both_fire_from_the_same_combat_damage_step() {
@@ -278,9 +235,7 @@ fn deals_damage_and_dies_triggers_both_fire_from_the_same_combat_damage_step() {
     assert_eq!(engine.state().stack.len(), 2, "both the DealsDamage and Dies triggers were collected");
     assert!(engine.state().object(blocker).is_none(), "the blocker died");
 
-    // Two triggers on the stack - each resolution needs both players to
-    // pass in a row (CR 117.3b), and priority returns to the active player
-    // after each resolution before the next round starts.
+    // Each of the two triggers needs both players to pass in a row (CR 117.3b), then priority returns to the active player.
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);

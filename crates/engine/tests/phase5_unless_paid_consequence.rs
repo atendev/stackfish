@@ -1,27 +1,6 @@
-//! Phase 5 vertical slice: `AbilityEffect::UnlessPaid` (CR 118.12/118.12a) —
-//! the shared "[do something] unless [a player does something else]"
-//! mechanism, generalized from the original single-purpose
-//! `CounterUnlessPaid` (CR 701.6a/118.12, Mana Leak/Condescend) so CR
-//! 702.21a Ward and CR 702.30a Echo can both build on it too, via
-//! `UnlessPaidConsequence::{Counter, SacrificeSelf}` rather than each
-//! getting its own bespoke pause. `Game.Ops.CounterUnlessPaid("{3}")` still
-//! builds the `Counter` shape (Lua-facing name kept stable across the
-//! rename - from a card author's perspective it's still exactly "counter
-//! unless paid"). `SacrificeSelf` has no Lua builder yet (TODO, see
-//! `AbilityEffect::UnlessPaid`'s own doc comment) - its own tests below
-//! construct the effect directly by pushing a `StackObject` onto the stack
-//! by hand, same "no Lua wiring proven this slice" posture other
-//! Lua-inaccessible pieces in this codebase already take.
-//!
-//! The multi-candidate `payer_queue` mechanism (CR 101.4 APNAP order, for a
-//! hypothetical future "any player may pay" keyword) has no real card
-//! producing more than a single-element queue yet - both real producers
-//! here (Ward's targeted player, Echo's controller) only ever ask one fixed
-//! player. Its own dedicated tests live as in-crate unit tests in
-//! `engine/tests.rs` instead, constructed directly (the same "dormant as of
-//! this slice" posture that file's own `AwaitingAttachChoice` tests already
-//! established), since a queue longer than one is unreachable from outside
-//! this crate today.
+//! CR 118.12, 118.12a: `AbilityEffect::UnlessPaid` is the shared "[do something] unless [a player does something else]" mechanism, with `UnlessPaidConsequence::{Counter, SacrificeSelf}` serving Mana Leak, Ward (CR 702.21a) and Echo (CR 702.30a). `Game.Ops.CounterUnlessPaid("{3}")` builds the `Counter` shape.
+//! The multi-candidate `payer_queue` (CR 101.4 APNAP) has no producer longer than one element, so its tests are in-crate unit tests in `engine/tests.rs`.
+// TODO: a Lua builder for `SacrificeSelf` (see `AbilityEffect::UnlessPaid`), so its tests push the `StackObject` by hand
 
 use std::collections::HashMap;
 
@@ -56,9 +35,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// A non-creature permanent standing in for "whatever grants this
-/// replacement effect" - same fixture role `phase5_destroy_ordering_choice.
-/// rs`'s own `shield_definition` plays.
 fn shield_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
@@ -84,10 +60,6 @@ fn shield_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "If a creature you control would die, exile it instead" - same helper as
-/// `phase5_destroy_ordering_choice.rs`'s own `exile_instead_effect`, copied
-/// rather than shared (that file's own helpers aren't part of this crate's
-/// public surface).
 fn exile_instead_effect(source: ObjectId, self_only: bool, consumption: ConsumptionPolicy) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -109,7 +81,6 @@ fn exile_instead_effect(source: ObjectId, self_only: bool, consumption: Consumpt
     }
 }
 
-/// "Test Mana Leak: Counter target spell unless its controller pays {3}."
 fn mana_leak_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 31,
@@ -164,20 +135,12 @@ fn two_player_state() -> GameState {
     }
 }
 
-/// Same as `two_player_state`, but p1 (the target spell's own controller,
-/// the one who'll be asked to pay) starts with `colorless` mana already in
-/// their pool.
 fn two_player_state_with_p1_colorless(colorless: u32) -> GameState {
     let mut state = two_player_state();
     state.players[1].mana_pool.colorless = colorless;
     state
 }
 
-/// Puts a creature spell directly on the stack, owned/controlled by
-/// `owner` — bypasses the real cast/pay flow, same shortcut
-/// `phase5_counter_target_spell.rs`'s own `push_creature_spell_on_stack`
-/// uses (this slice tests `UnlessPaid`'s own resolution, not casting
-/// mechanics).
 fn push_creature_spell_on_stack(state: &mut GameState, stack_id: ObjectId, owner: PlayerId) {
     state.objects.insert(stack_id, card_object(stack_id, creature_definition(1, "Bear"), owner, ZoneKind::Stack));
     state.stack.push(StackObject {
@@ -202,11 +165,6 @@ fn push_creature_spell_on_stack(state: &mut GameState, stack_id: ObjectId, owner
     });
 }
 
-/// CR 702.30a Echo's own resolution shape: a triggered ability, already on
-/// the stack, whose `source` is the permanent it'll sacrifice - pushed
-/// directly rather than through the trigger-collection pipeline (no real
-/// "came under your control since your last upkeep" condition is being
-/// tested here, only `UnlessPaid`'s own `SacrificeSelf` dispatch).
 fn push_echo_trigger_on_stack(state: &mut GameState, stack_id: ObjectId, source: ObjectId, controller: PlayerId, cost: &str) {
     state.stack.push(StackObject {
         stack_id,
@@ -262,12 +220,7 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-// ---------------------------------------------------------------------
-// CR 701.6a/118.12 + CR 702.21a (Ward) - UnlessPaidConsequence::Counter.
-// Migrated from the original CounterUnlessPaid-only test file; behavior
-// unchanged, only the type/method names generalized.
-// ---------------------------------------------------------------------
-
+// CR 701.6a/118.12
 #[test]
 fn declining_to_pay_counters_the_target_the_same_way_plain_counter_does() {
     let mut state = two_player_state();
@@ -410,13 +363,8 @@ fn game_ops_counter_unless_paid_decodes_to_the_unless_paid_counter_shape() {
     }
 }
 
-// ---------------------------------------------------------------------
-// CR 702.30a (Echo) - UnlessPaidConsequence::SacrificeSelf. No Lua builder
-// yet (TODO, see AbilityEffect::UnlessPaid's own doc comment) - the
-// triggered ability is pushed directly onto the stack instead of collected
-// through a real Echo keyword/condition.
-// ---------------------------------------------------------------------
-
+// CR 702.30a
+// TODO: `SacrificeSelf` has no Lua builder, so the triggered ability is pushed onto the stack directly and not collected through an Echo keyword
 #[test]
 fn declining_the_echo_cost_sacrifices_the_source_permanent() {
     let mut state = two_player_state();
@@ -478,15 +426,7 @@ fn paying_the_echo_cost_spares_the_permanent() {
 
 #[test]
 fn declining_the_echo_cost_through_a_simultaneous_replacement_ordering_choice_still_resolves_correctly() {
-    // Same fixture shape as phase5_destroy_ordering_choice.rs's own
-    // sacrifice-with-two-matching-effects test: two independent "exile
-    // instead" replacement effects both match the bear's own proposed
-    // ZoneChange, forcing a real CR 616.1 ordering-choice pause mid-decline.
-    // Proves decline_unless_paid's SacrificeSelf branch correctly threads
-    // events_so_far through continue_scripted_zone_move's own nested pause
-    // and still finishes with a StackObjectResolved for the *outer* Echo
-    // ability once the nested choice is answered - not just in the
-    // no-pause case the other Echo tests above exercise.
+    // Two independent "exile instead" effects both match the bear's ZoneChange, forcing a CR 616.1 ordering pause mid-decline. decline_unless_paid's SacrificeSelf branch must thread events_so_far through the nested pause and still finish with StackObjectResolved for the outer Echo ability.
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);

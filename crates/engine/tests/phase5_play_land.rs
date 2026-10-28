@@ -1,6 +1,4 @@
-//! Phase 5 vertical slice: `PlayLand` (CR 305.1 - lands aren't spells, no
-//! stack involved) plus the zone helpers (`Zone::remove`/`push_bottom`,
-//! `GameState::object_mut`/`zone_mut`) it's the first real caller of.
+//! CR 305.1: `PlayLand` moves a land without using the stack, and is the first caller of `Zone::remove`, `push_bottom`, `GameState::object_mut` and `zone_mut`.
 
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
@@ -21,20 +19,11 @@ fn instant_definition() -> CardDefinition {
     minimal_card_definition(2, "Shock", "shock", ManaCost { symbols: Vec::new() }, CardTypeSet::INSTANT)
 }
 
-/// Two players, both zone sets present (hand/battlefield) so `PlayLand` has
-/// somewhere real to move a card to/from. `base_two_player_state` already
-/// defaults to Main phase (sorcery-speed timing, CR 305.1/305.3), so callers
-/// don't have to set it per test; the rejection tests below still test their
-/// own intended failure (non-Land, not-in-hand), not an incidental timing
-/// failure.
 fn two_player_state() -> GameState {
     base_two_player_state(hand_and_battlefield_zones(PlayerId(0), PlayerId(1)))
 }
 
-/// CR 400.7: `PlayLand` mints a new `ObjectId` for the permanent rather than
-/// reusing the hand card's id (see commands.rs). Tests that need to find the
-/// moved object afterward can't look it up by the original id - they read it
-/// back from the `ZoneChange` event `PlayLand` produces instead.
+// CR 400.7: PlayLand mints a new ObjectId, so tests read the moved object from the ZoneChange event.
 fn moved_object_id(engine: &Engine) -> ObjectId {
     match engine.state().ledger.last().expect("expected a ledger entry").kind {
         GameEventKind::ZoneChange { object, .. } => object,
@@ -69,9 +58,7 @@ fn play_land_breaks_pass_chain() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // CR 305.3: a land can only be played on the actor's own turn - p1 is
-    // the one playing the land below, so p1 must be the active player. p0
-    // still passes first (passing priority has no turn restriction).
+    // CR 305.3: a land can be played only on the actor's own turn, so p1 must be the active player. p0 still passes first.
     state.active_player = p1;
     let land = ObjectId(0);
     state.objects.insert(land, card_object(land, land_definition(), p1, ZoneKind::Hand));
@@ -187,8 +174,7 @@ fn play_land_rejects_not_actors_turn() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // It's p1's turn, but p0 (who currently holds priority) tries to play
-    // a land they own - CR 305.3.
+    // It is p1's turn but p0 holds priority and tries to play a land (CR 305.3).
     state.active_player = p1;
     let card = ObjectId(0);
     state.objects.insert(card, card_object(card, land_definition(), p0, ZoneKind::Hand));
@@ -231,10 +217,8 @@ fn play_land_rejects_second_land_same_turn() {
     assert_eq!(engine.state().object(second).unwrap().zone, ZoneKind::Hand, "second land untouched");
 }
 
-/// CR 305.2: a `LandPlayModifier` granting one additional land play lets a
-/// second land through that would otherwise be rejected
-/// (`play_land_rejects_second_land_same_turn` above), and still rejects a
-/// third.
+// CR 305.2
+// A LandPlayModifier granting one additional land play lets a second land through and still rejects a third.
 #[test]
 fn play_land_allows_an_additional_land_with_a_land_play_modifier() {
     let mut state = two_player_state();
@@ -267,9 +251,8 @@ fn play_land_allows_an_additional_land_with_a_land_play_modifier() {
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "a 3rd land should still be rejected");
 }
 
-/// CR 305.2's own "additional lands" stack — two separate +1 modifiers grant
-/// 2 extra land plays (3 total), not the max of the two (unlike
-/// `effective_draw_limit`'s "latest wins" resolution for CR 121.2b).
+// CR 305.2
+// Two +1 modifiers grant 2 extra land plays (3 total) and not the max of the two, unlike effective_draw_limit.
 #[test]
 fn play_land_two_land_play_modifiers_stack_additively() {
     let mut state = two_player_state();

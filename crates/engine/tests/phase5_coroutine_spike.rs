@@ -1,23 +1,5 @@
-//! Phase 5 vertical slice: backlog item 9, spike. Proves the raw `mlua`
-//! coroutine mechanism this whole slice's design depends on actually works
-//! against the real vendored mlua 0.9, before any `Engine`-level plumbing
-//! gets built on top of it:
-//!
-//! 1. A Lua coroutine can `coroutine.yield(...)` mid-script and get resumed
-//!    later with a value standing in for the yield's return (`Thread::resume`).
-//! 2. A suspended `Thread` survives a round-trip through `Lua`'s registry
-//!    (`create_registry_value`/`registry_value`) - the mechanism
-//!    `ScriptRegistry` will use to hold a paused script across separate
-//!    `Engine::step()` calls, mirroring exactly how it already stores
-//!    `Function`s via `RegistryKey`.
-//! 3. `Thread::status()` reports `Resumable` while suspended and
-//!    `Unresumable` once the coroutine has returned for good - the signal
-//!    `Engine`'s resume logic will use to decide "pause again" vs "finished,
-//!    continue the pipeline."
-//!
-//! No engine code depends on this file - it's a standalone confirmation this
-//! slice's design (docs/implementation.md) is building on solid ground, not
-//! a guess about mlua's API.
+//! Spike for the `mlua` coroutine mechanism that script pauses depend on, against the vendored mlua 0.9.
+//! A script can `coroutine.yield` and resume with a value, a suspended `Thread` survives a round trip through the Lua registry, and `Thread::status()` separates `Resumable` from `Unresumable`.
 
 use mlua::{Lua, Thread, ThreadStatus};
 
@@ -54,10 +36,7 @@ fn a_coroutine_yields_and_resumes_with_real_values() {
 
 #[test]
 fn a_suspended_thread_survives_a_registry_round_trip_and_resumes_correctly() {
-    // One Lua instance throughout, exactly like ScriptRuntime owns one `Lua`
-    // for the engine's whole lifetime - RegistryKey is tied to the specific
-    // Lua instance it was created from, so real usage always retrieves
-    // through that same long-lived instance, never a fresh one.
+    // One Lua instance throughout, as ScriptRuntime owns one, because a RegistryKey is tied to the instance that created it.
     let lua = Lua::new();
     let thread: Thread = lua
         .load(

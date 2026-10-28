@@ -1,23 +1,6 @@
-//! Phase 5 vertical slice: CR 612.6 (Volrath's Shapeshifter) — "full text
-//! of another object" changes not just the text box/type line (CR 612.5's
-//! own narrower scope) but also the text that represents name, mana cost,
-//! color indicator, power, and toughness.
-//!
-//! Modeled as a live `ContinuousEffect` (Layer 3, `TextChanging`) rather
-//! than a one-time mutation the way `AbilityEffect::BecomeCopy`/
-//! `ExchangeTextBoxes` are — Volrath's Shapeshifter's own real duration
-//! ("until end of turn") needs the existing `EffectDuration`/layer-engine
-//! machinery, reused here for free rather than inventing a new revert-at-
-//! cleanup mechanism. `layers::effective_characteristics` is a pure,
-//! read-only query with no `&mut GameState`, so this can't re-run a script
-//! or grant a real ability the way the one-time-mutation precedents do —
-//! `EffectPrimitive::SetFullText`/`FullTextOverride` is deliberately
-//! narrowed to the *characteristic* half (name/mana cost/color/type line/
-//! keywords/power/toughness), named not hidden. No producer wires a real
-//! activated ability that captures "target creature card in a graveyard"
-//! into a fresh `SetFullText` effect yet (a separate, later follow-up) —
-//! proven here via direct `ContinuousEffect` construction only, same
-//! posture several other first-proof slices in this cluster already took.
+//! CR 612.6: Volrath's Shapeshifter changes the full text of another object (name, mana cost, color indicator, P/T, type line, keywords) as a live layer 3 `TextChanging` `ContinuousEffect`, so its "until end of turn" duration reuses `EffectDuration`.
+//! `EffectPrimitive::SetFullText` and `FullTextOverride` cover the characteristic half only, because `effective_characteristics` is a read-only query that cannot re-run scripts or grant abilities.
+// TODO: an activated ability that captures "target creature card in a graveyard" into a `SetFullText` effect, so tests build the `ContinuousEffect` directly
 
 use std::collections::HashMap;
 
@@ -51,9 +34,6 @@ fn creature_definition(definition_id: u64, name: &str, power: i32, toughness: i3
     }
 }
 
-/// The donor - a graveyard creature with a distinct name/mana cost/color/
-/// type line/keywords/P&T, so every field this slice touches is
-/// distinguishable from the shapeshifter's own printed identity.
 fn dread_wanderer_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
@@ -111,20 +91,12 @@ fn full_text_effect(source: ObjectId, donor: &CardDefinition, timestamp: u64) ->
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: FullTextOverride's own colors() derivation.
-// ---------------------------------------------------------------------
-
 #[test]
 fn full_text_override_colors_follows_mana_cost_when_no_color_indicator() {
     let donor = dread_wanderer_definition();
     let override_ = FullTextOverride::from(&donor);
     assert_eq!(override_.colors(), ColorSet::BLACK);
 }
-
-// ---------------------------------------------------------------------
-// Real consumer: effective_characteristics applies SetFullText.
-// ---------------------------------------------------------------------
 
 #[test]
 fn set_full_text_swaps_name_mana_cost_color_type_line_keywords_and_pt() {
@@ -229,10 +201,6 @@ fn an_earlier_plain_set_name_is_superseded_by_a_later_set_full_text() {
 
     assert_eq!(effective.name, "Dread Wanderer", "SetFullText's own later timestamp wins outright, including the name");
 }
-
-// ---------------------------------------------------------------------
-// End to end: EffectDuration::UntilEndOfTurn really expires at Cleanup.
-// ---------------------------------------------------------------------
 
 fn state_at_end_step() -> GameState {
     let p0 = PlayerId(0);

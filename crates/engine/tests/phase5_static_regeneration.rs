@@ -1,21 +1,5 @@
-//! Phase 5 vertical slice: `Game.CreateReplacementEffect` — the CR 701.19b
-//! sibling to `phase5/cant-be-regenerated`'s CR 701.19a one-shot shield. A
-//! static ability's own effect can now self-register a *repeatable*
-//! regeneration shield ("...each time that permanent would be destroyed",
-//! not just the next time) - the `ConsumptionPolicy::Repeatable` +
-//! `EventFilter::WouldDie`/`ReplacementPayload::Regenerate` shape already
-//! existed and was already proven by `replacement.rs`'s own unit tests; the
-//! only real gap was a creation path, same "no Lua/Rust creation surface
-//! yet" shape `phase5/pump-effect`/`phase5/cant-be-regenerated` themselves
-//! closed for their own primitives.
-//!
-//! Also proves a correctness finding made while implementing this slice: CR
-//! 701.19c ("can't be regenerated" gates shield *application*) has to be
-//! checked fresh every time a static shield is asked to apply, not just once
-//! at shield-creation time the way the one-shot spell/ability path checks it
-//! - a static shield is registered once but the target's CANT_BE_REGENERATED
-//! status can change afterward. See `ReplacementEffect::matches`'s own doc
-//! comment (types/effect.rs).
+//! CR 701.19b: `Game.CreateReplacementEffect` registers a repeatable regeneration shield (`ConsumptionPolicy::Repeatable`, `WouldDie`, `Regenerate`) from a static ability.
+//! CR 701.19c (can't be regenerated) is checked fresh each time the shield is asked to apply (`ReplacementEffect::matches`), since the target's status can change after the shield was registered.
 
 use std::collections::HashMap;
 
@@ -98,10 +82,7 @@ fn static_regeneration_shield_survives_being_used_and_saves_target_twice() {
     let object = card_object(creature, creature_definition(2, KeywordSet::empty(), STATIC_REGENERATE_SELF), PlayerId(0), ZoneKind::Battlefield);
     state.objects.insert(creature, object);
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
-    // Simulates the shield this creature would have self-registered upon an
-    // earlier entrance to the battlefield (same convention
-    // phase5_static_ability_self_registration.rs's own SBA test uses for a
-    // ContinuousEffect) - the Lua wiring itself is proven separately above.
+    // Simulates the shield the creature would have self-registered on an earlier battlefield entry.
     state.replacement_effects.push(ReplacementEffect {
         source: creature,
         spec: ReplacementSpec::Primitive {
@@ -132,9 +113,7 @@ fn static_regeneration_shield_survives_being_used_and_saves_target_twice() {
     assert_eq!(saved.damage_marked, 0, "regeneration clears marked damage");
     assert!(saved.tapped, "regeneration taps the permanent");
 
-    // Second lethal hit, same turn - a OneShot shield would be gone by now
-    // (phase5_regenerate_ability.rs's own tests prove that side); this one
-    // fires again, proving CR 701.19b's "each time" behavior for real.
+    // A second lethal hit the same turn fires again (CR 701.19b "each time"), where a OneShot shield would be gone.
     state.object_mut(creature).unwrap().damage_marked = 2;
     match check_state_based_actions(&mut state, &script_runtime) {
         SbaOutcome::Progressed(events, _) => {
@@ -169,11 +148,7 @@ fn static_regeneration_shield_does_not_save_a_target_that_later_cant_be_regenera
         consumption: ConsumptionPolicy::Repeatable,
     });
 
-    // The target gains CANT_BE_REGENERATED *after* the static shield already
-    // exists - proving the CR 701.19c gate is checked fresh at match time
-    // (ReplacementEffect::matches), not only once when the shield was
-    // created (there is no creation-time moment to check here at all - the
-    // shield was registered once, up front, independent of this).
+    // The target gains CANT_BE_REGENERATED after the shield exists, so the CR 701.19c gate is checked at match time and not at creation.
     state.continuous_effects.push(ContinuousEffect {
         source: creature,
         layer: Layer::AbilityAdding,

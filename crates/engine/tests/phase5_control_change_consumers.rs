@@ -1,16 +1,5 @@
-//! Phase 5 vertical slice: wires `layers::effective_controller` (the
-//! query-only `phase5/layer-engine-control` slice) into real gameplay
-//! consumers - backlog item 1.5b's follow-up. Every site migrated here was
-//! previously reading `GameObject.controller` directly (never reacting to a
-//! `GainControl` continuous effect); this file drives the real
-//! `Engine`/`execute_command` pipeline to prove each migrated consumer
-//! actually respects a control-changed permanent's *current* controller
-//! instead of whoever it started under. Sites deliberately left unmigrated
-//! (Hand/Graveyard/Command/Library-zone controller checks, `ContinuousEffect::
-//! applies_to`'s own internals - see docs/implementation.md's
-//! `phase5/layer-engine-control-consumers` slice notes for the
-//! infinite-recursion reasoning) aren't covered here, since nothing about
-//! them changed.
+//! `layers::effective_controller` drives real gameplay consumers: each migrated site honors a control-changed permanent's current controller and not its owner.
+//! Hand, graveyard, command and library controller checks, and `ContinuousEffect::applies_to`, are not migrated.
 
 use std::collections::HashMap;
 
@@ -53,11 +42,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// A permanent `GainControl`s continuous effect from `source` to
-/// `new_controller`, unfiltered, timestamp 0 - the query-only slice's own
-/// bootstrap fixture shape (`phase5_layer_engine_control.rs`), reused here
-/// against the real engine pipeline instead of the bare `effective_controller`
-/// query.
 fn gain_control(source: ObjectId, new_controller: PlayerId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -71,20 +55,12 @@ fn gain_control(source: ObjectId, new_controller: PlayerId) -> ContinuousEffect 
 }
 
 
-/// `p0` active, `p1` nonactive - `p1` owns `creature`, but a `GainControl`
-/// effect gives `p0` its effective control. `p0`'s own turn started at
-/// `p0_last_active_turn` (default combat-ready shape has both players'
-/// `last_active_turn_number` seeded so summoning-sickness math is exercised
-/// deliberately, not accidentally defaulted).
 fn control_changed_combat_state(p0_last_active_turn: u32, creature_controlled_since_turn: u32) -> (GameState, PlayerId, PlayerId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let creature = ObjectId(0);
     let mut state = GameState {
-        // p1 is a "veteran" (last active turn 10) throughout - fixed so the
-        // two summoning-sickness tests can demonstrate the check now keys
-        // off p0 (the effective controller), which would give a *different*
-        // answer than checking against p1 (the raw owner) still would.
+        // p1 is a veteran (last active turn 10), so the sickness check keying off p0, the effective controller, gives a different answer than p1, the owner.
         turn_number: 10,
         phase: Phase::Combat,
         step: Step::DeclareAttackers,
@@ -95,10 +71,6 @@ fn control_changed_combat_state(p0_last_active_turn: u32, creature_controlled_si
     state.continuous_effects.push(gain_control(creature, p0));
     (state, p0, p1, creature)
 }
-
-// ---------------------------------------------------------------------
-// DeclareAttackers/DeclareBlockers (commands.rs's effective_controller checks)
-// ---------------------------------------------------------------------
 
 #[test]
 fn only_the_new_controller_can_declare_a_gain_controlled_creature_as_an_attacker() {
@@ -123,8 +95,7 @@ fn only_the_new_controller_can_declare_a_gain_controlled_creature_as_an_attacker
 fn the_original_owner_can_no_longer_attack_with_a_gain_controlled_creature() {
     let (state, _p0, p1, creature) = control_changed_combat_state(1, 0);
     let mut state = state;
-    // p1 isn't the active player in this fixture, so also flip active_player
-    // to p1 to isolate the actual claim under test: control, not turn order.
+    // p1 is not the active player, so active_player is flipped to p1 to isolate control from turn order.
     state.active_player = p1;
     state.priority_player = p1;
     let mut engine = Engine::new(state);
@@ -143,8 +114,7 @@ fn the_original_owner_can_no_longer_attack_with_a_gain_controlled_creature() {
 #[test]
 fn only_the_new_controller_can_declare_it_as_a_blocker() {
     let (mut state, p0, p1, creature) = control_changed_combat_state(1, 0);
-    // An unrelated p0 creature attacks p1, so p1 has something to block with
-    // (blocking legality itself isn't under test - the control check is).
+    // An unrelated p0 creature attacks so p1 has something to block with. Blocking legality is not under test.
     let attacker = ObjectId(1);
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Attacker"), p0, 0));
     state.combat = Some(CombatState {
@@ -156,8 +126,7 @@ fn only_the_new_controller_can_declare_it_as_a_blocker() {
     state.step = Step::DeclareBlockers;
     let mut engine = Engine::new(state);
 
-    // p1 no longer effectively controls `creature` (GainControl gave it to
-    // p0) - blocking with it must be rejected even though p1 owns it.
+    // GainControl gave the creature to p0, so p1 cannot block with it even though p1 owns it.
     let result = engine.submit_action(PlayerAction {
             player: p1,
             kind: PlayerActionKind::DeclareBlockers { blocks: vec![(creature, attacker)] },
@@ -168,18 +137,7 @@ fn only_the_new_controller_can_declare_it_as_a_blocker() {
     );
 }
 
-// ---------------------------------------------------------------------
-// has_summoning_sickness
-// ---------------------------------------------------------------------
-
-/// `creature`'s `controlled_since_turn` (5) is *after* p0's own most recent
-/// turn began (turn 1) but *before* veteran p1's (turn 10). Checked against
-/// the raw `object.controller` (p1, the original owner) this would read as
-/// long-since-controlled and NOT sick (`5 >= 10` is false) - the exact wrong
-/// answer the pre-migration code would have given. Checked against the
-/// *effective* controller (p0, via `GainControl` - `layers::
-/// effective_controller`) it's `5 >= 1`, true, so it's sick under its new
-/// controller - the real, corrected answer this slice's migration produces.
+// controlled_since_turn 5 is after p0's turn began (1) and before p1's (10): sick under the effective controller (5 >= 1), not under the raw owner (5 >= 10 is false).
 #[test]
 fn summoning_sickness_is_checked_against_the_new_controllers_last_active_turn() {
     let (state, p0, _p1, creature) = control_changed_combat_state(1, 5);
@@ -198,9 +156,7 @@ fn summoning_sickness_is_checked_against_the_new_controllers_last_active_turn() 
 
 #[test]
 fn summoning_sickness_is_bypassed_when_controlled_before_the_new_controllers_own_turn() {
-    // Same fixture, but the creature has been controlled since turn 0 -
-    // before p0's own most recent turn (1) began, so `0 >= 1` is false: not
-    // sick under its new controller, and allowed to attack.
+    // Controlled since turn 0, before p0's most recent turn (1) began, so it is not sick and may attack.
     let (state, p0, _p1, creature) = control_changed_combat_state(1, 0);
     let mut engine = Engine::new(state);
 
@@ -213,10 +169,6 @@ fn summoning_sickness_is_bypassed_when_controlled_before_the_new_controllers_own
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
 }
-
-// ---------------------------------------------------------------------
-// ActivateAbility (commands.rs's "actor does not control the source" check)
-// ---------------------------------------------------------------------
 
 fn control_changed_activation_state() -> (GameState, PlayerId, PlayerId, ObjectId) {
     let p0 = PlayerId(0);
@@ -293,11 +245,6 @@ fn the_original_owner_can_no_longer_activate_a_gain_controlled_sources_ability()
     }
 }
 
-// ---------------------------------------------------------------------
-// PaymentPlan::validate's Sacrifice cost (CR 701.20a: "you can only
-// sacrifice a permanent you control")
-// ---------------------------------------------------------------------
-
 #[test]
 fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
     let p0 = PlayerId(0);
@@ -336,8 +283,7 @@ fn sacrifice_cost_accepts_a_gain_controlled_creature_from_its_new_controller() {
         }],
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]))
     };
-    // The ability's source is p0's own, ordinary permanent - only `fodder`
-    // (owned by p1, GainControl'd to p0) is under test.
+    // The ability's source is p0's ordinary permanent, and only fodder (owned by p1, GainControl'd to p0) is under test.
     put_on_battlefield(&mut state, permanent(source, creature_definition("Source"), p0, 0));
     put_on_battlefield(&mut state, permanent(fodder, creature_definition("Fodder"), p1, 0));
     state.continuous_effects.push(gain_control(fodder, p0));

@@ -1,18 +1,6 @@
-//! Phase 5 vertical slice: CR 613 continuous-effect layer engine, sub-slice
-//! C — layer 7a (characteristic-defining power/toughness, CR 604.3/208.2a).
-//! `PTValue::CharacteristicDefining` gains a `script: Option<ScriptReference>`
-//! field (was display-text-only before this slice); `layers.rs`'s
-//! `resolve_base_pt` invokes it (`ScriptRuntime::invoke_cda`) before layers
-//! 7b/7c apply, same CR 613.4a→b→c ordering as everywhere else in this
-//! engine's layer system.
-//!
-//! No `Game.*` state-query bindings exist yet (checked: neither
-//! `invoke_condition` nor `invoke_operation` passes `GameState` into Lua
-//! either) — a real "count cards in your graveyard"-style CDA isn't
-//! buildable until that lands (docs/implementation.md's slice backlog,
-//! script API expansion). Every CDA script below is a constant or
-//! id-derived, same limitation `invoke_condition`'s own existing tests
-//! already live with.
+//! CR 604.3, 208.2a: layer 7a characteristic-defining power/toughness. `PTValue::CharacteristicDefining { script }` is invoked by `resolve_base_pt` through `invoke_cda` before layers 7b and 7c (CR 613.4a, b, c).
+//! Every CDA script is a constant or id-derived.
+// TODO: Game.* state-query bindings, so a CDA such as "count cards in your graveyard" can be written
 
 use std::collections::HashMap;
 
@@ -22,9 +10,7 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, two_player_state as base_two_player_state, zones};
 
-/// This slice's fixtures never register a `ReplacementEffect` on a dying
-/// creature - a real CR 616.1 pause here would mean the fixture itself is
-/// wrong, not something to handle gracefully.
+// No fixture registers a ReplacementEffect on a dying creature, so a CR 616.1 pause here would mean the fixture is wrong.
 fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     match outcome {
         SbaOutcome::Progressed(events, _) => events,
@@ -40,9 +26,6 @@ fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     }
 }
 
-/// `script: None` means no CDA callback was ever supplied — `layers.rs`
-/// resolves this exactly like `PTValue::as_fixed` already did (`None`, skip
-/// rather than guess).
 fn cda_value(script: Option<&str>) -> PTValue {
     PTValue::CharacteristicDefining {
         display: "*".to_string(),
@@ -186,9 +169,7 @@ fn cda_base_is_overridden_by_a_later_set_pt() {
     let setter = ObjectId(1);
     put_on_battlefield(&mut state, cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE)));
     put_on_battlefield(&mut state, creature(setter, p0, 0, 0));
-    // CR 613.4a->b: layer 7a resolves the CDA base (3/3) first, then layer
-    // 7b's SetPT still overrides it entirely - the 3/3 base never "wins" by
-    // virtue of resolving first.
+    // CR 613.4a, b: layer 7a resolves the CDA base (3/3) first, then 7b's SetPT overrides it entirely.
     state.continuous_effects.push(continuous_effect(
         setter,
         Layer::PowerToughnessSetting,
@@ -212,9 +193,7 @@ fn cda_base_has_modify_pt_stacked_on_top() {
     let anthem = ObjectId(1);
     put_on_battlefield(&mut state, cda_creature(star, p0, Some(RETURNS_THREE), Some(RETURNS_THREE)));
     put_on_battlefield(&mut state, creature(anthem, p0, 0, 0));
-    // CR 613.4a->c: layer 7c is additive on top of whatever 7a/7b produced -
-    // the CDA-resolved 3/3 base plus a +2/+2 anthem should be 5/5, not just
-    // the anthem's +2/+2 alone.
+    // CR 613.4a, c: layer 7c adds on top of the 7a/7b result, so the CDA 3/3 base plus a +2/+2 anthem is 5/5.
     state.continuous_effects.push(continuous_effect(
         anthem,
         Layer::PowerToughnessModifying,
@@ -259,12 +238,6 @@ fn an_erroring_script_resolves_to_none_not_a_panic() {
     assert_eq!(effective.power, None, "a script that errors should skip, not panic or guess");
     assert_eq!(effective.toughness, None);
 }
-
-// ---------------------------------------------------------------------
-// Real consumer: sba::check_state_based_actions's existing lethal-toughness
-// check (real since layer-engine-basics) now actually resolves a scripted
-// CDA creature's toughness instead of always getting None for it.
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_script_less_cda_creature_never_dies_to_the_lethal_damage_sba() {

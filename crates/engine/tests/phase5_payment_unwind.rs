@@ -1,14 +1,4 @@
-//! Phase 5 vertical slice: backlog item 15 — CR 601.6 payment unwind.
-//! `Engine::submit_payment` rejecting an invalid `PaymentPlan` already left
-//! `AwaitingPayment` untouched so the caller could retry - but there was no
-//! way to declare "I cannot or will not pay" and get out. If a cost has no
-//! valid plan at all, the engine was stuck in `AwaitingPayment` forever: the
-//! card had already moved hand->stack (CR 601.2a happens before payment),
-//! and nothing returned it. `Engine::unwind_payment` is the new explicit
-//! entry point for this - reuses `move_resolving_spell` (the same
-//! Stack-departure helper CR 608.2b's fizzle path already uses) for a
-//! `Spell`, and just removes the stack entry for an `ActivatedAbility` (its
-//! source permanent never left the battlefield).
+//! CR 601.6: `Engine::unwind_payment` lets a player who cannot or will not pay leave `AwaitingPayment`. A `Spell` returns through `move_resolving_spell`, as in the CR 608.2b fizzle path, and an `ActivatedAbility` just loses its stack entry.
 
 use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
@@ -64,8 +54,6 @@ fn permanent_definition() -> CardDefinition {
     }
 }
 
-/// One player, main phase, empty stack - `abilities` starts empty; the
-/// activated-ability test pushes its own entry after construction.
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     single_player_state(
@@ -96,10 +84,6 @@ fn cast_and_await_payment(engine: &mut Engine, player: PlayerId, card: ObjectId)
         other => panic!("expected AwaitingPayment, got {other:?}"),
     }
 }
-
-// ---------------------------------------------------------------------
-// Unwinding a cast spell.
-// ---------------------------------------------------------------------
 
 #[test]
 fn unwinding_a_cast_spell_returns_the_card_to_hand() {
@@ -149,9 +133,7 @@ fn priority_reopens_for_the_same_player_after_unwinding() {
     let mut engine = Engine::new(state);
     cast_and_await_payment(&mut engine, p0, card);
 
-    // Confirm submit_payment's existing retry path is unaffected: an
-    // invalid plan still just errors, still AwaitingPayment, before the
-    // caller decides to unwind instead.
+    // An invalid plan still just errors in AwaitingPayment before the caller unwinds instead.
     let err = engine.submit_payment(PaymentPlan { payments: Vec::new() }).unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
     assert!(matches!(engine.step().status, StepStatus::AwaitingPayment { .. }));
@@ -160,10 +142,6 @@ fn priority_reopens_for_the_same_player_after_unwinding() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
-
-// ---------------------------------------------------------------------
-// Unwinding an activated ability - no zone move, source stays put.
-// ---------------------------------------------------------------------
 
 #[test]
 fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
@@ -207,8 +185,7 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
     engine.unwind_payment().expect("a real AwaitingPayment pause must accept an unwind");
 
     assert!(engine.state().stack.is_empty(), "the ability's stack entry is gone");
-    // The source permanent itself never left the battlefield - same id,
-    // same zone, completely untouched.
+    // The source permanent never left the battlefield, with the same id and zone.
     assert!(engine.state().object(source).is_some(), "the source permanent is untouched");
     assert_eq!(engine.state().object(source).unwrap().zone, ZoneKind::Battlefield);
 
@@ -222,10 +199,6 @@ fn unwinding_an_activated_ability_removes_it_without_a_zone_move() {
         "an ability's unwind must not produce a ZoneChange - nothing moved"
     );
 }
-
-// ---------------------------------------------------------------------
-// Rejection when not awaiting payment.
-// ---------------------------------------------------------------------
 
 #[test]
 fn unwind_payment_rejects_when_not_awaiting() {

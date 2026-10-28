@@ -1,7 +1,4 @@
-//! Phase 5 vertical slice B2: the entries a Decision lists (`Engine::
-//! legal_actions`, `legal_attackers`, `legal_blockers`,
-//! `pending_damage_splits`) and the facade checks that use them. Fixtures are
-//! built directly, the way `phase5_combat_declarations.rs` does.
+//! The entries a Decision lists (`Engine::legal_actions`, `legal_attackers`, `legal_blockers`, `pending_damage_splits`) and the facade checks that use them. Fixtures are built directly.
 
 use std::collections::HashMap;
 
@@ -43,7 +40,6 @@ fn creature_target() -> TargetSpec {
     })
 }
 
-/// Main phase, `P0` active and holding priority, empty stack.
 fn main_state() -> GameState {
     GameState {
         last_active_turn_number: HashMap::from([(P0, 1), (P1, 0)]),
@@ -88,10 +84,6 @@ fn answer(engine: &mut Engine, player: PlayerId, reply: Reply) -> Result<(), sta
 fn rejection_code(result: Result<(), stackfish_engine::decision::Rejection>) -> RejectionCode {
     result.expect_err("the Answer should be rejected").code
 }
-
-// ---------------------------------------------------------------------------
-// Priority entries
-// ---------------------------------------------------------------------------
 
 #[test]
 fn pass_is_always_the_last_entry() {
@@ -286,10 +278,6 @@ fn an_ability_index_counts_every_ability_on_its_source() {
     assert_eq!(activate.ability_index, 1, "the triggered ability takes index 0");
 }
 
-// ---------------------------------------------------------------------------
-// Facade checks on a priority Answer
-// ---------------------------------------------------------------------------
-
 #[test]
 fn a_priority_answer_that_no_entry_offers_is_rejected_and_changes_nothing() {
     let mut state = main_state();
@@ -311,8 +299,7 @@ fn a_priority_answer_that_no_entry_offers_is_rejected_and_changes_nothing() {
     };
     let first = engine.open_decision().unwrap().id;
 
-    // The land is not a spell, an unknown card is not castable, and the
-    // bear has neither an {X} nor a buyback cost.
+    // The land is not a spell, an unknown card is not castable, and the bear has no {X} or buyback cost.
     assert_eq!(rejection_code(answer(&mut engine, P0, cast(2, None, false))), RejectionCode::InvalidChoice);
     assert_eq!(rejection_code(answer(&mut engine, P0, cast(99, None, false))), RejectionCode::InvalidChoice);
     assert_eq!(rejection_code(answer(&mut engine, P0, cast(1, Some(2), false))), RejectionCode::InvalidChoice);
@@ -375,10 +362,6 @@ fn every_listed_entry_is_accepted_by_the_engine() {
         assert!(!matches!(status, StepStatus::Error(_)), "entry {index} failed in the engine: {status:?}");
     }
 }
-
-// ---------------------------------------------------------------------------
-// Combat entries
-// ---------------------------------------------------------------------------
 
 #[test]
 fn attackers_are_untapped_creatures_without_summoning_sickness_or_defender() {

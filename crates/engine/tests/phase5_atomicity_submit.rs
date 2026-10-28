@@ -1,13 +1,5 @@
-//! 024/025: a rejected answer to a pause changes nothing. The first test runs
-//! every `submit_*` and `decline_*` method (and `unwind_payment`) against an
-//! engine that is not waiting for it. The rest answer a real pause with a
-//! bad answer: a payment plan that does not cover the cost, a discard of the
-//! wrong cards, and a Madness or Cascade cast that is not legal.
-//!
-//! The pauses that need a scripted library walk or a replacement ordering
-//! (scry, surveil, search, attach choices, replacement and trigger ordering)
-//! get their bad answers from the proof-game test in `crates/host`, which
-//! injects an illegal Answer at every Decision it meets.
+//! A rejected answer to a pause changes nothing. The first test runs every `submit_*` and `decline_*` method against an engine not waiting for it.
+//! The rest give a real pause a bad answer. Scry, surveil, search, attach and ordering pauses get theirs from the proof-game test in `crates/host`.
 
 use std::collections::HashMap;
 
@@ -58,10 +50,6 @@ fn red(n: usize) -> Vec<ManaUnit> {
 fn pay(units: Vec<ManaUnit>) -> PaymentPlan {
     PaymentPlan { payments: vec![CostPayment::Mana { units, phyrexian_life: 0 }] }
 }
-
-// ---------------------------------------------------------------------
-// Every method, asked at a time it is not waiting for
-// ---------------------------------------------------------------------
 
 type Row = (&'static str, Box<dyn Fn(&mut Engine) -> bool>);
 
@@ -162,10 +150,6 @@ fn the_same_methods_reject_while_the_engine_waits_on_a_different_pause() {
     }
 }
 
-// ---------------------------------------------------------------------
-// Payment
-// ---------------------------------------------------------------------
-
 fn paying_engine() -> Engine {
     let mut state = base(ManaPool { red: 2, ..ManaPool::default() }, &[ZoneKind::Hand, ZoneKind::Battlefield]);
     let spell = put(
@@ -221,10 +205,6 @@ fn a_payment_plan_that_does_not_cover_the_cost_changes_nothing() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == P0), "{status:?}");
 }
 
-// ---------------------------------------------------------------------
-// Cleanup discard
-// ---------------------------------------------------------------------
-
 #[test]
 fn a_bad_discard_changes_nothing() {
     let mut state = GameState {
@@ -257,10 +237,6 @@ fn a_bad_discard_changes_nothing() {
     }
     engine.submit_discard(vec![hand[0]]).expect("one card is the right answer");
 }
-
-// ---------------------------------------------------------------------
-// Madness and Cascade: an illegal cast keeps the pause and the command id
-// ---------------------------------------------------------------------
 
 fn madness_bolt() -> CardDefinition {
     CardDefinition {
@@ -343,8 +319,7 @@ fn madness_engine() -> Engine {
     engine
 }
 
-/// Regression: `submit_madness_cast` took a command id before running the
-/// cast, so a cast `execute_command` turned down left the id used up.
+// An illegal Madness cast must not use up a command id.
 #[test]
 fn an_illegal_madness_cast_keeps_the_pause_and_the_command_id() {
     let mut engine = madness_engine();
@@ -435,7 +410,7 @@ fn cascade_engine() -> Engine {
     engine
 }
 
-/// Regression: same command id leak as Madness, through `submit_cascade_cast`.
+// An illegal Cascade cast must not use up a command id.
 #[test]
 fn an_illegal_cascade_cast_keeps_the_pause_and_the_command_id() {
     let mut engine = cascade_engine();

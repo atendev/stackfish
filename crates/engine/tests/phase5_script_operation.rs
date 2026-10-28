@@ -1,29 +1,5 @@
-//! Phase 5 vertical slice: a plain spell's own resolution effect (CR
-//! 608.2m) declared by its own script, via the optional `s.operation()`
-//! module convention - another sibling to `s.register_abilities(c)`/
-//! `s.target_requirement()`, not a replacement for either.
-//!
-//! A plain instant/sorcery has no ability wrapper at all, and
-//! `register_abilities(c)` only ever runs once a card becomes a
-//! *battlefield* object - a spell that resolves straight to the graveyard
-//! never reaches that point, so its own effect can't be declared there
-//! either. `operation()` sidesteps this the same way `target_requirement()`
-//! already does: called once per `CardDefinition` build, no `GameState`/
-//! `ObjectId` needed. Returns the same `Game.Ops.*` tag or custom-function
-//! shape `SetOperation` already accepts everywhere else in this API.
-//!
-//! **Custom-function decode is runtime-instance-bound.** A `Game.Ops.*`
-//! primitive tag decodes to a plain Rust value - no dependency on which
-//! `ScriptRuntime` did the decoding. A custom Lua function decodes to a
-//! `ScriptHandle`, which is only meaningful against the specific runtime
-//! that registered it. Building a `CardDefinition` with a throwaway
-//! `ScriptRuntime::new()` and then handing it to `Engine::new` (which
-//! builds its *own*, separate runtime internally) leaves that handle
-//! dangling - the custom function silently never runs. The
-//! `script_only_definition` helper below is fine for primitive-tag scripts;
-//! `pending_script_only_definition` + a post-`Engine::new` `build_operation`
-//! call is the one that's actually safe for a custom-function script (see
-//! `ScriptRuntime::build_operation`'s own "Caller trap" doc note).
+//! CR 608.2m: a plain spell declares its resolution effect with the optional `s.operation()` module function, called once per `CardDefinition` build. It returns the same `Game.Ops.*` tag or custom function that `SetOperation` accepts.
+//! A custom function decodes to a `ScriptHandle` valid only against the `ScriptRuntime` that registered it. `script_only_definition` suits primitive tags, and a custom function needs `pending_script_only_definition` plus a post-`Engine::new` `build_operation` call (`ScriptRuntime::build_operation`, "Caller trap").
 
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
@@ -31,10 +7,6 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::{OperationOutcome, ScriptRuntime};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state};
-
-// ---------------------------------------------------------------------
-// Decode-level: ScriptRuntime::build_operation
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_card_with_no_operation_function_returns_none() {
@@ -78,9 +50,7 @@ fn operation_function_decodes_a_custom_function_to_a_real_handle() {
     let (effect, handle) =
         runtime.build_operation(source).expect("script should load").expect("declares an operation");
     assert!(effect.is_none(), "a custom function has no Rust-native fast path");
-    // `ScriptHandle(0)` is a legitimate first-allocated handle in a fresh
-    // registry, not a reserved "unbound" sentinel value - so the only real
-    // proof this is a genuine, callable handle is invoking it for real.
+    // ScriptHandle(0) is a legitimate first handle in a fresh registry, so only invoking it proves it is callable.
     let outcome = runtime
         .invoke_operation(handle, &mut two_player_state(Vec::new()), ObjectId(0), PlayerId(0))
         .expect("a freshly-decoded custom-function handle should be callable");
@@ -89,10 +59,6 @@ fn operation_function_decodes_a_custom_function_to_a_real_handle() {
         "expected the custom function to run to completion, got {outcome:?}"
     );
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: casting a script-declared plain spell
-// ---------------------------------------------------------------------
 
 const GAIN_THREE_LIFE_SCRIPT: &str = r#"
 local s = {}
@@ -155,14 +121,7 @@ fn script_only_definition(definition_id: u64, name: &str, source: &str) -> CardD
     }
 }
 
-/// Same shape `script_only_definition` builds, but with `effect` left as the
-/// pre-decode default (`None`) - for a script whose `operation()` resolves
-/// to a custom function, which must be decoded through the *same*
-/// `ScriptRuntime` that will later invoke it (an `Engine`'s own, not a
-/// throwaway one - see this file's own header note on why `Engine::new`
-/// can't be hand-fed a handle from elsewhere). Callers patch `effect` in
-/// afterward via `engine.build_operation(source)`, mirroring exactly what
-/// the scenario crate's own `register_script_operation` does.
+// Leaves `effect` as None for a custom-function script, which must be decoded through the Engine's own ScriptRuntime and patched in afterward with engine.build_operation(source).
 fn pending_script_only_definition(definition_id: u64, name: &str, source: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
@@ -284,10 +243,7 @@ fn casting_a_script_declared_custom_function_operation_spell_resolves_via_the_sc
     );
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
-    // Decoded through the Engine's own runtime, after construction - a
-    // custom-function operation's `ScriptHandle` is only ever valid against
-    // the specific `ScriptRuntime` that decoded it (mirrors the scenario
-    // crate's own `register_script_operation`).
+    // Decoded through the Engine's own runtime after construction, since a ScriptHandle is valid only against the runtime that decoded it.
     let mut engine = Engine::new(state);
     let (primitive, handle) = engine
         .build_operation(CUSTOM_GAIN_ONE_LIFE_SCRIPT)
@@ -333,9 +289,7 @@ fn casting_a_script_declared_targeted_spell_combines_target_requirement_and_oper
             GameEventKind::DamageDealt { target: Target::Object(t), amount: 2, .. }
             if t == creature
         )),
-        // `source` isn't checked - CR 400.7 mints a new stack-object id for
-        // the spell the moment it's cast, distinct from `card`'s own
-        // pre-cast hand-zone id.
+        // `source` is not checked, since CR 400.7 mints a new stack-object id at cast.
         "the script-declared target_requirement()/operation() pair should have dealt 2 damage to the chosen target"
     );
 }

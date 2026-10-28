@@ -1,30 +1,7 @@
-//! Phase 5 vertical slice: CR 303.4d's third clause - "An Aura can't
-//! enchant more than one object or player. If a spell or ability would
-//! cause an Aura to become attached to more than one object or player, the
-//! Aura's controller chooses which object or player it becomes attached
-//! to." The first two clauses (an Aura can't enchant itself; a creature-Aura
-//! can't enchant anything) were already real (`phase5/aura-self-enchant`).
-//! This one was left open since - it needed a "player picks one of several
-//! candidates" mechanism, not another state-based action.
-//!
-//! `commands::propose_attach` is the pure decision function tested here:
-//! zero candidates, one candidate (attach immediately, no choice), or two
-//! or more (needs a choice). It's dormant as of this slice - no effect,
-//! spell, or ability anywhere in this engine ever computes more than one
-//! simultaneous attach candidate for one Aura, since both real attach call
-//! sites (`ResolveStackTop`'s Aura-ETB-attach, `Equip`'s own resolution)
-//! already narrow to a single legal target via `TargetRequirement { count: 1
-//! }` before this would ever run. The rule is genuinely enforced *if* a
-//! future effect ever produces multiple candidates, not because anything
-//! does today.
-//!
-//! The other half of this slice - `ProcessState::AwaitingAttachChoice`/
-//! `Engine::submit_attach_choice`, the actual "controller picks one" pause -
-//! is tested inside `engine.rs`'s own `#[cfg(test)] mod tests`, not here:
-//! `process_state` is a private field, so only an in-crate unit test can
-//! construct the pause directly (the same "no real producer, drive it by
-//! hand" precedent `AwaitingReplacementChoice`'s own unit tests already set
-//! for a different pause).
+//! CR 303.4d: an Aura's controller chooses which object it becomes attached to when an effect would attach it to several.
+//! `commands::propose_attach` decides between zero, one (attach at once) and two or more candidates (a choice).
+//! The `AwaitingAttachChoice` pause is tested in the engine's own unit tests, since `process_state` is private.
+// TODO: no effect yet produces several attach candidates for one Aura, so `propose_attach` is never reached with more than one
 
 use stackfish_engine::commands::{propose_attach, AttachProposal};
 use stackfish_engine::ObjectId;

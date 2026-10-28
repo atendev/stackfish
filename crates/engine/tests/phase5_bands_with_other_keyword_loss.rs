@@ -1,33 +1,5 @@
-//! Phase 5 vertical slice: CR 702.22b — "if an effect causes a permanent to
-//! lose banding, the permanent loses all 'bands with other' abilities as
-//! well." Closes the last named gap in CR 702.22 (banding).
-//!
-//! The backlog's own prior note on this ("no effect in this engine removes
-//! a keyword yet, untestable") was stale — `EffectPrimitive::RemoveKeyword`
-//! already exists, real and Lua-exposed (`phase5/keyword-layer-fix-and-
-//! remove-keyword`), just never logged back to that line.
-//!
-//! `layers::effective_characteristics`'s layer 6 fold already accumulates
-//! `bands_with_other_subtypes`/`bands_with_other_supertypes` completely
-//! independently of `keywords` — so `RemoveKeyword(BANDING)` already
-//! cleared the `Banding` keyword itself, but left a creature's separate
-//! "bands with other [quality]" grant untouched. Fixed with one check at
-//! the end of that fold: if this object's own *printed-or-copied* keywords
-//! include Banding (`def.keywords`, CR 702.22b's own precondition — banding
-//! must actually have been *lost*, not simply never present) but the
-//! *effective* set no longer does, both `bands_with_other_*` accumulators
-//! are cleared, mirroring exactly what `RemoveAllAbilities` already does as
-//! a side effect of clearing everything.
-//!
-//! Deliberately gated on *printed* Banding, not just "effective set lacks
-//! it": `phase5_bands_with_other.rs`'s own `quality_band_legal_with_no_
-//! banding_member_at_all` test proves a creature can legally have "bands
-//! with other [quality]" via a self-registered static ability while never
-//! printing Banding at all (CR 702.22c's second clause allows this — no
-//! real card does it, but it isn't illegal) — that shape must NOT be
-//! affected by this slice, since nothing was ever "lost."
-//! `bands_with_other_survives_when_the_creature_never_had_banding_at_all`
-//! below re-proves that boundary directly, from this slice's own angle.
+//! CR 702.22b: a permanent that loses banding loses all its "bands with other" abilities.
+//! `layers::effective_characteristics` clears both `bands_with_other_*` accumulators when printed Banding is lost, but not when it was never present (CR 702.22c).
 
 use std::collections::HashMap;
 
@@ -147,10 +119,6 @@ fn assert_legal_band(status: Result<StepStatus, ActionError>) {
     let status = status.expect("the engine should accept the action");    assert!(matches!(status, StepStatus::AwaitingAction { .. }), "expected a legal band declaration, got {status:?}");
 }
 
-// ---------------------------------------------------------------------
-// effective_characteristics unit level
-// ---------------------------------------------------------------------
-
 #[test]
 fn losing_banding_via_remove_keyword_also_clears_bands_with_other_subtype() {
     let p0 = PlayerId(0);
@@ -209,8 +177,7 @@ fn bands_with_other_survives_when_the_creature_never_had_banding_at_all() {
     let p0 = PlayerId(0);
     let elf_lord = ObjectId(0);
     let mut state = combat_state();
-    // No Banding printed at all - CR 702.22c's second clause allows a bare
-    // "bands with other [quality]" grant with no banding present anywhere.
+    // No Banding printed: CR 702.22c allows a bare "bands with other" grant.
     put_on_battlefield(&mut state, permanent(elf_lord, creature_definition(1, "Elf Lord", &["Elf"], KeywordSet::empty()), p0));
     state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
 
@@ -222,10 +189,6 @@ fn bands_with_other_survives_when_the_creature_never_had_banding_at_all() {
         "CR 702.22b only fires on an actual loss - never having Banding isn't one"
     );
 }
-
-// ---------------------------------------------------------------------
-// End to end: DeclareBands
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_quality_band_that_would_be_legal_is_rejected_once_banding_is_stripped() {
@@ -241,14 +204,11 @@ fn a_quality_band_that_would_be_legal_is_rejected_once_banding_is_stripped() {
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (elf, Target::Player(PlayerId(1)))]).unwrap();
-    // elf_lord's own Banding was stripped, so its bands-with-other grant is
-    // gone too, and elf itself never had Banding either - no path makes
-    // this band legal any more.
+    // elf_lord's Banding was stripped and elf never had it, so no path makes this band legal.
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![elf_lord, elf]]));
 }
 
-/// Same setup, minus the `RemoveKeyword` effect - proves the prior test's
-/// rejection really is caused by this slice, not some other latent bug.
+// Same setup without `RemoveKeyword`, so the rejection above comes from the keyword loss.
 #[test]
 fn the_same_band_is_legal_without_the_remove_keyword_effect() {
     let p0 = PlayerId(0);

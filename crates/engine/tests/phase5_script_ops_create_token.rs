@@ -1,25 +1,11 @@
-//! Phase 5 vertical slice: `AbilityEffect::CreateToken` (backlog item 8,
-//! final Script API primitive) — `Game.Tokens.*` + `Game.Ops.CreateToken`.
-//!
-//! Tokens are placed directly onto the battlefield (they originate there;
-//! they never pass through the stack or a hand). `is_token: true` is set so
-//! future CR 111.7 cessation logic can identify them.
-//!
-//! Named tokens (Clue / Food) register their activated ability immediately
-//! via `register_token_abilities`; Creature / ArtifactCreature tokens have
-//! no innate activated abilities.
-//!
-//! CR 111.7 cessation (token vanishes when it leaves the battlefield) is a
-//! TODO for a later slice — tokens currently go to the graveyard like any
-//! other permanent.
+//! `AbilityEffect::CreateToken` (`Game.Tokens.*` and `Game.Ops.CreateToken`) places tokens directly onto the battlefield with `is_token: true`. Named tokens (Clue, Food) register their activated ability through `register_token_abilities`, and Creature and ArtifactCreature tokens have none.
+// TODO: CR 111.7 cessation, since a token goes to the graveyard like any other permanent
 
 use std::collections::HashMap;
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, two_player_state as base_two_player_state, zones};
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn instant_definition(id: u64, name: &str, effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
@@ -138,10 +124,6 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-/// Casting a spell with `CreateToken { Named(Clue), count: 1 }` places one
-/// Clue artifact token on the battlefield controlled by the caster.
 #[test]
 fn clue_token_lands_on_battlefield() {
     let mut state = two_player_state();
@@ -174,8 +156,6 @@ fn clue_token_lands_on_battlefield() {
     assert_eq!(token.controller, p0);
 }
 
-/// A Clue token has its activated ability ({2}, Sacrifice → draw a card)
-/// registered immediately when it enters the battlefield.
 #[test]
 fn clue_token_has_registered_ability() {
     let mut state = two_player_state();
@@ -205,8 +185,6 @@ fn clue_token_has_registered_ability() {
     assert!(matches!(abilities[0].effect, Some(AbilityEffect::DrawCards(1))));
 }
 
-/// A Food token has its activated ability ({2}, Sacrifice → gain 3 life)
-/// registered immediately when it enters the battlefield.
 #[test]
 fn food_token_has_registered_ability() {
     let mut state = two_player_state();
@@ -236,8 +214,6 @@ fn food_token_has_registered_ability() {
     assert!(matches!(abilities[0].effect, Some(AbilityEffect::GainLife(3))));
 }
 
-/// A Treasure token has its activated ability ({T}, Sacrifice → add one mana
-/// of any color) registered immediately when it enters the battlefield.
 #[test]
 fn treasure_token_has_registered_ability() {
     let mut state = two_player_state();
@@ -271,8 +247,8 @@ fn treasure_token_has_registered_ability() {
     ));
 }
 
-/// The Treasure ability actually adds a chosen color of mana when activated
-/// and paid for - end-to-end, including the CR 602.2b color choice itself.
+// CR 602.2b
+// The Treasure ability adds the chosen color of mana when activated and paid for.
 #[test]
 fn treasure_ability_adds_chosen_color_mana_when_activated() {
     let mut state = two_player_state();
@@ -319,17 +295,13 @@ fn treasure_ability_adds_chosen_color_mana_when_activated() {
             payments: vec![CostPayment::Tap(token_id), CostPayment::Sacrifice(token_id)],
         })
         .expect("payment accepted");
-    // CR 605.3b: a mana ability resolves immediately as part of payment,
-    // never via the stack - checked before any further priority pass, since
-    // (unlike Clue/Food) passing both players here would end the phase and
-    // empty the mana pool (CR 500.4) before this assertion ever ran.
+    // CR 605.3b: a mana ability resolves as part of payment and never uses the stack, checked before another pass would empty the pool (CR 500.4).
     drain(&mut engine);
 
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "added one blue mana");
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty(), "Treasure was sacrificed");
 }
 
-/// `count: 3` creates three Clue tokens, each with its own registered ability.
 #[test]
 fn create_three_clue_tokens() {
     let mut state = two_player_state();
@@ -361,7 +333,6 @@ fn create_three_clue_tokens() {
     );
 }
 
-/// A Creature token has the right P/T, subtypes, card type, and is_token.
 #[test]
 fn creature_token_has_correct_stats() {
     let spec = TokenSpec::Creature(CreatureTokenSpec {
@@ -399,7 +370,6 @@ fn creature_token_has_correct_stats() {
     assert_eq!(token.definition.name, "Soldier");
 }
 
-/// A creature token with multiple subtypes gets its name from joining them.
 #[test]
 fn creature_token_multi_subtype_name() {
     let spec = TokenSpec::Creature(CreatureTokenSpec {
@@ -432,7 +402,6 @@ fn creature_token_multi_subtype_name() {
     assert_eq!(token.definition.name, "Elf Warrior");
 }
 
-/// A name override in `CreatureTokenSpec` is used instead of the subtype join.
 #[test]
 fn creature_token_name_override() {
     let spec = TokenSpec::Creature(CreatureTokenSpec {
@@ -465,7 +434,6 @@ fn creature_token_name_override() {
     assert_eq!(token.definition.name, "Rooftop Zombie");
 }
 
-/// An ArtifactCreature token has both ARTIFACT and CREATURE card types.
 #[test]
 fn artifact_creature_token_has_both_types() {
     let spec = TokenSpec::Creature(CreatureTokenSpec {
@@ -500,8 +468,7 @@ fn artifact_creature_token_has_both_types() {
     assert!(token.definition.keywords.contains(KeywordSet::FLYING));
 }
 
-/// Creating a token controlled by p1 — tokens respect the controller of the
-/// spell's source (the stack object's controller field drives this).
+// A token respects the controller of the spell's source.
 #[test]
 fn token_controller_matches_spell_caster() {
     let mut state = two_player_state();
@@ -533,8 +500,6 @@ fn token_controller_matches_spell_caster() {
     assert_eq!(token.owner, p1);
 }
 
-/// The Clue ability actually draws a card when activated and paid for.
-/// This is an end-to-end integration test of the whole chain.
 #[test]
 fn clue_ability_draws_a_card_when_activated() {
     let mut state = two_player_state();
@@ -616,7 +581,6 @@ fn clue_ability_draws_a_card_when_activated() {
     );
 }
 
-/// The Food ability gains 3 life when activated and paid for.
 #[test]
 fn food_ability_gains_life_when_activated() {
     let mut state = two_player_state();
@@ -678,10 +642,8 @@ fn food_ability_gains_life_when_activated() {
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty(), "Food was sacrificed");
 }
 
-/// CR 111.10f/111.10b: Clue/Food's own "Sacrifice this artifact" can't be
-/// paid by sacrificing a *different* matching artifact — the identity gap
-/// `AdditionalCost::Sacrifice{filter}` alone couldn't close (only
-/// `AdditionalCost::SacrificeSelf` pins the payment to the ability's source).
+// CR 111.10b, 111.10f
+// A "Sacrifice this artifact" cost cannot be paid by sacrificing a different matching artifact, since `SacrificeSelf` pins it to the source.
 #[test]
 fn clue_ability_cannot_be_paid_by_sacrificing_a_different_artifact() {
     let mut state = two_player_state();
@@ -745,7 +707,6 @@ fn clue_ability_cannot_be_paid_by_sacrificing_a_different_artifact() {
     assert!(result.is_err(), "sacrificing the decoy instead of the Clue itself must be rejected");
 }
 
-/// Creature tokens have no registered abilities — `abilities` stays empty.
 #[test]
 fn creature_token_has_no_registered_abilities() {
     let spec = TokenSpec::Creature(CreatureTokenSpec {
@@ -776,8 +737,7 @@ fn creature_token_has_no_registered_abilities() {
     assert!(engine.state().abilities.is_empty(), "creature tokens register no abilities");
 }
 
-/// Tokens that die (marked lethal damage) go to the graveyard as normal.
-/// CR 111.7 cessation is a TODO — this test verifies the current behavior.
+// TODO: tokens still go to the graveyard until CR 111.7 cessation lands
 #[test]
 fn dying_token_goes_to_graveyard_todo_cr111_7() {
     let spec = TokenSpec::Creature(CreatureTokenSpec {
@@ -825,9 +785,7 @@ fn dying_token_goes_to_graveyard_todo_cr111_7() {
     // Pass priority both ways to trigger SBA processing
     pass_both_and_drain(&mut engine, p0, p1);
 
-    // Token dies and goes to the graveyard (CR 111.7 cessation is a TODO —
-    // tokens will vanish instead of going to the graveyard once implemented).
-    // Death creates a new lineage object so we check by zone length, not ID.
+    // TODO: the token goes to the graveyard and not away until CR 111.7 cessation lands. Death creates a new lineage object, so check by zone length and not id.
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
     assert_eq!(bf.contents.len(), 1, "only the attacker remains on battlefield");
     assert_eq!(bf.contents[0], attacker, "the surviving creature is the attacker");

@@ -1,29 +1,6 @@
-//! Phase 5 vertical slice: CR 612.5 Exchange of Words - "One card (Exchange
-//! of Words) instructs a player to exchange the text boxes of two objects.
-//! This replaces all of the rules text of each object with the rules text
-//! of the other object."
-//!
-//! Scoped narrower than a full CR 707 copy effect: CR 612.1 limits
-//! text-changing effects to "rules text ... and/or ... the type line," and
-//! CR 612.5 itself says only "text boxes" - name, mana cost, color, P/T, and
-//! card types/supertypes/subtypes all stay exactly as printed on each
-//! permanent. Only `oracle_text`, `keywords`, and `script_ref` (this
-//! engine's operative stand-in for "rules text") cross over -
-//! `ability::apply_text_box` overwrites just those three fields on a
-//! snapshot, unlike `CopyExceptions`' full-copy-by-default shape.
-//!
-//! Reuses `BecomeCopy`'s established machinery for changing a *live*
-//! permanent's actual behavior (not just displayed characteristics):
-//! `commands::purge_granted_abilities` then a fresh `run_card_script`,
-//! done symmetrically for both targets. Like `BecomeCopy`, this is a
-//! one-time mutation with no duration/reversion.
-//!
-//! Inherently pairwise, unlike a uniform multi-word spell (Plague Spores'
-//! "destroy target creature and target land," CR 608.2b's own worked
-//! example, where each surviving legal target is still independently
-//! destroyed) - `ResolveStackTop` rechecks both targets directly rather than
-//! consuming the flattened `legal_targets` list, and no-ops the whole effect
-//! unless both are still legal.
+//! CR 612.5: Exchange of Words exchanges the text boxes of two objects. Only `oracle_text`, `keywords` and `script_ref` cross over, and name, cost, color, P/T and types stay (CR 612.1), unlike a CR 707 copy.
+//! `ability::apply_text_box` overwrites those fields, then `purge_granted_abilities` and a fresh `run_card_script` run for both targets, as `BecomeCopy` does. It is one-time, with no reversion.
+//! The effect is pairwise: `ResolveStackTop` rechecks both targets and no-ops the whole effect unless both are still legal.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
@@ -110,8 +87,6 @@ fn creature_word() -> TargetRequirement {
     }
 }
 
-/// "Test Exchange of Words: Exchange the text boxes of target creature and
-/// target creature."
 fn exchange_of_words_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -209,10 +184,7 @@ fn exchanging_swaps_keywords_oracle_text_and_registered_abilities_not_name_or_pt
     assert_eq!((bird_now.power, bird_now.toughness), (Some(2), Some(2)));
     assert_eq!((rhino_now.power, rhino_now.toughness), (Some(5), Some(5)));
 
-    // Registered abilities crossed over too - the flyer's own triggered
-    // ability (from its original script) is now registered on the
-    // trampler's id, and the flyer (now running the trampler's empty
-    // script) has none.
+    // Registered abilities crossed over too: the flyer's triggered ability is now on the trampler's id, and the flyer has none.
     assert_eq!(engine.state().abilities.iter().filter(|a| a.source == flyer).count(), 0);
     assert_eq!(engine.state().abilities.iter().filter(|a| a.source == trampler).count(), 1);
 }
@@ -236,8 +208,7 @@ fn one_target_leaving_before_resolution_no_ops_the_whole_effect() {
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(&mut engine);
 
-    // The trampler leaves the battlefield before resolution - only one of
-    // the two targets remains legal.
+    // The trampler leaves the battlefield before resolution, so only one target remains legal.
     engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(trampler);
     engine.state_mut().objects.remove(&trampler);
 
@@ -286,10 +257,6 @@ fn both_targets_leaving_before_resolution_fizzles_the_whole_spell() {
         "CR 608.2b: every target across every word is illegal - the whole spell fizzles"
     );
 }
-
-// ---------------------------------------------------------------------
-// Game.Ops.ExchangeTextBoxes Lua binding decoding.
-// ---------------------------------------------------------------------
 
 #[test]
 fn game_ops_exchange_text_boxes_decodes() {

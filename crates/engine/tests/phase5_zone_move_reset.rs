@@ -1,8 +1,4 @@
-//! Phase 5 vertical slice: battlefield-only state is dropped on every zone
-//! move (CR 400.7, `GameObject::reset_for_new_object`), and `Exile` /
-//! `ReturnToHand` resolve against the target's real zone, so "return target
-//! card from a graveyard to hand" and "exile target card from a graveyard"
-//! work (the `ReturnToHand`/`Exile` source zone is read at resolution).
+//! CR 400.7: battlefield-only state is dropped on every zone move (`GameObject::reset_for_new_object`), and `Exile` and `ReturnToHand` read the target's real source zone at resolution.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -35,8 +31,6 @@ fn spell(effect: AbilityEffect, zone: Option<ZoneKind>) -> CardDefinition {
     }
 }
 
-/// `TARGET` (owned by `P1`, controlled by `P0`, tapped, damaged, with
-/// counters) sits in `zone`; `P0` holds `SPELL`.
 fn setup(effect: AbilityEffect, filter_zone: Option<ZoneKind>, zone: ZoneKind) -> Engine {
     let mut state = GameState {
         step: Step::PreCombatMain,

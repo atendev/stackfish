@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: real multi-target effect resolution + CR 608.2b
-//! partial fizzle. Pulled from the "Known unresolved gaps" list rather than
-//! its own numbered backlog item.
-//!
-//! Found while scoping: every `AbilityEffect` resolution arm in `engine.rs`
-//! (`Damage`, `Sacrifice`, `Destroy`, `Exile`, `Counters`) only ever read
-//! `top.targets.first()` - already documented at each site as a deliberate
-//! narrowing, but bigger than it first looked: a `TargetRequirement` with
-//! `count: 2+` validated fine at cast time, but only ever affected the first
-//! chosen target at resolution. This slice makes every legal target receive
-//! the effect independently (CR 601.2d's "divide as you choose" stays
-//! unmodeled - each legal target gets the full stated amount, not a split),
-//! and makes CR 608.2b's actual partial-fizzle text real: a spell/ability
-//! with some (not all) targets now illegal still resolves, just skipping the
-//! individually-illegal ones, rather than the previous all-or-nothing check.
+//! CR 608.2b, 601.2c: every `AbilityEffect` arm (`Damage`, `Sacrifice`, `Destroy`, `Exile`, `Counters`) applies to every legal target and not only `targets.first()`, and a spell with some targets illegal still resolves, skipping those (partial fizzle).
+// TODO: CR 601.2d "divide as you choose", since each legal target gets the full stated amount
 
 use std::collections::HashMap;
 
@@ -45,7 +32,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Doom Blast deals 2 damage to each of two target creatures."
 fn doom_blast_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -76,7 +62,6 @@ fn doom_blast_definition() -> CardDefinition {
     }
 }
 
-/// "Test Slay Two: Destroy two target creatures."
 fn slay_two_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
@@ -152,10 +137,6 @@ fn damage_dealt_events(engine: &Engine) -> Vec<(Target, u32)> {
         .collect()
 }
 
-// ---------------------------------------------------------------------
-// Damage - CR 601.2d (no division) + CR 608.2b (partial fizzle).
-// ---------------------------------------------------------------------
-
 #[test]
 fn two_target_damage_spell_deals_full_amount_to_each_independently() {
     let mut state = two_player_state();
@@ -206,8 +187,7 @@ fn two_target_damage_spell_skips_only_the_target_that_became_illegal() {
     cast_spell(&mut engine, p0, card, vec![Target::Object(target_a), Target::Object(target_b)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 608.2b: target_b leaves the battlefield before this resolves - only
-    // one of the two targets is now illegal.
+    // CR 608.2b: target_b leaves the battlefield before this resolves, so one of two targets is illegal.
     engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(target_b);
     engine.state_mut().objects.remove(&target_b);
 
@@ -254,10 +234,6 @@ fn two_target_damage_spell_fully_fizzles_when_both_targets_become_illegal() {
     let fizzled = engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. }));
     assert!(fizzled, "CR 608.2b: every target illegal - the spell must not resolve at all");
 }
-
-// ---------------------------------------------------------------------
-// Destroy - same independent-per-legal-target pattern as Damage.
-// ---------------------------------------------------------------------
 
 #[test]
 fn two_target_destroy_spell_destroys_each_independently() {

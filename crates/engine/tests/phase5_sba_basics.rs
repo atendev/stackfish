@@ -1,17 +1,5 @@
-//! Phase 5 vertical slice: baseline CR 704 state-based actions - 704.5a
-//! (player at 0 or less life loses), 704.5b (player who drew from an empty
-//! library loses), 704.5c (player with 10+ poison counters loses), CR
-//! 903.10a (player dealt 21+ commander damage from one source loses), 704.5f
-//! (creature toughness 0 or less dies), and 704.5g (creature with lethal
-//! marked damage dies). Every other CR 704.5 SBA stays the pre-existing
-//! no-op stub - see `sba.rs`'s own TODO for the full list and why (legend
-//! rule/704.5j split into its own named follow-up, not bundled here - a
-//! structurally different "destroy via player choice" SBA shape).
-//!
-//! No combat damage step (CR 510) yet - `damage_marked` is pre-seeded
-//! directly on fixtures here, the same "fixture stands in for a producer
-//! that doesn't exist yet" pattern `mana_pool`/`controlled_since_turn` used
-//! before their real producers landed.
+//! CR 704.5a, 704.5b, 704.5c, 704.5f, 704.5g and CR 903.10a: a player at 0 life, who drew from an empty library, with 10 poison counters or dealt 21 commander damage loses, and a creature with 0 toughness or lethal damage dies.
+// TODO: the other CR 704.5 SBAs (see sba.rs)
 
 use std::collections::VecDeque;
 
@@ -21,9 +9,7 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, single_player_state};
 
-/// This slice's fixtures never register a `ReplacementEffect` on a dying
-/// creature - a real CR 616.1 pause here would mean the fixture itself is
-/// wrong, not something to handle gracefully.
+// No fixture registers a ReplacementEffect on a dying creature, so a CR 616.1 pause here would mean the fixture is wrong.
 fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     match outcome {
         SbaOutcome::Progressed(events, _) => events,
@@ -68,8 +54,6 @@ fn creature(id: ObjectId, owner: PlayerId, toughness: i32, damage_marked: u32) -
     GameObject { damage_marked, ..card_object(id, creature_definition(2, toughness), owner, ZoneKind::Battlefield) }
 }
 
-/// One player, an empty battlefield + that player's graveyard already
-/// registered (SBA-driven creature death needs a graveyard zone to land in).
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     GameState {
@@ -85,9 +69,7 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// One solo-player `PassPriority` + drain - each call advances exactly one
-/// phase/step transition (same "x3 total to reach Main from PreGame" shape
-/// every solo scenario TOML fixture's own comments document).
+// One solo-player PassPriority plus drain advances exactly one step transition.
 fn pass(engine: &mut Engine, player: PlayerId) -> StepStatus {
     engine
         .submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority })
@@ -166,9 +148,7 @@ fn two_lethally_damaged_creatures_die_in_the_same_pass() {
     assert_eq!(state.zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 2);
 }
 
-/// Creatures that die together take their new ids in ascending order of their
-/// old ids. `state.objects` is a `HashMap`, so an unordered walk would fail this
-/// about 11 times in 12 with twelve creatures, and a replay would see other ids.
+// Creatures that die together get new ids in ascending order of their old ids, since an unordered walk of the objects HashMap would fail this about 11 times in 12.
 #[test]
 fn creatures_that_die_together_leave_in_id_order() {
     let mut state = base_state();
@@ -244,32 +224,23 @@ fn already_eliminated_player_does_not_re_emit_on_next_pass() {
     assert!(second.is_empty(), "fixed-point loop must terminate, not re-eliminate every pass");
 }
 
-// ---------------------------------------------------------------------
-// CR 704.5b: a player who attempted to draw from an empty library loses.
-// ---------------------------------------------------------------------
-
+// CR 704.5b
 #[test]
 fn drawing_from_an_empty_library_sets_the_flag_but_does_not_eliminate_yet() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     state.phase = Phase::PreGame;
     state.zones.push(Zone { kind: ZoneKind::Library, owner: Some(p0), contents: VecDeque::new() });
-    // 1-player turn_order, same as every solo scenario fixture - CR 103.8a's
-    // turn-1 draw skip only applies to a 2-player game (turn_order.len() ==
-    // 2, checked in advance_turn_step), so this is exactly the shape needed
-    // to actually reach a real Draw-step draw attempt on turn 1.
+    // A 1-player turn order reaches a real Draw-step draw on turn 1, since the CR 103.8a skip applies only to a 2-player game.
 
     let mut engine = Engine::new(state);
-    // PreGame -> Untap (auto-chains, no priority window) -> Upkeep -> Draw ->
-    // Main - 3 passes to reach Main, same shape every solo TOML fixture uses.
+    // PreGame to Main takes 3 passes (Untap chains into Upkeep, then Draw).
     pass(&mut engine, p0);
     pass(&mut engine, p0);
     let status = pass(&mut engine, p0);
     assert!(matches!(status, StepStatus::AwaitingAction { .. }));
 
-    // The draw attempt itself only sets the flag - a real SBA pass is what
-    // actually eliminates (checked separately below), same split 704.5a's
-    // life <= 0 check already has.
+    // The draw only sets the flag, and a real SBA pass eliminates, as with the 704.5a life check.
     assert!(engine.state().player(p0).unwrap().drew_from_empty_library);
 }
 
@@ -310,10 +281,7 @@ fn drawing_a_real_card_does_not_set_the_flag() {
     assert!(!engine.state().player(p0).unwrap().eliminated);
 }
 
-// ---------------------------------------------------------------------
-// CR 704.5c: a player with 10+ poison counters loses.
-// ---------------------------------------------------------------------
-
+// CR 704.5c
 #[test]
 fn nine_poison_counters_is_untouched() {
     let mut state = base_state();
@@ -354,8 +322,7 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
         bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     let mut object = creature(infector, p0, 3, 0);
-    // 10 power - a single unblocked hit is enough to reach the 10-poison
-    // threshold in one real AssignCombatDamage pass, not a hand-seeded total.
+    // 10 power in one unblocked AssignCombatDamage pass reaches the 10-poison threshold.
     object.definition.power = Some(PTValue::Fixed(10));
     object.definition.keywords = KeywordSet::INFECT;
     put_on_battlefield(&mut state, object);
@@ -373,10 +340,7 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
             other => break other,
         }
     };
-    // 704.5c eliminates p1; in this two-player game that immediately ends
-    // the game (CR 104.2a: p0 is the sole remaining player) - backlog item
-    // 11b wiring GameOver up to actually fire once elimination is real,
-    // rather than the SBA pass being reachable but inert past this point.
+    // CR 704.5c eliminates p1, which ends a two-player game (CR 104.2a).
     assert!(matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p0));
 
     assert_eq!(engine.state().player(p1).unwrap().life, 20, "702.90b: infect damage doesn't cause life loss");
@@ -384,15 +348,7 @@ fn infect_combat_damage_accumulates_poison_and_eventually_eliminates_through_the
     assert!(engine.state().player(p1).unwrap().eliminated, "704.5c should fire through the real SbaLoop pipeline");
 }
 
-// ---------------------------------------------------------------------
-// CR 903.10a: a player dealt 21+ combat damage from a single commander
-// source loses. `commander_damage_taken` is keyed by the commander's own
-// name, not ObjectId (see PlayerState::commander_damage_taken's own doc
-// comment for why) - real combat damage accumulation is exercised end to
-// end in phase5_commander_damage.rs; these are the SBA-threshold-only unit
-// tests, via a hand-built PlayerState fixture.
-// ---------------------------------------------------------------------
-
+// CR 903.10a
 #[test]
 fn commander_damage_from_finds_the_matching_source_or_zero() {
     let mut player = player_state(PlayerId(0));
@@ -443,11 +399,7 @@ fn nothing_applies_returns_empty() {
     assert!(state.object(bear).is_some());
 }
 
-/// End-to-end: confirms `SbaLoop` is actually wired to this function inside
-/// `Engine::step`, not just correct in isolation. A lethally-damaged
-/// creature is pre-seeded on the battlefield; a single `PassPriority` (which
-/// routes through the full PendingAction -> ... -> SbaLoop -> CollectTriggers
-/// pipeline for any non-all-pass action) should be enough to kill it.
+// SbaLoop is wired to this function inside Engine::step: a single PassPriority kills a lethally damaged creature.
 #[test]
 fn lethal_damage_dies_through_the_real_engine_pipeline() {
     let mut state = base_state();

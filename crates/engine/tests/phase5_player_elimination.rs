@@ -1,9 +1,4 @@
-//! Phase 5 vertical slice: backlog item 11b — player elimination actually
-//! affects the game. `sba::apply_player_loss` already flipped
-//! `PlayerState.eliminated` (a prior slice); nothing downstream read it.
-//! Closes three independent gaps: `StepStatus::GameOver` never constructed
-//! (CR 104.2a/104.4a), an eliminated player still got turns/priority (CR
-//! 800.4b), and their objects never left the game (CR 800.4a).
+//! CR 104.2a, 104.4a, 800.4a, 800.4b: an eliminated player ends the game (`StepStatus::GameOver`), no longer gets turns or priority, and their objects leave the game.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -70,10 +65,6 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-/// Two players, ready for priority at `(Main, PreCombatMain)` - the shape
-/// most `PassPriority`-driven fixtures across this crate use once past
-/// pregame. Every zone kind a purged object could sit in is registered for
-/// both players, plus the shared battlefield/exile.
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -84,9 +75,7 @@ fn two_player_state() -> GameState {
     }
 }
 
-/// Same shape as `two_player_state`, plus `p2` - CR 800.4b's turn/priority
-/// skip only shows up with a third player still in the game once one is
-/// eliminated.
+// Adds p2, since the CR 800.4b turn and priority skip shows only with a third player still in the game.
 fn three_player_state() -> GameState {
     let mut state = two_player_state();
     let p2 = PlayerId(2);
@@ -113,10 +102,6 @@ fn pass(engine: &mut Engine, player: PlayerId) -> StepStatus {
     drain(engine)
 }
 
-// ---------------------------------------------------------------------
-// GameOver (CR 104.2a/104.4a)
-// ---------------------------------------------------------------------
-
 #[test]
 fn two_player_zero_life_ends_the_game_and_then_stays_ended() {
     let mut state = two_player_state();
@@ -133,9 +118,7 @@ fn two_player_zero_life_ends_the_game_and_then_stays_ended() {
     );
     assert!(engine.state().player(p1).unwrap().eliminated);
 
-    // Terminal: further step() calls keep returning the same GameOver
-    // rather than mutating anything (no further action can be submitted
-    // either - submit_action only accepts PriorityWindow).
+    // GameOver is terminal: further step() calls return it and nothing mutates, and submit_action accepts only PriorityWindow.
     let status_again = engine.step().status;
     assert!(matches!(status_again, StepStatus::GameOver { winner: Some(w) } if w == p0));
     assert!(
@@ -163,9 +146,7 @@ fn simultaneous_elimination_of_every_remaining_player_is_a_draw() {
 
 #[test]
 fn single_player_fixture_never_triggers_game_over() {
-    // CR 104.2a presupposes an opponent to win against - a one-player test
-    // fixture (common throughout this crate, unrelated to this feature)
-    // reaching 0 life shouldn't read as "game over."
+    // CR 104.2a presupposes an opponent, so a one-player fixture reaching 0 life is not game over.
     let p0 = PlayerId(0);
     let mut state = two_player_state();
     state.players.truncate(1);
@@ -178,10 +159,6 @@ fn single_player_fixture_never_triggers_game_over() {
     assert!(!matches!(status, StepStatus::GameOver { .. }), "got {status:?}");
     assert!(engine.state().player(p0).unwrap().eliminated, "the SBA itself is unrelated, still fires");
 }
-
-// ---------------------------------------------------------------------
-// Turn/priority skip (CR 800.4b)
-// ---------------------------------------------------------------------
 
 #[test]
 fn priority_pass_skips_an_already_eliminated_player() {
@@ -225,10 +202,6 @@ fn end_of_turn_rotation_skips_an_already_eliminated_player() {
     assert_eq!(engine.state().step, Step::Upkeep);
 }
 
-// ---------------------------------------------------------------------
-// Objects leaving the game (CR 800.4a)
-// ---------------------------------------------------------------------
-
 #[test]
 fn eliminated_players_battlefield_permanent_leaves_the_game_without_a_dies_trigger() {
     let mut state = two_player_state();
@@ -246,10 +219,7 @@ fn eliminated_players_battlefield_permanent_leaves_the_game_without_a_dies_trigg
     assert!(state.object(creature).is_none(), "800.4a: the object itself is gone, not just relocated");
     assert!(!state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&creature));
     assert!(state.abilities.is_empty(), "its Triggered ability is purged along with it");
-    // 800.4d: a triggered ability controlled by a player who left the game
-    // never goes on the stack - retire_object's return value (what a normal
-    // death would feed into CollectTriggers) is discarded, not surfaced
-    // here, so no Dies trigger fires for it.
+    // CR 800.4d: a trigger controlled by a player who left never goes on the stack, so no Dies trigger fires for it.
     assert!(departed.is_empty());
 }
 
@@ -289,22 +259,14 @@ fn a_non_eliminated_players_objects_are_untouched() {
     assert!(state.zone(ZoneKind::Battlefield, None).unwrap().contents.contains(&survivor));
 }
 
-// ---------------------------------------------------------------------
-// CR 800.4a: stack cleanup distinguishes a spell's owner from an
-// ability's controller (StackObject::owner, added alongside the
-// pre-existing controller field)
-// ---------------------------------------------------------------------
-
+// CR 800.4a
 #[test]
 fn an_eliminated_players_owned_spell_leaves_the_stack_even_if_controlled_by_someone_else() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let spell_id = ObjectId(0);
-    // A spell is "represented by a card" (CR 800.4a) - it leaves with its
-    // *owner*, regardless of who's currently controlling it (no such
-    // "cast a card you don't own" effect exists in this engine yet, but
-    // the cleanup rule doesn't depend on one existing to be correct).
+    // A spell is represented by a card, so it leaves with its owner whoever controls it (CR 800.4a).
     state.stack.push(StackObject::new(
         spell_id,
         StackEntryKind::Spell,
@@ -337,11 +299,7 @@ fn a_spell_merely_controlled_not_owned_by_an_eliminated_player_stays_on_the_stac
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let spell_id = ObjectId(0);
-    // Owned by the survivor p1, merely controlled by the eliminated p0 -
-    // CR 800.4a's controller-based clause only reaches objects "not
-    // represented by cards" (abilities), not spells. Proves the owner/
-    // controller distinction actually matters, not just that one field
-    // was renamed to the other.
+    // Owned by p1 and controlled by the eliminated p0: CR 800.4a's controller clause reaches only objects not represented by cards, so the spell stays.
     state.stack.push(StackObject::new(
         spell_id,
         StackEntryKind::Spell,
@@ -375,8 +333,7 @@ fn an_eliminated_players_controlled_ability_leaves_the_stack_even_if_owned_by_so
     let p1 = PlayerId(1);
     let ability_id = ObjectId(0);
     let source_id = ObjectId(1);
-    // An ability isn't represented by a card - CR 800.4a removes it by
-    // *controller*, even if a (hypothetical) different owner is set.
+    // An ability is not represented by a card, so CR 800.4a removes it by controller.
     state.stack.push(StackObject::new(
         ability_id,
         StackEntryKind::ActivatedAbility,

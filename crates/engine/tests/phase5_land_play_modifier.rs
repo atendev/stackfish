@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: CR 305.2 "you may play an additional land each
-//! turn"-style effects (Exploration, Azusa, ...) — the fourth player-level
-//! continuous effect in this cluster (`HandSizeModifier`/`HandRevealModifier`/
-//! `DrawLimitModifier` are the other three), same "distinct mechanism from
-//! the CR 613 layer system" reasoning all three already establish.
-//!
-//! Deliberately not shaped like `DrawLimitModifier` despite the close family
-//! resemblance: CR 305.2's land-play increases genuinely stack (two
-//! Explorations means 3 land plays, not 2 — the max of the two), so
-//! `effective_land_play_limit` sums every matching modifier's own
-//! `additional` rather than taking the latest timestamp — see
-//! `LandPlayModifier`'s own doc comment (types/player.rs). Direct Rust-native
-//! construction + `PlayLand` enforcement (stacking, "You"/"Opponent" scoping)
-//! is covered in `phase5_play_land.rs`; this file covers the Lua-facing
-//! `Game.CreateLandPlayModifier` builder round trip specifically.
+//! CR 305.2: "you may play an additional land each turn" effects (Exploration, Azusa), a player-level continuous effect outside the CR 613 layers.
+//! Increases stack, so `effective_land_play_limit` sums every matching `additional`. Rust-native construction and `PlayLand` enforcement are in phase5_play_land.rs, and this file covers the `Game.CreateLandPlayModifier` Lua round trip.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -139,8 +126,7 @@ fn a_land_play_modifier_from_a_real_script_lets_a_second_land_through() {
     assert!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.is_empty());
 }
 
-/// "Test Destroy Permanent: Destroy target permanent." — used only to force
-/// a real `commands::retire_object` call on the modifier's own source.
+// Forces a real retire_object call on the modifier's source.
 fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -171,8 +157,8 @@ fn destroy_permanent_definition() -> CardDefinition {
     }
 }
 
-/// CR 611.3b: a static ability's continuous effect only applies while its
-/// source remains on the battlefield — `phase5/modifier-source-cleanup`.
+// CR 611.3b
+// A static ability's continuous effect applies only while its source is on the battlefield.
 #[test]
 fn a_land_play_modifier_is_purged_once_its_source_leaves_the_battlefield() {
     let mut state = two_player_state();

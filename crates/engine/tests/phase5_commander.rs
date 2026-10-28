@@ -1,8 +1,5 @@
-//! Phase 5 vertical slice: backlog item 11c — commander marking + casting
-//! from the command zone (CR 903.3/903.6/903.8), plus CR 903.9a (owner may
-//! return a commander from graveyard/exile to the command zone). Foundation
-//! for 11d (commander tax) and 11e (commander damage production) — neither
-//! is implemented here.
+//! CR 903.3, 903.6, 903.8: commander marking and casting from the command zone, plus CR 903.9a (the owner may return a commander from graveyard or exile to the command zone).
+//! Commander tax and damage are in phase5_commander_tax.rs and phase5_commander_damage.rs.
 
 use std::collections::HashMap;
 
@@ -49,8 +46,6 @@ fn card_object(
     GameObject { is_commander, ..base_card_object(id, definition, owner, zone) }
 }
 
-/// Two players, ready for priority at `(Main, PreCombatMain)`, every zone
-/// kind (including command) registered for both.
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -77,9 +72,7 @@ fn drain(engine: &mut Engine) -> StepStatus {
     }
 }
 
-/// Every test card here has an empty `mana_cost` ({0}) - CR 118.5a still
-/// requires an explicit empty `PaymentPlan`, no auto-pay, so casting always
-/// pauses at `AwaitingPayment` once before continuing.
+// CR 118.5a still requires an explicit empty PaymentPlan for the {0} cost, so every cast pauses at AwaitingPayment once.
 fn cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) -> StepStatus {
     engine
         .submit_action(PlayerAction {
@@ -114,10 +107,6 @@ fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId) -> Resu
         },
     })
 }
-
-// ---------------------------------------------------------------------
-// Marking (CR 903.3) + casting from the command zone (CR 903.8)
-// ---------------------------------------------------------------------
 
 #[test]
 fn casting_a_commander_from_the_command_zone_is_legal() {
@@ -176,9 +165,7 @@ fn commander_marking_survives_stack_to_battlefield_too() {
 fn casting_a_non_commander_card_from_the_command_zone_is_rejected() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
-    // Not a legal setup under real rules, but the engine must not silently
-    // permit it - Command-zone permission is gated on is_commander, not on
-    // the zone alone.
+    // Illegal under real rules, but command-zone permission must be gated on is_commander and not on the zone alone.
     let not_a_commander = ObjectId(0);
     put_in_zone(
         &mut state,
@@ -208,10 +195,6 @@ fn casting_someone_elses_commander_from_the_command_zone_is_rejected() {
     let err = try_cast_spell(&mut engine, p0, commander).unwrap_err();
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))), "got {err:?}");
 }
-
-// ---------------------------------------------------------------------
-// Real game setup (CR 903.6): Engine::new_game
-// ---------------------------------------------------------------------
 
 #[test]
 fn new_game_places_commanders_in_the_command_zone_not_the_library() {
@@ -256,10 +239,7 @@ fn new_game_places_commanders_in_the_command_zone_not_the_library() {
     assert!(engine.state().zone(ZoneKind::Command, Some(p1)).unwrap().contents.is_empty());
 }
 
-// ---------------------------------------------------------------------
-// CR 903.9a: owner may return a commander from graveyard/exile
-// ---------------------------------------------------------------------
-
+// CR 903.9a
 #[test]
 fn a_dead_commander_pauses_for_the_return_choice() {
     let mut state = two_player_state();
@@ -295,8 +275,7 @@ fn declining_the_return_leaves_the_commander_in_the_graveyard_and_never_asks_aga
     );
 
     let mut engine = Engine::new(state);
-    // Any command drives the pipeline into an SBA pass; a bare pass from
-    // the active player is the least eventful way to do that.
+    // A bare pass from the active player is the least eventful command that drives the pipeline into an SBA pass.
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     let status = drain(&mut engine);
     assert!(
@@ -339,9 +318,7 @@ fn accepting_the_return_moves_the_commander_to_the_command_zone_in_recastable_sh
     let returned = engine.state().object(new_id).unwrap();
     assert!(returned.is_commander);
     assert_eq!(returned.owner, p0);
-    // Recastability itself (is_commander + Command zone + owner match) is
-    // exactly what `casting_a_commander_from_the_command_zone_is_legal`
-    // already proves against a fresh fixture - not re-driven here.
+    // Recastability is proven by casting_a_commander_from_the_command_zone_is_legal, so it is not re-driven here.
 }
 
 #[test]

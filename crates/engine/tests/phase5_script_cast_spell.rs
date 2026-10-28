@@ -1,16 +1,4 @@
-//! Phase 5 vertical slice: `Game.Ops.CastSpell` (CR 601.2/702.85a-style "you
-//! may cast [it] without paying its mana cost") - a real, script-callable
-//! cast primitive, rebuilt from scratch as `OperationOutcome::PendingCast`
-//! rather than the old dead synchronous `script_api::cast_spell` stub that
-//! was never bound into Lua at all (see that removal's own commit).
-//!
-//! End to end: a real Lua ETB operation calls `Game.Ops.CastSpell` on an
-//! exiled card, the engine actually casts it - through the same synthetic
-//! `PlayerActionKind::CastSpell`-via-`commands::execute_command` shape
-//! `Engine::submit_cascade_cast`/`submit_madness_cast` already established
-//! for their own (non-scripted) equivalents - and it resolves onto the
-//! battlefield for real, pausing for its own `{0}` payment acknowledgment
-//! (CR 118.5a) along the way like any other cast.
+//! CR 601.2, 702.85a: `Game.Ops.CastSpell` is a script-callable cast ("you may cast it without paying its mana cost") built as `OperationOutcome::PendingCast`. It casts through the same synthetic `CastSpell` shape as `submit_cascade_cast` and pauses for its own {0} payment acknowledgment (CR 118.5a).
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -117,9 +105,7 @@ fn etb_trigger_casts_an_exiled_card_for_free_via_game_ops_cast_spell() {
         .expect("p0 holds priority, caster is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
 
-    // Both players pass - resolves the caster spell onto the battlefield
-    // (the ETB condition's own zone-change match), pushing its triggered
-    // ability onto the stack.
+    // Both players pass, which resolves the caster spell onto the battlefield and pushes its triggered ability.
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);
@@ -127,16 +113,13 @@ fn etb_trigger_casts_an_exiled_card_for_free_via_game_ops_cast_spell() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
     assert_eq!(engine.state().stack.len(), 1, "the ETB ability itself is now on the stack");
 
-    // Both players pass again - resolves the triggered ability, invoking its
-    // real Lua operation, which calls Game.Ops.CastSpell on the exiled
-    // candidate. That cast pauses for its own {0} payment acknowledgment.
+    // Both players pass again, which resolves the trigger and calls Game.Ops.CastSpell on the exiled candidate, pausing for its {0} payment.
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);
     pay_free_and_drain(&mut engine);
 
-    // The candidate is now a fresh object on the stack (CR 400.7 - the
-    // Exile->Stack move minted a new id), not the exiled one anymore.
+    // The candidate is a fresh object on the stack (CR 400.7), not the exiled one.
     assert!(engine.state().object(candidate).is_none(), "the old exiled-zone id no longer resolves");
     assert!(
         engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(),
@@ -146,8 +129,7 @@ fn etb_trigger_casts_an_exiled_card_for_free_via_game_ops_cast_spell() {
     let cast_object = engine.state().stack.last().unwrap();
     assert_eq!(cast_object.controller, p0);
 
-    // Both players pass a third time - resolves the newly-cast candidate
-    // onto the battlefield for real.
+    // A third pass resolves the cast candidate onto the battlefield.
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);
@@ -165,11 +147,7 @@ fn etb_trigger_casts_an_exiled_card_for_free_via_game_ops_cast_spell() {
     assert!(candidate_on_battlefield.is_some(), "the free-cast candidate resolved onto the battlefield");
 }
 
-/// `resolve_pending_cast`'s own error arm - a script-requested cast that
-/// turns out illegal (here: a nonexistent object id) doesn't panic and
-/// doesn't leave the pipeline stuck; the triggering ability just finishes
-/// resolving as if the cast had never been requested (same "script error
-/// swallowed" gap this slice's own TODO already names).
+// An illegal script-requested cast (a nonexistent object id) does not panic or stick the pipeline, and the ability finishes resolving. This is the script error swallowed, per the TODO on that gap.
 #[test]
 fn casting_a_nonexistent_object_does_not_panic_and_the_triggering_ability_still_resolves() {
     let p0 = PlayerId(0);
@@ -225,9 +203,7 @@ fn casting_a_nonexistent_object_does_not_panic_and_the_triggering_ability_still_
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
     assert_eq!(engine.state().stack.len(), 1, "the ETB ability itself is now on the stack");
 
-    // Resolving the ability invokes the operation, which requests an
-    // illegal cast - no panic, no stuck pipeline, and no payment pause
-    // (the cast never happened).
+    // The operation requests an illegal cast: no panic, no stuck pipeline, and no payment pause.
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);

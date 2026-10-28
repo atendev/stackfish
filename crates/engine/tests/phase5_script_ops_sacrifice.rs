@@ -1,19 +1,4 @@
-//! Phase 5 vertical slice: `AbilityEffect::Sacrifice` (backlog item 8, sixth
-//! Script API primitive) — `Game.Ops.Sacrifice()`, e.g. "Sacrifice target
-//! creature you control."
-//!
-//! The implementation is the `Destroy` arm minus the indestructibility check:
-//! proposes `Battlefield → Graveyard`, runs `apply_replacements` (CR 614.13's
-//! "if it would die, exile it instead" applies to sacrifice just as it does
-//! to combat death and scripted Destroy), then calls `sba::commit_death`.
-//! Unlike the Exile slice, `commit_death` is reusable here because the
-//! destination is the owner's per-player graveyard (`Some(owner)`).
-//! `Dies`/`LeavesBattlefield` triggers fire via the same `retire_object` →
-//! `departed_triggered` → `collect_triggers` path as SBA-driven death.
-//!
-//! Scoped to "sacrifice the first chosen Target::Object" — "sacrifice a
-//! permanent you control" (player chooses at resolution, no targeting) is
-//! blocked on Lua coroutines (backlog item 9).
+//! `AbilityEffect::Sacrifice` (`Game.Ops.Sacrifice()`) is `Destroy` without the indestructible check: it proposes Battlefield to Graveyard, runs `apply_replacements` (CR 614.13) and calls `sba::commit_death`. `Dies` and `LeavesBattlefield` fire through `retire_object` and `collect_triggers`.
 
 use std::collections::HashMap;
 
@@ -46,7 +31,6 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
     }
 }
 
-/// "Test Sacrifice: Sacrifice target creature you control."
 fn sacrifice_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -83,12 +67,7 @@ fn sacrifice_spell_definition() -> CardDefinition {
     }
 }
 
-/// Like `card_object` but with an explicit controller separate from the owner.
-/// Useful for testing sacrifice effects: the target must be controlled by the
-/// caster (`FilterController::You`), but its owner determines which graveyard
-/// it lands in — giving the target a different owner keeps the spell's own
-/// resolved instant out of the same graveyard, matching the Destroy tests'
-/// same separation pattern.
+// Gives the target a controller separate from its owner, so FilterController::You passes and it lands in a different graveyard from the resolved instant.
 fn card_object_controlled_by(
     id: ObjectId,
     definition: CardDefinition,
@@ -176,9 +155,7 @@ fn sacrifice_spell_moves_target_to_owners_graveyard() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
-    // Target owned by p1 but controlled by p0 so FilterController::You passes
-    // and the creature lands in p1's graveyard — separate from p0's graveyard
-    // where the resolved instant ends up, matching the Destroy test pattern.
+    // Owned by p1 and controlled by p0, so FilterController::You passes and the creature lands in p1's graveyard, apart from the resolved instant's.
     state.objects.insert(target, card_object_controlled_by(target, creature_definition(1, "Target Bear", KeywordSet::empty()), p1, p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
     let card = ObjectId(1);
@@ -257,8 +234,7 @@ fn sacrifice_fires_dies_trigger() {
     let target = ObjectId(0);
     state.objects.insert(target, card_object(target, creature_definition(1, "Devoted Bear", KeywordSet::empty()), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
-    // "When this dies, gain 1 life." — sacrifice is a death (Battlefield →
-    // Graveyard), so Dies must fire here just as it does for SBA-driven death.
+    // Sacrifice is a death (Battlefield to Graveyard), so Dies fires as for an SBA death.
     state.abilities.push(dies_ability(target));
     let card = ObjectId(1);
     state.objects.insert(card, card_object(card, sacrifice_spell_definition(), p0, ZoneKind::Hand));
@@ -311,10 +287,7 @@ fn sacrifice_ignores_indestructible() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
-    // Destroy leaves an indestructible target untouched (CR 702.12b).
-    // Sacrifice has no such restriction — indestructibility only prevents
-    // being destroyed, not being sacrificed.
-    // Owned by p1/controlled by p0 so the graveyard counts stay clean.
+    // Indestructibility prevents only being destroyed and not being sacrificed. Owned by p1 and controlled by p0 so the graveyard counts stay clean.
     state.objects.insert(target, card_object_controlled_by(target, creature_definition(1, "Indestructible Bear", KeywordSet::INDESTRUCTIBLE), p1, p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
     let card = ObjectId(1);
@@ -338,8 +311,7 @@ fn sacrifice_leaves_unrelated_permanent_untouched() {
     let p1 = PlayerId(1);
     let target = ObjectId(0);
     let bystander = ObjectId(1);
-    // Target owned by p1/controlled by p0 — its graveyard is p1's, separate
-    // from where the resolved spell lands (p0's graveyard).
+    // Owned by p1 and controlled by p0, so its graveyard is p1's, apart from the resolved spell's.
     state.objects.insert(target, card_object_controlled_by(target, creature_definition(1, "Offering", KeywordSet::empty()), p1, p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
     state.objects.insert(bystander, card_object(bystander, creature_definition(2, "Bystander", KeywordSet::empty()), p1, ZoneKind::Battlefield));

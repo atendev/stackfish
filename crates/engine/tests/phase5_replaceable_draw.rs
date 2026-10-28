@@ -1,19 +1,4 @@
-//! Phase 5 vertical slice: CR 504.1's turn-based draw is a real replacement-
-//! checked zone-change proposal now, closing the last piece of the
-//! reachability gap `phase5/eventfilter-would-move-zone`'s own UNRESOLVED
-//! notes named (`phase5/replaceable-cost-zone-moves` and `phase5/replaceable-
-//! cleanup-discard` already closed the other two producers). Reuses
-//! `commands::propose_draw` (new) + `commands::commit_zone_move` (already
-//! shared by cost payments and cleanup discard) - `Engine::
-//! enter_priority_via_replacement_check` is the shared tail every
-//! `AdvanceTurnStep` step reaches once its own turn-based action is done,
-//! factored out so both the normal path and a CR 616.1 pause/resume
-//! (`ReplacementResumeTarget::Draw`) reach it identically.
-//!
-//! `Game.Ops.DrawCards(n)` (a scripted "draw N cards" ability, inside
-//! `ResolveStackTop`'s own giant effect match - a different pause/resume
-//! shape from `AdvanceTurnStep`) stays out of scope, named as its own
-//! follow-up in this slice's own requirements report.
+//! CR 504.1: the turn-based draw is a replacement-checked zone-change proposal through `commands::propose_draw` and `commit_zone_move`. `enter_priority_via_replacement_check` is the shared tail of every `AdvanceTurnStep` step, reached identically by the normal path and a CR 616.1 pause and resume (`ReplacementResumeTarget::Draw`).
 
 use std::collections::HashMap;
 
@@ -73,11 +58,6 @@ fn ward_definition(script: &str) -> CardDefinition {
     }
 }
 
-/// Two players, starting mid-Beginning-phase (`Phase::Beginning`/
-/// `Step::Upkeep`, turn 2 so the draw isn't skipped) so a single `pass_both`
-/// reaches `Step::Draw` - mirrors `phase5_draw_combat_end_triggers.rs::
-/// state_at_upkeep_turn_2`, plus an Exile zone and a battlefield `ward`
-/// permanent for a replacement effect to live on.
 fn state_at_upkeep_turn_2() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -150,8 +130,7 @@ fn a_turn_based_draw_without_a_matching_replacement_lands_in_hand_normally() {
     let mut state = state_at_upkeep_turn_2();
     state.objects.insert(card, card_object(card, land_definition("Forest"), p0, ZoneKind::Library));
     state.zone_mut(ZoneKind::Library, Some(p0)).unwrap().push_bottom(card);
-    // No replacement effect registered - the ward object exists but its
-    // script is empty, so nothing's in state.replacement_effects.
+    // No replacement effect is registered: the ward object exists but its script is empty.
 
     let mut engine = Engine::new(state);
     pass_both(&mut engine, p0, p1);

@@ -1,11 +1,4 @@
-//! Regression test for CR 500.5/106.4: unspent mana in a player's mana pool
-//! empties as each step or phase ends. Reported as a live bug (a scenario
-//! fixture where mana floated from turn 1's main phase was still present at
-//! turn 2's upkeep) - `advance_turn_step` (turn.rs) is the single choke
-//! point every real step/phase transition runs through, so that's where the
-//! empty-out lives. Same struct-literal `GameState` construction pattern as
-//! `phase5_beginning_phase.rs`, since the engine's own constructors are
-//! still `todo!()`.
+//! CR 500.5, 106.4: unspent mana empties as each step or phase ends. `advance_turn_step` is the single choke point every step transition runs through.
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::*;

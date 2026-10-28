@@ -1,22 +1,5 @@
-//! Phase 5 vertical slice: CR 303.4m — "an ability of a permanent that
-//! refers to the 'enchanted [object or player]' refers to whatever object
-//! or player that permanent is attached to," for a general *continuous*
-//! effect whose affected set is other objects, not the enchanted player
-//! itself. The player-level shape (`HandSizeModifier`/`HandRevealModifier`
-//! ::`EnchantedPlayer`) and the replacement-effect shape
-//! (`WouldEnterEnchantedPlayerGraveyard`, Wheel of Sun and Moon) both already
-//! existed; this closes the remaining named gap, the object-affecting one.
-//!
-//! The real card: Curse of Vitality, "Creatures enchanted player controls
-//! have lifelink."
-//!
-//! `AffectedFilter::EnchantedPlayerControls` is the new fieldless variant,
-//! sibling to `EnchantedOnly` — resolved directly off `GameObject::
-//! attached_to_player` (compared to the candidate object's own controller),
-//! no `GameState` lookup needed, same "already-borrowed `&GameObject`"
-//! shape `EnchantedOnly` established. Narrowed the same way `EnchantedOnly`
-//! is: can't combine with `controller`/`card_types` — no real "creatures
-//! enchanted player controls that are also a [type]" card motivates it.
+//! CR 303.4m: an ability that refers to the "enchanted [object or player]" refers to what the permanent is attached to, here for a continuous effect over other objects (Curse of Vitality: "Creatures enchanted player controls have lifelink").
+//! `AffectedFilter::EnchantedPlayerControls` compares `attached_to_player` with the candidate's controller, and cannot combine with `controller` or `card_types`.
 
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -77,7 +60,6 @@ fn creature(id: ObjectId, owner: PlayerId, power: i32, toughness: i32) -> GameOb
     card_object(id, creature_definition(power, toughness), owner, ZoneKind::Battlefield)
 }
 
-/// An Aura attached to `player`, sitting on the battlefield.
 fn aura_on_player(id: ObjectId, owner: PlayerId, player: PlayerId, script_ref: ScriptReference) -> GameObject {
     GameObject { attached_to_player: Some(player), ..card_object(id, aura_definition(script_ref), owner, ZoneKind::Battlefield) }
 }
@@ -106,10 +88,6 @@ fn lifelink_to_enchanted_players_creatures(source: ObjectId) -> ContinuousEffect
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: ContinuousEffect::applies_to / EnchantedPlayerControls directly.
-// ---------------------------------------------------------------------
-
 #[test]
 fn enchanted_player_controls_matches_only_that_players_objects() {
     let p0 = PlayerId(0);
@@ -136,9 +114,7 @@ fn enchanted_player_controls_matches_nothing_when_source_is_unattached() {
 
 #[test]
 fn enchanted_player_controls_does_not_match_the_enchanted_player_themselves_as_an_object() {
-    // Sanity check against confusing this with a player-level modifier:
-    // `applies_to` only ever receives objects to test, never players, so
-    // there's no way for this filter to accidentally "match the player."
+    // applies_to receives only objects, so the filter cannot match the player itself.
     let p0 = PlayerId(0);
     let aura = aura_on_player(ObjectId(3), p0, p0, ScriptReference::ByKey("vanilla".to_string()));
     let effect = lifelink_to_enchanted_players_creatures(ObjectId(3));
@@ -146,11 +122,6 @@ fn enchanted_player_controls_does_not_match_the_enchanted_player_themselves_as_a
 
     assert!(!effect.applies_to(&unrelated_object, &aura));
 }
-
-// ---------------------------------------------------------------------
-// Real consumer: effective_characteristics actually applies it (Curse of
-// Vitality's own worked shape).
-// ---------------------------------------------------------------------
 
 #[test]
 fn enchanted_player_controls_applies_through_effective_characteristics() {
@@ -190,16 +161,10 @@ fn enchanted_player_controls_tracks_a_change_of_control() {
     let script_runtime = ScriptRuntime::new();
     assert!(effective_characteristics(&state, &script_runtime, creature_id).keywords.contains(KeywordSet::LIFELINK));
 
-    // Control changes hands; re-evaluation (no caching) means the creature
-    // immediately stops qualifying, same continuous-effect re-derivation
-    // every other layer already relies on.
+    // Control changes hands, and with no caching the creature immediately stops qualifying.
     state.object_mut(creature_id).unwrap().controller = p1;
     assert!(!effective_characteristics(&state, &script_runtime, creature_id).keywords.contains(KeywordSet::LIFELINK));
 }
-
-// ---------------------------------------------------------------------
-// Game.CreateStaticAbility builder: :SetAffected({ enchanted_player_controls = true }).
-// ---------------------------------------------------------------------
 
 const SCRIPT_ENCHANTED_PLAYER_CONTROLS: &str = r#"
 local s = {}

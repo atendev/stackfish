@@ -1,10 +1,4 @@
-//! Phase 5 vertical slice: untargeted return-to-hand (CR 400.3, CR 601.2c).
-//!
-//! `Game.Ops.ReturnSelfToHand` moves the resolving ability's own source
-//! ("return this card from your graveyard to your hand"), and
-//! `Game.Ops.ReturnAllToHand(filter, zone)` moves every matching object in a
-//! battlefield / graveyard / exile ("return all creatures to their owners'
-//! hands"). Both go through the same `Bounce` zone move `ReturnToHand` uses.
+//! CR 400.3, 601.2c: `Game.Ops.ReturnSelfToHand` moves the ability's own source, and `ReturnAllToHand(filter, zone)` moves every matching object in a battlefield, graveyard or exile, both through the `Bounce` zone move.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -186,8 +180,6 @@ fn return_all(zone: ZoneKind, controller: Option<FilterController>) -> AbilityEf
     AbilityEffect::ReturnAllToHand { filter: all_filter(controller), zone }
 }
 
-// ---- ReturnSelfToHand -------------------------------------------------------
-
 #[test]
 fn a_graveyard_card_returns_itself_to_its_owners_hand() {
     let mut dead = placed(1, "Gravecrawler", CardTypeSet::CREATURE, P0, ZoneKind::Graveyard);
@@ -229,8 +221,6 @@ fn a_source_that_already_left_does_nothing() {
     assert_eq!(names_in(&engine, ZoneKind::Graveyard, Some(P0)), vec!["Bear"], "CR 400.7: the new graveyard object isn't the source");
     assert!(names_in(&engine, ZoneKind::Hand, Some(P0)).is_empty());
 }
-
-// ---- ReturnAllToHand --------------------------------------------------------
 
 #[test]
 fn return_all_bounces_every_matching_permanent_and_leaves_the_rest() {
@@ -335,8 +325,6 @@ fn return_all_with_no_match_resolves_cleanly() {
     assert!(engine.state().stack.is_empty());
     assert_eq!(names_in(&engine, ZoneKind::Battlefield, None), vec!["Forest"]);
 }
-
-// ---- Lua --------------------------------------------------------------------
 
 #[test]
 fn lua_return_all_defaults_to_the_battlefield() {

@@ -1,19 +1,4 @@
-//! Phase 5 vertical slice: `Sacrifice`/`Discard` cost payments are
-//! themselves replaceable zone-change proposals (CR 601.2h/616.1) - the real
-//! follow-up `phase5/eventfilter-would-move-zone`'s own UNRESOLVED notes
-//! named: `commands::commit_payment` used to mutate `Sacrifice`/`Discard`
-//! directly, never calling `apply_replacements` at all, so "if a permanent
-//! you control would be sacrificed, exile it instead" (or the Discard
-//! equivalent) was inert no matter how the replacement effect itself was
-//! built.
-//!
-//! `Engine::submit_payment` now collects `Sacrifice`/`Discard` payments
-//! separately from the immediate ones (mana/tap/life) and drives them
-//! through `Engine::continue_cost_zone_moves` - the same propose,
-//! replacement-check, then commit split `sba::resolve_deaths`/
-//! `Engine::continue_scripted_zone_move` already established, reusing this
-//! phase's own `EventFilter::WouldMoveZone` to match a from-zone `WouldDie`
-//! can't express (Hand, for Discard).
+//! CR 601.2h, 616.1: `Sacrifice` and `Discard` cost payments are replaceable zone-change proposals. `submit_payment` drives them through `continue_cost_zone_moves` (propose, replacement-check, commit), using `EventFilter::WouldMoveZone` to match the Hand from-zone that `WouldDie` cannot express.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -77,13 +62,6 @@ fn object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneK
     card_object(id, definition, owner, zone)
 }
 
-/// One player, main phase, empty stack - a battlefield `source` whose only
-/// ability has `cost`, plus sacrifice fodder, a hand card, and a `ward`
-/// permanent already carrying a self-registered replacement effect
-/// (registered via `run_card_script` before the state is handed to
-/// `Engine::new`, same "self-registration happens the same way PlayLand/
-/// CastSpell resolution already drives it for real" convention
-/// `phase5_replacement_effect_shapes.rs` established).
 fn state_with_cost_and_ward(cost: CostSpec, ward_script: &str) -> (GameState, PlayerId, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
@@ -243,10 +221,7 @@ fn a_discard_cost_payment_is_replacement_checked_for_real() {
 
 #[test]
 fn a_sacrifice_cost_payment_without_a_matching_replacement_lands_in_the_graveyard_normally() {
-    // Sanity check: the ward's own affected filter is Creature-only, and this
-    // cost's fodder still matches - so to prove the *absence* of a match
-    // path works too, register a ward that only cares about a different
-    // card_types filter (Land) instead.
+    // The ward's filter is Creature-only and the fodder matches, so a ward that cares only about Land proves the absence of a match.
     let cost = CostSpec {
         mana: None,
         additional: vec![AdditionalCost::Sacrifice {

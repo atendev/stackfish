@@ -1,26 +1,7 @@
-//! Phase 5 vertical slice: CR 303.4b's "or player" half of Aura attachment -
-//! an Aura can enchant a player instead of an object. Closes a real,
-//! previously-broken path: casting an Aura at a player already passed
-//! cast-time legality (`TargetFilter::Player` was already fully generic),
-//! but `ResolveStackTop`'s attach branch only ever matched `Target::Object`,
-//! so the Aura silently entered completely unattached and immediately died
-//! via the pre-existing CR 704.5m SBA check (`attached_to: None` is
-//! illegal) - a card that resolved and instantly died for no visible
-//! reason.
-//!
-//! `GameObject.attached_to_player: Option<PlayerId>` is a new sibling field
-//! to `attached_to: Option<ObjectId>`, not a widened `Option<Target>` - same
-//! "additive sibling, not a widened payload" precedent this backlog's own
-//! `ManaUnit`/`EffectPrimitive` variants already established. Mutually
-//! exclusive by construction (`commands::attach_permanent`/
-//! `attach_permanent_to_player` each clear the other).
-//!
-//! Deliberately deferred, named not silently dropped: CR 303.4f/g (entering
-//! already-attached via Search/token, not casting) for a player target,
-//! CR 303.4d's multi-candidate choice mixing object and player candidates,
-//! and CR 303.4m's "enchanted player" reference for continuous/replacement
-//! effects (this engine's continuous effects only ever affect objects, a
-//! separate and larger gap).
+//! CR 303.4b: an Aura can enchant a player. `ResolveStackTop` attaches to a `Target::Player` through `commands::attach_permanent_to_player`.
+//! `attached_to_player` and `attached_to` are mutually exclusive.
+// TODO: CR 303.4d multi-candidate choice mixing object and player candidates
+// TODO: CR 303.4m "enchanted player" references for continuous and replacement effects
 
 use std::collections::HashMap;
 
@@ -30,8 +11,6 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state};
 
-/// "Test Aura: enchant player." Any player, no restriction beyond CR
-/// 303.4b's own base shape.
 fn aura_enchant_player_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -63,13 +42,7 @@ fn aura_enchant_player_definition() -> CardDefinition {
     }
 }
 
-/// "Test Aura: enchant player with 10 or less life" - a scripted predicate
-/// (`TargetFilter::PlayerScript`), so the SBA re-check path (not just plain
-/// existence/elimination) is actually exercised. Takes the same
-/// `ScriptRuntime` the test's own `check_state_based_actions` call will use
-/// - a `ScriptHandle` is only valid against the runtime that registered it
-/// (the exact cross-runtime trap `phase5/script-target-requirement-
-/// predicate`'s own test construction already hit once).
+// A scripted predicate, so the SBA re-check path runs. A `ScriptHandle` is valid only against the runtime that registered it.
 fn aura_enchant_low_life_player_definition(runtime: &mut ScriptRuntime) -> CardDefinition {
     let handle = runtime
         .load_function("return function(player, source, controller, state) return state.life[player] <= 10 end")
@@ -143,10 +116,7 @@ fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     }
 }
 
-// ---------------------------------------------------------------------
-// CR 303.4a/b: casting an Aura at a player attaches it on resolution
-// ---------------------------------------------------------------------
-
+// CR 303.4a/b
 #[test]
 fn casting_an_aura_at_a_player_attaches_it_on_resolution() {
     let mut state = base_state();
@@ -175,10 +145,7 @@ fn casting_an_aura_at_a_player_attaches_it_on_resolution() {
     );
 }
 
-// ---------------------------------------------------------------------
-// CR 704.5m/303.4c: SBA cleanup for an illegally player-attached Aura
-// ---------------------------------------------------------------------
-
+// CR 704.5m/303.4c
 #[test]
 fn a_healthy_player_attached_aura_is_unaffected_by_sba() {
     let mut state = base_state();

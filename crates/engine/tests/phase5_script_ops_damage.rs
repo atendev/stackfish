@@ -1,18 +1,4 @@
-//! Phase 5 vertical slice: `AbilityEffect::Damage` (backlog item 8, first
-//! Script API primitive beyond `GainLife`) — `Game.Ops.Damage(n)`. Unlike
-//! `GainLife`, this doesn't mutate `GameState` directly: `ResolveStackTop`
-//! emits a real `GameEventKind::DamageDealt` event and lets it flow through
-//! the same `ReplacementCheck`→`CommitEvents` pipeline combat damage already
-//! uses (`commands::apply_damage_event` is the sole consumer of that event
-//! kind and isn't combat-specific), so prevention/replacement effects and
-//! Lifelink apply for free.
-//!
-//! Also proves the `CardDefinition.effect` wiring this slice added to
-//! `CastSpell` — a cast instant/sorcery spell can now resolve a Rust-native
-//! effect at all, which it couldn't before this slice (only activated/
-//! triggered abilities could). Covers both a `Spell` (an instant) and an
-//! `ActivatedAbility` carrying `Damage`, since both paths now share the same
-//! `ResolveStackTop` match arm.
+//! `AbilityEffect::Damage` (`Game.Ops.Damage(n)`) emits a `DamageDealt` event through `ReplacementCheck` and `CommitEvents`, so prevention, replacement and lifelink apply. It covers a `Spell` and an `ActivatedAbility`, which share one `ResolveStackTop` arm.
 
 use std::collections::HashMap;
 
@@ -45,7 +31,6 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
     }
 }
 
-/// "Test Shock deals 2 damage to any target" - CR 115.4's `AnyTarget`.
 fn shock_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -102,9 +87,7 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-/// Paying a cost only settles the spell/ability on the stack (CR 601.2i) -
-/// both players must then pass priority for `ResolveStackTop` to actually
-/// run it (CR 608.1).
+// Paying a cost only settles the object on the stack (CR 601.2i), so both players must pass for ResolveStackTop to run it (CR 608.1).
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine);
@@ -139,8 +122,7 @@ fn damage_spell_marks_damage_on_a_creature_target() {
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
-    // CR 400.7: the spell got a new id moving hand->stack - capture it
-    // before resolution mints yet another one moving stack->graveyard.
+    // CR 400.7: capture the new id from the hand to stack move before resolution mints another.
     let stack_source = engine.state().stack[0].source;
     pass_both_and_drain(&mut engine, p0, p1);
 

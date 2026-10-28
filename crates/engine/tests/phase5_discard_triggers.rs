@@ -1,13 +1,5 @@
-//! Phase 5: `DiscardsCard`/`EachDiscardsCard` trigger conditions (backlog
-//! item 7's discard bullet). `Engine::submit_discard` (CR 514.1's cleanup
-//! hand-size discard) used to commit its `ZoneChange` events directly to the
-//! ledger and jump straight to `ProcessState::CleanupSbaCheck`, bypassing
-//! `CollectTriggers` entirely - the same `AdvanceTurnStep`-shaped pipeline
-//! bypass gap the `upkeep-triggers`/Untap fixes already closed elsewhere.
-//! Now routes through `CollectTriggers`/`PutTriggersApnap` via a new
-//! unconditional `PipelineExit::CleanupSbaCheck`, which still reaches
-//! `ProcessState::CleanupSbaCheck` afterward regardless of whether anything
-//! triggered (CR 514.3's discard-then-SBA-check sequencing).
+//! CR 514.1, 514.3: the cleanup hand-size discard routes through `CollectTriggers` and `PutTriggersApnap`, so `DiscardsCard` and `EachDiscardsCard` conditions fire.
+//! `PipelineExit::CleanupSbaCheck` still reaches `CleanupSbaCheck` afterward, whether or not anything triggered.
 
 use std::collections::HashMap;
 
@@ -70,8 +62,6 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
     GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
 }
 
-/// A two-player `GameState` sitting at `(Ending, End)` in `PriorityWindow`
-/// for `p0` (active player) - mirrors `phase5_ending_phase.rs::state_at_end_step`.
 fn state_at_end_step() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -139,9 +129,7 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
         effect: Some(AbilityEffect::GainLife(1)),
         intervening_if: None,
     });
-    // Exactly one card over the limit (excess = 1) - keeps this test to a
-    // single trigger; the two-discards case (excess = 2, group.len() == 2)
-    // is its own test below.
+    // One card over the limit (excess = 1) keeps this to a single trigger. The two-discard case is its own test.
     let ids = add_cards_to_hand(&mut state, p0, 8);
 
     let mut engine = Engine::new(state);
@@ -149,8 +137,7 @@ fn discards_card_trigger_fires_off_the_cleanup_hand_size_discard() {
     assert!(matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0));
 
     engine.submit_discard(vec![ids[0]]).expect("valid discard");
-    // The DiscardsCard trigger must already be collected and on the stack -
-    // not silently dropped - by the time this settles.
+    // The DiscardsCard trigger must be collected and on the stack by the time this settles.
     let status = step_until_pause(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected priority reopened by the trigger, got {status:?}");
     assert_eq!(engine.state().stack.len(), 1, "the DiscardsCard trigger was collected and pushed");
@@ -201,10 +188,7 @@ fn discarding_two_cards_at_once_fires_the_trigger_twice() {
     engine.submit_discard(vec![ids[0], ids[1]]).expect("valid discard");
     let status = step_until_pause(&mut engine);
 
-    // Two discarded cards, both matched by the same ability's stable id -
-    // CR 603.3b pauses for p0 to choose their relative stack order rather
-    // than pushing both outright, same "group size proves it" shape
-    // phase5_trigger_once_per_turn.rs's own uncapped test uses.
+    // Two cards matched by the same ability's id pause for p0 to order them (CR 603.3b), the same group-size proof as phase5_trigger_once_per_turn.rs.
     match status {
         StepStatus::AwaitingTriggerOrderChoice { player, group } => {
             assert_eq!(player, p0);

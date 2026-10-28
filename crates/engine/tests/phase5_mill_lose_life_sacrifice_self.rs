@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: mill, lose life and sacrifice self.
-//!
-//! `Game.Ops.Mill(n)` (CR 701.17) moves the top of a library to its owner's
-//! graveyard one replacement-checked card at a time. `Game.Ops.LoseLife(n)`
-//! (CR 119.3) subtracts life and records a `LifeChanged` event.
-//! `Game.Ops.SacrificeSelf` (CR 701.21a) sacrifices the resolving ability's own
-//! source. Mill and LoseLife act on the controller when the ability declares no
-//! target spec and on the first legal player target when it does.
+//! `Game.Ops.Mill(n)` (CR 701.17) moves cards one replacement-checked card at a time, `LoseLife(n)` (CR 119.3) records `LifeChanged`, and `SacrificeSelf` (CR 701.21a) sacrifices the ability's source.
+//! Mill and LoseLife act on the controller with no target spec and on the first legal player target with one.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -292,8 +286,6 @@ fn library_redirect(source: u64, to: ZoneKind) -> ReplacementEffect {
     }
 }
 
-// ---- Mill -------------------------------------------------------------------
-
 #[test]
 fn mill_without_a_target_spec_mills_the_controller_top_down() {
     let mut engine = engine_with(five_cards(P0, 1), Some(spell(AbilityEffect::Mill(2), None)));
@@ -505,8 +497,6 @@ fn for_each_player_mill_mills_every_library() {
     assert_eq!(names_ordered(&engine, ZoneKind::Graveyard, Some(P1)), vec!["X", "Y"]);
 }
 
-// ---- LoseLife ---------------------------------------------------------------
-
 #[test]
 fn lose_life_without_a_target_spec_hits_the_controller_and_logs_the_change() {
     let mut engine = engine_with(Vec::new(), Some(spell(AbilityEffect::LoseLife(3), None)));
@@ -588,8 +578,6 @@ fn for_each_player_lose_life_hits_everyone_once() {
     assert_eq!((life(&engine, P0), life(&engine, P1)), (mine - 1, theirs - 1));
     assert_eq!(life_changes(&engine).len(), 2);
 }
-
-// ---- SacrificeSelf ----------------------------------------------------------
 
 #[test]
 fn sacrifice_self_moves_the_source_to_its_owners_graveyard() {
@@ -696,8 +684,6 @@ fn a_token_that_sacrifices_itself_ceases_to_exist() {
     assert!(engine.state().objects.values().all(|o| !o.is_token), "CR 111.7");
     assert!(names_ordered(&engine, ZoneKind::Graveyard, Some(P0)).is_empty());
 }
-
-// ---- Lua --------------------------------------------------------------------
 
 #[test]
 fn lua_ops_build_the_expected_effects() {

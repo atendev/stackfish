@@ -1,8 +1,4 @@
-//! Phase 5 slice (ticket 031): an entry's target candidates when a
-//! `mana_value` filter mentions X. The entry is listed before the caster
-//! announces X, so such a word lists every candidate legal for some X, flagged
-//! `x_dependent`, and the engine checks the announced pair (CR 107.3a,
-//! 601.2b-c, 602.2b).
+//! CR 107.3a, 601.2b-c, 602.2b: an entry's target candidates when a `mana_value` filter mentions X. Such a word lists every candidate legal for some X, flagged `x_dependent`, and the engine checks the announced pair.
 
 use std::collections::HashMap;
 
@@ -108,8 +104,6 @@ fn push_spell(state: &mut GameState, id: u64, mana_value: u32) {
     });
 }
 
-/// P0 holds priority with an X counterspell in hand (id 9) over spells of
-/// mana value 0, 2 and 5 (ids 1, 2, 3).
 fn state_with(counter: CardDefinition) -> GameState {
     let mut state = GameState {
         last_active_turn_number: HashMap::from([(P0, 1), (P1, 1)]),

@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: card scripts run for cards sitting in a hand or
-//! library, not just after a draw or on battlefield entry (CR 604.3, 113.6).
-//!
-//! `Engine::sync_off_battlefield_scripts` now sweeps Hand and Library as well
-//! as Graveyard/Exile, so a CDA or hand-only ability registers for a card that
-//! arrived by any producer (redirected death, mulligan, fixture), exactly
-//! once. A bounce-to-hand verb doesn't exist yet (backlog), so these tests
-//! place cards directly.
+//! CR 604.3, 113.6: `Engine::sync_off_battlefield_scripts` sweeps Hand and Library as well as Graveyard and Exile, so a CDA or hand-only ability registers once for a card that arrived by any producer.
+//! Tests place cards directly.
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::layers::effective_characteristics;
@@ -84,8 +78,7 @@ fn engine_with(zone: ZoneKind, script: &str) -> Engine {
     Engine::new(state)
 }
 
-/// One full round of priority passes, so trigger collection (and the sweep)
-/// runs at least once.
+// One full round of priority passes, so trigger collection and the sweep run at least once.
 fn run_sweep(engine: &mut Engine) {
     for player in [PlayerId(0), PlayerId(1)] {
         engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();

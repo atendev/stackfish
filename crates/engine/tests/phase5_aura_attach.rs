@@ -1,42 +1,8 @@
-//! Phase 5 vertical slice: CR 303.4's Aura attach machinery - the "known
-//! unresolved gap" every protection/gain-control slice's UNRESOLVED note
-//! named but deferred (`GameObject.attached_to`/`.attachments` existed as
-//! inert placeholder fields, never written to anywhere, until this slice).
-//! Scoped to Auras only - Equipment (CR 301.5/702.6, the `Equip` activated
-//! ability) needs a whole second `AbilityEffect::Attach`-style primitive
-//! plus an activate-only-as-sorcery restriction, named as its own follow-up
-//! slice rather than bundled in.
-//!
-//! Two halves:
-//! - `commands::attach_permanent`, called from `engine.rs`'s
-//!   `ResolveStackTop` right after an Aura resolves onto the battlefield
-//!   (CR 303.4a/b) - the target is already legality-checked by the
-//!   pre-existing CR 608.2b recheck (`legal_targets`), so this slice adds
-//!   no new targeting mechanism, just the attach itself.
-//! - `sba::collect_illegally_attached_auras` (CR 704.5m/303.4c): each SBA
-//!   pass, an Aura with no `attached_to`, or whose target no longer passes
-//!   its own `target_requirement` filter (re-checked via the same
-//!   `commands::target_is_legal` CR 608.2b already uses - which means a
-//!   target that gained protection *from this Aura* after it attached is
-//!   caught too, closing the one piece of CR 702.16's Enchant "DEBT"
-//!   restriction the six protection slices couldn't reach on their own),
-//!   dies via the same `resolve_deaths` pipeline every other SBA death
-//!   uses.
-//!
-//! CR 303.4d (an Aura can't enchant itself / an Aura-creature can't enchant
-//! anything - `sba::collect_self_enchanted_auras`/`collect_creature_auras`)
-//! was added later, in the `phase5/aura-self-enchant` slice - see the tests
-//! under that header below. Self-enchant is real as an SBA check but only
-//! reachable today via a directly-constructed fixture (no attach call site
-//! can target an Aura at itself); the creature-Aura case is reachable via
-//! any layer-4 `AddCardType` continuous effect.
-//!
-//! Still not attempted (named TODOs, not silently narrowed): CR
-//! 303.4f/h/i/k/m (non-spell attachment entry, "enchanted X" ability
-//! reference - no effect in this engine puts an Aura onto the battlefield
-//! except by resolving as a spell, so these have no reachable trigger yet),
-//! enchant-subtype restrictions ("Enchant Human" - `target.rs`'s
-//! pre-existing subtype-filter gap), and all of Equipment.
+//! CR 303.4: Aura attach machinery. `commands::attach_permanent` attaches on resolution (CR 303.4a/b).
+//! `sba::collect_illegally_attached_auras` drops an Aura whose target is gone or no longer passes its filter (CR 704.5m, 303.4c).
+//! The CR 303.4d self-enchant check is reachable only by hand-built fixtures.
+// TODO: non-spell attachment entry and "enchanted X" references (CR 303.4f/h/i/k/m)
+// TODO: enchant-subtype restrictions such as "Enchant Human", which need a subtype target filter
 
 use std::collections::HashMap;
 
@@ -71,8 +37,6 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32) -> CardD
     }
 }
 
-/// "Test Aura: enchant creature." Green, so the fizzle/protection tests
-/// have a real color to grant protection from.
 fn aura_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -103,7 +67,6 @@ fn aura_definition() -> CardDefinition {
     }
 }
 
-/// A plain (non-Aura) enchantment, for the "unaffected" control case.
 fn plain_enchantment_definition() -> CardDefinition {
     CardDefinition { definition_id: 31, name: "Test Plain Enchantment".to_string(), subtypes: Vec::new(), ..aura_definition() }
 }
@@ -176,10 +139,7 @@ fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     }
 }
 
-// ---------------------------------------------------------------------
-// CR 303.4a/b: casting an Aura attaches it on resolution
-// ---------------------------------------------------------------------
-
+// CR 303.4a/b
 #[test]
 fn casting_an_aura_at_a_legal_creature_attaches_it_on_resolution() {
     let mut state = base_state();
@@ -225,9 +185,7 @@ fn casting_an_aura_at_a_target_that_becomes_illegal_before_resolution_fizzles_an
     cast_spell(&mut engine, p0, card, vec![Target::Object(bear)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 608.2b: granting the target protection from the Aura's own color
-    // mid-stack makes it an illegal target by resolution time - same
-    // mechanism the protection slices' own fizzle tests already exercise.
+    // CR 608.2b: protection from the Aura's own color granted mid-stack makes the target illegal by resolution.
     engine.state_mut().continuous_effects.push(protection_from_green(bear));
 
     pass_both_and_drain(&mut engine, p0, p1);
@@ -243,17 +201,14 @@ fn casting_an_aura_at_a_target_that_becomes_illegal_before_resolution_fizzles_an
     assert!(engine.state().object(bear).unwrap().attachments.is_empty(), "the target's attachments list stays empty");
 }
 
-// ---------------------------------------------------------------------
-// CR 704.5m/303.4c: SBA cleanup for an illegally-attached Aura
-// ---------------------------------------------------------------------
-
+// CR 704.5m/303.4c
 #[test]
 fn an_aura_not_attached_to_anything_dies_via_sba() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let aura = ObjectId(0);
     put_on_battlefield(&mut state, permanent(aura, aura_definition(), p0));
-    // attached_to left at its default None (permanent()'s own default).
+    // attached_to stays None, as permanent() defaults it.
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
@@ -278,18 +233,13 @@ fn an_auras_target_dying_makes_it_fall_off_on_the_next_sba_pass_not_this_one() {
     aura_obj.attached_to = Some(bear);
     put_on_battlefield(&mut state, aura_obj);
 
-    // Pass 1: the creature dies to lethal damage (CR 704.5g). The Aura's
-    // own attached_to is checked against *this pass's* starting state
-    // (CR 704.3), where the creature still resolves as a legal target - so
-    // the Aura doesn't fall off yet, same "waits one pass" timing
-    // collect_ceasing_tokens's own precedent already established.
+    // Pass 1: the creature dies (CR 704.5g), but the Aura is checked against the pass's starting state (CR 704.3), so it waits one pass.
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1, "only the creature's death this pass, got {:?}", events.iter().map(|e| &e.kind).collect::<Vec<_>>());
     assert!(matches!(events[0].kind, GameEventKind::ZoneChange { to: ZoneKind::Graveyard, .. }));
     assert!(find_battlefield_object_named(&state, "Test Aura").is_some(), "the Aura is still on the battlefield after pass 1");
 
-    // Pass 2: the creature is gone (its old id no longer resolves), so the
-    // Aura is now attached to an illegal (nonexistent) target - CR 704.5m.
+    // Pass 2: the creature id no longer resolves, so the Aura is attached to an illegal target (CR 704.5m).
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0].kind, GameEventKind::ZoneChange { object, to: ZoneKind::Graveyard, .. } if object != aura));
@@ -319,19 +269,13 @@ fn a_non_aura_enchantment_is_never_touched_by_the_attach_check() {
     let p0 = PlayerId(0);
     let relic = ObjectId(0);
     put_on_battlefield(&mut state, permanent(relic, plain_enchantment_definition(), p0));
-    // attached_to left at None, same as an unattached Aura would be - but
-    // this isn't an Aura (no "Aura" subtype), so CR 704.5m never applies.
+    // Not an Aura (no Aura subtype), so CR 704.5m never applies.
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert!(events.is_empty(), "a plain enchantment with no attachment concept must never be swept up by this check");
 }
 
-/// Bonus: closes the one piece of CR 702.16's Enchant "DEBT" restriction
-/// the protection slices themselves couldn't reach (their own doc comments
-/// named this exact gap) - an Aura's own target gaining protection *from
-/// that Aura* after it's already attached makes the Aura fall off, and the
-/// dying Aura's id is cleaned out of the target's own `attachments` list
-/// (`commands::retire_object`'s new bidirectional-cleanup behavior).
+// Protection from the Aura's own color gained after attaching drops the Aura (CR 702.16) and removes its id from the target's attachments.
 #[test]
 fn an_auras_target_gaining_protection_from_it_after_attaching_makes_it_fall_off() {
     let mut state = base_state();
@@ -345,10 +289,7 @@ fn an_auras_target_gaining_protection_from_it_after_attaching_makes_it_fall_off(
     aura_obj.attached_to = Some(bear);
     put_on_battlefield(&mut state, aura_obj);
 
-    // The creature gains protection from green (the Aura's own color) some
-    // time after the Aura already attached - e.g. from an unrelated static
-    // ability. CR 702.16's Enchant restriction says an Aura with the
-    // stated quality already attached is put into its owner's graveyard.
+    // The creature gains protection from green after the Aura attached (CR 702.16).
     state.continuous_effects.push(protection_from_green(bear));
 
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
@@ -361,19 +302,14 @@ fn an_auras_target_gaining_protection_from_it_after_attaching_makes_it_fall_off(
     );
 }
 
-// ---------------------------------------------------------------------
-// CR 303.4d: an Aura that can't legally enchant what it's attached to
-// ---------------------------------------------------------------------
-
+// CR 303.4d
 #[test]
 fn a_self_enchanted_aura_dies_via_sba() {
     let mut state = base_state();
     let p0 = PlayerId(0);
     let aura = ObjectId(0);
     let mut aura_obj = permanent(aura, aura_definition(), p0);
-    // Directly constructed - no real attach call site can produce this
-    // (see this file's own header note), but CR 303.4d states the SBA
-    // unconditionally.
+    // Hand-built, since no attach call site produces this; CR 303.4d states the SBA unconditionally.
     aura_obj.attached_to = Some(aura);
     put_on_battlefield(&mut state, aura_obj);
 
@@ -399,10 +335,7 @@ fn an_aura_that_becomes_a_creature_unattaches_then_dies_in_the_same_pass() {
     aura_obj.attached_to = Some(bear);
     put_on_battlefield(&mut state, aura_obj);
 
-    // A continuous effect adds the Creature type to the Aura itself (layer
-    // 4 `AddCardType`) - the mechanism CR 303.4d's "an Aura that's also a
-    // creature" clause needs; no printed card does this yet, but the
-    // primitive is real.
+    // A layer 4 AddCardType effect makes the Aura a creature (CR 303.4d).
     state.continuous_effects.push(ContinuousEffect {
         source: aura,
         layer: Layer::TypeChanging,
@@ -430,11 +363,7 @@ fn an_aura_that_becomes_a_creature_unattaches_then_dies_in_the_same_pass() {
     );
 }
 
-// ---------------------------------------------------------------------
-// CR 303.4e: only the Aura's own controller activates the Aura's own
-// abilities, independent of who controls what it enchants
-// ---------------------------------------------------------------------
-
+// CR 303.4e
 #[test]
 fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatures_controller() {
     let mut state = base_state();
@@ -462,8 +391,7 @@ fn only_the_auras_controller_activates_its_own_ability_not_the_enchanted_creatur
         intervening_if: None,
     });
 
-    // p1 controls the enchanted creature, not the Aura - CR 303.4e says
-    // that's irrelevant to who may activate the Aura's own ability.
+    // p1 controls the enchanted creature, which is irrelevant to who may activate the Aura's ability (CR 303.4e).
     state.priority_player = p1;
     let mut engine = Engine::new(state);
     let err = engine

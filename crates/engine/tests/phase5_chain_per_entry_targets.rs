@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: per-entry targets for a chain (CR 601.2c, 608.2c).
-//! `Game.Ops.Chain` gives every entry the ability's whole target set.
-//! `Game.Ops.ChainEach({ op, words }, ...)` gives entry i the `words` target
-//! words it owns, the way a modal spell's modes own theirs, so "Draw 2 cards.
-//! Target opponent draws 2 cards." is one ability. `:SetTarget` on activated
-//! and triggered abilities also accepts an array of filter tables (one word
-//! each), and `DrawCards` draws for the targeted player when the ability
-//! declares a target.
+//! CR 601.2c, 608.2c: per-entry targets for a chain. `Game.Ops.ChainEach({ op, words }, ...)` gives entry i the target words it owns.
+//! `:SetTarget` also accepts an array of filter tables, and `DrawCards` draws for the targeted player when the ability declares a target.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -18,8 +12,6 @@ const P1: PlayerId = PlayerId(1);
 const SPELL: ObjectId = ObjectId(100);
 const BEAR: ObjectId = ObjectId(1);
 const BEAR2: ObjectId = ObjectId(2);
-
-// ---- Decode ------------------------------------------------------------------
 
 fn decode(body: &str) -> Result<Option<AbilityEffect>, String> {
     let source = format!("local s = {{}}\nfunction s.operation()\n    return {body}\nend\nreturn s");
@@ -123,8 +115,6 @@ fn word_counts_that_do_not_match_the_declared_words_fail_at_register() {
     assert!(error.contains("own 2") && error.contains("declares 1"), "{error}");
 }
 
-// ---- Resolution --------------------------------------------------------------
-
 fn card(id: u64, name: &str, types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         script_ref: ScriptReference::ByKey(name.to_string()),
@@ -171,7 +161,6 @@ fn spell(effect: AbilityEffect, target_requirement: Option<TargetSpec>) -> CardD
     }
 }
 
-/// Two P1 bears on the battlefield, `library` cards in each library, `spell` in P0's hand.
 fn state_with(spell: CardDefinition, library: u64) -> GameState {
     let mut state = GameState {
         step: Step::PreCombatMain,
@@ -232,7 +221,6 @@ fn zones_of(engine: &Engine, name: &str) -> Vec<ZoneKind> {
     engine.state().objects.values().filter(|o| o.definition.name == name).map(|o| o.zone).collect()
 }
 
-/// Owners of the cards moved from a library to a hand, in ledger order.
 fn drawers(engine: &Engine) -> Vec<PlayerId> {
     engine
         .state()

@@ -1,20 +1,5 @@
-//! Phase 5 vertical slice: CR 702.16 protection, narrowed to "protection
-//! from color" (702.16e's shape - by far the most common real form) and
-//! three of the four "DEBT" restrictions - damage (702.16a), targeting
-//! (702.16c), and blocking (702.16d). Enchant/Equip (702.16b) stays
-//! unmodeled - no attach/enchant machinery exists in this engine yet.
-//!
-//! Design finding: protection isn't a `state.replacement_effects` entry a
-//! card registers - it's a static, always-on characteristic of the object
-//! itself (`EffectiveCharacteristics.protection_colors`, a new layer-6
-//! primitive alongside `AddKeyword`). Enforcement is three hardcoded checks
-//! at the sites that already gate the equivalent real-gameplay actions:
-//! `replacement::apply_protection_from_color` (ahead of the registered-
-//! effects match, same "checked up front" precedent CR 702.12b
-//! indestructible already set for `Destroy`), `commands::target_is_legal`
-//! (now threading the spell/ability's own source id through, same
-//! "pre-resolve and pass in" shape `FilterSpec::matches` already took), and
-//! `DeclareBlockers`'s existing Flying/Reach/Menace check block.
+//! CR 702.16: protection from color, enforced for damage (702.16a), targeting (702.16c) and blocking (702.16d). It is the static characteristic `EffectiveCharacteristics.protection_colors`, a layer 6 primitive, and not a registered replacement effect.
+//! Enforcement sits in `replacement::apply_protection_from_color`, `commands::target_is_legal` and the `DeclareBlockers` check block.
 
 use std::collections::HashMap;
 
@@ -74,8 +59,6 @@ fn vanilla_creature(id: u64, name: &str, power: i32, toughness: i32, color: Opti
     creature_definition(id, name, power, toughness, color, ScriptReference::ByKey(name.to_string()))
 }
 
-/// "Test Bolt: deals 2 damage to target creature." Red, so the targeting
-/// tests have a real color to check protection against.
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -106,8 +89,6 @@ fn bolt_definition() -> CardDefinition {
     }
 }
 
-/// A colorless counterpart to `bolt_definition`, for the "protection
-/// doesn't block an unrelated color" control test.
 fn colorless_bolt_definition() -> CardDefinition {
     CardDefinition { definition_id: 21, name: "Test Colorless Bolt".to_string(), color_indicator: None, ..bolt_definition() }
 }
@@ -118,9 +99,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Directly-constructed protection, standing in for the ETB-registered
-/// version - the Lua wiring itself is proven separately, same convention
-/// every other static-ability-adjacent test file in this repo uses.
 fn protection_from_red(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -227,10 +205,6 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
 
-// ---------------------------------------------------------------------
-// Lua wiring
-// ---------------------------------------------------------------------
-
 #[test]
 fn game_effects_add_protection_color_self_registers_and_applies() {
     let mut state = base_state();
@@ -251,10 +225,7 @@ fn game_effects_add_protection_color_self_registers_and_applies() {
     assert_eq!(effective.protection_colors, ColorSet::RED);
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16a: damage
-// ---------------------------------------------------------------------
-
+// CR 702.16a
 #[test]
 fn combat_damage_from_a_matching_color_is_prevented_by_protection() {
     let p0 = PlayerId(0);
@@ -301,10 +272,7 @@ fn combat_damage_from_a_different_color_still_lands() {
     assert_eq!(ward.damage_marked, 3, "protection from red doesn't stop a green attacker's damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16c: targeting
-// ---------------------------------------------------------------------
-
+// CR 702.16c
 #[test]
 fn casting_a_matching_color_spell_at_a_protected_target_is_rejected() {
     let mut state = base_state();
@@ -357,10 +325,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 702.16c is rechecked by the same CR 608.2b mechanism as any other
-    // target legality change - granting protection mid-stack, after the
-    // spell already targeted this creature, makes the target illegal by
-    // resolution time.
+    // CR 702.16c: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
     engine.state_mut().continuous_effects.push(protection_from_red(target));
 
     pass_both_and_drain(&mut engine, p0, p1).unwrap();
@@ -372,10 +337,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     assert_eq!(engine.state().object(target).unwrap().damage_marked, 0, "a fizzled spell deals no damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16d: blocking
-// ---------------------------------------------------------------------
-
+// CR 702.16d
 #[test]
 fn an_attacker_with_protection_cannot_be_blocked_by_a_matching_color_creature() {
     let p0 = PlayerId(0);

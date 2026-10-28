@@ -1,24 +1,5 @@
-//! Phase 5 vertical slice: CR 205.4b subtype target restrictions ("target
-//! Human," "Equip Dragons") - the gap `target.rs`'s own TODO list had named
-//! since the targeting-basics slice, and both `phase5/aura-attach` ("Enchant
-//! Human"-style) and `phase5/equip-ability` (CR 702.6c "Equip [quality]
-//! creature") deferred as a follow-up rather than guessing at.
-//!
-//! `TargetFilter::Object` gained a `subtypes: Option<Vec<Subtype>>` field,
-//! mirroring `cost.rs`'s `FilterSpec::subtypes` shape exactly (an "or" match
-//! against the target's *effective* subtypes, via `layers::
-//! effective_characteristics`, same treatment `card_types` already gets in
-//! `commands::target_is_legal`). Two consumers: a spell/ability's own cast-
-//! time target requirement (`TargetSpec::Primitive`, built directly via
-//! `CardDefinition.target_requirement`/`RegisteredAbility.target`), and
-//! `Game.SelectTargets`/`Game.CreateActivatedAbility:SetTarget`'s shared
-//! Lua table decoder (`decode_target_filter_table`) - both exercised below.
-//!
-//! `TargetFilter`/`TargetRequirement`/`TargetSpec` all lost their `Copy`
-//! derive as a mechanical consequence (`Vec<Subtype>` isn't `Copy`) - the
-//! two real call sites that relied on it (`ability.target` copied out in
-//! `commands.rs`/`engine.rs`) now `.clone()` instead, otherwise invisible
-//! from outside the crate.
+//! CR 205.4b: subtype target restrictions ("target Human", "Equip Dragons") through `TargetFilter::Object::subtypes`, an "or" match against effective subtypes via `effective_characteristics`. It closes the gap on `target.rs`'s TODO list.
+//! Two consumers use it: a cast-time `TargetSpec::Primitive` and the shared Lua table decoder `decode_target_filter_table`.
 
 use std::collections::HashMap;
 
@@ -62,7 +43,6 @@ fn zombie(id: u64, name: &str) -> CardDefinition {
     creature_definition(id, name, vec![Subtype("Zombie".to_string())])
 }
 
-/// "Test Human Bolt: deals 2 damage to target Human."
 fn human_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -209,10 +189,7 @@ fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets
         
 }
 
-// ---------------------------------------------------------------------
-// CR 205.4b: a spell's own "target Human"
-// ---------------------------------------------------------------------
-
+// CR 205.4b
 #[test]
 fn casting_at_a_matching_subtype_creature_is_accepted() {
     let mut state = base_state();
@@ -251,11 +228,7 @@ fn casting_at_a_non_matching_subtype_creature_is_rejected() {
 
 #[test]
 fn spell_fizzles_when_targets_subtype_changes_before_resolution() {
-    // Re-checked fresh at resolution (CR 608.2b) the same way protection/
-    // color/card-type target restrictions already are - RemoveAllAbilities
-    // doesn't touch subtypes (only keywords/protection), so this instead
-    // simulates the target leaving the battlefield, the one other way an
-    // already-legal target can become illegal by resolution time.
+    // Re-checked fresh at resolution (CR 608.2b). RemoveAllAbilities does not touch subtypes, so this simulates the target leaving the battlefield.
     let mut state = base_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -269,8 +242,7 @@ fn spell_fizzles_when_targets_subtype_changes_before_resolution() {
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
-    // The target leaves the battlefield mid-stack (e.g. bounced by another
-    // effect) - no longer a legal "target Human" by resolution time.
+    // The target leaves the battlefield mid-stack, so it is no longer a legal "target Human" at resolution.
     engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(target);
     engine.state_mut().objects.remove(&target);
 
@@ -282,10 +254,7 @@ fn spell_fizzles_when_targets_subtype_changes_before_resolution() {
     );
 }
 
-// ---------------------------------------------------------------------
-// CR 702.6c: "Equip Dragons" via the shared Lua table decoder
-// ---------------------------------------------------------------------
-
+// CR 702.6c
 #[test]
 fn game_selecttargets_decoder_accepts_a_subtypes_key_for_equip() {
     let mut state = base_state();

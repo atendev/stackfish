@@ -1,23 +1,6 @@
-//! Phase 5 vertical slice: CR 301.5e/301.6 - Equipment/Fortification
-//! entering the battlefield already attached by an effect other than
-//! activating Equip/Fortify, the follow-up `phase5_aura_enters_attached.rs`
-//! named as still-open ("Equipment's attach legality isn't governed by a
-//! `target_requirement` the way an Aura's enchant ability is").
-//!
-//! Reuses the same `SearchDestination::Battlefield { enters_attached: true }`
-//! producer and the same `AwaitingEntryAttachChoice` pause/resume plumbing
-//! `phase5_aura_enters_attached.rs` built - `commands::
-//! legal_entry_attach_candidates` dispatches by permanent kind instead of
-//! reading a `target_requirement` (CR 702.6c: an Equip ability's own quality
-//! restrictions don't restrict what the Equipment may be attached to at
-//! all), so legality is just "every creature/land on the battlefield."
-//!
-//! - 1 legal candidate: attaches immediately, no pause (same as Aura).
-//! - 2+ legal candidates: the same `AwaitingEntryAttachChoice` pause.
-//! - 0 legal candidates: **diverges from Aura.** CR 301.5e/301.6 says the
-//!   Equipment/Fortification still enters the battlefield, just unattached -
-//!   unlike an Aura (CR 303.4g), which remains in its current zone and never
-//!   enters at all.
+//! CR 301.5e, 301.6: Equipment and Fortification entering already attached by an effect other than Equip or Fortify.
+//! Every creature (or land) on the battlefield is a candidate, since an Equip ability's restrictions do not limit attachment (CR 702.6c).
+//! One candidate attaches at once, two or more pause on `AwaitingEntryAttachChoice`, and none enters unattached (unlike an Aura, CR 303.4g).
 
 use std::collections::{HashMap, VecDeque};
 
@@ -292,9 +275,7 @@ fn equipment_with_zero_legal_creatures_enters_unattached() {
     let p1 = PlayerId(1);
     let sword = ObjectId(10);
     let card = ObjectId(2);
-    // No creatures anywhere - unlike an Aura (which would remain in the
-    // library, CR 303.4g), CR 301.5e says the Equipment still enters the
-    // battlefield, just unattached.
+    // No creatures anywhere: unlike an Aura (CR 303.4g), the Equipment still enters, unattached.
     let mut state = two_player_state(vec![sword]);
     state.objects.insert(sword, card_object(sword, equipment_definition(1, "Test Sword"), p0, ZoneKind::Library));
     state.objects.insert(

@@ -1,20 +1,5 @@
-//! Phase 5 vertical slice: narrow script bridge. One concrete triggered
-//! ability (CR 603) - real Lua condition + operation, both invoked for real
-//! via `ScriptRuntime` - powering an ETB "gain 1 life" trigger end to end.
-//!
-//! Registration itself stays Rust-side this slice: `RegisteredAbility` is
-//! pushed directly onto `state.abilities` (via `Engine::load_script` +
-//! a struct literal), not via a card script self-registering (`Game.
-//! CreateTriggeredAbility`, built in a later slice once the `Game.*` Lua
-//! table was bound and registration-time mutability was sorted out - see
-//! `script::builders`).
-//!
-//! Design lock-in this slice exercises: "Lua asks, Rust decides" - the
-//! operation script never mutates state itself, it returns a plain table
-//! (`{ gain_life = 1 }`) that `ScriptRuntime::invoke_operation` decodes and
-//! applies. Only `GameEventKind::ZoneChange` is bridged into a Lua-visible
-//! shape (see `script::event_to_lua`) - enough for an ETB-shaped condition,
-//! nothing else.
+//! CR 603: a real Lua condition and operation, invoked through `ScriptRuntime`, power an ETB "gain 1 life" trigger. The operation returns a plain table (`{ gain_life = 1 }`) that `invoke_operation` decodes, so Lua asks and Rust decides.
+//! Registration is Rust-side, and only `GameEventKind::ZoneChange` is bridged into Lua (`script::event_to_lua`).
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -49,8 +34,6 @@ fn bear_definition() -> CardDefinition {
     }
 }
 
-/// Two players, hand/battlefield/graveyard zones present for both, stack
-/// empty. Mirrors `phase5_cast_spell::two_player_state`.
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
@@ -64,11 +47,6 @@ fn zone_change_event(object: ObjectId, from: ZoneKind, to: ZoneKind) -> GameEven
         parent_event: None,
     }
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: collect_triggers' reaction to condition true/false/None,
-// against a real ScriptRuntime, without driving the whole Engine pipeline.
-// ---------------------------------------------------------------------
 
 #[test]
 fn collect_triggers_matches_a_real_condition_script() {
@@ -127,8 +105,7 @@ fn collect_triggers_condition_false_on_a_different_object() {
         intervening_if: None,
     });
 
-    // A different object entering the battlefield - the condition checks
-    // `event.object == source`, so this shouldn't match.
+    // A different object entering the battlefield does not match, since the condition checks event.object == source.
     let event = zone_change_event(someone_else, ZoneKind::Hand, ZoneKind::Battlefield);
     let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert!(pending.is_empty(), "the bear's ETB condition shouldn't fire for a different object");
@@ -158,8 +135,7 @@ fn collect_triggers_condition_false_on_wrong_destination_zone() {
         intervening_if: None,
     });
 
-    // The bear moving to the graveyard (not the battlefield) shouldn't
-    // match an ETB condition.
+    // The bear moving to the graveyard does not match an ETB condition.
     let event = zone_change_event(bear, ZoneKind::Battlefield, ZoneKind::Graveyard);
     let (pending, _) = collect_triggers(&state, &event, &runtime, &[]);
     assert!(pending.is_empty());
@@ -180,8 +156,7 @@ fn collect_triggers_none_condition_matches_any_event() {
         id: AbilityId(3),
         source: bear,
         kind: AbilityKind::Triggered,
-        // No condition at all - RegisteredAbility::condition documents this
-        // as "no filter, always triggers".
+        // No condition means no filter, so it always triggers.
         condition: None,
         cost: None,
         target: None,
@@ -190,8 +165,7 @@ fn collect_triggers_none_condition_matches_any_event() {
         intervening_if: None,
     });
 
-    // A totally unrelated event kind - matches anyway, since there's no
-    // condition to filter it out.
+    // An unrelated event kind matches anyway, since there is no condition to filter it.
     let event = GameEvent {
         event_id: EventId(0),
         sequence_no: SequenceNo(0),
@@ -209,11 +183,6 @@ fn engine_load_script_rejects_malformed_lua() {
     let result = engine.load_script("this is not valid lua {{{");
     assert!(result.is_err(), "a syntax error should fail to load, not panic");
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline, cast a creature with a real Lua ETB
-// trigger, resolve it, watch the operation script's life gain land.
-// ---------------------------------------------------------------------
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
@@ -263,16 +232,11 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
 
-    // Spell is on the stack, not resolved yet - only a hand->stack
-    // ZoneChange has happened so far, which doesn't match the ETB
-    // condition (`to == "battlefield"`) - no ability should be pending.
+    // The spell is on the stack, and the hand to stack ZoneChange does not match the ETB condition, so no ability is pending.
     assert_eq!(engine.state().stack.len(), 1, "only the spell itself is on the stack so far");
     assert_eq!(engine.state().player(p0).unwrap().life, 20, "no life gain before the creature resolves");
 
-    // Both players pass - CR 117.4 resolves the top (the spell) since the
-    // stack is non-empty. Resolution moves the creature to the battlefield,
-    // which is exactly the ZoneChange the ETB condition matches - the
-    // ability's own StackObject gets pushed in this same pipeline run.
+    // Both players pass, CR 117.4 resolves the spell onto the battlefield, and the ETB match pushes the ability in the same run.
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);
@@ -282,8 +246,7 @@ fn cast_creature_with_etb_triggers_gain_life_end_to_end() {
     assert_eq!(engine.state().stack.len(), 1, "the ETB ability itself is now on the stack");
     assert_eq!(engine.state().player(p0).unwrap().life, 20, "ability hasn't resolved yet");
 
-    // Both players pass again - resolves the triggered ability, invoking its
-    // real Lua operation callback via the script bridge.
+    // Both players pass again, which resolves the ability and invokes its Lua callback.
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);
@@ -317,8 +280,7 @@ fn cast_a_different_creature_does_not_trigger_the_bears_etb() {
     let mut engine = Engine::new(state);
     let condition = engine.load_script(CONDITION_ENTERS_BATTLEFIELD).expect("condition script loads");
     let operation = engine.load_script(OPERATION_GAIN_LIFE_1).expect("operation script loads");
-    // The ability is registered to `bear` specifically - casting a
-    // different creature (even with the same definition) shouldn't fire it.
+    // The ability is registered to bear, so another creature with the same definition does not fire it.
     engine.state_mut().abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),

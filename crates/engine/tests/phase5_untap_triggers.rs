@@ -1,14 +1,4 @@
-//! Phase 5: untap-step trigger conditions (backlog item 7's last "still
-//! open" bullet - Untap-step triggers used to stay unfireable regardless).
-//! `AdvanceTurnStep`'s `Untap` branch (engine.rs) now routes its events
-//! through the real `ReplacementCheck`->`CommitEvents`->`SbaLoop`->
-//! `CollectTriggers` pipeline too (via `PipelineExit::AdvanceTurnStep`
-//! instead of `BackToPriority`, so it still doesn't open a priority window
-//! CR 502.4 doesn't grant), same fix `AdvanceTurnStep`'s other branches
-//! already got in the `upkeep-triggers` slice.
-//! `ConditionPrimitive::BeginningOfYourUntap`/`BeginningOfEachUntap` is the
-//! concrete condition proving it, mirroring
-//! `phase5_upkeep_triggers.rs::BeginningOfYourUpkeep`'s own tests closely.
+//! CR 502.4: the Untap step's events route through the real `CollectTriggers` pipeline (`PipelineExit::AdvanceTurnStep`) without opening a priority window. `ConditionPrimitive::BeginningOfYourUntap` and `BeginningOfEachUntap` mirror phase5_upkeep_triggers.rs.
 
 
 use stackfish_engine::engine::{Engine, StepStatus};
@@ -40,8 +30,6 @@ fn creature_definition(name: &str) -> CardDefinition {
     }
 }
 
-/// Mirrors `phase5_upkeep_triggers::two_player_state` - starts at
-/// `Phase::PreGame`/`Step::Untap`, p0 active.
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -81,10 +69,7 @@ fn beginning_of_your_untap_trigger_is_already_on_the_stack_by_the_time_upkeep_pr
     });
 
     let mut engine = Engine::new(state);
-    // One full pass-round from PreGame lands exactly on Upkeep (Untap opens
-    // no priority window, per CR 502.4) - the untap trigger must already be
-    // sitting on the stack by then (CR 603.3's "next time a player would
-    // receive priority").
+    // One pass-round from PreGame lands on Upkeep (CR 502.4), and the untap trigger is already on the stack by then (CR 603.3).
     let status = pass_both(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().phase, Phase::Beginning);
@@ -103,8 +88,7 @@ fn beginning_of_your_untap_trigger_does_not_fire_for_a_different_controller() {
     let p1 = PlayerId(1);
     let permanent = ObjectId(0);
     let mut state = two_player_state();
-    // Controlled by p1, but active_player (and so whose untap this is) is
-    // p0 - BeginningOfYourUntap must not fire for p1 here.
+    // Controlled by p1, but this is p0's untap, so BeginningOfYourUntap must not fire for p1.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
     state.abilities.push(RegisteredAbility {
@@ -134,8 +118,7 @@ fn beginning_of_each_untap_trigger_fires_regardless_of_whose_turn_it_is() {
     let p1 = PlayerId(1);
     let permanent = ObjectId(0);
     let mut state = two_player_state();
-    // Controlled by p1 while active_player is p0 - EachUntap must fire
-    // anyway, unlike BeginningOfYourUntap above.
+    // Controlled by p1 while p0 is active, so EachUntap fires anyway, unlike BeginningOfYourUntap.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
     state.abilities.push(RegisteredAbility {

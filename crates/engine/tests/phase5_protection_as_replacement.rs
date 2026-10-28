@@ -1,24 +1,5 @@
-//! Phase 5 vertical slice: CR 702.16e/616.1 — protection's damage prevention
-//! now participates in the same CR 616 ordering-choice decision a
-//! registered `ReplacementEffect` does, instead of applying unconditionally
-//! ahead of `apply_replacements_from`'s loop the way this engine used to.
-//! `replacement::protection_prevents` is the new predicate (folds the
-//! protected object's own id into the loop's `matching` candidate list);
-//! `replacement::apply_one_replacement_or_protection` is the dispatch that
-//! tells a real registered effect's source apart from the protection
-//! sentinel.
-//!
-//! Concrete scenario this closes (previously unexercised by any test — see
-//! `docs/implementation/08-replacements.md`'s own slice notes): a creature
-//! with protection from red is dealt damage by a red source, while a
-//! *different* permanent also has a `RedirectDamageToSource` effect
-//! registered against the same damage. Per CR 616.1e, the affected player's
-//! choice of which applies first is real and produces genuinely different
-//! outcomes — protection-first prevents the damage entirely (nothing lands
-//! anywhere); redirect-first moves the *unprevented* damage onto the
-//! (unprotected) redirect target, which then takes it in full, since
-//! protection no longer matches once the event's target has moved away from
-//! the protected creature.
+//! CR 702.16e, 616.1: protection's damage prevention joins the CR 616 ordering choice with registered `ReplacementEffect`s (`replacement::protection_prevents`, `apply_one_replacement_or_protection`).
+//! A creature with protection from red takes red damage while another permanent has `RedirectDamageToSource` against it. Per CR 616.1e protection-first prevents everything, and redirect-first moves the unprevented damage onto the unprotected target.
 
 use std::collections::HashMap;
 
@@ -52,9 +33,6 @@ end
 return s
 "#;
 
-/// Same permanent has both: its own protection *and* its own registered
-/// replacement effect - the documented sentinel-collision limitation
-/// (`apply_one_replacement_or_protection`'s own doc comment).
 const STATIC_PROTECTION_FROM_RED_AND_PREVENTS_ALL_DAMAGE_TO_SELF: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -141,11 +119,6 @@ fn assign_combat_damage(engine: &mut Engine, player: PlayerId) -> StepStatus {
     drain(engine)
 }
 
-/// Attacker (p0, red, power 3) blocked by Protected (p1, protection from
-/// red, power 0 so it never fights back and confuses the scenario) - a
-/// third permanent, Redirector (p1), also registers `RedirectDamageToSource`
-/// scoped to `controller = "you"` (matches any damage dealt to a
-/// p1-controlled object, including Protected).
 fn protection_vs_redirect_state() -> (GameState, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -161,9 +134,7 @@ fn protection_vs_redirect_state() -> (GameState, ObjectId, ObjectId, ObjectId) {
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(0, "Bear", 3, 3, Some(ColorSet::RED)), p0));
     let protected_definition = creature_definition(1, "Protected", 0, 4, None, STATIC_PROTECTION_FROM_RED);
     put_on_battlefield(&mut state, permanent(protected, protected_definition.clone(), p1));
-    // Toughness 4, not a low number - must survive the redirected 3 damage
-    // so the tests below can still inspect its post-damage id/state rather
-    // than an SBA-driven death retiring it to a fresh ObjectId first.
+    // Toughness 4 so it survives the redirected 3 damage and keeps its id for inspection, instead of an SBA death retiring it.
     let redirector_definition = creature_definition(2, "Redirector", 0, 4, None, REDIRECT_DAMAGE_TO_SELF);
     put_on_battlefield(&mut state, permanent(redirector, redirector_definition.clone(), p1));
 
@@ -224,9 +195,7 @@ fn choosing_the_redirect_first_sends_the_full_unprevented_damage_to_the_unprotec
     assert_eq!(engine.state().object(protected).unwrap().damage_marked, 0, "the damage moved away from Protected entirely, it was never marked there");
 }
 
-/// Regression: protection alone (no competing registered effect) must still
-/// resolve synchronously, exactly as before this slice - no spurious pause
-/// introduced for the overwhelmingly common case.
+// Protection alone, with no competing registered effect, resolves synchronously with no pause.
 #[test]
 fn protection_alone_still_resolves_synchronously_with_no_pause() {
     let p0 = PlayerId(0);
@@ -253,15 +222,8 @@ fn protection_alone_still_resolves_synchronously_with_no_pause() {
     assert_eq!(engine.state().object(protected).unwrap().damage_marked, 0, "protection still actually prevented the damage");
 }
 
-/// Fixed collision (`ReplacementCandidate`'s own doc comment): when the SAME
-/// permanent has both innate protection and its own registered replacement
-/// effect on itself, both used to share the protected object's bare
-/// `ObjectId` as their "candidate," so `apply_replacements_from`'s dedup
-/// silently folded them into one entry and no ordering choice was ever
-/// offered - the registered effect always won by construction (its lookup
-/// ran first in the old dispatch). Now `Registered(protected)` and
-/// `Protection(protected)` are distinct `ReplacementCandidate` values, so a
-/// real CR 616.1 pause happens here for the first time.
+// CR 616.1
+// Protection and a registered effect on the same permanent are distinct ReplacementCandidate values, so a real ordering pause happens.
 fn protected_with_own_registered_effect_state() -> (GameState, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);

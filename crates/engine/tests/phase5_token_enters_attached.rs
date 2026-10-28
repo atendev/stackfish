@@ -1,34 +1,6 @@
-//! Phase 5 vertical slice: CR 303.4f/g/301.5e/301.6 pre-attached entry,
-//! extended to token creation (`AbilityEffect::CreateToken`) — the one real
-//! non-casting, non-Search battlefield-entry producer that had no attach
-//! machinery at all before this slice (`resolve_create_token_effect` always
-//! hard-coded `attached_to`/`attached_to_player: None` and never paused).
-//!
-//! Only `TokenSpec::CopyOf` can realistically produce an Aura/Equipment/
-//! Fortification token — `Named`/`Creature` specs always include the
-//! `CREATURE` card type and build a fresh, non-attach-capable
-//! `CardDefinition`. Real cards this models: Estrid, the Masked / Bruna,
-//! the Fading Light (copy an Aura/Equipment already on the battlefield).
-//!
-//! Unlike `SearchDestination::Battlefield::enters_attached`, there's no
-//! opt-in flag here — the attach-candidate dispatch always runs, gated
-//! purely by `commands::is_aura`/`is_equipment`/`is_fortification` on the
-//! token's own resolved `CardDefinition` (CR 303.4f has no "effect must
-//! specify" carve-out, and this keeps every pre-existing `CreateToken` call
-//! site — none of which ever produces an Aura/Equipment-shaped token —
-//! completely untouched, zero ripple).
-//!
-//! CR 303.4g's token-specific second sentence ("if the Aura is a token, it
-//! isn't created") is the one real divergence from Search's own shape
-//! (which instead leaves an already-existing library card right where it
-//! is) — verified directly (no new battlefield object at all), not just
-//! "stays in some zone."
-//!
-//! `count > 1` needed genuinely new resumable-loop plumbing:
-//! `resolve_create_token_effect`'s old `for _ in 0..count` loop is now
-//! `continue_create_token`, taking a `remaining: u32` instead, so a 2+
-//! candidate pause on one token in the middle of a multi-token effect can
-//! resume and keep creating the rest.
+//! CR 303.4f/g, 301.5e, 301.6: pre-attached entry for token creation (`AbilityEffect::CreateToken`). Only `TokenSpec::CopyOf` can produce an Aura, Equipment or Fortification token (Estrid, the Masked; Bruna, the Fading Light).
+//! The attach-candidate dispatch always runs, gated by `is_aura`, `is_equipment` and `is_fortification` on the token's resolved `CardDefinition`. Per CR 303.4g an Aura token with no legal target is not created, unlike Search, which leaves the library card in place.
+//! `continue_create_token` takes a `remaining: u32`, so a multi-candidate pause on one token resumes the rest.
 
 use stackfish_engine::engine::{AttachChoiceError, Engine, StepStatus};
 use stackfish_engine::*;
@@ -84,8 +56,6 @@ fn creature_definition(id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Aura: enchant creature" — the `CopyOf` source for the
-/// Aura-token tests.
 fn aura_source_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
@@ -126,8 +96,6 @@ fn aura_source_definition(id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Aura: enchant player" — the `CopyOf` source for the player-target
-/// test.
 fn aura_source_enchant_player_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         target_requirement: Some(TargetSpec::Primitive(TargetRequirement {
@@ -141,10 +109,6 @@ fn aura_source_enchant_player_definition(id: u64, name: &str) -> CardDefinition 
     }
 }
 
-/// "Test Equipment: equip creature" — the `CopyOf` source for the
-/// Equipment-token test. Equipment/Fortification legality is just "every
-/// creature/land on the battlefield" (CR 702.6c), no `target_requirement`
-/// read at all.
 fn equipment_source_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
@@ -180,19 +144,7 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// The `CopyOf` source sits in the graveyard, not the battlefield —
-/// `commands::legal_entry_attach_candidates`/`sba::collect_illegally_
-/// attached_auras` only ever consider `ZoneKind::Battlefield` objects, so a
-/// graveyard Aura is exempt from CR 704.5m's "unattached Aura dies"
-/// state-based action entirely. This sidesteps a genuine impossibility: a
-/// *battlefield* Aura currently offering zero legal targets must, by CR
-/// 704.5m, already be illegally attached itself and would already have died
-/// on the very next state-based action check — so a live, on-battlefield
-/// copy source can never simultaneously be "still around" and "would copy
-/// to zero candidates." A graveyard source (e.g. Bruna, the Fading Light's
-/// own reanimation-adjacent shape) has no such constraint, and needs no
-/// attachment of its own at all — only `TokenSpec::CopyOf`'s `self.state.
-/// object(*source_id)` lookup, which doesn't care about zone.
+// The CopyOf source sits in the graveyard, where it is exempt from the CR 704.5m unattached-Aura SBA, because a battlefield Aura with zero legal targets would already have died.
 fn put_in_graveyard(state: &mut GameState, object: GameObject) {
     let id = object.object_id;
     let owner = object.owner;
@@ -456,9 +408,7 @@ fn token_copy_of_player_aura_attaches_to_a_player() {
     let mut engine = Engine::new(state);
     cast_spell(&mut engine, p0, card);
     pay_free_and_drain(&mut engine);
-    // A plain TargetFilter::Player has no controller restriction - both p0
-    // and p1 are legal candidates, same "no exactly-one case" observation
-    // `phase5_aura_enters_attached_player.rs` already established.
+    // A plain TargetFilter::Player has no controller restriction, so p0 and p1 are both legal, with no exactly-one case.
     let status = pass_both_and_drain(&mut engine, p0, p1);
     let StepStatus::AwaitingTokenAttachChoice { attaching, candidates, .. } = status else {
         panic!("expected a player-target attach-choice pause, got {status:?}")

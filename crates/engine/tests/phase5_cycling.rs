@@ -1,43 +1,7 @@
-//! Phase 5 vertical slice: CR 702.29 Cycling / Typecycling.
-//!
-//! "Cycling [cost]" means "[Cost], Discard this card: Draw a card" (CR
-//! 702.29a) — an activated ability that functions only while the card sits
-//! in its controller's hand (CR 602.1's own "unless the ability itself says
-//! otherwise" carve-out). Two new pieces make this real:
-//!
-//! - `AdditionalCost::DiscardSelf` (types/cost.rs) — the `Discard` sibling
-//!   `TapSelf` already is to `TapPermanents`: always the ability's own
-//!   source, never a filter choice (unlike the pre-existing `Discard
-//!   { filter }`, which would let the payer discard *any* hand card).
-//! - `commands::activate::execute_activate_ability`'s zone check now
-//!   requires `Hand` instead of `Battlefield` when the found ability's own
-//!   cost contains `DiscardSelf` — matched on cost shape, not a new
-//!   `RegisteredAbility` field, same precedent Equip's sorcery-speed check
-//!   already set.
-//!
-//! Typecycling (CR 702.29e) reuses the existing `AbilityEffect::Search`
-//! primitive with `destination: Hand` — no new resolution code needed.
-//!
-//! This slice also closes a real, separate gap found while scoping it: every
-//! `run_card_script` call site in this engine was battlefield-entry-only, so
-//! a card drawn into hand never got a chance to self-register a hand-only
-//! ability at all. `Engine::run_card_script_for` (engine/mod.rs) is now
-//! called by every real Library->Hand producer (turn-based draw, effect-
-//! driven `Game.Ops.DrawCards`, `Game.Ops.Search`'s hand destination, and
-//! opening-hand deal) — the "real producer wiring" tests below prove each of
-//! those three surfaces (draw, tutor, opening hand) actually registers the
-//! ability, not just that the mechanism works when hand-built by hand.
-//!
-//! CR 702.29c/d ("when you cycle this card" / "cycles or discards"
-//! triggers) are real now too (`phase5/cycling-triggers`) — see
-//! `phase5_cycling_triggers.rs` for the full slice.
-//!
-//! A card leaving hand for any zone other than via a fresh draw still purges
-//! its `RegisteredAbility` the same way every other ability in this engine
-//! already does (CR 702.29b's "the ability continues to exist... in all
-//! other zones" has no real consumer today — nothing queries "does this
-//! object have an activated ability" — so that half stays a named,
-//! unobserved gap rather than something attempted here).
+//! CR 702.29 Cycling and Typecycling: "[Cost], Discard this card: Draw a card", an activated ability that works only from the hand (CR 602.1).
+//! `AdditionalCost::DiscardSelf` always discards the ability's own source, and `execute_activate_ability` requires `Hand` when the cost contains it. Typecycling reuses `Search` with `destination: Hand`.
+//! `Engine::run_card_script_for` runs for every Library to Hand producer (draw, `DrawCards`, `Search`, opening hand), so a hand-only ability self-registers. Triggers are in phase5_cycling_triggers.rs.
+// TODO: CR 702.29b, the cycling ability continuing to exist in all other zones, has no consumer yet
 
 use std::collections::HashMap;
 
@@ -47,10 +11,6 @@ use stackfish_engine::engine::{Engine, PaymentError, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, minimal_card_definition, single_player_state, two_player_state as base_two_player_state, zones};
-
-// ---------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------
 
 const PLAIN_CYCLING: &str = r#"
 local s = {}
@@ -74,10 +34,6 @@ end
 return s
 "#;
 
-/// A Cycling-shaped card whose script never actually runs in this test (the
-/// `RegisteredAbility` is built by hand instead) — used by the mechanism
-/// tests below, which care about `DiscardSelf`/the hand-zone activation
-/// override, not about self-registration itself.
 fn cycler_definition(oracle_text: &str) -> CardDefinition {
     CardDefinition {
         oracle_text: oracle_text.to_string(),
@@ -85,9 +41,6 @@ fn cycler_definition(oracle_text: &str) -> CardDefinition {
     }
 }
 
-/// A real, runnable Cycling card script - used by the self-registration and
-/// "real producer wiring" tests, which specifically need `run_card_script`
-/// to execute.
 fn scripted_cycler_definition(definition_id: u64, name: &str, script: &str) -> CardDefinition {
     CardDefinition {
         script_ref: ScriptReference::Inline(script.to_string()),
@@ -126,8 +79,6 @@ fn cycling_ability(source: ObjectId, effect: AbilityEffect) -> RegisteredAbility
     }
 }
 
-/// One player, `Hand`/`Battlefield`/`Graveyard`/`Library` zones, nothing in
-/// any of them yet.
 fn base_state(p0: PlayerId) -> GameState {
     single_player_state(
         p0,
@@ -169,11 +120,6 @@ fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId) -> Resu
         })
         
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: ScriptRuntime::run_card_script's Cycling registration
-// mechanics.
-// ---------------------------------------------------------------------
 
 #[test]
 fn run_card_script_self_registers_a_cycling_ability() {
@@ -217,11 +163,6 @@ fn run_card_script_self_registers_a_typecycling_ability() {
         other => panic!("expected Search{{destination: Hand}}, got {other:?}"),
     }
 }
-
-// ---------------------------------------------------------------------
-// Mechanism: DiscardSelf validation + the hand-zone activation override,
-// via hand-built `RegisteredAbility`s (no script involved).
-// ---------------------------------------------------------------------
 
 #[test]
 fn plain_cycling_discards_itself_and_draws_a_card() {
@@ -285,9 +226,7 @@ fn cycling_ability_cannot_be_activated_from_the_graveyard() {
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
-/// Proves the Hand-zone override is scoped exactly to `DiscardSelf`-cost
-/// abilities, not every ability - an ordinary `TapSelf`-cost ability placed
-/// on a card sitting in hand must still be rejected.
+// The Hand-zone override applies only to DiscardSelf-cost abilities, so a TapSelf ability on a card in hand is still rejected.
 #[test]
 fn an_ordinary_battlefield_ability_still_requires_the_battlefield_not_hand() {
     let p0 = PlayerId(0);
@@ -383,14 +322,7 @@ fn typecycling_discards_itself_and_searches_for_a_land() {
     );
 }
 
-// ---------------------------------------------------------------------
-// Real producer wiring: a card's own script actually self-registers its
-// Cycling ability once it lands in hand for real, via each of the three
-// real Library->Hand producers this engine has.
-// ---------------------------------------------------------------------
-
-/// Two players, mid-Beginning-phase turn 2 so a single `pass_both` reaches
-/// `Step::Draw` - mirrors `phase5_replaceable_draw.rs::state_at_upkeep_turn_2`.
+// Mid-Beginning-phase turn 2, so a single pass_both reaches Step::Draw.
 fn state_at_upkeep_turn_2(p0: PlayerId, p1: PlayerId) -> GameState {
     GameState {
         turn_number: 2,

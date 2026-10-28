@@ -1,17 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::Destroy` (backlog item 8, second
-//! Script API primitive) — `Game.Ops.Destroy()`, e.g. "Destroy target
-//! creature." Unlike `Damage`, this can't be modeled as "push an unapplied
-//! event and let `CommitEvents` retroactively apply it" - every other
-//! `ZoneChange` in this codebase describes a move that already happened.
-//! `ResolveStackTop` instead runs the real CR 614.13 `WouldDie` replacement
-//! check and `sba::commit_death` inline, mirroring `resolve_deaths`'s own
-//! per-object body - same functions, no new plumbing. CR 702.12b:
-//! indestructible is checked up front, not as a replacement effect.
-//!
-//! Scoped to `ReplacementOutcome::Resolved` only - if 2+ replacement effects
-//! matched the same destroy (CR 616.1's ordering choice), this slice
-//! deliberately no-ops rather than building new pause/resume plumbing (see
-//! docs/implementation.md).
+//! `AbilityEffect::Destroy` (`Game.Ops.Destroy()`) runs the CR 614.13 `WouldDie` replacement check and `sba::commit_death` inline, with indestructible checked up front (CR 702.12b).
+// TODO: a CR 616.1 ordering choice when two or more replacement effects match the same destroy, which currently no-ops
 
 use std::collections::HashMap;
 
@@ -44,7 +32,6 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
     }
 }
 
-/// "Test Destroy: Destroy target creature."
 fn destroy_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,

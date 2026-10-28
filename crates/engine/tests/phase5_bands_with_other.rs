@@ -1,36 +1,5 @@
-//! Phase 5 vertical slice: CR 702.22b/c's "bands with other [quality]" -
-//! `phase5_banding.rs`'s own second band-formation path, left unmodeled
-//! there ("needs a parameter, same shape gap `KeywordSet::BANDING`'s own
-//! doc comment names for Landwalk").
-//!
-//! Same shape as Landwalk (`EffectiveCharacteristics::landwalk_subtypes`, a
-//! layer 6 `EffectPrimitive`): no printed field on `CardDefinition`, always
-//! effect-granted via a self-registered static ability -
-//! `EffectPrimitive::AddBandsWithOther(Subtype)`,
-//! `EffectiveCharacteristics::bands_with_other_subtypes`. Enforcement lives
-//! in `commands::PlayerActionKind::DeclareBands` as a second accepted shape
-//! alongside the pre-existing plain-banding one (>=1 member with
-//! `bands_with_other_subtypes` containing quality Q, every *other* member's
-//! own subtypes include Q) - a band is legal if it matches either shape.
-//!
-//! CR 702.22j/k's *other* trigger condition is real now too
-//! (`phase5/bands-with-other-split-trigger`): independent of any declared
-//! band, if the creatures grouped by a block (an attacker's blockers, or a
-//! blocker's forced-onto attackers) contain a creature X with "bands with
-//! other [quality]" and another creature Y (Y != X) whose own subtypes
-//! include that quality, the combat-damage split chooser flips exactly the
-//! way a plain `BANDING` creature already flips it -
-//! `commands::AssignCombatDamage`'s `has_bands_with_other_pair` helper,
-//! checked alongside the pre-existing `BANDING`-keyword check.
-//!
-//! CR 702.22c/m's supertype-quality form ("bands with other Legends," i.e.
-//! Legendary) is real now too (`phase5/bands-with-other-supertype`) -
-//! `EffectPrimitive::AddBandsWithOtherSupertype(SupertypeSet)`,
-//! `EffectiveCharacteristics::bands_with_other_supertypes`, checked
-//! alongside the subtype form in both `DeclareBands` and the damage-split
-//! chooser flip - same "any one match is enough" posture, a separate
-//! primitive rather than widening `AddBandsWithOther` (a bare `Subtype` vs a
-//! whole `SupertypeSet` aren't the same payload shape).
+//! CR 702.22b/c: "bands with other [quality]", granted by `AddBandsWithOther` (subtype) or `AddBandsWithOtherSupertype` and enforced in `DeclareBands`.
+//! A band is legal under this form or plain banding. A blocked group with a "bands with other" creature and a matching one flips the damage-split chooser (CR 702.22j/k).
 
 use std::collections::HashMap;
 
@@ -90,10 +59,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Directly-constructed "bands with other [quality]" grant, standing in for
-/// the ETB-registered version - the Lua wiring (`Game.Effects.
-/// AddBandsWithOther`) is proven separately, same convention
-/// `phase5_landwalk.rs`'s `islandwalk` helper already establishes.
 fn bands_with_other(source: ObjectId, quality: &str) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -106,9 +71,6 @@ fn bands_with_other(source: ObjectId, quality: &str) -> ContinuousEffect {
     }
 }
 
-/// Directly-constructed "bands with other [quality]" grant, supertype form -
-/// same standing-in-for-Lua-wiring convention `bands_with_other` above
-/// already establishes.
 fn bands_with_other_supertype(source: ObjectId, quality: SupertypeSet) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -190,10 +152,7 @@ fn assert_accepted(status: Result<StepStatus, ActionError>) {
     assert!(!matches!(status, StepStatus::Error(_)), "expected the split to be accepted, got {status:?}");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.22c's second path: "bands with other [quality]"
-// ---------------------------------------------------------------------
-
+// CR 702.22c
 #[test]
 fn quality_band_legal_with_no_banding_member_at_all() {
     let p0 = PlayerId(0);
@@ -207,9 +166,7 @@ fn quality_band_legal_with_no_banding_member_at_all() {
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (elf, Target::Player(PlayerId(1)))]).unwrap();
-    // Neither creature has plain Banding - only the quality path can make
-    // this legal, and it does (elf_lord has bands-with-other Elf, elf is an
-    // Elf).
+    // Neither creature has plain Banding, so only the quality path can make this legal.
     assert_legal_band(declare_bands(&mut engine, p0, vec![vec![elf_lord, elf]]));
 }
 
@@ -226,8 +183,7 @@ fn quality_band_rejects_a_bandmate_missing_the_quality() {
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(elf_lord, Target::Player(PlayerId(1))), (bear, Target::Player(PlayerId(1)))]).unwrap();
-    // bear isn't an Elf - doesn't satisfy elf_lord's named quality, and
-    // neither creature has plain Banding either.
+    // bear is not an Elf, and neither creature has plain Banding.
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![elf_lord, bear]]));
 }
 
@@ -297,12 +253,7 @@ fn plain_banding_path_unaffected_by_this_slice() {
     assert_legal_band(declare_bands(&mut engine, p0, vec![vec![banding_creature, plain_creature]]));
 }
 
-// ---------------------------------------------------------------------
-// CR 702.22j/k's other trigger: a quality pair among the blockers/attackers
-// flips the combat-damage split chooser, with no `BANDING` keyword and no
-// declared band involved at all.
-// ---------------------------------------------------------------------
-
+// CR 702.22j/k
 #[test]
 fn attacker_double_blocked_by_a_bands_with_other_pair_needs_the_defending_players_choice() {
     let p0 = PlayerId(0);
@@ -315,8 +266,7 @@ fn attacker_double_blocked_by_a_bands_with_other_pair_needs_the_defending_player
     put_on_battlefield(&mut state, permanent(attacker, creature_definition_pt(1, "Attacker", &[], KeywordSet::empty(), 4, 4), p0));
     put_on_battlefield(&mut state, permanent(elf_lord, creature_definition_pt(2, "Elf Lord", &["Elf"], KeywordSet::empty(), 1, 5), p1));
     put_on_battlefield(&mut state, permanent(elf, creature_definition_pt(3, "Elf", &["Elf"], KeywordSet::empty(), 1, 5), p1));
-    // Neither blocker has plain Banding - only the quality pair (elf_lord's
-    // bands-with-other Elf + elf's own Elf subtype) can flip the chooser.
+    // Neither blocker has plain Banding, so only the quality pair can flip the chooser.
     state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
 
     let mut engine = Engine::new(state);
@@ -325,8 +275,7 @@ fn attacker_double_blocked_by_a_bands_with_other_pair_needs_the_defending_player
     declare_blockers(&mut engine, p1, vec![(elf_lord, attacker), (elf, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
-    // The active player no longer gets to choose this split - the
-    // attacker's blockers contain a bands-with-other/quality pair.
+    // The attacker's blockers contain a quality pair, so the active player does not choose.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(elf_lord, 2), (elf, 2)])]));
     assert_accepted(assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(elf_lord, 2), (elf, 2)])]));
 }
@@ -343,9 +292,7 @@ fn double_blocked_attacker_with_no_quality_pair_still_defaults_to_active_player(
     put_on_battlefield(&mut state, permanent(attacker, creature_definition_pt(1, "Attacker", &[], KeywordSet::empty(), 4, 4), p0));
     put_on_battlefield(&mut state, permanent(elf_lord, creature_definition_pt(2, "Elf Lord", &["Elf"], KeywordSet::empty(), 1, 5), p1));
     put_on_battlefield(&mut state, permanent(bear, creature_definition_pt(3, "Bear", &["Bear"], KeywordSet::empty(), 1, 5), p1));
-    // elf_lord's named quality (Elf) matches nothing else blocking this
-    // attacker - bear isn't an Elf, so no pair exists and the chooser stays
-    // the active player, same as any ordinary multi-block.
+    // bear is not an Elf, so no pair exists and the active player still chooses.
     state.continuous_effects.push(bands_with_other(elf_lord, "Elf"));
 
     let mut engine = Engine::new(state);
@@ -358,10 +305,7 @@ fn double_blocked_attacker_with_no_quality_pair_still_defaults_to_active_player(
     assert_accepted(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(elf_lord, 2), (bear, 2)])]));
 }
 
-// ---------------------------------------------------------------------
-// CR 702.22c/m's supertype form: "bands with other Legends" (Legendary)
-// ---------------------------------------------------------------------
-
+// CR 702.22c/m
 #[test]
 fn supertype_quality_band_legal_with_no_banding_member_at_all() {
     let p0 = PlayerId(0);
@@ -375,9 +319,7 @@ fn supertype_quality_band_legal_with_no_banding_member_at_all() {
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(legend_lord, Target::Player(PlayerId(1))), (legend, Target::Player(PlayerId(1)))]).unwrap();
-    // Neither creature has plain Banding - only the supertype-quality path
-    // can make this legal, and it does (legend_lord has bands-with-other
-    // Legends, legend is Legendary).
+    // Neither creature has plain Banding, so only the supertype-quality path can make this legal.
     assert_legal_band(declare_bands(&mut engine, p0, vec![vec![legend_lord, legend]]));
 }
 
@@ -394,8 +336,7 @@ fn supertype_quality_band_rejects_a_bandmate_missing_the_quality() {
 
     let mut engine = Engine::new(state);
     declare_attackers(&mut engine, p0, vec![(legend_lord, Target::Player(PlayerId(1))), (bear, Target::Player(PlayerId(1)))]).unwrap();
-    // bear isn't Legendary - doesn't satisfy legend_lord's named quality,
-    // and neither creature has plain Banding either.
+    // bear is not Legendary, and neither creature has plain Banding.
     assert_illegal(declare_bands(&mut engine, p0, vec![vec![legend_lord, bear]]));
 }
 
@@ -411,9 +352,7 @@ fn attacker_double_blocked_by_a_bands_with_other_supertype_pair_needs_the_defend
     put_on_battlefield(&mut state, permanent(attacker, creature_definition_pt(1, "Attacker", &[], KeywordSet::empty(), 4, 4), p0));
     put_on_battlefield(&mut state, permanent(legend_lord, legendary_creature_definition_pt(2, "Legend Lord", 1, 5), p1));
     put_on_battlefield(&mut state, permanent(legend, legendary_creature_definition_pt(3, "Legend", 1, 5), p1));
-    // Neither blocker has plain Banding - only the supertype-quality pair
-    // (legend_lord's bands-with-other Legends + legend's own Legendary
-    // supertype) can flip the chooser.
+    // Neither blocker has plain Banding, so only the supertype-quality pair can flip the chooser.
     state.continuous_effects.push(bands_with_other_supertype(legend_lord, SupertypeSet::LEGENDARY));
 
     let mut engine = Engine::new(state);
@@ -422,8 +361,7 @@ fn attacker_double_blocked_by_a_bands_with_other_supertype_pair_needs_the_defend
     declare_blockers(&mut engine, p1, vec![(legend_lord, attacker), (legend, attacker)]).unwrap();
     pass_to_step(&mut engine, Step::CombatDamage);
 
-    // The active player no longer gets to choose this split - the
-    // attacker's blockers contain a bands-with-other/supertype-quality pair.
+    // The attacker's blockers contain a supertype-quality pair, so the active player does not choose.
     assert_illegal(assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(legend_lord, 2), (legend, 2)])]));
     assert_accepted(assign_combat_damage(&mut engine, p1, vec![(attacker, vec![(legend_lord, 2), (legend, 2)])]));
 }
