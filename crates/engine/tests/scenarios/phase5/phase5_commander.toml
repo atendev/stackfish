@@ -4,7 +4,7 @@
 # alternative cost needed, and resolves to the battlefield normally. The
 # reject paths (non-commander in the command zone, wrong owner) and CR
 # 903.9a's return-to-command-zone choice are exercised exhaustively in
-# crates/engine/tests/phase5_commander.rs - this fixture only proves the
+# crates/engine/tests/commander.rs - this fixture only proves the
 # real end-to-end pipeline (TOML -> Engine -> CLI) wires CastSpell's new
 # command-zone permission through correctly.
 seed = 1

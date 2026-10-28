@@ -3,7 +3,7 @@
 # pawprint value N or less") - ModeChoice::PawprintBudget/
 # SpellMode::pawprint_weight are already real and exhaustively tested via
 # direct CardDefinition/RegisteredAbility construction (see
-# phase5_modal_pawprint_budget.rs); this fixture only proves the TOML ->
+# modal_pawprint_budget.rs); this fixture only proves the TOML ->
 # CardSpec.mode_pawprint_budget/SpellModeSpec.pawprint_weight -> real
 # ModeChoice/SpellMode wiring connects for real, same "prove the pipeline,
 # not the logic" convention phase5_modal_spell_toml.toml already establishes.

@@ -697,7 +697,7 @@ impl ScriptRuntime {
     /// Invokes the loaded function as a coroutine (`Lua::create_thread` and
     /// `Thread::resume`) and not a plain call. That is transparent for a script
     /// that never yields (a fresh thread's first `resume` behaves like a direct
-    /// call, confirmed in `phase5_coroutine_spike.rs`), and it is the only way a
+    /// call, confirmed in `coroutine_spike.rs`), and it is the only way a
     /// script can later suspend on `Game.SelectTargets`. See
     /// `handle_operation_result` for what comes back. It never mutates `state`
     /// on the yielded path, which avoids needing `&mut GameState` inside a Lua

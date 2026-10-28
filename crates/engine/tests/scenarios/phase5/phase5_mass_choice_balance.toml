@@ -3,7 +3,7 @@
 # itself, built entirely out of `Game.ChooseN`/`Game.Ops.SacrificeChosen`/
 # `Game.Ops.DiscardChosen`/`Game.Ops.ForEachPlayer` (phase5/mass-choice-
 # effects) - no card-specific engine code at all. Same fixture as
-# `crates/engine/tests/phase5_balance.rs`, ported to TOML now that a
+# `crates/engine/tests/balance.rs`, ported to TOML now that a
 # scenario can answer a `Game.SelectTargets`/`Game.ChooseN` mid-resolution
 # pick. Each battlefield/hand card gets its own `[[cards]]` key (rather than
 # reusing one land/bear key across multiple `[[setup]]` entries) since

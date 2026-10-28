@@ -2,7 +2,7 @@
 # the command zone for the first time pays no tax at all - base mana cost
 # only. The taxed-repeat-cast cases (second/third cast, Partner
 # independence) are exercised exhaustively in
-# crates/engine/tests/phase5_commander_tax.rs - no TOML action exists yet
+# crates/engine/tests/commander_tax.rs - no TOML action exists yet
 # for CR 903.9a's return-to-command-zone choice (a pre-existing gap 11c's
 # own report already flagged), so a repeat cast can't be driven through the
 # real TOML -> Engine -> CLI pipeline yet. This fixture only proves the tax

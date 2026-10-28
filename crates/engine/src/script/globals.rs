@@ -1000,7 +1000,7 @@ pub(crate) fn bind_game_globals(lua: &Lua, registry: Rc<RefCell<ScriptRegistry>>
         })?,
     )?;
 
-    // `Game.SelectTargets(filter)` yields its request to Lua's own `coroutine.yield`, not a `create_function` closure: mlua 0.9 without the `async` feature lets only code running as a coroutine call `coroutine.yield`, so a Rust-bound function can't suspend the Lua stack. A literal Lua definition avoids that (`phase5_coroutine_spike.rs` confirms a `coroutine.yield` inside a `Thread` round-trips values). `ScriptRuntime::invoke_operation` and `resume_operation` decode the yielded table and drive the pause and resume. This binding only produces the request.
+    // `Game.SelectTargets(filter)` yields its request to Lua's own `coroutine.yield`, not a `create_function` closure: mlua 0.9 without the `async` feature lets only code running as a coroutine call `coroutine.yield`, so a Rust-bound function can't suspend the Lua stack. A literal Lua definition avoids that (`coroutine_spike.rs` confirms a `coroutine.yield` inside a `Thread` round-trips values). `ScriptRuntime::invoke_operation` and `resume_operation` decode the yielded table and drive the pause and resume. This binding only produces the request.
     let select_targets: Function = lua
         .load(r#"function(filter) return coroutine.yield({ op = "select_target", filter = filter or {} }) end"#)
         .eval()?;

@@ -1,5 +1,5 @@
 //! Unit tests for the `decision` facade, building pause states directly. Real flows are
-//! covered in `tests/phase5_decision_answer_facade.rs`.
+//! covered in `tests/decision_answer_facade.rs`.
 
 use std::collections::VecDeque;
 
