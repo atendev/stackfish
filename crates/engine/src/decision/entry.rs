@@ -15,9 +15,13 @@ use crate::types::mana::Color;
 /// One target word of a spell or ability. `candidates` is explicit and in a
 /// stable order: objects by id, then players, then abilities on the stack.
 ///
-/// TODO: candidates are computed without an announced X, so a `mana_value`
-/// filter that mentions X sees X as 0 (the same rule `legal_target_candidates`
-/// already uses for triggers).
+/// The entry is listed before the caster announces X (CR 601.2b comes before
+/// 601.2c). A word whose `mana_value` filter mentions X is `x_dependent`, and
+/// lists every candidate legal for some X. The engine checks the pair of
+/// announced X and targets when the Answer arrives.
+///
+/// TODO(CR 107.3a): "legal for some X" ignores whether the caster can pay
+/// that X, like every other entry.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TargetSlot {
     pub candidates: Vec<Target>,
@@ -25,6 +29,8 @@ pub struct TargetSlot {
     pub min: u32,
     /// `None` for an "N or more" word.
     pub max: Option<u32>,
+    /// The candidates depend on the announced X, so they are a superset.
+    pub x_dependent: bool,
 }
 
 /// The target slots of a spell. A modal spell lists them per mode, because the

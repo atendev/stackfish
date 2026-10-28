@@ -142,11 +142,14 @@ pub struct WireSlot {
     /// Absent for an "N or more" word.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<u32>,
+    /// The candidates are every target legal for some announced X.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub x_dependent: bool,
 }
 
 impl From<&TargetSlot> for WireSlot {
     fn from(slot: &TargetSlot) -> Self {
-        WireSlot { candidates: slot.candidates.iter().map(|t| (*t).into()).collect(), min: slot.min, max: slot.max }
+        WireSlot { candidates: slot.candidates.iter().map(|t| (*t).into()).collect(), min: slot.min, max: slot.max, x_dependent: slot.x_dependent }
     }
 }
 

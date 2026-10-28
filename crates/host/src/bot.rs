@@ -583,6 +583,9 @@ impl Bot {
                 (modes, slots)
             }
         };
+        // TODO(ticket 031): a slot with `x_dependent` lists targets legal for some X, and the bot
+        // picks X and the targets separately, so the engine can reject the pair. No proof card
+        // has a `mana_value` filter that mentions X.
         let targets = self.slot_targets(&slots)?;
         Some(json!({
             "kind": "cast_spell",
