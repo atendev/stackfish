@@ -12,7 +12,7 @@ impl Engine {
     /// Everything the player who holds priority may do: play a land, cast a
     /// card, activate an ability or pass. `Pass` is always last. An entry is
     /// listed when timing, zone, restrictions and target existence allow it.
-    /// The list does not say whether the player can pay (ticket 003).
+    /// The list does not say whether the player can pay.
     pub fn legal_actions(&self) -> Vec<Entry> {
         commands::priority_entries(self.state(), self.script_runtime())
     }

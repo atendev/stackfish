@@ -1,17 +1,8 @@
-//! Checks an Answer to a priority, attack, block or damage Decision against the
-//! entries the Decision listed. They run before the Answer reaches the engine,
-//! so an action that no entry offers is a rejection and not a failure during
-//! `step()`.
-//!
-//! The checks are structural: the card or ability is listed, the cost route
-//! is offered, the mode count is in range, and every target is a listed
-//! candidate. The engine still validates what depends on the combination
-//! (which pairs of modes combine, how many blockers a menace attacker got)
-//! when the action runs.
-//!
-//! TODO: an Answer that passes here but fails in the engine's own check still
-//! surfaces as a pipeline error during `step()`. Closing that needs the engine
-//! atomicity item in `.plan/map.md`.
+//! Structural checks of a priority, attack, block or damage Answer against the
+//! entries the Decision listed, run before the Answer reaches the engine. See
+//! `DESIGN.md` for the rest.
+
+// TODO: which mode pairs combine and how many blockers a menace attacker got are only checked when the action runs, so a bad Answer there fails during `step()` and not as a rejection
 
 use std::collections::HashSet;
 
@@ -190,7 +181,7 @@ pub(super) fn check_attackers(entries: &[AttackerEntry], declared: &[(ObjectId, 
             return Err(invalid("a creature cannot attack twice"));
         }
     }
-    // CR 508.1d: a listed attacker marked `required` must be declared.
+    // CR 508.1d
     if entries.iter().any(|entry| entry.required && !seen.contains(&entry.attacker)) {
         return Err(invalid("a creature that must attack is not declared"));
     }

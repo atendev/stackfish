@@ -1,13 +1,5 @@
-//! The options a Decision lists. A priority Decision lists `Entry`s, a combat
-//! declaration lists attackers or blockers with who they may attack or block,
-//! and a damage assignment lists the splits a player has to choose.
-//!
-//! An entry is listed when timing, zone, restrictions and target existence
-//! allow it. The engine does not check that the player can pay (ticket 003):
-//! a Payment Decision that cannot be met answers `Payment(None)` and the cast
-//! unwinds. The engine's own validation still runs when the Answer arrives,
-//! because some rules depend on the combination of choices (the targets chosen
-//! for a mode, how many blockers a menace attacker got).
+//! The options a Decision lists: priority entries, attackers and blockers with
+//! their legal counterparts, and damage splits. See `DESIGN.md` for the rest.
 
 use crate::types::ids::{ObjectId, Target};
 use crate::types::mana::Color;
@@ -20,8 +12,7 @@ use crate::types::mana::Color;
 /// lists every candidate legal for some X. The engine checks the pair of
 /// announced X and targets when the Answer arrives.
 ///
-/// TODO(CR 107.3a): "legal for some X" ignores whether the caster can pay
-/// that X, like every other entry.
+/// TODO: "legal for some X" ignores whether the caster can pay that X (CR 107.3a)
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TargetSlot {
     pub candidates: Vec<Target>,
@@ -109,7 +100,10 @@ pub struct ActivateEntry {
     pub color_choice: Option<ColorChoice>,
 }
 
-/// One playable option at a priority Decision.
+/// One playable option at a priority Decision. An entry is listed when timing,
+/// zone, restrictions and target existence allow it, without checking that the
+/// player can pay. A Payment Decision that cannot be met answers
+/// `Payment(None)` and the cast unwinds.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Entry {
     PlayLand { card: ObjectId },

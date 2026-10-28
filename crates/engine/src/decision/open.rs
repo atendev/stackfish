@@ -1,7 +1,6 @@
-//! Builds the open Decision from the engine's current `ProcessState`. The
-//! match below has no wildcard arm on purpose: a new pause variant fails to
-//! compile here until it is mapped to a reply shape or marked as not waiting
-//! on a player.
+//! Builds the open Decision from the engine's current `ProcessState`. The match
+//! has no wildcard arm so a new pause variant fails to compile until it is
+//! mapped. See `DESIGN.md` for the rest.
 
 use crate::commands;
 use crate::engine::{Engine, ProcessState};
@@ -81,8 +80,7 @@ fn pick(candidates: Vec<Candidate>, min: usize, max: usize) -> ReplyShape {
 /// Every object and player a `Game.SelectTargets` ask may legally pick,
 /// objects first in id order. `ScriptChoiceRequest::SelectTarget` carries a
 /// filter rather than a list, so the facade evaluates it here.
-/// TODO: abilities on the stack are legal `Target::Ability` candidates for a
-/// filter that asks for them; they are not enumerated yet.
+/// TODO: abilities on the stack are legal `Target::Ability` candidates for a filter that asks for them, but they are not enumerated
 fn script_select_candidates(
     engine: &Engine,
     filter: &crate::types::target::TargetFilter,
