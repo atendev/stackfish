@@ -1,6 +1,5 @@
-//! `execute_command`'s `AssignCombatDamage` arm body, split out of the
-//! original monolithic `commands.rs` - ordering, first/double strike,
-//! lethal-damage math, and event building.
+//! The `AssignCombatDamage` command body: ordering, first and double strike,
+//! lethal-damage math and event building. See `DESIGN.md` for the rest.
 
 use std::collections::{HashMap, HashSet};
 
@@ -39,12 +38,11 @@ pub(crate) fn plan_damage_splits<'a>(
     state: &'a GameState,
     script_runtime: &ScriptRuntime,
 ) -> Result<Option<SplitPlan<'a>>, Rejected> {
-    // CR 510.1/509.1's turn-based-action shape, same as
-    // DeclareAttackers/DeclareBlockers: only during the combat
-    // damage step. Which player is allowed to be `command.actor`
-    // is resolved further down, once we know which splits (if any)
-    // this step actually needs - see the "required chooser" block
-    // below `requires_assignment`.
+    // CR 510.1/509.1
+    // A turn-based action like DeclareAttackers and DeclareBlockers, allowed only in
+    // the combat damage step. Who may be `command.actor` is decided below, once it
+    // is known which splits this step needs (see the required-chooser block after
+    // `requires_assignment`).
     if state.phase != Phase::Combat
         || !matches!(state.step, Step::CombatDamage | Step::FirstStrikeDamage)
     {
@@ -58,29 +56,20 @@ pub(crate) fn plan_damage_splits<'a>(
     })?;
     let step = state.step;
 
-    // `phase5/automatic-combat-damage`: this step's damage was already
-    // assigned+dealt - either `engine::turn`'s own auto-fire attempt beat
-    // this call to it (the common case a redundant explicit
-    // `AssignCombatDamage{assignments: vec![]}` submission hits, kept
-    // legal so every pre-existing zero-split call site across the test
-    // suite stays a harmless no-op rather than needing to be deleted), or
-    // this is a genuine second submission for a step that's already done.
-    // CR 510 has no "assign twice" case for a real player to hit either
-    // way, so both collapse to the same no-op rather than distinguishing
-    // them.
+    // This step's damage was already assigned and dealt, either by the auto-fire
+    // attempt in `engine::turn` or by an earlier submission. CR 510 has no
+    // assign-twice case, so a redundant submission (such as an empty
+    // `AssignCombatDamage`) is a harmless no-op.
     if combat.damage_assigned_this_step {
         return Ok(None);
     }
 
-    // CR 510.1a/702.7: a participant that no longer resolves in
-    // state.objects (killed by a spell in the priority window before
-    // this step, or - the case first strike makes central - by the
-    // first-strike step's own damage) never assigns or deals damage,
-    // full stop, rather than hard-erroring the whole command. Same
-    // treatment for a participant that resolves fine but isn't
-    // eligible for *this* damage step: a plain creature during the
-    // first-strike step, or a first-strike-only creature (no double
-    // strike) during the regular step, sits this step out entirely.
+    // CR 510.1a/702.7
+    // A participant missing from state.objects (killed before this step, or by the
+    // first-strike step's damage) never assigns or deals damage, and does not error
+    // the command. The same goes for one not eligible for this step: a plain
+    // creature in the first-strike step, or a first-strike-only creature in the
+    // regular step.
     let attackers: Vec<(ObjectId, Target)> = combat
         .attackers
         .iter()
@@ -93,13 +82,10 @@ pub(crate) fn plan_damage_splits<'a>(
                 )
         })
         .collect();
-    // Alive only, deliberately NOT filtered by the blocker's own
-    // step-eligibility - which step an attacker's damage is dealt in
-    // is decided by the attacker's own keywords, not the blocker's
-    // (a first-strike attacker's damage lands on a plain blocker
-    // during the first-strike step same as always; the blocker's
-    // lack of first strike only decides whether *it* strikes back
-    // this step, handled by the separately-filtered `blocks` below).
+    // Alive only, and not filtered by the blocker's step eligibility: the attacker's
+    // own keywords decide which step its damage lands in. The blocker's lack of
+    // first strike only decides whether it strikes back this step, which the
+    // filtered `blocks` below handles.
     let alive_blocks: Vec<(ObjectId, ObjectId)> = combat
         .blocks
         .iter()
@@ -114,24 +100,15 @@ pub(crate) fn plan_damage_splits<'a>(
         })
         .collect();
 
-    // CR 509.1h/510.1c: "blocked" is decided once, at declare-
-    // blockers time, and doesn't change even if every blocker
-    // assigned to an attacker later leaves combat (dies to a spell,
-    // etc) before damage is assigned — a blocked attacker with zero
-    // *living* blockers still deals no combat damage at all, unless
-    // it has trample (CR 702.19d, the one case where it's treated as
-    // though every blocker got lethal damage). Computed from the raw
-    // `combat.blocks` (unfiltered by aliveness), deliberately
-    // distinct from `blockers_by_attacker` below (which only tracks
-    // *living* blockers) - conflating the two was a real pre-
-    // existing bug: an attacker whose blockers all died before this
-    // step fell into the same "no entry" case as a never-blocked
-    // attacker and incorrectly dealt full damage to the defending
-    // player regardless of trample. `combat.effect_blocked` (CR
-    // 509.1h/702.22i: became blocked via an effect, never had a real
-    // blocker to begin with) joins the same set for the exact same
-    // reason - zero blockers, living or otherwise, still means no
-    // combat damage unless trample.
+    // CR 509.1h/510.1c
+    // "Blocked" is fixed at declare-blockers time and survives every blocker leaving
+    // combat before damage. A blocked attacker with no living blockers deals no
+    // combat damage unless it has trample (CR 702.19d). Computed from the raw
+    // `combat.blocks`, unlike `blockers_by_attacker` below, which tracks only living
+    // blockers: conflating them made such an attacker deal full damage to the
+    // defending player regardless of trample. `combat.effect_blocked` (CR
+    // 509.1h/702.22i: blocked by an effect, with no real blocker) joins the same set
+    // for the same reason.
     let declared_blocked_attackers: HashSet<ObjectId> = combat
         .blocks
         .iter()
@@ -139,24 +116,18 @@ pub(crate) fn plan_damage_splits<'a>(
         .chain(combat.effect_blocked.iter().copied())
         .collect();
 
-    // CR 510.1c: a real split only exists for an attacker with 2+
-    // living blockers, or exactly 1 living blocker if it has trample
-    // (CR 702.19b - even a single blocker needs a chosen lethal-vs-
-    // excess split once trample is in play). Every other attacker
-    // (0 living blockers, or 1 with no trample) has exactly one
-    // legal place for its damage to go, computed below rather than
-    // chosen. Computed from `alive_blocks` (not step-filtered - see
-    // above), so a dead blocker is never required in a split, but a
-    // step-ineligible one still is (its attacker's damage still has
-    // to go somewhere this step).
+    // CR 510.1c
+    // A real split exists only for an attacker with 2+ living blockers, or one
+    // living blocker if it has trample (CR 702.19b). Any other attacker has one
+    // legal place for its damage, computed below. Built from `alive_blocks`, so a
+    // dead blocker is never in a split but a step-ineligible one still is, since its
+    // attacker's damage still has to go somewhere.
     let mut blockers_by_attacker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     for (blocker, attacker) in &alive_blocks {
         blockers_by_attacker.entry(*attacker).or_default().push(*blocker);
     }
-    // Also scoped to attackers that themselves participate this step
-    // (alive and step-eligible) - a dead or step-ineligible attacker
-    // deals no damage this step at all, so it can't need a split
-    // either, even if 2+ of its blockers happen to be eligible now.
+    // Scoped to attackers that participate this step (alive and step-eligible): a
+    // dead or step-ineligible attacker deals no damage, so it needs no split.
     let participating_attackers: HashSet<ObjectId> =
         attackers.iter().map(|(attacker, _)| *attacker).collect();
     let mut requires_assignment: HashSet<ObjectId> = blockers_by_attacker
@@ -170,12 +141,11 @@ pub(crate) fn plan_damage_splits<'a>(
         })
         .map(|(attacker, _)| *attacker)
         .collect();
-    // CR 702.22h/k: banding can force a single blocker onto 2+
-    // attackers (band propagation in DeclareBlockers) - that blocker
-    // then needs the same kind of chosen split `blockers_by_attacker`
-    // above already models for a multi-blocked attacker. Built from
-    // the step-filtered `blocks` (not `alive_blocks`) since only a
-    // blocker that itself deals damage this step can need one.
+    // CR 702.22h/k
+    // Banding can force one blocker onto 2+ attackers (band propagation in
+    // DeclareBlockers), and that blocker needs a chosen split like a multi-blocked
+    // attacker. Built from the step-filtered `blocks`, since only a blocker that
+    // deals damage this step can need one.
     let mut attackers_by_blocker: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     for (blocker, attacker) in &blocks {
         attackers_by_blocker.entry(*blocker).or_default().push(*attacker);
@@ -184,15 +154,11 @@ pub(crate) fn plan_damage_splits<'a>(
         attackers_by_blocker.iter().filter(|(_, attackers)| attackers.len() >= 2).map(|(blocker, _)| *blocker),
     );
 
-    // CR 702.22j/k's second trigger condition: independent of
-    // banding entirely (and independent of any declared band - this
-    // is a pure grouping-by-block check at the damage step), the
-    // chooser also flips when `ids` contains a creature X with
-    // "bands with other [quality]" for some quality Q and another
-    // creature Y (Y != X) whose own subtypes include Q. Tries every
-    // quality X names in turn, same "any one match is enough"
-    // posture `commands::PlayerActionKind::DeclareBands`'s own
-    // quality-band check already takes.
+    // CR 702.22j/k
+    // The chooser also flips, independent of banding and of any declared band, when
+    // `ids` contains a creature X with "bands with other [quality]" for some quality
+    // Q and another creature Y whose subtypes include Q. Tries every quality X
+    // names, as `PlayerActionKind::DeclareBands`'s quality check does.
     let has_bands_with_other_pair = |ids: &[ObjectId]| -> bool {
         ids.iter().any(|x| {
             let x_characteristics = crate::layers::effective_characteristics(state, script_runtime, *x);
@@ -204,9 +170,9 @@ pub(crate) fn plan_damage_splits<'a>(
                             .contains(quality)
                 })
             });
-            // CR 702.22c/j/k's supertype form ("bands with other Legends"):
-            // same pairwise check, against each candidate's `supertypes`
-            // bitset instead of a `Vec<Subtype>`.
+            // CR 702.22c/j/k
+            // The supertype form: the same pairwise check against each candidate's
+            // `supertypes` bitset instead of a `Vec<Subtype>`.
             let supertype_match = x_characteristics.bands_with_other_supertypes.iter().any(|quality| {
                 ids.iter().any(|y| {
                     y != x
@@ -219,20 +185,14 @@ pub(crate) fn plan_damage_splits<'a>(
         })
     };
 
-    // CR 510.1c/d: a split is chosen by the object's own controller
-    // by default - attacker splits by the attacker's controller,
-    // blocker splits by the blocker's controller. CR 702.22j/k flip
-    // that per-id when either trigger condition holds on the
-    // *other* side of that particular block: a plain `BANDING`
-    // creature there, or `has_bands_with_other_pair` above. An
-    // attacker blocked by either has its split chosen by the
-    // defending player instead (702.22j); a blocker blocking either
-    // has its split chosen by the active player instead (702.22k -
-    // this also covers the pre-existing band-forced-blocker case
-    // for real now, rather than by the old blanket-active-player
-    // hardcode's accident: every band needs >=1 banding member, so
-    // a band-forced blocker split was always going to resolve to
-    // "active player" here anyway).
+    // CR 510.1c/d
+    // A split is chosen by the object's own controller by default (attacker splits
+    // by the attacker's controller, blocker splits by the blocker's). CR 702.22j/k
+    // flip that per id when the other side of that block has a plain `BANDING`
+    // creature or `has_bands_with_other_pair`: an attacker so blocked has its split
+    // chosen by the defending player (702.22j), and a blocker so blocking by the
+    // active player (702.22k). This also covers a band-forced blocker, since every
+    // band has at least one banding member.
     let attacker_defending_player = |attacker: &ObjectId| -> PlayerId {
         let (_, target) =
             combat.attackers.iter().find(|(id, _)| id == attacker).expect("attacker is attacking");
@@ -244,11 +204,10 @@ pub(crate) fn plan_damage_splits<'a>(
             Target::Ability(_) => unreachable!("an attacker's own combat target is never an ability"),
         }
     };
-    // CR 510.1c/d/702.22j/k: which player chooses *each* id's own split -
-    // a map, not just a set, since two different ids in the same step can
-    // legitimately have two different choosers (a plain multi-blocked
-    // attacker chosen by its own controller, alongside a separate
-    // Banding-blocked attacker chosen by the defending player instead).
+    // CR 510.1c/d/702.22j/k
+    // Which player chooses each id's split. A map and not a set, because two ids in
+    // one step can have different choosers (a multi-blocked attacker chosen by its
+    // controller beside a Banding-blocked attacker chosen by the defending player).
     let mut required_actor_by_id: HashMap<ObjectId, PlayerId> = HashMap::new();
     for id in &requires_assignment {
         let actor_for_id = if let Some(blockers) = blockers_by_attacker.get(id) {
@@ -297,9 +256,9 @@ pub(crate) enum DamagePlan {
     Deal { events: Vec<GameEventKind> },
 }
 
-/// `phase5/automatic-combat-damage`'s `engine::turn::resolve_advance_turn_step_state`
-/// calls this directly (its own auto-fire attempt on entering the damage step),
-/// outside the normal `execute_command` dispatch.
+/// `engine::turn::resolve_advance_turn_step_state` calls this directly on
+/// entering the damage step (its auto-fire attempt), outside the normal
+/// `execute_command` dispatch.
 pub(crate) fn execute_assign_combat_damage(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
@@ -340,32 +299,27 @@ fn validate_damage(
         required_actor_by_id,
     }) = plan_damage_splits(state, script_runtime)?
     else {
-        // `phase5/automatic-combat-damage`: already assigned and dealt, so a
-        // redundant submission is a harmless no-op.
+        // Already assigned and dealt, so a redundant submission is a no-op.
         return Ok(DamagePlan::AlreadyAssigned);
     };
-    // Splits some other actor already submitted this step (CR 508.5a's
-    // "declared_defenders" precedent for the identical "this turn-based
-    // action can need input from more than one player" shape) - cloned
-    // rather than borrowed, so nothing below needs to juggle a `state.
-    // combat` borrow alongside the many `effective_*(state, ...)` calls
-    // still to come.
+    // Splits another actor already submitted this step (the same shape as CR
+    // 508.5a's `declared_defenders`: a turn-based action that can need input from
+    // more than one player). Cloned so nothing below juggles a `state.combat`
+    // borrow beside the `effective_*(state, ...)` calls.
     let already_submitted = combat.pending_damage_splits.clone();
     let still_needed: HashSet<ObjectId> =
         requires_assignment.iter().copied().filter(|id| !already_submitted.contains_key(id)).collect();
-    // This actor's own remaining share - not the whole step's
-    // `requires_assignment` (that may include ids a *different* actor is
-    // the chooser for, submitted separately) and not ids some earlier
-    // call already covered.
+    // This actor's remaining share: not the whole step's `requires_assignment`
+    // (which may include ids a different actor chooses) and not ids an earlier call
+    // covered.
     let this_actors_ids: HashSet<ObjectId> = still_needed
         .iter()
         .copied()
         .filter(|id| required_actor_by_id.get(id) == Some(&actor))
         .collect();
     if requires_assignment.is_empty() {
-        // No split needed at all this step - same turn-based-action
-        // convention DeclareAttackers/DeclareBlockers use, active player
-        // only (matches every pre-existing zero-split test).
+        // No split needed this step: a turn-based action for the active player only, as
+        // with DeclareAttackers and DeclareBlockers.
         if actor != state.active_player {
             return Err(Rejected::IllegalAction(
                 "actor is not the player who chooses this combat damage step's split(s)"
@@ -381,11 +335,10 @@ fn validate_damage(
         ));
     }
 
-    // CR 510.1e atomicity, now scoped to *this actor's own* share rather
-    // than the whole step: `assignments` must cover exactly the ids this
-    // actor is the chooser for and hasn't already submitted - no extra, no
-    // missing, and none belonging to a different required actor (that
-    // player's own share is submitted in its own separate call).
+    // CR 510.1e
+    // Atomic per actor: `assignments` must cover exactly the ids this actor chooses
+    // and has not yet submitted, with none extra, none missing and none belonging to
+    // a different required actor (that player submits their own share separately).
     let submitted: HashSet<ObjectId> = assignments.iter().map(|(id, _)| *id).collect();
     if submitted != this_actors_ids {
         return Err(Rejected::IllegalAction(
@@ -402,10 +355,9 @@ fn validate_damage(
         if state.object(*id).is_none() {
             return Err(Rejected::InvalidTarget);
         }
-        // CR 510.1a: 0-or-less power assigns no damage. Reads through
-        // effective_power (CR 613 layer 7c) so this validation stays
-        // consistent with the actual damage-event amounts computed
-        // below, which use the same helper.
+        // CR 510.1a
+        // Power of 0 or less assigns no damage. Reads effective_power (CR 613 layer 7c)
+        // so validation matches the damage amounts computed below.
         let power = effective_power(state, script_runtime, *id).map(|p| p.max(0) as u32).unwrap_or(0);
 
         if let Some(blockers) = blockers_by_attacker.get(id) {
@@ -443,12 +395,11 @@ fn validate_damage(
                     ));
                 }
             } else {
-                // CR 702.19b: a trampler may send the remainder to the
-                // defending player (handled in the assign-and-deal pass
-                // below), but only once every blocker in the split has
-                // been given at least its own lethal amount - short one
-                // and *nothing* can go to the player, all of `power`
-                // must stay on blockers instead.
+                // CR 702.19b
+                // A trampler may send the remainder to the defending player (in the
+                // assign-and-deal pass below) only once every blocker in the split has at least
+                // its lethal amount. Short one blocker, nothing goes to the player and all of
+                // `power` must stay on blockers.
                 if sum > power {
                     return Err(Rejected::IllegalAction(
                         "a split's amounts can't sum to more than the attacker's power".to_string(),
@@ -469,11 +420,10 @@ fn validate_damage(
                 }
             }
         } else {
-            // CR 702.22h/k: the blocker-side case - a blocker forced
-            // onto 2+ attackers by band propagation. No trample-style
-            // carve-out here: a blocker has no "spill to the
-            // defending player" outlet, so its split must sum to
-            // exactly its power every time.
+            // CR 702.22h/k
+            // The blocker-side case: a blocker forced onto 2+ attackers by band propagation.
+            // A blocker has no spill outlet like trample, so its split must sum to exactly
+            // its power.
             let attackers_for_blocker = &attackers_by_blocker[id];
             let mut seen = Vec::with_capacity(splits.len());
             let mut sum: u32 = 0;
@@ -507,32 +457,27 @@ fn validate_damage(
         }
     }
 
-    // Everyone required has submitted once this actor's share joins the shares
-    // already recorded (CR 508.5a's `declared_defenders` precedent, applied to a
-    // real payload instead of a bare "who's gone" marker).
+    // Everyone required has submitted once this actor's share joins the recorded
+    // shares (CR 508.5a's `declared_defenders` applied to a real payload).
     let mut assignment_map: HashMap<ObjectId, Vec<(ObjectId, u32)>> = already_submitted;
     for (id, splits) in &assignments {
         assignment_map.insert(*id, splits.clone());
     }
     if assignment_map.len() < requires_assignment.len() {
-        // Still waiting on a different required actor's own share this
-        // step - CR 510.2's simultaneous damage can't be dealt until
-        // everyone's chosen, but this actor's own split is genuinely
-        // recorded (a real turn-based action, not a no-op).
+        // Still waiting on another required actor's share. CR 510.2's simultaneous
+        // damage cannot be dealt until everyone has chosen, but this actor's split is
+        // recorded.
         return Ok(DamagePlan::Record { assignments });
     }
 
-    // CR 510.1b/c/d + 510.2: assign and deal in the same pass - no
-    // priority window between them.
+    // CR 510.1b/c/d/510.2
+    // Assign and deal in one pass, with no priority window between.
     let mut events = Vec::new();
     for (attacker, target) in &attackers {
-        // CDA power (PTValue::CharacteristicDefining, layer 7a) now
-        // resolves for real if the card's base value carries a
-        // script - a script-less/erroring CDA still skips rather
-        // than guesses, same stance sba.rs's toughness check
-        // already takes. effective_power also folds in any
-        // applicable ModifyPT/SetPT continuous effect (layer 7c) on
-        // top of that.
+        // CDA power (PTValue::CharacteristicDefining, layer 7a) resolves if the base
+        // value carries a script; a script-less or erroring CDA is skipped and not
+        // guessed, as in sba.rs's toughness check. effective_power also folds in
+        // applicable ModifyPT and SetPT effects (layer 7c).
         let Some(power) = effective_power(state, script_runtime, *attacker) else {
             continue;
         };
@@ -546,17 +491,15 @@ fn validate_damage(
 
         match blockers_by_attacker.get(attacker) {
             None if declared_blocked_attackers.contains(attacker) && !has_trample => {
-                // CR 509.1h/510.1c: blocked, but every blocker is
-                // gone by damage time, no trample - deals no combat
-                // damage at all, not "falls back to the original
-                // target" (that's only the genuinely-unblocked case
-                // below, or the trample case CR 702.19d covers).
+                // CR 509.1h/510.1c
+                // Blocked but every blocker gone, no trample: deals no combat damage. It does
+                // not fall back to the original target; only a never-blocked attacker or
+                // trample (CR 702.19d) does.
             }
             None => {
-                // 510.1b (never blocked), or 702.19d (blocked, no
-                // living blockers left, trample - as though every
-                // blocker got lethal damage) - all damage to the
-                // original target either way.
+                // CR 510.1b/702.19d
+                // Never blocked, or blocked with no living blockers left and trample (as though
+                // every blocker got lethal damage): all damage goes to the original target.
                 events.push(GameEventKind::DamageDealt {
                     source: *attacker,
                     target: *target,
@@ -565,8 +508,8 @@ fn validate_damage(
                 });
             }
             Some(blockers) if blockers.len() == 1 && !has_trample => {
-                // 510.1c: exactly one blocker, no trample - no
-                // choice, all damage there.
+                // CR 510.1c
+                // One blocker, no trample: no choice, all damage there.
                 events.push(GameEventKind::DamageDealt {
                     source: *attacker,
                     target: Target::Object(blockers[0]),
@@ -575,13 +518,11 @@ fn validate_damage(
                 });
             }
             Some(_) => {
-                // 510.1c (2+ blockers) or a single trampling blocker
-                // (CR 702.19b) - the validated split above, plus
-                // whatever it left unassigned spilling to the
-                // original target (CR 702.19b's "excess... assigned
-                // as its controller chooses"; validation above
-                // already confirmed every blocker got its lethal
-                // amount whenever this remainder is nonzero).
+                // CR 510.1c/702.19b
+                // 2+ blockers or a single trampling blocker: the validated split above, plus
+                // whatever it left unassigned spilling to the original target. Validation
+                // already confirmed every blocker got its lethal amount whenever the remainder
+                // is nonzero.
                 let mut assigned_to_blockers = 0u32;
                 for (blocker, amount) in &assignment_map[attacker] {
                     assigned_to_blockers += *amount;
@@ -606,12 +547,11 @@ fn validate_damage(
             }
         }
     }
-    // 510.1d: a blocker deals its damage to the one attacker it
-    // blocks - unambiguous, unless banding forced it onto 2+
-    // attackers (CR 702.22h/k), in which case the validated split
-    // above decides. `handled_blockers` collapses `blocks`'s
-    // possibly-repeated blocker entries (one per attacker it's
-    // forced onto) down to one pass per distinct blocker.
+    // CR 510.1d
+    // A blocker deals damage to the one attacker it blocks, unless banding forced it
+    // onto 2+ attackers (CR 702.22h/k), where the validated split above decides.
+    // `handled_blockers` reduces `blocks`'s repeated blocker entries (one per
+    // attacker it is forced onto) to one pass per blocker.
     let mut handled_blockers: HashSet<ObjectId> = HashSet::new();
     for (blocker, _) in &blocks {
         if !handled_blockers.insert(*blocker) {
@@ -646,10 +586,9 @@ fn validate_damage(
         }
     }
 
-    // CR 510.2/601.2a: these are proposed events only - engine.rs's
-    // ReplacementCheck (CR 614-616) gets a chance to rewrite or
-    // prevent each one (see apply_damage_event's own doc comment for
-    // why the real mutation isn't performed here anymore).
+    // CR 510.2/601.2a
+    // These are proposed events only. ReplacementCheck (CR 614-616) can rewrite or
+    // prevent each one, so the real mutation happens in apply_damage_event.
     Ok(DamagePlan::Deal { events })
 }
 
@@ -665,12 +604,10 @@ fn apply_damage(state: &mut GameState, plan: DamagePlan) -> Result<CommandOutcom
             Vec::new()
         }
         DamagePlan::Deal { events } => {
-            // `phase5/automatic-combat-damage`: mark this step done so a later
-            // call this same step (auto-fire or a redundant explicit submission)
-            // hits the no-op guard above instead of dealing damage twice. Also
-            // clears the now-fully-consumed accumulator, same as
-            // `damage_assigned_this_step` itself, both reset again on the next
-            // real transition into a fresh damage step (engine/turn.rs).
+            // Mark this step done so a later call (auto-fire or a redundant explicit
+            // submission) hits the no-op guard above and does not deal damage twice. This
+            // also clears the consumed accumulator; both reset on the next transition into a
+            // damage step (engine/turn.rs).
             let combat =
                 state.combat.as_mut().ok_or_else(|| Internal::new("assign damage: the validated combat is gone"))?;
             combat.damage_assigned_this_step = true;

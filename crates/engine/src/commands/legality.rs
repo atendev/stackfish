@@ -1,6 +1,5 @@
-//! Sorcery-speed/legality helper predicates and target validation, shared by
-//! `execute_command`'s match arms (`land`/`cast`/`activate`/`combat`
-//! submodules) - split out of the original monolithic `commands.rs`.
+//! Sorcery-speed and legality predicates and target validation, shared by the
+//! command bodies. See `DESIGN.md` for the rest.
 
 use std::collections::HashSet;
 
@@ -18,22 +17,14 @@ use crate::types::zone::ZoneKind;
 
 use super::{non_eliminated_players, Rejected};
 
-/// CR 117.1a's "sorcery speed" window — `player` may take an action that
-/// requires it (playing a land, casting a sorcery, most activated
-/// abilities) only when all of: they hold priority, it's their own turn
-/// (CR 305.3), it's a main phase of that turn (CR 305.1), and the stack is
-/// empty (CR 307.1/305.1). Pulled out as a standalone predicate rather than
-/// inlined into `PlayLand` alone, since `CastSpell`'s sorcery-timing branch
-/// and `ActivateAbility`'s own CR 702.6a check (Equip's "activate only as a
-/// sorcery," `phase5/equip-ability`) both need the exact same condition.
+/// CR 117.1a sorcery-speed window: `player` may take a sorcery-speed action
+/// (play a land, cast a sorcery, most activated abilities) only when they hold
+/// priority, it is their own turn (CR 305.3), it is a main phase (CR 305.1) and
+/// the stack is empty (CR 307.1/305.1). A standalone predicate because
+/// `PlayLand`, `CastSpell` and `ActivateAbility`'s Equip check (CR 702.6a) share
+/// the condition.
 ///
-/// TODO: doesn't account for effects that grant timing permission beyond
-/// the base rule (e.g. "you may play an additional land," "you may cast
-/// this spell as though it had flash," "you may play lands as though it
-/// were a main phase") - those are all CR 113.6-style rules-text
-/// permissions layered on top of this base check, and nothing here
-/// consults state.continuous_effects/abilities for them yet. Revisit once
-/// such an effect needs representing.
+/// TODO: effects that grant timing permission beyond the base rule ("additional land", "as though it had flash", "as though it were a main phase") are not consulted, since nothing here reads state.continuous_effects or abilities for them (CR 113.6)
 pub(in crate::commands) fn is_sorcery_speed(state: &GameState, player: PlayerId) -> bool {
     state.priority_player == player
         && state.active_player == player
@@ -41,16 +32,14 @@ pub(in crate::commands) fn is_sorcery_speed(state: &GameState, player: PlayerId)
         && state.stack.is_empty()
 }
 
-/// CR 302.6/602.5a's summoning sickness check: `object` is sick unless it's
-/// been under its current controller's control since their most recent
-/// turn began. Derived from `GameObject.controlled_since_turn` against
-/// `GameState.last_active_turn_number` rather than a stored bool - see
-/// those fields' doc comments for why. CR 702.10b/c: Haste bypasses this
-/// check entirely. Checks against `object`'s *live* controller
-/// (`layers::effective_controller`), not the raw field - CR 302.6 cares who
-/// controls the creature right now, which matters the moment a
-/// `GainControl` effect exists (`controlled_since_turn` itself still isn't
-/// bumped by one - see this slice's own UNRESOLVED note).
+/// CR 302.6/602.5a summoning sickness: `object` is sick unless it has been under
+/// its current controller's control since their most recent turn began. Derived
+/// from `GameObject.controlled_since_turn` against
+/// `GameState.last_active_turn_number` and not stored (see those fields). Haste
+/// bypasses it (CR 702.10b/c). Checks the live controller
+/// (`layers::effective_controller`), since CR 302.6 cares who controls the
+/// creature now.
+/// TODO: `controlled_since_turn` is not bumped by a `GainControl` effect
 pub(crate) fn has_summoning_sickness(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -62,22 +51,17 @@ pub(crate) fn has_summoning_sickness(
     let controller = crate::layers::effective_controller(state, script_runtime, object.object_id);
     match state.last_active_turn_number.get(&controller) {
         Some(&since) => object.controlled_since_turn >= since,
-        // The controller has no recorded turn start at all - shouldn't
-        // happen past the very first turn (PreGame seeds this), but "no
-        // record" isn't evidence of long-standing control either, so treat
-        // it as sick rather than silently allowing it.
+        // No recorded turn start is not evidence of long-standing control, so treat it
+        // as sick. PreGame seeds this, so it should not happen past the first turn.
         None => true,
     }
 }
 
 /// CR 613 layer 6: `id`'s live keywords (printed plus anything granted by an
 /// applicable `ContinuousEffect`), via `layers::effective_characteristics`.
-/// Tolerates a missing `id` (returns `KeywordSet::empty()`) rather than
-/// panicking the way `effective_characteristics` itself does — several call
-/// sites below already separately raise `Rejected::InvalidTarget` for a
-/// missing id and just want "no keywords" as the fallback otherwise (mirrors
-/// the pre-existing `Option<&GameObject>` + `is_some_and` shape this
-/// replaces).
+/// Returns `KeywordSet::empty()` for a missing `id` where
+/// `effective_characteristics` would panic, since callers reject a missing id
+/// separately with `Rejected::InvalidTarget`.
 pub(crate) fn effective_keywords(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> KeywordSet {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).keywords
@@ -86,14 +70,11 @@ pub(crate) fn effective_keywords(state: &GameState, script_runtime: &ScriptRunti
     }
 }
 
-/// CR 613.1f "as though it didn't have [keyword]" text: `id`'s live
-/// `IgnoreKeyword` grants (see that primitive's own doc comment).
-/// A caller enforcing a keyword-driven restriction (today, only the
-/// Defender attack-declaration check) must combine this with
-/// `effective_keywords` above — the keyword still has to be present in
-/// `effective_keywords` (this doesn't imply the keyword itself), just with
-/// its restriction voided if it's also present here. Same missing-`id`
-/// fallback as `effective_keywords`.
+/// CR 613.1f: `id`'s live `IgnoreKeyword` grants (see that primitive), which void
+/// a keyword's restriction. A caller enforcing a keyword-driven restriction
+/// (only Defender's attack check does) must combine this with
+/// `effective_keywords`: the keyword must be present there and absent here. Same
+/// missing-`id` fallback as `effective_keywords`.
 pub(crate) fn ignored_keywords(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> KeywordSet {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).ignored_keywords
@@ -102,12 +83,11 @@ pub(crate) fn ignored_keywords(state: &GameState, script_runtime: &ScriptRuntime
     }
 }
 
-/// CR 510.1a/702.7: whether a creature with `keywords` assigns/deals combat
-/// damage during `step` (`FirstStrikeDamage` or `CombatDamage` - any other
-/// `Step` value is unreachable, gated by `AssignCombatDamage`'s own
-/// phase/step check above). `FIRST_STRIKE`/`DOUBLE_STRIKE` are independent
-/// bits - a double striker only needs `DOUBLE_STRIKE` set to take part in
-/// both steps, it doesn't also need `FIRST_STRIKE`.
+/// CR 510.1a/702.7: whether a creature with `keywords` deals combat damage during
+/// `step` (`FirstStrikeDamage` or `CombatDamage`; `AssignCombatDamage`'s step
+/// check rules out any other). `FIRST_STRIKE` and `DOUBLE_STRIKE` are
+/// independent bits, so a double striker needs only `DOUBLE_STRIKE` to take part
+/// in both steps.
 pub(in crate::commands) fn participates_in_damage_step(keywords: KeywordSet, step: Step) -> bool {
     match step {
         Step::FirstStrikeDamage => keywords.intersects(KeywordSet::FIRST_STRIKE | KeywordSet::DOUBLE_STRIKE),
@@ -115,13 +95,11 @@ pub(in crate::commands) fn participates_in_damage_step(keywords: KeywordSet, ste
     }
 }
 
-/// CR 613 layers 7a/7c: `id`'s live power (already netted against counters,
-/// any resolvable characteristic-defining base, and any applicable
-/// `ModifyPT`/`SetPT` continuous effect), via `layers::effective_characteristics`.
-/// `None` for a missing `id` or an unresolved characteristic-defining base
-/// value — same "skip rather than guess" contract `effective_characteristics`
-/// itself already documents, just reachable without risking its
-/// panic-on-missing-id path.
+/// CR 613 layers 7a/7c: `id`'s live power, netted against counters, any
+/// resolvable characteristic-defining base and any applicable `ModifyPT` or
+/// `SetPT` effect, via `layers::effective_characteristics`. `None` for a missing
+/// `id` or an unresolved characteristic-defining base, so callers skip rather
+/// than guess and avoid its panic on a missing id.
 pub(crate) fn effective_power(state: &GameState, script_runtime: &ScriptRuntime, id: ObjectId) -> Option<i32> {
     if state.object(id).is_some() {
         crate::layers::effective_characteristics(state, script_runtime, id).power
@@ -140,16 +118,13 @@ fn effective_toughness(state: &GameState, script_runtime: &ScriptRuntime, id: Ob
     }
 }
 
-/// CR 702.19b: the minimum amount of combat damage `AssignCombatDamage` must
-/// give `blocker` before a trampling attacker may send any excess to the
-/// defending player — effective toughness minus damage already marked (from
-/// an earlier step, e.g. first strike, or a non-combat source this turn),
-/// floored at 0, netted down to 1 if `attacker_has_deathtouch` (CR 702.2b:
-/// any nonzero deathtouch damage is lethal regardless of toughness). An
-/// unresolved toughness (missing CDA script, same "skip rather than guess"
-/// stance as `effective_power`) reads as "needs everything" (`u32::MAX`) so
-/// a trampler can never claim to have satisfied a lethal requirement it
-/// can't actually compute — safer than silently treating unknown as 0.
+/// CR 702.19b: the minimum combat damage `AssignCombatDamage` must give
+/// `blocker` before a trampling attacker may send excess to the defending
+/// player: effective toughness minus damage already marked (from an earlier step
+/// or a non-combat source this turn), floored at 0, and 1 if
+/// `attacker_has_deathtouch` (CR 702.2b). An unresolved toughness reads as
+/// `u32::MAX` ("needs everything"), so a trampler never claims a lethal
+/// requirement it cannot compute.
 pub(in crate::commands) fn lethal_damage_needed(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -170,40 +145,16 @@ pub(in crate::commands) fn lethal_damage_needed(
     }
 }
 
-/// CR 115/601.2c-e: whether `target` satisfies `filter`, evaluated against
-/// current `state` (used both at cast/activation time and, unchanged, again
-/// at `ResolveStackTop` for the CR 608.2b recheck — legality is defined the
-/// same way both times, only *when* it's asked differs). `caster` is the
-/// spell/ability's controller, since `FilterController::You`/`Opponent` are
-/// relative to whoever is casting/activating, not the target's own
-/// perspective.
-///
-/// TODO: `CR 115.2`'s "no longer in the zone it was in" half of 608.2b isn't
-/// checked here — this only asks "is it legal *now*", not "is it in the
-/// zone it was originally targeted in". The two coincide for every filter
-/// this slice builds (an `Object` filter's `zone` is fixed, so a target that
-/// changed zones already fails the zone check below), but a future filter
-/// that doesn't pin a zone would need the original zone threaded through
-/// separately to catch that case.
-/// CR 702.16c: `target_id` can't be the target of a spell/ability matching
-/// a quality it has protection from — color (702.16e), card type (702.16),
-/// subtype (702.16), name (702.16a), "everything" (702.16j), or a specific
-/// player (702.16k), checked as an OR across all six. `source` is the
-/// spell/ability's own object id (the card being cast, or the source of an
-/// activated ability) — its color/card types/subtypes/name, not the
-/// caster's, is what protection cares about (CR 702.16's "of the stated
-/// quality" always describes the source, never the controller) — except
-/// `protection_everything`, which CR 702.16j is explicit applies
-/// "regardless of that object's characteristic values," so it's checked
-/// before the source's own characteristics are even looked up. The player
-/// quality is the one exception to "source, not caster": CR 702.16k cares
-/// about the source's *controller* (raw `GameObject.controller`, resolved
-/// relative to `target_id`'s own controller, same "You"/"Opponent"
-/// resolution `EffectFilter` already does), not any characteristic. An
-/// unresolvable source has no qualities to check against and can't
-/// illegally target anything on this basis — same "skip rather than guess"
-/// stance every other unresolvable-source case in this codebase already
-/// takes.
+/// CR 702.16c: whether `target_id` cannot be the target of `source` because it
+/// has protection from one of: color (702.16e), card type, subtype, name
+/// (702.16a), everything (702.16j) or a specific player (702.16k), as an OR over
+/// all six. Protection is judged on `source`'s qualities (the card cast or the
+/// activated ability's source), never the caster's. Two exceptions:
+/// `protection_everything` applies regardless of the source's characteristics
+/// (CR 702.16j), so it is checked first; and the player quality (CR 702.16k)
+/// compares the source's raw `GameObject.controller` with `target_id`'s
+/// controller. An unresolvable source has no qualities, so it cannot target
+/// illegally on this basis.
 fn target_has_protection_from(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -246,25 +197,21 @@ fn target_has_protection_from(
         || target_characteristics.protection_names.iter().any(|n| *n == source_characteristics.name)
 }
 
-/// CR 702.11b/702.18a: whether `id` can't be chosen as a target by a spell
-/// or ability controlled by `caster`, because of hexproof or shroud.
-/// Shroud stops every `caster`, its own controller included. Hexproof only
-/// stops a `caster` who isn't the permanent's controller (CR 702.11b "your
-/// opponents"). "Opponent" here means any player other than the permanent's
-/// `layers::effective_controller`, compared against `caster` rather than a
-/// source object's controller, so the check also works for a trigger or
-/// ability whose source object is gone. The keywords are read from
-/// `effective_characteristics`, so a layer 6 grant or removal counts.
+/// CR 702.11b/702.18a: whether `id` cannot be chosen as a target by a spell or
+/// ability controlled by `caster`, because of hexproof or shroud. Shroud stops
+/// every `caster`, including the controller. Hexproof stops only a `caster` who
+/// is not the permanent's `layers::effective_controller`. Comparing against
+/// `caster` and not a source object's controller keeps it working for a trigger
+/// whose source is gone. Keywords come from `effective_characteristics`, so
+/// layer 6 grants and removals count.
 ///
-/// Only permanents are covered (CR 702.11b/702.18a say "permanent"): a
-/// hexproof card in a graveyard, or a hexproof spell on the stack, is still
-/// targetable.
+/// Only permanents are covered (CR 702.11b/702.18a): a hexproof card in a
+/// graveyard or a hexproof spell on the stack is still targetable.
 ///
-/// TODO(CR 702.11d-g): "hexproof from [quality]" isn't modeled.
-/// TODO(CR 702.11c/702.18a): players can't have hexproof or shroud.
-/// TODO(CR 702.11e): nothing consumes `ignored_keywords` here, so "can
-/// target as though it didn't have hexproof" isn't expressible yet.
-/// TODO: no team model, so "opponent" means "any other player."
+/// TODO: "hexproof from [quality]" is not modeled (CR 702.11d-g)
+/// TODO: players cannot have hexproof or shroud (CR 702.11c/702.18a)
+/// TODO: nothing consumes `ignored_keywords` here, so "can target as though it didn't have hexproof" is not expressible (CR 702.11e)
+/// TODO: no team model, so "opponent" means any other player
 fn target_blocked_by_hexproof_or_shroud(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -300,14 +247,11 @@ pub(crate) fn target_is_legal(
     target_is_legal_impl(state, script_runtime, target, filter, caster, source, exclude_source, caster_x_value, true)
 }
 
-/// `target_is_legal` without the hexproof/shroud check, for the callers that
-/// ask "is this a legal thing to be attached to" rather than "may this
-/// spell or ability target it": the CR 704.5m/704.5n state-based action
-/// rechecks of an already-attached Aura or Equipment, and the CR 303.4f
-/// candidate scan for an Aura entering the battlefield without being cast.
-/// An Aura permanent doesn't target (CR 115.1b) and attachment by SBA or
-/// entry isn't targeting, so hexproof and shroud don't apply. Protection
-/// still does (CR 702.16d), so it stays in.
+/// `target_is_legal` without the hexproof/shroud check, for "is this a legal
+/// thing to attach to" and not "may this target it": the CR 704.5m/704.5n
+/// rechecks of an attached Aura or Equipment and the CR 303.4f scan for an Aura
+/// entering uncast. An Aura permanent does not target (CR 115.1b), so hexproof
+/// and shroud do not apply. Protection still does (CR 702.16d).
 pub(crate) fn attachment_target_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -321,6 +265,12 @@ pub(crate) fn attachment_target_is_legal(
     target_is_legal_impl(state, script_runtime, target, filter, caster, source, exclude_source, caster_x_value, false)
 }
 
+/// CR 115/601.2c-e: whether `target` satisfies `filter` against current `state`,
+/// at cast or activation time and again at `ResolveStackTop` for the CR 608.2b
+/// recheck. `caster` is the spell or ability's controller, since
+/// `FilterController::You` and `Opponent` are relative to who casts or activates
+/// and not to the target.
+/// TODO: the zone-change half of CR 608.2b (CR 115.2) is not checked, because this asks only whether the target is legal now; the two coincide for every current filter since an `Object` filter's `zone` is fixed
 fn target_is_legal_impl(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -329,20 +279,18 @@ fn target_is_legal_impl(
     caster: PlayerId,
     source: ObjectId,
     exclude_source: bool,
-    // CR 202.3/107.3a: the *casting/resolving* spell's own announced X
-    // (`StackObject::x_value`/`CastSpell::x_value`, not the candidate's own)
-    // — only consumed by `TargetFilter::Object::mana_value`'s `X` bound.
-    // `None` from every caller with no live X context (an ability, an SBA
-    // recheck, a triggered-ability candidate scan) resolves as `0`, same as
-    // "no X announced" — see `ManaValueBound::X`'s own doc comment.
+    // CR 202.3/107.3a
+    // The casting or resolving spell's announced X (not the candidate's), consumed
+    // only by `TargetFilter::Object::mana_value`'s `X` bound. `None` from callers
+    // with no X context (an ability, an SBA recheck, a trigger candidate scan)
+    // resolves as 0 (see `ManaValueBound::X`).
     caster_x_value: Option<u32>,
     // `false` skips CR 702.11b/702.18a; see `attachment_target_is_legal`.
     enforce_targetability: bool,
 ) -> bool {
-    // CR 115.4/"another target": the source is never a legal candidate for
-    // a requirement that says so, regardless of what the rest of `filter`
-    // would otherwise allow - checked once, ahead of every filter variant,
-    // rather than duplicated in each match arm below.
+    // CR 115.4
+    // The source is never a legal candidate for a requirement that excludes it.
+    // Checked once here and not in each match arm.
     if exclude_source && target == Target::Object(source) {
         return false;
     }
@@ -366,11 +314,10 @@ fn target_is_legal_impl(
                 return false;
             }
             if let Some(req) = mana_value {
-                // CR 202.3b: a candidate's own mana value only uses a real X
-                // while it's on the stack (`StackObject::x_value`, resolved
-                // at that spell's own cast time) - every other zone treats
-                // its `{X}` as 0, same off-the-stack default `ManaCost::
-                // mana_value`'s own doc comment already establishes.
+                // CR 202.3b
+                // A candidate's mana value uses a real X only on the stack
+                // (`StackObject::x_value`, set at cast time). Every other zone treats `{X}` as
+                // 0, as in `ManaCost::mana_value`.
                 let candidate_x =
                     state.stack.iter().find(|so| so.stack_id == id).and_then(|so| so.x_value).unwrap_or(0);
                 let candidate_mv = obj.definition.mana_cost.resolve_x(candidate_x).mana_value();
@@ -400,49 +347,41 @@ fn target_is_legal_impl(
                         return false;
                     }
                 }
-                // CR 601.2c/115's negated form - "target nonland permanent."
-                // Independent of `card_types` above (a filter can combine a
-                // positive card_types with an excluded_subtypes, e.g.
-                // "target creature that isn't a Wall").
+                // CR 601.2c/115
+                // The negated form (a nonland target). Independent of `card_types` above, so a
+                // filter can combine a positive card_types with an excluded_subtypes.
                 if let Some(types) = excluded_card_types {
                     if effective.card_types.intersects(*types) {
                         return false;
                     }
                 }
-                // CR 205.4b: "target Human"/"Equip Dragons" - matches if the
-                // target has *any* subtype in the list, same "or, not and"
-                // convention cost.rs's FilterSpec::subtypes already
-                // documents. Checked against effective_characteristics
-                // (post layer-4 AddCardType-adjacent subtype grants, if any
-                // ever exist), same treatment card_types just above already
-                // gets - not the raw CardDefinition.
+                // CR 205.4b
+                // Matches if the target has any subtype in the list (or, not and, as in
+                // cost.rs's FilterSpec::subtypes). Checked against effective_characteristics
+                // like card_types above, not the raw CardDefinition.
                 if let Some(subtypes) = subtypes {
                     if !subtypes.iter().any(|s| effective.subtypes.contains(s)) {
                         return false;
                     }
                 }
-                // CR 601.2c/115/205.4b's negated form - "target creature
-                // that isn't a Wall." Rejects if the target has *any*
-                // subtype in the list (the negation of subtypes' "or"
-                // match above).
+                // CR 601.2c/115/205.4b
+                // The negated form: rejects if the target has any subtype in the list.
                 if let Some(excluded) = excluded_subtypes {
                     if excluded.iter().any(|s| effective.subtypes.contains(s)) {
                         return false;
                     }
                 }
-                // CR 205.4a: "target legendary creature" - same
-                // intersection-against-effective-characteristics treatment
-                // card_types gets, mirroring cost.rs's FilterSpec::matches.
+                // CR 205.4a
+                // The same intersection against effective_characteristics as card_types,
+                // mirroring cost.rs's FilterSpec::matches.
                 if let Some(types) = supertypes {
                     if !effective.supertypes.intersects(*types) {
                         return false;
                     }
                 }
-                // CR 601.2c/115/205.4a's negated form - "target nonlegendary
-                // creature." Rejects if the target's supertypes intersect
-                // this set, the negation of supertypes' match above, checked
-                // independently of it (same "can combine positive and
-                // negative" stance excluded_subtypes already documents).
+                // CR 601.2c/115/205.4a
+                // The negated form: rejects if the target's supertypes intersect this set.
+                // Checked independently of `supertypes`, so a filter can combine both.
                 if let Some(types) = excluded_supertypes {
                     if effective.supertypes.intersects(*types) {
                         return false;
@@ -450,11 +389,10 @@ fn target_is_legal_impl(
                 }
             }
             if let Some(fc) = controller {
-                // CR 108.4: "you"/"opponent" resolve against the object's
-                // live controller (layers::effective_controller), not the
-                // raw GameObject.controller field - a control-changed
-                // permanent must be targetable/untargetable per its current
-                // controller, not whoever it started under.
+                // CR 108.4
+                // `You` and `Opponent` resolve against the live controller
+                // (layers::effective_controller), not the raw GameObject.controller, so a
+                // control-changed permanent follows its current controller.
                 let effective_controller = crate::layers::effective_controller(state, script_runtime, id);
                 let matches_controller = match fc {
                     FilterController::You => effective_controller == caster,
@@ -494,15 +432,12 @@ fn target_is_legal_impl(
             }
             Target::Ability(_) => false,
         },
-        // CR 601.2c/602.2b: `invoke_target_legal`'s real body (script.rs)
-        // is the same per-candidate predicate shape `invoke_continuous_affects`
-        // established for `AffectedFilter::Script` — evaluated once per
-        // already-chosen candidate, not a `Game.SelectTargets` coroutine
-        // suspension (that's a different, unrelated concept - see
-        // `TargetFilter::Script`'s own doc comment). Object-only per that
-        // doc comment; a nonexistent object is rejected before the script
-        // ever runs, same "don't invoke Lua on a dead id" guard the other
-        // arms get via `state.object(id)`.
+        // CR 601.2c/602.2b
+        // `invoke_target_legal` (script.rs) is a per-candidate predicate like
+        // `invoke_continuous_affects` for `AffectedFilter::Script`, run once per chosen
+        // candidate. It is not a `Game.SelectTargets` coroutine suspension (see
+        // `TargetFilter::Script`). Object-only; a nonexistent object is rejected before
+        // the script runs, so Lua is never invoked on a dead id.
         TargetFilter::Script(handle) => {
             let Target::Object(id) = target else { return false };
             if state.object(id).is_none() {
@@ -516,9 +451,8 @@ fn target_is_legal_impl(
             }
             script_runtime.invoke_target_legal(*handle, state, id, source, caster).unwrap_or(false)
         }
-        // `Script`'s player-candidate twin - same treatment `Player` above
-        // gets (no protection check, this engine doesn't model player-side
-        // protection), plus the script predicate.
+        // The player-candidate twin of `Script`: no protection check, because
+        // player-side protection is not modeled, plus the script predicate.
         TargetFilter::PlayerScript(handle) => {
             let Target::Player(pid) = target else { return false };
             if state.player(pid).is_none() {
@@ -526,11 +460,10 @@ fn target_is_legal_impl(
             }
             script_runtime.invoke_player_target_legal(*handle, state, pid, source, caster).unwrap_or(false)
         }
-        // CR 113.9/701.6a: "counter target activated or triggered ability" -
-        // matched against state.stack directly (not state.objects, which an
-        // ability's own stack_id never appears in - see TargetFilter::
-        // Ability's own doc comment). A Spell entry is never a legal
-        // candidate here, same disjoint-category split CR 113.9 states.
+        // CR 113.9/701.6a
+        // Matched against state.stack directly, because an ability's stack_id never
+        // appears in state.objects (see TargetFilter::Ability). A Spell entry is never
+        // a candidate, since CR 113.9 keeps the categories disjoint.
         TargetFilter::Ability => {
             let Target::Ability(stack_id) = target else { return false };
             state.stack.iter().any(|so| so.stack_id == stack_id && is_ability_stack_entry(&so.kind))
@@ -556,14 +489,11 @@ pub(crate) fn is_ability_stack_entry(kind: &StackEntryKind) -> bool {
     }
 }
 
-/// CR 603.3d: every currently-legal candidate for `requirement`, scanned
-/// fresh - the same "walk every object/player, filter through
-/// `target_is_legal`" shape `attach::legal_aura_entry_candidates` already
-/// established, generalized off any `TargetRequirement` instead of just an
-/// Aura's own `target_requirement`. Used by `engine::triggers_pipeline`'s CR
-/// 603.3d pause, which has no player-submitted `targets` to validate at all
-/// (nothing initiated the trigger the way a cast/activation does) - it has
-/// to present real candidates instead of guessing blind.
+/// CR 603.3d: every currently legal candidate for `requirement`, scanned fresh
+/// like `attach::legal_aura_entry_candidates` but for any `TargetRequirement`.
+/// `engine::triggers_pipeline`'s CR 603.3d pause uses it: nothing initiated the
+/// trigger, so there are no player-submitted `targets` to validate and it must
+/// present real candidates.
 pub(crate) fn legal_target_candidates(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -611,9 +541,9 @@ pub(crate) fn legal_target_candidates_for_x(
     object_ids.sort();
     let object_candidates = object_ids.into_iter().map(Target::Object);
     let player_candidates = non_eliminated_players(state).into_iter().map(Target::Player);
-    // CR 113.9: an ability's own StackObject has no matching GameObject, so
-    // it needs its own candidate source rather than falling out of
-    // object_candidates above - see TargetFilter::Ability's own doc comment.
+    // CR 113.9
+    // An ability's StackObject has no matching GameObject, so it needs its own
+    // candidate source (see TargetFilter::Ability).
     let ability_candidates = state
         .stack
         .iter()
@@ -623,25 +553,19 @@ pub(crate) fn legal_target_candidates_for_x(
         .chain(player_candidates)
         .chain(ability_candidates)
         .filter(|&target| {
-            // CR 603.3d candidate scan for a *triggered* ability - no
-            // PlayerActionKind::CastSpell exists here to have announced an X
-            // at all, so `None` (a `mana_value` filter's own `X` bound
-            // resolves as 0 - see `target_is_legal`'s own doc comment).
+            // CR 603.3d
+            // A triggered ability has no CastSpell to announce an X, so `None` (a
+            // `mana_value` filter's X bound resolves as 0; see `target_is_legal`).
             target_is_legal(state, script_runtime, target, &requirement.filter, caster, source, requirement.exclude_source, None)
         })
         .collect()
 }
 
-/// CR 603.3d, generalized to a full `TargetSpec` (one candidate list per
-/// target word - `Vec<Vec<Target>>`, length 1 for `Primitive`): every
-/// currently-legal candidate for each word in `spec`, via
-/// `legal_target_candidates` per word. `engine::triggers_pipeline`'s own CR
-/// 603.3d pause uses this (rather than the single-`TargetRequirement`
-/// version) since a triggered ability's own `target` field is a full
-/// `TargetSpec` just like a spell/activated ability's, and CR 601.2c/603.3d
-/// (via 601.2c-d) already establish "a word with zero legal candidates for
-/// its own minimum makes the whole cast/trigger illegal" for the
-/// multi-word case too, not just the single-word one.
+/// CR 603.3d for a full `TargetSpec`: one candidate list per target word
+/// (`Vec<Vec<Target>>`, length 1 for `Primitive`), via `legal_target_candidates`
+/// per word. `engine::triggers_pipeline`'s pause uses it because a triggered
+/// ability's `target` is a full `TargetSpec`, and a word with too few legal
+/// candidates for its minimum makes the whole trigger illegal (CR 601.2c-d).
 pub(crate) fn legal_target_candidates_for_spec(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -656,13 +580,12 @@ pub(crate) fn legal_target_candidates_for_spec(
     requirements.into_iter().map(|req| legal_target_candidates(state, script_runtime, req, caster, source)).collect()
 }
 
-/// One minimum-legal-candidate-count per word in `spec` (`0` for `up_to`,
-/// `count` otherwise - `at_least`'s own lower bound is still just `count`,
-/// same as `up_to`/exact) - paired positionally with
-/// `legal_target_candidates_for_spec`'s own per-word output so
-/// `engine::triggers_pipeline::push_ordered_triggers` can check "does every
-/// word have enough real candidates" before deciding to pause at all versus
-/// applying CR 603.3d's "the ability is simply removed from the stack."
+/// The minimum legal-candidate count for each word in `spec`: `0` for `up_to`,
+/// `count` otherwise (`at_least` has the same lower bound). Paired by position
+/// with `legal_target_candidates_for_spec` so
+/// `engine::triggers_pipeline::push_ordered_triggers` can check every word has
+/// enough candidates before pausing, or else remove the ability from the stack
+/// (CR 603.3d).
 pub(crate) fn target_spec_minimums(spec: &TargetSpec) -> Vec<u32> {
     let requirements: Vec<&TargetRequirement> = match spec {
         TargetSpec::Primitive(req) => vec![req],
@@ -671,31 +594,22 @@ pub(crate) fn target_spec_minimums(spec: &TargetSpec) -> Vec<u32> {
     requirements.into_iter().map(|req| if req.up_to { 0 } else { req.count }).collect()
 }
 
-/// CR 601.2c/601.2e (spells) and CR 602.2b (activated abilities): validates
-/// a full set of chosen `targets` against `requirement` before the
-/// spell/ability is allowed onto the stack at all - an illegal proposed
-/// cast/activation never happens (601.2e), so this is called before any
-/// state mutation in `CastSpell`/`ActivateAbility`, and its `Err` propagates
-/// straight out without anything having been touched.
+/// CR 601.2c/601.2e (spells) and CR 602.2b (activated abilities): validates the
+/// chosen `targets` against `requirement` before the spell or ability goes on
+/// the stack. An illegal cast or activation never happens (CR 601.2e), so this
+/// runs before any mutation in `CastSpell`/`ActivateAbility` and its `Err`
+/// leaves nothing touched.
 ///
-/// `None` requirement means the spell/ability takes no targets at all
-/// (CR 601.2c's "cast as though it did not require those targets") - any
-/// targets submitted anyway are rejected rather than silently ignored,
-/// since nothing asked for them.
+/// A `None` requirement means no targets (CR 601.2c); submitted targets are
+/// rejected and not ignored.
 ///
-/// CR 601.2c/115.6: "up to N" (`TargetRequirement::up_to`) accepts anywhere
-/// from 0 to `count` chosen; "N or more" (`TargetRequirement::at_least`)
-/// accepts `count` or more chosen, no upper bound - see `TargetRequirement`'s
-/// own doc for the full three-way shape.
-/// TODO(CR 601.2d): no division/distribution step for effects that split
-/// among several targets.
+/// CR 601.2c/115.6: `up_to` accepts 0 to `count`, `at_least` accepts `count` or
+/// more. See `TargetRequirement`.
 ///
-/// `pub(crate)`, not `pub(in crate::commands)`: `engine::triggers_pipeline`'s
-/// own CR 603.3d pause (`Engine::submit_trigger_targets`) needs this too, and
-/// is outside the `commands` module tree - a triggered ability's target
-/// choice has no `CastSpell`/`ActivateAbility`-style player-submitted
-/// `targets` to validate at the point it's initiated, so it validates here
-/// instead, at answer time.
+/// `pub(crate)` because `engine::triggers_pipeline`'s pause
+/// (`Engine::submit_trigger_targets`) validates a triggered ability's chosen
+/// targets here at answer time, from outside the `commands` tree.
+/// TODO: no division of an effect among several targets (CR 601.2d)
 pub(crate) fn validate_targets(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -703,10 +617,9 @@ pub(crate) fn validate_targets(
     targets: &[Target],
     caster: PlayerId,
     source: ObjectId,
-    // CR 202.3/107.3a: this cast/activation's own announced X, if any - see
-    // `target_is_legal`'s own doc comment. `None` from every caller with no
-    // X concept (a triggered ability's own CR 603.3d target choice never
-    // has one).
+    // CR 202.3/107.3a
+    // This cast or activation's announced X (see `target_is_legal`). `None` from
+    // callers with no X, such as a triggered ability's CR 603.3d target choice.
     caster_x_value: Option<u32>,
 ) -> Result<(), Rejected> {
     match requirement {
@@ -721,17 +634,17 @@ pub(crate) fn validate_targets(
             validate_one_target_requirement(state, script_runtime, req, targets, caster, source, caster_x_value)
         }
         Some(TargetSpec::Multiple(reqs)) => {
-            // CR 601.2c: a flat submitted-targets list, split into one
-            // chunk per requirement - positionally for 0/1 variable words,
-            // by filter-assignment for 2+ (see `split_targets_by_
-            // requirement`'s own doc comment).
+            // CR 601.2c
+            // A flat submitted-targets list split into one chunk per requirement:
+            // positionally for 0 or 1 variable words, by filter assignment for 2 or more
+            // (see `split_targets_by_requirement`).
             let Some(chunks) = split_targets_by_requirement(state, script_runtime, reqs, targets, caster, source, caster_x_value) else {
                 return Err(Rejected::InvalidTarget);
             };
-            // CR 115.3/601.2c: dedup is checked independently per word by
-            // `validate_one_target_requirement` below (its own `seen` set is
-            // fresh each call) - the same object/player legally can, and
-            // often will, appear in two different words' chunks.
+            // CR 115.3/601.2c
+            // Dedup is checked per word by `validate_one_target_requirement` (fresh `seen`
+            // set each call), so the same object or player may legally appear in two
+            // words' chunks.
             for (req, chunk) in reqs.iter().zip(chunks) {
                 validate_one_target_requirement(state, script_runtime, req, &chunk, caster, source, caster_x_value)?;
             }
@@ -740,10 +653,9 @@ pub(crate) fn validate_targets(
     }
 }
 
-/// One target word's worth of validation (CR 601.2c count check, CR
-/// 115.3/601.2c same-instance dedup, per-target legality) - shared by
-/// `validate_targets`'s `Primitive` arm (the whole submitted list) and its
-/// `Multiple` arm (one chunk per requirement).
+/// One target word's validation (CR 601.2c count, CR 115.3/601.2c same-instance
+/// dedup, per-target legality), shared by the `Primitive` arm (whole list) and
+/// the `Multiple` arm (one chunk per requirement) of `validate_targets`.
 fn validate_one_target_requirement(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -753,10 +665,9 @@ fn validate_one_target_requirement(
     source: ObjectId,
     caster_x_value: Option<u32>,
 ) -> Result<(), Rejected> {
-    // CR 601.2c/115.6: "up to N" accepts anywhere from 0 to `count`
-    // chosen; "N or more" accepts `count` or more with no upper
-    // bound; the common exact-count case still requires exactly
-    // `count`.
+    // CR 601.2c/115.6
+    // `up_to` accepts 0 to `count`, `at_least` accepts `count` or more, and the
+    // exact case requires `count`.
     let count_ok = if req.up_to {
         targets.len() <= req.count as usize
     } else if req.at_least {
@@ -767,8 +678,8 @@ fn validate_one_target_requirement(
     if !count_ok {
         return Err(Rejected::InvalidTarget);
     }
-    // CR 115.3/601.2c: the same target can't be chosen twice for one
-    // instance of the word "target".
+    // CR 115.3/601.2c
+    // A target cannot repeat within one target word.
     let mut seen = HashSet::new();
     for t in targets {
         if !seen.insert(*t) {
@@ -783,29 +694,21 @@ fn validate_one_target_requirement(
     Ok(())
 }
 
-/// CR 601.2c/608.2b: splits `targets` into one chunk per entry of `reqs`.
-/// Every entry with an exact count (`up_to`/`at_least` both `false`) always
-/// claims exactly `req.count`. At most one entry may be variable (`up_to` or
-/// `at_least`) for the fast positional path below - its own count isn't
-/// announced separately anywhere in this engine's `PlayerAction` shape (just
-/// one flat `targets: Vec<Target>`), so it's derived as "however many are
-/// left after every exact-count entry has claimed its own share":
-/// `submitted.len() - sum(exact counts)`, wherever the variable entry sits in
-/// word order (the derivation doesn't depend on position, only on the
-/// total). `None` if `targets` is too short to cover every exact entry, if
-/// the derived variable count falls outside that entry's own `up_to`/
-/// `at_least` bound, or if there's a leftover remainder after every entry
-/// has claimed its chunk (a caller/count mismatch, same "reject rather than
-/// guess" stance every other validation failure here takes).
+/// CR 601.2c/608.2b: splits `targets` into one chunk per entry of `reqs`. An
+/// exact-count entry (`up_to` and `at_least` both false) claims exactly
+/// `req.count`. At most one variable entry (`up_to` or `at_least`) is allowed on
+/// the fast positional path. `PlayerAction` carries one flat `targets` list, so
+/// the variable count is derived as `submitted.len() - sum(exact counts)`,
+/// wherever that entry sits. Returns `None` if `targets` is too short for the
+/// exact entries, the derived count falls outside the entry's bound, or a
+/// remainder is left over (a mismatch is rejected, not guessed).
 ///
-/// Two or more variable entries (`phase5/multi-word-variable-count-filter-
-/// assignment`) fall through to `assign_targets_by_filter` instead - a flat
-/// list has no positional signal to derive a *shared* remainder's split at
-/// all (e.g. "up to two target creatures and up to two target players" with
-/// 2 targets submitted could mean 2+0, 1+1, or 0+2 by position alone), so
-/// this needs `state`/`script_runtime`/`caster`/`source` to resolve it by
-/// filter-matching instead - unused by the fast positional path, which
-/// remains a pure function of `reqs`/`targets` for the common case.
+/// Two or more variable entries fall through to `assign_targets_by_filter`: a
+/// flat list has no positional signal for a shared remainder (up to two target
+/// creatures and up to two target players with 2 targets submitted could be 2+0,
+/// 1+1 or 0+2), so it resolves by filter matching and needs `state`,
+/// `script_runtime`, `caster` and `source`. The fast path stays a pure function
+/// of `reqs` and `targets`.
 pub(crate) fn split_targets_by_requirement(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -820,8 +723,7 @@ pub(crate) fn split_targets_by_requirement(
         for (i, req) in reqs.iter().enumerate() {
             if req.up_to || req.at_least {
                 if found.is_some() {
-                    // A second variable entry - hand off to the
-                    // filter-assignment path instead of guessing.
+                    // A second variable entry: hand off to filter assignment instead of guessing.
                     return assign_targets_by_filter(state, script_runtime, reqs, targets, caster, source, caster_x_value);
                 }
                 found = Some(i);
@@ -862,33 +764,20 @@ pub(crate) fn split_targets_by_requirement(
     }
 }
 
-/// CR 601.2c, for 2+ variable-count words (`phase5/multi-word-variable-
-/// count-filter-assignment`): assigns each entry of `targets` to a word
-/// whose own `TargetFilter` it satisfies (the same `target_is_legal` check
-/// every single-word/exact-word validation already uses), backtracking over
-/// the small search space until every word's own count bound (exact/up_to/
-/// at_least) is met and every submitted entry is used exactly once.
+/// CR 601.2c, for 2 or more variable-count words: assigns each submitted target
+/// to a word whose `TargetFilter` it satisfies (via `target_is_legal`),
+/// backtracking until every word's bound (exact, `up_to` or `at_least`) is met
+/// and every target is used once.
 ///
-/// Deliberately accepts *any* valid assignment rather than requiring a
-/// *unique* one. Real CR 601.2c has the player state the word-target
-/// association explicitly as part of announcing targets, but every
-/// multi-word spell/ability `AbilityEffect` in this engine applies its
-/// resolution uniformly across the *flattened concatenation* of every
-/// word's own legal targets (see `TargetSpec::Multiple`'s own doc comment,
-/// CR 608.2b's Plague Spores example) - which word a target is filed under
-/// has no resolution-time consequence here, only a legality-checking one.
-/// So "some valid partition exists" is the right bar for this engine's own
-/// model, not "the partition is uniquely determined" - there is nothing
-/// downstream that could ever observe the difference between two otherwise-
-/// identical casts that differ only in which word a shared-eligible target
-/// was filed under, so rejecting one as "ambiguous" would only be pickier
-/// than the engine's own semantics actually require.
+/// It accepts any valid assignment, not only a unique one. CR 601.2c has the
+/// player state which word each target fills, but every multi-word
+/// `AbilityEffect` here resolves across the flattened concatenation of all
+/// words' targets (see `TargetSpec::Multiple`, CR 608.2b), so the filing has no
+/// effect at resolution and rejecting an ambiguous one would be pickier than the
+/// engine's semantics need.
 ///
-/// Plain backtracking, not a real max-flow/bipartite-matching
-/// implementation - simple on purpose. Every real and test-fixture target
-/// count in this engine is tiny (a handful of words, a handful of targets);
-/// this is not the right place to optimize for scale that doesn't exist
-/// here.
+/// Plain backtracking, not bipartite matching, since target counts are tiny (a
+/// handful of words and targets).
 fn assign_targets_by_filter(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -898,8 +787,8 @@ fn assign_targets_by_filter(
     source: ObjectId,
     caster_x_value: Option<u32>,
 ) -> Option<Vec<Vec<Target>>> {
-    // Precompute, once, which words each submitted target is even legal
-    // for - the backtracking search below only ever branches over these.
+    // Precompute which words each submitted target is legal for; the search below
+    // branches only over these.
     let legal_words: Vec<Vec<usize>> = targets
         .iter()
         .map(|t| {
@@ -925,8 +814,7 @@ fn assign_targets_by_filter(
             });
         }
         for &w in &legal_words[idx] {
-            // Prune: an exact/up_to word can never exceed its own max -
-            // no point recursing into a branch that's already overfull.
+            // Prune: an exact or up_to word can never exceed its max.
             let max = if reqs[w].at_least { usize::MAX } else { reqs[w].count as usize };
             if buckets[w].len() >= max {
                 continue;
@@ -949,24 +837,20 @@ fn assign_targets_by_filter(
 }
 
 /// CR 700.2d: can `effect` be one of 2+ chosen modes? `ResolveStackTop`'s
-/// `AbilityEffect::Modal` arm (`engine::resolve::modal`) hands each mode to
-/// the same resolver a single effect uses, so this is every kind that
-/// resolver handles against a mode's own target requirement and the standard
-/// `ReplacementCheck` tail: the synchronous effects, the scripted zone moves
-/// (including their CR 616.1 ordering pauses), draw, discard, scry/surveil,
-/// search (including its devour/amplify entry choices), token creation
-/// (including the Aura attach choice) and "unless paid" (the payer's pay or
-/// decline answer).
-/// Checked at cast time so an unsupported mode is rejected immediately rather
-/// than silently doing nothing at resolution. A single chosen mode (the
-/// pre-existing "Choose one -" case) is never checked against this at all - it
-/// uses its own effect bare, unwrapped from `Modal`.
+/// `AbilityEffect::Modal` arm (`engine::resolve::modal`) hands each mode to the
+/// resolver a single effect uses, so this is every kind that resolver handles
+/// against a mode's target requirement and the standard `ReplacementCheck` tail:
+/// synchronous effects, scripted zone moves (with their CR 616.1 ordering
+/// pauses), draw, discard, scry/surveil, search (with devour/amplify entry
+/// choices), token creation (with the Aura attach choice) and "unless paid" (the
+/// payer's answer). Checked at cast time so an unsupported mode is rejected and
+/// not silently ignored at resolution. A single chosen mode is never checked
+/// here, because it uses its own effect unwrapped from `Modal`.
 ///
 /// `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`, `ReturnSelfWithCounter`,
-/// `AddMana*`, `Script` and a nested `Modal` are not card-text modes, so they
-/// are rejected here. A mode may own several target words (a
-/// `TargetSpec::Multiple`, e.g. a two-word `Fight` or `ExchangeTextBoxes`),
-/// see `AbilityEffect::Modal`.
+/// `AddMana*`, `Script` and a nested `Modal` are not card-text modes and are
+/// rejected. A mode may own several target words (a `TargetSpec::Multiple`, such
+/// as a two-word `Fight` or `ExchangeTextBoxes`); see `AbilityEffect::Modal`.
 ///
 /// Callers outside this module ask `mode_can_join_others` instead.
 pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
@@ -1025,16 +909,12 @@ pub(crate) fn is_modal_resolvable(effect: &AbilityEffect) -> bool {
     )
 }
 
-/// Why `mode` can only be chosen alone, or `None` when it can join other
-/// chosen modes. Two modes that each pass can always combine: target words are
+/// Why `mode` can only be chosen alone, or `None` when it can join other chosen
+/// modes. Two modes that each pass can always combine: target words are
 /// deduplicated per word, so no joint check is needed.
 ///
-/// TODO(modal-resolver): `is_modal_resolvable` still refuses `ForEachPlayer`,
-/// `Cascade`, `MadnessCastOrDiscard`, `ReturnSelfWithCounter`, `AddMana*`,
-/// `Script` and a nested `Modal`. Each kind the resolver learns to handle
-/// shrinks the set of solo-only modes.
-/// TODO: an empty `TargetSpec::Multiple` is a card-definition mistake. A
-/// load-time check should reject it one day.
+/// TODO: `is_modal_resolvable` refuses `ForEachPlayer`, `Cascade`, `MadnessCastOrDiscard`, `ReturnSelfWithCounter`, `AddMana*`, `Script` and a nested `Modal`, and each kind the resolver learns shrinks the set of solo-only modes
+/// TODO: an empty `TargetSpec::Multiple` is a card-definition mistake that a load-time check should reject
 fn mode_join_refusal(mode: &SpellMode) -> Option<&'static str> {
     if matches!(&mode.target_requirement, Some(TargetSpec::Multiple(own)) if own.is_empty()) {
         return Some("a mode with an empty multi-target requirement can't be combined");
@@ -1088,28 +968,21 @@ pub(crate) fn is_modal_placeholder_requirement(req: &TargetRequirement) -> bool 
         && matches!(req.filter, TargetFilter::AnyTarget)
 }
 
-/// CR 700.2c/d: combines `modes[chosen_indices]` (already validated for
-/// count/duplicates by the caller) into the one `(target_requirement,
-/// effect)` pair `ResolveStackTop` resolves — a single chosen mode passes its
-/// own `target_requirement`/`effect` through bare (the pre-existing "Choose
-/// one —" shape), 2+ chosen modes combine into `TargetSpec::Multiple` (one
-/// `TargetRequirement` per chosen mode, a synthetic zero-count placeholder
-/// for a mode with none of its own, CR 700.2c) + `AbilityEffect::Modal` (one
-/// slot per chosen mode, same order) — see `AbilityEffect::Modal`'s own doc
-/// comment for the shape invariant `ResolveStackTop`'s own `Modal` arm relies
-/// on.
+/// CR 700.2c/d: combines `modes[chosen_indices]` (already validated for count and
+/// duplicates by the caller) into the one `(target_requirement, effect)` pair
+/// `ResolveStackTop` resolves. A single chosen mode passes its own
+/// `target_requirement` and `effect` through bare. Two or more combine into
+/// `TargetSpec::Multiple` (one `TargetRequirement` per mode, with a zero-count
+/// placeholder for a mode that has none, CR 700.2c) and `AbilityEffect::Modal`
+/// (one slot per mode, same order); see `AbilityEffect::Modal` for the shape
+/// `ResolveStackTop` relies on.
 ///
-/// Extracted out of `commands::cast::execute_command`'s `CastSpell` caster-
-/// chosen branch so a modal *triggered* ability (`Engine::
-/// submit_trigger_mode_choice`, CR 603.3c) can reuse the exact same
-/// combination rules instead of a third hand-written copy — `chosen_indices`
-/// is assumed already sorted into card-print order by the caller, same
-/// convention `CastSpell`'s own caller already followed. Doesn't collect CR
-/// 700.2h additional costs (`SpellMode::additional_cost`) — that's a
-/// casting-cost concept tied to CR 601.2b/f-h, meaningless for a triggered
-/// ability going on the stack (CR 603.3c has no equivalent clause), so the
-/// caster-chosen `CastSpell` branch still collects it separately around this
-/// call rather than folding it in here.
+/// Shared by the caster-chosen `CastSpell` branch and a modal triggered ability
+/// (`Engine::submit_trigger_mode_choice`, CR 603.3c), so both use one set of
+/// combination rules. `chosen_indices` must already be in card-print order. It
+/// does not collect CR 700.2h additional costs (`SpellMode::additional_cost`):
+/// those belong to casting (CR 601.2b/f-h) and mean nothing for a triggered
+/// ability, so `CastSpell` collects them around this call.
 pub(crate) fn combine_chosen_modes(
     modes: &[SpellMode],
     chosen_indices: &[u32],

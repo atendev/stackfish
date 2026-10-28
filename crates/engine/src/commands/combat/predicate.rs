@@ -1,27 +1,11 @@
-//! The rules about a whole combat declaration: "attacks each combat if able"
-//! (CR 508.1d) and menace (CR 509.1b, 702.111b). `validate_declare_attackers`,
-//! `validate_declare_blockers`, the pass-priority check and the entry builders
-//! all read them from here, so the entries and the commands cannot drift apart
-//! (024).
-//!
-//! An entry is a per-creature list, so it can only carry the part of a
-//! whole-declaration rule that one creature decides alone. Menace shows up in
-//! `legal_blockers` as "an attacker is offered only if two creatures could block
-//! it". Whether the blockers a player picked add up to two, and whether two
-//! menace attackers fight over the same two blockers, is left to
-//! `block_declaration_is_legal` when the Answer arrives.
-//!
-//! TODO(026-followup): "blocks if able" (CR 509.1c) and the maximum-requirements
-//! search that comes with it. A menace attacker plus a "blocks if able" creature
-//! forces every legal blocker to block, which needs the search.
-//! TODO(026-followup): "attacks a specific player if able".
-//! TODO(026-followup): costs to attack (CR 508.1g to 508.1j). A creature that
-//! can't attack unless its controller pays is treated as able, and nobody is
-//! forced to pay.
-//! TODO(026-followup): restrictions on the whole declaration ("can't attack
-//! alone", "no more than one creature can attack"). Nothing in the engine
-//! produces one yet, so the maximum-requirements count is just "every able
-//! must-attack creature attacks".
+//! The rules about a whole combat declaration: must-attack (CR 508.1d) and
+//! menace (CR 509.1b, 702.111b). The commands and the entry builders both read
+//! them from here, so the two cannot drift apart.
+
+// TODO: "blocks if able" and the maximum-requirements search that comes with it, since a menace attacker plus a "blocks if able" creature forces every legal blocker to block (CR 509.1c)
+// TODO: "attacks a specific player if able"
+// TODO: costs to attack are not charged, so a creature that can't attack unless its controller pays is treated as able and nobody is forced to pay (CR 508.1g to 508.1j)
+// TODO: restrictions on the whole declaration ("can't attack alone"); nothing produces one yet, so the maximum-requirements count is every able must-attack creature
 
 use std::collections::BTreeMap;
 
@@ -70,8 +54,8 @@ pub(crate) fn required_attackers(state: &GameState, script_runtime: &ScriptRunti
 }
 
 /// CR 508.1d: the declaration is illegal if it leaves a required attacker
-/// home. Each requirement is independent today, so the maximum number of
-/// requirements that can be obeyed is all of them.
+/// home. Each requirement is independent, so the maximum number of requirements
+/// that can be obeyed is all of them.
 pub(crate) fn attack_declaration_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -116,7 +100,8 @@ pub(crate) fn blockers_needed(state: &GameState, script_runtime: &ScriptRuntime,
 
 /// CR 509.1b: a blocked attacker needs `blockers_needed` of the declared
 /// blockers. This counts the direct blocks of one submission and runs before
-/// banding adds its propagated blocks (CR 702.22h bypasses it).
+/// banding adds its propagated blocks (CR 702.22h bypasses it). The entries
+/// cannot check it because they list one creature at a time.
 pub(crate) fn block_declaration_is_legal(
     state: &GameState,
     script_runtime: &ScriptRuntime,

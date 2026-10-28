@@ -1,14 +1,8 @@
-//! The options a combat Decision lists. Each builder asks the same checks that
-//! `DeclareAttackers`, `DeclareBlockers` and `AssignCombatDamage` run, so a
-//! listed attack, block or split is one the command accepts on its own. The
-//! whole-declaration rules (menace, "attacks each combat if able") come from
-//! `predicate`, the same module the commands use. An entry is a per-creature
-//! list, so it carries only what one creature decides alone. How the picks
-//! add up (two blockers on a menace attacker, a required attacker left
-//! home) is checked when the Answer arrives. Banding is checked there too.
-//!
-//! TODO: `DeclareBands` (CR 702.22) is not offered. It stays a direct
-//! `submit_action`.
+//! The options a combat Decision lists. Each builder runs the same checks as the
+//! matching command, and the whole-declaration rules come from `predicate`. See
+//! `DESIGN.md` for the rest.
+
+// TODO: `DeclareBands` (CR 702.22) is not offered and stays a direct `submit_action`
 
 use std::collections::HashSet;
 

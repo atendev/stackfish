@@ -1,5 +1,4 @@
-//! `execute_command`'s `ActivateAbility` arm body, split out of the
-//! original monolithic `commands.rs`.
+//! The `ActivateAbility` command body. See `DESIGN.md` for the rest.
 
 use crate::script::ScriptRuntime;
 use crate::types::ability::AbilityEffect;
@@ -51,9 +50,8 @@ pub(super) fn validate_activate_ability(
     chosen_colors: Vec<Color>,
     x_value: Option<u32>,
 ) -> Result<Validated, Rejected> {
-    // CR 602.2a/117.3c: activating an ability follows the same
-    // process as casting a spell - the activator must hold priority
-    // to begin with.
+    // CR 602.2a/117.3c
+    // Activating follows the casting process, so the activator must hold priority.
     if state.priority_player != actor {
         return Err(Rejected::IllegalAction(
             "actor does not hold priority".to_string(),
@@ -61,13 +59,13 @@ pub(super) fn validate_activate_ability(
     }
 
     let source_object = state.object(source).ok_or(Rejected::InvalidTarget)?;
-    // CR 800.4a: an ability's owner is its source permanent's owner,
-    // not its (possibly `GainControl`'d) controller - captured now,
-    // this borrow doesn't survive past this statement.
+    // CR 800.4a
+    // The ability's owner is its source's owner, not its (possibly `GainControl`'d)
+    // controller. Captured now because the borrow ends here.
     let source_owner = source_object.owner;
-    // CR 602.2a: only the source's *current* controller may activate
-    // it - layers::effective_controller, not the raw field, so a
-    // GainControl'd permanent's abilities follow its new controller.
+    // CR 602.2a
+    // Only the source's current controller may activate, so this reads
+    // layers::effective_controller and not the raw field.
     let controller = crate::layers::effective_controller(state, script_runtime, source);
     if controller != actor {
         return Err(Rejected::IllegalAction(
@@ -87,13 +85,11 @@ pub(super) fn validate_activate_ability(
     let operation = ability.operation;
     let target_requirement = ability.target.clone();
 
-    // CR 602.1/112.6: activated abilities on permanents are only usable
-    // while the permanent is on the battlefield, "unless the ability itself
-    // says otherwise" - CR 702.29a Cycling is exactly that override, so its
-    // own required zone is Hand instead. Matched on the ability's own cost
-    // shape (does it include DiscardSelf?) rather than a new RegisteredAbility
-    // field, same "match on shape, don't grow the struct" precedent the
-    // Equip sorcery-speed check just below already set.
+    // CR 602.1/112.6
+    // Abilities on permanents work only on the battlefield, except Cycling
+    // (CR 702.29a), which works from the hand. Matched on the cost shape
+    // (DiscardSelf) so RegisteredAbility needs no zone field, as with the Equip
+    // check below.
     let requires_hand = cost
         .as_ref()
         .is_some_and(|c| c.additional.iter().any(|a| matches!(a, AdditionalCost::DiscardSelf)));
@@ -110,39 +106,28 @@ pub(super) fn validate_activate_ability(
         }));
     }
 
-    // CR 702.6a: "Activate only as a sorcery" - Equip's own timing
-    // restriction, enforced here by matching on the effect shape
-    // rather than a new RegisteredAbility field (see AbilityEffect::
-    // Attach's own doc comment for why - a generic per-ability
-    // timing-restriction field isn't worth the ~94-call-site
-    // blast radius for a restriction only this one effect needs
-    // today). `is_sorcery_speed` was written anticipating exactly
-    // this call site (see its own doc comment) but had no real
-    // caller until now.
+    // CR 702.6a
+    // Equip is sorcery speed. Matching on the effect shape avoids a per-ability
+    // timing field that only this effect needs (see AbilityEffect::Attach).
     if matches!(effect, Some(AbilityEffect::Attach)) && !is_sorcery_speed(state, actor) {
         return Err(Rejected::IllegalAction(
             "this ability can only be activated as a sorcery".to_string(),
         ));
     }
 
-    // CR 602.2b: `chosen_colors` is only meaningful alongside
-    // `AddManaChoice` - reject rather than silently ignore it
-    // against any other ability (a plain `AddMana`'s units are
-    // fixed, and no non-mana ability has a color choice at all), so
-    // a caller passing it by mistake gets a loud error instead of a
-    // quietly-dropped value.
+    // CR 602.2b
+    // `chosen_colors` only means something with `AddManaChoice`. Rejecting it
+    // elsewhere keeps a stray value from being dropped silently.
     if !chosen_colors.is_empty() && !matches!(effect, Some(AbilityEffect::AddManaChoice { .. })) {
         return Err(Rejected::IllegalAction(
             "chosen_colors given but this ability has no mana-color choice to make".to_string(),
         ));
     }
 
-    // CR 107.3a/107.3k/602.2b: an announced x_value and an {X} in this
-    // ability's own activation cost must agree - both present or both
-    // absent - checked once, up front, before either match arm below
-    // touches `cost` at all. Mirrors CastSpell's own has_x/x_value check
-    // (cast.rs) exactly; CR 107.3k is why this only ever looks at this
-    // ability's own cost, never anything else already on the stack.
+    // CR 107.3a/107.3k/602.2b
+    // An announced x_value and an {X} in this ability's own cost must both be
+    // present or both absent. Checked up front, as CastSpell does (cast.rs). CR
+    // 107.3k limits this to the ability's own cost.
     let cost_has_x = cost.as_ref().and_then(|c| c.mana.as_ref()).is_some_and(|m| m.has_x());
     match (cost_has_x, x_value) {
         (true, None) => {
@@ -160,7 +145,7 @@ pub(super) fn validate_activate_ability(
 
     match effect {
         Some(effect @ (AbilityEffect::AddMana(_) | AbilityEffect::AddManaChoice { .. })) => {
-            // CR 605.1a: a mana ability never has a target.
+            // CR 605.1a
             if !targets.is_empty() {
                 return Err(Rejected::IllegalAction(
                     "a mana ability cannot have targets".to_string(),
@@ -189,10 +174,9 @@ pub(super) fn validate_activate_ability(
                 }
                 _ => unreachable!("matched only AddMana/AddManaChoice above"),
             };
-            // CR 106.3: mana a snow source produces is snow mana, which is
-            // what lets it pay a {S} symbol (CR 107.4h).
-            // TODO: a triggered mana ability's mana is not tagged, because
-            // triggered mana abilities are not built yet.
+            // CR 106.3/107.4h
+            // Mana from a snow source is snow mana, which can pay {S}.
+            // TODO: a triggered mana ability's mana is not tagged, because triggered mana abilities are not built
             let units = if effective_characteristics(state, script_runtime, source)
                 .supertypes
                 .contains(SupertypeSet::SNOW)
@@ -202,16 +186,11 @@ pub(super) fn validate_activate_ability(
                 units
             };
 
-            // A mana ability built with no `Game.Costs.*` component at
-            // all (`cost: None` - the only shape `mana_ability` TOML
-            // can ever produce) keeps its original hardcoded-tap,
-            // no-payment-pause behavior unchanged below. A mana
-            // ability with a *real* cost (`Game.CreateManaAbility`'s
-            // own `:AddCost`, e.g. a Treasure/Lotus-Petal-style
-            // sacrifice, or an explicit `Game.Costs.TapSelf`) still
-            // never reaches the stack (CR 605.3b), but does need a
-            // real payment step first, same as any other ability (CR
-            // 602.2f-h/118.5a) - see `PaymentResolution::ManaAbility`.
+            // A mana ability with no `Game.Costs.*` component (`cost: None`, the only shape
+            // the `mana_ability` TOML makes) taps and adds mana with no payment pause. One
+            // with a real cost (`:AddCost`, a Treasure-style sacrifice, or
+            // `Game.Costs.TapSelf`) still skips the stack (CR 605.3b) but pays first
+            // (CR 602.2f-h, 118.5a). See `PaymentResolution::ManaAbility`.
             let Some(mut cost) = cost.filter(|c| c.mana.is_some() || !c.additional.is_empty()) else {
                 let source_object = state.object(source).ok_or(Rejected::InvalidTarget)?;
                 if source_object.tapped {
@@ -219,10 +198,8 @@ pub(super) fn validate_activate_ability(
                         "source is already tapped".to_string(),
                     ));
                 }
-                // CR 302.6: summoning sickness only restricts a
-                // creature's {T}/{Q} abilities - non-creature
-                // permanents (lands, artifacts, ...) ignore it
-                // entirely.
+                // CR 302.6
+                // Summoning sickness restricts only a creature's {T}/{Q} abilities.
                 if source_object.definition.card_types.contains(CardTypeSet::CREATURE)
                     && has_summoning_sickness(state, script_runtime, source_object)
                 {
@@ -235,19 +212,16 @@ pub(super) fn validate_activate_ability(
                 }
                 return Ok(Validated::ActivateAbility(Box::new(ActivatePlan::FreeMana { actor, source, units })));
             };
-            // CR 107.3a: substitute the announced X into this mana
-            // ability's own cost before it's ever handed to PaymentPlan -
-            // `cost_has_x` above already guarantees `x_value` is `Some`
-            // whenever this cost actually has an `{X}` to resolve.
+            // CR 107.3a
+            // Substitute the announced X before the cost reaches PaymentPlan. `cost_has_x`
+            // guarantees x_value is `Some` when there is an {X}.
             if let Some(x) = x_value {
                 cost.mana = cost.mana.map(|m| m.resolve_x(x));
             }
 
-            // CR 602.5a/302.6: same TapSelf pre-check the non-mana
-            // branch below takes, when this mana ability's own cost
-            // happens to include one - the actual tap still only
-            // commits once Engine::submit_payment does, same as any
-            // other AdditionalCost::TapSelf.
+            // CR 602.5a/302.6
+            // The same TapSelf pre-check as the non-mana branch. The tap commits only when
+            // Engine::submit_payment does.
             if cost.additional.iter().any(|c| matches!(c, AdditionalCost::TapSelf)) {
                 let source_object =
                     state.object(source).ok_or(Rejected::InvalidTarget)?;
@@ -267,29 +241,17 @@ pub(super) fn validate_activate_ability(
 
             Ok(Validated::ActivateAbility(Box::new(ActivatePlan::PaidMana { actor, source, cost, units })))
         }
-        // None (script-bridge-only effect) and Some(GainLife)/
-        // Some(Damage)/Some(Destroy)/Some(Counters)/Some(Pump)/
-        // Some(GainControl)/Some(Regenerate)/Some(DrawCards)/
-        // Some(Shuffle)/Some(Scry)/Some(Surveil)/Some(Search)/
-        // Some(BecomeCopy)/Some(Attach) (a non-mana ActivateAbility
-        // whose effect happens to be a recognized primitive) all
-        // take the same path: unlike CR 605's mana abilities, a
-        // non-mana activated ability uses the stack (CR 602.2)
-        // rather than resolving immediately. Targets are validated
-        // below (CR 602.2b/601.2c-e) via the same validate_targets
-        // CastSpell uses, before any state mutation (stack push)
-        // happens - for Attach (Equip), this is where CR 702.6a's
-        // "target creature you control" is enforced, same as any
-        // other targeted ability.
+        // Every effect here goes on the stack: unlike a mana ability (CR 605), a
+        // non-mana activated ability does not resolve immediately (CR 602.2). Targets
+        // are validated below with validate_targets (CR 602.2b/601.2c-e) before the
+        // stack push. For Equip this is where CR 702.6a's target is enforced.
         non_mana_effect @ (None
         | Some(AbilityEffect::GainLife(_))
         | Some(AbilityEffect::Damage(_))
         | Some(AbilityEffect::Destroy)
         | Some(AbilityEffect::BecomeBlocked)
-        // CR 701.8/601.2c: no different from any other untargeted
-        // effect shape at this level - "destroy all X" needs no
-        // targets validated (target_requirement is None for it),
-        // same as Shuffle just below.
+        // CR 701.8/601.2c
+        // "Destroy all" has no target requirement to validate, like Shuffle below.
         | Some(AbilityEffect::DestroyAll(_))
         | Some(AbilityEffect::Sacrifice)
         // CR 701.21a: untargeted self form, goes on the stack like Sacrifice.
@@ -315,29 +277,24 @@ pub(super) fn validate_activate_ability(
         | Some(AbilityEffect::UntapSelf)
         | Some(AbilityEffect::TapAll { .. })
         | Some(AbilityEffect::UntapAll { .. })
-        // CR 701.6a: no real card grants Counter as an activated ability's
-        // own effect (Stifle-style "counter target activated/triggered
-        // ability" is a different, unbuilt targeting shape - see
-        // AbilityEffect::Counter's own doc comment), but it's still a
-        // recognized primitive that goes on the stack the same way as any
-        // other here. Listed for exhaustiveness, same reason as
-        // ForEachPlayer/SacrificeRandom/DiscardRandom below.
+        // CR 701.6a
+        // No card grants Counter as an activated ability's effect (a Stifle-style
+        // counter is a different targeting shape; see AbilityEffect::Counter). Listed
+        // so every variant is named, as with ForEachPlayer, SacrificeRandom and
+        // DiscardRandom below.
         | Some(AbilityEffect::Counter)
-        // CR 118.12/118.12a: same exhaustiveness-only listing as Counter
-        // just above - no real card grants an "unless paid" consequence
-        // as an activated ability's own effect either.
+        // CR 118.12/118.12a
+        // Listed for exhaustiveness only: no card grants an "unless paid" consequence
+        // as an activated ability's effect.
         | Some(AbilityEffect::UnlessPaid { .. })
-        // `phase5/mass-choice-effects`: no real card grants any of these
-        // three as an activated ability's own effect yet, but they're
-        // recognized primitives that go on the stack the same way as any
-        // other here - listed for exhaustiveness, same reason as
-        // ReturnSelfWithCounter/MadnessCastOrDiscard/Cascade below.
+        // Listed for exhaustiveness only: no card grants these three as an activated
+        // ability's effect.
         | Some(AbilityEffect::ForEachPlayer(_))
         | Some(AbilityEffect::SacrificeRandom { .. })
         | Some(AbilityEffect::DiscardRandom { .. })
-        // CR 701.9/701.9b: same exhaustiveness-only listing as Counter/
-        // UnlessPaid above - no real card grants a targeted discard as an
-        // activated ability's own effect either.
+        // CR 701.9/701.9b
+        // Listed for exhaustiveness only: no card grants a targeted discard as an
+        // activated ability's effect.
         | Some(AbilityEffect::Discard { .. })
         | Some(AbilityEffect::Counters { .. })
         | Some(AbilityEffect::Pump { .. })
@@ -357,36 +314,23 @@ pub(super) fn validate_activate_ability(
         | Some(AbilityEffect::Bite)
         // CR 608.2c: several effects in one ability, run in order.
         | Some(AbilityEffect::Chain { .. })
-        // CR 700.2b (a modal activated/triggered ability) is still
-        // unmodeled - RegisteredAbility has no modes field, so this
-        // variant can't actually originate from an ability today.
-        // Listed for exhaustiveness only, same "every variant named,
-        // no wildcard" convention this disjunction already follows.
+        // CR 700.2b
+        // Listed for exhaustiveness only, because RegisteredAbility has no modes field.
         | Some(AbilityEffect::Modal { .. })
-        // AbilityEffect::Script only ever comes from a plain spell's
-        // CardDefinition.effect (CastSpell unpacks it before push -
-        // see that variant's own doc comment) - an ability's effect
-        // can't be this shape. Listed for exhaustiveness only, same
-        // reason as Modal just above.
+        // Script comes only from a plain spell's CardDefinition.effect, which CastSpell
+        // unpacks before the push, so an ability never has this shape. Listed for
+        // exhaustiveness only.
         | Some(AbilityEffect::Script(_))
-        // CR 702.79a/702.93a: only ever meaningful on a Dies-triggered
-        // ability (see this variant's own doc comment) - no real card
-        // grants Persist/Undying as an activated ability's own effect, but
-        // it's still a recognized primitive that goes on the stack the
-        // same way as any other here. Listed for exhaustiveness, same
-        // reason as Modal/Script above.
+        // CR 702.79a/702.93a
+        // Meaningful only on a Dies-triggered ability, and no card grants Persist or
+        // Undying as an activated ability's effect. Listed for exhaustiveness only.
         | Some(AbilityEffect::ReturnSelfWithCounter(_))
-        // CR 702.35a: only ever meaningful on a MadnessExiled-triggered
-        // ability (see this variant's own doc comment) - no real card
-        // grants Madness's own "cast or discard" as an activated ability's
-        // effect, but it's still a recognized primitive that goes on the
-        // stack the same way as any other here. Listed for exhaustiveness,
-        // same reason as ReturnSelfWithCounter above.
+        // CR 702.35a
+        // Meaningful only on a MadnessExiled-triggered ability. Listed for
+        // exhaustiveness only.
         | Some(AbilityEffect::MadnessCastOrDiscard)
-        // CR 702.85a: only ever meaningful on a Cast-triggered ability (see
-        // this variant's own doc comment) - no real card grants Cascade as
-        // an activated ability's own effect either. Listed for
-        // exhaustiveness, same reason as MadnessCastOrDiscard above.
+        // CR 702.85a
+        // Meaningful only on a Cast-triggered ability. Listed for exhaustiveness only.
         | Some(AbilityEffect::Cascade)) => {
             validate_targets(
                 state,
@@ -395,40 +339,31 @@ pub(super) fn validate_activate_ability(
                 &targets,
                 actor,
                 source,
-                // CR 202.3/107.3a: this activation's own announced X, if
-                // any - a `mana_value` filter's own `X` bound (e.g. "target
-                // permanent with mana value X") resolves against exactly
-                // this, same as CastSpell's own call below.
+                // CR 202.3/107.3a
+                // This activation's announced X, which a `mana_value` filter's X bound
+                // resolves against, as in CastSpell.
                 x_value,
             )?;
 
-            // `None` means "no cost at all" - same empty-CostSpec
-            // treatment RegisteredAbility::cost's own doc comment
+            // `None` means no cost: the same empty CostSpec RegisteredAbility::cost
             // describes.
             let mut cost = cost.unwrap_or(CostSpec {
                 mana: None,
                 additional: Vec::new(),
                 alternative: Vec::new(),
             });
-            // CR 107.3a: substitute the announced X into this ability's own
-            // cost before it's ever handed to PaymentPlan - `cost_has_x`
-            // above already guarantees `x_value` is `Some` whenever this
-            // cost actually has an `{X}` to resolve.
+            // CR 107.3a
+            // Substitute the announced X before the cost reaches PaymentPlan. `cost_has_x`
+            // guarantees x_value is `Some` when there is an {X}.
             if let Some(x) = x_value {
                 cost.mana = cost.mana.map(|m| m.resolve_x(x));
             }
 
-            // CR 602.5a/302.6: a TapSelf cost can't be paid by an
-            // already-tapped source, and a creature's own {T}
-            // ability is restricted by summoning sickness - both
-            // checked against the declared cost up front, before
-            // anything is pushed (an illegal activation never
-            // happens, same stance validate_targets already takes).
-            // The actual tap (like every other additional-cost
-            // mutation) happens once Engine::submit_payment commits
-            // a real PaymentPlan - CR 602.2f-h treats paying the
-            // cost as its own step, separate from announcing the
-            // activation.
+            // CR 602.5a/302.6
+            // An already-tapped source cannot pay a TapSelf cost, and summoning sickness
+            // restricts a creature's own {T} ability. Both are checked against the declared
+            // cost before anything is pushed, so an illegal activation never happens. The
+            // tap itself commits in Engine::submit_payment (CR 602.2f-h).
             if cost.additional.iter().any(|c| matches!(c, AdditionalCost::TapSelf)) {
                 let source_object =
                     state.object(source).ok_or(Rejected::InvalidTarget)?;
@@ -476,8 +411,8 @@ pub(super) fn apply_activate_ability(state: &mut GameState, plan: ActivatePlan) 
                 pool.add_unit(*unit);
             }
 
-            // CR 605.3b: a mana ability resolves immediately as
-            // part of activation - it never uses the stack.
+            // CR 605.3b
+            // A mana ability resolves as part of activation and never uses the stack.
             Ok(CommandOutcome {
                 events: vec![GameEventKind::Tapped { object: source }, GameEventKind::ManaAdded { player: actor, units }],
                 broke_pass_chain: true,
@@ -487,12 +422,10 @@ pub(super) fn apply_activate_ability(state: &mut GameState, plan: ActivatePlan) 
             })
         }
         ActivatePlan::PaidMana { actor, source, cost, units } => {
-            // No StackObject is ever pushed for a mana ability (CR
-            // 605.1a/605.3b) - `stack_id` here is only an opaque
-            // handle for this payment pause to be identified by
-            // (`Engine::unwind_payment` already tolerates a `stack_id`
-            // matching nothing on `state.stack`), never a real
-            // resolvable stack entry.
+            // CR 605.1a/605.3b
+            // No StackObject is pushed for a mana ability. `stack_id` is only a handle that
+            // identifies this payment pause; Engine::unwind_payment tolerates one that
+            // matches nothing on `state.stack`.
             let stack_id = state.allocate_object_id();
 
             Ok(CommandOutcome {
@@ -517,29 +450,27 @@ pub(super) fn apply_activate_ability(state: &mut GameState, plan: ActivatePlan) 
                 source,
                 source_owner,
                 actor,
-                // TODO: no modes on activated abilities yet (CR 700.2b -
-                // RegisteredAbility has no modes field at all).
+                // TODO: no modes on activated abilities, because RegisteredAbility has no modes field (CR 700.2b)
                 Vec::new(),
                 targets,
                 target_requirement,
                 x_value,
                 false,
-                // CR 702.27a: buyback is a spell-only concept - an
-                // activated ability never carries it.
+                // CR 702.27a
+                // Buyback is spell-only.
                 false,
-                // CR 702.138b: "escaped" is a spell-cast-shaped concept - an
-                // activated ability never carries it either.
+                // CR 702.138b
+                // Escape is spell-only.
                 false,
                 operation,
                 effect,
-                // CR 603.4's "if" clause is triggered-ability-only
-                // text - an activated ability never carries one.
+                // CR 603.4
+                // An intervening-if clause belongs to triggered abilities only.
                 None,
-                // CR 700.2e: only a modal spell can defer its mode
-                // choice this way - an activated ability never does.
+                // CR 700.2e
+                // Only a modal spell can defer its mode choice.
                 None,
-                // An activated ability never has a departed source - it's
-                // always activated from a live object.
+                // An activation always comes from a live object, so there is no departed source.
                 None,
             ));
 
@@ -547,10 +478,9 @@ pub(super) fn apply_activate_ability(state: &mut GameState, plan: ActivatePlan) 
                 events: vec![GameEventKind::StackObjectPushed { stack_id }],
                 broke_pass_chain: true,
                 priority_handoff: PriorityHandoff::Unchanged,
-                // CR 602.2f-h: same AwaitingPayment pause CastSpell
-                // uses, even for a bare {T} cost (CR 118.5a's
-                // "explicit empty acknowledgment" stance applies
-                // here too via the empty-CostSpec default above).
+                // CR 602.2f-h
+                // The same AwaitingPayment pause as CastSpell, even for a bare {T} cost
+                // (CR 118.5a), through the empty-CostSpec default above.
                 requires_payment: Some(PendingPaymentRequest {
                     stack_id,
                     payer: actor,

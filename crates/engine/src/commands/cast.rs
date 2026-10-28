@@ -1,6 +1,4 @@
-//! `execute_command`'s `CastSpell` arm body, split out of the original
-//! monolithic `commands.rs` - the single largest arm (mode/target/X-value/
-//! alternative-cost handling, stack-object construction).
+//! The `CastSpell` command body. See `DESIGN.md` for the rest.
 
 use std::collections::HashSet;
 
@@ -51,22 +49,19 @@ pub(super) fn validate_cast_spell(
     alternative_cost: Option<usize>,
     pay_buyback: bool,
 ) -> Result<Validated, Rejected> {
-    // CR 601.3/702.35b: a one-shot timing waiver set by `Engine::
-    // submit_madness_cast` immediately before this call - the resolving
-    // madness triggered ability's own "you may cast it" text is itself the
-    // CR 601.3 "effect [that] allows" casting here, outside `card`'s normal
-    // timing permission, not a property of the alternative cost declaration
-    // itself (see `GameState::pending_timing_bypass`'s own doc comment for
-    // why this is a side channel rather than a new `CastSpell` field).
-    // `apply_cast_spell` clears both grants unconditionally so they can never
-    // leak into a later, unrelated ordinary cast of the same card.
+    // CR 601.3/702.35b
+    // A one-shot timing waiver set by `Engine::submit_madness_cast` just before this
+    // call. The resolving madness trigger's "you may cast it" is the effect that
+    // allows casting outside the card's normal timing (see
+    // GameState::pending_timing_bypass for why this is a side channel).
+    // `apply_cast_spell` clears both grants so they cannot leak into a later cast of
+    // the same card.
     let timing_bypassed = state.pending_timing_bypass == Some(card);
-    // CR 702.85a: a one-shot "cast this exact object for {0}, from Exile"
-    // grant set by `Engine::submit_cascade_cast` immediately before this
-    // call - see `GameState::pending_free_cast`'s own doc comment for why
-    // this can't be an ordinary printed `alternative_costs` entry (the
-    // permission comes from Cascade's own effect, not from anything the
-    // exiled candidate card was ever printed with).
+    // CR 702.85a
+    // A one-shot "cast this object for {0} from Exile" grant set by
+    // `Engine::submit_cascade_cast` just before this call. It cannot be a printed
+    // `alternative_costs` entry because the permission comes from Cascade's effect
+    // (see GameState::pending_free_cast).
     let free_cast = state.pending_free_cast == Some(card);
     let free_cast_alternative = AlternativeCost::Replacement {
         description: "cast without paying its mana cost".to_string(),
@@ -81,20 +76,18 @@ pub(super) fn validate_cast_spell(
             "lands aren't cast as spells - use PlayLand".to_string(),
         ));
     }
-    // CR 702.27a: buyback is announced up front, same phase as
-    // alternative_cost/x_value - rejected here (before any state
-    // mutation) rather than silently ignored if the card has none.
+    // CR 702.27a
+    // Buyback is announced up front with alternative_cost and x_value. A card
+    // without one is rejected before any mutation.
     if pay_buyback && object.definition.buyback_cost.is_none() {
         return Err(Rejected::IllegalAction(
             "this spell has no buyback cost to pay".to_string(),
         ));
     }
-    // CR 601.2b: an announced alternative cost (flashback, etc)
-    // replaces the mana cost entirely and, for the ones this slice
-    // supports, is what grants permission to cast from a zone other
-    // than the hand in the first place - so the zone permission and
-    // the alternative-cost choice are resolved together, not as two
-    // independent checks.
+    // CR 601.2b
+    // An announced alternative cost (flashback, etc) replaces the mana cost and, for
+    // the supported ones, grants permission to cast from a zone other than the hand.
+    // So the zone permission and the cost choice resolve together.
     let alternative: Option<&AlternativeCost> = if free_cast {
         Some(&free_cast_alternative)
     } else {
@@ -111,25 +104,17 @@ pub(super) fn validate_cast_spell(
             None => None,
         }
     };
-    // CR 903.8: a commander may be cast from the command zone by its
-    // owner (not just controller - matching the rule text) at the
-    // normal mana cost, no alternative cost announced. Checked
-    // before the general zone-permission rule below rather than
-    // folded into `required_zone`, since this path cares about
-    // ownership, not control, and only applies with no
-    // `alternative_cost` at all.
+    // CR 903.8
+    // A commander may be cast from the command zone by its owner (not controller)
+    // at its normal cost, with no alternative cost announced. Checked before the
+    // general zone rule because it depends on ownership and not on required_zone.
     let cast_from_command_zone = alternative.is_none()
         && object.is_commander
         && object.zone == ZoneKind::Command
         && object.owner == actor;
-    // TODO: doesn't require casting from the graveyard specifically
-    // for flashback's own zone permission to have been granted at
-    // all (e.g. nothing here checks the card actually has a
-    // Flashback keyword vs. an ad-hoc alternative_costs entry) -
-    // simplest correct rule for now: the chosen alternative's
-    // from_zone must match where the card actually is, full stop.
-    // Without an alternative_cost declared, the card must be in
-    // hand, same as before this slice.
+    // TODO: nothing checks that the chosen alternative cost really grants flashback's graveyard permission (a Flashback keyword versus an ad-hoc alternative_costs entry)
+    // The alternative's from_zone must match where the card is. Without an
+    // alternative cost the card must be in hand.
     let required_zone = match alternative {
         Some(AlternativeCost::Replacement { from_zone, .. }) => *from_zone,
         None => ZoneKind::Hand,
@@ -142,17 +127,11 @@ pub(super) fn validate_cast_spell(
         ));
     }
     let from_zone = object.zone;
-    // CR 117.1a/602/702.8b: instants, and anything with flash, may
-    // be cast any time the actor holds priority; everything else
-    // needs the full sorcery-speed window (is_sorcery_speed already
-    // covers "holds priority" as one of its four conditions, so
-    // this branch only adds the priority check on its own rather
-    // than duplicating it).
-    // TODO: effects granting flash (e.g. "you may cast this as
-    // though it had flash") aren't represented on
-    // continuous_effects yet - same class of gap is_sorcery_speed
-    // flags for PlayLand. Only the card's own printed Flash keyword
-    // is consulted here.
+    // CR 117.1a/602/702.8b
+    // Instants and flash spells may be cast any time the actor holds priority.
+    // Everything else needs the sorcery window; is_sorcery_speed already requires
+    // priority, so this branch adds only the priority check.
+    // TODO: effects that grant flash ("as though it had flash") are not on continuous_effects, so only the card's own Flash keyword counts
     let castable_at_instant_speed = object.definition.card_types.contains(CardTypeSet::INSTANT)
         || object.definition.keywords.contains(KeywordSet::FLASH);
     if !timing_bypassed {
@@ -171,29 +150,15 @@ pub(super) fn validate_cast_spell(
         }
     }
 
-    // CR 700.2a/d/h: a modal card requires the caster to announce
-    // their mode choice(s) here, before targets are chosen (601.2b
-    // comes before 601.2c). A non-modal card (definition.modes
-    // empty) is untouched: modes must be empty, and the card's own
-    // singular target_requirement/effect are used exactly as before
-    // this field existed. `mode_choice` names how many of `modes`
-    // must be chosen (`ModeChoice::Exactly(1)` is the pre-existing
-    // "Choose one —" behavior); its `*Repeatable` variants are CR
-    // 700.2d's reminder-text-gated "you may choose the same mode
-    // more than once" exception - a repeated index is rejected
-    // unless `repeatable` is set. `mode_additional_costs` collects
-    // every chosen mode's own `SpellMode::additional_cost` (CR
-    // 700.2h) - appended to the spell's overall `CostSpec.additional`
-    // once `cost` itself is computed below, so it's paid together
-    // with the mana cost through the same already-generic
-    // `PaymentPlan` machinery an activated ability's own additional
-    // costs already use. A repeated mode with its own additional
-    // cost pays that cost once per instance (CR 700.2d "treated as
-    // if that mode appeared that many times in sequence" + 700.2h
-    // "if more than one such mode is chosen, all additional costs
-    // must be paid") - falls out for free below since
-    // `mode_additional_costs` is collected per chosen instance, not
-    // deduped by mode index.
+    // CR 700.2a/d/h
+    // A modal card announces its modes here, before targets (CR 601.2b comes before
+    // 601.2c). A non-modal card must announce none. `mode_choice` says how many
+    // modes to choose, and a repeated index is rejected unless `repeatable` is set
+    // (CR 700.2d). `mode_additional_costs` collects each chosen instance's
+    // `SpellMode::additional_cost` (CR 700.2h). It is added to `CostSpec.additional`
+    // once `cost` is computed, so it pays through the same PaymentPlan as an
+    // activated ability's additional costs. A repeated mode pays its cost once per
+    // instance because the list is per instance and not deduped by index.
     let (target_requirement, modal_effect, mode_additional_costs, pending_mode_choice): (
         Option<TargetSpec>,
         Option<AbilityEffect>,
@@ -209,11 +174,9 @@ pub(super) fn validate_cast_spell(
         } else if let ModeChoice::ExactlyChosenByOpponent(_) | ModeChoice::UpToChosenByOpponent(_) =
             object.definition.mode_choice
         {
-            // CR 700.2e: the other player chooses, not the caster -
-            // see `ModeChoice`'s own doc comment for the full
-            // narrowing this variant carries. The choice itself is
-            // deferred to a resolution-time pause rather than
-            // supplied here.
+            // CR 700.2e
+            // The other player chooses, not the caster (see `ModeChoice`). The choice is
+            // deferred to a pause at resolution.
             if !modes.is_empty() {
                 return Err(Rejected::IllegalAction(
                     "this card's mode is chosen by another player, not the caster - submit \
@@ -261,11 +224,10 @@ pub(super) fn validate_cast_spell(
                 Some(PendingModeChoice { chooser: *chooser, min, max }),
             )
         } else if let ModeChoice::PawprintBudget(budget) = object.definition.mode_choice {
-            // CR 700.2i: constrained by total pawprint *weight*, not mode
-            // count - no floor (0 modes is legal, unlike every count-based
-            // variant's implicit "at least one"), and no repeats (no real
-            // card combines a pawprint budget with CR 700.2d's "choose the
-            // same mode more than once" exception).
+            // CR 700.2i
+            // Limited by total pawprint weight and not mode count: zero modes is legal, and
+            // there are no repeats (no card combines a pawprint budget with the repeat
+            // exception of CR 700.2d).
             let mut seen_modes = HashSet::new();
             let mut total_weight: u32 = 0;
             for &m in &modes {
@@ -294,9 +256,8 @@ pub(super) fn validate_cast_spell(
                 combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(Rejected::IllegalAction)?;
             (target_requirement, modal_effect, mode_additional_costs, None)
         } else {
-            // CR 700.2a: "choose a number of those options" - never
-            // zero, even for an UpTo spell (ModeChoice::bounds's own
-            // floor already reflects this).
+            // CR 700.2a
+            // Never zero, even for an UpTo spell (ModeChoice::bounds already floors it).
             let (min, max, repeatable) = object.definition.mode_choice.bounds();
             let chosen_count = modes.len() as u32;
             if chosen_count < min || chosen_count > max {
@@ -314,10 +275,9 @@ pub(super) fn validate_cast_spell(
                     }
                 }
             }
-            // CR 700.2's own convention (per Wizards' rulings on
-            // e.g. Cryptic Command): chosen modes' effects happen in
-            // the order printed on the card, not the order the
-            // player listed them in `modes`.
+            // CR 700.2
+            // Chosen modes' effects happen in printed order, not the order the player
+            // listed them.
             let mut chosen_indices = modes.clone();
             chosen_indices.sort_unstable();
             let mut chosen_modes = Vec::with_capacity(chosen_indices.len());
@@ -327,38 +287,25 @@ pub(super) fn validate_cast_spell(
                 })?;
                 chosen_modes.push(mode);
             }
-            // CR 700.2h: every chosen mode's own additional cost (if
-            // any), collected regardless of whether one or several
-            // modes were chosen - "if more than one such mode is
-            // chosen, all additional costs must be paid."
+            // CR 700.2h
+            // Every chosen mode's additional cost, whether one or several modes were chosen.
             let mode_additional_costs: Vec<AdditionalCost> =
                 chosen_modes.iter().filter_map(|m| m.additional_cost.clone()).collect();
-            // CR 700.2c/d: single mode passes through bare (unchanged
-            // pre-multi-mode shape), 2+ modes combine into one
-            // TargetSpec::Multiple/AbilityEffect::Modal pair -
-            // ResolveStackTop zips the two back together at
-            // resolution time via split_targets_by_requirement, the
-            // same helper multi-target-word spells already use.
-            // Shared with a modal *triggered* ability's own mode
-            // choice (Engine::submit_trigger_mode_choice, CR 603.3c)
-            // via commands::legality::combine_chosen_modes - see that
-            // function's own doc comment for the exact combination
-            // rules (including the "mode with its own multi-target
-            // requirement can't be combined" and "unsupported effect
-            // kind" narrow gaps it names).
+            // CR 700.2c/d
+            // A single mode passes through bare. Two or more combine into one
+            // TargetSpec::Multiple and AbilityEffect::Modal pair, which ResolveStackTop
+            // splits again with split_targets_by_requirement. A modal triggered ability
+            // shares this through commands::legality::combine_chosen_modes (CR 603.3c); see
+            // its doc comment for the combinations it cannot make.
             let (target_requirement, modal_effect) =
                 combine_chosen_modes(&object.definition.modes, &chosen_indices).map_err(Rejected::IllegalAction)?;
             (target_requirement, modal_effect, mode_additional_costs, None)
         };
 
-    // CR 601.2c/601.2e: target count/filter/dedup validated below via
-    // validate_targets, rejecting the whole cast before anything is
-    // mutated if illegal. TODO(CR 601.2d): no division/distribution
-    // step for effects that split among targets. TODO: no splice
-    // (CR 601.2b/702.47) - a player revealing other cards in hand to
-    // splice their text onto this spell isn't modeled at all;
-    // PlayerAction has nowhere to carry "which cards I'm splicing,"
-    // and StackObject has nowhere to record it either.
+    // CR 601.2c/601.2e
+    // Validated below, so an illegal cast is rejected before anything mutates.
+    // TODO: no division of an effect among targets (CR 601.2d)
+    // TODO: no splice, since PlayerAction and StackObject cannot carry which cards are being spliced (CR 601.2b/702.47)
     validate_targets(
         state,
         script_runtime,
@@ -366,32 +313,24 @@ pub(super) fn validate_cast_spell(
         &targets,
         actor,
         card,
-        // CR 202.3/107.3a: this casting's own announced X, if any - a
-        // `mana_value` target filter's `X` bound (e.g. "counter target
-        // spell with mana value X") resolves against exactly this.
+        // CR 202.3/107.3a
+        // This cast's announced X, which a `mana_value` target filter's X bound
+        // resolves against.
         x_value,
     )?;
 
-    // CR 601.2f: total cost = the card's printed mana_cost, unless
-    // an alternative cost was announced (CR 601.2b), in which case
-    // it replaces the mana cost entirely - never mixed with it.
-    // `cost.additional` is populated below only from chosen modes'
-    // own CR 700.2h costs (`mode_additional_costs`, computed above)
-    // - a non-modal card's own top-level additional cost has no
-    // representation on `CardDefinition` at all yet (only
-    // `alternative_costs` exists), a separate, still-open gap.
+    // CR 601.2f
+    // Total cost is the printed mana cost, or the announced alternative cost in its
+    // place (CR 601.2b), never both. `cost.additional` is filled only from chosen
+    // modes' costs (CR 700.2h).
+    // TODO: CardDefinition has no top-level additional cost, so a non-modal card cannot have one
     //
-    // CR 107.3a/601.2b: an {X} cost and an announced x_value must
-    // agree - both present or both absent - and once agreed, X is
-    // substituted for a generic amount before PaymentPlan::validate
-    // ever sees the cost (see ManaCost::resolve_x's own doc comment
-    // for why that's enough on its own, no changes needed in
-    // cost.rs). An activated ability's own cost gets the same
-    // treatment - see activate.rs's `cost_has_x` check
-    // (`phase5/x-costs-activated-abilities`). TODO: X combined with
-    // an alternative cost (e.g. flashback on an X spell) isn't
-    // handled - x_value is simply
-    // unchecked in that branch below.
+    // CR 107.3a/601.2b
+    // An {X} cost and an announced x_value must both be present or both absent. X
+    // is then substituted before PaymentPlan::validate sees the cost (see
+    // ManaCost::resolve_x). Activated abilities do the same (activate.rs
+    // `cost_has_x`).
+    // TODO: X combined with an alternative cost (flashback on an X spell) is not handled, and x_value goes unchecked in that branch
     let (mut cost, exile_on_leaving_stack, escaped) = match alternative {
         Some(AlternativeCost::Replacement { cost, exile_on_leaving_stack, escape, .. }) => {
             (cost.clone(), *exile_on_leaving_stack, *escape)
@@ -414,36 +353,26 @@ pub(super) fn validate_cast_spell(
                     ));
                 }
             };
-            // CR 601.2f/118.9: static cost-modification effects
-            // (Goblin Warchief, Thalia, ...) apply after X is
-            // resolved, before the cost is locked in for payment -
-            // see CostModifier's own doc comment (cost.rs) for why
-            // this only touches the plain mana-cost path (never an
-            // alternative cost, this slice).
+            // CR 601.2f/118.9
+            // Static cost modifiers (Goblin Warchief, Thalia) apply after X is resolved and
+            // before the cost is locked. They touch only the plain mana-cost path, never an
+            // alternative cost (see CostModifier in cost.rs).
             let resolved_mana_cost =
                 cost::apply_cost_modifiers(&resolved_mana_cost, &state.cost_modifiers, object);
-            // CR 903.8/702.124d: commander tax - {2} generic per
-            // prior time this player has cast *this* commander (by
-            // name, not ObjectId - see PlayerState::commander_casts'
-            // own doc comment for why) from the command zone this
-            // game. Only the 903.8 path taxes; a normal hand cast or
-            // an announced alternative cost never does (`alternative`
-            // being `None` is this whole match arm's own condition,
-            // and `cast_from_command_zone` narrows it further).
+            // CR 903.8/702.124d
+            // Commander tax is {2} generic per prior cast of this commander from the
+            // command zone this game, counted by name and not ObjectId (see
+            // PlayerState::commander_casts). Only the command-zone path taxes.
             let resolved_mana_cost = if cast_from_command_zone {
                 let prior_casts = state
                     .player(actor)
                     .and_then(|p| p.commander_casts.get(&object.definition.name))
                     .copied()
                     .unwrap_or(0);
-                // A first cast (prior_casts == 0, delta == 0) must
-                // be a true no-op - apply_cost_delta(0) isn't one,
-                // it always drops an explicit Generic(0) symbol
-                // (see cost::apply_cost_modifiers's own doc comment
-                // for the same bug shape, caught by phase5/cost-
-                // modifier-order). An {X} commander with X == 0,
-                // cast from the command zone for the first time,
-                // would otherwise lose that explicit zero marker.
+                // A first cast (prior_casts == 0) must add nothing. apply_cost_delta(0) is not
+                // a no-op because it always drops an explicit Generic(0) symbol (see
+                // cost::apply_cost_modifiers), which would erase an {X} commander's explicit
+                // zero when X == 0.
                 if prior_casts == 0 {
                     resolved_mana_cost
                 } else {
@@ -455,18 +384,14 @@ pub(super) fn validate_cast_spell(
             (CostSpec::mana_only(resolved_mana_cost), false, false)
         }
     };
-    // CR 700.2h: every chosen mode's own additional cost (collected
-    // above, regardless of whether an alternative or normal mana
-    // cost is being paid - CR 700.2h doesn't exclude either) is
-    // paid together with the rest of this cost, through the same
-    // already-generic PaymentPlan machinery.
+    // CR 700.2h
+    // Every chosen mode's additional cost is paid with the rest of the cost,
+    // whether an alternative or the normal mana cost applies.
     cost.additional.extend(mode_additional_costs);
-    // CR 702.27a: buyback's own cost is paid *in addition to* whatever
-    // cost already applies (checked above: pay_buyback implies
-    // buyback_cost.is_some()) - concatenated directly onto the resolved
-    // cost's own mana symbols, so PaymentPlan::validate enforces the
-    // combined total through the same generic mana-payment check, rather
-    // than a second independent one.
+    // CR 702.27a
+    // Buyback's cost is paid in addition to whatever cost applies (pay_buyback
+    // implies buyback_cost.is_some(), checked above). It is concatenated onto the
+    // mana symbols so PaymentPlan::validate enforces one combined total.
     if pay_buyback {
         let buyback_cost = object.definition.buyback_cost.clone().ok_or_else(|| {
             Rejected::IllegalAction("this spell has no buyback cost to pay".to_string())
@@ -476,13 +401,11 @@ pub(super) fn validate_cast_spell(
         cost.mana = Some(mana);
     }
 
-    // CR 400.7: Exile (like Battlefield) is a shared zone, not per-player -
-    // same owner derivation `commands::commit_zone_move` already uses. Every
-    // `from_zone` before Madness's own `AlternativeCost::Replacement {
-    // from_zone: Exile, .. }` was per-player (Hand/Graveyard/Command), so
-    // this case was never reachable until now. Looked up before any id is
-    // allocated or the card is removed, so a missing zone rejects without a
-    // partial move (024).
+    // CR 400.7
+    // Exile, like Battlefield, is a shared zone and not per-player, using the same
+    // owner derivation as `commands::commit_zone_move`. Looked up before any id is
+    // allocated or the card is removed, so a missing zone rejects without a partial
+    // move.
     let from_owner = if from_zone == ZoneKind::Exile { None } else { Some(actor) };
     if state.zone(from_zone, from_owner).is_none() {
         return Err(Rejected::IllegalAction("actor has no such zone".to_string()));
@@ -529,13 +452,13 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
     state.pending_timing_bypass.take();
     state.pending_free_cast.take();
     let object = state.object(card).ok_or_else(|| Internal::new("cast: the validated card is gone"))?;
-    // Snapshot before the move - CR 603.10's last_known_info (see
-    // GameEventKind::ZoneChange's doc comment).
+    // CR 603.10
+    // Snapshot before the move, for last_known_info.
     let last_known_info = object.clone();
 
-    // CR 400.7/601.2a: casting moves the card to the stack, which is
-    // a zone change that mints a new ObjectId (same convention
-    // PlayLand uses for hand->battlefield) - see ObjectLineage.
+    // CR 400.7/601.2a
+    // Casting moves the card to the stack, a zone change that mints a new ObjectId
+    // (see ObjectLineage), as PlayLand does.
     let new_id = state.allocate_object_id();
     let mut new_object = last_known_info.clone();
     new_object.object_id = new_id;
@@ -551,48 +474,33 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
     state.objects.insert(new_id, new_object);
     remap_abilities(state, card, new_id);
 
-    // CR 903.8: this cast counts toward the *next* commander tax
-    // once it actually commits (the zone move above, not merely
-    // attempted) - matches where the tax was computed above (this
-    // player's own count, at the point of casting). TODO: if this
-    // cast is later abandoned via `Engine::unwind_payment` (CR
-    // 601.6), this increment isn't rolled back - a real gap, same
-    // family as `unwind_payment`'s own pre-existing bug of returning
-    // any unwound spell to hand regardless of its real origin zone
-    // (so an unwound commander cast already loses its command-zone
-    // recastability independent of this). Flagged, not fixed here.
+    // CR 903.8
+    // This cast counts toward the next commander tax once the zone move above
+    // commits.
+    // TODO: a cast abandoned through Engine::unwind_payment (CR 601.6) keeps this increment, and unwind_payment returns any unwound spell to hand whatever its origin zone, so an unwound commander cast already loses its command-zone recastability
     if cast_from_command_zone {
         if let Some(p) = state.player_mut(actor) {
             *p.commander_casts.entry(last_known_info.definition.name.clone()).or_insert(0) += 1;
         }
     }
 
-    // CR 608.2m: a real, Rust-native fast-path effect (e.g. "Shock
-    // deals 2 damage to any target") if the card's own
-    // CardDefinition carries one - see CardDefinition::effect's own
-    // doc comment for why a permanent spell never has one. For a
-    // modal card, the chosen mode's own effect (resolved above,
-    // before targets) is used instead of the card's singular field.
+    // CR 608.2m
+    // The card's Rust-native fast-path effect (Shock's damage, say), if it has one;
+    // a permanent spell never does (see CardDefinition::effect). A modal card uses
+    // the chosen mode's effect, resolved above, instead of its singular field.
     let effect = if last_known_info.definition.modes.is_empty() {
         last_known_info.definition.effect.clone()
     } else {
         modal_effect
     };
 
-    // A script-declared custom-function operation (`s.operation()`
-    // returning a Lua function rather than a `Game.Ops.*` tag) is
-    // packed onto `CardDefinition.effect` as `AbilityEffect::
-    // Script(handle)` - see that variant's own doc comment for why
-    // `CardDefinition` has no separate `operation: ScriptHandle`
-    // field to carry it natively. Unpacked here into StackObject's
-    // real two-field shape (`operation`/`effect`) so
-    // `ResolveStackTop` never has to know the difference from a
-    // triggered/activated ability's own script fallback - `None` on
-    // `effect` is what makes it invoke `operation` for real. Every
-    // other shape (a `Game.Ops.*` primitive, or no script-declared
-    // operation at all) keeps the pre-existing `ScriptHandle(0)`
-    // placeholder - "nothing real bound to it," only `effect`'s
-    // Rust-native fast path can resolve those.
+    // A script custom-function operation (`s.operation()` returning a Lua function
+    // and not a `Game.Ops.*` tag) arrives packed as `AbilityEffect::Script(handle)`
+    // on `CardDefinition.effect` (see that variant for why). It is unpacked into
+    // StackObject's `operation`/`effect` pair so `ResolveStackTop` treats it like a
+    // triggered or activated ability's script fallback: `None` on `effect` makes it
+    // run `operation`. Every other shape keeps the `ScriptHandle(0)` placeholder,
+    // and only the Rust-native `effect` can resolve those.
     let (operation, effect) = match effect {
         Some(AbilityEffect::Script(handle)) => (handle, None),
         other => (ScriptHandle(0), other),
@@ -602,8 +510,8 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
         new_id,
         StackEntryKind::Spell,
         new_id,
-        // CR 800.4a: a spell's owner is its card's own owner, not
-        // necessarily whoever is casting it.
+        // CR 800.4a
+        // A spell's owner is its card's owner, not necessarily the caster.
         last_known_info.owner,
         actor,
         modes,
@@ -611,22 +519,21 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
         target_requirement,
         x_value,
         exile_on_leaving_stack,
-        // CR 702.27a: already confirmed above (pay_buyback implies
-        // buyback_cost.is_some()) - baked in here so the resolution-side
-        // destination check (engine/resolve/permanent_entry.rs) doesn't
-        // need to re-read CardDefinition.
+        // CR 702.27a
+        // Baked in so the resolution-side destination check
+        // (engine/resolve/permanent_entry.rs) need not re-read CardDefinition.
         pay_buyback,
-        // CR 702.138b: already resolved above from the chosen alternative
-        // cost's own `escape` flag.
+        // CR 702.138b
+        // Resolved above from the chosen alternative cost's `escape` flag.
         escaped,
         operation,
         effect,
-        // CR 603.4's "if" clause is triggered-ability-only text - a
-        // spell never carries one.
+        // CR 603.4
+        // An intervening-if clause belongs to triggered abilities only.
         None,
         pending_mode_choice,
-        // A spell never carries a departed-source LKI - only a triggered
-        // ability pushed off a Dies-style departed source does.
+        // A spell never carries a departed-source LKI; only a triggered ability pushed
+        // off a Dies-style departed source does.
         None,
     ));
 
@@ -640,20 +547,20 @@ pub(super) fn apply_cast_spell(state: &mut GameState, plan: CastPlan) -> Result<
             },
             GameEventKind::StackObjectPushed { stack_id: new_id },
         ],
-        // CR 601.2i: the controller already held priority before
-        // casting (checked above), so they keep it - it doesn't move.
+        // CR 601.2i
+        // The caster held priority before casting (checked above) and keeps it.
         broke_pass_chain: true,
         priority_handoff: PriorityHandoff::Unchanged,
-        // CR 601.2f-h: cost isn't paid yet just by being on the
-        // stack - engine.rs pauses on AwaitingPayment until
-        // Engine::submit_payment answers, even for a {0} cost (CR
-        // 118.5a still requires an explicit empty acknowledgment).
+        // CR 601.2f-h
+        // Being on the stack does not pay the cost. The engine pauses on
+        // AwaitingPayment until Engine::submit_payment answers, even for a {0} cost
+        // (CR 118.5a).
         requires_payment: Some(PendingPaymentRequest {
             stack_id: new_id,
             payer: actor,
             cost,
-            // Placeholder - a spell's CostSpec never contains
-            // AdditionalCost::TapSelf, so this is never consulted.
+            // Placeholder: a spell's CostSpec never has AdditionalCost::TapSelf, so this is
+            // never read.
             source: new_id,
             on_paid: PaymentResolution::StackObject,
         }),
