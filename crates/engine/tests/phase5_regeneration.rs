@@ -1,19 +1,5 @@
-//! Phase 5 vertical slice: CR 614.8/701.19 regeneration. Scoped to CR
-//! 704.5g's lethal-damage/deathtouch SBA path (the overwhelmingly common
-//! real case, "regenerate this creature" in response to lethal damage) and
-//! the scripted `Destroy` op - CR 704.5f (zero toughness) and CR 704.5k
-//! (world rule) are explicitly NOT destruction and can't be saved by a
-//! shield, the real rules nuance this slice exists to get right (see
-//! `sba::DyingCandidate`'s own doc comment).
-//!
-//! `ReplacementPayload::Regenerate` rewrites the proposed destroy
-//! `ZoneChange` into a `GameEventKind::Regenerated` instead (CR 614.6: a
-//! replaced event never happens, a modified one occurs instead) -
-//! `sba::commit_regeneration` then removes all marked damage, taps the
-//! permanent, and removes it from combat. `ConsumptionPolicy::OneShot`/
-//! `Repeatable` map directly onto CR 701.19a (spell/ability-sourced, one-
-//! shot) vs 701.19b (static-ability-sourced, repeatable) - no new machinery
-//! needed for that distinction.
+//! CR 614.8, 701.19: regeneration, scoped to the CR 704.5g lethal-damage and deathtouch SBA path and the scripted `Destroy` op. CR 704.5f and 704.5k are not destruction, so a shield cannot save from them (`sba::DyingCandidate`).
+//! `ReplacementPayload::Regenerate` rewrites the destroy `ZoneChange` into `Regenerated` (CR 614.6), and `sba::commit_regeneration` removes marked damage, taps the permanent and removes it from combat. `OneShot` and `Repeatable` map to CR 701.19a and 701.19b.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -66,9 +52,6 @@ fn regenerate_shield(source: ObjectId, consumption: ConsumptionPolicy) -> Replac
     }
 }
 
-/// Distinct source/payload from `regenerate_shield`, for the CR 616.1
-/// ordering-choice test - the two effects must be tellable apart by which
-/// candidate a test picks.
 fn would_die_exile_effect(source: ObjectId) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -98,11 +81,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// A non-creature permanent standing in for "whatever grants the Exile
-/// replacement effect" in the CR 616.1 ordering-choice tests - distinct from
-/// the dying creature itself. `event_target_matches` requires a
-/// `ReplacementEffect::source` to actually resolve in `state.objects`, so
-/// this has to be a real object, not just an id.
 fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: 2,
@@ -137,10 +115,6 @@ fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
         SbaOutcome::NeedsCommanderReturnChoice { .. } => panic!("fixture didn't expect a commander-return choice pause"),
     }
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: sba::check_state_based_actions
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_one_shot_shield_saves_a_creature_with_lethal_damage() {
@@ -182,10 +156,7 @@ fn a_one_shot_shield_does_not_save_a_second_lethal_hit() {
 
 #[test]
 fn a_repeatable_shield_survives_multiple_lethal_hits() {
-    // CR 701.19b: a static ability's own regeneration shield reapplies each
-    // time - modeled here as ConsumptionPolicy::Repeatable on a shield
-    // sourced from the dying creature itself (self_only), same shape a real
-    // "regenerate this creature" static ability would register.
+    // CR 701.19b: a static ability's shield reapplies each time, modeled as ConsumptionPolicy::Repeatable on a self_only shield.
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let mut state = base_state();
@@ -203,9 +174,7 @@ fn a_repeatable_shield_survives_multiple_lethal_hits() {
 
 #[test]
 fn a_shield_does_not_save_a_zero_toughness_creature() {
-    // CR 704.5f (zero-or-less toughness) is "put into the graveyard," not
-    // "destroy" (CR 614.8) - the real rules nuance this slice exists to get
-    // right. A regeneration shield must not intercept it.
+    // CR 704.5f is "put into the graveyard" and not "destroy" (CR 614.8), so a regeneration shield must not intercept it.
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let mut state = base_state();
@@ -221,14 +190,7 @@ fn a_shield_does_not_save_a_zero_toughness_creature() {
     );
     let GameEventKind::ZoneChange { object: new_id, .. } = events[0].kind else { unreachable!() };
     assert_eq!(state.object(new_id).unwrap().zone, ZoneKind::Graveyard);
-    // The shield never matched at all (is_destroy: false for a 704.5f death)
-    // - it was never spent on a death it couldn't actually intercept. But
-    // the bear's own ObjectId still retired via CR 400.7 (the zero-toughness
-    // death is a real zone change, new id and all), and `phase5/static-
-    // regeneration`'s `retire_object` fix purges a self_only shield pinned
-    // to a since-retired source - it can never match anything again, so it's
-    // gone too, not left sitting as a harmless-looking but permanently dead
-    // entry.
+    // The shield never matched (is_destroy: false for a CR 704.5f death), but the bear's id retired (CR 400.7) and `retire_object` purges a self_only shield pinned to a retired source.
     assert_eq!(
         state.replacement_effects.len(),
         0,
@@ -275,9 +237,7 @@ fn an_unshielded_creature_is_destroyed_normally() {
 
 #[test]
 fn regeneration_and_a_would_die_exile_effect_still_pause_for_a_cr_616_1_ordering_choice() {
-    // Proves is_destroy threads correctly across the whole CR 616.1
-    // pause/resume path - a real risk this slice's own scoping report
-    // flagged, not left silently unverified.
+    // is_destroy must thread through the whole CR 616.1 pause and resume path.
     let p0 = PlayerId(0);
     let bear = ObjectId(0);
     let mut state = base_state();
@@ -296,11 +256,6 @@ fn regeneration_and_a_would_die_exile_effect_still_pause_for_a_cr_616_1_ordering
     assert_eq!(state.object(bear).unwrap().damage_marked, 2);
     assert_eq!(state.replacement_effects.len(), 2);
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline, including the CR 616.1 pause/resume
-// choosing the regeneration shield specifically.
-// ---------------------------------------------------------------------
 
 #[test]
 fn engine_resumes_correctly_after_choosing_the_regeneration_shield_in_an_ordering_choice() {
@@ -340,13 +295,6 @@ fn engine_resumes_correctly_after_choosing_the_regeneration_shield_in_an_orderin
     );
 }
 
-// ---------------------------------------------------------------------
-// The scripted `AbilityEffect::Destroy` op also checks for a regeneration
-// shield now (this slice widened scope beyond just the SBA path once the
-// plumbing turned out cheap to share - see docs/implementation.md).
-// ---------------------------------------------------------------------
-
-/// "Test Destroy: Destroy target creature."
 fn destroy_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -418,16 +366,13 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
 
 #[test]
 fn a_destroy_spell_is_intercepted_by_a_regeneration_shield() {
-    // p0 (already active/holding priority in base_state()) targets their
-    // own creature - unusual on a real card, but a fine way to exercise the
-    // mechanic without needing to pass priority to a second player first.
+    // p0 targets its own creature, a simple way to exercise the mechanic without passing priority to a second player.
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let destroy_spell = ObjectId(1);
     let mut state = state_with_hand_zones();
-    // No pre-existing damage - the only thing that should destroy this bear
-    // is the Destroy spell itself, so the shield is still up when it does.
+    // No pre-existing damage, so only the Destroy spell can destroy this bear and the shield is still up when it does.
     put_on_battlefield(&mut state, creature(bear, p0, 2, 0));
     put_in_hand(&mut state, card_object(destroy_spell, destroy_spell_definition(), p0, ZoneKind::Hand));
     state.replacement_effects.push(regenerate_shield(bear, ConsumptionPolicy::OneShot));

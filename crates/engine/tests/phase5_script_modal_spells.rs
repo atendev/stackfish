@@ -1,19 +1,5 @@
-//! Phase 5 vertical slice: CR 700.2a modal spell mode-selection (backlog
-//! item 9a-i) — the controller chooses exactly one of a spell's modes as
-//! part of casting, before targets are chosen (601.2b precedes 601.2c).
-//! This file covers only the "choose exactly one" (`ModeChoice::Exactly(1)`)
-//! case; choosing two or more modes (CR 700.2d) is real now too — see
-//! `phase5_modal_multi_mode.rs`. Another player choosing (700.2e) and a mode
-//! carrying its own additional cost (700.2h) are still deferred — see
-//! `CardDefinition::modes`'s own doc comment.
-//!
-//! Unlike `Game.SelectTargets`/`Game.MayChoose` (backlog items 9/9a, mid-
-//! resolution Lua coroutine yields), mode-choice is a cast-time decision:
-//! `PlayerActionKind::CastSpell::modes` already flowed end-to-end before
-//! this slice (all the way onto `StackObject.chosen_modes`) without ever
-//! being read - this slice is what actually consults it, choosing which of
-//! `CardDefinition.modes`'s `SpellMode`s supplies the target requirement
-//! and effect for the rest of casting/resolution.
+//! CR 700.2a: the controller chooses exactly one of a spell's modes as part of casting, before targets (CR 601.2b precedes 601.2c). `CastSpell::modes` selects which `SpellMode` supplies the target requirement and effect.
+//! Multi-mode choice is in phase5_modal_multi_mode.rs, opponent-chosen modes (CR 700.2e) in phase5_modal_chosen_by_opponent.rs, and mode costs (CR 700.2h) in phase5_modal_mode_additional_cost.rs.
 
 use std::collections::HashMap;
 
@@ -48,10 +34,8 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Choose one — Mode 0: You gain 3 life. Mode 1: Test Modal Spell deals 2
-/// damage to any target." Mode 0 has no target requirement at all (CR
-/// 601.2c: a spell is cast as though it didn't require targets its chosen
-/// mode doesn't ask for); mode 1 requires exactly one `AnyTarget`.
+// CR 601.2c
+// Mode 0 has no target requirement, so a spell is cast as though it did not require targets its chosen mode does not ask for. Mode 1 requires one `AnyTarget`.
 fn modal_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -94,8 +78,6 @@ fn modal_spell_definition() -> CardDefinition {
     }
 }
 
-/// A plain, non-modal instant - regression guard that `modes: Vec::new()`
-/// on `CardDefinition` still behaves exactly as before this slice.
 fn shock_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -178,9 +160,7 @@ fn choosing_mode_zero_gains_life_and_never_touches_mode_ones_target_requirement(
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // No targets supplied - legal only because mode 0 has no target
-    // requirement at all. If mode 1's AnyTarget requirement leaked in here,
-    // this cast would be illegally rejected for a missing target instead.
+    // No targets are supplied, legal only because mode 0 needs none. A leaked mode 1 AnyTarget would reject this cast.
     cast_spell(&mut engine, p0, card, vec![0], Vec::new());
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
@@ -219,8 +199,7 @@ fn modal_spell_rejects_a_target_illegal_for_the_chosen_modes_own_requirement() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Mode 1 requires exactly one AnyTarget - supplying none is illegal,
-    // same as any non-modal spell's own target_requirement would reject.
+    // Mode 1 requires exactly one AnyTarget, so supplying none is illegal.
     let err = try_cast_spell(&mut engine, p0, card, vec![1], Vec::new()).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
@@ -252,8 +231,7 @@ fn modal_spell_rejects_choosing_two_modes() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // CR 700.2d ("choose two"/repeated modes) is out of scope this slice -
-    // narrowed to exactly one.
+    // Choosing two modes is out of scope here (CR 700.2d), so a non-single selection is rejected.
     let err = try_cast_spell(&mut engine, p0, card, vec![0, 1], Vec::new()).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));

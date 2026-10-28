@@ -1,22 +1,5 @@
-//! Phase 5 vertical slice: CR 700.2i — some modal spells weight their modes
-//! with pawprint symbols ({P}) instead of a flat mode count, and let their
-//! controller choose any number of modes such that the total pawprint
-//! weight of the chosen modes doesn't exceed a stated budget.
-//!
-//! Unlike every prior `ModeChoice` variant, the constraint is on total
-//! *weight*, not mode *count* - `ModeChoice::bounds()` (a `(min, max,
-//! repeatable)` shape with no access to the modes list) can't express this,
-//! so `PawprintBudget` is validated by its own explicit weight-sum check at
-//! each real site instead: `commands::cast::execute_command`'s `CastSpell`
-//! arm (caster-chosen spells) and `Engine::submit_trigger_mode_choice` (CR
-//! 603.3c modal triggered abilities, which share `ModeChoice`/`SpellMode`
-//! wholesale with `CardDefinition`). CR 700.2i's own wording sets no floor -
-//! choosing zero modes is legal, unlike every count-based variant's implicit
-//! "at least one."
-//!
-//! Narrowed on purpose: no repeatable pawprint-budget modes, and no CR
-//! 700.2e "chosen by opponent" combination - no real card combines either
-//! with this shape.
+//! CR 700.2i: pawprint ({P}) modes are chosen by total weight against a budget and not by count, validated by an explicit weight-sum check in `CastSpell` and `submit_trigger_mode_choice` (CR 603.3c). Choosing zero modes is legal.
+// TODO: repeatable pawprint-budget modes and the CR 700.2e opponent-chosen combination
 
 use std::collections::HashMap;
 
@@ -36,12 +19,6 @@ fn any_target_requirement() -> TargetSpec {
     })
 }
 
-/// "Choose up to 3 {P} worth -
-///  {P} You gain 1 life.
-///  {P}{P} Test Modal Spell deals 2 damage to any target."
-/// Mode 0 costs 1 pawprint, mode 1 costs 2 - both together (3) exactly fill
-/// a budget of 3; mode 1 alone (2) plus mode 0 (1) is the only way to spend
-/// all 3, since there's no third mode to combine differently.
 fn pawprint_budget_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 41,
@@ -205,21 +182,12 @@ fn choosing_the_same_pawprint_mode_twice_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Weight 1 + 1 = 2, well within budget - but repeats aren't supported
-    // for this ModeChoice variant regardless.
+    // Weight 1 + 1 = 2 is within budget, but this variant does not support repeats.
     let err = try_cast_spell(&mut engine, p0, card, vec![0, 0], Vec::new()).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "state untouched");
 }
-
-// ---------------------------------------------------------------------
-// CR 603.3c: a triggered ability's own modes can be pawprint-budgeted too
-// (RegisteredAbility mirrors CardDefinition's modal shape wholesale). Same
-// "at the beginning of your upkeep" real-trigger shape
-// `phase5_trigger_modal_choice.rs`'s own `modal_upkeep_ability` already
-// established, reused here rather than a synthetic pending-trigger API.
-// ---------------------------------------------------------------------
 
 fn creature_definition(name: &str) -> CardDefinition {
     CardDefinition {
@@ -285,6 +253,7 @@ fn pawprint_budget_upkeep_ability(source: ObjectId, extra_mode: Option<SpellMode
     }
 }
 
+// CR 603.3c
 #[test]
 fn a_pawprint_budgeted_trigger_accepts_a_combination_within_budget() {
     let p0 = PlayerId(0);
@@ -305,11 +274,7 @@ fn a_pawprint_budgeted_trigger_accepts_a_combination_within_budget() {
 
     engine.submit_trigger_mode_choice(vec![0, 1]).expect("weight 1 + 2 = 3, exactly the budget");
     let status = drain(&mut engine);
-    // Both chosen modes are targetless, but combine_chosen_modes still
-    // produces a TargetSpec::Multiple of two synthetic zero-count slots for
-    // any 2+-mode combination - same pre-existing shape
-    // `phase5_trigger_modal_choice.rs`'s own combined-mode tests already
-    // chain through, just with every slot needing zero targets here.
+    // Both modes are targetless, but combine_chosen_modes still produces a Multiple of two zero-count slots for any 2+ mode combination.
     assert!(matches!(status, StepStatus::AwaitingTriggerTargets { .. }), "got {status:?}");
     engine.submit_trigger_targets(vec![]).expect("both requirements are zero-count");
     let status = drain(&mut engine);

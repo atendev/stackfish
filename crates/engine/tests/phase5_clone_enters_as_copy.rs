@@ -1,25 +1,6 @@
-//! Phase 5 vertical slice: CR 707.6/614.12a "enter as a copy" (Clone
-//! itself) - "You may have this creature enter as a copy of any creature on
-//! the battlefield." The last of the explicitly named layer-1/copy gaps
-//! (`copy-exceptions`/`layer-engine-copy`'s own notes): `BecomeCopy` (an
-//! existing permanent re-copying something) and `TokenSpec::CopyOf` (a
-//! token copying something) both already existed; this is the third real
-//! entry point - a card itself choosing, as it enters, to become a copy.
-//!
-//! Same category of gap as Devour/Amplify: `ReplacementPayload::EntersAsCopy`
-//! is never applied by `replacement::apply_enters_battlefield_modifiers` at
-//! all - `replacement::pending_copy_choice` is checked directly by
-//! `ResolveStackTop`, pausing on `ProcessState::AwaitingCopyChoice` and
-//! resuming via `Engine::submit_copy_choice`.
-//!
-//! Unlike Devour/Amplify, a real choice reuses `AbilityEffect::BecomeCopy`'s
-//! own machinery wholesale (purge + re-run `run_card_script`, `CopyExceptions`
-//! applied first) and logs the same `GameEventKind::BecameCopy`. The resume
-//! then always runs `apply_enters_battlefield_modifiers` (copied or not),
-//! with the entering spell's own real `costs_paid`-derived `colors_spent`
-//! carried through - this is what makes the comp rules' own worked example
-//! real: a Clone copying a Fading + "enters tapped" creature enters tapped
-//! with fade counters too (CR 707.2's Skyshroud Behemoth example).
+//! CR 707.6, 614.12a: "enter as a copy" (Clone). `ResolveStackTop` checks `replacement::pending_copy_choice`, pauses on `AwaitingCopyChoice` and resumes via `submit_copy_choice`.
+//! A choice reuses `AbilityEffect::BecomeCopy` (exceptions first) and logs `BecameCopy`, and the resume applies enters-the-battlefield modifiers either way.
+//! A Clone copying a Fading, enters-tapped creature enters tapped with fade counters (CR 707.2).
 
 use stackfish_engine::engine::{CopyChoiceError, Engine, StepStatus};
 use stackfish_engine::layers;
@@ -107,10 +88,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-// ---------------------------------------------------------------------
-// pending_copy_choice - unit level.
-// ---------------------------------------------------------------------
-
 #[test]
 fn pending_copy_choice_offers_every_battlefield_creature_regardless_of_controller() {
     let mut state = two_player_state();
@@ -131,8 +108,7 @@ fn pending_copy_choice_offers_every_battlefield_creature_regardless_of_controlle
         replacement::pending_copy_choice(&state, &runtime, entrant, ZoneKind::Stack).expect("an EntersAsCopy effect is registered with real candidates");
     candidates.sort_by_key(|id| id.0);
 
-    // Both bears (regardless of controller) and the entrant itself (a
-    // creature) all qualify; the non-creature artifact doesn't.
+    // Both bears and the entrant itself are creatures and qualify, and the artifact does not.
     let mut expected = vec![entrant, own_bear, opponents_bear];
     expected.sort_by_key(|id| id.0);
     assert_eq!(candidates, expected);
@@ -157,10 +133,6 @@ fn pending_copy_choice_is_none_without_a_registered_effect() {
     let runtime = ScriptRuntime::new();
     assert!(replacement::pending_copy_choice(&state, &runtime, ObjectId(0), ZoneKind::Stack).is_none());
 }
-
-// ---------------------------------------------------------------------
-// Lua self-registration.
-// ---------------------------------------------------------------------
 
 const CLONE_SCRIPT: &str = r#"
 local s = {}
@@ -196,13 +168,6 @@ fn set_payload_enters_as_copy_registers_correctly() {
     }
 }
 
-// ---------------------------------------------------------------------
-// End to end: Lua registration + real CastSpell resolution + the pause.
-// ---------------------------------------------------------------------
-
-/// Skyshroud Behemoth, per CR 707.2's own worked example: "Fading 2" (enters
-/// with two counters, modeled here as Charge) and "This creature enters
-/// tapped."
 const BEHEMOTH_SCRIPT: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -321,10 +286,6 @@ fn choosing_not_to_copy_leaves_the_entrant_as_itself() {
     assert_eq!(engine.state().object(object).unwrap().copy_generation, 0, "declining is not a copy application");
 }
 
-/// Spark Double, per CR 707.9e's "additional effect" exception shape:
-/// "...if it's a creature, it enters with an additional +1/+1 counter on
-/// it." Exercises the Lua-side `counter_kind`/`counter_amount` decode too
-/// (`decode_copy_exceptions`), not just the Rust-level field.
 const SPARK_DOUBLE_SCRIPT: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -434,11 +395,6 @@ fn a_creature_without_entersascopy_never_pauses() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "no EntersAsCopy effect registered - no pause, got {status:?}");
 }
 
-// ---------------------------------------------------------------------
-// CR 707.9a: Vesuvan Doppelganger's own "except it has [linked upkeep
-// ability]" - phase5/vesuvan-linked-copy-ability.
-// ---------------------------------------------------------------------
-
 const VESUVAN_SCRIPT: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -451,11 +407,7 @@ end
 return s
 "#;
 
-/// CR 707.9a: choosing to copy grants the linked "at the beginning of your
-/// upkeep, become a copy of target creature" ability alongside whatever the
-/// copied creature's own abilities are - a real, distinct `RegisteredAbility`
-/// tagged in `linked_ability_generation` with the generation this copy
-/// application produced.
+// CR 707.9a
 #[test]
 fn choosing_a_vesuvan_style_copy_grants_the_linked_upkeep_ability() {
     let p0 = PlayerId(0);
@@ -496,7 +448,6 @@ fn choosing_a_vesuvan_style_copy_grants_the_linked_upkeep_ability() {
     );
 }
 
-/// Declining the copy grants nothing - no linked ability, no bump.
 #[test]
 fn declining_a_vesuvan_style_copy_grants_no_linked_ability() {
     let p0 = PlayerId(0);

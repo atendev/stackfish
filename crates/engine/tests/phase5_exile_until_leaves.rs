@@ -1,16 +1,5 @@
-//! Phase 5 vertical slice: exile until the source leaves the battlefield
-//! (CR 610.3).
-//!
-//! `Game.Ops.ExileUntilSourceLeaves` exiles its target like `Game.Ops.Exile`
-//! and links the exiled card to the ability's source. When the source is no
-//! longer on the battlefield the card returns under its owner's control
-//! (CR 610.3c). The return is a one-shot effect, not a trigger, so it does not
-//! use the stack. It runs where state-based actions settle, goes through the
-//! normal reanimation pipeline (replacement effects, enters triggers, entry
-//! modifiers) and is followed by another state-based action pass.
-//!
-//! If the source left before the exile resolves, nothing is exiled
-//! (CR 610.3a/b).
+//! CR 610.3: `Game.Ops.ExileUntilSourceLeaves` exiles its target and links the card to the ability's source.
+//! When the source leaves the battlefield the card returns under its owner's control (CR 610.3c), as a one-shot effect where state-based actions settle, through the normal reanimation pipeline. If the source left before the exile resolves, nothing is exiled (CR 610.3a/b).
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -21,10 +10,6 @@ const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
 const WARD: u64 = 900;
 
-// ---- Lua fixtures ---------------------------------------------------------
-
-/// "{0}: Exile target creature until this leaves the battlefield." (twice,
-/// so one source can hold two cards), plus "Sacrifice this: gain 1 life".
 const PRIEST: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -77,7 +62,6 @@ end
 return s
 "#;
 
-/// "{0}: Return target creature card from exile to the battlefield."
 const REANIMATOR: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -99,8 +83,6 @@ function s.register_abilities(c)
 end
 return s
 "#;
-
-// ---- Card and state fixtures ----------------------------------------------
 
 #[derive(Clone)]
 struct Creature {
@@ -171,7 +153,6 @@ fn engine_with(creatures: Vec<Creature>) -> Engine {
     Engine::new(state)
 }
 
-/// A battlefield object that exists only so a replacement effect has a real source.
 fn with_ward(mut engine: Engine) -> Engine {
     let definition = minimal_card_definition(WARD, "Ward", "unused", ManaCost { symbols: Vec::new() }, CardTypeSet::ENCHANTMENT);
     engine.state_mut().objects.insert(ObjectId(WARD), card_object(ObjectId(WARD), definition, P1, ZoneKind::Battlefield));
@@ -194,8 +175,6 @@ fn redirect(source: u64, from: ZoneKind, to: ZoneKind, destination: ZoneKind) ->
     }
 }
 
-// ---- Driving the engine ---------------------------------------------------
-
 fn pass_both(engine: &mut Engine) -> StepStatus {
     let mut status = StepStatus::Progressed;
     for player in [P0, P1] {
@@ -209,7 +188,6 @@ fn obj(id: u64) -> Target {
     Target::Object(ObjectId(id))
 }
 
-/// Activates ability `index` of `source` and puts it on the stack, paid.
 fn activate(engine: &mut Engine, source: u64, index: u32, targets: Vec<Target>, payments: Vec<CostPayment>) {
     engine
         .submit_action(PlayerAction {
@@ -242,7 +220,6 @@ fn life(engine: &Engine, player: PlayerId) -> i32 {
     engine.state().player(player).unwrap().life
 }
 
-/// The common setup: P0's priest (1) and P1's bear (2), the bear exiled.
 fn priest_holding_a_bear(extra: Vec<Creature>) -> Engine {
     let mut creatures = vec![creature(1, P0).script(PRIEST), creature(2, P1)];
     creatures.extend(extra);
@@ -250,10 +227,6 @@ fn priest_holding_a_bear(extra: Vec<Creature>) -> Engine {
     activate_and_resolve(&mut engine, 1, 0, vec![obj(2)]);
     engine
 }
-
-// ===========================================================================
-// The exile and the link (CR 610.3)
-// ===========================================================================
 
 #[test]
 fn the_target_is_exiled_and_stays_there_while_the_source_is_on_the_battlefield() {
@@ -265,10 +238,6 @@ fn the_target_is_exiled_and_stays_there_while_the_source_is_on_the_battlefield()
     assert_ne!(exiled.object_id, ObjectId(2), "CR 400.7: the exiled card is a new object");
     assert_eq!(engine.state().linked_exiles, vec![LinkedExile { source: ObjectId(1), exiled: exiled.object_id }]);
 }
-
-// ===========================================================================
-// The return (CR 610.3, 610.3c)
-// ===========================================================================
 
 #[test]
 fn the_card_returns_when_the_source_dies() {
@@ -371,10 +340,7 @@ fn the_source_leaving_does_not_return_cards_it_never_held() {
     assert!(engine.state().object(held).is_none(), "the held card moved on");
 }
 
-// ===========================================================================
-// CR 610.3a/b: the source is already gone
-// ===========================================================================
-
+// CR 610.3a/b
 #[test]
 fn nothing_is_exiled_when_the_source_left_before_the_ability_resolved() {
     let mut engine = engine_with(vec![creature(1, P0).script(PRIEST), creature(2, P1)]);
@@ -407,10 +373,6 @@ fn nothing_is_exiled_when_the_source_is_gone_from_the_state_entirely() {
     assert!(find(&engine, "Creature 2", ZoneKind::Battlefield).is_some());
     assert!(engine.state().linked_exiles.is_empty());
 }
-
-// ===========================================================================
-// Replacement effects (CR 614, 616)
-// ===========================================================================
 
 #[test]
 fn an_exile_replaced_with_a_graveyard_move_makes_no_link() {
@@ -455,10 +417,6 @@ fn competing_replacements_on_the_return_pause_and_the_return_still_finishes() {
     assert!(find(&engine, "Creature 2", ZoneKind::Battlefield).is_none());
     assert!(engine.state().linked_exiles.is_empty());
 }
-
-// ===========================================================================
-// What the returned permanent does
-// ===========================================================================
 
 #[test]
 fn the_returned_cards_enters_trigger_fires() {
@@ -512,10 +470,6 @@ fn a_returned_legend_triggers_the_legend_rule() {
     );
 }
 
-// ===========================================================================
-// The link when the exiled card moves on by itself
-// ===========================================================================
-
 #[test]
 fn a_card_returned_early_by_another_effect_is_not_pulled_back_or_duplicated() {
     let mut engine = priest_holding_a_bear(vec![creature(3, P0).script(KILLER), creature(4, P0).script(REANIMATOR)]);
@@ -530,10 +484,6 @@ fn a_card_returned_early_by_another_effect_is_not_pulled_back_or_duplicated() {
     assert_eq!(copies, 1, "the priest dying returns nothing a second time");
     assert_eq!(find(&engine, "Creature 2", ZoneKind::Battlefield).unwrap().controller, P0, "still under the reanimator's control");
 }
-
-// ===========================================================================
-// Lua surface
-// ===========================================================================
 
 #[test]
 fn the_lua_tag_builds_the_effect() {

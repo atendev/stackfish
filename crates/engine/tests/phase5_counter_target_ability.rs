@@ -1,15 +1,6 @@
-//! Phase 5 vertical slice: `TargetFilter::Ability`/`Target::Ability` (CR
-//! 113.9/701.6a) — "counter target activated or triggered ability" (Stifle,
-//! Trickbind). See `phase5_counter_target_spell.rs`'s own header for
-//! `AbilityEffect::Counter`'s resolution-side shape, which is unchanged by
-//! this slice (it already dispatched on the found `StackObject`'s own
-//! `kind`, not on which `Target` variant named it) — the entire gap closed
-//! here is upstream: an ability's own `StackObject` has no matching
-//! `GameObject` in `state.objects` for `TargetFilter::Object` to find, so it
-//! needed its own `Target`/`TargetFilter` vocabulary
-//! (`commands::legality::target_is_legal`'s new `Ability` arm, matched
-//! against `state.stack` directly) and its own candidate source
-//! (`legal_target_candidates`'s new `ability_candidates` scan).
+//! CR 113.9, 701.6a: `TargetFilter::Ability` and `Target::Ability` for "counter target activated or triggered ability" (Stifle, Trickbind).
+//! An ability's `StackObject` has no `GameObject`, so `target_is_legal` matches it against `state.stack` and `legal_target_candidates` scans for it.
+//! Resolution is `AbilityEffect::Counter`, covered in phase5_counter_target_spell.rs.
 
 use std::collections::HashMap;
 
@@ -55,9 +46,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// "Test Stifle: Counter target activated or triggered ability." No
-/// controller/kind narrowing - CR 113.9's real cards (Stifle, Trickbind)
-/// don't restrict either.
 fn stifle_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
@@ -89,9 +77,6 @@ fn stifle_definition() -> CardDefinition {
     }
 }
 
-/// "{T}: Bear deals 1 damage to target player." A real activated ability,
-/// registered on `source` so `PlayerActionKind::ActivateAbility` puts a
-/// genuine `StackEntryKind::ActivatedAbility` on the stack.
 fn damage_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -114,13 +99,7 @@ fn damage_ability(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-/// Directly constructs a `StackEntryKind::TriggeredAbility` on the stack,
-/// same "bypass the real trigger-collection machinery, prove `Counter`'s own
-/// targeting/resolution" shortcut `phase5_another_target.rs`'s own
-/// `an_ability_targeting_its_own_source_fizzles_at_resolution_recheck` test
-/// already uses for `ActivatedAbility` - this slice isn't testing trigger
-/// collection, only that a triggered ability is just as legal a `Counter`
-/// target as an activated one (CR 113.9 draws no distinction between them).
+// Pushes a triggered ability directly onto the stack, since CR 113.9 draws no distinction between it and an activated one as a Counter target.
 fn push_triggered_ability_on_stack(state: &mut GameState, stack_id: ObjectId, source: ObjectId, owner: PlayerId) {
     state.stack.push(StackObject::new(
         stack_id,
@@ -197,8 +176,7 @@ fn stifle_counters_a_real_activated_ability_before_it_deals_its_damage() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
-    // p0 holds priority at game start (testutil::two_player_state) - p0's
-    // own creature activates, p1 responds with Stifle.
+    // p0 holds priority at game start, so p0's creature activates and p1 responds with Stifle.
     put_on_battlefield(&mut state, permanent(bear, creature_definition(1, "Bear"), p0));
     state.abilities.push(damage_ability(bear));
 
@@ -231,9 +209,7 @@ fn stifle_counters_a_real_activated_ability_before_it_deals_its_damage() {
     let ability_stack_id = engine.state().stack.last().expect("the ability is on the stack").stack_id;
     assert_eq!(engine.state().stack.len(), 1);
 
-    // CR 117.3c: p0 (the activator) retains priority after the activation
-    // settles - p0 must pass before p1 gets a window to respond with
-    // Stifle. If p1 already holds priority instead, nothing more is needed.
+    // CR 117.3c: p0 retains priority after the activation settles and must pass before p1 can respond.
     let StepStatus::AwaitingAction { player: awaiting } = status else {
         panic!("unexpected status after activation: {status:?}")
     };
@@ -247,8 +223,7 @@ fn stifle_counters_a_real_activated_ability_before_it_deals_its_damage() {
     pay_free_and_drain(&mut engine);
     assert_eq!(engine.state().stack.len(), 2, "both the ability and Stifle are on the stack");
 
-    // Stifle resolves first (LIFO). CR 117.3c: p1 (Stifle's own caster)
-    // retains priority after casting, so p1 passes first this time.
+    // Stifle resolves first (LIFO). CR 117.3c: p1 retains priority after casting, so p1 passes first.
     let status = pass_both_and_drain(&mut engine, p1, p0);
 
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p1 || player == p0));
@@ -286,10 +261,7 @@ fn stifle_counters_a_triggered_ability_with_no_zone_change_either() {
 
     assert!(engine.state().stack.is_empty());
     assert_eq!(engine.state().player(p0).unwrap().life, 20, "the triggered ability's damage never happened");
-    // Stifle itself resolved normally (it wasn't countered) and lands in its
-    // own owner's graveyard, same as any other resolved instant - but no
-    // card exists for the countered *ability*, so nothing else shows up in
-    // either graveyard.
+    // Stifle resolved normally and sits in its owner's graveyard. No card exists for the countered ability.
     assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 1);
     assert!(engine.state().zone(ZoneKind::Graveyard, Some(p1)).unwrap().contents.is_empty());
     let countered = engine
@@ -332,9 +304,7 @@ fn stifle_rejects_a_spell_as_a_target_at_cast_time() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // CR 113.9: a spell is never a legal target for "counter target
-    // activated or triggered ability" - Target::Object doesn't even match
-    // TargetFilter::Ability's own arm.
+    // CR 113.9: a spell is never a legal target for "counter target activated or triggered ability".
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(target)]).unwrap_err();
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
         "a spell is not a legal target for \"counter target ability\", got {err:?}");
@@ -351,8 +321,7 @@ fn stifle_has_no_legal_target_when_nothing_is_on_the_stack() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // No ability with this stack_id actually exists - same "not a real
-    // candidate" rejection as any other bogus id.
+    // No ability has this stack_id, so it is rejected like any bogus id.
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Ability(ability_stack_id)]).unwrap_err();
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)), "got {err:?}");
 }

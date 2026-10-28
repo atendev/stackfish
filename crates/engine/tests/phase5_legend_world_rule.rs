@@ -1,12 +1,4 @@
-//! Phase 5 vertical slice: backlog item 10a — CR 704.5j (legend rule) and CR
-//! 704.5k (world rule), split out of backlog item 10's player-loss triad
-//! since both destroy permanents via a different mechanism than "this player
-//! loses." Legend rule needs a real player choice (`sba::SbaOutcome::
-//! NeedsLegendRuleChoice` / `Engine::submit_legend_rule_choice`) — the
-//! losers are then resolved via the exact same `sba::resolve_deaths` every
-//! other SBA death already uses (real replacement checking, CR 400.7 new
-//! object id), not bespoke destruction logic. World rule is fully
-//! deterministic (no pause) and just joins the ordinary dying-creature list.
+//! CR 704.5j legend rule and CR 704.5k world rule. The legend rule needs a player choice (`NeedsLegendRuleChoice`, `submit_legend_rule_choice`) and resolves the losers through `sba::resolve_deaths`. The world rule is deterministic.
 
 use std::collections::HashMap;
 
@@ -19,8 +11,7 @@ use stackfish_testutil::{card_object, zones, two_player_state as base_two_player
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // Exile is a shared zone (CR 400.10, owner: None) - `zones` already
-    // handles that for the Exile kind.
+    // Exile is a shared zone (CR 400.10, owner: None), which `zones` already handles.
     GameState {
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
@@ -82,10 +73,7 @@ fn would_die_exile_effect(source: ObjectId) -> ReplacementEffect {
     }
 }
 
-// ---------------------------------------------------------------------
-// CR 704.5j: legend rule.
-// ---------------------------------------------------------------------
-
+// CR 704.5j
 #[test]
 fn two_same_name_legendaries_pause_for_a_legend_rule_choice() {
     let p0 = PlayerId(0);
@@ -134,8 +122,7 @@ fn same_name_different_controllers_are_not_grouped() {
     put_on_battlefield(&mut state, legendary_creature(ObjectId(1), p1, "Test Legend", 1));
 
     let outcome = check_state_based_actions(&mut state, &ScriptRuntime::new());
-    // Legend rule is per-controller (CR 704.5j: "controlled by the same
-    // player") - different controllers never violate it against each other.
+    // Legend rule is per controller (CR 704.5j), so different controllers never violate it against each other.
     assert!(matches!(outcome, SbaOutcome::Progressed(events, _) if events.is_empty()));
 }
 
@@ -214,10 +201,7 @@ fn would_die_replacement_applies_to_the_losing_legendary() {
     let mut state = base_state();
     put_on_battlefield(&mut state, legendary_creature(kept, p0, "Test Legend", 0));
     put_on_battlefield(&mut state, legendary_creature(loser, p0, "Test Legend", 1));
-    // "If this would die, exile it instead" on the loser specifically -
-    // proves submit_legend_rule_choice really routes the losers through the
-    // same real replacement pipeline resume_sba_death/resolve_deaths use for
-    // every other SBA death, not bespoke destruction logic.
+    // "If this would die, exile it instead" on the loser shows the losers go through the real replacement pipeline.
     state.replacement_effects.push(would_die_exile_effect(loser));
 
     let mut engine = Engine::new(state);
@@ -237,18 +221,14 @@ fn would_die_replacement_applies_to_the_losing_legendary() {
     assert_eq!(exile.contents.len(), 1, "the loser was exiled instead, per the real replacement effect");
 }
 
-// ---------------------------------------------------------------------
-// CR 704.5k: world rule - fully deterministic, no pause.
-// ---------------------------------------------------------------------
-
+// CR 704.5k
 #[test]
 fn world_rule_destroys_all_but_the_most_recently_arrived() {
     let p0 = PlayerId(0);
     let older = ObjectId(0);
     let newer = ObjectId(1);
     let mut state = base_state();
-    // Higher timestamp = arrived later = has had World for the shortest
-    // amount of time = the one CR 704.5k keeps.
+    // A higher timestamp arrived later and has had World for the shortest time, so CR 704.5k keeps it.
     put_on_battlefield(&mut state, world_permanent(older, p0, 0));
     put_on_battlefield(&mut state, world_permanent(newer, p0, 1));
 
@@ -269,8 +249,7 @@ fn world_rule_tie_destroys_all_of_them() {
     let a = ObjectId(0);
     let b = ObjectId(1);
     let mut state = base_state();
-    // Identical timestamp - CR 704.5k's explicit tie clause: no unique
-    // survivor, all World permanents die.
+    // An identical timestamp leaves no unique survivor, so all World permanents die (CR 704.5k).
     put_on_battlefield(&mut state, world_permanent(a, p0, 5));
     put_on_battlefield(&mut state, world_permanent(b, p0, 5));
 

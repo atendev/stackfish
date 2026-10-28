@@ -1,25 +1,5 @@
-//! Phase 5 vertical slice: the rest of backlog item 7, all three remaining
-//! named gaps bundled into one slice.
-//!
-//! A) `ConditionPrimitive::Scries`/`Surveils` (CR 701.22d/701.25d) - the
-//!    deferred trigger-condition half the `scry-surveil` slice's own TODO
-//!    named. Matches `GameEventKind::CardsScried`/`CardsSurveiled`, which
-//!    already reached `CollectTriggers` before this slice.
-//!
-//! B) `ConditionPrimitive::DiesMatching`/`LeavesBattlefieldMatching(FilterSpec)`
-//!    (CR 700.4/603.10) - "whenever a creature you control dies," the
-//!    filter-scoped sibling of the identity-scoped `Dies`/`LeavesBattlefield`.
-//!    Checked in `collect_triggers`'s ordinary live-source loop (the
-//!    ability's own source is a separate, still-alive watcher, e.g. Blood
-//!    Artist), never the CR 603.10 departed/LKI fallback loop `Dies`/
-//!    `LeavesBattlefield` themselves rely on.
-//!
-//! C) `InterveningIfSpec::Script(ScriptHandle)` (CR 603.4) - a real Lua
-//!    predicate, invoked via the new `ScriptRuntime::invoke_intervening_if`,
-//!    which passes a minimal state snapshot (`state_to_lua` - currently just
-//!    per-player life totals) into the Lua call. Checked twice independently,
-//!    same "trigger time, then rechecked at resolution" shape the existing
-//!    `Primitive` intervening-if tests already established.
+//! CR 701.22d, 701.25d: `ConditionPrimitive::Scries` and `Surveils` match `CardsScried` and `CardsSurveiled`. CR 700.4, 603.10: `DiesMatching` and `LeavesBattlefieldMatching(FilterSpec)` ("whenever a creature you control dies") are checked in `collect_triggers`' live-source loop and not the departed/LKI loop.
+//! CR 603.4: `InterveningIfSpec::Script` is invoked through `invoke_intervening_if` with a state snapshot, and checked at trigger time and again at resolution.
 
 use std::collections::HashMap;
 
@@ -117,10 +97,6 @@ fn watcher_ability(source: ObjectId, condition: ConditionPrimitive) -> Registere
     }
 }
 
-// ---------------------------------------------------------------------
-// A) Scries/Surveils (CR 701.22d/701.25d)
-// ---------------------------------------------------------------------
-
 #[test]
 fn scries_fires_for_the_controllers_own_scry_not_a_different_players() {
     let p0 = PlayerId(0);
@@ -184,10 +160,6 @@ fn each_surveils_fires_regardless_of_player() {
     let (pending, _) = collect_triggers(&state, &cards_surveiled_event(p1), &runtime, &[]);
     assert_eq!(pending.len(), 1, "EachSurveils fires regardless of who surveiled");
 }
-
-// ---------------------------------------------------------------------
-// B) DiesMatching/LeavesBattlefieldMatching (CR 700.4/603.10)
-// ---------------------------------------------------------------------
 
 fn creature_only_filter(controller: Option<FilterController>) -> FilterSpec {
     FilterSpec { card_types: Some(CardTypeSet::CREATURE), supertypes: None, subtypes: None, controller, random: false, extra: None }
@@ -282,10 +254,7 @@ fn game_conditions_dies_matching_lua_binding_decodes_correctly() {
     assert_eq!(filter.controller, Some(FilterController::You));
 }
 
-// ---------------------------------------------------------------------
-// C) Script-backed intervening-if (CR 603.4)
-// ---------------------------------------------------------------------
-
+// TODO: expand intervening-if Lua snapshot beyond per-player life totals.
 const AT_OR_BELOW_LIFE_5_SCRIPT: &str = r#"
 return function(source, controller, snapshot)
     return snapshot.life[controller] <= 5
@@ -333,9 +302,7 @@ fn heal_spell_definition() -> CardDefinition {
     }
 }
 
-/// Same shape as `base_state`, plus Untap-step/PreGame starting point so
-/// `pass_both` can walk the turn all the way into upkeep, plus a starting
-/// Library-less two-zone-per-player Hand for the response-spell test.
+// Adds the Untap-step and PreGame start so pass_both reaches upkeep, and a Hand for the response spell.
 fn intervening_if_state(p0_life: i32) -> GameState {
     let mut state = base_state(p0_life);
     state.phase = Phase::PreGame;
@@ -492,8 +459,7 @@ return s
     let ability = &state.abilities[0];
     assert!(matches!(ability.intervening_if, Some(InterveningIfSpec::Script(_))));
 
-    // Prove the registered handle is actually callable and correct, not
-    // just present - p0's life (3) is <= 5.
+    // The registered handle is callable and correct, with p0's life (3) <= 5.
     let Some(InterveningIfSpec::Script(handle)) = ability.intervening_if else { unreachable!() };
     assert!(runtime.invoke_intervening_if(handle, &state, bear, PlayerId(0)).expect("script runs"));
 }

@@ -1,21 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::Search` (backlog item 14b) —
-//! `Game.Ops.Search(filter, count, opts?)` (CR 701.23a/b).
-//!
-//! Unlike `Scry`/`Surveil` (backlog item 14a, a fixed top-N peek),
-//! `ResolveStackTop` scans the controller's *entire* library and pre-filters
-//! to ids matching the search's own `FilterSpec` before pausing on
-//! `ProcessState::AwaitingSearchChoice` — no visibility-machinery gap blocks
-//! this (`GameState`/`Zone` already expose full contents freely; the only
-//! project-wide hidden-info gap is the Lua callback boundary, never crossed
-//! by this Rust-native primitive). CR 701.23b: choosing fewer than `count`,
-//! including zero, is always legal. `Engine::submit_search_choice` moves
-//! each found card to the pause's own `destination` (Hand or Battlefield)
-//! and shuffles afterward iff `shuffle_after`.
-//!
-//! Also exercises `FilterSpec`'s new `supertypes`/`subtypes` fields (added
-//! alongside this slice — `cost.rs`'s own test module covers `matches()`
-//! directly; this file proves the whole pipeline, including the
-//! `Game.Ops.Search` Lua binding's filter-table decoding).
+//! CR 701.23a/b: `Game.Ops.Search(filter, count, opts?)` scans the controller's whole library, pre-filters by `FilterSpec`, and pauses on `AwaitingSearchChoice`. Choosing fewer than `count`, including zero, is legal. `submit_search_choice` moves each card to `destination` (Hand or Battlefield) and shuffles afterward iff `shuffle_after`.
+//! It also exercises `FilterSpec`'s `supertypes` and `subtypes` through the `Game.Ops.Search` filter-table decoding.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -118,9 +102,6 @@ fn search_spell_definition(
     }
 }
 
-/// Same shape as `phase5_scry_surveil`'s own `two_player_state`, plus a
-/// Library zone for `p0` seeded with `library` in an arbitrary order (search
-/// doesn't care about library order the way Scry/Surveil do).
 fn two_player_state(library: Vec<ObjectId>) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -157,7 +138,6 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-/// Both players pass priority (CR 117.4) so the cast spell actually resolves.
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine);
@@ -294,8 +274,7 @@ fn search_rejects_a_duplicate_chosen_id() {
     let p1 = PlayerId(1);
     let forest = ObjectId(10);
     let card = ObjectId(2);
-    // count: 2 so a 2-element answer doesn't already fail on TooMany before
-    // ever reaching the duplicate check below.
+    // count: 2 so a 2-element answer reaches the duplicate check and does not already fail on TooMany.
     let mut state = two_player_state(vec![forest]);
     state.objects.insert(forest, card_object(forest, basic_land_definition(1, "Forest", "Forest"), p0, ZoneKind::Library));
     state.objects.insert(

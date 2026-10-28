@@ -1,9 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::Discard` (CR 701.9/701.9b's
-//! default shape — "target player discards `count` card(s)," that player's
-//! own choice, per Mind Rot's real template "Target player discards two
-//! cards"). Distinct from `DiscardRandom` (no choice) and `Game.Ops.
-//! DiscardChosen` (chosen by *this ability's own controller*, not the
-//! target) — see `AbilityEffect::Discard`'s own doc comment.
+//! CR 701.9: `AbilityEffect::Discard` makes the target player discard `count` cards by their own choice (Mind Rot).
+//! `DiscardRandom` has no choice and `Game.Ops.DiscardChosen` is chosen by the ability's controller.
 
 use std::collections::HashMap;
 
@@ -37,7 +33,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Mind Rot: Target player discards `count` cards."
 fn mind_rot_definition(count: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -199,8 +194,7 @@ fn count_two_asks_twice_and_cannot_repeat_a_candidate() {
     assert_eq!(remaining_count, 0, "this is the last pick");
     assert_eq!(candidates, vec![second], "first can't be offered again - it already left the hand");
 
-    // Trying to re-submit the already-discarded card must fail, not silently
-    // succeed - proves the candidate list is real, not just advisory.
+    // Re-submitting the already-discarded card must fail, so the candidate list is binding.
     let err = engine.submit_discard_choice(p1, first).unwrap_err();
     assert!(matches!(err, DiscardChoiceError::InvalidCandidate));
 
@@ -254,10 +248,7 @@ fn only_the_targeted_player_may_answer_the_choice() {
 
 #[test]
 fn a_madness_redirect_on_the_discarded_card_still_applies() {
-    // Proves continue_targeted_discard reuses the exact same replacement-
-    // checked pipeline (and CR 702.35a Madness marker) every other real
-    // discard producer in this engine already routes through, not a
-    // bespoke unchecked zone move.
+    // continue_targeted_discard reuses the replacement-checked pipeline and the CR 702.35a Madness marker that every discard producer uses.
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);

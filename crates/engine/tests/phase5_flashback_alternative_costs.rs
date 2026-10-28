@@ -1,15 +1,5 @@
-//! Phase 5 vertical slice: alternative costs / flashback (CR 601.2b, 702.34a).
-//! `CardDefinition::alternative_costs` is the persistent data a card carries
-//! (previously nothing populated `CostSpec::alternative`/`AlternativeCost`,
-//! left over from Phase 1); `PlayerActionKind::CastSpell::alternative_cost`
-//! is the cast-time announcement (same phase as `x_value`, see
-//! `phase5_x_costs.rs`) of which one, if any, is being invoked.
-//!
-//! Scoped to flashback specifically: paying the alternative cost entirely
-//! replaces the mana cost, casting from the alternative's own `from_zone`
-//! (graveyard) rather than hand is what the alternative grants, and the
-//! spell exiles instead of going to the graveyard the next time it leaves
-//! the stack - whether by resolving normally or by fizzling (CR 608.2b).
+//! CR 601.2b, 702.34a: alternative costs and flashback. `CardDefinition::alternative_costs` holds the data, and `CastSpell::alternative_cost` announces which one is used.
+//! Paying a flashback cost replaces the mana cost, casts from the graveyard, and exiles the spell when it leaves the stack, whether it resolves or fizzles (CR 608.2b).
 
 
 use stackfish_engine::commands::Rejected;
@@ -17,8 +7,6 @@ use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
 
-/// "Test Flashback Bolt": `{1}{R}` instant, targets a creature, with a
-/// flashback alternative cost of a bare `{R}` from the graveyard.
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
@@ -125,8 +113,6 @@ fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     panic!("expected a ZoneChange event in the ledger");
 }
 
-/// Test case 1: cast from hand with no `alternative_cost` announced -
-/// entirely unaffected by this slice, still pays the printed `{1}{R}`.
 #[test]
 fn cast_from_hand_without_alternative_cost_uses_mana_cost() {
     let p0 = PlayerId(0);
@@ -155,9 +141,7 @@ fn cast_from_hand_without_alternative_cost_uses_mana_cost() {
     assert_eq!((from, to), (ZoneKind::Hand, ZoneKind::Stack));
 }
 
-/// Test case 2: cast from the graveyard with the flashback index announced -
-/// legal, paid with the flashback cost (`{R}`), not the mana cost
-/// (`{1}{R}` would need the colorless too, which the pool below lacks).
+// The flashback cost {R} is paid and not the mana cost {1}{R}, which the pool could not cover.
 #[test]
 fn cast_from_graveyard_with_alternative_cost_uses_flashback_cost() {
     let p0 = PlayerId(0);
@@ -189,10 +173,7 @@ fn cast_from_graveyard_with_alternative_cost_uses_flashback_cost() {
     assert_eq!(pool.red, 0, "the single red unit paid the flashback cost");
 }
 
-/// Test case 3: the card is in the graveyard, but no alternative is
-/// announced - rejected the same way as any other "card is not in the zone
-/// required to cast it this way" case (plain hand-casting still requires
-/// hand).
+// A card in the graveyard with no alternative announced is rejected like any card outside the zone required to cast it.
 #[test]
 fn cast_from_graveyard_without_declaring_alternative_is_rejected() {
     let p0 = PlayerId(0);
@@ -207,8 +188,7 @@ fn cast_from_graveyard_without_declaring_alternative_is_rejected() {
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Graveyard, "card untouched");
 }
 
-/// Test case 4: resolving a flashback-cast spell exiles it rather than
-/// sending it to the graveyard (CR 702.34a).
+// CR 702.34a
 #[test]
 fn resolving_flashback_spell_exiles_instead_of_graveyard() {
     let p0 = PlayerId(0);
@@ -243,10 +223,8 @@ fn resolving_flashback_spell_exiles_instead_of_graveyard() {
     assert!(!engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.contains(&new_id));
 }
 
-/// Test case 5: a flashback-cast spell that fizzles (CR 608.2b, its only
-/// target became illegal) also lands in exile, not the graveyard - CR
-/// 702.34a's "as it resolves or as it leaves the stack otherwise" covers
-/// both paths.
+// CR 702.34a, 608.2b
+// A fizzled flashback spell is also exiled, not sent to the graveyard.
 #[test]
 fn fizzled_flashback_spell_also_exiles() {
     let p0 = PlayerId(0);
@@ -269,8 +247,7 @@ fn fizzled_flashback_spell_also_exiles() {
         .unwrap();
     drain(&mut engine);
 
-    // Simulate the target leaving the battlefield before this resolves -
-    // same technique phase5_targeting_basics.rs's fizzle test uses.
+    // The target leaves the battlefield before this resolves.
     engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(creature);
     engine.state_mut().objects.remove(&creature);
 
@@ -289,8 +266,7 @@ fn fizzled_flashback_spell_also_exiles() {
     assert!(!engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.contains(&new_id));
 }
 
-/// Test case 6: an out-of-range `alternative_cost` index is rejected before
-/// anything is mutated.
+// An out-of-range alternative_cost index is rejected before anything is mutated.
 #[test]
 fn out_of_range_alternative_cost_index_is_rejected() {
     let p0 = PlayerId(0);
@@ -305,11 +281,7 @@ fn out_of_range_alternative_cost_index_is_rejected() {
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Graveyard, "card untouched");
 }
 
-/// Test case 7: the card is in hand (not the alternative's `from_zone`) but
-/// the alternative is announced anyway - rejected. Simplest correct rule
-/// this slice implements: the announced alternative's `from_zone` must
-/// match where the card actually is, full stop (see commands.rs's
-/// `CastSpell` arm doc comment).
+// The announced alternative's from_zone must match where the card is.
 #[test]
 fn casting_from_hand_while_declaring_the_alternative_is_rejected() {
     let p0 = PlayerId(0);

@@ -1,11 +1,4 @@
-//! Phase 5 vertical slice: `Game.Ops.ReturnToHand()` (CR 400.3) and
-//! `:SetFunctionsFrom("Hand")` (CR 113.6).
-//!
-//! A bounce spell moves its battlefield target to the *owner's* hand through
-//! the same replacement-checked scripted zone move Exile uses, clears
-//! battlefield-only state on the new object, and lets the hand/library sweep
-//! register the card's hand abilities or CDA. `SetFunctionsFrom("Hand")`
-//! declares a hand-only ability explicitly instead of by cost shape.
+//! CR 400.3, 113.6: `Game.Ops.ReturnToHand()` moves a battlefield target to its owner's hand through the replacement-checked scripted zone move, and `:SetFunctionsFrom("Hand")` declares a hand-only ability explicitly.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
@@ -65,7 +58,6 @@ fn bounce_spell() -> CardDefinition {
     }
 }
 
-/// `owner` owns the target; `P0` controls it and casts the bounce spell.
 fn setup(script: &str, owner: PlayerId, token: bool) -> Engine {
     let mut state = GameState {
         step: Step::PreCombatMain,
@@ -187,8 +179,6 @@ fn a_bounced_cda_card_has_its_cda_live_in_hand() {
     let card = hand_card(&engine, P0).unwrap();
     assert_eq!(effective_characteristics(engine.state(), &ScriptRuntime::new(), card.object_id).colors, ColorSet::all());
 }
-
-// ---- :SetFunctionsFrom("Hand") ----
 
 fn hand_declared(body: &str) -> String {
     format!("local s = {{}}\nfunction s.register_abilities(c)\n{body}\nend\nreturn s")

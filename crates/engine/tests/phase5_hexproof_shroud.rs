@@ -1,19 +1,9 @@
-//! Phase 5 vertical slice: Hexproof (CR 702.11) and Shroud (CR 702.18).
-//!
-//! Both are real `KeywordSet` bits, read through
-//! `layers::effective_characteristics` and enforced inside
-//! `commands::target_is_legal`, so they hold at cast, activation, the CR
-//! 603.3d trigger candidate scan and the CR 608.2b resolution recheck.
-//! Hexproof stops only a spell or ability an opponent of the permanent's
-//! controller controls (CR 702.11b). Shroud stops everyone (CR 702.18a).
-//! Untargeted effects never ask (CR 601.2c). An attached Aura or Equipment
-//! is not targeting, so the SBA rechecks and the CR 303.4f entry scan use
-//! `commands::attachment_target_is_legal`, which skips both keywords but
-//! keeps protection (CR 702.16d).
-//!
-//! Not covered (named TODOs): hexproof/shroud on players (CR 702.11c),
-//! "hexproof from [quality]" (CR 702.11d-g), and "can be the target as
-//! though it didn't have hexproof" (CR 702.11e).
+//! CR 702.11 Hexproof and CR 702.18 Shroud: `KeywordSet` bits read through `effective_characteristics` and enforced in `commands::target_is_legal`, at cast, activation, the CR 603.3d trigger scan and the CR 608.2b recheck.
+//! Hexproof stops only an opponent's spell or ability (CR 702.11b), shroud stops everyone (CR 702.18a), and untargeted effects never ask (CR 601.2c).
+//! Attached Auras and Equipment are not targeting, so SBA rechecks and the CR 303.4f entry scan use `attachment_target_is_legal`, which skips both keywords but keeps protection (CR 702.16d).
+// TODO: hexproof and shroud on players (CR 702.11c)
+// TODO: "hexproof from [quality]" (CR 702.11d-g)
+// TODO: "can be the target as though it didn't have hexproof" (CR 702.11e)
 
 use std::collections::{HashMap, VecDeque};
 
@@ -27,7 +17,6 @@ const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
 const SPELL: ObjectId = ObjectId(100);
 
-/// Icy Manipulator: "{T}: Tap target artifact, creature, or land."
 const ICY_MANIPULATOR: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -50,7 +39,6 @@ end
 return s
 "#;
 
-/// A static ability that gives its own source the keyword `effect` names.
 fn static_self_effect(effect: &str) -> String {
     format!(
         r#"
@@ -87,7 +75,6 @@ fn creature_requirement() -> TargetRequirement {
     }
 }
 
-/// An instant with `effect` that targets one creature.
 fn targeted_spell(effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
         effect: Some(effect),
@@ -96,7 +83,6 @@ fn targeted_spell(effect: AbilityEffect) -> CardDefinition {
     }
 }
 
-/// An instant with `effect` and no target.
 fn untargeted_spell(effect: AbilityEffect) -> CardDefinition {
     CardDefinition {
         effect: Some(effect),
@@ -104,7 +90,6 @@ fn untargeted_spell(effect: AbilityEffect) -> CardDefinition {
     }
 }
 
-/// A green "Enchant creature" Aura spell.
 fn aura_spell() -> CardDefinition {
     CardDefinition {
         color_indicator: Some(ColorSet::GREEN),
@@ -184,7 +169,6 @@ fn pass_both(engine: &mut Engine) {
     }
 }
 
-/// Casts `SPELL` aiming at `targets` and pays its (free) cost, leaving it on the stack.
 fn cast(engine: &mut Engine, targets: Vec<Target>) -> Result<(), String> {
     engine
         .submit_action(PlayerAction {
@@ -207,7 +191,6 @@ fn cast_and_resolve(engine: &mut Engine, targets: Vec<Target>) {
     pass_both(engine);
 }
 
-/// Activates `source`'s first ability, pays `payments`, and leaves it on the stack.
 fn activate(engine: &mut Engine, source: u64, targets: Vec<Target>, payments: Vec<CostPayment>) -> Result<(), String> {
     engine
         .submit_action(PlayerAction {
@@ -241,8 +224,6 @@ const HEXPROOF: KeywordSet = KeywordSet::HEXPROOF;
 const SHROUD: KeywordSet = KeywordSet::SHROUD;
 const NONE: KeywordSet = KeywordSet::empty();
 
-/// A permanent-keyword grant, directly constructed, standing in for the
-/// ETB-registered static ability (the Lua wiring has its own tests below).
 fn grant_keyword(source: u64, keyword: KeywordSet) -> ContinuousEffect {
     ContinuousEffect {
         source: ObjectId(source),
@@ -283,8 +264,6 @@ fn sba_events(engine: &mut Engine) -> Vec<GameEvent> {
     }
 }
 
-// ---- CR 702.11b / 702.18a: casting a spell --------------------------------
-
 #[test]
 fn hexproof_blocks_an_opponents_spell_at_cast_time() {
     let mut engine = engine_with(vec![creature(1, P1, HEXPROOF)], Some(targeted_spell(AbilityEffect::Tap)));
@@ -312,8 +291,6 @@ fn shroud_blocks_an_opponents_spell() {
     assert!(cast(&mut engine, vec![target(1)]).is_err());
 }
 
-// ---- CR 702.11b / 702.18a: activated abilities and equip ------------------
-
 fn icy() -> Placed {
     Placed { name: "Icy Manipulator", types: CardTypeSet::ARTIFACT, script: Some(ICY_MANIPULATOR), ..creature(9, P0, NONE) }
 }
@@ -338,7 +315,6 @@ fn shroud_blocks_an_activated_ability_even_from_its_controller() {
     assert!(!tapped(&engine, 2));
 }
 
-/// CR 702.6a's Equip, directly constructed the way `phase5_equip_ability.rs` does.
 fn equip_ability(source: u64) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -379,8 +355,6 @@ fn equip_can_target_your_own_hexproof_creature_but_not_your_own_shroud_creature(
     assert_eq!(engine.state().object(ObjectId(5)).unwrap().attached_to, Some(ObjectId(1)));
 }
 
-// ---- CR 608.2b: resolution recheck ----------------------------------------
-
 #[test]
 fn spell_fizzles_when_its_target_gains_hexproof_before_resolution() {
     let mut engine = engine_with(vec![creature(1, P1, NONE)], Some(targeted_spell(AbilityEffect::Tap)));
@@ -407,8 +381,6 @@ fn a_multi_target_spell_only_skips_the_target_that_gained_hexproof() {
     assert!(!tapped(&engine, 1), "the hexproof target is skipped");
     assert!(tapped(&engine, 2), "the other target still resolves");
 }
-
-// ---- Layers and Lua -------------------------------------------------------
 
 #[test]
 fn a_hexproof_granted_through_lua_add_keyword_works() {
@@ -461,9 +433,6 @@ fn lua_accepts_hexproof_and_shroud_but_still_rejects_ward() {
     }
 }
 
-// ---- CR 603.3d: trigger candidate scan ------------------------------------
-
-/// "At the beginning of your upkeep, destroy target creature."
 fn upkeep_destroy_trigger(source: u64, exclude_source: bool) -> RegisteredAbility {
     RegisteredAbility {
         kind: AbilityKind::Triggered,
@@ -474,7 +443,7 @@ fn upkeep_destroy_trigger(source: u64, exclude_source: bool) -> RegisteredAbilit
     }
 }
 
-/// Starts at `Phase::PreGame`, so one `pass_both` lands on P0's upkeep.
+// Starts at PreGame, so one pass_both lands on P0's upkeep.
 fn trigger_engine(cards: Vec<Placed>, exclude_source: bool) -> Engine {
     let mut state = GameState {
         phase: Phase::PreGame,
@@ -529,8 +498,6 @@ fn a_trigger_whose_only_candidate_has_shroud_is_removed_from_the_stack() {
     assert!(engine.state().stack.is_empty(), "CR 603.3d: no legal target, so the ability was never pushed");
     assert!(engine.state().object(ObjectId(2)).unwrap().zone == ZoneKind::Battlefield);
 }
-
-// ---- Auras (CR 115.1b, 303.4f) and Equipment (CR 704.5n) -------------------
 
 #[test]
 fn an_aura_spell_cannot_target_an_opponents_hexproof_creature_but_can_target_your_own() {
@@ -637,8 +604,6 @@ fn an_aura_entering_the_battlefield_attached_can_pick_a_hexproof_or_shroud_creat
     assert_eq!(new_aura.attached_to, Some(ObjectId(11)), "CR 303.4f: entering attached isn't targeting");
 }
 
-// ---- Zones ----------------------------------------------------------------
-
 #[test]
 fn hexproof_and_shroud_only_apply_on_the_battlefield() {
     let graveyard_creature = TargetRequirement {
@@ -665,8 +630,6 @@ fn hexproof_and_shroud_only_apply_on_the_battlefield() {
     cast_and_resolve(&mut engine, vec![target(1)]);
     assert!(!fizzled(&engine), "a hexproof/shroud card in a graveyard is still a legal target");
 }
-
-// ---- Untargeted effects (CR 601.2c) ---------------------------------------
 
 fn creature_filter() -> EffectFilter {
     EffectFilter { controller: None, card_types: Some(CardTypeSet::CREATURE), subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, self_only: false }

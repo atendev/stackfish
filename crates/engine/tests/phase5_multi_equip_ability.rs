@@ -1,22 +1,4 @@
-//! Phase 5 vertical slice: CR 702.6d - "If a permanent has multiple equip
-//! abilities, any of its equip abilities may be activated." Named as an
-//! unattempted TODO by `phase5/equip-ability`'s own doc comment.
-//!
-//! Turned out not to need any new production code: `commands::find_ability`
-//! already looks up `state.abilities` filtered by `source` and indexed by
-//! registration order ("any kind, in registration order" - its own doc
-//! comment), used by `ActivateAbility`'s `ability_index` field (still
-//! positional as of `phase5/ability-stable-id` - it's chosen and consumed in
-//! the same synchronous step, never at risk the way `PendingTrigger` was).
-//! Nothing about that mechanism is Attach-specific or equip-specific - two
-//! `RegisteredAbility` entries with the same `source` and
-//! `effect: Some(AbilityEffect::Attach)` already resolve independently by
-//! index, each keeping its own distinct `target`/`cost`. This slice is pure
-//! proof (a real test exercising two differently-restricted equip abilities
-//! on one card, both by hand-built `RegisteredAbility` and by a script
-//! registering two `Game.CreateActivatedAbility` builders), not a fix - same
-//! "the TODO over-pattern-matched against a different, real wall" shape
-//! `phase5/layer-engine-consumers` already found once for a different gap.
+//! CR 702.6d: if a permanent has multiple equip abilities, any of them may be activated. `phase5_equip_ability.rs` named this an unattempted TODO, and that TODO over-matched a different wall.
 
 use std::collections::HashMap;
 
@@ -52,9 +34,7 @@ fn creature_definition(id: u64, name: &str, subtypes: Vec<Subtype>) -> CardDefin
     }
 }
 
-/// "Test Dual Equipment: Equip {0}. Equip Dragon {0}." - CR 702.6c's
-/// "Equip [quality]" restriction on the second ability only, proving the two
-/// indices keep genuinely separate target filters, not a shared one.
+// "Equip Dragon {0}" (CR 702.6c) restricts only the second ability, so the two indices keep separate target filters.
 fn equipment_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
@@ -80,7 +60,6 @@ fn equipment_definition() -> CardDefinition {
     }
 }
 
-/// Index 0: "Equip {0}" - any creature you control.
 fn equip_any(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -108,7 +87,6 @@ fn equip_any(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-/// Index 1: "Equip Dragon {0}" - CR 702.6c, only a Dragon you control.
 fn equip_dragon(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -215,15 +193,13 @@ fn either_of_two_equip_abilities_may_be_activated_keeping_its_own_restriction() 
     pass_both_and_drain(&mut engine, p0, p1);
     assert_eq!(engine.state().object(equipment).unwrap().attached_to, Some(bear), "index 0's own \"any creature\" restriction should have accepted the bear");
 
-    // Index 1 ("Equip Dragon {0}") retargets the same Equipment to the
-    // Dragon - proves it's a genuinely separate ability, not index 0 reused.
+    // Index 1 retargets the same Equipment to the Dragon, a separate ability and not index 0 reused.
     activate(&mut engine, p0, equipment, 1, vec![Target::Object(dragon)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
     assert_eq!(engine.state().object(equipment).unwrap().attached_to, Some(dragon), "index 1 should have reattached to the Dragon it targeted");
 
-    // Index 1 rejects the non-Dragon bear - its own restriction is real,
-    // not silently sharing index 0's laxer one.
+    // Index 1 rejects the non-Dragon bear, so its own restriction is real.
     let err = try_activate(&mut engine, p0, equipment, 1, vec![Target::Object(bear)]).unwrap_err();
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)),
         "\"Equip Dragon\" (index 1) must reject a non-Dragon creature, got {err:?}");

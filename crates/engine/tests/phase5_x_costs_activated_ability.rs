@@ -1,9 +1,4 @@
-//! Phase 5 vertical slice: {X} costs (CR 107.3a/107.3k/602.2b) for
-//! `PlayerActionKind::ActivateAbility` - mirrors `phase5_x_costs.rs`'s
-//! `CastSpell` slice exactly, on the activation side. `ActivateAbility` now
-//! carries its own `x_value`, checked for agreement against whether this
-//! ability's own cost actually has an `{X}` (`activate.rs`'s `cost_has_x`
-//! check) before `ManaCost::resolve_x` substitutes it in, same as casting.
+//! CR 107.3a, 107.3k, 602.2b: {X} costs on `ActivateAbility`, mirroring phase5_x_costs.rs. `x_value` must agree with whether the ability's cost has an `{X}` (`cost_has_x`) before `ManaCost::resolve_x` substitutes it.
 
 use stackfish_engine::commands::Rejected;
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
@@ -35,11 +30,6 @@ fn ability_definition() -> CardDefinition {
     }
 }
 
-/// One player, main phase, empty stack, a battlefield `source` with a single
-/// `Activated` ability whose own cost is `mana_cost` (an `{X}`-bearing cost,
-/// same shape `Game.Costs.Mana` produces) and whose effect gains 1 life -
-/// the effect itself never reads X, since this slice is about the cost side
-/// only (CR 107.3a), not about X-parameterized effect text.
 fn state_with_ability_cost(mana_cost: ManaCost, pool: ManaPool) -> (GameState, PlayerId, ObjectId) {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
@@ -79,8 +69,6 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, x_value: Op
     })
 }
 
-/// Test case 1: an `{X}{R}` ability cost activated with `x_value: Some(3)`,
-/// paid with 3 generic (covering the resolved X) + 1 red - legal, resolves.
 #[test]
 fn x_ability_activated_with_announced_value_is_payable() {
     let mana_cost =
@@ -105,8 +93,8 @@ fn x_ability_activated_with_announced_value_is_payable() {
     assert_eq!((pool.red, pool.colorless), (0, 0), "pool fully debited");
 }
 
-/// Test case 2: activating an `{X}{R}` ability without announcing X is
-/// rejected before anything is mutated (CR 602.2b/601.2b).
+// CR 602.2b, 601.2b
+// Activating an {X}{R} ability without announcing X is rejected before anything is mutated.
 #[test]
 fn x_ability_activated_without_announcing_x_is_rejected() {
     let mana_cost =
@@ -120,8 +108,7 @@ fn x_ability_activated_without_announcing_x_is_rejected() {
     assert!(!engine.state().object(source).unwrap().tapped, "nothing paid, nothing mutated");
 }
 
-/// Test case 3: announcing an X value for an ability whose cost has no
-/// `{X}` is rejected too - a nonsensical announcement, not silently ignored.
+// Announcing X for an ability whose cost has no {X} is rejected.
 #[test]
 fn announcing_x_for_a_non_x_ability_is_rejected() {
     let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Colored(Color::Red))] };
@@ -132,9 +119,8 @@ fn announcing_x_for_a_non_x_ability_is_rejected() {
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
-/// Test case 4: `{X}` alone with `x_value: Some(0)` is legal, paid with an
-/// explicit empty-units `Mana` entry (CR 107.3/118.5a are distinct
-/// acknowledgments - see mana.rs's `resolve_x` doc comment).
+// CR 107.3, 118.5a
+// {X} alone with x_value: Some(0) is legal, paid with an explicit empty-units Mana entry.
 #[test]
 fn x_only_ability_cost_with_zero_value_needs_an_explicit_empty_mana_entry() {
     let mana_cost = ManaCost { symbols: vec![ManaSymbol::X] };
@@ -151,11 +137,8 @@ fn x_only_ability_cost_with_zero_value_needs_an_explicit_empty_mana_entry() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
 
-/// Test case 5 (CR 107.3k): this ability's own X is independent of any
-/// other instance of the same ability already on the stack - activating it
-/// twice with two different announced X values before either resolves
-/// leaves both `StackObject`s carrying their own value, uncontaminated by
-/// the other.
+// CR 107.3k
+// Each stack instance keeps its own announced X, uncontaminated by the other.
 #[test]
 fn two_activations_of_the_same_x_ability_keep_independent_x_values() {
     let mana_cost = ManaCost { symbols: vec![ManaSymbol::X] };

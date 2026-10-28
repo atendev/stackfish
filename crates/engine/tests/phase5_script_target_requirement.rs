@@ -1,29 +1,5 @@
-//! Phase 5 vertical slice: a card's own base target requirement (CR
-//! 702.5a/303.4a's "Enchant [quality]", or any other targeted spell's
-//! targeting) declared by its own script, via the optional
-//! `s.target_requirement()` module convention - a sibling to
-//! `s.register_abilities(c)`, not a replacement.
-//!
-//! `s.target_requirement()` takes no arguments and is called once per
-//! `CardDefinition` build (`ScriptRuntime::build_target_requirement`), not
-//! per object per zone-entry the way `run_card_script`/`register_abilities(c)`
-//! is - an Aura's own Enchant restriction is fixed text needed *before* it's
-//! ever cast (while still in hand), so it can't wait for
-//! `run_card_script`'s battlefield-entry timing. Returns the same flat
-//! filter table `Game.SelectTargets`/`ActivatedAbilityBuilder::SetTarget`
-//! already accept, plus `count`/`up_to`/`at_least`/`exclude_source` as
-//! sibling keys - identical shape to the scenario crate's own TOML
-//! `[cards.target_requirement]` table, just Lua-authored.
-//!
-//! `phase5/script-target-requirement-predicate`: a `filter` key can hold a
-//! scripted-predicate function instead (or `{type="player", filter=fn}`) -
-//! the same table-or-function decoder `ActivatedAbilityBuilder::SetTarget`
-//! already uses (`decode_target_filter_value`), for a legality shape the
-//! flat option-bag table can't express (e.g. "Enchant creature with power 4
-//! or greater," `phase5_scripted_target_filter.rs`'s own worked example).
-//! `TargetFilter::Script`/`PlayerScript` were already read generically off
-//! any `CardDefinition.target_requirement` before this slice - only
-//! `target_requirement()`'s own decode entry point needed the change.
+//! CR 702.5a, 303.4a: a card declares its base target requirement ("Enchant [quality]") with the optional `s.target_requirement()`, called once per `CardDefinition` build (`ScriptRuntime::build_target_requirement`) because an Aura's Enchant text is needed before it is cast.
+//! It returns the flat filter table of `Game.SelectTargets` plus `count`, `up_to`, `at_least` and `exclude_source`, like the scenario crate's `[cards.target_requirement]` table. A `filter` key may hold a scripted predicate (or `{type="player", filter=fn}`) through `decode_target_filter_value`, for shapes the flat table cannot express.
 
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
@@ -31,10 +7,6 @@ use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state};
-
-// ---------------------------------------------------------------------
-// Decode-level: ScriptRuntime::build_target_requirement
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_card_with_no_target_requirement_function_returns_none() {
@@ -72,10 +44,7 @@ fn target_requirement_function_decodes_a_subtype_filter_with_count() {
     }
 }
 
-/// `phase5/script-target-requirement-predicate`: a `filter` key holding a
-/// function is a scripted-predicate legality check (same shape `:SetTarget`
-/// already accepts), not the flat option-bag table - closes the TODO this
-/// slice's own doc comment above used to name.
+// A `filter` key holding a function is a scripted-predicate legality check. This closes the TODO that the module doc used to name.
 #[test]
 fn target_requirement_function_decodes_a_scripted_predicate_filter() {
     let runtime = ScriptRuntime::new();
@@ -93,8 +62,6 @@ fn target_requirement_function_decodes_a_scripted_predicate_filter() {
     assert!(matches!(req.filter, TargetFilter::Script(_)), "expected a scripted predicate, got {:?}", req.filter);
 }
 
-/// The player-target scripted-predicate form (`{type="player", filter=fn}`)
-/// works from `target_requirement()` too - same decoder `:SetTarget` uses.
 #[test]
 fn target_requirement_function_decodes_a_player_scripted_predicate_filter() {
     let runtime = ScriptRuntime::new();
@@ -115,9 +82,7 @@ fn target_requirement_function_decodes_a_player_scripted_predicate_filter() {
     );
 }
 
-/// A `target_requirement()` with no `filter` key at all still decodes the
-/// original flat option-bag shape unchanged - the new `filter`-key check
-/// doesn't disturb the pre-existing common case.
+// A target_requirement() with no filter key still decodes the flat option-bag shape.
 #[test]
 fn target_requirement_function_without_a_filter_key_still_decodes_the_flat_shape() {
     let runtime = ScriptRuntime::new();
@@ -149,10 +114,6 @@ fn target_requirement_function_missing_count_is_a_load_error() {
         "count is required, same as the scenario TOML's own TargetRequirementSpec.count"
     );
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: casting a script-declared Aura ("Enchant Wall")
-// ---------------------------------------------------------------------
 
 const ENCHANT_WALL_SCRIPT: &str = r#"
 local s = {}
@@ -201,10 +162,6 @@ fn bear_definition(definition_id: u64) -> CardDefinition {
     CardDefinition { name: "Test Bear".to_string(), subtypes: Vec::new(), ..wall_definition(definition_id) }
 }
 
-/// The Aura's own `CardDefinition`, with `target_requirement` filled in by
-/// its own script rather than hand-written inline - exactly the shape a
-/// real caller (the scenario crate, or any other future `CardDefinition`
-/// producer) builds it.
 fn enchant_wall_definition() -> CardDefinition {
     let runtime = ScriptRuntime::new();
     let target_requirement = runtime
@@ -310,13 +267,6 @@ fn casting_the_script_declared_aura_at_a_non_wall_creature_is_rejected() {
         "a plain Bear (no Wall subtype) should fail the script-declared Enchant Wall restriction, got {err:?}");
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: casting a script-declared Aura whose Enchant restriction is
-// a scripted predicate, not a flat filter table ("Enchant creature with
-// power 4 or greater" - phase5_scripted_target_filter.rs's own worked
-// example, reused here for target_requirement() instead of :SetTarget).
-// ---------------------------------------------------------------------
-
 const ENCHANT_POWER_FOUR_SCRIPT: &str = r#"
 local s = {}
 
@@ -359,16 +309,7 @@ fn creature_definition_pt(definition_id: u64, name: &str, power: i32, toughness:
     }
 }
 
-/// The Aura's own `CardDefinition`, with `target_requirement` left `None` -
-/// a scripted predicate carries a real `ScriptHandle`, valid only against
-/// whichever `ScriptRuntime` decoded it (the exact caller trap
-/// `docs/implementation/05-script-bridge.md` already names for a
-/// custom-function handle), so it can't be pre-built with a throwaway
-/// `ScriptRuntime` the way `enchant_wall_definition`'s flat-table shape
-/// safely is above. Each test builds it from the real `Engine`'s own
-/// runtime instead, via `Engine::build_target_requirement`, then patches it
-/// onto the already-inserted object - the same placeholder-then-patch
-/// timing the scenario crate's own `register_target_script` established.
+// target_requirement is left None because a scripted predicate's ScriptHandle is valid only against the Engine's own runtime, so each test builds it with Engine::build_target_requirement and patches it onto the inserted object.
 fn enchant_power_four_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 31,

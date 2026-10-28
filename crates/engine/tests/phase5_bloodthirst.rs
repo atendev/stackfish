@@ -81,13 +81,6 @@ fn bloodthirst_effect(source: ObjectId, amount: i32) -> ReplacementEffect {
     }
 }
 
-// ---------------------------------------------------------------------
-// opponent_damaged_this_turn / apply_enters_battlefield_modifiers - unit
-// level, direct driver-function calls (same convention this file's sibling,
-// phase5_etb_replacement_modifiers.rs, uses for its own consumption-policy
-// tests).
-// ---------------------------------------------------------------------
-
 #[test]
 fn bloodthirst_grants_counters_when_an_opponent_was_damaged_this_turn() {
     let mut state = two_player_state();
@@ -165,10 +158,6 @@ fn bloodthirst_condition_resets_across_a_turn_boundary() {
 
     assert!(events.is_empty(), "the damage happened last turn, not this one - condition unmet, got {events:?}");
 }
-
-// ---------------------------------------------------------------------
-// End to end: Lua self-registration + CastSpell resolution.
-// ---------------------------------------------------------------------
 
 const BLOODTHIRST_TWO: &str = r#"
 local s = {}

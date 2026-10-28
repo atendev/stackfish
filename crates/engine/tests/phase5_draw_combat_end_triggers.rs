@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: draw/beginning-of-combat/beginning-of-end-step
-//! trigger conditions (CR 121/507/512-513, backlog item 7's next sub-slice
-//! after upkeep). `AdvanceTurnStep` already routes every non-`Untap`/
-//! non-`Cleanup` step's events through the real `CollectTriggers` pipeline
-//! (`phase5_upkeep_triggers.rs`) - this slice is the "cheap follow-up" that
-//! doc comment named: new `ConditionPrimitive` variants only, no further
-//! plumbing changes. Same struct-literal `GameState` construction pattern as
-//! `phase5_upkeep_triggers.rs`, which this file mirrors closely.
+//! CR 121, 507, 512-513: draw, beginning-of-combat and beginning-of-end-step trigger conditions, reached because `AdvanceTurnStep` routes step events through `CollectTriggers`.
+//! The construction mirrors phase5_upkeep_triggers.rs.
 
 use std::collections::HashMap;
 
@@ -79,10 +73,6 @@ fn ability(source: ObjectId, condition: ConditionPrimitive) -> RegisteredAbility
     }
 }
 
-/// Two players, starting mid-Beginning-phase (`Phase::Beginning`/
-/// `Step::Upkeep`, turn 2 so the draw isn't skipped) so a single
-/// `pass_both` reaches `Step::Draw` - mirrors
-/// `phase5_beginning_phase::draw_on_turn_2_or_later`'s starting point.
 fn state_at_upkeep_turn_2() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -101,10 +91,6 @@ fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine)
 }
-
-// ---------------------------------------------------------------------
-// DrawsCard / EachDrawsCard
-// ---------------------------------------------------------------------
 
 #[test]
 fn draws_card_trigger_fires_and_resolves_for_its_controllers_own_draw() {
@@ -138,8 +124,7 @@ fn draws_card_trigger_does_not_fire_for_a_different_players_draw() {
     let permanent = ObjectId(0);
     let card = ObjectId(1);
     let mut state = state_at_upkeep_turn_2();
-    // Controlled by p1, but p0 is the active/drawing player this turn -
-    // DrawsCard must not fire for p1 here.
+    // Controlled by p1 while p0 draws, so DrawsCard must not fire for p1.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
     state.objects.insert(card, card_object(card, land_definition("Forest"), p0, ZoneKind::Library));
@@ -160,8 +145,7 @@ fn each_draws_card_trigger_fires_regardless_of_who_drew() {
     let permanent = ObjectId(0);
     let card = ObjectId(1);
     let mut state = state_at_upkeep_turn_2();
-    // Controlled by p1 while p0 is the one drawing - EachDrawsCard must fire
-    // anyway, unlike DrawsCard above.
+    // Controlled by p1 while p0 draws, so EachDrawsCard fires anyway, unlike DrawsCard.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
     state.objects.insert(card, card_object(card, land_definition("Forest"), p0, ZoneKind::Library));
@@ -178,10 +162,6 @@ fn each_draws_card_trigger_fires_regardless_of_who_drew() {
     assert!(engine.state().stack.is_empty());
     assert_eq!(engine.state().player(p1).unwrap().life, 21, "GainLife(1) applied to the ability's own controller, p1");
 }
-
-// ---------------------------------------------------------------------
-// BeginningOfYourCombat / BeginningOfEachCombat
-// ---------------------------------------------------------------------
 
 #[test]
 fn beginning_of_your_combat_trigger_fires_and_resolves_for_its_controller() {
@@ -249,10 +229,6 @@ fn beginning_of_each_combat_trigger_fires_regardless_of_whose_turn_it_is() {
     assert!(engine.state().stack.is_empty());
     assert_eq!(engine.state().player(p1).unwrap().life, 21, "GainLife(1) applied to the ability's own controller, p1");
 }
-
-// ---------------------------------------------------------------------
-// BeginningOfYourEndStep / BeginningOfEachEndStep
-// ---------------------------------------------------------------------
 
 #[test]
 fn beginning_of_your_end_step_trigger_fires_and_resolves_for_its_controller() {

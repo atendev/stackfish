@@ -1,30 +1,7 @@
-//! Phase 5 vertical slice: CR 614.12a wired into `Search` -
-//! `phase5/devour`/`phase5/amplify` only ever raised their CR 702.82a
-//! Devour / CR 702.38a Amplify mid-ETB choice pause from the resolving-spell
-//! path (`ResolveStackTop`) - a creature fetched onto the battlefield via
-//! `Game.Ops.Search(...)` (a tutor effect) silently entered with zero bonus
-//! counters instead, a named, deliberately-unclosed gap (see
-//! `replacement::pending_devour_choice`'s own doc comment, pre-this-slice
-//! wording). This slice closes it for `Search` specifically - `PlayLand`
-//! (lands can never have Devour/Amplify text) and `CreateToken` (only
-//! reachable via `TokenSpec::CopyOf`, no real card in this engine's test
-//! corpus needs it) stay deliberately unwired, see their own TODO comments
-//! in `engine/action.rs`/`engine/resolve/tokens.rs`.
-//!
-//! The interesting engineering problem this slice solves: `Engine::
-//! continue_scripted_zone_move` (the shared Destroy/Sacrifice/Exile
-//! pipeline, reused here for Devour's own sacrifice) used to unconditionally
-//! finalize into `ProcessState::ReplacementCheck` once its target queue
-//! drained - correct for the resolving-spell path (nothing else to do), but
-//! wrong for a Devour choice raised mid-`Search`, which still owes the rest
-//! of its own `remaining` candidate queue. `ScriptedZoneMoveThen` (`Stack
-//! Resolution`/`SearchResume`) generalizes that "what happens once the queue
-//! drains" decision, the same way `SbaResumeThen` already does for
-//! `resume_sba_death`. The last test below exercises the sharpest edge of
-//! this: a CR 616.1 ordering choice raised *mid-sacrifice* (a second,
-//! nested pause on top of the search-devour pause) must still correctly
-//! resume all the way back into the search's own pending state afterward,
-//! not get lost or misdirected into the wrong continuation.
+//! CR 614.12a: the Devour (CR 702.82a) and Amplify (CR 702.38a) choice pauses also run when a creature enters the battlefield through `Game.Ops.Search`.
+//! `ScriptedZoneMoveThen` (`StackResolution` or `SearchResume`) decides what happens once the sacrifice queue drains, so a Devour choice raised mid-Search still finishes the search.
+//! The last test nests a CR 616.1 ordering choice inside a sacrifice and must still resume the search.
+// TODO: PlayLand and CreateToken do not run the Devour or Amplify choice (see engine/action.rs and engine/resolve/tokens.rs)
 
 use std::collections::HashMap;
 
@@ -58,9 +35,6 @@ fn creature_definition(definition_id: u64, name: &str, subtypes: Vec<Subtype>, s
     }
 }
 
-/// A non-creature permanent standing in for "whatever grants this
-/// replacement effect" - same fixture role `phase5_destroy_ordering_choice.rs`'s
-/// own `shield_definition` plays.
 fn shield_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
@@ -86,11 +60,6 @@ fn shield_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "If a creature you control would die, exile it instead" - copied
-/// verbatim from `phase5_destroy_ordering_choice.rs`'s own helper (same
-/// role: two of these, sourced from two different objects, is the standard
-/// way this test suite constructs a genuine CR 616.1 2-way ordering choice
-/// on a Sacrifice op).
 fn exile_instead_effect(source: ObjectId, self_only: bool, consumption: ConsumptionPolicy) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -219,10 +188,6 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-// ---------------------------------------------------------------------
-// Devour, fetched via Search.
-// ---------------------------------------------------------------------
-
 #[test]
 fn search_fetches_a_devour_creature_and_pauses_for_the_search_devour_choice() {
     let p0 = PlayerId(0);
@@ -308,13 +273,7 @@ fn search_devour_choosing_nothing_still_resolves_the_search_with_no_counters() {
     assert!(shuffled, "the search's own shuffle_after must still run once the devour pause resolves");
 }
 
-/// The sharpest edge this slice's own refactor exists for: the chosen
-/// sacrifice itself raises a *second*, nested CR 616.1 ordering-choice pause
-/// (two replacement effects both wanting to intercept the same dying
-/// creature) - `Engine::continue_scripted_zone_move`'s own `ScriptedZoneMoveThen
-/// ::SearchResume` must survive that inner pause intact and still hand
-/// control back to the search once both pauses are answered, not just the
-/// simple single-pause case the tests above exercise.
+// The chosen sacrifice raises a nested CR 616.1 ordering pause, and `SearchResume` must survive it and hand control back to the search.
 #[test]
 fn search_devour_sacrifice_can_raise_a_nested_ordering_choice_and_still_resume_the_search() {
     let p0 = PlayerId(0);
@@ -330,9 +289,7 @@ fn search_devour_sacrifice_can_raise_a_nested_ordering_choice_and_still_resume_t
     );
     put_on_battlefield(&mut state, card_object(victim, creature_definition(2, "Victim", Vec::new(), ""), p0, ZoneKind::Battlefield));
     put_on_battlefield(&mut state, card_object(shield_obj, shield_definition(3, "Test Shield"), p0, ZoneKind::Battlefield));
-    // Two distinct sources both matching victim's own would-die event - the
-    // same construction `phase5_destroy_ordering_choice.rs`'s own Sacrifice
-    // test uses to force a genuine 2-way CR 616.1 choice.
+    // Two distinct sources both match victim's would-die event, forcing a real 2-way CR 616.1 choice.
     state.replacement_effects.push(exile_instead_effect(victim, true, ConsumptionPolicy::OneShot));
     state.replacement_effects.push(exile_instead_effect(shield_obj, false, ConsumptionPolicy::OneShot));
     state.objects.insert(
@@ -358,9 +315,7 @@ fn search_devour_sacrifice_can_raise_a_nested_ordering_choice_and_still_resume_t
         panic!("victim's own 2 matching replacement effects must raise a nested CR 616.1 pause mid-sacrifice, got {status:?}")
     };
     assert_eq!(repl_candidates.len(), 2);
-    // The devour choice's own counters aren't granted yet - nothing has
-    // reached CommitEvents at this point, only the sacrifice's own inner
-    // pause has fired.
+    // The devour counters are not granted yet, since only the sacrifice's inner pause has fired.
     assert_eq!(engine.state().object(object).unwrap().counters.count(&CounterKind::PlusOnePlusOne), 0);
 
     engine
@@ -409,10 +364,6 @@ fn search_devour_choice_rejects_a_candidate_not_offered() {
     let err = engine.submit_search_devour_choice(vec![ObjectId(999)]).unwrap_err();
     assert!(matches!(err, engine::DevourChoiceError::InvalidCandidate));
 }
-
-// ---------------------------------------------------------------------
-// Amplify, fetched via Search.
-// ---------------------------------------------------------------------
 
 #[test]
 fn search_fetches_an_amplify_creature_and_pauses_for_the_search_amplify_choice() {
@@ -492,12 +443,6 @@ fn search_amplify_choice_rejects_a_candidate_not_offered() {
     let err = engine.submit_search_amplify_choice(vec![ObjectId(999)]).unwrap_err();
     assert!(matches!(err, engine::AmplifyChoiceError::InvalidCandidate));
 }
-
-// ---------------------------------------------------------------------
-// Regression: a creature with neither ability fetched via Search never
-// pauses on either new StepStatus variant - proves the wiring is additive,
-// not a behavior change for the common case.
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_plain_creature_fetched_via_search_never_pauses_for_either_choice() {

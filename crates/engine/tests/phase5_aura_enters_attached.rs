@@ -1,33 +1,6 @@
-//! Phase 5 vertical slice: CR 303.4f/g/h - a permanent entering the
-//! battlefield already attached by an effect other than resolving as an
-//! Aura spell or activating Equip. `phase5_aura_attach.rs` named this the
-//! one remaining open piece of CR 303.4 ("no effect in this engine puts an
-//! Aura onto the battlefield except by resolving as a spell") - closed here
-//! for the one real non-casting battlefield-entry producer that exists,
-//! `SearchDestination::Battlefield`, now with an `enters_attached: bool`
-//! field.
-//!
-//! Scoped to Auras only (`commands::is_aura`) - Equipment/Fortification
-//! pre-attached entry is closed separately in
-//! `phase5_attach_entry_equipment_fortification.rs` (Equipment/Fortification
-//! attach legality isn't governed by a `target_requirement` the way an
-//! Aura's enchant ability is, so it needed its own legality shape and its
-//! own file rather than folding into this one).
-//!
-//! - 1 legal candidate: attaches immediately, no pause.
-//! - 2+ legal candidates (CR 303.4f, "that player chooses"): a real (not
-//!   dormant) `ProcessState::AwaitingEntryAttachChoice` pause -
-//!   `submit_entry_attach_choice` resumes the search's own remaining
-//!   work (more chosen cards, `shuffle_after`, `StackObjectResolved`)
-//!   afterward, unlike the pre-existing (still dormant)
-//!   `AwaitingAttachChoice`/`submit_attach_choice`. Player candidates (CR
-//!   303.4b) are covered separately, in
-//!   `phase5_aura_enters_attached_player.rs`.
-//! - 0 legal candidates (CR 303.4g, current zone is the library, not the
-//!   stack): the Aura stays in the library - the search simply doesn't move
-//!   it.
-//! - A non-Aura card with `enters_attached: true` (CR 303.4h): enters
-//!   unattached, the field is a no-op for it.
+//! CR 303.4f/g/h: an Aura entering through `SearchDestination::Battlefield { enters_attached }`.
+//! One candidate attaches at once, several pause on `AwaitingEntryAttachChoice` (CR 303.4f), none leaves the Aura in the library (CR 303.4g), and a non-Aura enters unattached (CR 303.4h).
+//! Player candidates are in phase5_aura_enters_attached_player.rs and Equipment in phase5_attach_entry_equipment_fortification.rs.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -60,8 +33,6 @@ fn creature_definition(id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Aura: enchant creature." Same shape `phase5_aura_attach.rs`'s own
-/// `aura_definition` already establishes.
 fn aura_definition(id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id: id,
@@ -253,9 +224,7 @@ fn aura_with_two_legal_candidates_pauses_and_resumes_the_search_afterward() {
         Target::Ability(id) => id.0,
     });
     assert_eq!(sorted, expected, "both bears are legal enchant targets");
-    // The aura is already a real battlefield permanent (unattached) by the
-    // time this pause is raised - same order the cast-time Aura-ETB-attach
-    // path already uses.
+    // The Aura is already an unattached battlefield permanent when this pause is raised.
     assert_eq!(engine.state().object(paused_aura).unwrap().zone, ZoneKind::Battlefield);
     assert_eq!(engine.state().object(paused_aura).unwrap().attached_to, None);
 
@@ -315,8 +284,7 @@ fn aura_with_zero_legal_candidates_stays_in_the_library() {
     let p1 = PlayerId(1);
     let aura = ObjectId(10);
     let card = ObjectId(2);
-    // No creatures anywhere - the Aura's own "enchant creature" requirement
-    // has zero legal candidates.
+    // No creatures anywhere, so "enchant creature" has no legal candidate.
     let mut state = two_player_state(vec![aura]);
     state.objects.insert(aura, card_object(aura, aura_definition(1, "Test Aura"), p0, ZoneKind::Library));
     state.objects.insert(

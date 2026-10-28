@@ -1,10 +1,4 @@
-//! Phase 5 vertical slice: a mode with several target words of its own (a
-//! `TargetSpec::Multiple`, such as "two target creatures fight each other" or
-//! "exchange the text boxes of two target creatures") combined with other
-//! chosen modes. All the words of all chosen modes form one flat
-//! `TargetSpec::Multiple`; `AbilityEffect::Modal::words[i]` says how many of
-//! them mode i owns, and each mode resolves against its own range of the
-//! per-word legal chunks.
+//! A mode with several target words (a `TargetSpec::Multiple`, such as "two target creatures fight each other") combined with other modes. All words form one flat `TargetSpec::Multiple`, and `AbilityEffect::Modal::words[i]` says how many mode i owns.
 
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -72,8 +66,6 @@ fn obj(id: u64) -> Target {
     Target::Object(ObjectId(id))
 }
 
-/// Four creatures: 1 `A` 3/3 flying (P0), 2 `B` 2/2 trample (P1), 3 `C` 1/1
-/// (P1), 4 `D` 2/2 (P0), and the modal spell in P0's hand.
 fn engine_with(modes: Vec<SpellMode>, choose: u32) -> Engine {
     let spell = CardDefinition {
         modes,
@@ -138,8 +130,6 @@ fn assert_resolved_cleanly(engine: &Engine) {
     assert!(!engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })), "not fizzled");
 }
 
-// ---- Exchange of text boxes ------------------------------------------------
-
 #[test]
 fn an_exchange_mode_swaps_two_targets_text_boxes_and_the_other_mode_runs() {
     let mut engine = engine_with(vec![mode(two_creatures(), AbilityEffect::ExchangeTextBoxes), mode(None, AbilityEffect::GainLife(3))], 2);
@@ -166,8 +156,6 @@ fn a_mode_printed_after_nothing_else_still_gets_its_own_word_range() {
     assert_eq!(life(&engine, P0), 23);
     assert_resolved_cleanly(&engine);
 }
-
-// ---- Mode spans of different lengths ----------------------------------------
 
 #[test]
 fn three_modes_with_spans_of_two_one_and_one_each_read_their_own_targets() {
@@ -199,8 +187,6 @@ fn two_multi_word_modes_each_read_their_own_pair() {
     assert_resolved_cleanly(&engine);
 }
 
-// ---- A word going away -------------------------------------------------------
-
 #[test]
 fn a_fight_mode_whose_word_left_does_nothing_but_the_other_mode_still_runs() {
     let mut engine = engine_with(vec![mode(two_creatures(), AbilityEffect::Fight), mode(one_creature(), AbilityEffect::Tap)], 2);
@@ -216,8 +202,6 @@ fn a_fight_mode_whose_word_left_does_nothing_but_the_other_mode_still_runs() {
     assert!(engine.state().object(ObjectId(3)).unwrap().tapped, "the tap mode still resolved");
     assert_resolved_cleanly(&engine);
 }
-
-// ---- Cast-time validation ---------------------------------------------------------
 
 #[test]
 fn too_few_targets_for_the_combined_words_are_rejected_at_cast_time() {
@@ -236,8 +220,6 @@ fn a_mode_with_an_empty_multi_target_requirement_is_rejected() {
     assert!(matches!(result, Err(ActionError::Rejected(_))), "{result:?}");
     assert_eq!(zone(&engine, SPELL.0), Some(ZoneKind::Hand), "state untouched");
 }
-
-// ---- A modal triggered ability --------------------------------------------------
 
 #[test]
 fn a_multi_word_mode_works_on_a_modal_triggered_ability() {

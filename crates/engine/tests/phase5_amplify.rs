@@ -1,31 +1,8 @@
-//! Phase 5 vertical slice: CR 702.38a Amplify N - "as this object enters,
-//! reveal any number of cards from your hand that share a creature type
-//! with it. This permanent enters with N +1/+1 counters on it for each card
-//! revealed this way." The last of the four "dynamic ETB counts" backlog
-//! items (Bloodthirst/Sunburst/Devour/Amplify).
-//!
-//! Same category of gap as Devour: `EntersWithCountersAmplify` is never
-//! applied by `replacement::apply_enters_battlefield_modifiers` at all -
-//! `replacement::pending_amplify_choice` is checked directly by
-//! `ResolveStackTop`, before that function runs, pausing on
-//! `ProcessState::AwaitingAmplifyChoice`/`StepStatus::AwaitingAmplifyChoice`
-//! and resuming via `Engine::submit_amplify_choice`.
-//!
-//! Unlike Devour, revealing a hand card changes nothing about its zone - no
-//! sacrifice, no dies triggers - so `submit_amplify_choice` needs no
-//! `continue_scripted_zone_move`; it folds `events_so_far` plus a
-//! `CounterAdded` straight into the same `StackObjectResolved`/
-//! `ReplacementCheck` tail any other synchronous-only resolution ends on.
-//!
-//! Candidates are cards in the entering permanent's own controller's hand
-//! whose `EffectiveCharacteristics::subtypes` overlap the entering
-//! permanent's own - "shares a creature type" approximated as raw subtype
-//! overlap (this engine has no separate "creature type" category, same
-//! imprecision `landwalk_subtypes`/`bands_with_other_subtypes` already
-//! accept). CR 702.38a's "can't reveal cards entering the battlefield at the
-//! same time as this card" is unmodeled (no simultaneous-entry producer
-//! exists). CR 702.38b (multiple separate Amplify instances) is unmodeled -
-//! only the first registered instance is matched.
+//! CR 702.38a Amplify N: the entering permanent gets N +1/+1 counters per revealed hand card sharing a creature type.
+//! `ResolveStackTop` pauses on `AwaitingAmplifyChoice` and `submit_amplify_choice` resumes it.
+//! Creature type is approximated as raw subtype overlap.
+// TODO: cards entering the battlefield at the same time cannot be revealed (CR 702.38a)
+// TODO: only the first Amplify instance matches (CR 702.38b)
 
 use stackfish_engine::engine::{AmplifyChoiceError, Engine, StepStatus};
 use stackfish_engine::replacement;
@@ -84,10 +61,6 @@ fn put_in_hand(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-// ---------------------------------------------------------------------
-// pending_amplify_choice - unit level.
-// ---------------------------------------------------------------------
-
 #[test]
 fn pending_amplify_choice_only_offers_hand_cards_sharing_a_subtype() {
     let mut state = two_player_state();
@@ -113,8 +86,7 @@ fn pending_amplify_choice_only_offers_hand_cards_sharing_a_subtype() {
         replacement::pending_amplify_choice(&state, &runtime, entrant, ZoneKind::Stack, p0).expect("an Amplify effect is registered with real candidates");
 
     assert_eq!(per_card, 1);
-    // Only the own zombie shares a subtype - the human doesn't share one,
-    // the opponent's zombie isn't in this controller's hand.
+    // Only the own zombie shares a subtype.
     assert_eq!(candidates, vec![own_zombie_in_hand]);
 }
 
@@ -144,10 +116,6 @@ fn pending_amplify_choice_is_none_without_a_registered_amplify_effect() {
     let runtime = ScriptRuntime::new();
     assert!(replacement::pending_amplify_choice(&state, &runtime, ObjectId(0), ZoneKind::Stack, p0).is_none());
 }
-
-// ---------------------------------------------------------------------
-// Lua self-registration.
-// ---------------------------------------------------------------------
 
 const AMPLIFY_ONE: &str = r#"
 local s = {}
@@ -180,10 +148,6 @@ fn set_payload_amplify_registers_correctly() {
         other => panic!("expected a WouldMoveZone(_, Battlefield)/EntersWithCountersAmplify(1) spec, got {other:?}"),
     }
 }
-
-// ---------------------------------------------------------------------
-// End to end: Lua registration + real CastSpell resolution + the pause.
-// ---------------------------------------------------------------------
 
 fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine

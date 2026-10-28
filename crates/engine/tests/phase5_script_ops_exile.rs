@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::Exile` (backlog item 8, fifth
-//! Script API primitive) — `Game.Ops.Exile()`, e.g. "Exile target creature."
-//!
-//! Like `Destroy`, exile is a zone move that can't be modeled as an unapplied
-//! event — `apply_replacements` is consulted first, then the move is inlined.
-//! Unlike `Destroy`, exile ignores indestructibility entirely (CR 702.12b is
-//! Destroy-specific). `sba::commit_death` cannot be reused: it hardcodes
-//! `Some(owner)` for the destination zone lookup, but the Exile zone is
-//! shared (`owner = None`), so that lookup would silently miss and the object
-//! would disappear rather than land in exile. The `Exile` arm therefore
-//! inlines its own zone move using `state.zone_mut(Exile, None)`.
-//!
-//! Scoped to battlefield targets only — "exile target creature/permanent" is
-//! the overwhelmingly common real card text. Exiling from graveyard/hand
-//! requires knowing which zone to remove from at resolution time; deferred.
+//! `AbilityEffect::Exile` (`Game.Ops.Exile()`) consults `apply_replacements` and then inlines its own zone move through `state.zone_mut(Exile, None)`, since `sba::commit_death` hardcodes `Some(owner)` and Exile is shared. It ignores indestructibility, which is Destroy-specific (CR 702.12b).
+// TODO: exiling from the graveyard or hand, which needs the zone to remove from at resolution time
 
 use std::collections::HashMap;
 
@@ -45,7 +32,6 @@ fn creature_definition(definition_id: u64, name: &str, keywords: KeywordSet) -> 
     }
 }
 
-/// "Test Exile: Exile target creature."
 fn exile_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -216,9 +202,7 @@ fn exile_fires_leaves_battlefield_trigger() {
     let target = ObjectId(0);
     state.objects.insert(target, card_object(target, creature_definition(1, "Watchful Bear", KeywordSet::empty()), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
-    // "When this leaves the battlefield, gain 1 life." — exile is a
-    // Battlefield → Exile departure, so LeavesBattlefield must fire here
-    // even though the creature did not die (no Dies trigger would match).
+    // "When this leaves the battlefield, gain 1 life." Exile is a Battlefield to Exile departure, so LeavesBattlefield fires though the creature did not die.
     state.abilities.push(leaves_battlefield_ability(target));
     let card = ObjectId(1);
     state.objects.insert(card, card_object(card, exile_spell_definition(), p0, ZoneKind::Hand));
@@ -247,8 +231,7 @@ fn exile_ignores_indestructible() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
-    // Destroy would leave an indestructible target untouched (CR 702.12b).
-    // Exile has no such restriction — it bypasses indestructibility entirely.
+    // Exile bypasses indestructibility, which would leave a destroy target untouched (CR 702.12b).
     state.objects.insert(target, card_object(target, creature_definition(1, "Indestructible Bear", KeywordSet::INDESTRUCTIBLE), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
     let card = ObjectId(1);

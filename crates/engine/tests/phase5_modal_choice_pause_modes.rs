@@ -1,10 +1,5 @@
-//! Phase 5 vertical slice: `Search` and `CreateToken` as modes of a
-//! multi-mode spell. Both pause for a player choice mid-resolution: Search
-//! for the card to find and then, for a Devour creature, a nested sacrifice
-//! choice (`SearchResume`); CreateToken for the CR 303.4f attach choice of an
-//! Aura token. Each ends in the standard `ReplacementCheck` tail, so the
-//! modal continuation (`Engine::modal_continuation`) resumes the remaining
-//! modes after the answer.
+//! `Search` and `CreateToken` as modes of a multi-mode spell. Search pauses for the card to find and, for a Devour creature, a nested sacrifice (`SearchResume`). CreateToken pauses for an Aura token's CR 303.4f attach choice.
+//! Each ends in the `ReplacementCheck` tail, so `modal_continuation` resumes the remaining modes.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -23,7 +18,6 @@ fn card(id: u64, name: &str, types: CardTypeSet, script: Option<&str>) -> CardDe
     }
 }
 
-/// "Test Aura: enchant creature" - the `CopyOf` source for the Aura-token tests.
 fn aura(id: u64) -> CardDefinition {
     CardDefinition {
         subtypes: vec![Subtype("Aura".to_string())],
@@ -138,8 +132,6 @@ fn assert_resolved_cleanly(engine: &Engine) {
     assert_eq!(spell_zones, vec![ZoneKind::Graveyard], "the spell ends in the graveyard");
 }
 
-// ---- Search ----------------------------------------------------------------
-
 fn three_lands(engine: &mut Engine) {
     for i in 0..3 {
         add(engine, 200 + i, card(200 + i, &format!("Land {i}"), CardTypeSet::LAND, None), P0, ZoneKind::Library);
@@ -215,8 +207,6 @@ fn a_search_mode_that_fetches_a_devour_creature_pauses_twice_and_the_next_mode_s
     assert_resolved_cleanly(&engine);
 }
 
-// ---- CreateToken -----------------------------------------------------------
-
 #[test]
 fn a_create_token_mode_and_a_synchronous_mode_both_resolve() {
     let mut engine = engine_with(vec![mode(treasures(2)), mode(AbilityEffect::GainLife(3))]);
@@ -266,8 +256,6 @@ fn an_aura_token_mode_pauses_for_the_attach_choice_and_the_next_mode_runs_after_
     assert_eq!(life(&engine), 23);
     assert_resolved_cleanly(&engine);
 }
-
-// ---- Two pausing modes in a row -----------------------------------------------
 
 #[test]
 fn a_search_mode_then_an_aura_token_mode_pause_one_after_the_other() {

@@ -1,14 +1,5 @@
-//! 024/025: a rejected input changes nothing. Each test submits one illegal
-//! `PlayerAction` and `assert_action_rejected` compares the whole engine
-//! (`GameState`, the ledger, `next_command_id`, the pipeline stage, the Lua
-//! handle count) before and after. One or more illegal inputs per command
-//! arm: `PassPriority`, `MakeChoice`, `PlayLand`, `CastSpell`,
-//! `ActivateAbility`, `DeclareAttackers`, `DeclareBands`, `DeclareBlockers`
-//! and `AssignCombatDamage`. The `submit_*` methods are in
-//! `phase5_atomicity_submit.rs`.
-//!
-//! Tests marked "regression" cover a mutate-then-`Err` the 025 audit found
-//! (see `docs/implementation/21-atomicity.md`).
+//! A rejected `PlayerAction` changes nothing: `assert_action_rejected` compares the whole engine before and after.
+//! Covers each command arm. The `submit_*` methods are in phase5_atomicity_submit.rs.
 
 use std::collections::HashMap;
 
@@ -48,8 +39,6 @@ fn any_target() -> TargetSpec {
     })
 }
 
-/// Two players in `p0`'s main phase with an empty stack. `last_active_turn_number`
-/// is seeded so nothing is summoning sick by default.
 fn main_state(kinds: &[ZoneKind]) -> GameState {
     GameState {
         last_active_turn_number: HashMap::from([(P0, 1), (P1, 0)]),
@@ -125,10 +114,6 @@ fn illegal(rejected: &ActionError) -> bool {
     matches!(rejected, ActionError::Rejected(_) | ActionError::IllegalAction(_))
 }
 
-// ---------------------------------------------------------------------
-// PassPriority, MakeChoice
-// ---------------------------------------------------------------------
-
 #[test]
 fn pass_priority_by_the_wrong_player_is_rejected() {
     let mut engine = Engine::new(game());
@@ -157,16 +142,12 @@ fn an_action_while_the_engine_is_mid_pipeline_is_rejected() {
     let card = in_hand(&mut state, 1, def(1, "Spell", CardTypeSet::INSTANT));
     let mut engine = Engine::new(state);
     engine.submit_action(act(P0, cast(card))).unwrap();
-    // The cast is queued, not run: the engine is no longer waiting for an action.
+    // The cast is queued, not run, so the engine is no longer waiting for an action.
     let rejected = assert_unchanged_after(&mut engine, "second action while queued", |e| {
         e.submit_action(act(P0, PlayerActionKind::PassPriority))
     });
     assert!(matches!(rejected, Err(ActionError::IllegalAction(_))));
 }
-
-// ---------------------------------------------------------------------
-// PlayLand
-// ---------------------------------------------------------------------
 
 fn land_engine() -> (Engine, ObjectId) {
     let mut state = game();
@@ -233,9 +214,7 @@ fn play_land_that_does_not_exist_is_rejected() {
     assert!(matches!(rejected, ActionError::Rejected(Rejected::InvalidTarget)), "{rejected:?}");
 }
 
-/// Regression: `execute_play_land` allocated the new object id and sequence
-/// number, then removed the card from the hand, and only then looked up the
-/// battlefield zone, so a missing zone returned `Err` with the card gone.
+// A missing battlefield zone must not leave the card gone from the hand.
 #[test]
 fn play_land_without_a_battlefield_zone_changes_nothing() {
     let mut state = main_state(&[ZoneKind::Hand]);
@@ -244,10 +223,6 @@ fn play_land_without_a_battlefield_zone_changes_nothing() {
     let rejected = assert_action_rejected(&mut engine, "no battlefield", act(P0, PlayerActionKind::PlayLand { card: land }));
     assert!(illegal(&rejected), "{rejected:?}");
 }
-
-// ---------------------------------------------------------------------
-// CastSpell
-// ---------------------------------------------------------------------
 
 fn bolt() -> CardDefinition {
     CardDefinition { target_requirement: Some(any_target()), ..def(10, "Bolt", CardTypeSet::INSTANT) }
@@ -415,9 +390,7 @@ fn cast_with_a_bad_alternative_cost_or_buyback_is_rejected() {
     assert_action_rejected(&mut engine, "buyback with no buyback cost", action);
 }
 
-/// Regression: `execute_cast_spell` allocated the stack object's id and
-/// sequence number before it looked up the zone to remove the card from, so
-/// a missing zone returned `Err` with both counters already advanced.
+// A missing source zone must not advance the id and sequence counters.
 #[test]
 fn cast_without_the_source_zone_changes_nothing() {
     let mut state = main_state(&[ZoneKind::Battlefield]);
@@ -427,10 +400,6 @@ fn cast_without_the_source_zone_changes_nothing() {
     let rejected = assert_action_rejected(&mut engine, "no hand zone", act(P0, cast(card)));
     assert!(illegal(&rejected), "{rejected:?}");
 }
-
-// ---------------------------------------------------------------------
-// ActivateAbility
-// ---------------------------------------------------------------------
 
 fn mana_ability(effect: AbilityEffect, cost: Option<CostSpec>) -> (Engine, ObjectId) {
     let mut state = game();
@@ -575,9 +544,7 @@ fn activate_a_targeted_ability_with_a_bad_target_is_rejected() {
     assert_action_rejected(&mut engine, "missing target", act(P0, bad));
 }
 
-/// Regression: the free mana-ability path set `tapped = true` and only then
-/// looked up the actor's `PlayerState`, so an actor with no player state got
-/// `Err` and a tapped land.
+// A missing player state must not leave the land tapped.
 #[test]
 fn activate_a_mana_ability_without_player_state_changes_nothing() {
     let ghost = PlayerId(5);
@@ -591,10 +558,6 @@ fn activate_a_mana_ability_without_player_state_changes_nothing() {
     assert!(!engine.state().object(source).unwrap().tapped);
 }
 
-// ---------------------------------------------------------------------
-// A rejected input does not use up a command id
-// ---------------------------------------------------------------------
-
 #[test]
 fn a_rejected_action_does_not_use_up_a_command_id() {
     let (mut engine, land) = land_engine();
@@ -606,12 +569,6 @@ fn a_rejected_action_does_not_use_up_a_command_id() {
     assert_eq!(engine.snapshot().next_command_id, 1, "the accepted pass takes id 0, so the next id is 1");
 }
 
-// ---------------------------------------------------------------------
-// A rejected nested mana ability leaves the suspended payment intact
-// ---------------------------------------------------------------------
-
-/// `p0` has cast a {G} spell and is `AwaitingPayment`, with a tapped Forest
-/// that has a mana ability and one floating green.
 fn paying_engine() -> (Engine, ObjectId) {
     let mut state = game();
     let spell = in_hand(
@@ -670,10 +627,6 @@ fn another_action_during_a_payment_is_rejected_without_touching_it() {
     assert!(matches!(rejected, ActionError::IllegalAction(_)));
     assert!(engine.pending_payment_cost().is_some());
 }
-
-// ---------------------------------------------------------------------
-// DeclareAttackers, DeclareBands
-// ---------------------------------------------------------------------
 
 fn combat_state(step: Step, combat: Option<CombatState>) -> GameState {
     GameState { phase: Phase::Combat, step, combat, ..game() }
@@ -758,8 +711,7 @@ fn declare_attackers_with_one_illegal_attacker_taps_none_of_them() {
     assert!(!engine.state().object(first).unwrap().tapped);
 }
 
-/// Regression: the same creature listed twice passed validation (it is
-/// untapped when each entry is checked), then was tapped and logged twice.
+// The same attacker listed twice must be rejected before it is tapped twice.
 #[test]
 fn declare_the_same_attacker_twice_is_rejected() {
     let (mut engine, bear) = attack_step_engine();
@@ -811,11 +763,6 @@ fn declare_bands_that_are_illegal_is_rejected() {
     assert_action_rejected(&mut engine, "bands before attackers", bands(vec![vec![ObjectId(1)]]));
 }
 
-// ---------------------------------------------------------------------
-// DeclareBlockers
-// ---------------------------------------------------------------------
-
-/// `p0` attacks `p1` with an attacker; `p1` controls a Bear. Step is DeclareBlockers.
 fn block_step_engine(attacker_keywords: KeywordSet) -> (Engine, ObjectId, ObjectId) {
     let mut state = combat_state(Step::DeclareBlockers, None);
     let attacker =
@@ -882,11 +829,6 @@ fn declare_blockers_twice_or_by_a_non_defender_is_rejected() {
     assert_action_rejected(&mut engine, "wrong step", block(P1, Vec::new()));
 }
 
-// ---------------------------------------------------------------------
-// AssignCombatDamage
-// ---------------------------------------------------------------------
-
-/// A 3-power attacker blocked by two creatures: its controller has to split the damage.
 fn damage_engine() -> (Engine, ObjectId, ObjectId, ObjectId) {
     let mut state = combat_state(Step::CombatDamage, None);
     let attacker = on_battlefield(

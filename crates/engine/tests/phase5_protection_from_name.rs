@@ -1,23 +1,5 @@
-//! Phase 5 vertical slice: CR 702.16a's name quality ("protection from
-//! Progenitus"), extending `phase5/protection-from-color`/
-//! `phase5/protection-from-card-type`/`phase5/protection-from-subtype`'s
-//! three enforcement sites (damage/targeting/blocking) to a fourth,
-//! independent quality axis - `EffectiveCharacteristics.protection_names`,
-//! folded in the same layer-6 pass from a sibling `EffectPrimitive::
-//! AddProtectionName`. Each enforcement site now checks "protected if the
-//! color, card-type, subtype, *or* name quality matches the source" - this
-//! file only re-proves the name half; the other three (and the
-//! OR-composition mechanics) are already covered by their own test files.
-//!
-//! Unlike `ColorSet`/`CardTypeSet`, and same as `protection_subtypes`,
-//! `protection_names` is a plain `Vec<String>`, not a bitflag `Set` - a card
-//! name is an open-ended string. Matched by exact equality against the
-//! source's own *effective* name (post any CR 612.8 rename), not a
-//! set-intersection.
-//!
-//! Same scoping as the earlier three slices: protection from a specific
-//! player or "from everything" stays unmodeled, and Enchant/Equip (CR
-//! 702.16b) is out of scope (no attach/enchant machinery exists).
+//! CR 702.16a: the name quality ("protection from Progenitus"), `EffectiveCharacteristics.protection_names`, a `Vec<String>` matched by exact equality against the source's effective name (after any CR 612.8 rename).
+//! This file covers the name half, and the other qualities and the OR composition are in their own files.
 
 use std::collections::HashMap;
 
@@ -70,9 +52,6 @@ fn vanilla_creature(id: u64, name: &str, power: i32, toughness: i32) -> CardDefi
     creature_definition(id, name, power, toughness, ScriptReference::ByKey(name.to_string()))
 }
 
-/// "Test Progenitus Bolt: deals 2 damage to target creature," named
-/// "Progenitus" so the targeting tests have a real spell-side name to check
-/// protection against.
 fn progenitus_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -103,8 +82,6 @@ fn progenitus_bolt_definition() -> CardDefinition {
     }
 }
 
-/// A differently-named counterpart to `progenitus_bolt_definition`, for the
-/// "protection doesn't block an unrelated name" control test.
 fn plain_bolt_definition() -> CardDefinition {
     CardDefinition { definition_id: 21, name: "Test Plain Bolt".to_string(), ..progenitus_bolt_definition() }
 }
@@ -115,9 +92,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Directly-constructed protection, standing in for the ETB-registered
-/// version - the Lua wiring itself is proven separately, same convention
-/// every other static-ability-adjacent test file in this repo uses.
 fn protection_from_progenitus(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -224,10 +198,6 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
 
-// ---------------------------------------------------------------------
-// Lua wiring
-// ---------------------------------------------------------------------
-
 #[test]
 fn game_effects_add_protection_name_self_registers_and_applies() {
     let mut state = base_state();
@@ -248,10 +218,7 @@ fn game_effects_add_protection_name_self_registers_and_applies() {
     assert_eq!(effective.protection_names, vec!["Progenitus".to_string()]);
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16a: damage
-// ---------------------------------------------------------------------
-
+// CR 702.16a
 #[test]
 fn combat_damage_from_a_matching_name_is_prevented_by_protection() {
     let p0 = PlayerId(0);
@@ -298,10 +265,7 @@ fn combat_damage_from_a_non_matching_name_still_lands() {
     assert_eq!(ward.damage_marked, 3, "protection from Progenitus doesn't stop a differently-named creature's damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16c: targeting
-// ---------------------------------------------------------------------
-
+// CR 702.16c
 #[test]
 fn casting_a_matching_name_spell_at_a_protected_target_is_rejected() {
     let mut state = base_state();
@@ -354,10 +318,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 702.16c is rechecked by the same CR 608.2b mechanism as any other
-    // target legality change - granting protection mid-stack, after the
-    // spell already targeted this creature, makes the target illegal by
-    // resolution time.
+    // CR 702.16c: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
     engine.state_mut().continuous_effects.push(protection_from_progenitus(target));
 
     pass_both_and_drain(&mut engine, p0, p1).unwrap();
@@ -369,10 +330,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     assert_eq!(engine.state().object(target).unwrap().damage_marked, 0, "a fizzled spell deals no damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16d: blocking
-// ---------------------------------------------------------------------
-
+// CR 702.16d
 #[test]
 fn an_attacker_with_protection_cannot_be_blocked_by_a_matching_name_creature() {
     let p0 = PlayerId(0);
@@ -416,13 +374,6 @@ fn an_attacker_with_protection_can_still_be_blocked_by_a_non_matching_name_creat
         "a differently-named creature can still block an attacker with only protection from Progenitus, got {status:?}"
     );
 }
-
-// ---------------------------------------------------------------------
-// RemoveAllAbilities consistency (CR 613.1f covers protection_names too,
-// same as protection_colors/protection_card_types/protection_subtypes -
-// see phase5_lose_all_abilities.rs's own analogous test for the color
-// half).
-// ---------------------------------------------------------------------
 
 #[test]
 fn remove_all_abilities_also_strips_a_granted_protection_name() {

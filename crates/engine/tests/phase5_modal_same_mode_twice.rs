@@ -1,22 +1,5 @@
-//! Phase 5 vertical slice: CR 700.2d's own "same mode twice" exception —
-//! "some modal spells include the instruction 'You may choose the same mode
-//! more than once.'" (Profane Command is the classic example.) A repeated
-//! mode is treated as if it appeared that many times in sequence: each
-//! instance gets its own target slot (the same object/player may be chosen
-//! for each, or different ones), and if the repeated mode carries a CR
-//! 700.2h additional cost, that cost is paid once per instance.
-//!
-//! `ModeChoice::ExactlyRepeatable(u32)`/`UpToRepeatable(u32)` are new
-//! variants (not a field added to `Exactly`/`UpTo` or to `CardDefinition`
-//! itself — either would ripple through every bare `CardDefinition`/
-//! `ModeChoice::Exactly(1)` struct literal in this test suite, the same
-//! class of change `phase5_modal_multi_mode.rs` already paid for once).
-//! `commands::execute_command`'s `CastSpell` arm only skips its own dedup
-//! check when the resolved `mode_choice` is one of these two variants —
-//! everything downstream (sorting chosen indices, building `TargetSpec::
-//! Multiple`/`AbilityEffect::Modal`, `ResolveStackTop`'s own resolution) was
-//! already agnostic to whether two chosen-mode chunks came from the same
-//! `SpellMode` index or two different ones, so none of it changed.
+//! CR 700.2d: "you may choose the same mode more than once" (Profane Command). Each instance gets its own target slot, and a CR 700.2h additional cost is paid once per instance.
+//! `ModeChoice::ExactlyRepeatable` and `UpToRepeatable` skip the `CastSpell` dedup check, and everything downstream was already agnostic to repeats.
 
 use std::collections::HashMap;
 
@@ -36,10 +19,6 @@ fn any_target_requirement() -> TargetSpec {
     })
 }
 
-/// "Test Repeatable: Choose two —
-///  * You gain 3 life.
-///  * Test Repeatable deals 2 damage to any target.
-///  You may choose the same mode more than once."
 fn repeatable_definition(mode_choice: ModeChoice) -> CardDefinition {
     CardDefinition {
         definition_id: 50,
@@ -77,10 +56,6 @@ fn repeatable_definition(mode_choice: ModeChoice) -> CardDefinition {
     }
 }
 
-/// "Test Repeatable Cost: Choose two —
-///  * You gain 3 life.
-///  * Pay 2 life. Test Repeatable Cost deals 2 damage to any target.
-///  You may choose the same mode more than once."
 fn repeatable_cost_definition() -> CardDefinition {
     CardDefinition {
         modes: vec![
@@ -167,9 +142,7 @@ fn repeated_mode_with_a_target_allows_reusing_the_same_target() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Mode 1 (Damage(2), any target) chosen twice, same target both times -
-    // CR 700.2d: "the same player or object may be chosen as the target for
-    // each of those modes."
+    // CR 700.2d: mode 1 twice with the same target, which the rule allows.
     cast_spell(&mut engine, p0, card, vec![1, 1], vec![Target::Player(p1), Target::Player(p1)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
@@ -238,8 +211,7 @@ fn repeated_mode_with_an_additional_cost_charges_it_once_per_instance() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Mode 1 (LifePayment{2}) chosen twice - CR 700.2h + 700.2d: both
-    // instances' costs must be paid, not just one.
+    // CR 700.2h, 700.2d: mode 1 twice, and both instances' costs must be paid.
     cast_spell(&mut engine, p0, card, vec![1, 1], vec![Target::Player(p1), Target::Player(p1)]);
     drain(&mut engine);
 

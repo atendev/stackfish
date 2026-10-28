@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: backlog item 11d — commander tax (CR 903.8),
-//! {2} generic per prior time this player has cast *this* commander from
-//! the command zone this game. Tracked per commander by name
-//! (`PlayerState::commander_casts`), not `ObjectId` — CR 400.7 mints a new
-//! id on every cast and every 903.9a return, so an id can't identify "the
-//! same commander" across a cast/death/return/recast cycle. Builds on 11c
-//! (`phase5_commander.rs`), which already proved marking + the bare
-//! command-zone cast permission; this file only exercises the cost.
+//! CR 903.8: commander tax is {2} generic per prior cast of this commander from the command zone.
+//! It is tracked by name in `PlayerState::commander_casts`, since CR 400.7 mints a new id on every cast and every CR 903.9a return.
 
 use std::collections::HashMap;
 
@@ -48,11 +42,7 @@ fn card_object(
     GameObject { is_commander, ..base_card_object(id, definition, owner, zone) }
 }
 
-/// Two players, ready for priority at `(Main, PreCombatMain)`, every zone
-/// kind (including command) registered for both. `p0`'s pool is seeded
-/// generously (10 colorless) - CR 605 mana abilities aren't exercised here,
-/// tests hand-set the pool directly, same convention
-/// `phase5_cast_spell_payment.rs` established.
+// p0's pool is seeded with 10 colorless, and tests set it directly.
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -80,10 +70,7 @@ fn drain(engine: &mut Engine) -> engine::StepStatus {
     }
 }
 
-/// Casts `card` for `p0` from wherever it sits, pays with `n` floating
-/// colorless mana (must cover the resolved generic total - `p0`'s pool
-/// starts at 10 colorless, plenty of headroom), and returns the pool's
-/// remaining colorless count so a test can read off exactly what was spent.
+// Pays with n colorless and returns the remaining colorless count, so a test can read off what was spent.
 fn cast_and_pay(engine: &mut Engine, card: ObjectId, n: u32) -> u32 {
     let p0 = PlayerId(0);
     engine
@@ -108,12 +95,7 @@ fn cast_and_pay(engine: &mut Engine, card: ObjectId, n: u32) -> u32 {
     engine.state().player(p0).unwrap().mana_pool.colorless
 }
 
-/// Moves `card` directly from the battlefield/graveyard back into `p0`'s
-/// command zone under a *new* id, mirroring what CR 903.9a's acceptance
-/// path does in real play (11c's own `move_commander_to_command_zone`) -
-/// this file only cares about the tax that results from a repeat cast, not
-/// re-driving 903.9a's own pause/choice machinery (already covered by
-/// `phase5_commander.rs`). Returns the new id.
+// Moves the card back to p0's command zone under a new id, as a CR 903.9a return does in play.
 fn manually_return_to_command_zone(state: &mut GameState, card: ObjectId) -> ObjectId {
     let object = state.objects.get(&card).unwrap().clone();
     let from_zone = object.zone;
@@ -132,16 +114,7 @@ fn manually_return_to_command_zone(state: &mut GameState, card: ObjectId) -> Obj
     new_id
 }
 
-/// `phase5/cost-modifier-order` found this while fixing a related bug:
-/// `ManaCost::apply_cost_delta(0)` isn't a true no-op, it drops an explicit
-/// `Generic(0)` symbol (e.g. an {X} cost resolved with X=0) - the commander
-/// tax path used to call it unconditionally even on a first cast
-/// (`prior_casts == 0`, delta `2 * 0 == 0`), so an {X} commander cast for
-/// the very first time from the command zone would have silently lost its
-/// explicit `{0}`, requiring `PaymentPlan::validate` to accept a payment
-/// with *no* mana entry at all instead of the explicit-empty one CR 601.2b
-/// actually requires. Now the tax path skips `apply_cost_delta` entirely
-/// when `prior_casts == 0`, same guard `cost::apply_cost_modifiers` uses.
+// ManaCost::apply_cost_delta(0) drops an explicit Generic(0) (e.g. {X} with X=0), so the tax path skips it when prior_casts == 0, as cost::apply_cost_modifiers does (CR 601.2b).
 #[test]
 fn x_cost_commander_first_cast_still_needs_an_explicit_empty_mana_entry() {
     let mut state = two_player_state();
@@ -223,9 +196,7 @@ fn second_cast_after_returning_costs_two_more() {
     let mut engine = Engine::new(state);
     cast_and_pay(&mut engine, commander, 1);
 
-    // Send it (under whatever id it now has on the stack) to the graveyard
-    // and back to the command zone, same as a real death + 903.9a
-    // acceptance would, then recast it.
+    // Send it to the graveyard and back to the command zone, as a real death plus CR 903.9a would, then recast it.
     let on_stack = engine.state().stack.last().unwrap().stack_id;
     engine.state_mut().stack.retain(|s| s.stack_id != on_stack);
     let mut obj = engine.state().objects.get(&on_stack).unwrap().clone();
@@ -320,14 +291,11 @@ fn partner_commanders_have_independent_tax_counters() {
     let general_recast = manually_return_to_command_zone(engine.state_mut(), on_stack);
     cast_and_pay(&mut engine, general_recast, 3);
 
-    // Clear General's second cast off the stack (sorcery speed needs an
-    // empty stack) before casting Admiral - where it ends up doesn't matter
-    // for this test, only that the stack is empty again.
+    // Clear General's second cast off the stack, since sorcery speed needs an empty stack.
     let on_stack = engine.state().stack.last().unwrap().stack_id;
     engine.state_mut().stack.retain(|s| s.stack_id != on_stack);
 
-    // Admiral, never cast before, still costs only its base {1} - General's
-    // two casts didn't bleed into its own counter.
+    // Admiral, never cast before, costs only its base {1}.
     let remaining = cast_and_pay(&mut engine, admiral, 1);
     // Pool: started 10, spent 1 (General #1) + 3 (General #2) + 1 (Admiral #1) = 5, 5 left.
     assert_eq!(remaining, 5, "Admiral's first cast is untaxed regardless of General's cast count");
@@ -337,9 +305,7 @@ fn partner_commanders_have_independent_tax_counters() {
 fn casting_from_hand_is_never_taxed() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
-    // Same card, same name as a would-be commander, but sitting in hand and
-    // not marked is_commander - the ordinary CR 601.2f path, no 903.8
-    // involvement at all.
+    // Same card in hand and not marked is_commander takes the ordinary CR 601.2f path, with no commander tax.
     let card = ObjectId(0);
     put_in_zone(
         &mut state,
@@ -357,9 +323,7 @@ fn tax_stacks_additively_onto_a_real_printed_cost() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let commander = ObjectId(0);
-    // {2}{G} rather than a bare generic cost, to confirm the tax adds to
-    // whatever generic component already exists rather than creating a
-    // brand new {2} cost that clobbers the printed one.
+    // {2}{G} confirms the tax adds to an existing generic component and does not replace it.
     put_in_zone(
         &mut state,
         card_object(
@@ -387,9 +351,7 @@ fn tax_stacks_additively_onto_a_real_printed_cost() {
         .expect("player holds priority");
     let status = drain(&mut engine);
     assert!(matches!(status, engine::StepStatus::AwaitingPayment { .. }), "got {status:?}");
-    // First cast: no tax yet, so still exactly {2}{G} - 2 colorless pays
-    // the generic, 1 green pays the pip. Confirms tax math is additive by
-    // checking the untaxed baseline before recasting.
+    // First cast has no tax: {2}{G}, with 2 colorless for the generic and 1 green for the pip. This is the untaxed baseline.
     engine
         .submit_payment(PaymentPlan {
             payments: vec![CostPayment::Mana {

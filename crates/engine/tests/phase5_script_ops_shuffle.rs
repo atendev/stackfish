@@ -1,19 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::Shuffle` (backlog item 14) -
-//! `Game.Ops.Shuffle()`, e.g. "Shuffle your library." No target - always the
-//! resolving `StackObject`'s controller's own library (CR 701.19b: "a player
-//! who shuffles a library shuffles their own unless instructed otherwise"),
-//! same "controller only" shape `DrawCards`/`GainLife` already use.
-//!
-//! Not a new primitive from scratch - `Engine::shuffle_library` already
-//! existed (Fisher-Yates over `state.rng`, logging `LibraryShuffled`/
-//! `RngDrawn`) but was pregame-setup-only and private. This slice just gives
-//! a card/script a way to call it mid-game: `ResolveStackTop` calls it
-//! directly and lets it log its own events, no `CommitEvents` special-case
-//! needed, same convention `DrawCards` established for `draw_one_card`.
-//!
-//! `Target::Player` ("target player shuffles their library") is deferred -
-//! controller-only this slice, same precedent `DrawCards` itself set for its
-//! own target gap.
+//! CR 701.19b: `AbilityEffect::Shuffle` (`Game.Ops.Shuffle()`) shuffles the resolving controller's own library, through `Engine::shuffle_library` (Fisher-Yates over `state.rng`, logging `LibraryShuffled` and `RngDrawn`).
+// TODO: `Target::Player` ("target player shuffles their library")
 
 use std::collections::HashMap;
 
@@ -71,7 +57,6 @@ fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Shuffle: Shuffle your library."
 fn shuffle_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -97,7 +82,6 @@ fn shuffle_spell_definition() -> CardDefinition {
     }
 }
 
-/// "Test Draw: Draw a card."
 fn draw_spell_definition(definition_id: u64) -> CardDefinition {
     CardDefinition {
         definition_id,
@@ -133,8 +117,6 @@ fn two_player_state() -> GameState {
     }
 }
 
-/// Populates `p0`'s library with `names.len()` cards in the given top-to-
-/// bottom order (index 0 = top). Returns the `ObjectId`s in that same order.
 fn stock_library(state: &mut GameState, p0: PlayerId, names: &[&str]) -> Vec<ObjectId> {
     let mut ids = Vec::new();
     for (i, name) in names.iter().enumerate() {
@@ -186,10 +168,7 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-/// Builds a fresh two-player state with a five-card p0 library and a
-/// "Test Shuffle" spell in p0's hand - factored out so the determinism test
-/// below can build two wholly independent `GameState`s (no `Clone` on
-/// `GameState`) from the same fixed seed and compare their outcomes.
+// Builds a fresh state so the determinism test can compare two independent GameStates from one fixed seed, since GameState has no Clone.
 fn shuffle_test_state() -> GameState {
     let p0 = PlayerId(0);
     let mut state = two_player_state();
@@ -214,8 +193,7 @@ fn shuffle_spell_reorders_the_library_deterministically_and_logs_the_event() {
     let p1 = PlayerId(1);
     let card = ObjectId(2);
 
-    // Same fixed seed (RngState { seed: 1, .. }) run twice - a real assertion
-    // of determinism, not just "it ran once and didn't crash".
+    // The same fixed seed run twice asserts determinism.
     let first_run = run_shuffle_spell(shuffle_test_state(), card, p0, p1);
     let second_run = run_shuffle_spell(shuffle_test_state(), card, p0, p1);
     let first_names = library_names(&first_run, p0);

@@ -1,25 +1,6 @@
-//! Phase 5 vertical slice: wire `AbilityEffect::CreateToken` into
-//! `replacement::apply_enters_battlefield_modifiers` - the 4th of the four
-//! real to-Battlefield producers (`PlayLand`, the resolving-spell path in
-//! `ResolveStackTop`, `Search`), closing a real, previously-silent gap:
-//! `EntersTapped`/`EntersWithCounters`/Bloodthirst/Sunburst all already
-//! worked for every other permanent-entry shape but never applied to a
-//! token.
-//!
-//! Two real ways this gets exercised, since a plain `Named`/`Creature`
-//! token has no script of its own (`run_card_script` is only ever called
-//! for `TokenSpec::CopyOf`):
-//! - An externally-registered, non-`self_only` replacement effect (e.g. "tokens
-//!   you control enter tapped") already sitting in `state.replacement_effects`,
-//!   filtered by controller rather than source.
-//! - A `TokenSpec::CopyOf` token whose copied source had a self-registered
-//!   ETB modifier - `run_card_script` already re-registers it under the new
-//!   token's id; this slice is what actually applies it.
-//!
-//! Devour/Amplify stay unwired on tokens - both need a genuine mid-ETB
-//! player pause `apply_enters_battlefield_modifiers` structurally can't
-//! raise, same narrow posture `pending_devour_choice`'s own doc comment
-//! already takes for `Search`.
+//! `CreateToken` applies `replacement::apply_enters_battlefield_modifiers`, the fourth to-Battlefield producer after `PlayLand`, the resolving spell and `Search`. `EntersTapped`, `EntersWithCounters`, Bloodthirst and Sunburst apply to tokens.
+//! Two cases: an external non-`self_only` replacement effect ("tokens you control enter tapped"), and a `TokenSpec::CopyOf` token whose copied source had a self-registered ETB modifier.
+// TODO: Devour and Amplify on tokens, since `apply_enters_battlefield_modifiers` cannot raise the mid-ETB player pause
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -75,9 +56,6 @@ fn bear_definition(id: u64, name: &str, script: &str) -> CardDefinition {
     }
 }
 
-/// A permanent with an external, non-`self_only` replacement effect: "tokens
-/// you control enter the battlefield tapped" - filtered by controller, not
-/// by which object is entering.
 fn tokens_you_control_enter_tapped(source: ObjectId) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -218,10 +196,7 @@ fn a_copyof_token_applies_its_freshly_reregistered_self_only_effect() {
     let card = ObjectId(1);
     let mut state = two_player_state();
     put_on_battlefield(&mut state, card_object(source, bear_definition(1, "Tapped Bear", SELF_REGISTER_ENTERS_TAPPED), p0, ZoneKind::Battlefield));
-    // The source's own self-registration ran when it entered - real
-    // battlefield setup for a plain-struct-literal fixture, mirroring how
-    // every other test in this codebase seeds `state.replacement_effects`
-    // directly rather than re-deriving it from a script run.
+    // The source's self-registration ran on entry, as a struct-literal fixture seeds state.replacement_effects directly.
     state.replacement_effects.push(ReplacementEffect {
         source,
         spec: ReplacementSpec::Primitive {

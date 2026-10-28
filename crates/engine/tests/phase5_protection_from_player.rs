@@ -1,25 +1,4 @@
-//! Phase 5 vertical slice: CR 702.16k's player quality ("protection from an
-//! opponent"), the last of `phase5/protection-from-color`/
-//! `phase5/protection-from-card-type`/`phase5/protection-from-subtype`/
-//! `phase5/protection-from-name`/`phase5/protection-from-everything`'s
-//! three enforcement sites (damage/targeting/blocking) to close out CR
-//! 702.16's quality list (Enchant/Equip, 702.16b, stays out of scope - no
-//! attach machinery).
-//!
-//! Unlike the other five qualities, "protection from a player" doesn't
-//! compare the source's own characteristics against the protected object -
-//! it compares the source's *controller* against a reference player. This
-//! engine has no multiplayer arbitrary-player-targeting yet (backlog item
-//! 11) and a card script's `register_abilities(c)` is never handed a raw
-//! `PlayerId` at registration time, so `AddProtectionPlayer` carries a
-//! `FilterController` (`You`/`Opponent`) - the same relative-player
-//! vocabulary `:SetAffected({controller=...})` already exposes to Lua -
-//! resolved against the *protected object's own* controller at each
-//! enforcement site.
-//!
-//! Same scoping as the earlier five slices: Enchant/Equip (CR 702.16b) is
-//! out of scope (no attach/enchant machinery exists). This is the last CR
-//! 702.16 quality this engine will model.
+//! CR 702.16k: protection from a player. `AddProtectionPlayer` carries a `FilterController` (`You` or `Opponent`), resolved against the protected object's own controller at each enforcement site, since the source's controller is compared and not its characteristics.
 
 use std::collections::HashMap;
 
@@ -72,10 +51,6 @@ fn vanilla_creature(id: u64, name: &str, power: i32, toughness: i32) -> CardDefi
     creature_definition(id, name, power, toughness, ScriptReference::ByKey(name.to_string()))
 }
 
-/// "Test Bolt: deals 2 damage to target creature." Plain instant - the
-/// quality here is the *caster's* identity (its controller), not the
-/// spell's own characteristics, so the targeting tests don't need a
-/// specially-qualified card the way color/card-type/subtype/name did.
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -112,10 +87,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Directly-constructed protection ("protection from an opponent" -
-/// FilterController::Opponent), standing in for the ETB-registered version -
-/// the Lua wiring itself is proven separately, same convention every other
-/// static-ability-adjacent test file in this repo uses.
 fn protection_from_opponent(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -222,10 +193,6 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
 
-// ---------------------------------------------------------------------
-// Lua wiring
-// ---------------------------------------------------------------------
-
 #[test]
 fn game_effects_add_protection_player_self_registers_and_applies() {
     let mut state = base_state();
@@ -259,10 +226,7 @@ fn game_effects_add_protection_player_rejects_any() {
     assert!(result.is_err(), "AddProtectionPlayer(\"any\") should be a real error, not a silently-accepted quality");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16a: damage
-// ---------------------------------------------------------------------
-
+// CR 702.16a
 #[test]
 fn combat_damage_from_an_opponent_controlled_source_is_prevented_by_protection() {
     let p0 = PlayerId(0);
@@ -298,9 +262,7 @@ fn combat_damage_from_a_source_the_protected_controller_owns_still_lands() {
         declared_defenders: vec![p1],
         bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
-    // The blocker's own controller (p1) also controls the attacker here -
-    // "protection from an opponent" only stops sources controlled by
-    // someone else, not the protected permanent's own controller.
+    // The blocker's controller (p1) also controls the attacker, and "protection from an opponent" stops only sources controlled by someone else.
     put_on_battlefield(&mut state, permanent(attacker, vanilla_creature(1, "Bear", 3, 3), p1, ZoneKind::Battlefield));
     put_on_battlefield(&mut state, permanent(blocker, vanilla_creature(2, "Ward", 0, 5), p1, ZoneKind::Battlefield));
     state.continuous_effects.push(protection_from_opponent(blocker));
@@ -312,10 +274,7 @@ fn combat_damage_from_a_source_the_protected_controller_owns_still_lands() {
     assert_eq!(ward.damage_marked, 3, "protection from an opponent doesn't stop damage from a source the protected creature's own controller controls");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16c: targeting
-// ---------------------------------------------------------------------
-
+// CR 702.16c
 #[test]
 fn casting_a_spell_an_opponent_controls_at_a_protected_target_is_rejected() {
     let mut state = base_state();
@@ -340,9 +299,7 @@ fn casting_a_spell_the_protected_controller_controls_at_a_protected_target_still
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let target = ObjectId(0);
-    // p0 holds priority in base_state() - protect a creature p0 itself
-    // controls, and cast from p0's own hand, so the caster is the protected
-    // creature's own controller, not "an opponent" of it.
+    // p0 protects a creature it controls and casts from its own hand, so the caster is the controller and not an opponent.
     put_on_battlefield(&mut state, permanent(target, vanilla_creature(1, "Bear", 2, 5), p0, ZoneKind::Battlefield));
     state.continuous_effects.push(protection_from_opponent(target));
     let card = ObjectId(2);
@@ -371,10 +328,7 @@ fn spell_fizzles_when_target_gains_protection_from_an_opponent_before_resolution
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 702.16c is rechecked by the same CR 608.2b mechanism as any other
-    // target legality change - granting protection mid-stack, after the
-    // spell already targeted this creature, makes the target illegal by
-    // resolution time.
+    // CR 702.16c: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
     engine.state_mut().continuous_effects.push(protection_from_opponent(target));
 
     pass_both_and_drain(&mut engine, p0, p1).unwrap();
@@ -386,10 +340,7 @@ fn spell_fizzles_when_target_gains_protection_from_an_opponent_before_resolution
     assert_eq!(engine.state().object(target).unwrap().damage_marked, 0, "a fizzled spell deals no damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16d: blocking
-// ---------------------------------------------------------------------
-
+// CR 702.16d
 #[test]
 fn an_attacker_with_protection_from_an_opponent_cannot_be_blocked_by_an_opponent_controlled_creature() {
     let p0 = PlayerId(0);
@@ -411,12 +362,6 @@ fn an_attacker_with_protection_from_an_opponent_cannot_be_blocked_by_an_opponent
         "a creature an opponent controls can't block an attacker with protection from an opponent, got {result:?}"
     );
 }
-
-// ---------------------------------------------------------------------
-// RemoveAllAbilities consistency (CR 613.1f covers protection_players too,
-// same as the other five protection fields - see
-// phase5_lose_all_abilities.rs's own analogous test for the color half).
-// ---------------------------------------------------------------------
 
 #[test]
 fn remove_all_abilities_also_strips_a_granted_protection_player() {

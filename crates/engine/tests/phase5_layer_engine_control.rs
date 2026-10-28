@@ -1,15 +1,5 @@
-//! Phase 5 vertical slice: CR 108.4/613.1 layer 2 (control-changing effects)
-//! - backlog item 1.5b, query-only half. `layers::effective_controller`
-//! mirrors `effective_characteristics`'s own 7b (`SetPT`) override loop:
-//! `EffectPrimitive::GainControl(PlayerId)` replaces the object's controller
-//! outright, later timestamp winning over an earlier one, not additive.
-//! Deliberately not wired into any real gameplay consumer yet (see
-//! `Layer`'s own doc comment) - the ~15 real `GameObject.controller`
-//! read-sites (combat, targeting, cost filters, `has_summoning_sickness`,
-//! `EffectFilter`/`FilterSpec`) still read the raw field, untouched by this
-//! slice. Same "`ContinuousEffect`s built directly via struct literal"
-//! bootstrap pattern as `phase5_layer_engine_switching.rs` - no
-//! `Game.AddContinuousEffect`/`Game.Ops.GainControl` Lua binding yet.
+//! CR 108.4, 613.1: layer 2 control-changing effects. `layers::effective_controller` lets a later-timestamp `EffectPrimitive::GainControl(PlayerId)` replace the controller outright, like the 7b `SetPT` override.
+//! Effects are built directly by struct literal. The gameplay consumers are in phase5_control_change_consumers.rs.
 
 use std::collections::HashMap;
 
@@ -102,9 +92,8 @@ fn a_gain_control_effect_overrides_the_base_controller() {
     assert_eq!(effective_controller(&state, &ScriptRuntime::new(), bear), p1);
 }
 
-/// CR 613.7: a later-timestamp `GainControl` overrides an earlier one
-/// outright - not additive/combined, same as `SetPT`'s own override
-/// semantics for layer 7b.
+// CR 613.7
+// A later-timestamp GainControl overrides an earlier one outright and does not combine.
 #[test]
 fn later_timestamp_gain_control_wins_outright() {
     let mut state = base_state();

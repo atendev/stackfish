@@ -1,6 +1,4 @@
-//! Ticket 026: menace and "attacks each combat if able" as whole-declaration
-//! predicates shared by the entries (`legal_attackers`, `legal_blockers`) and
-//! the command validation (`submit_action`).
+//! Menace and "attacks each combat if able" as whole-declaration predicates shared by the entries (`legal_attackers`, `legal_blockers`) and command validation (`submit_action`).
 
 use std::collections::HashMap;
 
@@ -98,10 +96,6 @@ fn self_keyword_effect(source: u64, primitive: EffectPrimitive, timestamp: u64) 
         condition: None,
     }
 }
-
-// ---------------------------------------------------------------------
-// Must attack (CR 508.1d)
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_creature_that_must_attack_cannot_stay_home() {
@@ -210,10 +204,6 @@ fn the_facade_refuses_a_reply_that_leaves_a_required_attacker_home() {
     assert!(!matches!(drain(&mut engine), StepStatus::Error(_)));
 }
 
-// ---------------------------------------------------------------------
-// Menace (CR 509.1b, 702.111b)
-// ---------------------------------------------------------------------
-
 fn menace_board(defenders: &[(u64, KeywordSet)]) -> GameState {
     let mut state = combat_state(Step::DeclareBlockers);
     put(&mut state, 1, P0, creature("Menacer", KeywordSet::MENACE));
@@ -285,9 +275,7 @@ fn two_menace_attackers_cannot_share_the_same_two_blockers() {
     assert_illegal(assert_action_rejected(&mut engine, "one blocker each", declare_blockers(&[(10, 1), (11, 2)])));
 }
 
-/// Every way to assign three defenders to two attackers (or to nobody) is
-/// checked against the entries: a declaration that uses a pair the entries
-/// left out is refused, and every listed pair is part of some accepted one.
+// Every assignment of three defenders to two attackers (or none) is checked: a pair the entries left out is refused, and every listed pair is part of an accepted declaration.
 #[test]
 fn the_menace_filter_removes_exactly_the_pairs_no_declaration_can_use() {
     let board = || {

@@ -1,17 +1,6 @@
-//! Phase 5 vertical slice: `AbilityEffect::Counters` (backlog item 8, third
-//! Script API primitive) — `Game.Ops.Counters(kind, n)`, e.g. "Put two +1/+1
-//! counters on target creature." Cheaper than `Destroy`: `GameEventKind::
-//! CounterAdded` already existed as dead code with exactly this shape, so
-//! this reuses `Damage`'s "push an unapplied event, let `CommitEvents`
-//! retroactively apply it" pattern rather than `Destroy`'s heavier inline
-//! replacement-check path.
-//!
-//! Object targets only this slice - no player-facing counters (Energy/
-//! Experience). No replacement/prevention modeling for counter placement
-//! (no `EventFilter::CounterAdded`). No CR 704.5q +1/+1-vs--1/-1
-//! annihilation SBA - both kinds can coexist un-annihilated; `net_counters`
-//! still nets them correctly for P/T purposes regardless (see
-//! docs/implementation.md).
+//! `AbilityEffect::Counters` (`Game.Ops.Counters(kind, n)`) pushes an unapplied `CounterAdded` event that `CommitEvents` applies, like `Damage`. It targets objects only.
+// TODO: player counters (Energy, Experience) and `EventFilter::CounterAdded` replacement or prevention
+// TODO: CR 704.5q +1/+1 versus -1/-1 annihilation, since both kinds coexist and `net_counters` nets them for P/T
 
 use std::collections::HashMap;
 
@@ -46,7 +35,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Counters: Put N counters of a kind on target creature."
 fn counters_spell_definition(kind: CounterKind, amount: i32) -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -148,8 +136,7 @@ fn counters_spell_puts_minus_one_minus_one_counters_on_target_creature() {
     state.objects.insert(target, card_object(target, creature_definition(1, "Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(target);
     let card = ObjectId(2);
-    // amount = 1, not 2: a 2/2 hitting toughness 0 would die to CR 704.5g
-    // SBAs before this test can inspect its counters - keep the bear alive.
+    // amount = 1, because a 2/2 hitting toughness 0 would die to CR 704.5g before this test can inspect its counters.
     state.objects.insert(card, card_object(card, counters_spell_definition(CounterKind::MinusOneMinusOne, 1), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 

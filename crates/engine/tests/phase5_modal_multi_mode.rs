@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: CR 700.2d — choosing two or more modes of a modal
-//! spell. Builds on `phase5_script_modal_spells.rs`'s "choose exactly one"
-//! (CR 700.2a) machinery: `CardDefinition.mode_choice: ModeChoice` now names
-//! how many of `modes` must be chosen (`Exactly(n)`/`UpTo(n)`), and choosing
-//! 2+ combines the chosen modes' own target requirements into one
-//! `TargetSpec::Multiple` and their own effects into one
-//! `AbilityEffect::Modal`, resolved in *card-print* order (not the order the
-//! player listed them in) via `ResolveStackTop`'s own `Modal` arm.
-//!
-//! Narrowed to the `AbilityEffect` kinds `commands::is_modal_resolvable`
-//! accepts (see its own doc comment and `phase5_modal_resolvable_ops.rs` for
-//! the zone-move, draw and tap modes); combining a mode using an unsupported
-//! kind (e.g. `Cascade`) is rejected at cast time. CR 700.2d's "same mode twice" exception
-//! (reminder-text-gated) stays unmodeled — a repeated index is always
-//! rejected. CR 700.2e/h/i stay out of scope, same as before this slice.
+//! CR 700.2d: choosing two or more modes. `CardDefinition.mode_choice` (`Exactly(n)`, `UpTo(n)`) names how many modes must be chosen, and 2 or more combine into one `TargetSpec::Multiple` and one `AbilityEffect::Modal`, resolved in card-print order.
+//! Only kinds accepted by `commands::is_modal_resolvable` can combine, and the rest are rejected at cast time.
 
 use std::collections::HashMap;
 
@@ -57,12 +44,6 @@ fn any_target_requirement() -> TargetSpec {
     })
 }
 
-/// "Choose two —
-///  * You gain 3 life.
-///  * Test Modal Spell deals 2 damage to any target.
-///  * Destroy target creature."
-/// The rejection test below swaps mode 2's effect for a kind that still
-/// can't be combined.
 fn choose_two_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 31,
@@ -121,8 +102,6 @@ fn choose_two_definition() -> CardDefinition {
     }
 }
 
-/// Same three modes, but "Choose one or two —" (`UpTo(2)`) instead of a
-/// fixed "Choose two —".
 fn choose_up_to_two_definition() -> CardDefinition {
     CardDefinition { mode_choice: ModeChoice::UpTo(2), ..choose_two_definition() }
 }
@@ -179,8 +158,7 @@ fn choosing_modes_zero_and_one_resolves_both_effects_against_their_own_targets()
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Mode 0 has no target, mode 1 needs exactly one - only mode 1's own
-    // target is supplied.
+    // Mode 0 has no target and mode 1 needs one, so only mode 1's target is supplied.
     cast_spell(&mut engine, p0, card, vec![0, 1], vec![Target::Player(p1)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
@@ -199,9 +177,7 @@ fn chosen_mode_order_in_the_action_does_not_matter_resolution_is_card_print_orde
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Listed as [1, 0] instead of [0, 1] - same two modes, same outcome,
-    // since resolution order is always card-print order (0 then 1), not
-    // submission order.
+    // Listed as [1, 0], with the same outcome, since resolution is always in card-print order.
     cast_spell(&mut engine, p0, card, vec![1, 0], vec![Target::Player(p1)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
@@ -272,8 +248,7 @@ fn combining_a_mode_with_an_unsupported_effect_kind_is_rejected_at_cast_time() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Mode 2 can't be combined with another mode - Cascade is a keyword
-    // ability's effect, not a card-text mode.
+    // Mode 2 (Cascade) is a keyword ability's effect and not a combinable mode.
     let err = try_cast_spell(&mut engine, p0, card, vec![0, 2], vec![Target::Object(target)]).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
@@ -324,8 +299,7 @@ fn up_to_two_rejects_choosing_zero_modes() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // CR 700.2a: "choose a number of those options" - never zero, even for
-    // an UpTo spell.
+    // CR 700.2a: a number of options is chosen, never zero, even for an UpTo spell.
     let err = try_cast_spell(&mut engine, p0, card, Vec::new(), Vec::new()).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
@@ -341,8 +315,7 @@ fn a_target_illegal_for_its_own_mode_rejects_the_whole_cast() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Modes 0 and 1 chosen, but no target supplied for mode 1's own
-    // requirement - illegal, same as any missing-target cast.
+    // No target is supplied for mode 1's requirement, which is illegal.
     let err = try_cast_spell(&mut engine, p0, card, vec![0, 1], Vec::new()).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));

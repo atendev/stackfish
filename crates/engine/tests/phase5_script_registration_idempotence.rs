@@ -1,24 +1,5 @@
-//! Phase 5 vertical slice: `run_card_script` registrations are idempotent
-//! across zone changes.
-//!
-//! A card's script used to be run on hand entry (draw / opening hand) and
-//! again on battlefield entry, while `commands::remap_abilities` carried the
-//! hand-time abilities across the zone change - so a drawn-then-played card
-//! ended up with every ability registered twice. Non-ability registrations
-//! (continuous/replacement effects, player-level modifiers) were worse: they
-//! were registered while the card was still in hand, took effect there, and
-//! were left behind under the dead hand id afterwards.
-//!
-//! Now:
-//! - `GameState::script_ability_ids` marks script-registered abilities;
-//!   `remap_abilities` drops those instead of carrying them (the script is
-//!   re-run for the zone the object lands in). Hand-built abilities still
-//!   carry across.
-//! - A script run for an object that isn't on the battlefield doesn't
-//!   register static effects / replacement effects / modifiers (CR 113.6).
-//! - The script runs for a spell entering the stack too (CR 601.2a), where
-//!   only "when you cast this spell" triggers register - so Lua can declare
-//!   Cascade-style cast triggers.
+//! `run_card_script` registrations are idempotent across zone changes. `GameState::script_ability_ids` marks script-registered abilities, which `remap_abilities` drops and re-runs for the new zone, while hand-built abilities carry across.
+//! A script run for an object off the battlefield registers no static effects, replacement effects or modifiers (CR 113.6). It also runs for a spell entering the stack (CR 601.2a), where only "when you cast this spell" triggers register.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;

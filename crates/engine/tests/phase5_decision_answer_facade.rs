@@ -1,7 +1,4 @@
-//! Phase 5 vertical slice: the Decision/Answer facade (`Engine::open_decision`
-//! and `Engine::answer`) over a real game. Drives `Engine::new_game` through
-//! the mulligan, the bottom-card choice and the first priority windows using
-//! only Decisions and Answers.
+//! The Decision/Answer facade (`Engine::open_decision`, `Engine::answer`) drives `Engine::new_game` through the mulligan, bottom-card choice and first priority windows using only Decisions and Answers.
 
 use stackfish_engine::decision::{Answer, Candidate, DecisionId, RejectionCode, Reply, ReplyShape};
 use stackfish_engine::engine::{Engine, StepStatus};

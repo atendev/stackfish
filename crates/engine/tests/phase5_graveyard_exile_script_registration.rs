@@ -1,14 +1,5 @@
-//! Phase 5 vertical slice: abilities that function from the graveyard or exile
-//! (CR 113.6).
-//!
-//! `:SetFunctionsFrom("Graveyard"|"Exile")` on a triggered or activated
-//! ability builder declares the zone the ability exists in. The engine runs a
-//! card's script for cards sitting in a graveyard or exile
-//! (`Engine::sync_off_battlefield_scripts`, once per trigger-collection pass);
-//! only abilities that declared that zone register, everything else the script
-//! queues (an ETB trigger, say) is discarded. The ability is dropped again
-//! when the card leaves the zone, and can be activated/triggers only while
-//! the source is there.
+//! CR 113.6: `:SetFunctionsFrom("Graveyard"|"Exile")` declares the zone a triggered or activated ability exists in.
+//! `Engine::sync_off_battlefield_scripts` runs a card's script once per trigger-collection pass, registers only abilities that declared the zone and discards everything else the script queues. The ability is dropped when the card leaves the zone.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -250,8 +241,7 @@ fn leaving_the_graveyard_drops_the_ability() {
     engine.submit_payment(PaymentPlan { payments: vec![CostPayment::Exile(fodder)] }).expect("exile the other card");
     drain(&mut engine);
 
-    // The fodder card is in exile now (new id): its graveyard ability is gone, and
-    // - since its script ran for exile and declared only Graveyard - it didn't come back.
+    // The fodder card is in exile with a new id: its graveyard ability is gone and did not return, since its script declared only Graveyard.
     assert!(engine.state().object(fodder).is_none());
     let exiled = engine.state().zone(ZoneKind::Exile, None).unwrap().contents.clone();
     assert_eq!(exiled.len(), 1);

@@ -1,17 +1,4 @@
-//! Phase 5 vertical slice: CR 601.2g/605.3a — a mana ability may be
-//! activated "even if it's in the middle of casting or resolving a spell or
-//! activating or resolving an ability" that itself requires a mana payment.
-//! Before this slice, `Engine::submit_action` only accepted input while
-//! `process_state == PriorityWindow` — once `CastSpell`/`ActivateAbility`
-//! paused on `AwaitingPayment`, tapping a land for mana to cover that very
-//! cost was rejected outright, forcing every test fixture to pre-seed the
-//! mana pool by hand instead. `submit_action` now also accepts a nested
-//! `ActivateAbility` for the *payer's own* mana ability while `AwaitingPayment`
-//! is open, suspending the outer payment (`Engine::suspended_payments`) and
-//! resuming it once the nested activation's own pipeline run settles (see
-//! `submit_action`'s own doc comment for the full mechanism, including the
-//! `pipeline_context`/`pipeline_exit` save/restore a real-cost nested mana
-//! ability needs).
+//! CR 601.2g, 605.3a: a mana ability may be activated in the middle of a payment. `submit_action` accepts a nested `ActivateAbility` for the payer's own mana ability while `AwaitingPayment` is open, suspending the outer payment in `suspended_payments` and resuming it afterward.
 
 use stackfish_engine::engine::{ActionError, Engine, PaymentError, StepStatus};
 use stackfish_engine::*;
@@ -76,9 +63,6 @@ fn non_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
     }
 }
 
-/// Sacrifice-cost mana ability, Treasure/Lotus-Petal-style — has a *real*
-/// cost, so activating it pauses `AwaitingPayment` on its own (CR 605.1a/
-/// 605.3b: still never touches the stack).
 fn sacrifice_mana_ability(id: u64, source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -110,10 +94,6 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId) -> Result<(
     })
 }
 
-/// p0: hand with a {R}{R} spell, battlefield with two untapped Mountains
-/// (own mana abilities) and a Cleric (non-mana {T}: gain 1 life ability).
-/// p1: battlefield with its own untapped Mountain, for the "not the payer"
-/// rejection test.
 fn state_with_fixtures() -> (GameState, ObjectId, ObjectId, ObjectId, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -163,8 +143,6 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
         .expect("player holds priority, spell is in hand, main phase, empty stack");
 }
 
-/// The direct repro: tap two lands mid-payment to cover a spell's mana cost,
-/// then pay with the mana that produced.
 #[test]
 fn tapping_a_land_mid_payment_floats_mana_the_payment_then_spends() {
     let p0 = PlayerId(0);
@@ -199,8 +177,8 @@ fn tapping_a_land_mid_payment_floats_mana_the_payment_then_spends() {
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.red, 0);
 }
 
-/// CR 605.3a's exception is for the payer's own mana ability only — an
-/// opponent doesn't get to interject one into someone else's payment.
+// CR 605.3a
+// Only the payer's own mana ability gets the exception.
 #[test]
 fn a_different_player_cannot_activate_a_mana_ability_mid_payment() {
     let p0 = PlayerId(0);
@@ -217,8 +195,8 @@ fn a_different_player_cannot_activate_a_mana_ability_mid_payment() {
     assert!(matches!(drain(&mut engine), StepStatus::AwaitingPayment { player, .. } if player == p0), "outer payment still open, untouched");
 }
 
-/// CR 601.2g/605.3a only widens the window for *mana* abilities — a normal
-/// activated ability still needs a real priority window, even for the payer.
+// CR 601.2g, 605.3a
+// A normal activated ability still needs a real priority window, even for the payer.
 #[test]
 fn a_non_mana_ability_cannot_be_activated_mid_payment() {
     let p0 = PlayerId(0);
@@ -234,8 +212,7 @@ fn a_non_mana_ability_cannot_be_activated_mid_payment() {
     assert!(matches!(drain(&mut engine), StepStatus::AwaitingPayment { player, .. } if player == p0), "outer payment still open, untouched");
 }
 
-/// Regression: casting a second spell mid-payment is still illegal - this
-/// slice only widens the exception to mana abilities, nothing else.
+// Casting a second spell mid-payment is still illegal, since only mana abilities are widened.
 #[test]
 fn casting_a_second_spell_mid_payment_is_still_illegal() {
     let p0 = PlayerId(0);
@@ -264,10 +241,7 @@ fn casting_a_second_spell_mid_payment_is_still_illegal() {
     assert!(matches!(err, ActionError::IllegalAction(_)));
 }
 
-/// A real-cost (Treasure-style) mana ability activated mid-payment pauses on
-/// its own nested `AwaitingPayment` instead of resolving instantly - paying
-/// *that* cost (sacrificing the Treasure) then correctly resumes the outer
-/// spell's own payment, which can then still be completed.
+// A real-cost mana ability (Treasure) pauses on its own nested AwaitingPayment, and paying it resumes the outer payment.
 #[test]
 fn a_real_cost_mana_ability_activated_mid_payment_nests_and_resumes_the_outer_payment() {
     let p0 = PlayerId(0);
@@ -296,10 +270,7 @@ fn a_real_cost_mana_ability_activated_mid_payment_nests_and_resumes_the_outer_pa
     assert!(engine.state().object(treasure).is_none(), "the Treasure is gone");
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "its mana was added, even though the outer {{R}}{{R}} cost can't use it");
 
-    // Finish paying the outer {R}{R} cost with both Mountains - the
-    // Treasure's blue mana has no generic slot to cover in a pure-{R}{R}
-    // cost, so it's left floating unspent, same as any other excess mana a
-    // player produces but doesn't need.
+    // Finish paying the outer {R}{R} with both Mountains. The Treasure's blue mana is left floating.
     activate(&mut engine, p0, land1).expect("still mid the outer payment, still the payer's own mana ability");
     drain(&mut engine);
     activate(&mut engine, p0, land2).expect("still mid the outer payment");
@@ -314,9 +285,7 @@ fn a_real_cost_mana_ability_activated_mid_payment_nests_and_resumes_the_outer_pa
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.blue, 1, "the Treasure's mana is still floating, untouched");
 }
 
-/// Declining to pay a nested real-cost mana ability's own cost
-/// (`unwind_payment`) must resume the outer spell's payment rather than
-/// abandoning it - the player can still pay a different way.
+// Declining a nested mana ability's cost (`unwind_payment`) resumes the outer payment.
 #[test]
 fn unwinding_a_nested_payment_resumes_the_outer_payment() {
     let p0 = PlayerId(0);
@@ -338,8 +307,7 @@ fn unwinding_a_nested_payment_resumes_the_outer_payment() {
     );
     assert!(engine.state().object(treasure).is_some(), "the Treasure survives - its activation was undone, not committed");
 
-    // Pay the outer cost a different way instead, proving the outer pause
-    // genuinely survived intact.
+    // Pay the outer cost another way, which shows the outer pause survived.
     activate(&mut engine, p0, land1).expect("still mid the outer payment");
     drain(&mut engine);
     activate(&mut engine, p0, land2).expect("still mid the outer payment");
@@ -353,8 +321,7 @@ fn unwinding_a_nested_payment_resumes_the_outer_payment() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 }
 
-/// `submit_payment` (the sub-decision entry point) still rejects outright
-/// when nothing is pending - unaffected by this slice.
+// `submit_payment` still rejects when nothing is pending.
 #[test]
 fn submit_payment_while_not_awaiting_is_still_rejected() {
     let (state, ..) = state_with_fixtures();

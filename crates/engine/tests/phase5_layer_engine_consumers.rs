@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: wires the CR 613 layer engine (built in
-//! `phase5/layer-engine-basics`, only real consumer was `sba.rs`'s
-//! lethal-toughness check) into the two consumers flagged as follow-up
-//! there — combat-damage power (`AssignCombatDamage`) and Flying/Reach/
-//! Menace blocking legality (`DeclareBlockers`). Both already had a
-//! `&GameState` to read, no `&ScriptRuntime` needed for the primitive-only
-//! path — the prior slice's TODO comments overstated a blocker that didn't
-//! actually apply here (see docs/implementation.md).
+//! The CR 613 layer engine feeds combat-damage power (`AssignCombatDamage`) and Flying, Reach and Menace blocking legality (`DeclareBlockers`), both read from `&GameState`.
+//! Earlier TODO comments said these needed a `&ScriptRuntime`, which does not apply to the primitive-only path.
 
 use std::collections::HashMap;
 
@@ -50,9 +44,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Two players, `p0` active/attacking, `p1` defending, `Phase::Combat`/
-/// `Step::DeclareAttackers` - same shape as `phase5_keyword_primitives.rs`'s
-/// `combat_state`.
 fn combat_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -64,8 +55,6 @@ fn combat_state() -> GameState {
     }
 }
 
-/// Same as `combat_state`, with `combat` already populated as if
-/// `DeclareAttackers`/`DeclareBlockers` ran, sitting at `Step::CombatDamage`.
 fn combat_damage_state(combat: CombatState) -> GameState {
     let mut state = combat_state();
     state.step = Step::CombatDamage;
@@ -121,10 +110,6 @@ fn no_filter() -> EffectFilter {
     EffectFilter {  controller: None, card_types: None, self_only: false, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, }
 }
 
-// ---------------------------------------------------------------------
-// Combat-damage power (AssignCombatDamage)
-// ---------------------------------------------------------------------
-
 #[test]
 fn a_modify_pt_boost_increases_combat_damage_dealt() {
     let p0 = PlayerId(0);
@@ -166,10 +151,6 @@ fn without_the_boost_the_same_attacker_only_deals_its_printed_power() {
     assert_eq!(p1_life, 17);
 }
 
-// ---------------------------------------------------------------------
-// Blocking legality (DeclareBlockers) - Flying granted, not printed
-// ---------------------------------------------------------------------
-
 #[test]
 fn granted_flying_via_continuous_effect_still_enforces_blocking_legality() {
     let p0 = PlayerId(0);
@@ -179,8 +160,7 @@ fn granted_flying_via_continuous_effect_still_enforces_blocking_legality() {
     let mut state = combat_state();
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Drake", 2, 2), p0, 0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Bear", 2, 2), p1, 0));
-    // No printed Flying on "Drake" this time - granted by a continuous
-    // effect instead (e.g. an aura's "enchanted creature has flying").
+    // No printed Flying on Drake, which a continuous effect grants instead (an aura's "enchanted creature has flying").
     state.continuous_effects.push(ContinuousEffect {
         source: attacker,
         layer: Layer::AbilityAdding,

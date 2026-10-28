@@ -1,17 +1,5 @@
-//! Phase 5 vertical slice: CR 702.16's card-type quality ("protection from
-//! artifacts"), extending `phase5/protection-from-color`'s three enforcement
-//! sites (damage/targeting/blocking) to a second, independent quality axis
-//! alongside color - `EffectiveCharacteristics.protection_card_types`,
-//! folded in the same layer-6 pass from a sibling `EffectPrimitive::
-//! AddProtectionCardType`. Each enforcement site now checks "protected if
-//! *either* the color or the card-type quality intersects the source's own
-//! characteristics" - this file only re-proves the card-type half; the
-//! color half (and the OR-composition mechanics) are already covered by
-//! `phase5_protection_from_color.rs`.
-//!
-//! Same scoping as the color slice: protection from a creature subtype, a
-//! specific player, or "from everything" stays unmodeled, and Enchant/Equip
-//! (CR 702.16b) is out of scope (no attach/enchant machinery exists).
+//! CR 702.16: the card-type quality ("protection from artifacts"), `EffectiveCharacteristics.protection_card_types`, folded in layer 6 from `AddProtectionCardType`. Damage, targeting and blocking protect if the color or the card-type quality intersects the source.
+//! This file covers the card-type half, and phase5_protection_from_color.rs covers the color half and the OR composition.
 
 use std::collections::HashMap;
 
@@ -71,9 +59,6 @@ fn vanilla_creature(id: u64, name: &str, power: i32, toughness: i32, extra_types
     creature_definition(id, name, power, toughness, extra_types, ScriptReference::ByKey(name.to_string()))
 }
 
-/// "Test Artifact Bolt: deals 2 damage to target creature." An artifact
-/// instant, so the targeting tests have a real card type to check
-/// protection against.
 fn artifact_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -104,8 +89,6 @@ fn artifact_bolt_definition() -> CardDefinition {
     }
 }
 
-/// A non-artifact counterpart to `artifact_bolt_definition`, for the
-/// "protection doesn't block an unrelated card type" control test.
 fn plain_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
@@ -121,9 +104,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Directly-constructed protection, standing in for the ETB-registered
-/// version - the Lua wiring itself is proven separately, same convention
-/// every other static-ability-adjacent test file in this repo uses.
 fn protection_from_artifacts(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -230,10 +210,6 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
 
-// ---------------------------------------------------------------------
-// Lua wiring
-// ---------------------------------------------------------------------
-
 #[test]
 fn game_effects_add_protection_card_type_self_registers_and_applies() {
     let mut state = base_state();
@@ -261,10 +237,7 @@ fn game_effects_add_protection_card_type_self_registers_and_applies() {
     assert_eq!(effective.protection_card_types, CardTypeSet::ARTIFACT);
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16a: damage
-// ---------------------------------------------------------------------
-
+// CR 702.16a
 #[test]
 fn combat_damage_from_a_matching_card_type_is_prevented_by_protection() {
     let p0 = PlayerId(0);
@@ -311,10 +284,7 @@ fn combat_damage_from_a_non_matching_card_type_still_lands() {
     assert_eq!(ward.damage_marked, 3, "protection from artifacts doesn't stop a plain creature's damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16c: targeting
-// ---------------------------------------------------------------------
-
+// CR 702.16c
 #[test]
 fn casting_a_matching_card_type_spell_at_a_protected_target_is_rejected() {
     let mut state = base_state();
@@ -367,10 +337,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 702.16c is rechecked by the same CR 608.2b mechanism as any other
-    // target legality change - granting protection mid-stack, after the
-    // spell already targeted this creature, makes the target illegal by
-    // resolution time.
+    // CR 702.16c: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
     engine.state_mut().continuous_effects.push(protection_from_artifacts(target));
 
     pass_both_and_drain(&mut engine, p0, p1).unwrap();
@@ -382,10 +349,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     assert_eq!(engine.state().object(target).unwrap().damage_marked, 0, "a fizzled spell deals no damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16d: blocking
-// ---------------------------------------------------------------------
-
+// CR 702.16d
 #[test]
 fn an_attacker_with_protection_cannot_be_blocked_by_a_matching_card_type_creature() {
     let p0 = PlayerId(0);
@@ -429,12 +393,6 @@ fn an_attacker_with_protection_can_still_be_blocked_by_a_non_matching_card_type_
         "a non-artifact creature can still block an attacker with only protection from artifacts, got {status:?}"
     );
 }
-
-// ---------------------------------------------------------------------
-// RemoveAllAbilities consistency (CR 613.1f covers protection_card_types
-// too, same as protection_colors - see phase5_lose_all_abilities.rs's own
-// analogous test for the color half).
-// ---------------------------------------------------------------------
 
 #[test]
 fn remove_all_abilities_also_strips_a_granted_protection_card_type() {

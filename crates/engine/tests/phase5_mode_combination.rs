@@ -1,7 +1,4 @@
-//! Ticket 036: which modes can join other chosen modes is one predicate,
-//! `mode_can_join_others`. The modal entries, the facade, the cast, a modal
-//! triggered ability and the opponent's mode choice all use it. A mode that
-//! fails it is "solo only": fine alone, never beside another mode.
+//! `mode_can_join_others` is the one predicate for which modes can join other chosen modes. The modal entries, facade, cast, modal triggered ability and opponent's mode choice all use it, and a mode that fails it is solo only.
 
 use std::collections::HashMap;
 
@@ -86,8 +83,6 @@ fn assert_refused(engine: &mut Engine, modes: &[u32]) {
     assert_eq!(engine.snapshot(), before, "{modes:?}: a refusal changes nothing");
     assert_eq!(engine.open_decision().unwrap().id, decision, "{modes:?}: the Decision stays open");
 }
-
-// ---- Entries ---------------------------------------------------------------
 
 #[test]
 fn a_choose_two_card_with_one_combinable_mode_is_not_listed() {
@@ -185,8 +180,6 @@ fn the_facade_and_the_engine_accept_the_same_selections() {
         }
     }
 }
-
-// ---- The other two mode pauses ---------------------------------------------
 
 fn modal_upkeep(modes: Vec<SpellMode>) -> RegisteredAbility {
     RegisteredAbility {

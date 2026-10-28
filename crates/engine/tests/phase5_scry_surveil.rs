@@ -1,19 +1,6 @@
-//! Phase 5 vertical slice: `AbilityEffect::Scry`/`Surveil` (backlog item
-//! 14a) — `Game.Ops.Scry(n)`/`Game.Ops.Surveil(n)` (CR 701.22a/701.25a).
-//!
-//! Unlike every prior `Game.Ops.*` primitive, these can't resolve in one
-//! step: `ResolveStackTop` peeks the controller's top `n` library ids
-//! (read-only) and pauses on a new `ProcessState::AwaitingScryChoice`/
-//! `AwaitingSurveilChoice` rather than mutating anything itself -
-//! `Engine::submit_scry_choice`/`submit_surveil_choice` carry out the actual
-//! reorder (Scry) or library -> graveyard move (Surveil, CR 400.7 new
-//! `ObjectId` per card) once the controller answers. CR 701.22b/701.25c:
-//! `n == 0` (or an empty library) is a no-op - no pause, no event.
-//!
-//! CR 701.22d/701.25d ("whenever a player scries/surveils" trigger) is out
-//! of scope this slice - the resulting `CardsScried`/`CardsSurveiled` event
-//! already reaches `CollectTriggers`, but no `ConditionPrimitive` exists yet
-//! to match it (see `AbilityEffect::Scry`'s own doc comment).
+//! CR 701.22a, 701.25a: `Game.Ops.Scry(n)` and `Surveil(n)` peek the controller's top `n` library ids and pause on `AwaitingScryChoice` or `AwaitingSurveilChoice`. `submit_scry_choice` and `submit_surveil_choice` reorder or move cards (new `ObjectId` each, CR 400.7).
+//! `n == 0` or an empty library is a no-op with no pause and no event (CR 701.22b, 701.25c).
+// TODO: the CR 701.22d and 701.25d "whenever a player scries/surveils" trigger, since no `ConditionPrimitive` matches `CardsScried` or `CardsSurveiled`
 
 use std::collections::{HashMap, VecDeque};
 
@@ -99,12 +86,6 @@ fn surveil_spell_definition(n: u32) -> CardDefinition {
     }
 }
 
-/// Same shape as every other Phase 5 test's `two_player_state`, plus a
-/// Library zone for `p0` (absent from the shared precedent since most
-/// slices never touch it) seeded with `library` in top-to-bottom order
-/// (`contents`'s front is the top - `Zone::top`/`push_top` already establish
-/// this). Each id in `library` must also be inserted into `objects`
-/// separately by the caller, same as every other zone here.
 fn two_player_state(library: Vec<ObjectId>) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -140,7 +121,6 @@ fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-/// Both players pass priority (CR 117.4) so the cast spell actually resolves.
 fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine);
@@ -180,10 +160,6 @@ fn surveiled_events(engine: &Engine) -> Vec<(PlayerId, Vec<ObjectId>, Vec<Object
         .collect()
 }
 
-// ---------------------------------------------------------------------
-// Scry
-// ---------------------------------------------------------------------
-
 #[test]
 fn scry_two_keep_both_on_top_reorders_in_chosen_order() {
     let p0 = PlayerId(0);
@@ -209,8 +185,7 @@ fn scry_two_keep_both_on_top_reorders_in_chosen_order() {
     assert_eq!(player, p0);
     assert_eq!(cards, vec![lib0, lib1], "top 2 cards, front = top");
 
-    // Reverse the offered order to prove the chosen order is respected, not
-    // just the offered one.
+    // Reverse the offered order to prove the chosen order is respected.
     engine.submit_scry_choice(vec![lib1, lib0], Vec::new()).expect("kept_on_top+put_bottom together are exactly cards");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
@@ -377,10 +352,6 @@ fn submit_surveil_choice_rejects_a_pending_scry_pause() {
     assert!(matches!(err, SurveilChoiceError::NotAwaitingChoice), "a Scry pause isn't a Surveil pause");
 }
 
-// ---------------------------------------------------------------------
-// Surveil
-// ---------------------------------------------------------------------
-
 #[test]
 fn surveil_two_keep_both_on_top_is_a_pure_reorder_no_graveyard_move() {
     let p0 = PlayerId(0);
@@ -410,8 +381,7 @@ fn surveil_two_keep_both_on_top_is_a_pure_reorder_no_graveyard_move() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
     assert_eq!(library_order(&engine, p0), vec![lib1, lib0], "reordered, still in the library");
-    // The graveyard isn't necessarily empty - the resolved instant itself
-    // (CR 608.2m) lands there too - but neither surveiled library card does.
+    // The resolved instant (CR 608.2m) also lands in the graveyard, but neither surveiled library card does.
     let graveyard = engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap();
     assert!(!graveyard.contents.contains(&lib0) && !graveyard.contents.contains(&lib1), "neither kept-on-top card left the library");
     assert_eq!(surveiled_events(&engine), vec![(p0, vec![lib1, lib0], Vec::new())]);
@@ -444,8 +414,7 @@ fn surveil_two_to_graveyard_is_a_real_zone_change_with_new_ids() {
     assert!(engine.state().object(lib0).is_none(), "old id retired (CR 400.7)");
     assert!(engine.state().object(lib1).is_none(), "old id retired (CR 400.7)");
 
-    // 3, not 2: the resolved instant itself (CR 608.2m) also lands in the
-    // owner's graveyard, alongside the two surveiled library cards.
+    // 3 and not 2: the resolved instant (CR 608.2m) also lands in the owner's graveyard.
     let graveyard = engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap();
     assert_eq!(graveyard.contents.len(), 3, "both surveiled cards, plus the resolved instant itself");
 
@@ -467,11 +436,6 @@ fn surveil_two_to_graveyard_is_a_real_zone_change_with_new_ids() {
     assert!(kept_on_top.is_empty());
     assert_eq!(put_graveyard, &zone_changes, "the summary event's put_graveyard carries the new ids, not the old ones");
 }
-
-// ---------------------------------------------------------------------
-// Game.Ops.Scry(n)/Game.Ops.Surveil(n) Lua bindings decode to the right
-// AbilityEffect primitive.
-// ---------------------------------------------------------------------
 
 #[test]
 fn game_ops_scry_decodes_to_the_ability_effect_primitive() {

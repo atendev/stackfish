@@ -1,22 +1,5 @@
-//! Phase 5 vertical slice: `TargetFilter::PlayerScript` (CR 601.2c/602.2b) -
-//! `TargetFilter::Script`'s player-candidate twin, for a player legality
-//! shape plain `TargetFilter::Player` can't express (e.g. "target player
-//! with 10 or less life"). Kept as a separate variant rather than widening
-//! `Script` to accept either target kind - `Script`'s Lua contract already
-//! passes a bare object id number as its first call argument, so folding
-//! players in would mean either breaking that contract for every existing
-//! object-script card or tagging every call with a kind, neither of which
-//! any real card built so far needs.
-//!
-//! `ScriptRuntime::invoke_player_target_legal` is the same static
-//! per-candidate predicate shape `invoke_target_legal` established, just
-//! `player` in place of `object`. No protection check - same posture plain
-//! `TargetFilter::Player` already has (this engine doesn't model
-//! player-side protection).
-//!
-//! Lua entry point: `:SetTarget({ type = "player", filter = function(player,
-//! source, controller, state) -> bool end })` - the bare-function shorthand
-//! stays object-only (`scripted-target-filter`'s own shape, unchanged).
+//! CR 601.2c, 602.2b: `TargetFilter::PlayerScript` is the player twin of `TargetFilter::Script`, for a legality plain `TargetFilter::Player` cannot express ("target player with 10 or less life").
+//! `invoke_player_target_legal` has the same per-candidate predicate shape as `invoke_target_legal`, with no protection check, as for plain `Player`. The Lua entry is `:SetTarget({ type = "player", filter = function(player, source, controller, state) ... end })`.
 
 use std::collections::HashMap;
 
@@ -27,8 +10,6 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, player_state, two_player_state as base_two_player_state};
 
-/// "Tap: Gain 1 life." with a scripted player-target requirement - legal
-/// only against a player at 10 or less life.
 const SCRIPTED_LOW_LIFE_TARGET: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -89,11 +70,6 @@ fn two_player_state(p1_life: i32) -> GameState {
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: self-registration wires `:SetTarget({type="player", filter=fn})`
-// into a real `TargetFilter::PlayerScript`.
-// ---------------------------------------------------------------------
-
 #[test]
 fn set_target_with_a_player_table_self_registers_a_player_scripted_target_filter() {
     let mut state = two_player_state(20);
@@ -113,10 +89,6 @@ fn set_target_with_a_player_table_self_registers_a_player_scripted_target_filter
             if matches!(req.filter, TargetFilter::PlayerScript(_)) && req.count == 1 && !req.up_to
     ));
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline through `ActivateAbility`.
-// ---------------------------------------------------------------------
 
 fn try_play_land_and_activate(p1_life: i32, target: Target) -> (Engine, Result<(), ActionError>) {
     let p0 = PlayerId(0);

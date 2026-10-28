@@ -1,9 +1,5 @@
-//! Phase 5 vertical slice: CR 608.2c - several effects of one spell or
-//! ability, followed in the order written. Before this slice an ability held
-//! a single `Game.Ops.*` value and a second `:SetOperation` overwrote the
-//! first. `Game.Ops.Chain(a, b, ...)` builds `AbilityEffect::Chain`, which
-//! runs through the modal loop (`engine::resolve::modal`) with every entry
-//! chosen and the ability's one target set shared between them.
+//! CR 608.2c: several effects of one ability resolve in the order written.
+//! `Game.Ops.Chain(a, b, ...)` builds `AbilityEffect::Chain`, run through the modal loop with every entry chosen and the target set shared.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -15,8 +11,6 @@ const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
 const SPELL: ObjectId = ObjectId(100);
 const BEAR: ObjectId = ObjectId(1);
-
-// ---- Decode ------------------------------------------------------------------
 
 fn decode(body: &str) -> Result<Option<AbilityEffect>, String> {
     let source = format!("local s = {{}}\nfunction s.operation()\n    return {body}\nend\nreturn s");
@@ -72,8 +66,6 @@ fn a_non_operation_argument_is_a_load_error() {
     assert!(error.contains("argument 2 must be a Game.Ops.* value, got"), "{error}");
 }
 
-// ---- Resolution --------------------------------------------------------------
-
 fn card(id: u64, name: &str, types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         script_ref: ScriptReference::ByKey(name.to_string()),
@@ -121,8 +113,6 @@ fn chain_spell(entries: Vec<AbilityEffect>, target_requirement: Option<TargetSpe
     }
 }
 
-/// A bear (P1, battlefield, optionally indestructible or tapped), `library`
-/// cards in each library, and `spell` in P0's hand.
 fn engine_with(spell: CardDefinition, library: u64) -> Engine {
     Engine::new(state_with(spell, library))
 }
@@ -159,7 +149,6 @@ fn cast(engine: &mut Engine, targets: Vec<Target>) {
     drain(engine);
 }
 
-/// Both players pass; returns the status after the second pass.
 fn pass_both(engine: &mut Engine) -> StepStatus {
     engine.submit_action(PlayerAction { player: P0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine);
@@ -333,8 +322,6 @@ fn a_chain_fizzles_whole_when_its_target_is_gone() {
     assert_eq!(life(&engine, P0), 20, "no entry ran");
     assert!(engine.state().stack.is_empty());
 }
-
-// ---- Abilities and Lua scripts -----------------------------------------------
 
 const TAP_AND_DRAW_ACTIVATED: &str = r#"
 local s = {}

@@ -1,17 +1,5 @@
-//! Phase 5 vertical slice: `Game.CreateTriggeredAbility(c)` gains a real
-//! `:SetTarget(table | function)` method, mirroring `Game.
-//! CreateActivatedAbility`'s own `:SetTarget` exactly (same
-//! `decode_target_filter_value` decode, same single-exact-count narrowing -
-//! `count: 1, up_to: false`, no CR 601.2c multi-word form). CR 603.3d's real
-//! target-selection pause (`ProcessState`/`StepStatus::AwaitingTriggerTargets`,
-//! `Engine::submit_trigger_targets`) has been engine-complete since
-//! `phase5/trigger-target-selection`, but was only reachable by constructing
-//! a `RegisteredAbility` directly in Rust - this slice closes that gap so an
-//! actual card script can declare a targeted triggered ability too.
-//!
-//! Mode declaration (CR 603.3c) stays out of scope - confirmed with the user
-//! first, since unlike `:SetTarget` there's no existing Lua modal vocabulary
-//! anywhere to mirror (modal *spells* don't have one either).
+//! CR 603.3d: `Game.CreateTriggeredAbility(c)` has a `:SetTarget(table | function)` method, decoded as in `Game.CreateActivatedAbility` (`decode_target_filter_value`, `count: 1`, `up_to: false`), so a card script can declare a targeted trigger.
+// TODO: mode declaration for triggered abilities from Lua (CR 603.3c), since there is no Lua modal vocabulary to mirror
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -75,11 +63,6 @@ fn pass(engine: &mut Engine, player: PlayerId) {
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: run_card_script's own decode of :SetTarget, without driving
-// the whole Engine pipeline.
-// ---------------------------------------------------------------------
-
 #[test]
 fn set_target_with_a_table_decodes_into_a_real_target_requirement() {
     let mut state = two_player_state();
@@ -137,11 +120,6 @@ fn set_target_with_a_function_decodes_into_a_scripted_filter() {
     );
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: a real card script's targeted triggered ability actually
-// fires, pauses for a real CR 603.3d choice, and resolves against it.
-// ---------------------------------------------------------------------
-
 #[test]
 fn play_land_self_registering_targeted_ability_fires_pauses_and_resolves_end_to_end() {
     let p0 = PlayerId(0);
@@ -160,9 +138,7 @@ fn play_land_self_registering_targeted_ability_fires_pauses_and_resolves_end_to_
         .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
 
-    // CR 603.3d: the self-registered ability's own real target requirement
-    // (declared via :SetTarget, not hand-built in Rust) pauses for a real
-    // choice before it ever reaches the stack.
+    // CR 603.3d: the self-registered ability's target requirement, declared by :SetTarget, pauses for a choice before reaching the stack.
     let StepStatus::AwaitingTriggerTargets { player, candidates, .. } = status else {
         panic!("expected the script-declared target requirement to raise a real CR 603.3d pause, got {status:?}")
     };

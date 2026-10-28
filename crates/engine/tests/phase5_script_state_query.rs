@@ -1,20 +1,5 @@
-//! Phase 5 vertical slice: backlog item 8's remaining half, the
-//! hidden-information-safe `ScriptContext` (see DESIGN.md's open question).
-//! `state_to_lua` (script.rs) is now a real public-safe board-state
-//! snapshot, not just per-player life totals - passed as a trailing arg to
-//! every state-aware `invoke_*` call (`invoke_cda`, `invoke_continuous_affects`,
-//! `invoke_continuous_effect`, on top of `invoke_condition`/
-//! `invoke_intervening_if` which already had it). Per CR 400.2/402.3:
-//! battlefield/graveyard/exile/command are public zones - full contents
-//! exposed as one card-summary table per object. Hand/library are hidden
-//! zones - only a count (`hand_count`/`library_count`) is ever exposed,
-//! never contents.
-//!
-//! Card summaries are base (`CardDefinition`, netted against counters)
-//! values, not layer-resolved `effective_characteristics` - see
-//! `state_to_lua`'s own doc comment in script.rs for why (avoiding
-//! unbounded recursion the moment a battlefield object has its own CDA/
-//! scripted continuous effect).
+//! `state_to_lua` is a public-safe board-state snapshot passed to every state-aware `invoke_*` call. Battlefield, graveyard, exile and command are public (CR 400.2, 402.3) with one card-summary table per object, and hand and library expose only `hand_count` and `library_count`.
+//! Card summaries are base values netted against counters and not layer-resolved, to avoid unbounded recursion when a battlefield object has its own CDA or scripted continuous effect.
 
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -90,10 +75,6 @@ fn put_in_zone(state: &mut GameState, kind: ZoneKind, owner: Option<PlayerId>, o
     state.objects.insert(id, object);
 }
 
-// ---------------------------------------------------------------------
-// Hidden zones: count only, never contents (CR 400.2/402.3).
-// ---------------------------------------------------------------------
-
 #[test]
 fn hand_and_library_counts_are_exposed_but_never_contents() {
     let runtime = ScriptRuntime::new();
@@ -125,18 +106,11 @@ fn hand_count_is_symmetric_for_owner_and_opponent() {
     put_in_zone(&mut state, ZoneKind::Hand, Some(p1), creature(ObjectId(2), p1, 2, 2));
     put_in_zone(&mut state, ZoneKind::Hand, Some(p1), creature(ObjectId(3), p1, 2, 2));
 
-    // `invoke_cda` is the real state-aware entry point under test - a
-    // controller (p0) can read an *opponent's* (p1's) hand count too (CR
-    // 402.3 allows counting another player's hand at any time), proving the
-    // count-only exposure is symmetric, not just "can't see my own either."
+    // invoke_cda is the state-aware entry point under test. A controller can read an opponent's hand count (CR 402.3), so the count-only exposure is symmetric.
     let source = "return function(source, controller, state) return state.hand_count[1] end";
     let base = runtime.invoke_cda(source, &state, ObjectId(1), p0).unwrap();
     assert_eq!(base, 3);
 }
-
-// ---------------------------------------------------------------------
-// Public zones: full contents, base characteristics (CDA/CR 613.4a).
-// ---------------------------------------------------------------------
 
 #[test]
 fn cda_reads_graveyard_card_count_for_base_power() {

@@ -1,29 +1,6 @@
-//! Phase 5 vertical slice: CR 303.4m/616 (Wheel of Sun and Moon's own worked
-//! example under CR 616) — "If a card would be put into enchanted player's
-//! graveyard from anywhere, instead that card is revealed and put on the
-//! bottom of its owner's library." The one real, CR-doc-cited "enchanted
-//! player" card left unbuilt in this engine's own history — every other
-//! angle on CR 303.4m (`HandSizeAffected`/`HandRevealAffected::
-//! EnchantedPlayer`) had no real card behind it; this one does, and it's a
-//! *replacement* effect, not a continuous one — the player-attached sibling
-//! of `phase5/umbra-armor`'s object-attached `EventFilter::WouldDieEnchanted`.
-//!
-//! `EventFilter::WouldEnterEnchantedPlayerGraveyard` (fieldless, sibling to
-//! `WouldMoveZone` rather than a new field on it) resolves against the
-//! replacement effect's own `source`'s `attached_to_player` and the moving
-//! card's own *owner* (CR 400.7: graveyards are owner-keyed, not
-//! controller-keyed) — not gated on `is_destroy`, since CR 616's own wording
-//! ("from anywhere") covers a discard or mill exactly the same as a death.
-//!
-//! No new `ReplacementPayload` needed: `ReplaceZoneDestination(Library)` is
-//! reused as-is — `sba::commit_death`'s own `to`-driven zone lookup
-//! (`ZoneKind::Battlefield | ZoneKind::Exile => None, _ => Some(owner)`)
-//! already resolves a `Library` destination against the moving card's own
-//! owner and `push_bottom`s it there, exactly matching "the bottom of its
-//! owner's library" — already-tested generic machinery, not new plumbing.
-//! "Revealed" isn't modeled: this engine has no per-viewer hidden-information
-//! boundary to reveal from in the first place (`VisibilityPolicy::
-//! is_visible_to` still has no callers).
+//! CR 303.4m, 616: Wheel of Sun and Moon, "If a card would be put into enchanted player's graveyard from anywhere, instead it is revealed and put on the bottom of its owner's library."
+//! `EventFilter::WouldEnterEnchantedPlayerGraveyard` resolves against the source's `attached_to_player` and the card's owner (CR 400.7), is not gated on `is_destroy`, and reuses `ReplaceZoneDestination(Library)`.
+// TODO: revealing the card, since no per-viewer hidden-information boundary exists (`VisibilityPolicy::is_visible_to` has no callers)
 
 use std::collections::HashMap;
 
@@ -127,10 +104,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-// ---------------------------------------------------------------------
-// ReplacementEffect::matches - unit level.
-// ---------------------------------------------------------------------
-
 #[test]
 fn matches_a_card_headed_to_the_enchanted_player_s_own_graveyard_from_anywhere() {
     let mut state = two_player_state();
@@ -146,14 +119,12 @@ fn matches_a_card_headed_to_the_enchanted_player_s_own_graveyard_from_anywhere()
     let effect = wheel_effect(aura);
     let script_runtime = ScriptRuntime::new();
 
-    // CR 616's own "from anywhere" - a battlefield death...
+    // CR 616 "from anywhere" covers a battlefield death,
     let dies = GameEventKind::ZoneChange { object: creature, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
     assert!(effect.matches(&dies, true, &state, &script_runtime), "should match the enchanted player's own creature dying");
-    // ...not gated on is_destroy either (CR 700.4's broader "dies" / CR 616's
-    // wording has no destruction requirement at all)...
+    // not only destroy,
     assert!(effect.matches(&dies, false, &state, &script_runtime), "must match regardless of the is_destroy tag");
-    // ...and a discard (Hand -> Graveyard) matches just as well - the
-    // wildcard `from` is the whole point of "from anywhere".
+    // and a discard from hand.
     let discards = GameEventKind::ZoneChange { object: creature, from: ZoneKind::Hand, to: ZoneKind::Graveyard, last_known_info: None };
     assert!(effect.matches(&discards, false, &state, &script_runtime), "CR 616's own wording is unconditional on the source zone");
 }
@@ -175,8 +146,7 @@ fn does_not_match_a_different_player_s_card_or_a_non_graveyard_destination() {
     let effect = wheel_effect(aura);
     let script_runtime = ScriptRuntime::new();
 
-    // Owned by p0, not the enchanted player (p1) - doesn't match, even
-    // though it's still headed to a graveyard.
+    // Owned by p0 and not the enchanted player (p1), so it does not match even though it heads to a graveyard.
     let wrong_owner = GameEventKind::ZoneChange { object: own_creature, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
     assert!(!effect.matches(&wrong_owner, true, &state, &script_runtime));
 
@@ -192,8 +162,7 @@ fn does_not_match_when_the_source_is_not_attached_to_a_player() {
     let creature = ObjectId(0);
     let aura = ObjectId(1);
     put_on_battlefield(&mut state, card_object(creature, creature_definition(2), p0, ZoneKind::Battlefield));
-    // Not attached to anything - a malformed/unattached fixture, same
-    // defensive posture WouldDieEnchanted's own None arm already takes.
+    // Not attached to anything, a malformed fixture, as WouldDieEnchanted's None arm treats it.
     put_on_battlefield(&mut state, card_object(aura, wheel_definition(""), p0, ZoneKind::Battlefield));
 
     let effect = wheel_effect(aura);
@@ -201,11 +170,6 @@ fn does_not_match_when_the_source_is_not_attached_to_a_player() {
     let dies = GameEventKind::ZoneChange { object: creature, from: ZoneKind::Battlefield, to: ZoneKind::Graveyard, last_known_info: None };
     assert!(!effect.matches(&dies, true, &state, &script_runtime));
 }
-
-// ---------------------------------------------------------------------
-// End to end: SBA-driven death, redirected to the bottom of the owner's
-// library instead of the graveyard.
-// ---------------------------------------------------------------------
 
 #[test]
 fn wheel_of_sun_and_moon_redirects_a_dying_creature_to_the_bottom_of_its_owner_s_library() {
@@ -219,8 +183,7 @@ fn wheel_of_sun_and_moon_redirects_a_dying_creature_to_the_bottom_of_its_owner_s
     aura_obj.attached_to_player = Some(p1);
     put_on_battlefield(&mut state, aura_obj);
     state.replacement_effects.push(wheel_effect(aura));
-    // A pre-existing library card, so the redirected card's own
-    // bottom-of-library position is unambiguous to assert against.
+    // A pre-existing library card makes the redirected card's bottom position unambiguous.
     let already_in_library = ObjectId(2);
     state.objects.insert(already_in_library, card_object(already_in_library, creature_definition(2), p1, ZoneKind::Library));
     state.zone_mut(ZoneKind::Library, Some(p1)).unwrap().push_bottom(already_in_library);
@@ -284,10 +247,6 @@ fn without_wheel_of_sun_and_moon_the_creature_dies_normally() {
     }
     assert!(!state.zone(ZoneKind::Graveyard, Some(p1)).unwrap().contents.is_empty(), "the creature really did land in the graveyard");
 }
-
-// ---------------------------------------------------------------------
-// Lua self-registration.
-// ---------------------------------------------------------------------
 
 #[test]
 fn run_card_script_self_registers_wheel_of_sun_and_moon() {

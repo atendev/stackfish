@@ -1,11 +1,4 @@
-//! Phase 5 vertical slice: backlog item 5b — a dying creature's zone change
-//! (CR 704.5f/g) now runs through the real replacement pipeline (CR 614-616)
-//! *before* it actually moves, so "if this would die, exile it instead"
-//! (CR 614.13) is real, including a full CR 616.1 ordering-choice pause when
-//! two such effects match the same death simultaneously (`sba::
-//! resolve_deaths`/`ProcessState::AwaitingReplacementChoice`'s `SbaDeath`
-//! resume target). See docs/implementation.md's
-//! phase5-fix-replacement-bypasses slice notes for the bug this closes.
+//! CR 614-616: a dying creature's zone change (CR 704.5f/g) runs through the replacement pipeline before it moves, so "if this would die, exile it instead" (CR 614.13) works, including a CR 616.1 ordering pause when two effects match (`sba::resolve_deaths`, `SbaDeath` resume target).
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -56,9 +49,6 @@ fn would_die_exile_effect(source: ObjectId, consumption: ConsumptionPolicy) -> R
     }
 }
 
-/// Distinct `source` from `would_die_exile_effect`'s own shield - lets a
-/// test tell the two apart by which candidate id it chooses, the same way
-/// two different real permanents could each grant this style of effect.
 fn would_die_command_zone_effect(source: ObjectId) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -75,8 +65,7 @@ fn would_die_command_zone_effect(source: ObjectId) -> ReplacementEffect {
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // Graveyard/Command are only needed for p0 here (the dying creature's
-    // controller); Exile is a shared zone (CR 400.10, owner: None).
+    // Graveyard and Command are needed only for p0, and Exile is shared (CR 400.10).
     let mut zones = zones(p0, p1, &[ZoneKind::Battlefield]);
     zones.push(Zone::new(ZoneKind::Graveyard, Some(p0)));
     zones.push(Zone::new(ZoneKind::Exile, None));
@@ -90,9 +79,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// A non-creature permanent standing in for "whatever grants this
-/// replacement effect" - distinct from the dying creature itself, so a test
-/// with two such effects can tell them apart by `ReplacementEffect::source`.
 fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
     let definition = CardDefinition {
         definition_id: 2,
@@ -118,10 +104,6 @@ fn shield(id: ObjectId, controller: PlayerId) -> GameObject {
     };
     card_object(id, definition, controller, ZoneKind::Battlefield)
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: sba::check_state_based_actions / sba::resolve_deaths
-// ---------------------------------------------------------------------
 
 #[test]
 fn would_die_replacement_exiles_instead_of_dying_to_the_graveyard() {
@@ -177,12 +159,6 @@ fn two_would_die_replacements_on_the_same_creature_pause_for_an_ordering_choice(
     assert_eq!(state.object(bear).unwrap().zone, ZoneKind::Battlefield);
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline - PassPriority naturally cascades into
-// SbaLoop, pauses on AwaitingReplacementChoice, and submit_replacement_choice
-// resumes it correctly.
-// ---------------------------------------------------------------------
-
 #[test]
 fn engine_pauses_mid_sba_and_resumes_correctly_after_a_replacement_choice() {
     let p0 = PlayerId(0);
@@ -204,9 +180,7 @@ fn engine_pauses_mid_sba_and_resumes_correctly_after_a_replacement_choice() {
     assert_eq!(player, p0);
     assert_eq!(candidates.len(), 2);
 
-    // Choose the Command-zone effect (ObjectId(2)) specifically, to
-    // distinguish it from the Exile one (ObjectId(1)) in the assertions
-    // below.
+    // Choose the Command-zone effect (ObjectId(2)) to tell it from the Exile one (ObjectId(1)).
     let command_zone_candidate = candidates
         .into_iter()
         .find(|&c| c == ReplacementCandidate::Registered(ObjectId(2)))
@@ -224,8 +198,7 @@ fn engine_pauses_mid_sba_and_resumes_correctly_after_a_replacement_choice() {
         "the Exile effect must not have also applied - only the chosen one wins"
     );
 
-    // Fixed point genuinely reached - exactly one ZoneChange for this death,
-    // not re-processed on a later SbaLoop re-entry.
+    // Exactly one ZoneChange for this death, not re-processed on a later SbaLoop re-entry.
     let zone_changes =
         engine.state().ledger.iter().filter(|e| matches!(e.kind, GameEventKind::ZoneChange { .. })).count();
     assert_eq!(zone_changes, 1);

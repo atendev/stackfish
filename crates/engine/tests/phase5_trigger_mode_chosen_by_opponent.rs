@@ -1,23 +1,5 @@
-//! Phase 5 vertical slice: CR 700.2e — "some spells and abilities specify
-//! that a player other than their controller chooses a mode for it" — for a
-//! *triggered* ability's own modes, the last named gap `phase5/trigger-
-//! modal-choice` left open. CR 700.2h (a mode's own additional cost) does
-//! *not* apply here at all - its own rule text says "some modal **spells**"
-//! and "paid **as the spell is cast**," with no "or ability" clause the way
-//! 700.2a/700.2e both have - so there was nothing left to build for that
-//! citation on a trigger.
-//!
-//! Mirrors `phase5_modal_chosen_by_opponent.rs`'s own narrowing exactly
-//! (every mode targetless and costless, exactly one other non-eliminated
-//! player), but the mechanism differs: `CastSpell` defers to a resolution-
-//! time pause because casting is a single atomic player action that can't
-//! accept a second player's input mid-action. A triggered ability isn't
-//! initiated by a player action at all - `push_ordered_triggers` resolves
-//! the real chooser itself, right where it detects the ability is modal, and
-//! skips the trigger entirely (never pausing, never pushing) if either
-//! precondition fails - there's no "reject the cast" step for a trigger to
-//! fall back on, so this mirrors CR 603.3d's own "no legal choice -> removed
-//! from the stack" stance instead of `CastSpell`'s cast-time `CommandError`.
+//! CR 700.2e: a triggered ability's modes chosen by a player other than the controller. CR 700.2h does not apply to abilities, since it says "modal spells" and "as the spell is cast".
+//! The narrowing matches phase5_modal_chosen_by_opponent.rs (targetless, costless modes, exactly one other non-eliminated player), but `push_ordered_triggers` resolves the chooser itself and skips the trigger if a precondition fails, as CR 603.3d removes it from the stack.
 
 use stackfish_engine::engine::{Engine, StepStatus, TriggerModeChoiceError};
 use stackfish_engine::*;
@@ -58,13 +40,6 @@ fn any_target_requirement() -> TargetSpec {
     })
 }
 
-/// "At the beginning of your upkeep, choose one - your opponent chooses -
-///  * You gain 3 life.
-///  * You shuffle your library."
-/// Mode 1 is `Shuffle` (not `Damage`/`Destroy`) for the same reason
-/// `phase5_modal_chosen_by_opponent.rs`'s own fixture picks it - a
-/// synchronous, targetless `is_modal_resolvable` kind, so choosing both
-/// modes at once is never rejected as an unsupported combination.
 fn modal_upkeep_ability_chosen_by_opponent(source: ObjectId, mode_choice: ModeChoice) -> RegisteredAbility {
     RegisteredAbility {
         modes: vec![
@@ -84,8 +59,6 @@ fn modal_upkeep_ability_chosen_by_opponent(source: ObjectId, mode_choice: ModeCh
     }
 }
 
-/// Same shape, but mode 1 illegally carries its own target requirement -
-/// used only by the rejection test below.
 fn modal_upkeep_ability_chosen_by_opponent_with_a_target(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: vec![
@@ -106,8 +79,7 @@ fn two_player_state() -> GameState {
     let p1 = PlayerId(1);
     GameState {
         phase: Phase::PreGame,
-        // Library included - mode 1's Shuffle effect needs each player's
-        // library zone to exist even when empty.
+        // The library zone must exist for mode 1's Shuffle effect, even when empty.
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Library, ZoneKind::Battlefield, ZoneKind::Graveyard]))
     }
 }
@@ -162,8 +134,7 @@ fn the_other_players_chosen_mode_resolves_for_the_triggers_own_controller() {
     let mut engine = Engine::new(state);
     pass_both(&mut engine, p0, p1);
 
-    // p1 (the other player) chooses mode 0 - GainLife(3) - even though p0 is
-    // the ability's own controller and the one who benefits.
+    // p1 chooses mode 0 (GainLife(3)) though p0 is the controller and benefits.
     engine.submit_trigger_mode_choice(vec![0]).expect("p1 chooses mode 0, within range, no duplicates");
     drain(&mut engine);
     let status = pass_both(&mut engine, p0, p1);
@@ -186,10 +157,7 @@ fn choosing_two_modes_resolves_both_for_the_controller() {
     pass_both(&mut engine, p0, p1);
 
     engine.submit_trigger_mode_choice(vec![1, 0]).expect("order doesn't matter - resolved in card-print order");
-    // Both modes are targetless, but 2+ chosen modes always combine into a
-    // TargetSpec::Multiple (synthetic zero-count placeholders here) - same
-    // shape a spell's own multi-mode cast uses - so this still chains into
-    // a real (trivially satisfied) AwaitingTriggerTargets pause.
+    // 2 or more chosen modes always combine into a TargetSpec::Multiple (synthetic zero-count placeholders), so this still chains into a trivially satisfied AwaitingTriggerTargets pause.
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingTriggerTargets { .. }), "got {status:?}");
     engine.submit_trigger_targets(Vec::new()).expect("every combined mode is targetless");
@@ -214,9 +182,7 @@ fn a_mode_with_a_target_requirement_makes_the_whole_trigger_never_fire() {
     let mut engine = Engine::new(state);
     let status = pass_both(&mut engine, p0, p1);
 
-    // No pause at all - straight through to the next priority window, same
-    // CR 603.3d "removed from the stack" stance a trigger with no legal
-    // target already takes.
+    // No pause: straight to the next priority window, as for a trigger with no legal target (CR 603.3d).
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "got {status:?}");
     assert!(engine.state().stack.is_empty(), "a chosen-by-opponent mode with its own target can never validly go on the stack");
     assert_eq!(engine.state().player(p0).unwrap().life, 20, "nothing resolved");

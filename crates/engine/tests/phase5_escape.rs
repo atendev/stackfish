@@ -1,36 +1,6 @@
-//! Phase 5 vertical slice: CR 702.138 Escape.
-//!
-//! "Escape—[cost], Exile N other cards from your graveyard" is a static
-//! ability that functions while the card sits in a graveyard - the same
-//! `AlternativeCost::Replacement{ from_zone: Graveyard, .. }` shape Flashback
-//! (`phase5_flashback_alternative_costs.rs`) already proved works end to
-//! end, since that type's own doc comment was written anticipating exactly
-//! this reuse ("escape/jump-start/aftermath/mayhem can reuse this same
-//! shape later"). The only genuinely new piece is the cost component itself
-//! - "exile N other cards from your graveyard" - which this engine had no
-//! `AdditionalCost` shape for at all before this slice:
-//!
-//! - `AdditionalCost::ExileFromGraveyard { filter, count }` / `CostPayment::
-//!   Exile(ObjectId)` - the same N-distinct-payments shape `TapPermanents`
-//!   already established, checked against the graveyard instead of the
-//!   battlefield.
-//! - `commands::zone_ops::propose_zone_move` widened to take a real `to`
-//!   parameter (previously hardcoded to `Graveyard`, since every prior
-//!   caller - Sacrifice/Discard cost payments, CR 514.1 cleanup discard -
-//!   happened to end there) so an `Exile` payment can propose a
-//!   `Graveyard -> Exile` move through the same replacement-checked
-//!   pipeline instead of a `Graveyard -> Graveyard` no-op.
-//!
-//! No self-exclusion logic is needed the way Cycling's `DiscardSelf` needed
-//! one: by the time this cost is paid, the escaping card has already moved
-//! to the stack (CR 601.2a - casting moves the card first, cost is paid
-//! after; confirmed by reading `commands::cast::execute_cast_spell`
-//! directly), so it's structurally impossible for the card being cast to
-//! also appear among its own exile-cost candidates.
-//!
-//! CR 702.138b/c/d ("if this permanent escaped," "escapes with
-//! [counters/ability]") are real now too (`phase5/escape-provenance`) - see
-//! `phase5_escape_provenance.rs` for the full slice.
+//! CR 702.138 Escape: a cast from the graveyard through `AlternativeCost::Replacement { from_zone: Graveyard }`, like Flashback, plus the cost "exile N other cards from your graveyard".
+//! `AdditionalCost::ExileFromGraveyard { filter, count }` pays with `CostPayment::Exile(ObjectId)`, and `propose_zone_move` takes a real `to` so the exile is replacement-checked.
+//! The escaping card is already on the stack when the cost is paid (CR 601.2a), so it cannot be among its own exile candidates. Provenance is in phase5_escape_provenance.rs.
 
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
@@ -39,8 +9,6 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
 
-/// "Test Escape Creature": `{2}{B}` creature, with an escape alternative
-/// cost of `{1}{B}, Exile three other cards from your graveyard.`
 fn escape_creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
@@ -123,8 +91,6 @@ fn two_player_state(pool: ManaPool) -> GameState {
     }
 }
 
-/// Inserts `card` in `p0`'s graveyard plus 3 distinct fodder cards
-/// (`fodder_ids`) to exile, and returns the state.
 fn state_with_escaper_and_fodder(pool: ManaPool, card: ObjectId, fodder_ids: &[ObjectId]) -> GameState {
     let p0 = PlayerId(0);
     let mut state = two_player_state(pool);
@@ -155,10 +121,7 @@ fn try_cast_spell(engine: &mut Engine, player: PlayerId, card: ObjectId, alterna
         
 }
 
-/// Finds the specific `ZoneChange` whose destination is `to` - needed since
-/// a single payment can commit more than one zone move (escape's own
-/// exile-cost payments alongside the card's own cast move), so "the last
-/// one in the ledger" isn't necessarily the move being asserted on.
+// A payment can commit several zone moves, so find the one whose destination is `to`.
 fn zone_change_to(engine: &Engine, to: ZoneKind) -> (ObjectId, ZoneKind, ZoneKind) {
     for event in engine.state().ledger.iter().rev() {
         if let GameEventKind::ZoneChange { object, from, to: event_to, .. } = event.kind {
@@ -180,8 +143,7 @@ fn cast_from_graveyard_with_escape_cost_exiles_the_other_graveyard_cards() {
         card,
         &fodder,
     );
-    // A fifth graveyard card that ISN'T exiled - proves the cost only takes
-    // exactly `count`, not "as many as available."
+    // A fifth graveyard card that is not exiled shows the cost takes exactly `count`.
     let untouched = ObjectId(5);
     state.objects.insert(untouched, card_object(untouched, filler_definition(20, "Untouched"), p0, ZoneKind::Graveyard));
     state.zone_mut(ZoneKind::Graveyard, Some(p0)).unwrap().push_bottom(untouched);
@@ -295,9 +257,7 @@ fn escape_payment_must_reference_cards_actually_in_the_graveyard() {
     assert!(engine.state().object(battlefield_creature).unwrap().zone == ZoneKind::Battlefield, "no partial mutation");
 }
 
-/// Casting from hand while declaring the escape alternative is rejected -
-/// same "the announced alternative's from_zone must match where the card
-/// actually is" rule Flashback's own tests already prove.
+// Casting from hand with the escape alternative is rejected, since from_zone must match where the card is.
 #[test]
 fn casting_from_hand_while_declaring_escape_is_rejected() {
     let p0 = PlayerId(0);
@@ -312,11 +272,7 @@ fn casting_from_hand_while_declaring_escape_is_rejected() {
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "card untouched");
 }
 
-/// Unit-level: `Game.Costs.ExileFromGraveyard` decodes correctly through the
-/// generic `Game.CreateActivatedAbility` builder - proves the primitive
-/// itself works independent of where it's used (escape's own
-/// `AlternativeCost::Replacement.cost` has no Lua builder, same scope
-/// Flashback's own slice already established).
+// `Game.Costs.ExileFromGraveyard` decodes through the generic `Game.CreateActivatedAbility` builder.
 const EXILE_FROM_GRAVEYARD_COST: &str = r#"
 local s = {}
 function s.register_abilities(c)

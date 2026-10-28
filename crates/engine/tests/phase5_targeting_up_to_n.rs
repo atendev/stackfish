@@ -1,16 +1,5 @@
-//! Phase 5 vertical slice: CR 601.2c/115.6 "up to N" target counts. Pulled
-//! from the "Known unresolved gaps" list — the `multi-target-resolution`
-//! slice's own UNRESOLVED section named this as the natural next follow-up.
-//!
-//! `TargetRequirement::up_to` lets a caster choose anywhere from 0 to
-//! `count` targets instead of exactly `count`. Also fixes a small, real bug
-//! found while designing this: `ResolveStackTop`'s fizzle check used to gate
-//! on `req.count > 0` as a proxy for "were any targets actually chosen" -
-//! that coincided with reality for the old exact-count-only requirement
-//! (`validate_targets` always forced `targets.len() == count`), but breaks
-//! once "up to N" lets a caster legally choose zero targets while `count`
-//! itself stays nonzero. Fixed by gating on `!top.targets.is_empty()`
-//! instead - see `zero_chosen_targets_never_produces_a_fizzled_event` below.
+//! CR 601.2c, 115.6: "up to N" target counts, `TargetRequirement::up_to`, letting a caster choose from 0 to `count` targets.
+//! The `ResolveStackTop` fizzle check gates on `!top.targets.is_empty()` and not `req.count > 0`, since a caster may legally choose zero targets (see `zero_chosen_targets_never_produces_a_fizzled_event`).
 
 use std::collections::HashMap;
 
@@ -45,7 +34,6 @@ fn creature_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Volley deals 1 damage to each of up to two target creatures."
 fn volley_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -126,8 +114,6 @@ fn damage_marked_on(engine: &Engine, id: ObjectId) -> u32 {
     engine.state().object(id).map(|o| o.damage_marked).unwrap_or(0)
 }
 
-/// Two creatures on the battlefield (`p1`'s), a "Test Volley" card in `p0`'s
-/// hand - the common setup every test below starts from.
 fn setup_with_two_creatures() -> (GameState, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -156,9 +142,7 @@ fn casting_with_zero_targets_is_legal_under_up_to_n() {
     let status = pass_both_and_drain(&mut engine, p0, p1);
 
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
-    // CR 400.7: resolution mints a fresh id moving stack->graveyard, so the
-    // original `card` id no longer resolves - check the graveyard's
-    // contents instead of the old id.
+    // CR 400.7: resolution mints a fresh id into the graveyard, so check the graveyard contents and not the old id.
     assert!(engine.state().object(card).is_none());
     assert_eq!(
         engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(),

@@ -1,39 +1,7 @@
-//! Phase 5 vertical slice: CR 702.85 Cascade.
-//!
-//! Two new primitives this slice adds, each reusable well beyond Cascade
-//! itself:
-//! - `ManaCost::mana_value` (CR 202.3) - didn't exist anywhere in this
-//!   engine before.
-//! - CR 601.2i's "when you cast this spell" trigger point
-//!   (`GameEventKind::SpellCast`/`ConditionPrimitive::Cast`), fired once a
-//!   `CastSpell`'s own cost fully commits (`Engine::continue_cost_zone_moves`'s
-//!   own tail - every real cast in this engine pauses for an explicit
-//!   payment acknowledgment, even a bare `{0}`, so there's exactly one real
-//!   commit point to hook, not two).
-//!
-//! A third piece was tried and reverted: a generic `CommandOutcome::
-//! stack_entries` field re-running a card's own script once it hits the
-//! stack (so a script could self-register `Cast` directly). It broke an
-//! *existing* test (`phase5_escape_provenance.rs`) - every card's own
-//! `register_abilities(c)` assumes it's called exactly once per object
-//! lifecycle, and running it a second time at cast time double-registered
-//! every ordinary ETB trigger too, once from `commands::remap_abilities`
-//! carrying the cast-time registration across the stack->battlefield move
-//! and again from the pre-existing battlefield-entry `run_card_script` call.
-//! See `ConditionPrimitive::Cast`'s own doc comment for the full account.
-//! This slice's own tests below register the Cascade trigger via direct
-//! `RegisteredAbility` construction instead, same posture Escape/Madness/
-//! Flashback/Buyback already take for their own Lua-inaccessible pieces.
-//!
-//! Cascade's own resolution (`AbilityEffect::Cascade`) is a synchronous
-//! library walk (no per-card player choice, unlike `Search`) that always
-//! pauses at the end for a real "cast the candidate, or not" decision -
-//! `ProcessState::AwaitingCascadeChoice`, answered by `Engine::
-//! decline_cascade_cast`/`submit_cascade_cast`. The "cast" branch reuses
-//! `GameState::pending_free_cast` (a sibling of Madness's own `pending_
-//! timing_bypass`) so `commands::cast::execute_cast_spell` can synthesize a
-//! transient `{0}`-mana `AlternativeCost::Replacement` for a candidate that
-//! was never printed with one of its own.
+//! CR 702.85 Cascade: a "when you cast this spell" trigger (CR 601.2i) runs a library walk that ends in a "cast it or not" pause.
+//! `AwaitingCascadeChoice` is answered by `decline_cascade_cast` or `submit_cascade_cast`, and a cast synthesizes a `{0}` alternative cost through `pending_free_cast`.
+//! The trigger is registered by direct `RegisteredAbility` construction.
+// TODO: a script cannot self-register a `Cast` trigger, since re-running `register_abilities` at cast time double-registers ETB triggers
 
 use std::collections::HashMap;
 
@@ -41,10 +9,6 @@ use stackfish_engine::engine::{ActionError, CascadeChoiceError, Engine, StepStat
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
 
-/// "Test Cascade Beast" - {3}{R} creature (mana value 4), Cascade, no
-/// target/effect (this slice only needs to prove the trigger/walk/pause
-/// machinery, not any particular resolution effect - same posture
-/// `phase5_madness.rs`'s own `madness_bolt_definition` already takes).
 fn cascade_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
@@ -121,15 +85,7 @@ impl AsLand for CardDefinition {
     }
 }
 
-/// CR 702.85a's own triggered ability - "when you cast this spell" (self-
-/// referential `Cast` condition) resolving into the library walk
-/// (`Cascade`). Registered directly on the cascade spell's own *predicted*
-/// stack-object id (`next_object_id` starts at 1000 in every `testutil::
-/// two_player_state`, and nothing else in these tests allocates an id
-/// before the cast, so the first real mint is deterministically
-/// `ObjectId(1000)`) - same "no Lua wiring proven this slice, direct
-/// construction only" posture every other alternative-cost-family slice in
-/// this engine already takes (Flashback/Escape/Buyback/Madness).
+// Registered on the predicted stack object id: next_object_id starts at 1000 and nothing allocates before the cast.
 fn cascade_trigger(source: ObjectId, _controller: PlayerId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -189,11 +145,7 @@ fn library_top_to_bottom(state: &mut GameState, p0: PlayerId, defs: Vec<(u64, Ca
     }
 }
 
-/// Casts the cascade spell and drives it up through the payment
-/// acknowledgment (every real cast in this engine pauses for one, even a
-/// non-{0} cost paid here with 4 generic-eligible mana) - returns once the
-/// Cast trigger has been collected and is sitting on the stack above the
-/// cascade spell itself.
+// Casts the spell and pays through the acknowledgment pause, returning with the Cast trigger on the stack above it.
 fn cast_cascade_spell_and_await_trigger(engine: &mut Engine, p0: PlayerId, card: ObjectId) {
     cast_spell(engine, p0, card);
     let status = drain(engine);
@@ -244,8 +196,7 @@ fn cascade_trigger_fires_off_casting_and_walks_past_lands_to_a_qualifying_candid
     let candidate = candidate.expect("a qualifying candidate (mv 2 < 4) should have been found");
     assert_eq!(engine.state().object(candidate).unwrap().definition.name, "Candidate");
 
-    // Exiled: the two lands, the too-expensive creature, and the candidate -
-    // the walk stopped there, so the last filler card was never touched.
+    // Exiled: the two lands, the too-expensive creature and the candidate. The walk stopped there.
     let exile_names: Vec<String> = engine
         .state()
         .zone(ZoneKind::Exile, None)
@@ -292,8 +243,7 @@ fn declining_bottoms_every_exiled_card_in_a_random_order_and_casts_nothing() {
         2,
         "both exiled cards returned to the library"
     );
-    // The Cast trigger itself has resolved and popped - the cascade spell
-    // (LIFO, pushed underneath it) still needs its own pass-both cycle.
+    // The Cast trigger resolved, so the cascade spell underneath still needs its own pass-both cycle.
     assert_eq!(engine.state().stack.len(), 1, "just the cascade spell itself remains");
     let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(engine.state().stack.is_empty(), "nothing was cast via cascade - only the cascade spell itself resolved");
@@ -305,8 +255,7 @@ fn casting_the_candidate_pays_no_mana_cost_and_bottoms_only_the_leftovers() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let card = ObjectId(0);
-    // No mana left after paying the cascade spell's own {3}{R} - proves the
-    // candidate really is cast for {0}, not its own {2} printed cost.
+    // No mana is left after the cascade spell's {3}{R}, so the candidate was cast for {0}.
     let mut state = two_player_state(ManaPool { red: 1, colorless: 3, ..ManaPool::default() });
     state.objects.insert(card, card_object(card, cascade_spell_definition(), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
@@ -336,9 +285,7 @@ fn casting_the_candidate_pays_no_mana_cost_and_bottoms_only_the_leftovers() {
     assert_eq!(engine.state().zone(ZoneKind::Library, Some(p0)).unwrap().contents.len(), 1, "only the land was bottomed");
     assert_eq!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.len(), 0);
 
-    // LIFO: the cascade-cast candidate (pushed above the cascade spell
-    // itself) resolves first, onto the battlefield (it's a creature, CR
-    // 608.3) - then the cascade spell itself needs its own pass-both cycle.
+    // LIFO: the cast candidate resolves first onto the battlefield (CR 608.3), then the cascade spell.
     assert_eq!(engine.state().stack.len(), 2, "the candidate plus the cascade spell itself");
     let status = pass_both_and_drain(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");

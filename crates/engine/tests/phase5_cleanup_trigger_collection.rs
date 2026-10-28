@@ -1,19 +1,5 @@
-//! Phase 5: backlog item 7a's cleanup half - `CleanupSbaCheck` now routes
-//! through the real `CollectTriggers`/`PutTriggersApnap` stages
-//! (`Engine::finish_cleanup_sba_check`/`PipelineExit::CleanupCheck`) instead
-//! of deciding priority-vs-advance from the SBA pass's own event count alone.
-//!
-//! Regression scenario: CR 514.2's "until end of turn" effect expiry runs
-//! before cleanup's SBA check (in the same turn-based action as marked-
-//! damage removal - a lethal-*damage* scenario can't survive to cleanup's
-//! own SBA pass, since damage clears in that same step). A permanent -X/-X
-//! effect combined with a temporary (until-end-of-turn) +X/+X pump can,
-//! though: the creature has 0-or-less effective toughness (CR 704.5f) the
-//! instant the pump wears off, so its "when this dies" trigger fires from
-//! *inside* `CleanupSbaCheck` itself - previously silently dropped (no
-//! `CollectTriggers` ever ran for this path), now placed onto the stack and
-//! correctly reopening priority per CR 514.3 ("if a state-based action is
-//! performed... a priority window is opened").
+//! CR 514.3: `CleanupSbaCheck` routes through `CollectTriggers` and `PutTriggersApnap`, so a trigger fired in the cleanup SBA pass reaches the stack and reopens priority.
+//! A permanent -X/-X plus an until-end-of-turn pump reaches 0 toughness (CR 704.5f) when the pump expires (CR 514.2).
 
 use std::collections::HashMap;
 
@@ -70,9 +56,6 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-/// A two-player `GameState` sitting at `(Ending, End)` in `PriorityWindow`
-/// for `p0` (active player), same fixture shape `phase5_ending_phase.rs`'s
-/// own `state_at_end_step` uses.
 fn state_at_end_step() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -100,8 +83,6 @@ fn pass(engine: &mut Engine, player: PlayerId) {
         .expect("PassPriority should be accepted");
 }
 
-/// Drives through End step priority for both players, then returns whatever
-/// cleanup produces.
 fn pass_through_end_step(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     let s = step_until_pause(engine);
     assert!(matches!(s, StepStatus::AwaitingAction { player } if player == p0), "expected p0 end-step priority, got {s:?}");
@@ -120,11 +101,7 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let source = ObjectId(1);
-    // Base toughness 1. A permanent -5/-5 drops it to -4 on its own; a
-    // +0/+5 "until end of turn" pump keeps it at a healthy 1 all turn. No
-    // marked damage involved at all - CR 514.2 wipes that in this same
-    // cleanup step regardless, so a damage-based lethal scenario can't
-    // survive to reach CleanupSbaCheck's own SBA pass.
+    // A permanent -5/-5 plus a +0/+5 pump leaves toughness 1 all turn, with no marked damage since CR 514.2 clears it in the same step.
     state.objects.insert(source, creature(source, p0, 1, 0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);
     state.abilities.push(dies_ability(source));
@@ -150,12 +127,7 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
     let mut engine = Engine::new(state);
     let status = pass_through_end_step(&mut engine, p0, p1);
 
-    // The pump expired at cleanup (CR 514.2), the creature dropped to
-    // 0-or-less effective toughness, CleanupSbaCheck's own SBA pass killed
-    // it (CR 704.5f), and - the actual fix - the resulting Dies trigger was
-    // collected and pushed onto the stack instead of silently dropped, so
-    // priority reopens for p0 (the active player) rather than the turn
-    // advancing straight to p1's Upkeep.
+    // The pump expired (CR 514.2), toughness hit 0 (CR 704.5f) and the Dies trigger was pushed, so priority reopens for p0 and the turn does not advance.
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "expected p0 priority reopened by the Dies trigger, got {status:?}"
@@ -181,9 +153,7 @@ fn a_creature_that_dies_exactly_when_its_end_of_turn_pump_expires_fires_its_dies
 
     assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied from the Dies trigger");
     assert!(engine.state().stack.is_empty());
-    // CR 117.5: priority reopens for p0 once more (still the same Cleanup
-    // step, empty stack now) before the turn is finally allowed to advance -
-    // one more full pass round is needed.
+    // CR 117.5: priority reopens for p0 once more in the same Cleanup step, so one more pass round is needed.
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
         "expected priority to reopen once more for p0 with the stack now empty, got {status:?}"
@@ -206,11 +176,7 @@ fn cleanup_with_no_sba_and_no_trigger_still_advances_silently() {
     let mut state = state_at_end_step();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // A perfectly healthy creature - untouched by cleanup's SBA pass, no
-    // Dies trigger should ever fire, matching pre-existing behavior
-    // (phase5_ending_phase.rs's own cleanup_no_discard_needed_* tests) - not
-    // a regression introduced by routing CleanupSbaCheck through the real
-    // pipeline now.
+    // A healthy creature fires no Dies trigger, as the cleanup_no_discard_needed tests in phase5_ending_phase.rs also show.
     let source = ObjectId(1);
     state.objects.insert(source, creature(source, p0, 3, 0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source);

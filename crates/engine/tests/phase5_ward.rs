@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: Ward (CR 702.21). "Whenever this permanent becomes
-//! the target of a spell or ability an opponent controls, counter that spell
-//! or ability unless that player pays [cost]."
-//!
-//! Three pieces make it up: `GameEventKind::BecameTarget` (logged once the
-//! spell is cast, the activation is paid for, or the trigger is put on the
-//! stack), `ConditionPrimitive::BecomesTargetOfOpponent`, and
-//! `TargetFilter::TriggeringStackObject`, which lets the ward trigger target
-//! the spell or ability that caused it without a CR 603.3d choice. The
-//! counter itself is the existing `AbilityEffect::UnlessPaid`. Cards are
-//! written with `Game.RegisterWard(c, "{2}")`.
-//!
-//! Also covers the `Game.SelectTargets` fix: its legality check used to pass
-//! the resolving stack id as the protection source, which is not a real object
-//! for an ability.
+//! CR 702.21 Ward: `GameEventKind::BecameTarget`, `ConditionPrimitive::BecomesTargetOfOpponent` and `TargetFilter::TriggeringStackObject` let the ward trigger target the spell or ability that caused it with no CR 603.3d choice. The counter is `AbilityEffect::UnlessPaid`, and cards use `Game.RegisterWard(c, "{2}")`.
+//! It also covers `Game.SelectTargets` passing a real protection source and not the resolving stack id, which is no object for an ability.
 
 use std::collections::HashMap;
 
@@ -73,8 +60,6 @@ fn creature_word() -> TargetRequirement {
     }
 }
 
-/// "Test Doom: Destroy target creature." Free, so casting only pauses for the
-/// empty payment.
 fn doom_definition(spec: TargetSpec) -> CardDefinition {
     CardDefinition {
         target_requirement: Some(spec),
@@ -105,9 +90,6 @@ fn put_in_hand(state: &mut GameState, id: ObjectId, definition: CardDefinition, 
     state.zone_mut(ZoneKind::Hand, Some(owner)).unwrap().push_bottom(id);
 }
 
-/// Runs the card script of every battlefield object, sharing one runtime so
-/// ability ids don't collide (fixture battlefield cards aren't scripted by the
-/// engine itself).
 fn run_battlefield_scripts(state: &mut GameState, ids: &[ObjectId]) {
     let mut runtime = ScriptRuntime::new();
     for &id in ids {
@@ -125,7 +107,6 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Targ
         .expect("player holds priority, spell is in hand");
 }
 
-/// Casts a free spell and pays for it.
 fn cast_and_pay(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: Vec<Target>) -> StepStatus {
     cast(engine, player, card, targets);
     let status = drain(engine);
@@ -134,8 +115,6 @@ fn cast_and_pay(engine: &mut Engine, player: PlayerId, card: ObjectId, targets: 
     drain(engine)
 }
 
-/// If several ward triggers matched at once their controller orders them;
-/// keeps the offered order.
 fn accept_trigger_order(engine: &mut Engine, status: StepStatus) -> StepStatus {
     match status {
         StepStatus::AwaitingTriggerOrderChoice { group, .. } => {
@@ -169,8 +148,6 @@ fn ward_triggers_on_stack(engine: &Engine) -> Vec<&StackObject> {
     engine.state().stack.iter().filter(|s| matches!(s.kind, StackEntryKind::TriggeredAbility)).collect()
 }
 
-/// A cast spell is a new object (CR 400.7), so the id it had in hand is gone;
-/// this finds the spell now on the stack.
 fn spell_on_stack(engine: &Engine) -> ObjectId {
     engine.state().stack.iter().find(|s| matches!(s.kind, StackEntryKind::Spell)).expect("a spell is on the stack").stack_id
 }
@@ -179,11 +156,6 @@ fn on_battlefield(engine: &Engine, id: ObjectId) -> bool {
     engine.state().object(id).is_some_and(|o| o.zone == ZoneKind::Battlefield)
 }
 
-// ---------------------------------------------------------------------
-// CR 702.21a - the basic trigger and the unless-paid counter.
-// ---------------------------------------------------------------------
-
-/// P1 controls a Ward {2} bear, P0 casts a free Doom at it.
 fn ward_bear_vs_doom() -> (Engine, ObjectId, ObjectId) {
     let (bear, doom) = (ObjectId(10), ObjectId(11));
     let mut state = two_player_state();
@@ -193,6 +165,7 @@ fn ward_bear_vs_doom() -> (Engine, ObjectId, ObjectId) {
     (Engine::new(state), bear, doom)
 }
 
+// CR 702.21a
 #[test]
 fn an_opponents_spell_targeting_a_ward_permanent_puts_a_ward_trigger_above_it() {
     let (mut engine, bear, doom) = ward_bear_vs_doom();
@@ -316,10 +289,7 @@ fn the_ward_trigger_fizzles_cleanly_if_the_spell_is_already_gone() {
     assert!(engine.state().stack.is_empty());
 }
 
-// ---------------------------------------------------------------------
-// CR 603.2c / 702.21b - how many triggers.
-// ---------------------------------------------------------------------
-
+// CR 603.2c
 #[test]
 fn two_ward_instances_trigger_separately_and_only_the_first_decline_matters() {
     let (bear, doom) = (ObjectId(10), ObjectId(11));
@@ -380,10 +350,6 @@ fn naming_the_same_permanent_under_two_target_words_is_one_trigger() {
     assert_eq!(became_target_events(&engine, bear).len(), 1, "CR 603.2c: one event for the one permanent");
     assert_eq!(ward_triggers_on_stack(&engine).len(), 1);
 }
-
-// ---------------------------------------------------------------------
-// Activated and triggered abilities.
-// ---------------------------------------------------------------------
 
 #[test]
 fn an_activated_ability_targeting_a_ward_permanent_triggers_ward_and_can_be_countered() {
@@ -490,10 +456,6 @@ fn a_triggered_ability_targeting_a_ward_permanent_triggers_ward() {
     assert_eq!(ward.targets, vec![Target::Ability(reaper_trigger)]);
 }
 
-// ---------------------------------------------------------------------
-// The Game.SelectTargets source fix.
-// ---------------------------------------------------------------------
-
 const RED_LAND_SELECT_CREATURE_THEN_DESTROY: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -529,10 +491,7 @@ fn protection_from_red(source: ObjectId) -> ContinuousEffect {
 
 #[test]
 fn a_selecttargets_answer_checks_protection_against_the_abilitys_source_not_its_stack_id() {
-    // An ability's stack id is not an object in the state, so the old call
-    // (`stack_id` as the protection source) could never match a quality
-    // protection and accepted a protected creature. The check now gets the
-    // real source permanent, here a red land.
+    // An ability's stack id is no object in the state, so passing it as the protection source could never match a quality protection. The check now gets the real source permanent, a red land.
     let (land, protected_bear, plain_bear) = (ObjectId(20), ObjectId(10), ObjectId(12));
     let mut state = two_player_state();
     put_on_battlefield(&mut state, protected_bear, bear_definition(1, "Protected Bear", None), P1);

@@ -1,11 +1,4 @@
-//! Phase 5 vertical slice: {X} costs (CR 107.3/601.2b) for
-//! `PlayerActionKind::CastSpell`. Builds on `phase5_cast_spell_payment.rs`'s
-//! cost/payment slice - the `CastSpell` handler now requires an announced
-//! `x_value` to agree with whether the card's mana cost actually has an
-//! `{X}` in it, then substitutes that value in as a generic amount
-//! (`ManaCost::resolve_x`) before `PaymentPlan::validate` ever sees the
-//! cost. See commands.rs's `CastSpell` arm and mana.rs's `resolve_x` doc
-//! comment.
+//! CR 107.3, 601.2b: {X} costs on `CastSpell`. The announced `x_value` must agree with whether the mana cost has an `{X}`, then `ManaCost::resolve_x` substitutes it as generic before `PaymentPlan::validate`.
 
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
@@ -54,8 +47,6 @@ fn state_with_pool(pool: ManaPool) -> GameState {
     }
 }
 
-/// Test case 1: an `{X}{R}` spell cast with `x_value: Some(3)`, paid with
-/// 3 generic (covering the resolved X) + 1 red - legal, resolves.
 #[test]
 fn x_spell_cast_with_announced_value_is_payable() {
     let p0 = PlayerId(0);
@@ -103,8 +94,8 @@ fn x_spell_cast_with_announced_value_is_payable() {
     assert_eq!((pool.red, pool.colorless), (0, 0), "pool fully debited");
 }
 
-/// Test case 2: casting an `{X}{R}` spell without announcing X is rejected
-/// before anything is mutated (CR 601.2b).
+// CR 601.2b
+// Casting an {X}{R} spell without announcing X is rejected before anything is mutated.
 #[test]
 fn x_spell_cast_without_announcing_x_is_rejected() {
     let p0 = PlayerId(0);
@@ -127,8 +118,7 @@ fn x_spell_cast_without_announcing_x_is_rejected() {
     assert_eq!(engine.state().object(card).unwrap().zone, ZoneKind::Hand, "card never left hand");
 }
 
-/// Test case 3: announcing an X value for a spell whose cost has no `{X}`
-/// is rejected too - a nonsensical announcement, not silently ignored.
+// Announcing X for a spell whose cost has no {X} is rejected.
 #[test]
 fn announcing_x_for_a_non_x_spell_is_rejected() {
     let p0 = PlayerId(0);
@@ -154,9 +144,8 @@ fn announcing_x_for_a_non_x_spell_is_rejected() {
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
-/// Test case 4: `{X}` alone with `x_value: Some(0)` is legal, paid with an
-/// explicit empty-units `Mana` entry (CR 107.3/118.5a are distinct
-/// acknowledgments - see mana.rs's `resolve_x` doc comment).
+// CR 107.3, 118.5a
+// {X} alone with x_value: Some(0) is legal, paid with an explicit empty-units Mana entry.
 #[test]
 fn x_only_cost_with_zero_value_needs_an_explicit_empty_mana_entry() {
     let p0 = PlayerId(0);

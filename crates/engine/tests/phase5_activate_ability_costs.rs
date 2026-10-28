@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: CR 602 general activated-ability costs beyond
-//! plain `{T}` — `Sacrifice`/`Discard`/`TapPermanents`/`LifePayment`
-//! additional costs, validated for real by `PaymentPlan::validate` (against
-//! real objects — filter/zone/controller/tapped-state all checked) and
-//! applied for real by `commands::commit_payment` (sacrifice/discard
-//! actually move the object to the graveyard, tap actually taps, life
-//! actually deducts). Also covers a combined cost (`TapSelf` + `Sacrifice`
-//! together), CR 118.3/118.8/118.10.
+//! CR 602: activated-ability additional costs (`Sacrifice`, `Discard`, `TapPermanents`, `LifePayment`) validate and commit.
+//! A combined `TapSelf` plus `Sacrifice` cost needs both parts. CR 118.3, 118.8, 118.10.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -42,11 +36,6 @@ fn object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneK
     card_object(id, definition, owner, zone)
 }
 
-/// One player, main phase, empty stack, a battlefield `source` whose only
-/// registered ability has `cost` and gains 1 life when it resolves. Also
-/// seeds a sacrifice-fodder creature, a hand card, and two other untapped
-/// permanents (`fodder`, `hand_card`, `tappable_a`, `tappable_b`) so cost
-/// tests have real objects to pay with.
 fn state_with_cost(cost: CostSpec) -> (GameState, PlayerId, ObjectId, ObjectId, ObjectId, ObjectId) {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
@@ -174,7 +163,7 @@ fn sacrifice_cost_rejects_illegal_payment() {
 
     activate_and_await_payment(&mut engine, p0, source);
 
-    // tappable_a is an Artifact, not a Creature - fails the filter.
+    // tappable_a is an Artifact, not a Creature, so it fails the filter.
     let err = engine
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(tappable_a)] })
         .unwrap_err();
@@ -221,7 +210,7 @@ fn discard_cost_rejects_illegal_payment() {
 
     activate_and_await_payment(&mut engine, p0, source);
 
-    // fodder is on the battlefield, not in hand - fails the zone check.
+    // fodder is on the battlefield, not in hand.
     let err = engine
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Discard(fodder)] })
         .unwrap_err();
@@ -270,7 +259,7 @@ fn tap_permanents_cost_rejects_duplicate_id() {
 
     activate_and_await_payment(&mut engine, p0, source);
 
-    // Same object twice can't satisfy a count-2 requirement.
+    // The same object twice cannot satisfy a count of 2.
     let err = engine
         .submit_payment(PaymentPlan {
             payments: vec![CostPayment::Tap(tappable_a), CostPayment::Tap(tappable_a)],
@@ -297,8 +286,7 @@ fn life_payment_cost_accepts_legal_payment() {
     drain(&mut engine);
     assert_eq!(engine.state().player(p0).unwrap().life, 17, "20 - 3 paid, ability not resolved yet");
 
-    // Sole player passes priority with a non-empty stack - resolves the
-    // pushed ActivatedAbility's own GainLife(1) effect.
+    // Passing priority with a non-empty stack resolves the ability.
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(&mut engine);
     assert_eq!(engine.state().player(p0).unwrap().life, 18, "17 + 1 gained from the resolved ability");
@@ -316,7 +304,7 @@ fn life_payment_cost_rejects_insufficient_life() {
 
     activate_and_await_payment(&mut engine, p0, source);
 
-    // Only 20 life available - can't pay 25 (CR 119.4).
+    // Only 20 life is available, so paying 25 fails (CR 119.4).
     let err = engine
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Life(25)] })
         .unwrap_err();
@@ -341,13 +329,13 @@ fn combined_tap_self_and_sacrifice_requires_both() {
 
     activate_and_await_payment(&mut engine, p0, source);
 
-    // Only the Sacrifice half - missing the TapSelf entry entirely.
+    // Only the Sacrifice half, so the TapSelf entry is missing.
     let err = engine
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Sacrifice(fodder)] })
         .unwrap_err();
     assert!(matches!(err, PaymentError::InvalidPlan));
 
-    // Both components, in order - accepted, both side effects happen.
+    // Both components, in order.
     engine
         .submit_payment(PaymentPlan {
             payments: vec![CostPayment::Tap(source), CostPayment::Sacrifice(fodder)],

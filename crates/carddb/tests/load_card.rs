@@ -148,9 +148,9 @@ fn not_found_is_a_typed_error() {
     assert!(matches!(err, stackfish_carddb::CardLoadError::NotFound(_)));
 }
 
+// CR 613.4a
 #[test]
 fn cda_power_and_toughness_have_no_script_yet() {
-    // CR 613.4a
     // The DB has no CDA function column, so `script` is always None.
     let db = open_fixture();
     let def = db.load_by_oracle_id("tarmogoyf-1").unwrap();

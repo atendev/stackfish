@@ -1,22 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::DrawCards` (backlog item 8,
-//! fourth Script API primitive) — `Game.Ops.DrawCards(n)`, e.g. "Draw two
-//! cards." No target - always the resolving `StackObject`'s controller,
-//! same "controller only" shape `GainLife` already uses (real card text is
-//! overwhelmingly "you draw" rather than "target player draws").
-//!
-//! Cheapest of the four `Game.Ops` primitives so far: a `ZoneChange` always
-//! describes a move that already happened (see `Destroy`'s own doc
-//! comment), so `ResolveStackTop` mutates state immediately via the shared
-//! `Engine::draw_one_card` helper (extracted from `draw_step`'s own body)
-//! and just logs the resulting real event(s) - no `CommitEvents`
-//! special-case needed, same convention `draw_step` already established.
-//! This also makes it the first non-turn-structure way to draw, so it
-//! exercises the already-existing `DrawsCard`/`EachDrawsCard` trigger
-//! conditions from a new source for the first time.
-//!
-//! Drawing from an empty library silently stops rather than looping past it
-//! - CR 704.5b's empty-library-loss SBA isn't modeled (same TODO
-//! `draw_step` itself already carries).
+//! `AbilityEffect::DrawCards` (`Game.Ops.DrawCards(n)`) draws for the resolving controller through `Engine::draw_one_card`, the first non-turn-structure draw, so it exercises `DrawsCard` and `EachDrawsCard` from a new source.
+// TODO: a scripted draw from an empty library silently stops, and the CR 704.5b loss is only marked
 
 use std::collections::HashMap;
 
@@ -74,7 +57,6 @@ fn land_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Draw: Draw N cards."
 fn drawcards_spell_definition(amount: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -227,10 +209,7 @@ fn drawing_more_than_the_library_holds_stops_without_crashing() {
     pay_free_and_drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);
 
-    // CR 120.3/104.3c: the one available card is drawn, then the second
-    // attempt (from an empty library) marks p0 for the loss SBA - in this
-    // two-player game that immediately ends it (CR 104.2a), backlog item
-    // 11b wiring GameOver up to actually fire once elimination is real.
+    // CR 120.3, 104.3c: the one card is drawn, the second attempt on an empty library marks p0 for the loss SBA, and a two-player game ends (CR 104.2a).
     assert!(matches!(status, StepStatus::GameOver { winner: Some(w) } if w == p1));
     assert!(engine.state().player(p0).unwrap().eliminated);
 }

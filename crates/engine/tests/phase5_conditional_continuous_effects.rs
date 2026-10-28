@@ -1,18 +1,6 @@
-//! Phase 5 vertical slice: CR 611.2c's conditional ("as long as ...")
-//! continuous effects. Scoped tightly to `InterveningIfPrimitive::
-//! ControllerControlsAtLeast` — the one condition shape this slice ships
-//! (see docs/implementation.md's own slice notes) — reusing CR 603.4's
-//! `InterveningIfSpec`/`InterveningIfPrimitive` rather than inventing a
-//! second predicate type, since both are "evaluate a live board-state
-//! predicate, get a bool."
-//!
-//! `layers::applicable_effects_in_layer` (the one call-site every layer
-//! already funnels through) drops an effect whose `condition` doesn't
-//! currently hold - checked fresh on every call, no caching/cleanup, same
-//! "recompute everything" architecture `EffectiveCharacteristics` already
-//! has. The tests below exercise that directly through
-//! `effective_characteristics`, plus the `Game.InterveningIf.ControlsAtLeast`/
-//! `StaticAbilityBuilder:SetCondition` Lua binding end to end.
+//! CR 611.2c: conditional ("as long as ...") continuous effects, scoped to `InterveningIfPrimitive::ControllerControlsAtLeast` and reusing CR 603.4's `InterveningIfSpec`.
+//! `layers::applicable_effects_in_layer` drops an effect whose `condition` does not hold, checked fresh on every call.
+//! The Lua side is `Game.InterveningIf.ControlsAtLeast` with `StaticAbilityBuilder:SetCondition`.
 
 use std::collections::HashMap;
 
@@ -66,8 +54,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// "Creatures you control get +1/+1 as long as you control `count` or more
-/// artifacts" - the anthem shape this slice's Tests section names.
 fn conditional_anthem(source: ObjectId, count: u32) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -148,9 +134,7 @@ fn conditional_effect_stops_applying_the_instant_a_matching_permanent_leaves() {
         "starts with 3 artifacts - the anthem applies"
     );
 
-    // No cache to invalidate - a plain zone removal, then re-querying the
-    // same object, is the whole "re-evaluated continuously" proof CR 611.2c
-    // asks for.
+    // A plain zone removal and re-query is the whole proof of continuous re-evaluation (CR 611.2c).
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().remove(ObjectId(4));
     state.objects.remove(&ObjectId(4));
 
@@ -185,16 +169,7 @@ fn an_unconditional_effect_is_completely_unaffected() {
     assert_eq!(effective.toughness, Some(3));
 }
 
-// ---------------------------------------------------------------------
-// Game.InterveningIf.ControlsAtLeast / StaticAbilityBuilder:SetCondition -
-// the Lua round-trip, both the Primitive and Script decode paths.
-// ---------------------------------------------------------------------
-
-/// Returns the `ScriptRuntime` too, not just the resulting `GameState` -
-/// a `Script`-backed condition's `ScriptHandle` only resolves against the
-/// same runtime's registry that loaded it (see `ScriptRuntime::function`),
-/// so callers exercising that path must query `effective_characteristics`
-/// with *this* runtime, not a fresh `ScriptRuntime::new()`.
+// Returns the ScriptRuntime too, because a Script condition's ScriptHandle resolves only against the runtime that loaded it.
 fn run_static_ability_script(source: ObjectId, script: &str) -> (GameState, ScriptRuntime) {
     let mut state = base_state();
     let p0 = PlayerId(0);
@@ -228,9 +203,7 @@ fn lua_controls_at_least_primitive_round_trips_through_set_condition() {
     // Below the threshold - no boost yet.
     assert_eq!(effective_characteristics(&state, &runtime, bear).power, Some(2));
 
-    // Add 3 artifacts and re-query - the registered condition is a real
-    // InterveningIfSpec::Primitive, re-evaluated fresh, no re-registration
-    // needed.
+    // Add 3 artifacts and re-query: the condition is re-evaluated fresh, with no re-registration.
     put_on_battlefield(&mut state, permanent(ObjectId(2), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT));
     put_on_battlefield(&mut state, permanent(ObjectId(3), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT));
     put_on_battlefield(&mut state, permanent(ObjectId(4), PlayerId(0), 0, 0, CardTypeSet::ARTIFACT));
@@ -240,8 +213,7 @@ fn lua_controls_at_least_primitive_round_trips_through_set_condition() {
 #[test]
 fn lua_set_condition_accepts_a_custom_function_as_a_script_backed_condition() {
     let source = ObjectId(0);
-    // A custom condition function - invoked via ScriptRuntime::invoke_intervening_if,
-    // same InterveningIfSpec::Script path CR 603.4's SetInterveningIf already exercises.
+    // A custom condition function, through the same InterveningIfSpec::Script path as CR 603.4's SetInterveningIf.
     let script = r#"
         local s = {}
         function s.register_abilities(c)

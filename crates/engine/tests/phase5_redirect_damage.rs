@@ -1,16 +1,5 @@
-//! Phase 5 vertical slice: `Game.ReplacementPayloads.RedirectDamageToSource`
-//! (CR 614.9) — the first Lua construction path for
-//! `ReplacementPayload::RedirectDamage(Target)`, narrowed to exactly
-//! "redirect to this effect's own source" (Pariah/Pariah's Shield-shape
-//! cards: "damage that would be dealt to you is dealt to [this permanent]
-//! instead"). `ReplacementEffectBuilder`'s own doc comment (script.rs) names
-//! why an arbitrary chosen redirect target stays unbound.
-//!
-//! `matches()`-level unit tests for CR 614.9's own destination-validity
-//! clause ("if [the destination] is no longer on the battlefield... the
-//! effect does nothing") live in `types/effect.rs`'s own test module
-//! instead, since exercising an eliminated-player destination needs the
-//! general `Target::Player` shape this narrow Lua binding never produces.
+//! CR 614.9: `Game.ReplacementPayloads.RedirectDamageToSource` is the Lua path for `ReplacementPayload::RedirectDamage(Target)`, narrowed to redirecting to the effect's own source (Pariah).
+//! The CR 614.9 destination-validity clause is tested at `matches()` level in `types/effect.rs`, since an eliminated-player destination needs a `Target::Player` this binding never produces.
 
 use std::collections::HashMap;
 
@@ -107,10 +96,6 @@ fn base_state() -> GameState {
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: run_card_script's self-registration mechanics.
-// ---------------------------------------------------------------------
-
 #[test]
 fn set_payload_redirect_damage_to_source_registers_with_own_source_as_target() {
     let mut state = base_state();
@@ -147,11 +132,6 @@ fn mismatched_would_die_filter_and_redirect_damage_payload_is_a_real_register_ti
     assert!(result.is_err(), "WouldDie + RedirectDamage is a real mismatch, must be rejected");
     assert!(state.replacement_effects.is_empty(), "no partial effect should have been committed");
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: a Lua-registered redirect actually changes real Engine
-// combat-damage resolution, not just the queued struct's shape.
-// ---------------------------------------------------------------------
 
 fn assign_combat_damage(
     engine: &mut Engine,

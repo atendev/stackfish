@@ -1,47 +1,6 @@
-//! Phase 5 vertical slice: CR 702.82a Devour N - "as this object enters,
-//! you may sacrifice any number of creatures. This permanent enters with N
-//! +1/+1 counters on it for each creature sacrificed this way." The last of
-//! the four "dynamic ETB counts" backlog items (Bloodthirst/Sunburst/Devour/
-//! Amplify) - and the first that genuinely needs a mid-ETB player choice,
-//! unlike its three siblings' fully deterministic amounts.
-//!
-//! Unlike every other `EntersWithCounters*` payload, `EntersWithCountersDevour`
-//! is never applied by `replacement::apply_enters_battlefield_modifiers` at
-//! all - that function only ever mutates state/proposes events
-//! synchronously, it can't pause the engine mid-call. Instead:
-//! - `replacement::pending_devour_choice` is checked directly by
-//!   `ResolveStackTop`, *before* `apply_enters_battlefield_modifiers` runs
-//!   for the entering object - the one call site that's a resolving spell
-//!   (`PlayLand`/`Search` never check this at all, see that function's own
-//!   doc comment for why).
-//! - A real 1+-candidate match pauses on `ProcessState::AwaitingDevourChoice`
-//!   /`StepStatus::AwaitingDevourChoice`, carrying `events_so_far` (this
-//!   resolution's own not-yet-committed progress, e.g. the entering
-//!   permanent's own `ZoneChange`) since nothing has reached
-//!   `ReplacementCheck`/`CommitEvents` yet at this point in `ResolveStackTop`.
-//! - `Engine::submit_devour_choice` resumes by performing the chosen
-//!   sacrifices via `Engine::continue_scripted_zone_move` (so CR 616.1's
-//!   ordering choice and dies-triggers all apply for free, same as a real
-//!   `AbilityEffect::Sacrifice`), folding `events_so_far` plus a
-//!   `CounterAdded` into that continuation's own `trailing` parameter -
-//!   a new addition to `continue_scripted_zone_move`/`ReplacementResumeTarget::
-//!   ScriptedZoneMove` so those events survive even a nested CR 616.1 pause
-//!   raised mid-sacrifice, not just the non-pausing path.
-//!
-//! Candidates are every creature the entering permanent's own controller
-//! controls (CR 701.17a: sacrificing is always the controller's own choice
-//! over their own permanents) - including the entering permanent itself,
-//! which real Magic allows devouring (untested here as a dedicated case;
-//! if chosen, the later `CounterAdded` simply finds no object left to add
-//! to, same "skip rather than guess" stance every other post-departure
-//! lookup in this codebase already takes).
-//!
-//! CR 702.82c's "Devour [quality] N" variant is real now too
-//! (`phase5/devour-quality`) - `EntersWithCountersDevour.quality:
-//! Option<Subtype>`, checked in `pending_devour_choice` against
-//! `layers::effective_characteristics(...).subtypes` (narrows the candidate
-//! list to permanents of that quality, in addition to the existing
-//! "creature you control" checks - `None` means "any creature," unchanged).
+//! CR 702.82a Devour N: the entering permanent gets N +1/+1 counters per creature sacrificed as it enters.
+//! `ResolveStackTop` checks `replacement::pending_devour_choice` before `apply_enters_battlefield_modifiers`, pauses on `AwaitingDevourChoice` and resumes via `submit_devour_choice` through `continue_scripted_zone_move`.
+//! Candidates are the controller's creatures (CR 701.17a), including the entrant, and `Devour [quality]` narrows them by subtype (CR 702.82c).
 
 use stackfish_engine::engine::{DevourChoiceError, Engine, StepStatus};
 use stackfish_engine::replacement;
@@ -134,10 +93,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-// ---------------------------------------------------------------------
-// pending_devour_choice - unit level.
-// ---------------------------------------------------------------------
-
 #[test]
 fn pending_devour_choice_only_offers_creatures_the_entrant_s_own_controller_controls() {
     let mut state = two_player_state();
@@ -159,9 +114,7 @@ fn pending_devour_choice_only_offers_creatures_the_entrant_s_own_controller_cont
     candidates.sort_by_key(|id| id.0);
 
     assert_eq!(per_creature, 2);
-    // The entrant itself (a creature its own controller controls) and
-    // own_bear both qualify; the opponent's bear and the non-creature
-    // artifact don't.
+    // The entrant and own_bear qualify, and the opponent's bear and the artifact do not.
     assert_eq!(candidates, vec![entrant, own_bear]);
 }
 
@@ -188,8 +141,7 @@ fn pending_devour_choice_with_a_quality_only_offers_the_matching_subtype() {
         replacement::pending_devour_choice(&state, &runtime, entrant, ZoneKind::Stack, p0).expect("a Devour effect is registered with a real candidate");
 
     assert_eq!(per_creature, 2);
-    // The entrant itself isn't a Nightmare, so it doesn't qualify either -
-    // quality narrows every candidate, not just the non-entrant ones.
+    // The entrant is not a Nightmare either, since quality narrows every candidate.
     assert_eq!(candidates, vec![nightmare]);
 }
 
@@ -198,8 +150,7 @@ fn pending_devour_choice_is_none_when_the_controller_has_no_creatures_at_all() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let entrant = ObjectId(0);
-    // The entering permanent itself isn't a creature - Devour on a
-    // hypothetical noncreature carrier, zero creatures anywhere.
+    // The entering permanent is not a creature, and there are no creatures anywhere.
     state.objects.insert(entrant, card_object(entrant, artifact_definition("Odd Devourer", ManaCost { symbols: Vec::new() }, ""), p0, ZoneKind::Battlefield));
     state.replacement_effects.push(devour_effect(entrant, 2));
 
@@ -214,10 +165,6 @@ fn pending_devour_choice_is_none_without_a_registered_devour_effect() {
     let runtime = ScriptRuntime::new();
     assert!(replacement::pending_devour_choice(&state, &runtime, ObjectId(0), ZoneKind::Stack, p0).is_none());
 }
-
-// ---------------------------------------------------------------------
-// Lua self-registration.
-// ---------------------------------------------------------------------
 
 const DEVOUR_TWO: &str = r#"
 local s = {}
@@ -282,10 +229,6 @@ fn set_payload_devour_with_a_quality_registers_correctly() {
         other => panic!("expected a WouldMoveZone(_, Battlefield)/EntersWithCountersDevour(2, \"Nightmare\") spec, got {other:?}"),
     }
 }
-
-// ---------------------------------------------------------------------
-// End to end: Lua registration + real CastSpell resolution + the pause.
-// ---------------------------------------------------------------------
 
 fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
     engine
@@ -376,8 +319,7 @@ fn devour_with_a_quality_only_offers_the_matching_subtype_end_to_end() {
         panic!("expected a CR 702.82c Devour [quality] choice pause, got {status:?}")
     };
     assert_eq!(per_creature, 2);
-    // Neither the entrant (not a Nightmare) nor the plain Bear qualify -
-    // only Night Terror does.
+    // Only Night Terror qualifies, since neither the entrant nor the plain Bear is a Nightmare.
     assert_eq!(candidates, vec![nightmare]);
 
     engine.submit_devour_choice(vec![nightmare]).expect("Night Terror was the offered candidate");
@@ -436,8 +378,7 @@ fn a_devour_creature_with_no_other_creatures_can_still_devour_itself() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
 
-    // It sacrificed itself before it could receive counters - gone, not on
-    // the battlefield with 2 counters.
+    // It sacrificed itself before it could receive counters, so it is gone and not on the battlefield with 2.
     assert!(engine.state().object(object).is_none());
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty());
 }

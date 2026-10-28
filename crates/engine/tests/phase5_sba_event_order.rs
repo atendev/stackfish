@@ -1,9 +1,4 @@
-//! A state-based action pass that touches several objects at once must do so
-//! in the same order every run. `GameState::objects` is a `HashMap`, so any
-//! SBA collector that skips sorting returns objects in a different order on
-//! each run, and the same seed then writes different ledgers. The proof-game
-//! atomicity test found this: the same seed sometimes ordered two
-//! `Unattached` events differently.
+//! An SBA pass touching several objects must do so in the same order every run, since `GameState::objects` is a `HashMap`. An unsorted collector would write different ledgers for one seed.
 
 use stackfish_engine::sba::{check_state_based_actions, SbaOutcome};
 use stackfish_engine::script::ScriptRuntime;
@@ -20,7 +15,6 @@ fn equipment_definition(id: u64) -> CardDefinition {
     }
 }
 
-/// `COUNT` Equipment attached to a land, which is not a creature, so each one falls off.
 #[test]
 fn equipment_that_falls_off_does_so_in_object_id_order() {
     let mut state = two_player_state(zones(P0, PlayerId(1), &[ZoneKind::Battlefield]));

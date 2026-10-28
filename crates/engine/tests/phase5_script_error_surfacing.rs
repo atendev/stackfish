@@ -1,21 +1,6 @@
-//! Phase 5 vertical slice: script-error surfacing (the "Known unresolved
-//! gaps" cross-cutting bullet). Before this slice, a Lua runtime error mid-
-//! resolution silently became "condition false"/"doesn't hold" at every one
-//! of these call sites, with nothing recording that it happened - a real
-//! script bug and "the card's ability legitimately didn't apply" were
-//! indistinguishable from the ledger alone. Each site keeps the exact same
-//! conservative fallback behavior (never guesses what the script *would*
-//! have returned) - only the *visibility* changed: a real
-//! `GameEventKind::ScriptError` is now logged wherever the call site has
-//! `&mut Engine`/a real mutation pipeline to log through.
-//!
-//! `layers.rs`'s own script call sites (`applicable_effects_in_layer`/
-//! `resolve_primitive`) are a deliberate, named exception, not covered here
-//! - they're pure `&GameState`-only characteristic-query functions, called
-//! from `effective_characteristics`'s many call sites throughout the
-//! engine; logging from there would mean threading error-reporting through
-//! that entire call graph, a much larger change than this slice's scope
-//! (see each site's own doc comment).
+//! A Lua runtime error mid-resolution logs `GameEventKind::ScriptError` wherever the call site has `&mut Engine`, keeping the conservative fallback (condition false, intervening-if does not hold).
+//! `layers.rs` script call sites are `&GameState`-only characteristic queries, so they do not log, since threading error reporting through `effective_characteristics` is a much larger change.
+// TODO: script errors raised from `layers.rs` are not logged
 
 
 use stackfish_engine::engine::{Engine, StepStatus};
@@ -24,16 +9,9 @@ use stackfish_engine::triggers::collect_triggers;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, player_state, two_player_state as base_two_player_state};
 
-/// Errors unconditionally regardless of call shape (works for both
-/// `invoke_condition`'s `(source, controller, event, state)` and
-/// `invoke_intervening_if`'s `(source, controller, state)` via `...`).
 const ALWAYS_ERRORS: &str = "function(...) error('boom') end";
 
-/// Errors only once `controller`'s life drops to 10 or below - lets a test
-/// keep the trigger-time check error-free (so it actually queues) and force
-/// the error specifically at the resolution-time recheck, the same "flips
-/// between trigger and resolution" shape `phase5_intervening_if.rs`'s own
-/// response-spell test already uses for a `Primitive` intervening-if.
+// Errors only once controller's life is 10 or below, so the trigger-time check queues and the error is forced at the resolution-time recheck.
 const ERRORS_BELOW_TEN_LIFE: &str = r#"
 function(source, controller, state)
     if state.life[controller] <= 10 then
@@ -68,8 +46,6 @@ fn creature_definition(name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Drain: you lose 15 life." - the response spell used to drive the
-/// resolution-time recheck below the error threshold.
 fn drain_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
@@ -95,8 +71,6 @@ fn drain_spell_definition() -> CardDefinition {
     }
 }
 
-/// Two-player state starting at `Phase::PreGame`/`Step::Untap`, p0 active -
-/// mirrors `phase5_intervening_if.rs::two_player_state`.
 fn two_player_state(p0_life: i32) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -141,10 +115,6 @@ fn script_error_events(engine: &Engine) -> Vec<String> {
         })
         .collect()
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: collect_triggers's own three script call sites.
-// ---------------------------------------------------------------------
 
 #[test]
 fn collect_triggers_condition_script_error_falls_back_to_no_match_and_is_reported() {
@@ -259,17 +229,12 @@ fn collect_triggers_departed_loop_intervening_if_script_error_falls_back() {
     assert!(errors[0].contains("departed"), "error message: {}", errors[0]);
 }
 
-// ---------------------------------------------------------------------
-// Full Engine: ResolveStackTop's own resolution-time recheck (CR 608.2a).
-// ---------------------------------------------------------------------
-
 #[test]
 fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let permanent = ObjectId(0);
-    // Life 20 - well above the error threshold (10), so the trigger-time
-    // check succeeds cleanly and the trigger actually queues.
+    // Life 20 is above the error threshold (10), so the trigger-time check succeeds and the trigger queues.
     let mut state = two_player_state(20);
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
@@ -277,10 +242,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
     state.objects.insert(drain_spell, card_object(drain_spell, drain_spell_definition(), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(drain_spell);
 
-    // ScriptHandle values are registry keys local to one ScriptRuntime -
-    // must be minted from the engine's own runtime (Engine::load_script),
-    // not a throwaway one, or the handle won't resolve to anything when the
-    // engine actually invokes it.
+    // ScriptHandle values are keys local to one ScriptRuntime, so mint them from the engine's own runtime (Engine::load_script).
     let mut engine = Engine::new(state);
     let handle = engine.load_script(ERRORS_BELOW_TEN_LIFE).expect("script loads");
     engine.state_mut().abilities.push(RegisteredAbility {
@@ -302,8 +264,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
     assert_eq!(engine.state().stack.len(), 1, "intervening-if held (no error) at trigger time - collected and pushed");
     assert!(script_error_events(&engine).is_empty(), "no error yet - the trigger-time check never ran the erroring branch");
 
-    // p0 responds with Test Drain, dropping life to 5 - below the error
-    // threshold - before the upkeep trigger underneath it ever resolves.
+    // p0 responds with Test Drain, dropping life to 5, below the error threshold, before the trigger resolves.
     cast_spell(&mut engine, p0, drain_spell);
     pay_free_and_drain(&mut engine);
     assert_eq!(engine.state().stack.len(), 2);
@@ -313,10 +274,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
     assert_eq!(engine.state().player(p0).unwrap().life, 5, "Test Drain resolved first");
     assert_eq!(engine.state().stack.len(), 1, "only the upkeep trigger remains");
 
-    // Now the upkeep trigger resolves - CR 608.2a's recheck hits the
-    // erroring branch (life 5 <= 10), falls back to "doesn't hold", and
-    // fizzles - same observable outcome as a real false Primitive, but now
-    // with a real ScriptError event logged alongside it.
+    // CR 608.2a's recheck hits the erroring branch (life 5 <= 10), falls back to "doesn't hold", fizzles, and logs a ScriptError.
     let status = pass_both(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty());
@@ -325,14 +283,7 @@ fn resolution_time_intervening_if_script_error_fizzles_the_trigger_and_is_logged
         engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::Fizzled { .. })),
         "a Fizzled event was logged for the errored-out trigger"
     );
-    // collect_triggers computes every ability's intervening-if against
-    // every event regardless of whether that event's own condition
-    // matched (a pre-existing, unrelated characteristic of the function,
-    // not something this slice changes) - once life is at 5, every event
-    // from here on re-triggers the same erroring branch, so more than one
-    // ScriptError is expected. The point being proven is that at least one
-    // real error got logged, not an exact count driven by incidental event
-    // traffic.
+    // collect_triggers evaluates every ability's intervening-if on every event, so at life 5 more than one ScriptError is expected. The point is that at least one was logged.
     let errors = script_error_events(&engine);
     assert!(!errors.is_empty(), "at least one ScriptError event was logged");
     assert!(errors.iter().all(|m| m.contains("intervening-if")), "error messages: {errors:?}");

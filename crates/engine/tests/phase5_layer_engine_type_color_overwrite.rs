@@ -1,26 +1,8 @@
-//! Phase 5 vertical slice: CR 613 continuous-effect layer engine, the
-//! overwrite half of layers 4/5 `phase5_layer_engine_types_colors.rs`
-//! deliberately left unbuilt — `EffectPrimitive::SetCardTypes`/`SetColors`
-//! (CR 613.1a's "becomes" shape, overriding whatever came before this layer
-//! entirely, same override-not-additive semantics `SetPT` already
-//! establishes for layer 7b) — plus supertype/subtype grants
-//! (`AddSupertype`/`AddSubtype`, CR 613.1d/205.1b/205.4b), which fold into
-//! the same layer 4 pass as card types per CR 613.1d, not a separate layer.
-//!
-//! Narrowed, named rather than attempted: CR 205.1a's own carve-out (an
-//! object with the Instant or Sorcery card type retains that type through a
-//! card-type overwrite) isn't modeled — no real card in this corpus needs
-//! it. CR 205.3d ("can't gain a subtype that doesn't correspond to one of
-//! the object's card types") isn't validated either, same trust-the-script
-//! posture every other script-authored primitive in this engine already
-//! takes. No `SetSupertypes`/`SetSubtypes` full-overwrite shape — only the
-//! additive `Add*` form, matching the original TODO's own framing ("natural
-//! next extension of the additive pattern").
-//!
-//! Same "`ContinuousEffect`s built directly via struct literal" bootstrap
-//! pattern as the sibling additive-only file for the layer-engine-level
-//! tests; the Lua round-trip test at the bottom goes through a real card
-//! script instead.
+//! CR 613.1a, 613.1d: `EffectPrimitive::SetCardTypes` and `SetColors` overwrite whatever came before in layers 4 and 5, like `SetPT` in 7b, and `AddSupertype` and `AddSubtype` fold into the layer 4 pass (CR 205.1b, 205.4b).
+//! Effects are built directly by struct literal, and the Lua round-trip test goes through a real card script.
+// TODO: the CR 205.1a carve-out that an Instant or Sorcery keeps that type through a card-type overwrite
+// TODO: CR 205.3d, a subtype that does not correspond to one of the object's card types, is not validated
+// TODO: full-overwrite `SetSupertypes` and `SetSubtypes`, since only the additive `Add*` form exists
 
 use std::collections::HashMap;
 
@@ -156,10 +138,7 @@ fn set_colors_overwrites_existing_colors_entirely() {
 
 #[test]
 fn later_timestamp_set_card_types_wins_over_an_earlier_add_card_type() {
-    // CR 613.7: within one layer, effects apply in timestamp order against
-    // the running value - a later SetCardTypes wipes out whatever an
-    // earlier AddCardType already added, since the loop is one sequential
-    // fold, not two independent passes.
+    // CR 613.7: effects in one layer fold sequentially in timestamp order, so a later SetCardTypes wipes out an earlier AddCardType.
     let mut state = base_state();
     let p0 = PlayerId(0);
     let target_land = ObjectId(0);
@@ -184,9 +163,7 @@ fn later_timestamp_set_card_types_wins_over_an_earlier_add_card_type() {
 
 #[test]
 fn an_earlier_set_card_types_is_still_built_on_by_a_later_add_card_type() {
-    // The reverse ordering: an AddCardType after an earlier SetCardTypes
-    // stacks on top of it rather than being wiped, same running-fold
-    // sequencing proven the other direction above.
+    // The reverse order: an AddCardType after an earlier SetCardTypes stacks on top of it.
     let mut state = base_state();
     let p0 = PlayerId(0);
     let target_land = ObjectId(0);
@@ -268,13 +245,6 @@ fn add_subtype_does_not_duplicate_a_subtype_already_present() {
     assert_eq!(effective.subtypes, vec![Subtype("Bear".to_string())]);
 }
 
-// ---------------------------------------------------------------------
-// Real consumer: sba.rs's CR 704.5j legend-rule check already reads
-// supertypes through effective_characteristics specifically to
-// future-proof for a "becomes legendary" effect - proving that actually
-// works end to end now that one exists.
-// ---------------------------------------------------------------------
-
 #[test]
 fn legend_rule_recognizes_a_continuous_effect_granted_legendary_supertype() {
     let mut state = base_state();
@@ -288,8 +258,7 @@ fn legend_rule_recognizes_a_continuous_effect_granted_legendary_supertype() {
     let mut b = creature(granted_legend, p0, 3, 3);
     b.definition.name = "Test Legend".to_string();
     put_on_battlefield(&mut state, b);
-    // An unrelated static ability grants Legendary to the second copy - not
-    // printed on it at all, only via AddSupertype.
+    // An unrelated static ability grants Legendary to the second copy, which is not printed on it.
     state.continuous_effects.push(continuous_effect(
         granted_legend,
         Layer::TypeChanging,
@@ -306,12 +275,6 @@ fn legend_rule_recognizes_a_continuous_effect_granted_legendary_supertype() {
         _ => panic!("expected a legend-rule choice pause now that both copies are effectively legendary"),
     }
 }
-
-// ---------------------------------------------------------------------
-// Lua round trip: Game.Effects.SetCardTypes/SetColors/AddSupertype/
-// AddSubtype self-register and resolve for real, not just direct Rust
-// construction.
-// ---------------------------------------------------------------------
 
 const ANIMATE_LAND_SCRIPT: &str = r#"
 local s = {}

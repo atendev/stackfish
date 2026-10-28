@@ -1,10 +1,5 @@
-//! Phase 5 vertical slice: baseline `ActivateAbility` (CR 602), implemented
-//! far enough to support one concrete case end-to-end: a mana ability
-//! (CR 605) that taps its source and adds mana to the pool. CR 605.3b: a
-//! mana ability has no target and never uses the stack - it resolves
-//! immediately as part of activation. Non-mana abilities get the structural
-//! lookup/validation only - effect resolution stays `todo!()` (no script
-//! bridge yet, same gap every other ability/operation hits).
+//! CR 605.3b: a mana ability taps its source and adds mana at once, with no target and no stack object.
+//! Non-mana abilities get structural lookup and validation only.
 
 use std::collections::VecDeque;
 
@@ -21,16 +16,11 @@ fn land_definition() -> CardDefinition {
     }
 }
 
-/// Controlled well before turn 1 started - `state_with_source` seeds
-/// `last_active_turn_number` to 1, so this is never summoning sick by
-/// default. Tests exercising sickness itself override this field directly
-/// on the object after construction.
+// Controlled since before turn 1, so never summoning sick unless a test overrides it.
 fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
     card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
-/// One player, main phase, empty stack, a battlefield zone with a single
-/// tap-for-mana permanent registered as its only ability.
 fn state_with_source(source: ObjectId, controller: PlayerId, ability_owner: ObjectId) -> GameState {
     let mut objects = std::collections::HashMap::new();
     objects.insert(source, permanent_object(source, land_definition(), controller));
@@ -64,10 +54,7 @@ fn activate(engine: &mut Engine, player: PlayerId, source: ObjectId, targets: Ve
         .expect("player holds priority");
 }
 
-/// Submits the action and drains, returning the engine's `CommandError` if
-/// `execute_command` rejected it mid-pipeline (the validations this slice
-/// adds all surface as `StepStatus::Error`, not a `submit_action` rejection,
-/// since they need state `submit_action` doesn't check).
+// Returns the `CommandError` raised mid-pipeline, which `submit_action` does not check.
 fn activate_and_drain(
     engine: &mut Engine,
     player: PlayerId,
@@ -129,9 +116,7 @@ fn reject_when_actor_does_not_control_source() {
     let p1 = PlayerId(1);
     let source = ObjectId(0);
     let mut state = state_with_source(source, p0, source);
-    // p1 doesn't control anything, but has priority via a (fake) second seat
-    // isn't needed - simplest reject path is to have p0 (who holds priority)
-    // not control the source, by changing the source's controller.
+    // p0 holds priority, so the reject path is changing the source's controller.
     state.object_mut(source).unwrap().controller = p1;
 
     let mut engine = Engine::new(state);
@@ -153,22 +138,15 @@ fn reject_when_source_already_tapped() {
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0, "no mana added");
 }
 
-/// CR 602.5a: closes the TODO the activate-ability-mana slice left open -
-/// a creature that entered the battlefield this turn can't tap for mana
-/// either (same summoning-sickness check `DeclareAttackers` uses). CR
-/// 302.6/the keyword-primitives slice: summoning sickness only restricts a
-/// *creature's* tap abilities, not a land's - `state_with_source`'s default
-/// fixture is a land, so this test overrides it to a creature to actually
-/// exercise the check it's testing.
+// CR 602.5a, CR 302.6
+// Only creatures are summoning sick, so the fixture land becomes a creature. Resolves the TODO on mana abilities and sickness.
 #[test]
 fn reject_when_source_has_summoning_sickness() {
     let p0 = PlayerId(0);
     let source = ObjectId(0);
     let mut state = state_with_source(source, p0, source);
     state.object_mut(source).unwrap().definition.card_types = CardTypeSet::CREATURE;
-    // last_active_turn_number[p0] == 1 (state_with_source's default) - a
-    // source controlled since turn 1 (the current turn) hasn't been
-    // controlled since the turn *began*, so it's sick.
+    // Controlled since turn 1 (the current turn), not since the turn began, so it is sick.
     state.object_mut(source).unwrap().controlled_since_turn = 1;
 
     let mut engine = Engine::new(state);
@@ -201,8 +179,7 @@ fn reject_when_actor_does_not_hold_priority() {
     state.priority_player = p1;
 
     let mut engine = Engine::new(state);
-    // p0 doesn't hold priority - submit_action itself rejects it (CR
-    // 117.3a's check lives there), never even reaching execute_command.
+    // p0 does not hold priority, so submit_action rejects it before execute_command (CR 117.3a).
     let err = engine
         .submit_action(PlayerAction {
             player: p0,
@@ -265,9 +242,6 @@ fn reject_target_supplied_for_mana_ability() {
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0);
 }
 
-/// Two mana abilities on the same source, plus a second source - confirms
-/// `ability_index`/`source` lookup picks the right one and the pool
-/// accumulates correctly across separate activations.
 #[test]
 fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
     let p0 = PlayerId(0);
@@ -276,7 +250,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
     let mut state = state_with_source(source_a, p0, source_a);
     state.objects.insert(source_b, permanent_object(source_b, land_definition(), p0));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(source_b);
-    // source_a gets a second ability (index 1: adds colorless instead).
+    // source_a gets a second ability (index 1) that adds colorless.
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -306,7 +280,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
 
     let mut engine = Engine::new(state);
 
-    // source_a's ability_index 1 (colorless), not index 0 (green).
+    // Index 1 (colorless), not index 0 (green).
     engine
         .submit_action(PlayerAction {
             player: p0,
@@ -325,7 +299,7 @@ fn multiple_mana_abilities_pick_the_right_one_and_accumulate() {
     assert!(engine.state().object(source_a).unwrap().tapped);
     assert!(!engine.state().object(source_b).unwrap().tapped);
 
-    // source_b's only ability (index 0, green) - accumulates on top.
+    // source_b's only ability (green) accumulates on top.
     activate(&mut engine, p0, source_b, Vec::new());
     drain(&mut engine);
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.colorless, 1);

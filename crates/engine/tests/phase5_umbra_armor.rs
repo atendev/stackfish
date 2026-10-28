@@ -1,26 +1,5 @@
-//! Phase 5 vertical slice: CR 702.89a (Umbra armor) — "if enchanted permanent
-//! would be destroyed, instead remove all damage marked on it and destroy
-//! this Aura." A replacement effect's own reference to "the enchanted
-//! permanent" — the sibling of `phase5/enchanted-reference` (which added the
-//! identical concept for *continuous* effects, `AffectedFilter::
-//! EnchantedOnly`), named there as out of scope: `ReplacementEffect.affected`
-//! is nested two levels deeper (`ReplacementSpec::Primitive.filter ->
-//! EventFilter::WouldDie.affected -> EffectFilter`), a different,
-//! non-`AffectedFilter` type.
-//!
-//! `EventFilter::WouldDieEnchanted` (fieldless, sibling to `WouldDie` rather
-//! than a new field on it — 23 existing `WouldDie` construction sites, no
-//! `Default` impl) resolves directly against the replacement effect's own
-//! `source`'s `attached_to`, mirroring `AffectedFilter::EnchantedOnly`'s own
-//! `source.attached_to == Some(object.object_id)` check.
-//!
-//! `ReplacementPayload::UmbraArmor` is the real novel piece: unlike every
-//! other payload, it has two real, distinct side effects on *two different
-//! objects* — clearing damage on the enchanted permanent (which never
-//! changes zones) and genuinely destroying the Aura itself (a real CR 400.7
-//! new-id zone move). `sba::commit_death_or_regeneration` widened from
-//! returning one `(GameEvent, Vec<RegisteredAbility>)` to a `Vec` of them to
-//! carry both committed events out of one resolved replacement.
+//! CR 702.89a: Umbra armor, "if enchanted permanent would be destroyed, instead remove all damage marked on it and destroy this Aura". `EventFilter::WouldDieEnchanted` resolves against the replacement source's `attached_to`.
+//! `ReplacementPayload::UmbraArmor` has two effects on two objects (clear damage on the enchanted permanent, destroy the Aura with a CR 400.7 new id), so `sba::commit_death_or_regeneration` returns a `Vec` of committed events.
 
 use std::collections::HashMap;
 

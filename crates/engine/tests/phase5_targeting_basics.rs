@@ -1,9 +1,4 @@
-//! Phase 5 vertical slice: targeting system (CR 115 / 601.2c-e / 608.2b).
-//! Covers a fixed-count primitive `TargetRequirement` on `CastSpell`'s spell
-//! and `ActivateAbility`'s non-mana ability path - cast/activation-time
-//! count/filter/dedup validation (601.2c/601.2e, 602.2b), and the CR 608.2b
-//! all-targets-illegal recheck at `ResolveStackTop`. Same struct-literal
-//! `GameState` construction pattern as `phase5_cast_spell.rs`.
+//! CR 115, 601.2c-e, 608.2b: fixed-count `TargetRequirement` validation on `CastSpell` and `ActivateAbility` (count, filter, dedup: CR 601.2c, 601.2e, 602.2b) and the CR 608.2b all-targets-illegal recheck at `ResolveStackTop`.
 
 
 use stackfish_engine::engine::ActionError;
@@ -62,8 +57,6 @@ fn artifact_definition() -> CardDefinition {
     }
 }
 
-/// "Test Bolt deals 3 damage to any target" shape - CR 115.4's `AnyTarget`,
-/// exactly one target.
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -94,8 +87,6 @@ fn bolt_definition() -> CardDefinition {
     }
 }
 
-/// "Test Pump: target creature you control gets +1/+1" shape - `Object`
-/// filter with a `card_types`/`controller` restriction, exactly one target.
 fn pump_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
@@ -132,15 +123,10 @@ fn pump_definition() -> CardDefinition {
     }
 }
 
-/// Two players, hand/battlefield/graveyard zones present for both, stack
-/// empty. Mirrors `phase5_cast_spell::two_player_state`.
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
 
-/// Every fixture card in this file has an empty `mana_cost` - pays it via
-/// the explicit empty `PaymentPlan` CR 118.5a still requires, then drains
-/// the rest of that pipeline run.
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(
@@ -181,8 +167,7 @@ fn cast_spell_rejects_wrong_target_count() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // bolt_definition requires exactly 1 target - submitting 0 or 2 is
-    // illegal (CR 601.2c: the count is fixed by the spell's own text).
+    // bolt_definition requires exactly 1 target, so 0 or 2 is illegal (CR 601.2c).
     let err = try_cast_spell(&mut engine, p0, card, Vec::new()).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
@@ -197,8 +182,7 @@ fn cast_spell_rejects_unrequested_target() {
     let creature = ObjectId(0);
     state.objects.insert(creature, card_object(creature, creature_definition(1, "Bear"), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
-    // creature_definition's own card, cast as a spell straight from hand,
-    // has target_requirement: None - supplying a target anyway is illegal.
+    // creature_definition has target_requirement: None, so supplying a target is illegal.
     let card = ObjectId(2);
     state.objects.insert(card, card_object(card, creature_definition(2, "Bear2"), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
@@ -214,8 +198,7 @@ fn cast_spell_rejects_target_failing_filter() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // pump_definition requires "target creature you control" - a creature
-    // controlled by the opponent fails the FilterController::You check.
+    // pump_definition requires "target creature you control", so an opponent's creature fails FilterController::You.
     let opponents_creature = ObjectId(0);
     state.objects.insert(
         opponents_creature,
@@ -239,8 +222,7 @@ fn cast_spell_rejects_duplicate_targets() {
     let creature = ObjectId(0);
     state.objects.insert(creature, card_object(creature, creature_definition(1, "Bear"), p0, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(creature);
-    // A hypothetical 2-target requirement choosing the same object twice -
-    // reuse bolt_definition's shape but bump count to 2 inline.
+    // A hypothetical 2-target requirement choosing the same object twice, from bolt_definition with count bumped to 2.
     let mut two_target_bolt = bolt_definition();
     two_target_bolt.target_requirement =
         Some(TargetSpec::Primitive(TargetRequirement { filter: TargetFilter::AnyTarget, count: 2, up_to: false, at_least: false, exclude_source: false }));
@@ -279,8 +261,8 @@ fn cast_spell_accepts_legal_target_and_bakes_it_onto_stack_object() {
     assert!(matches!(stack_object.target_requirement, Some(TargetSpec::Primitive(_))));
 }
 
-/// CR 115.4: `AnyTarget` accepts a creature but rejects a noncreature
-/// artifact.
+// CR 115.4
+// AnyTarget accepts a creature but rejects a noncreature artifact.
 #[test]
 fn any_target_filter_rejects_noncreature_artifact() {
     let mut state = two_player_state();
@@ -298,12 +280,8 @@ fn any_target_filter_rejects_noncreature_artifact() {
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
 }
 
-/// CR 608.2b: the target creature is removed from the battlefield after the
-/// spell is cast (simulating an opponent's instant-speed removal resolving
-/// first) but before this spell resolves - by resolution time its only
-/// target is illegal, so it fizzles: no effect runs, it's removed from the
-/// stack, and since it's a spell it goes to its owner's graveyard (not
-/// invoking any card script, unlike a normal permanent resolution).
+// CR 608.2b
+// The target leaves the battlefield before the spell resolves, so it fizzles: no effect, removed from the stack, and a spell goes to its owner's graveyard without invoking a card script.
 #[test]
 fn resolution_fizzles_when_only_target_becomes_illegal() {
     let mut state = two_player_state();
@@ -324,10 +302,7 @@ fn resolution_fizzles_when_only_target_becomes_illegal() {
     pay_free_and_drain(&mut engine);
     assert_eq!(engine.state().stack.len(), 1);
 
-    // Simulate the target leaving the battlefield via some other effect
-    // between casting and this spell resolving - the mechanism isn't this
-    // test's concern, only that ResolveStackTop rechecks legality against
-    // whatever state.objects says now.
+    // The target leaves the battlefield by some other effect, and ResolveStackTop rechecks legality against state.objects.
     engine.state_mut().zone_mut(ZoneKind::Battlefield, None).unwrap().remove(target_creature);
     engine.state_mut().objects.remove(&target_creature);
 
@@ -352,10 +327,7 @@ fn resolution_fizzles_when_only_target_becomes_illegal() {
         .any(|e| matches!(e.kind, GameEventKind::StackObjectResolved { .. }));
     assert!(!resolved_event, "a fizzled spell/ability never emits StackObjectResolved");
 
-    // CR 608.2b: a spell that fizzles always goes to its owner's graveyard,
-    // even though bolt_definition is an instant anyway (so this coincides
-    // with normal 608.2m routing) - the important part is *no battlefield
-    // permanent* and *no effect ran*.
+    // CR 608.2b: a fizzled spell goes to its owner's graveyard. The point is that no battlefield permanent and no effect ran.
     let in_graveyard = engine
         .state()
         .zones
@@ -365,9 +337,7 @@ fn resolution_fizzles_when_only_target_becomes_illegal() {
     assert_eq!(in_graveyard.contents.len(), 1, "fizzled spell landed in its owner's graveyard");
 }
 
-/// Same setup as the fizzle test, but the target is still legal at
-/// resolution - proceeds exactly as before this slice (StackObjectResolved,
-/// no Fizzled event).
+// With the target still legal at resolution, the spell resolves normally (StackObjectResolved, no Fizzled event).
 #[test]
 fn resolution_succeeds_when_target_remains_legal() {
     let mut state = two_player_state();

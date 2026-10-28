@@ -1,35 +1,10 @@
-//! Phase 5 vertical slice: CR 701.8/601.2c mass destruction - "destroy all
-//! X," which doesn't target at all (unlike `AbilityEffect::Destroy`, which
-//! only ever destroys the resolving spell/ability's own already-chosen
-//! target). `AbilityEffect::DestroyAll(EffectFilter)` reuses the exact
-//! `EffectFilter` shape (`controller`/`card_types`/`self_only`, plus
-//! `subtypes`/`excluded_subtypes` - `phase5/effect-filter-subtypes`, CR
-//! 205.4b - "destroy all Zombies" - and `supertypes`/`excluded_supertypes` -
-//! `phase5/effect-filter-supertypes`, CR 205.4a - "destroy all legendary
-//! permanents") `Game.CreateStaticAbility`'s own
-//! `:SetAffected` already uses, and the
-//! same `continue_scripted_zone_move(ScriptedZoneMoveKind::Destroy, ...)`
-//! pipeline the single-target `Destroy` effect already delegates to - CR
-//! 702.12b indestructibility and the CR 614.13 `WouldDie` replacement check
-//! both apply for free, no new destruction logic.
-//!
-//! Combined with the previous slice's `s.operation()`, Armageddon becomes a
-//! real, fully self-contained script:
-//!
-//! ```lua
-//! function s.operation()
-//!     return Game.Ops.DestroyAll({ card_types = { "Land" } })
-//! end
-//! ```
+//! CR 701.8, 601.2c: `AbilityEffect::DestroyAll(EffectFilter)` is "destroy all X", which does not target. It reuses the `EffectFilter` shape of `:SetAffected` (controller, card types, subtypes, supertypes: CR 205.4a/b) and the `Destroy` pipeline, so indestructible (CR 702.12b) and `WouldDie` replacement (CR 614.13) apply.
+//! Armageddon is `return Game.Ops.DestroyAll({ card_types = { "Land" } })`.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state};
-
-// ---------------------------------------------------------------------
-// Decode-level: Game.Ops.DestroyAll
-// ---------------------------------------------------------------------
 
 #[test]
 fn destroy_all_decodes_a_card_types_and_controller_filter() {
@@ -94,10 +69,6 @@ fn destroy_all_decodes_a_supertypes_and_excluded_supertypes_filter() {
         other => panic!("expected DestroyAll, got {other:?}"),
     }
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: a script-declared Armageddon
-// ---------------------------------------------------------------------
 
 const DESTROY_ALL_LANDS_SCRIPT: &str = r#"
 local s = {}

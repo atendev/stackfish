@@ -1,10 +1,4 @@
-//! Phase 5 vertical slice: tap and untap effects (CR 701.26).
-//!
-//! `Game.Ops.Tap` / `Untap` act on the resolving ability's targets,
-//! `TapSelf` / `UntapSelf` on its own source, and `TapAll(filter)` /
-//! `UntapAll(filter)` on every matching battlefield permanent. Only an
-//! untapped permanent can be tapped and only a tapped one untapped (CR
-//! 701.26a/b): a no-op flip changes nothing and emits no event.
+//! CR 701.26: `Game.Ops.Tap`/`Untap` act on the ability's targets, `TapSelf`/`UntapSelf` on its source, and `TapAll(filter)`/`UntapAll(filter)` on every matching battlefield permanent. A no-op flip changes nothing and emits no event (CR 701.26a/b).
 
 use std::collections::HashMap;
 
@@ -48,7 +42,6 @@ end
 return s
 "#;
 
-/// Icy Manipulator: "{T}: Tap target artifact, creature, or land."
 const ICY_MANIPULATOR: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -142,7 +135,6 @@ fn creature_target() -> TargetSpec {
     })
 }
 
-/// An instant with `effect`; targeted ones aim at "target creature".
 fn spell(effect: AbilityEffect, targeted: bool) -> CardDefinition {
     CardDefinition {
         effect: Some(effect),
@@ -203,7 +195,6 @@ fn pass_both(engine: &mut Engine) {
     }
 }
 
-/// Casts `SPELL` aiming at `targets` and pays its (free) cost, leaving it on the stack.
 fn cast(engine: &mut Engine, targets: Vec<Target>) -> Result<(), String> {
     engine
         .submit_action(PlayerAction {
@@ -268,8 +259,6 @@ fn tap_events(engine: &Engine) -> Vec<ObjectId> {
         })
         .collect()
 }
-
-// ---- Tap / Untap (targeted) --------------------------------------------------
 
 #[test]
 fn tap_taps_an_untapped_target_and_emits_one_tapped_event() {
@@ -351,8 +340,6 @@ fn icy_manipulator_style_ability_taps_its_target() {
     assert_eq!(tap_events(&engine), vec![ObjectId(1), ObjectId(2)], "cost first, then the effect");
 }
 
-// ---- TapSelf / UntapSelf -----------------------------------------------------
-
 #[test]
 fn tap_self_taps_the_source_and_emits_one_event() {
     let mut bear = placed(1, "Bear", CardTypeSet::CREATURE, P0, false);
@@ -388,8 +375,6 @@ fn tap_self_with_a_stale_source_does_nothing() {
     assert_eq!(count_events(&engine, true), 0, "CR 400.7: the graveyard object isn't the source");
     assert!(engine.state().objects.values().all(|o| !o.tapped));
 }
-
-// ---- TapAll / UntapAll -------------------------------------------------------
 
 #[test]
 fn tap_all_taps_every_matching_permanent_and_leaves_the_rest() {
@@ -479,13 +464,9 @@ fn untap_all_only_touches_the_battlefield() {
     assert_eq!(count_events(&engine, false), 1);
 }
 
-// ---- Combat (CR 506.4b, 509.1a) ---------------------------------------------
-
 const ATTACKER: ObjectId = ObjectId(10);
 const BLOCKER: ObjectId = ObjectId(11);
 
-/// P0's attacker and P1's potential blocker on the battlefield, `SPELL` in
-/// P0's hand, step `DeclareAttackers` with P0's attack already declared.
 fn combat_engine(effect: AbilityEffect, blocker_tapped: bool) -> Engine {
     let mut state = GameState {
         phase: Phase::Combat,
@@ -565,8 +546,6 @@ fn untapping_a_declared_attacker_keeps_it_in_combat_and_it_still_deals_damage() 
     let life = engine.state().players.iter().find(|p| p.player_id == P1).unwrap().life;
     assert_eq!(life, 18, "CR 506.4b: its combat damage isn't prevented");
 }
-
-// ---- Lua ---------------------------------------------------------------------
 
 #[test]
 fn lua_registers_every_tap_untap_op() {

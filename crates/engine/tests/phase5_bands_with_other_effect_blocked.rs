@@ -1,32 +1,6 @@
-//! Phase 5 vertical slice: CR 509.1h's "target attacking creature becomes
-//! blocked" effect (`AbilityEffect::BecomeBlocked`) plus CR 702.22i's own
-//! banding propagation riding on top of it.
-//!
-//! `BecomeBlocked` is a genuinely new, generic primitive - not banding-
-//! specific - since this engine had zero producer for "a creature becomes
-//! blocked" outside the normal `DeclareBlockers` player action before this
-//! slice. `CombatState.blocks` (a flat list of real `(blocker, attacker)`
-//! pairs) can't represent "blocked, but by nothing," so a new sibling field,
-//! `CombatState.effect_blocked: Vec<ObjectId>`, holds it - consulted
-//! alongside `blocks` by `damage.rs`'s `declared_blocked_attackers`, the one
-//! real consumer: CR 510.1c already means a blocked attacker with zero
-//! *living* blockers deals no combat damage (unless trample), the exact
-//! same rule this reuses, just reached with zero blockers from the start.
-//!
-//! CR 702.22i itself: `commands::combat::mark_effect_blocked` (the shared
-//! mutation both the resolve arm and every test below exercise indirectly,
-//! through the real `Engine::submit_action` pipeline - it's `pub(crate)`,
-//! not reachable directly from an integration test) propagates to every
-//! other living, still-attacking member of the target's own band -
-//! independently blocked by no one each, not by a shared blocker the way CR
-//! 702.22h's declared-blocker propagation works.
-//!
-//! Narrowed target legality (named, not hidden): no `TargetFilter`
-//! predicate for "is attacking" exists, and the Lua state snapshot doesn't
-//! expose combat data either, so `target_requirement` here is just "target
-//! creature" - targeting a non-attacking creature is a silent no-op at
-//! resolution (checked inside `mark_effect_blocked` itself), not a real CR
-//! 608.2b illegal-target fizzle.
+//! CR 509.1h, 702.22i: `AbilityEffect::BecomeBlocked` marks an attacker blocked by nothing, and banding spreads it to the rest of the band.
+//! `CombatState.effect_blocked` holds those attackers, and a blocked attacker with no living blockers deals no combat damage (CR 510.1c).
+// TODO: no `TargetFilter` for "is attacking", so a non-attacking target is a silent no-op at resolution and not a CR 608.2b fizzle
 
 use std::collections::HashMap;
 
@@ -59,7 +33,6 @@ fn creature_definition(id: u64, name: &str, power: i32, toughness: i32, keywords
     }
 }
 
-/// "Test Fog Effect: Target attacking creature becomes blocked."
 fn become_blocked_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 99,
@@ -121,11 +94,6 @@ fn combat_state() -> GameState {
     }
 }
 
-/// Same shape as `phase5_trample.rs`'s own `combat_damage_state` - starts
-/// right at `Step::CombatDamage` with `combat` already populated, for the
-/// two damage-assignment consumer tests below (no cast needed - `effect_
-/// blocked` is populated directly, same as those tests populate `blocks`
-/// with a never-placed "blocker" to stand in for one that died).
 fn combat_damage_state(combat: CombatState) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -175,9 +143,7 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-/// Same as `pass_both_and_drain`, reversed order - for the tests below
-/// where p1 (not p0) is the one who cast the spell and so holds priority
-/// back after casting (CR 601.2i).
+// Reversed pass order: p1 cast the spell and holds priority back after casting (CR 601.2i).
 fn pass_p1_then_p0_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     engine.submit_action(PlayerAction { player: p1, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(engine);
@@ -273,10 +239,7 @@ fn a_band_member_already_removed_from_combat_is_not_propagated_to() {
     declare_attackers(&mut engine, p0, vec![(a, Target::Player(p1)), (b, Target::Player(p1))]);
     let status = declare_bands(&mut engine, p0, vec![vec![a, b]]);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "band declaration failed: {status:?}");
-    // CR 702.22f: `b` is removed from combat (e.g. destroyed) before the
-    // fog effect resolves - it should leave its band, per that same rule
-    // `phase5/bands-with-other`'s own combat.attackers-membership check
-    // already established.
+    // CR 702.22f: b is removed from combat before the effect resolves, so it leaves its band.
     engine.state_mut().combat.as_mut().unwrap().attackers.retain(|(id, _)| *id != b);
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(&mut engine);

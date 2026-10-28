@@ -1,26 +1,6 @@
-//! Phase 5 vertical slice: `TargetFilter::Script` (CR 601.2c/602.2b) - a
-//! custom Lua legality predicate for a target requirement, for filter shapes
-//! `TargetFilter::Object`'s flat option-bag can't express (e.g. "target
-//! creature with power 4 or greater"). Closes the `TargetSpec::Script`/
-//! `invoke_target` backlog gap - that old top-level variant was never
-//! constructed by anything across 5+ prior targeting slices and had no
-//! `count`/`up_to` of its own, so this slice removes it outright and moves
-//! the real predicate one level down, into `TargetRequirement.filter`
-//! instead, where `count`/`up_to` already work.
-//!
-//! `ScriptRuntime::invoke_target_legal` is a *static* per-candidate
-//! predicate, checked once at cast/activation time from
-//! `commands::target_is_legal` - the same call shape
-//! `invoke_continuous_affects` already established for
-//! `AffectedFilter::Script`, not a `Game.SelectTargets` coroutine suspension
-//! (that's a different, unrelated mechanism for asking the player mid-
-//! resolution).
-//!
-//! Scoping notes (named TODOs, not attempted): candidate is `Target::Object`
-//! only - a player-target script predicate is unmodeled. No zone default
-//! either - the script sees full public state and decides zone itself if it
-//! cares. CR 702.16e protection still gates a script-legal candidate, same
-//! as every other `TargetFilter` arm.
+//! CR 601.2c, 602.2b: `TargetFilter::Script` is a custom Lua legality predicate for a target requirement, for shapes the flat `TargetFilter::Object` cannot express ("target creature with power 4 or greater"). It lives in `TargetRequirement.filter`, where `count` and `up_to` work.
+//! `invoke_target_legal` is a static per-candidate predicate checked once at cast or activation from `target_is_legal`, and not a `Game.SelectTargets` suspension. CR 702.16e protection still gates a script-legal candidate.
+// TODO: a player-target script predicate, since candidates are `Target::Object` only
 
 use std::collections::HashMap;
 
@@ -31,9 +11,6 @@ use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, hand_battlefield_graveyard_zones, two_player_state as base_two_player_state};
 
-/// "Tap: Gain 1 life." with a scripted target requirement instead of a real
-/// cost or effect dependency on the target - this slice is about legality,
-/// not what the operation does with a legal target once chosen.
 const SCRIPTED_POWER_FOUR_TARGET: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -119,8 +96,8 @@ fn put_in_hand(state: &mut GameState, mut obj: GameObject, owner: PlayerId) {
     state.objects.insert(id, obj);
 }
 
-/// CR 702.16e: protection from Land - the source in every test below is
-/// always a Land, so this reliably collides with `target_has_protection_from`.
+// CR 702.16e
+// Protection from Land collides with target_has_protection_from, since the source in every test is a Land.
 fn protection_from_land(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -143,11 +120,6 @@ fn two_player_state() -> GameState {
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: self-registration wires `:SetTarget(function)` into a real
-// `TargetFilter::Script`, not the removed top-level `TargetSpec::Script`.
-// ---------------------------------------------------------------------
-
 #[test]
 fn set_target_with_a_function_self_registers_a_scripted_target_filter() {
     let mut state = two_player_state();
@@ -168,17 +140,7 @@ fn set_target_with_a_function_self_registers_a_scripted_target_filter() {
     ));
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline through `ActivateAbility`.
-// ---------------------------------------------------------------------
-
-/// Self-registration (`run_card_script`, called internally by `PlayLand`)
-/// has to run inside the same `Engine`'s own `ScriptRuntime` for the
-/// resulting `ScriptHandle` to resolve later - a separately constructed
-/// `ScriptRuntime` used only to populate `state.abilities` up front would
-/// register the Lua function into a registry `Engine::new` immediately
-/// discards. So every end-to-end test here plays the land through the real
-/// `PlayLand` pipeline instead of building `state.abilities` by hand.
+// Self-registration must run inside the same Engine's ScriptRuntime for the ScriptHandle to resolve, so end-to-end tests play the land through the real PlayLand pipeline.
 fn try_play_land_and_activate(
     creatures: &[(ObjectId, &str, i32, i32)],
     target: ObjectId,
@@ -203,11 +165,7 @@ fn try_play_land_and_activate(
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected AwaitingAction after PlayLand, got {status:?}");
     assert_eq!(engine.state().abilities.len(), 1, "the land's activated ability self-registered");
 
-    // The land's new battlefield id, not the pre-`PlayLand` `ObjectId(0)` -
-    // read off the self-registered ability's own `source` rather than
-    // guessing battlefield order, since fixture creatures already sitting
-    // on the battlefield before `PlayLand` runs make "whichever id is at
-    // the front of the zone" unreliable.
+    // The land's new battlefield id is read off the self-registered ability's source, since creatures already on the battlefield make zone order unreliable.
     let new_land_id = engine.state().abilities[0].source;
     let result = engine.submit_action(PlayerAction {
             player: p0,

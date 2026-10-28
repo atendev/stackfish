@@ -1,32 +1,6 @@
-//! Phase 5 vertical slice: CR 115.4's "another target" (e.g. Olivia
-//! Voldaren's "{1}{R}: Olivia Voldaren deals 1 damage to another target
-//! creature") - a spell/ability's own source is excluded from an otherwise-
-//! matching target filter. A separate mechanism from CR 601.2c/115.3's
-//! same-instance dedup (already enforced unconditionally in
-//! `commands::validate_targets`, untouched by this slice) - that rejects
-//! choosing the *same target twice*; this excludes one specific object (the
-//! source) from ever being a legal candidate at all, even alone.
-//!
-//! `TargetRequirement::exclude_source: bool`, checked once in
-//! `commands::target_is_legal` ahead of every filter variant. Threaded
-//! through every `target_is_legal` call site (cast/activate-time validation,
-//! the CR 608.2b resolution recheck, Aura/Equipment SBA rechecks) except
-//! `Game.SelectTargets`'s mid-resolution script choice, which carries a bare
-//! `TargetFilter` with no `TargetRequirement` to read a flag from - named
-//! TODO, not silently narrowed.
-//!
-//! Found while implementing: the CR 608.2b resolution recheck
-//! (`engine.rs`'s `ResolveStackTop`) was passing `top.stack_id` as
-//! `target_is_legal`'s `source` parameter instead of `top.source` - harmless
-//! for a spell (where the two coincide) but wrong for an activated/
-//! triggered ability, where `stack_id` is a bare id never inserted into
-//! `state.objects` at all. That silently broke protection-from-source-
-//! quality rechecks for every ability (an ever-false `state.object(source)`
-//! lookup), and would have broken this slice's own exclude_source the same
-//! way. Fixed alongside this feature, not filed separately - the recheck
-//! call site is exactly what needed touching. See
-//! `an_ability_targeting_its_own_source_fizzles_at_resolution_recheck`
-//! below for the regression.
+//! CR 115.4: "another target" excludes the source from an otherwise matching target filter, even when it is the only candidate.
+//! `TargetRequirement::exclude_source` is checked in `commands::target_is_legal` ahead of every filter variant.
+// TODO: exclude_source for `Game.SelectTargets`, whose bare `TargetFilter` carries no flag
 
 use std::collections::HashMap;
 
@@ -71,8 +45,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// "another target creature" - excludes whatever ability source this ends
-/// up registered on.
 fn another_target_creature_ability(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -173,13 +145,7 @@ fn an_ability_with_another_target_creature_can_target_a_different_creature() {
 
 #[test]
 fn an_ability_targeting_its_own_source_fizzles_at_resolution_recheck() {
-    // Bypasses ActivateAbility's own cast-time validation (already proven
-    // illegal above) to exercise the CR 608.2b resolution recheck directly -
-    // this is also the regression for the top.source/top.stack_id mixup
-    // named in this file's own header: with the bug, target_is_legal's
-    // exclude_source check compared against the wrong id and never caught
-    // this, so the illegal self-target would have incorrectly gone on to
-    // deal damage instead of fizzling.
+    // Skips cast-time validation to reach the CR 608.2b recheck, where a self-target must fizzle and not deal damage.
     let mut state = base_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);

@@ -1,26 +1,6 @@
-//! Phase 5 vertical slice: CR 121.2b "a player can't draw more than one card
-//! each turn"-style effects — the third player-level continuous effect in
-//! this cluster (`HandSizeModifier`/`HandRevealModifier` are the other two),
-//! same "distinct mechanism from the CR 613 layer system" reasoning both
-//! already established. Unlike `HandRevealModifier` (mechanism-only, no
-//! consumer existed yet), this one gets real enforcement from the start:
-//! `commands::propose_draw` is the one choke point both `Engine::
-//! continue_draw_cards` (effect-driven draws, e.g. `Game.Ops.DrawCards`) and
-//! the turn-based `Step::Draw` handling already share, so returning `None`
-//! there once the limit is hit reuses the exact "no draw happens" path the
-//! empty-library case already takes.
-//!
-//! `DrawLimitAffected` is narrowed to `Filter(FilterController)` only - no
-//! `EnchantedPlayer` variant, unlike `HandSizeAffected`/`HandRevealAffected`'s
-//! two-shape split, since no known real card needs an Aura-driven form of
-//! this effect (both those siblings had a real worked example driving that
-//! variant; this one doesn't).
-//!
-//! `cards_drawn_this_turn` mirrors `replacement::opponent_damaged_this_turn`'s
-//! own "scan `state.ledger` back to the most recent `GameEventKind::
-//! TurnStarted`" convention exactly, just counting `ZoneChange { from:
-//! Library, to: Hand, .. }` events owned by the player in question instead of
-//! `DamageDealt` events targeting an opponent.
+//! CR 121.2b: "a player can't draw more than one card each turn" effects, a player-level continuous effect outside the CR 613 layers.
+//! `commands::propose_draw`, shared by `continue_draw_cards` and the turn-based draw, returns `None` once the limit is hit.
+//! `DrawLimitAffected` is `Filter(FilterController)` only, and `cards_drawn_this_turn` counts Library to Hand `ZoneChange`s since the latest `TurnStarted`.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -51,7 +31,6 @@ fn land_definition(name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Draw Limit: Draw two cards."
 fn drawcards_spell_definition(amount: u32) -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -122,11 +101,7 @@ fn two_player_state() -> GameState {
     }
 }
 
-/// Directly appends a ledger event, same allocate-then-push shape
-/// `commands::execute_command`'s own committed-event construction uses -
-/// there's no other way to seed ledger history for a fixture, since
-/// `GameEvent::new` itself is `todo!()`. Mirrors `phase5_bloodthirst.rs`'s
-/// own `push_event` helper.
+// Appends a ledger event directly to seed history for a fixture.
 fn push_event(state: &mut GameState, kind: GameEventKind) {
     let event_id = state.allocate_event_id();
     let sequence_no = state.allocate_sequence_no();
@@ -201,9 +176,7 @@ fn effective_draw_limit_filter_forms_and_latest_timestamp_wins() {
     assert_eq!(effective_draw_limit(&opponent_only, p0), None);
     assert_eq!(effective_draw_limit(&opponent_only, p1), Some(1), "p1 is p0's opponent");
 
-    // Two conflicting modifiers on the same player - latest timestamp wins
-    // outright, same "no stacking" resolution `effective_max_hand_size`
-    // already established.
+    // Two conflicting modifiers on one player: the latest timestamp wins, with no stacking, as effective_max_hand_size does.
     let conflicting = vec![
         DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::Any), limit: 1, timestamp: SequenceNo(0) },
         DrawLimitModifier { source, controller: p0, affected: DrawLimitAffected::Filter(FilterController::Any), limit: 2, timestamp: SequenceNo(1) },
@@ -314,8 +287,7 @@ fn a_limit_only_affects_the_player_it_targets() {
     let card = ObjectId(2);
     state.objects.insert(card, card_object(card, drawcards_spell_definition(2), p0, ZoneKind::Hand));
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
-    // From p0's own perspective, "your opponents can't draw more than one
-    // card each turn" - restricts p1, not p0 itself.
+    // From p0's view, "your opponents can't draw more than one card each turn" restricts p1 and not p0.
     state.draw_limit_modifiers.push(DrawLimitModifier {
         source: ObjectId(999),
         controller: p0,
@@ -353,9 +325,7 @@ fn a_turn_based_draw_is_skipped_once_the_limit_was_already_met_this_turn() {
         limit: 1,
         timestamp: SequenceNo(0),
     });
-    // Simulate p0 already having drawn a card this turn via some earlier
-    // effect (e.g. an instant resolved during upkeep) - the ledger already
-    // shows one this-turn draw before the turn-based draw step ever runs.
+    // p0 already drew a card this turn through an earlier effect, so the ledger shows one draw before the draw step runs.
     push_event(&mut state, GameEventKind::TurnStarted { player: p0, turn_number: 2 });
     let already_drawn = card_object(ObjectId(50), land_definition("Already Drawn"), p0, ZoneKind::Hand);
     push_event(
@@ -376,8 +346,7 @@ fn a_turn_based_draw_is_skipped_once_the_limit_was_already_met_this_turn() {
     assert!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.is_empty(), "no card actually landed in the real hand zone from this step");
 }
 
-/// "Test Destroy Permanent: Destroy target permanent." — used only to force
-/// a real `commands::retire_object` call on the modifier's own source.
+// Forces a real retire_object call on the modifier's source.
 fn destroy_permanent_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 30,
@@ -408,8 +377,8 @@ fn destroy_permanent_definition() -> CardDefinition {
     }
 }
 
-/// CR 611.3b: a static ability's continuous effect only applies while its
-/// source remains on the battlefield — `phase5/modifier-source-cleanup`.
+// CR 611.3b
+// A static ability's continuous effect applies only while its source is on the battlefield.
 #[test]
 fn a_draw_limit_modifier_is_purged_once_its_source_leaves_the_battlefield() {
     let mut state = two_player_state();

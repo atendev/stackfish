@@ -1,21 +1,5 @@
-//! Phase 5 vertical slice: CR 601.2c/608.2b — a multi-target-word spell
-//! where one word is variable-count (`up_to`/`at_least`) instead of every
-//! word using an exact count. `multi-target-word-spells`'s own notes named
-//! this combination as unsupported ("no way to split a flat list
-//! unambiguously by a variable-length entry"); it's resolvable as long as
-//! *at most one* word is variable — `commands::split_targets_by_requirement`
-//! derives that one word's own count as "whatever's left after every
-//! exact-count word claims its share," regardless of where the variable
-//! word sits in the card's own word order.
-//!
-//! Two or more variable words (`phase5/multi-word-variable-count-filter-
-//! assignment`) is real now too, via a different mechanism:
-//! `assign_targets_by_filter` assigns each submitted target to a word whose
-//! own `TargetFilter` it legally satisfies, accepting any assignment that
-//! meets every word's own count bound rather than deriving one specific
-//! split positionally — see `two_variable_words_with_disjoint_filters_
-//! resolves_via_filter_assignment` and `two_variable_words_with_no_valid_
-//! assignment_is_still_rejected` below.
+//! CR 601.2c, 608.2b: a multi-word spell where a word is variable-count (`up_to`, `at_least`). With at most one variable word, `split_targets_by_requirement` derives its count as what the exact-count words leave.
+//! With two or more, `assign_targets_by_filter` assigns each target to a word whose filter it satisfies and accepts any assignment meeting every count bound.
 
 use std::collections::HashMap;
 
@@ -113,8 +97,6 @@ fn land_word() -> TargetRequirement {
     TargetRequirement { filter: land_filter(), count: 1, up_to: false, at_least: false, exclude_source: false }
 }
 
-/// "Test Variable Multi-Word: Destroy up to two target creatures and target
-/// land." Variable word first, exact word second.
 fn up_to_then_exact_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -140,9 +122,6 @@ fn up_to_then_exact_definition() -> CardDefinition {
     }
 }
 
-/// Same idea, variable word *last* instead of first - "Destroy target land
-/// and up to two target creatures." - proves the derivation doesn't depend
-/// on word position.
 fn exact_then_up_to_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
@@ -168,8 +147,6 @@ fn exact_then_up_to_definition() -> CardDefinition {
     }
 }
 
-/// "Destroy at least one target creature and target land." - the `at_least`
-/// shape instead of `up_to`.
 fn at_least_then_exact_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 22,
@@ -195,10 +172,6 @@ fn at_least_then_exact_definition() -> CardDefinition {
     }
 }
 
-/// Two variable words at once ("up to two target creatures and up to two
-/// target lands") - disjoint filters (creature vs. land), so every
-/// submitted target is only ever legal for one of the two words -
-/// `assign_targets_by_filter` resolves this with no real ambiguity.
 fn two_variable_words_definition() -> CardDefinition {
     let up_to_two_lands_word =
         TargetRequirement { filter: land_filter(), count: 2, up_to: true, at_least: false, exclude_source: false };
@@ -290,8 +263,7 @@ fn up_to_word_first_claims_the_remainder_after_the_exact_word() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // 2 creatures + 1 land = 3 submitted - the up_to word (max 2) claims
-    // both creatures, the exact word claims the land.
+    // 2 creatures + 1 land: the up_to word (max 2) claims both creatures and the exact word claims the land.
     cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(land)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
@@ -364,8 +336,7 @@ fn up_to_word_exceeding_its_own_bound_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // 3 creatures + 1 land = 4 submitted - after the exact word claims 1,
-    // the derived up_to count is 3, exceeding its own max of 2.
+    // 3 creatures + 1 land: the derived up_to count is 3, over its max of 2.
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox), Target::Object(land)]).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
@@ -383,8 +354,7 @@ fn at_least_word_below_its_own_bound_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Only the land submitted - after it claims its exact share, the
-    // derived at_least count is 0, below its own minimum of 1.
+    // Only the land: the derived at_least count is 0, under its minimum of 1.
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(land)]).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));
@@ -407,8 +377,7 @@ fn at_least_word_meeting_its_own_bound_resolves() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // 2 creatures + 1 land - derived at_least count is 2, satisfying "at
-    // least one."
+    // 2 creatures + 1 land: the derived at_least count is 2, satisfying "at least one."
     cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(land)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
@@ -432,8 +401,7 @@ fn two_variable_words_with_disjoint_filters_resolves_via_filter_assignment() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // The bear can only ever legally satisfy the creature word, the land
-    // only the land word - no positional signal is needed at all.
+    // The bear can satisfy only the creature word and the land only the land word.
     cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(land)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
@@ -442,12 +410,7 @@ fn two_variable_words_with_disjoint_filters_resolves_via_filter_assignment() {
     assert!(engine.state().object(land).is_none(), "the land word's own target destroyed");
 }
 
-/// "Destroy at least two target creatures and at least two target
-/// creatures." - two variable words sharing the *same* filter, so nothing
-/// disambiguates which creature goes to which word - but that's fine, since
-/// no downstream effect cares (see `assign_targets_by_filter`'s own doc
-/// comment): what matters is whether *some* split can satisfy both words'
-/// own minimums at once.
+// Two variable words with the same filter: nothing says which creature goes where, and what matters is whether some split meets both minimums.
 fn two_at_least_two_creatures_definition() -> CardDefinition {
     let word = TargetRequirement { filter: creature_filter(), count: 2, up_to: false, at_least: true, exclude_source: false };
     CardDefinition {
@@ -491,8 +454,7 @@ fn two_variable_words_with_overlapping_filters_resolves_when_a_split_exists() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // 4 creatures submitted - both "at least two" words can be satisfied
-    // (2 each) even though every target is legal for both words at once.
+    // 4 creatures: both "at least two" words are satisfied at 2 each though every target fits both.
     cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox), Target::Object(hare)]);
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
@@ -517,10 +479,7 @@ fn two_variable_words_with_no_valid_assignment_is_still_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Only 3 creatures submitted - both words need at least 2 each (4
-    // total minimum), so no split of 3 targets across both words can ever
-    // satisfy both minimums at once. Genuinely infeasible, not just
-    // under-specified - correctly rejected, not guessed at.
+    // Only 3 creatures cannot meet both minimums (4 total), so it is infeasible and rejected.
     let err = try_cast_spell(&mut engine, p0, card, vec![Target::Object(bear), Target::Object(wolf), Target::Object(fox)]).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::InvalidTarget)));

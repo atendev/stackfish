@@ -1,24 +1,5 @@
-//! Phase 5 vertical slice: real card-script self-registration. A card's own
-//! Lua `register_abilities(c)` can now call `Game.CreateTriggeredAbility(c)` to
-//! register its own triggered ability - mirroring ygopro's
-//! `Effect.CreateEffect(c)`/`e1:SetCondition(...)`/`c:RegisterEffect(e1)`
-//! convention (see `docs/ygo_pro_reference.md`) - instead of the
-//! test/scenario harness building a `RegisteredAbility` by hand via
-//! `Engine::load_condition`/`load_operation` (the prior two slices' path,
-//! which remains fully supported and unaffected).
-//!
-//! The registration-time mutability gap flagged since Phase 2 is fixed via a
-//! queued side-channel: `Game.CreateTriggeredAbility`'s builder only ever
-//! touches a small `Rc<RefCell<_>>` registry `ScriptRuntime` owns - never
-//! `GameState` itself. `ScriptRuntime::run_card_script` drains whatever got
-//! `:Register()`ed into `state.abilities` only after the whole script call
-//! returns.
-//!
-//! Production call sites (self-registration runs unconditionally, every
-//! time a new battlefield object id is minted, per CR 400.7's "no memory of
-//! its previous existence"): `commands.rs`'s `PlayLand` arm (via
-//! `CommandOutcome::battlefield_entries`, drained in `engine.rs`) and
-//! `engine.rs`'s `ResolveStackTop` permanent-entry branch (called directly).
+//! `Game.CreateTriggeredAbility(c)` in a card's `register_abilities(c)` registers its triggered ability, in the style of ygopro's `Effect.CreateEffect(c)` (see `docs/ygo_pro_reference.md`).
+//! The builder touches only a `ScriptRuntime`-owned `Rc<RefCell<_>>` registry, and `run_card_script` drains it into `state.abilities` after the call returns. Self-registration runs each time a new battlefield id is minted (CR 400.7), from `PlayLand` and `ResolveStackTop`.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
@@ -110,15 +91,9 @@ fn land_definition(script: &str) -> CardDefinition {
     }
 }
 
-/// Mirrors `phase5_script_bridge_trigger::two_player_state`.
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: ScriptRuntime::run_card_script's self-registration mechanics,
-// without driving the whole Engine pipeline.
-// ---------------------------------------------------------------------
 
 #[test]
 fn run_card_script_self_registers_a_primitive_ability() {
@@ -212,11 +187,6 @@ fn run_card_script_can_register_multiple_abilities_from_one_script_call() {
     assert!(state.abilities.iter().all(|a| a.source == bear));
 }
 
-// ---------------------------------------------------------------------
-// SBA: a dying creature's self-registered ability is purged, not left
-// dangling in state.abilities.
-// ---------------------------------------------------------------------
-
 #[test]
 fn dying_creatures_registered_ability_is_purged_by_sba() {
     let mut state = two_player_state();
@@ -225,8 +195,7 @@ fn dying_creatures_registered_ability_is_purged_by_sba() {
     object.damage_marked = 2; // == toughness, lethal (CR 704.5g).
     state.objects.insert(bear, object);
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    // Simulates the ability this creature would have self-registered upon
-    // an earlier entrance to the battlefield.
+    // Simulates the ability the creature would have self-registered on an earlier battlefield entry.
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
         mode_choice: ModeChoice::Exactly(1),
@@ -249,11 +218,6 @@ fn dying_creatures_registered_ability_is_purged_by_sba() {
         "the dead creature's registered ability must be purged via retire_object, not left dangling"
     );
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline, cast/play a self-registering card, watch
-// its own register_abilities's ability fire for real.
-// ---------------------------------------------------------------------
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
@@ -287,16 +251,12 @@ fn cast_self_registering_creature_gains_life_on_etb_end_to_end() {
         .expect("p0 holds priority, bear is in hand, main phase, empty stack");
     pay_free_and_drain(&mut engine);
 
-    // Spell is on the stack, not resolved yet - the ETB ability isn't
-    // registered until the creature actually reaches the battlefield.
+    // The spell is on the stack, so the ETB ability is not registered until the creature reaches the battlefield.
     assert_eq!(engine.state().stack.len(), 1, "only the spell itself is on the stack so far");
     assert_eq!(engine.state().player(p0).unwrap().life, 20, "no life gain before the creature resolves");
     assert!(engine.state().abilities.is_empty(), "self-registration hasn't run yet - still on the stack");
 
-    // Both players pass - resolves the spell, moving the creature to the
-    // battlefield. This is exactly where run_card_script fires, self-
-    // registering the ETB ability, which then matches this same ZoneChange
-    // and goes on the stack in this same pipeline run.
+    // Both players pass, which resolves the spell, runs run_card_script and self-registers the ETB ability, which matches this ZoneChange and goes on the stack in the same run.
     pass(&mut engine, p0);
     drain(&mut engine);
     pass(&mut engine, p1);
@@ -352,8 +312,7 @@ fn casting_two_self_registering_creatures_only_fires_each_ones_own_ability() {
 
     cast_and_resolve(&mut engine, first);
     assert_eq!(engine.state().player(p0).unwrap().life, 21, "first creature's own self-registered ability fired");
-    // The second creature still sits in hand, so its script has also run (hand
-    // sweep) - count only abilities whose source is on the battlefield.
+    // The second creature is still in hand, so its script also ran (hand sweep). Count only abilities whose source is on the battlefield.
     let on_battlefield = |engine: &Engine| {
         engine
             .state()
@@ -389,9 +348,7 @@ fn play_land_self_registering_ability_fires_end_to_end() {
         .expect("p0 holds priority, land is in hand");
     let status = drain(&mut engine);
 
-    // PlayLand doesn't use the stack directly, but the triggered ability it
-    // self-registers still does (CR 603.3b/603.4 - any triggered ability
-    // goes on the stack, regardless of source type).
+    // PlayLand does not use the stack, but the triggered ability it self-registers does (CR 603.3b, 603.4).
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().stack.len(), 1, "the land's self-registered ETB ability is on the stack");
     assert_eq!(engine.state().player(p0).unwrap().life, 20, "ability hasn't resolved yet");

@@ -1,43 +1,7 @@
-//! Phase 5 vertical slice: CR 614's general "instead" framing for battlefield
-//! entry (`ReplacementPayload::ReplaceZoneDestination` wired to a real
-//! `WouldMoveZone(_, Battlefield)` producer for the first time) - e.g. "if a
-//! creature would enter the battlefield under an opponent's control, exile
-//! it instead" (comp rules' own Gather Specimens example, redirecting to a
-//! different zone here rather than a different controller).
-//!
-//! `ReplaceZoneDestination` and its `WouldMoveZone(_, Battlefield)` pairing
-//! already existed and were already validated as legal at `:Register()`
-//! time - what was missing was a real producer that proposed the
-//! battlefield-entry `ZoneChange` through `replacement::apply_replacements`
-//! *before* physically placing anything, mirroring `sba::resolve_deaths`'s
-//! own propose-then-commit shape for the graveyard side. `ResolveStackTop`'s
-//! resolving-spell path (the only real producer touched this slice, same
-//! narrowing every prior mid-ETB slice already took) now does exactly that
-//! for a would-be `Battlefield` destination.
-//!
-//! A redirected permanent never actually enters the battlefield at all - no
-//! self-registration, no summoning sickness, none of that "entering"
-//! semantics apply, same as CR 608.2b's fizzle already establishes for a
-//! different reason.
-//!
-//! Named, narrow gap: only an *externally* granted redirect effect can ever
-//! fire - the entering permanent's own self-registered effects haven't run
-//! yet at the point this check happens (its own `run_card_script` only
-//! happens once the real destination is already decided), so a card's own
-//! "as this would enter, redirect it instead" text isn't reachable this way.
-//!
-//! CR 616.1's ordering choice for two *simultaneous* redirects is real now
-//! too (`phase5/etb-redirect-ordering-choice`) - two different sources each
-//! independently redirecting the same would-be battlefield entry pauses on a
-//! genuine `AwaitingReplacementChoice` instead of silently doing nothing.
-//! Nothing has been placed anywhere yet at this pause point (unlike every
-//! other replacement collision this engine already handles), so the whole
-//! not-yet-resolved `StackObject` rides along in a new
-//! `ReplacementResumeTarget::PermanentEntry` - `resolve_permanent_entry`'s
-//! own tail (`move_resolving_spell`, Aura-attach, Copy/Devour/Amplify pause
-//! checks) was pulled out into a shared `continue_permanent_entry`
-//! continuation so both the fresh path and this resumed path reach the exact
-//! same "spell actually enters the battlefield" logic.
+//! CR 614, 616.1: `ReplacementPayload::ReplaceZoneDestination` on `WouldMoveZone(_, Battlefield)`, e.g. "if a creature would enter the battlefield under an opponent's control, exile it instead".
+//! `ResolveStackTop` proposes the entry `ZoneChange` through `apply_replacements` before placing anything, so a redirected permanent never enters (no self-registration, no summoning sickness).
+//! Two simultaneous redirects pause on `AwaitingReplacementChoice` with `ReplacementResumeTarget::PermanentEntry`, resumed through the shared `continue_permanent_entry`.
+// TODO: a card's own "as this would enter, redirect it" effect, since its self-registered effects have not run when the check happens
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -79,17 +43,11 @@ fn creature_definition(name: &str, script: &str) -> CardDefinition {
     }
 }
 
-/// "If a creature would enter the battlefield under an opponent's control,
-/// exile it instead" - a hate-bear-style externally granted redirect,
-/// relative to `source`'s own controller.
 fn hateful_ward(source: ObjectId, consumption: ConsumptionPolicy) -> ReplacementEffect {
     hateful_ward_to(source, consumption, ZoneKind::Exile)
 }
 
-/// Same as `hateful_ward`, but redirecting to an arbitrary `destination` -
-/// used to build two simultaneously-matching wards (one to Exile, one to
-/// Graveyard) that disagree on where the entering creature ends up, so a CR
-/// 616.1 ordering choice between them has an observable difference.
+// Redirects to an arbitrary destination, so two wards (Exile and Graveyard) disagree and a CR 616.1 ordering choice is observable.
 fn hateful_ward_to(source: ObjectId, consumption: ConsumptionPolicy, destination: ZoneKind) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -205,9 +163,7 @@ fn no_matching_redirect_lets_the_creature_enter_normally() {
 
 #[test]
 fn a_redirect_effect_you_dont_control_the_opponent_of_never_matches() {
-    // The ward only redirects creatures entering under an *opponent* of its
-    // own controller - the ward's own controller's creatures aren't
-    // affected by their own ward.
+    // The ward redirects only creatures entering under an opponent of its controller.
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let ward = ObjectId(0);
@@ -256,9 +212,8 @@ fn a_one_shot_redirect_only_fires_once() {
     assert!(bf.iter().any(|&id| engine.state().object(id).unwrap().definition.name == "Second Creature"), "the second creature entered normally - the ward was already spent");
 }
 
-/// CR 616.1: two different sources each independently redirecting the same
-/// would-be battlefield entry (one to Exile, one to Graveyard) pauses on a
-/// real ordering choice instead of silently applying neither.
+// CR 616.1
+// Two sources each redirecting the same entry pause on an ordering choice and do not silently apply neither.
 #[test]
 fn two_simultaneous_redirects_pause_for_a_cr_616_1_ordering_choice() {
     let p0 = PlayerId(0);
@@ -297,8 +252,7 @@ fn two_simultaneous_redirects_pause_for_a_cr_616_1_ordering_choice() {
     assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 0, "the un-chosen (graveyard) redirect never applied - its own filter no longer matches a ZoneChange already rewritten to Exile");
 }
 
-/// Same setup as above, but choosing the *other* candidate - proves the
-/// outcome genuinely depends on the choice, not a hardcoded winner.
+// The other candidate gives the other outcome, so the result depends on the choice.
 #[test]
 fn choosing_the_other_candidate_redirects_to_graveyard_instead() {
     let p0 = PlayerId(0);

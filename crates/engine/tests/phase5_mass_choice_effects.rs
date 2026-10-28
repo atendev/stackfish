@@ -1,22 +1,5 @@
-//! Phase 5 vertical slice: `phase5/mass-choice-effects` — four new generic
-//! Lua API primitives for Balance-shaped effects ("Each player chooses a
-//! number of lands they control equal to the number of lands controlled by
-//! the player who controls the fewest, then sacrifices the rest. Players
-//! discard cards and sacrifice creatures the same way."), none tailored to
-//! Balance specifically:
-//! - `Game.ChooseN(filter, n, opts)` — ask a player to choose N objects/cards
-//!   mid-resolution, built on the pre-existing `Game.SelectTargets`/
-//!   `Game.MayChoose` coroutine mechanism (backlog item 9) rather than a new
-//!   request shape.
-//! - `Game.Ops.SacrificeChosen(list)`/`Game.Ops.DiscardChosen(list)` — move
-//!   an already-`Game.ChooseN`-chosen list to the graveyard.
-//! - `Game.Ops.SacrificeRandom(filter, count)`/`Game.Ops.DiscardRandom(filter, count)`
-//!   — CR 701.9b/701.21's "at random" shape, no player choice at all.
-//! - `Game.Ops.ForEachPlayer(fn)` — CR 101.4 APNAP: invokes `fn` once per
-//!   player, active player first, accumulating every player's own
-//!   `SacrificeChosen`/`DiscardChosen` answer and performing the real zone
-//!   moves only once every player has chosen (CR 101.4's "then the actions
-//!   happen simultaneously"), not as each player finishes.
+//! Generic Lua primitives for Balance-shaped effects. `Game.ChooseN(filter, n, opts)` asks a player to choose N objects mid-resolution through the `Game.SelectTargets` and `Game.MayChoose` coroutine mechanism.
+//! `Game.Ops.SacrificeChosen` and `DiscardChosen` move a chosen list, `SacrificeRandom` and `DiscardRandom` take no choice (CR 701.9b, 701.21), and `Game.Ops.ForEachPlayer(fn)` runs `fn` per player in APNAP order (CR 101.4) and moves the cards only after every player has chosen.
 
 use std::collections::HashMap;
 
@@ -123,14 +106,7 @@ fn put_in_hand(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// `sorcery_definition` builds a `CardDefinition` with `effect: None` and no
-/// separate place to stash a custom function's `ScriptHandle` - `s.operation()`
-/// must be loaded through *this* `Engine`'s own `ScriptRuntime` (a handle
-/// from a different runtime is meaningless) and patched onto the object's
-/// `CardDefinition.effect` after construction, mirroring the scenario
-/// crate's own private `register_script_operation` exactly (see
-/// `ScriptRuntime::build_operation`'s own doc comment for the full "caller
-/// trap" this works around).
+// `s.operation()` must be loaded through this Engine's own ScriptRuntime and patched onto CardDefinition.effect, because a ScriptHandle from another runtime is meaningless.
 fn register_script_operation(engine: &mut Engine, object: ObjectId, source: &str) {
     let Some((primitive, handle)) =
         engine.build_operation(source).unwrap_or_else(|e| panic!("script operation() failed to load: {e:?}"))
@@ -141,10 +117,7 @@ fn register_script_operation(engine: &mut Engine, object: ObjectId, source: &str
     engine.state_mut().objects.get_mut(&object).expect("object exists").definition.effect = effect;
 }
 
-/// Casts `card` (always a 0-cost sorcery in this file), pays the empty cost,
-/// and passes both players' priority - returns whatever `ResolveStackTop`
-/// reaches next (a pause, or straight back to `AwaitingAction` if the
-/// operation never yields).
+// Casts a 0-cost sorcery, pays the empty cost, passes priority, and returns what ResolveStackTop reaches next.
 fn cast_and_resolve(engine: &mut Engine, p0: PlayerId, p1: PlayerId, card: ObjectId) -> StepStatus {
     engine
         .submit_action(PlayerAction {
@@ -178,10 +151,6 @@ fn expect_select_target(status: StepStatus) -> (PlayerId, TargetFilter, Vec<Obje
     }
 }
 
-// ---------------------------------------------------------------------
-// Game.ChooseN
-// ---------------------------------------------------------------------
-
 const CHOOSE_TWO_CREATURES_THEN_GAIN_LIFE: &str = r#"
 local s = {}
 function s.operation()
@@ -213,10 +182,7 @@ fn choose_n_asks_twice_excluding_the_first_pick_and_rejects_a_repeat() {
     assert_eq!(player, p0);
     assert!(exclude_ids.is_empty(), "first ask excludes nothing yet");
 
-    // Repeating the same object the first ask itself offered should be
-    // rejected once exclude_ids covers it - proven on the *second* ask below,
-    // since the first ask's own exclude_ids is genuinely empty (nothing
-    // chosen yet).
+    // The second ask rejects the object the first ask offered once exclude_ids covers it. The first ask's exclude_ids is empty.
     engine.submit_script_choice(Target::Object(bear_a)).expect("bear_a is a legal, unexcluded first pick");
     let status = drain(&mut engine);
     let (player, _filter, exclude_ids) = expect_select_target(status);
@@ -283,10 +249,7 @@ end
 return s
 "#;
 
-/// `phase5/mass-choice-effects` follow-up: `opts.at_least` (CR 601.2c/115.6's
-/// "N or more") - the first `n` picks are mandatory (no "one more?" ask at
-/// all), then the loop keeps asking indefinitely until declined, unlike
-/// `up_to`'s bounded-and-optional shape.
+// opts.at_least (CR 601.2c, 115.6): the first n picks are mandatory with no "one more?" ask, then the loop keeps asking until declined.
 #[test]
 fn choose_n_at_least_is_mandatory_then_unbounded() {
     let p0 = PlayerId(0);
@@ -347,12 +310,7 @@ end
 return s
 "#;
 
-/// `phase5/mass-choice-effects` follow-up: `Game.ChooseN`'s `filter` now
-/// accepts the same scripted-predicate shape `:SetTarget`/`target_
-/// requirement()` already do (a bare function), not just the flat
-/// option-bag table - proves a power-based predicate a flat table can't
-/// express (no `power` key exists in the table shape) really restricts the
-/// pick to the one qualifying creature.
+// ChooseN's filter also accepts a scripted predicate, which can express a power test the flat table cannot.
 #[test]
 fn choose_n_accepts_a_scripted_predicate_filter() {
     let p0 = PlayerId(0);
@@ -379,10 +337,6 @@ fn choose_n_accepts_a_scripted_predicate_filter() {
     drain(&mut engine);
     assert_eq!(engine.state().player(p0).unwrap().life, 20 + big_bear.0 as i32, "gain_life = the chosen object's own id");
 }
-
-// ---------------------------------------------------------------------
-// Game.Ops.SacrificeChosen / DiscardChosen
-// ---------------------------------------------------------------------
 
 const CHOOSE_ONE_CREATURE_THEN_SACRIFICE_IT: &str = r#"
 local s = {}
@@ -455,10 +409,6 @@ fn discard_chosen_moves_the_chosen_card_from_hand_to_graveyard() {
     assert_eq!(moved.zone, ZoneKind::Graveyard);
 }
 
-// ---------------------------------------------------------------------
-// Game.Ops.SacrificeRandom / DiscardRandom
-// ---------------------------------------------------------------------
-
 const SACRIFICE_TWO_CREATURES_AT_RANDOM: &str = r#"
 local s = {}
 function s.operation()
@@ -484,9 +434,7 @@ fn sacrifice_random_moves_exactly_count_when_enough_candidates_exist() {
     let status = cast_and_resolve(&mut engine, p0, p1, card);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "no player choice - resolves synchronously, got {status:?}");
     assert_eq!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.len(), 1, "exactly 2 of 3 sacrificed at random");
-    // 2 sacrificed creatures + the sorcery itself, which also resolves into
-    // its owner's graveyard (CR 608.2m) - not double-counting the sorcery,
-    // just accounting for it too.
+    // 2 sacrificed creatures plus the sorcery itself, which resolves into its owner's graveyard (CR 608.2m).
     assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 3);
 }
 
@@ -512,12 +460,9 @@ fn discard_random_discards_fewer_than_count_when_hand_is_smaller() {
     let mut engine = Engine::new(state);
     register_script_operation(&mut engine, card, DISCARD_THREE_AT_RANDOM);
     cast_and_resolve(&mut engine, p0, p1, card);
-    // Only 2 non-sorcery cards were ever in hand (the sorcery itself already
-    // left on cast) - CR 701.17b's "as many as possible" stance means both
-    // get discarded even though count asked for 3, no error.
+    // Only 2 cards were in hand, so CR 701.17b "as many as possible" discards both though count asked for 3.
     assert!(engine.state().zone(ZoneKind::Hand, Some(p0)).unwrap().contents.is_empty());
-    // 2 discarded cards + the sorcery itself (CR 608.2m) - same accounting
-    // as sacrifice_random_moves_exactly_count_when_enough_candidates_exist.
+    // 2 discarded cards plus the sorcery itself (CR 608.2m).
     assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(), 3);
 }
 
@@ -529,9 +474,7 @@ end
 return s
 "#;
 
-/// `phase5/mass-choice-effects` follow-up: `Game.Ops.DiscardRandom` gained a
-/// `filter` parameter (previously always the whole hand) - proves it really
-/// restricts candidates, not just accepted and ignored.
+// DiscardRandom's filter must really restrict candidates and not be ignored.
 #[test]
 fn discard_random_respects_its_filter() {
     let p0 = PlayerId(0);
@@ -547,8 +490,7 @@ fn discard_random_respects_its_filter() {
     register_script_operation(&mut engine, card, DISCARD_A_RANDOM_LAND);
     cast_and_resolve(&mut engine, p0, p1, card);
 
-    // Only the land was ever a legal candidate - the creature must still be
-    // in hand regardless of which draw next_rng would otherwise have made.
+    // Only the land was a legal candidate, so the creature stays in hand whatever next_rng draws.
     let hand_names: Vec<String> = engine
         .state()
         .zone(ZoneKind::Hand, Some(p0))
@@ -562,10 +504,6 @@ fn discard_random_respects_its_filter() {
     assert_eq!(discarded.zone, ZoneKind::Graveyard);
 }
 
-// ---------------------------------------------------------------------
-// Game.Ops.ForEachPlayer
-// ---------------------------------------------------------------------
-
 const EACH_PLAYER_SACRIFICES_A_CREATURE_THEY_CONTROL: &str = r#"
 local s = {}
 function s.operation()
@@ -577,14 +515,8 @@ end
 return s
 "#;
 
-/// The CR 101.4 worked example verbatim: "each player sacrifices a
-/// creature." Proves three things at once:
-/// - APNAP order: the active player (p0) is asked before p1.
-/// - "you" inside a `ForEachPlayer` body resolves against *that* player, not
-///   the spell's original caster - p1's own ask only offers p1's creature.
-/// - CR 101.4's "then the actions happen simultaneously": p0's chosen
-///   creature is still on the battlefield while p1 is being asked, and both
-///   move to the graveyard together only once p1 also answers.
+// CR 101.4
+// "Each player sacrifices a creature": the active player is asked first, "you" resolves to the asked player, and both creatures move together only after p1 answers.
 #[test]
 fn for_each_player_asks_in_apnap_order_and_sacrifices_simultaneously() {
     let p0 = PlayerId(0);
@@ -609,24 +541,19 @@ fn for_each_player_asks_in_apnap_order_and_sacrifices_simultaneously() {
     engine.submit_script_choice(Target::Object(p0_bear)).expect("p0_bear is p0's own creature");
     let status = drain(&mut engine);
 
-    // Simultaneity: p0's chosen creature hasn't moved yet - only p1's own
-    // choice remains outstanding.
+    // Simultaneity: p0's chosen creature has not moved while p1 is asked.
     assert_eq!(engine.state().object(p0_bear).unwrap().zone, ZoneKind::Battlefield, "not sacrificed until every player has chosen");
     let (player, _filter, _exclude_ids) = expect_select_target(status);
     assert_eq!(player, p1, "second in turn order");
 
-    // p1's own "you" must resolve to p1 - p0's creature is illegal for p1's
-    // own ask even though the filter itself is identical.
+    // "You" resolves to p1, so p0's creature is illegal for p1's ask though the filter is identical.
     let err = engine.submit_script_choice(Target::Object(p0_bear)).expect_err("p0_bear isn't p1's own creature");
     assert!(matches!(err, ScriptChoiceError::InvalidCandidate));
 
     engine.submit_script_choice(Target::Object(p1_bear)).expect("p1_bear is p1's own creature");
     drain(&mut engine);
 
-    // Both moved together, only after the last player answered. CR 400.7:
-    // a real sacrifice re-mints a new id and retires the old one (same as
-    // Destroy/Exile), so the post-move objects are found by name, not by
-    // the stale pre-sacrifice id.
+    // Both moved together after the last answer. CR 400.7 re-mints ids, so the post-move objects are found by name.
     assert!(engine.state().zone(ZoneKind::Battlefield, None).unwrap().contents.is_empty());
     let p0_bear_after = engine.state().objects.values().find(|o| o.definition.name == "P0 Bear").expect("still tracked");
     let p1_bear_after = engine.state().objects.values().find(|o| o.definition.name == "P1 Bear").expect("still tracked");
@@ -642,10 +569,7 @@ end
 return s
 "#;
 
-/// `Game.Ops.ForEachPlayer` can wrap a bare `SacrificeRandom`/`DiscardRandom`
-/// tag directly, not just a script function - no coroutine involved at all,
-/// so this resolves in one synchronous step straight through to
-/// `AwaitingAction`, unlike every function-shaped `ForEachPlayer` test above.
+// ForEachPlayer can wrap a bare SacrificeRandom or DiscardRandom tag with no coroutine, so it resolves synchronously to AwaitingAction.
 #[test]
 fn for_each_player_wraps_a_bare_sacrifice_random_tag_with_no_player_choice() {
     let p0 = PlayerId(0);
@@ -672,10 +596,7 @@ fn for_each_player_wraps_a_bare_sacrifice_random_tag_with_no_player_choice() {
     assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(p1)).unwrap().contents.len(), 1, "P1 Bear");
 }
 
-/// A non-`SacrificeRandom`/`DiscardRandom` `Game.Ops.*` tag handed to
-/// `Game.Ops.ForEachPlayer` directly is a loud load-time error, not a silent
-/// no-op - same "typos are load-time errors" stance every other tag decode
-/// in this engine takes.
+// Any other Game.Ops tag handed to ForEachPlayer is a loud load-time error and not a silent no-op.
 #[test]
 fn for_each_player_rejects_an_unsupported_bare_tag() {
     const BAD_SCRIPT: &str = r#"

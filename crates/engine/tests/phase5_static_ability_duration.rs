@@ -1,14 +1,4 @@
-//! Phase 5 vertical slice: `StaticAbilityBuilder::SetDuration` (CR 611.2a-
-//! style limited-duration static effects). Before this slice,
-//! `Game.CreateStaticAbility(c)`'s `:Register()` always hardcoded
-//! `EffectDuration::Permanent` — no Lua path to a temporary static-shaped
-//! `ContinuousEffect` (e.g. "artifacts you control gain flying until end of
-//! turn"), even though the drain mechanism for every `EffectDuration`
-//! variant already exists (`phase5/effect-duration-expiration`,
-//! `phase5_effect_duration_expiration.rs`) and is exercised there with
-//! directly-constructed `ContinuousEffect` values. This slice only closes
-//! the construction gap - the drain mechanics themselves aren't retested
-//! here beyond the one end-to-end case proving the two now connect.
+//! `StaticAbilityBuilder::SetDuration` (CR 611.2a) gives a Lua static ability a limited duration instead of `EffectDuration::Permanent`. The drain mechanics are in phase5_effect_duration_expiration.rs, and one end-to-end case here shows the two connect.
 
 use std::collections::HashMap;
 
@@ -106,17 +96,9 @@ fn bear_definition(script: &str) -> CardDefinition {
     }
 }
 
-/// A minimal 2-player state, same shape `phase5_static_ability_self_
-/// registration.rs::two_player_state` uses, for the unit-level `run_card_
-/// script` tests below.
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: SetDuration decodes each Game.Durations.* tag into the real
-// ContinuousEffect.duration field.
-// ---------------------------------------------------------------------
 
 fn registered_duration(script: &str) -> EffectDuration {
     let mut state = two_player_state();
@@ -156,13 +138,6 @@ fn omitting_set_duration_still_defaults_to_permanent() {
     assert!(matches!(registered_duration(NO_SET_DURATION), EffectDuration::Permanent));
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: a Lua-registered UntilEndOfTurn static ability actually gets
-// drained by the real cleanup-step mechanism (phase5/effect-duration-
-// expiration's engine.rs::begin_cleanup_step retain()), proving the two
-// halves (Lua wiring here, drain there) actually connect.
-// ---------------------------------------------------------------------
-
 fn step_until_pause(engine: &mut Engine) -> StepStatus {
     loop {
         let r = engine.step();
@@ -196,11 +171,7 @@ fn lua_registered_until_end_of_turn_static_ability_drains_at_cleanup() {
     let p1 = PlayerId(1);
     let bear = ObjectId(1);
 
-    // Register directly via run_card_script (same mechanism PlayLand/
-    // CastSpell resolution drives - see phase5_static_ability_self_
-    // registration.rs's own end-to-end tests for that path already proven),
-    // then hand the resulting state to a real Engine sitting at the End
-    // step so cleanup's drain is the one under test here, not registration.
+    // Register directly through run_card_script, then give the state to an Engine at the End step, so cleanup's drain is under test and not registration.
     let mut state = two_player_state();
     state.phase = Phase::Ending;
     state.step = Step::End;

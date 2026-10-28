@@ -1,17 +1,5 @@
-//! Phase 5 vertical slice: CR 700.2h — a modal spell mode with its own
-//! additional cost ("some modal spells have one or more modes with a cost
-//! listed before the effect of that mode... paid as the spell is cast if
-//! that mode is chosen"). `SpellMode.additional_cost: Option<AdditionalCost>`
-//! reuses the exact `AdditionalCost` enum an activated ability's own
-//! additional costs already use — `commands::execute_command`'s `CastSpell`
-//! arm just appends every chosen mode's own cost to the spell's overall
-//! `CostSpec.additional`, so `PaymentPlan::validate`/`Engine::submit_payment`
-//! (already fully generic over `CostSpec`, never special-cased by caller)
-//! need no changes at all.
-//!
-//! Uses `AdditionalCost::LifePayment` as the exercised shape - the simplest
-//! one to set up (no object lookups needed), same choice
-//! `phase5_activate_ability_costs.rs` makes for its own most basic case.
+//! CR 700.2h: a modal spell mode with its own additional cost, `SpellMode.additional_cost`. The `CastSpell` arm appends every chosen mode's cost to `CostSpec.additional`, so `PaymentPlan::validate` and `submit_payment` need no change.
+//! `AdditionalCost::LifePayment` is the exercised shape.
 
 use std::collections::HashMap;
 
@@ -29,9 +17,6 @@ fn any_target_requirement() -> TargetSpec {
     })
 }
 
-/// "Test Mode Cost: Choose one or both —
-///  * You gain 3 life.
-///  * Pay 2 life. Test Mode Cost deals 2 damage to any target."
 fn mode_cost_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 40,
@@ -151,10 +136,7 @@ fn choosing_both_modes_still_only_requires_the_one_costed_modes_payment() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // Both modes chosen - mode 0 (GainLife, no cost) and mode 1 (Damage,
-    // LifePayment{2}) - CR 700.2h: "if more than one such mode is chosen,
-    // all additional costs must be paid," which here is still just the one
-    // mode 1 actually carries.
+    // CR 700.2h: both modes chosen, and all additional costs must be paid, here just mode 1's.
     cast_spell(&mut engine, p0, card, vec![0, 1], vec![Target::Player(p1)]);
     drain(&mut engine);
 

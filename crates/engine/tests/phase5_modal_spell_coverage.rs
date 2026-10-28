@@ -1,9 +1,5 @@
-//! Phase 5 vertical slice: coverage for the kinds `phase5/modal-resolvable-ops`
-//! put in `is_modal_resolvable` without testing them as a mode of a
-//! multi-mode spell (`Discard`, `Surveil`, `Regenerate`, `Counter`), and for
-//! the CR 700.2e chosen-by-opponent path (`Engine::submit_mode_choice`) with
-//! modes that pause. Also pins that a resolving instant's own Stack ->
-//! Graveyard `ZoneChange` is logged when its effect is a scripted zone move.
+//! Coverage for kinds that `is_modal_resolvable` accepts (`Discard`, `Surveil`, `Regenerate`, `Counter`) as modes of a multi-mode spell, and the CR 700.2e opponent-chosen path with pausing modes.
+//! It also pins that a resolving instant's Stack to Graveyard `ZoneChange` is logged when its effect is a scripted zone move.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -75,8 +71,6 @@ fn creatures() -> EffectFilter {
     EffectFilter { card_types: Some(CardTypeSet::CREATURE), ..everything() }
 }
 
-/// A bear on the battlefield (P1's), `library` cards and two `hand` cards in
-/// each library and P1 hand, and the modal spell in P0's hand.
 fn engine_with(spell: CardDefinition, library: u64, p1_hand: u64) -> Engine {
     let mut state = GameState {
         step: Step::PreCombatMain,
@@ -159,8 +153,6 @@ fn add_competing_redirects(engine: &mut Engine) {
     }
 }
 
-// ---- The resolving instant's own zone change ---------------------------------
-
 #[test]
 fn a_destroy_instant_logs_its_own_stack_to_graveyard_move() {
     let mut spell = card(99, "Test Spell", CardTypeSet::INSTANT);
@@ -178,8 +170,6 @@ fn a_destroy_instant_logs_its_own_stack_to_graveyard_move() {
         .count();
     assert_eq!(spell_moves, 1, "the instant's move off the stack is in the ledger");
 }
-
-// ---- Discard ---------------------------------------------------------------
 
 #[test]
 fn a_discard_mode_pauses_for_the_targeted_player_and_the_next_mode_waits() {
@@ -211,8 +201,6 @@ fn a_discard_mode_with_an_empty_hand_does_not_pause_and_the_next_mode_runs() {
     assert_resolved_cleanly(&engine);
 }
 
-// ---- Surveil ---------------------------------------------------------------
-
 #[test]
 fn a_surveil_mode_pauses_for_its_choice_and_the_next_mode_runs_after_it() {
     let spell = modal_spell(vec![mode(None, AbilityEffect::Surveil(1)), mode(None, AbilityEffect::GainLife(3))], ModeChoice::Exactly(2));
@@ -229,8 +217,6 @@ fn a_surveil_mode_pauses_for_its_choice_and_the_next_mode_runs_after_it() {
     assert_eq!(engine.state().zone(ZoneKind::Graveyard, Some(P0)).unwrap().contents.len(), 2, "the surveilled card and the spell");
     assert_resolved_cleanly(&engine);
 }
-
-// ---- Regenerate ------------------------------------------------------------
 
 #[test]
 fn a_regenerate_mode_shields_the_target_from_a_later_destroy_mode() {
@@ -256,9 +242,6 @@ fn a_regenerate_mode_printed_after_the_destroy_mode_is_too_late() {
     assert_resolved_cleanly(&engine);
 }
 
-// ---- Counter ---------------------------------------------------------------
-
-/// P0 casts a plain "gain 1 life" spell, then the modal spell in response.
 fn engine_with_a_spell_to_counter(modes: Vec<SpellMode>) -> Engine {
     let mut engine = engine_with(modal_spell(modes, ModeChoice::Exactly(2)), 0, 0);
     let mut victim = card(98, "Victim", CardTypeSet::INSTANT);
@@ -298,8 +281,6 @@ fn a_counter_mode_followed_by_a_pausing_mode_resumes_after_the_pause() {
     assert_eq!(life(&engine, P0), 20, "the victim was countered");
     assert!(engine.state().stack.is_empty());
 }
-
-// ---- Chosen by the opponent (CR 700.2e) -------------------------------------
 
 fn chosen_by_opponent(modes: Vec<SpellMode>) -> CardDefinition {
     modal_spell(modes, ModeChoice::ExactlyChosenByOpponent(2))

@@ -1,16 +1,4 @@
-//! Phase 5 vertical slice: CR 601.2c/115/205.4b negative target filters —
-//! `TargetFilter::Object`'s own long-standing TODO ("target creature you
-//! don't control that isn't a Wall"), left open through every prior
-//! targeting slice (subtype/supertype filters, "another target", scripted
-//! predicates, "N or more" counts).
-//!
-//! `TargetFilter::Object` gains `excluded_card_types: Option<CardTypeSet>`
-//! ("target nonland permanent") and `excluded_subtypes: Option<Vec<Subtype>>`
-//! ("target creature that isn't a Wall") — the negation of the existing
-//! `card_types`/`subtypes` "or" matches, checked independently so a filter
-//! can combine a positive `card_types` with an `excluded_subtypes` (the
-//! worked example above: `card_types: Creature, excluded_subtypes: [Wall],
-//! controller: Opponent`).
+//! CR 601.2c, 115, 205.4b: negative target filters, closing the long-standing TODO on `TargetFilter::Object` ("target creature you don't control that isn't a Wall"). `excluded_card_types` ("nonland permanent") and `excluded_subtypes` ("isn't a Wall") negate the positive `card_types` and `subtypes` matches and combine with them independently.
 
 use std::collections::HashMap;
 
@@ -70,7 +58,6 @@ fn land_definition(id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Bolt deals 1 damage to target nonland permanent."
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -110,7 +97,6 @@ fn bolt_definition() -> CardDefinition {
     }
 }
 
-/// "Test Purge deals 1 damage to target creature that isn't a Wall."
 fn purge_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
@@ -150,8 +136,6 @@ fn purge_definition() -> CardDefinition {
     }
 }
 
-/// This repo's own worked example for the negative-filter gap: "target
-/// creature you don't control that isn't a Wall."
 fn smite_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 22,

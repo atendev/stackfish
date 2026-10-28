@@ -1,27 +1,6 @@
-//! Phase 5 vertical slice: CR 702.29c/f — "when you cycle this card"
-//! triggered abilities.
-//!
-//! `ConditionPrimitive::Cycled` (types/ability.rs) is a new self-referential
-//! sibling of `Discarded`: unlike `Discarded` (matches *any* hand ->
-//! graveyard departure of this card, whatever the cause), `Cycled` matches
-//! only `GameEventKind::Cycled`, a purpose-built marker event logged
-//! alongside the ordinary `ZoneChange` exclusively when the discard paid a
-//! Cycling/Typecycling ability's own `AdditionalCost::DiscardSelf` cost
-//! (`Engine::submit_payment`'s `cycling_source` check, threaded through
-//! `continue_cost_zone_moves`). CR 702.29f means Typecycling's own
-//! `DiscardSelf` cost counts identically - no separate mechanism needed.
-//!
-//! Reuses the exact CR 603.10 departed/LKI fallback shape `Discarded`
-//! itself uses (`triggers.rs::collect_triggers`'s `departed` loop), since
-//! the cycled card's own "when you cycle this card" ability is purged from
-//! `state.abilities` the moment the card leaves hand, same as any other
-//! departure.
-//!
-//! CR 702.29d ("whenever a player cycles or discards a card") needed no new
-//! work at all - `DiscardsCard`/`EachDiscardsCard` already match *any* Hand
-//! -> Graveyard `ZoneChange`, and a cycling discard is exactly that shape.
-//! `cycles_or_discards_condition_already_fires_for_a_cycling_discard` below
-//! proves that coverage directly rather than leaving it assumed.
+//! CR 702.29c/f: "when you cycle this card" triggers. `ConditionPrimitive::Cycled` matches only `GameEventKind::Cycled`, logged when the discard paid a `DiscardSelf` cost.
+//! The trigger uses the departed/LKI fallback of CR 603.10, since the card's abilities are purged when it leaves the hand.
+//! CR 702.29d "cycles or discards" already works through `DiscardsCard` and `EachDiscardsCard`.
 
 use std::collections::HashMap;
 
@@ -51,8 +30,6 @@ fn discard_self_cost() -> CostSpec {
     CostSpec { mana: None, additional: vec![AdditionalCost::DiscardSelf], alternative: Vec::new() }
 }
 
-/// The Cycling activated ability itself - same shape `phase5_cycling.rs`
-/// already established.
 fn cycling_ability(source: ObjectId, effect: AbilityEffect) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -69,10 +46,6 @@ fn cycling_ability(source: ObjectId, effect: AbilityEffect) -> RegisteredAbility
     }
 }
 
-/// "When you cycle this card, you gain 1 life" - a self-referential
-/// `Cycled`-conditioned trigger on the same card as its own Cycling
-/// ability. `effect: GainLife(1)` is a convenient, easy-to-observe proof the
-/// trigger actually resolved.
 fn cycled_trigger(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -142,9 +115,7 @@ fn cycled_trigger_fires_off_a_plain_cycling_activation() {
     let status = drain(&mut engine);
 
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected priority reopened by the Cycled trigger, got {status:?}");
-    // 2, not 1: the Cycling activated ability itself (pushed on activation,
-    // before its cost was even paid) plus the Cycled trigger collected off
-    // paying that cost.
+    // 2: the Cycling ability, pushed on activation before its cost was paid, plus the Cycled trigger collected off that payment.
     assert_eq!(engine.state().stack.len(), 2, "the Cycling ability plus the Cycled trigger it paid for");
 
     // Resolve both stack entries (Cycled trigger resolves first, LIFO).
@@ -216,8 +187,7 @@ fn cycled_trigger_does_not_fire_for_the_cleanup_hand_size_discard() {
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingDiscard { player, hand_size: 8, max_hand_size: 7 } if player == p0), "got {status:?}");
 
-    // Cleanup-discard the Cycling card itself - a plain discard, not a
-    // Cycling activation, so the DiscardSelf-cost cost path never runs.
+    // A plain cleanup discard and not a Cycling activation, so the DiscardSelf cost path never runs.
     engine.submit_discard(vec![card]).expect("valid discard");
     let status = drain(&mut engine);
 
@@ -229,11 +199,8 @@ fn cycled_trigger_does_not_fire_for_the_cleanup_hand_size_discard() {
     assert_eq!(engine.state().player(p0).unwrap().life, 20, "no GainLife - the Cycled trigger never fired");
 }
 
-/// CR 702.29d: "whenever a player cycles or discards a card" already works
-/// off the pre-existing `EachDiscardsCard` condition - no new mechanism
-/// needed, since a cycling discard produces the exact same Hand ->
-/// Graveyard `ZoneChange` shape any other discard does. This proves that
-/// coverage directly rather than leaving it assumed.
+// CR 702.29d
+// A cycling discard is a Hand to Graveyard ZoneChange, so the existing EachDiscardsCard condition fires.
 #[test]
 fn cycles_or_discards_condition_already_fires_for_a_cycling_discard() {
     let mut state = two_player_state();

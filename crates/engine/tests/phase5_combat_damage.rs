@@ -1,11 +1,5 @@
-//! Phase 5 vertical slice: combat damage (CR 510). `AssignCombatDamage`
-//! collapses 510.1 (assign) and 510.2 (deal) into one turn-based action,
-//! same shape as `DeclareAttackers`/`DeclareBlockers` - see
-//! `command.rs`'s doc comment on the variant for why only attackers with
-//! 2+ blockers ever need a real `assignments` entry. First/double strike
-//! (702.7), deathtouch (702.2), damage prevention/replacement (CR 615/616),
-//! and planeswalker/battle damage are all out of scope - see the TODOs left
-//! in `commands.rs`.
+//! CR 510: `AssignCombatDamage` collapses assigning (CR 510.1) and dealing (CR 510.2) into one action.
+//! Only an attacker with two or more blockers needs an `assignments` entry.
 
 use std::collections::HashMap;
 
@@ -24,8 +18,7 @@ fn creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition
 }
 
 fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameObject {
-    // Attackers/blockers are already mid-combat - tapped is irrelevant to
-    // this slice either way.
+    // Attackers and blockers are mid-combat, so tapped state does not matter.
     GameObject { tapped: true, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
 }
 
@@ -35,10 +28,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Two players, `p0` active/attacking, `p1` defending,
-/// `Phase::Combat`/`Step::CombatDamage` with `combat` already populated (as
-/// if `DeclareAttackers`/`DeclareBlockers` already ran) - `AssignCombatDamage`
-/// is immediately legal.
 fn combat_damage_state(combat: CombatState) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -79,10 +68,6 @@ fn try_assign_combat_damage(
     Ok(drain(engine))
 }
 
-// ---------------------------------------------------------------------
-// Unblocked
-// ---------------------------------------------------------------------
-
 #[test]
 fn unblocked_attacker_deals_damage_to_original_target() {
     let p0 = PlayerId(0);
@@ -105,10 +90,6 @@ fn unblocked_attacker_deals_damage_to_original_target() {
         GameEventKind::DamageDealt { source, target: Target::Player(t), amount, .. } if *source == attacker && *t == p1 && *amount == 3
     )));
 }
-
-// ---------------------------------------------------------------------
-// Single blocker
-// ---------------------------------------------------------------------
 
 #[test]
 fn single_blocker_deals_damage_both_directions() {
@@ -156,10 +137,6 @@ fn single_blocker_lethal_both_ways_kills_both_creatures_same_step() {
     assert!(engine.state().object(attacker).is_none(), "704.5g: lethal damage destroys the attacker");
     assert!(engine.state().object(blocker).is_none(), "704.5g: lethal damage destroys the blocker");
 }
-
-// ---------------------------------------------------------------------
-// Multi-blocked: real split
-// ---------------------------------------------------------------------
 
 #[test]
 fn double_blocked_attacker_accepts_a_legal_split() {
@@ -259,15 +236,10 @@ fn single_blocked_attacker_rejects_a_redundant_split_entry() {
     put_on_battlefield(&mut state, permanent(blocker, creature_definition("Wall", 2, 5), p1));
 
     let mut engine = Engine::new(state);
-    // Only one blocker - there's no real choice here, so an assignments
-    // entry is disallowed input, not just redundant.
+    // One blocker leaves no choice, so an assignments entry is disallowed and not just redundant.
     let err = try_assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker, 3)])]).unwrap_err();
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
-
-// ---------------------------------------------------------------------
-// Zero power
-// ---------------------------------------------------------------------
 
 #[test]
 fn zero_power_attacker_assigns_no_damage() {
@@ -289,18 +261,6 @@ fn zero_power_attacker_assigns_no_damage() {
         "no DamageDealt event for a 0-power attacker"
     );
 }
-
-// ---------------------------------------------------------------------
-// Automatic assignment (phase5/automatic-combat-damage, CR 510.1/510.2):
-// a damage step with no real split to choose resolves on its own as the
-// step opens - no `AssignCombatDamage` submission required. Starts each
-// fixture at `Step::DeclareBlockers` (not `Step::CombatDamage` directly,
-// unlike every fixture above) so both players passing priority is what
-// actually drives the real `DeclareBlockers` -> `CombatDamage` engine
-// transition the auto-fire attempt lives on - constructing state already
-// sitting in `Step::CombatDamage` would skip right past the code path
-// under test.
-// ---------------------------------------------------------------------
 
 fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
@@ -389,7 +349,6 @@ fn double_blocked_attacker_still_waits_for_a_real_split_after_the_auto_fire_atte
     assert_eq!(engine.state().object(attacker).unwrap().damage_marked, 0, "auto-fire correctly declined - nothing dealt yet");
     assert!(!engine.state().combat.as_ref().unwrap().damage_assigned_this_step);
 
-    // The real submission still works exactly as before this slice.
     assign_combat_damage(&mut engine, p0, vec![(attacker, vec![(blocker_a, 3), (blocker_b, 2)])]);
     assert_eq!(engine.state().object(blocker_a).unwrap().damage_marked, 3);
     assert_eq!(engine.state().object(blocker_b).unwrap().damage_marked, 2);
@@ -416,27 +375,20 @@ fn redundant_explicit_submission_after_auto_fire_is_a_harmless_noop() {
     let p1_life_after_auto_fire = engine.state().players.iter().find(|p| p.player_id == p1).unwrap().life;
     assert_eq!(p1_life_after_auto_fire, 17);
 
-    // Every pre-existing zero-split scenario/test in this repo submits
-    // exactly this, unconditionally, regardless of whether a real split
-    // was ever needed - it must keep being legal and inert rather than
-    // double-dealing damage or erroring.
+    // A zero-split submission stays legal and inert, and must not double-deal damage or error.
     assign_combat_damage(&mut engine, p0, Vec::new());
     let p1_life_after_redundant_submission =
         engine.state().players.iter().find(|p| p.player_id == p1).unwrap().life;
     assert_eq!(p1_life_after_redundant_submission, 17, "no second DamageDealt - damage was already assigned this step");
 }
 
-// ---------------------------------------------------------------------
-// CR 514.2 cleanup
-// ---------------------------------------------------------------------
-
+// CR 514.2
 #[test]
 fn damage_marked_is_cleared_entering_cleanup() {
     let p0 = PlayerId(0);
     let creature = ObjectId(0);
     let mut state = combat_damage_state(CombatState { attackers: Vec::new(), blocks: Vec::new(), declared_defenders: Vec::new() , bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new() });
-    // Non-lethal marked damage (toughness 5, damage 1) - survives to Cleanup
-    // so this test isolates the reset itself, not 704.5g.
+    // Non-lethal marked damage survives to Cleanup, which isolates the reset from CR 704.5g.
     let mut object = permanent(creature, creature_definition("Bear", 3, 5), p0);
     object.damage_marked = 1;
     put_on_battlefield(&mut state, object);
@@ -444,20 +396,14 @@ fn damage_marked_is_cleared_entering_cleanup() {
     state.step = Step::End;
 
     let mut engine = Engine::new(state);
-    // Both players pass at End step; Cleanup runs automatically without
-    // opening a priority window (CR 514.3 — no SBAs/triggers fired here).
+    // Both players pass at End step, and Cleanup runs without a priority window (CR 514.3).
     engine.submit_action(PlayerAction { player: p0, kind: PlayerActionKind::PassPriority }).unwrap();
     drain(&mut engine);
     engine.submit_action(PlayerAction { player: PlayerId(1), kind: PlayerActionKind::PassPriority }).unwrap();
     drain(&mut engine);
-    // Cleanup has already processed (advance_turn_step cleared damage when
-    // it set step to Cleanup, then begin_cleanup_step auto-advanced through).
+    // Cleanup cleared the damage when advance_turn_step set the step, then auto-advanced.
     assert_eq!(engine.state().object(creature).unwrap().damage_marked, 0, "514.2: marked damage is removed entering cleanup");
 }
-
-// ---------------------------------------------------------------------
-// PlayerState::lose_life
-// ---------------------------------------------------------------------
 
 #[test]
 fn lose_life_subtracts_from_life_total() {
@@ -476,8 +422,7 @@ fn lose_life_subtracts_from_life_total() {
     };
     player.lose_life(7);
     assert_eq!(player.life, 13);
-    // CR 119: not clamped to 0 - negative life is meaningful for the CR
-    // 704.5a SBA check, not special-cased away here.
+    // CR 119: life is not clamped to 0, since negative life matters to CR 704.5a.
     player.lose_life(20);
     assert_eq!(player.life, -7);
 }

@@ -1,19 +1,4 @@
-//! Phase 5 vertical slice: CR 514.1 cleanup hand-size discard is a real
-//! replacement-checked zone-change proposal now, closing the exact TODO
-//! `Engine::submit_discard`'s own doc comment used to carry ("discard can be
-//! replaced (e.g. Leyline of the Void redirects discarded cards to exile)
-//! but replacement effects aren't implemented yet"). Reuses `commands::
-//! propose_zone_move`/`commit_zone_move` and the `Engine::
-//! continue_cost_zone_moves` shape `phase5/replaceable-cost-zone-moves`
-//! already proved for Sacrifice/Discard cost payments - `Engine::
-//! continue_discard_moves` is the same loop, reused rather than duplicated,
-//! with its own `ReplacementResumeTarget::CleanupDiscard` resume shape.
-//!
-//! `Engine::draw_one_card`/`DrawCards(n)` stay out of scope - see this
-//! slice's own requirements report: they live inside `AdvanceTurnStep`'s
-//! single shared `step()` match arm, not a self-contained public method,
-//! and making them replaceable would mean threading a new pause/resume
-//! shape through that whole function - real, separate follow-up work.
+//! CR 514.1: the cleanup hand-size discard is a replacement-checked zone-change proposal (Leyline of the Void redirects it to exile), closing the TODO in `Engine::submit_discard`'s doc comment. `continue_discard_moves` reuses the `continue_cost_zone_moves` loop with `ReplacementResumeTarget::CleanupDiscard`.
 
 use std::collections::HashMap;
 
@@ -74,9 +59,6 @@ fn ward_definition(script: &str) -> CardDefinition {
     }
 }
 
-/// A two-player `GameState` sitting at `(Ending, End)` in `PriorityWindow`
-/// for `p0` (active player) - mirrors `phase5_max_hand_size.rs::state_at_end_step`,
-/// plus a battlefield `ward` permanent for a replacement effect to live on.
 fn state_at_end_step() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -159,8 +141,7 @@ fn a_cleanup_discard_is_replacement_checked_for_real() {
     };
     assert_eq!(player, p0);
 
-    // Discard any one of the 8 - all are the same vanilla Creature, so which
-    // one doesn't matter for this test.
+    // Discards any one of the 8, which are all the same vanilla Creature.
     engine.submit_discard(vec![hand_ids[0]]).expect("valid discard");
     let status = step_until_pause(&mut engine);
 
@@ -184,9 +165,7 @@ fn a_cleanup_discard_without_a_matching_replacement_lands_in_the_graveyard_norma
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let hand_ids = add_cards_to_hand(&mut state, p0, 8);
-    // No replacement effect registered at all this time - the ward object
-    // exists (from state_at_end_step) but its script is empty, so nothing's
-    // in state.replacement_effects.
+    // No replacement effect is registered: the ward object exists but its script is empty.
 
     let mut engine = Engine::new(state);
     let status = pass_to_cleanup_discard(&mut engine, p0, p1);

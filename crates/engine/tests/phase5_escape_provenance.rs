@@ -1,41 +1,6 @@
-//! Phase 5 vertical slice: CR 702.138b/c/d Escape provenance.
-//!
-//! CR 702.138b: "a spell or permanent 'escaped' if [it] was cast from a
-//! graveyard with an escape ability." This slice makes that a real,
-//! queryable fact for the first time:
-//!
-//! - `AlternativeCost::Replacement.escape: bool` (true only for Escape's own
-//!   alternative cost, false for Flashback/every other shape - the only
-//!   thing that structurally distinguishes them, since both share
-//!   `from_zone: Graveyard`).
-//! - `StackObject::escaped: bool`, baked in at push time from the chosen
-//!   alternative cost.
-//! - `GameObject::entered_via_escape: bool`, set by `Engine::
-//!   move_resolving_spell` when a spell with `escaped: true` resolves onto
-//!   the battlefield.
-//! - `InterveningIfPrimitive::Escaped` (CR 603.4's "if it escaped" clause) -
-//!   Kroxa/Uro's own real card pattern is an *ordinary* ETB trigger with
-//!   this as its intervening-if, not CR 702.138c/d's own literal "escapes
-//!   with [counters/ability]" templates.
-//! - CR 702.138c ("escapes with N counters") is real too -
-//!   `ReplacementPayload::EntersWithCountersEscape`, the same no-player-
-//!   choice gated shape `EntersWithCountersBloodthirst` already established,
-//!   checked against `entered_via_escape` instead of
-//!   `opponent_damaged_this_turn`.
-//! - CR 702.138d ("has [ability] if escaped") needed **no new mechanism at
-//!   all** - a static ability's own `StaticAbilityBuilder:SetCondition`
-//!   (CR 611.2c, `phase5/conditional-continuous-effects`) already accepts
-//!   any `InterveningIfPrimitive`, so `Game.InterveningIf.Escaped` plugs in
-//!   directly. `layers::applicable_effects_in_layer` already re-evaluates a
-//!   `ContinuousEffect`'s own `condition` fresh on every query, off the
-//!   *live* `GameObject` (no CR 603.10 departed-ability concern - unlike an
-//!   ETB trigger, a static ability's condition is checked while the
-//!   permanent is still on the battlefield).
-//!
-//! All three shapes are proven together on one creature, cast two ways: via
-//! Escape (all three apply) and normally from hand (none of them do) -
-//! proving `entered_via_escape` is real per-incarnation provenance, not a
-//! standing permission on the card.
+//! CR 702.138b/c/d: Escape provenance. `AlternativeCost::Replacement.escape` marks Escape's cost, `StackObject::escaped` is baked in at push time, and `GameObject::entered_via_escape` is set when the spell resolves onto the battlefield.
+//! `InterveningIfPrimitive::Escaped` serves an ordinary ETB trigger (CR 603.4), `EntersWithCountersEscape` serves CR 702.138c, and `Game.InterveningIf.Escaped` serves CR 702.138d through `SetCondition` (CR 611.2c).
+//! One creature is cast both ways, so `entered_via_escape` is per-incarnation provenance and not a standing permission.
 
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -68,9 +33,6 @@ end
 return s
 "#;
 
-/// "Test Escaper": `{2}{B}` creature, Escape—`{1}{B}, Exile three other
-/// cards from your graveyard`, carrying all three escape-gated effects
-/// above via a real inline script.
 fn escaper_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
@@ -171,8 +133,7 @@ fn pass_both(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     drain(engine)
 }
 
-/// The most recently entered battlefield permanent's own id - the fresh
-/// CR 400.7 id minted by casting, not the original graveyard/hand id.
+// The fresh CR 400.7 id minted by casting, not the graveyard or hand id.
 fn sole_battlefield_object(engine: &Engine) -> ObjectId {
     let bf = engine.state().zone(ZoneKind::Battlefield, None).unwrap();
     assert_eq!(bf.contents.len(), 1, "expected exactly one battlefield permanent");
@@ -261,8 +222,7 @@ fn casting_normally_grants_none_of_the_escape_gated_effects() {
     let effective = effective_characteristics(&engine.state(), &ScriptRuntime::new(), permanent);
     assert!(!effective.keywords.contains(KeywordSet::FLYING), "CR 702.138d only applies to an escaped incarnation");
 
-    // The ETB trigger's own intervening-if never held - collect_triggers
-    // filters it out at collection time, so it never even reaches the stack.
+    // The intervening-if never held, so collect_triggers filters the trigger out before it reaches the stack.
     assert!(engine.state().stack.is_empty(), "the Escaped-gated ETB trigger must not have been collected at all");
     assert_eq!(engine.state().player(p0).unwrap().life, 20, "no GainLife - the trigger never fired");
 }

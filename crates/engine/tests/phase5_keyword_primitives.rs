@@ -1,23 +1,6 @@
-//! Phase 5 vertical slice: CR 702 keyword primitives — the subset that
-//! changes how an existing engine checkpoint behaves (blocking legality,
-//! summoning sickness, casting timing, SBA lethal-checks, damage
-//! application), stored as `KeywordSet` bits on `CardDefinition`. Deliberately
-//! NOT the ~140-keyword CR 702 catalog — keywords that are really just sugar
-//! for an activated/triggered ability (Cycling, Persist, ...) get a
-//! `RegisteredAbility` instead; see `KeywordSet`'s own doc comment and the
-//! TODO in `script_api.rs` for the still-unbuilt keyword-name -> primitive-
-//! or-ability mapping layer.
-//!
-//! Covered here: Flying/Reach/Menace (blocking legality), Vigilance/Haste/
-//! Defender (attack declaration), Flash (casting timing), Deathtouch/
-//! Indestructible (SBA lethal-check), Lifelink/Wither/Infect (damage
-//! application), plus `PTValue::net_with_counters` (the +1/+1 / -1/-1
-//! counter-netting Wither/Infect rely on to matter at all).
-//!
-//! Out of scope, own future slices (see the requirements report): Trample
-//! (needs a real `AssignCombatDamage` split-shape change), First/Double
-//! Strike (needs a new combat sub-step), Hexproof/Shroud/Protection/Ward
-//! (blocked on there being no target-legality check anywhere yet).
+//! CR 702 keywords that change an engine checkpoint, stored as `KeywordSet` bits: Flying, Reach and Menace (blocking), Vigilance, Haste and Defender (attacking), Flash (casting timing), Deathtouch and Indestructible (SBA), Lifelink, Wither and Infect (damage).
+//! `PTValue::net_with_counters` nets the +1/+1 and -1/-1 counters that Wither and Infect rely on.
+// TODO: keyword-name to primitive-or-ability mapping layer (see script_api.rs)
 
 use std::collections::HashMap;
 
@@ -69,11 +52,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Two players, `p0` active/attacking, `p1` defending, `Phase::Combat`/
-/// `Step::DeclareAttackers`, both turns seeded into `last_active_turn_number`
-/// (turn 1 for `p0`, turn 0 for `p1`) so `permanent`'s `controlled_since_turn`
-/// param alone controls summoning sickness. Same shape as
-/// `phase5_combat_declarations.rs::combat_state`.
 fn combat_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -85,9 +63,6 @@ fn combat_state() -> GameState {
     }
 }
 
-/// Same as `combat_state`, with `combat` already populated as if
-/// `DeclareAttackers`/`DeclareBlockers` ran, sitting at `Step::CombatDamage`
-/// so `AssignCombatDamage` is immediately legal.
 fn combat_damage_state(combat: CombatState) -> GameState {
     let mut state = combat_state();
     state.step = Step::CombatDamage;
@@ -123,9 +98,6 @@ fn try_declare_blockers(engine: &mut Engine, player: PlayerId, blocks: Vec<(Obje
     Ok(drain(engine))
 }
 
-/// Drives the real `AdvanceTurnStep` pipeline (both players passing with the
-/// empty stack a legal `DeclareAttackers` leaves behind) until `state.step`
-/// reaches `DeclareBlockers` - same helper as `phase5_combat_declarations.rs`.
 fn pass_to_declare_blockers(engine: &mut Engine) {
     for _ in 0..10 {
         if engine.state().step == Step::DeclareBlockers {
@@ -148,10 +120,6 @@ fn assign_combat_damage(
         .expect("turn-based action, no priority required");
     drain(engine)
 }
-
-// ---------------------------------------------------------------------
-// Flying / Reach (CR 702.9 / 702.17)
-// ---------------------------------------------------------------------
 
 #[test]
 fn flying_attacker_cannot_be_blocked_by_non_flying_non_reach() {
@@ -186,10 +154,6 @@ fn flying_attacker_can_be_blocked_by_reach_creature() {
     let status = declare_blockers(&mut engine, p1, vec![(blocker, attacker)]);
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "reach legally blocks flying, got {status:?}");
 }
-
-// ---------------------------------------------------------------------
-// Menace (CR 702.111)
-// ---------------------------------------------------------------------
 
 #[test]
 fn menace_attacker_rejects_a_single_blocker() {
@@ -227,10 +191,6 @@ fn menace_attacker_accepts_two_blockers() {
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "two blockers legally block menace, got {status:?}");
 }
 
-// ---------------------------------------------------------------------
-// Vigilance (CR 702.20)
-// ---------------------------------------------------------------------
-
 #[test]
 fn vigilance_attacker_does_not_tap() {
     let p0 = PlayerId(0);
@@ -248,18 +208,13 @@ fn vigilance_attacker_does_not_tap() {
     );
 }
 
-// ---------------------------------------------------------------------
-// Haste (CR 702.10)
-// ---------------------------------------------------------------------
-
 #[test]
 fn haste_creature_can_attack_the_turn_it_entered() {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state = combat_state();
-    // controlled_since_turn == the current turn (1) - sick unless Haste
-    // overrides it.
+    // controlled_since_turn equals the current turn (1), so it is sick unless Haste overrides it.
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Sprinter", 2, 2, KeywordSet::HASTE), p0, 1));
 
     let mut engine = Engine::new(state);
@@ -280,10 +235,6 @@ fn creature_without_haste_cannot_attack_the_turn_it_entered() {
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
 
-// ---------------------------------------------------------------------
-// Defender (CR 702.3)
-// ---------------------------------------------------------------------
-
 #[test]
 fn defender_creature_cannot_attack() {
     let p0 = PlayerId(0);
@@ -296,13 +247,6 @@ fn defender_creature_cannot_attack() {
     let err = try_declare_attackers(&mut engine, p0, vec![(attacker, Target::Player(p1))]).unwrap_err();
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
 }
-
-// ---------------------------------------------------------------------
-// Haste/Defender/Vigilance granted or removed by a continuous effect (CR
-// 613.1f) - these three specifically used to read only the *printed*
-// keyword, ignoring any static ability; fixed to consult effective_keywords
-// like every other keyword check in this file already does.
-// ---------------------------------------------------------------------
 
 fn self_only_keyword_effect(source: ObjectId, effect: EffectPrimitive) -> ContinuousEffect {
     ContinuousEffect {
@@ -322,8 +266,7 @@ fn haste_granted_by_a_continuous_effect_bypasses_summoning_sickness() {
     let p1 = PlayerId(1);
     let attacker = ObjectId(0);
     let mut state = combat_state();
-    // controlled_since_turn == the current turn (1) - sick unless something
-    // overrides it. No printed Haste this time - only a granted one.
+    // controlled_since_turn equals the current turn (1) and no Haste is printed, so only a granted one helps.
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Sprinter", 2, 2, KeywordSet::empty()), p0, 1));
     state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::AddKeyword(KeywordSet::HASTE)));
 
@@ -364,12 +307,7 @@ fn vigilance_granted_by_a_continuous_effect_prevents_tapping() {
     assert!(!engine.state().object(attacker).unwrap().tapped, "a continuous effect granting Vigilance must skip the tap too");
 }
 
-/// `RemoveKeyword(Defender)` also happens to let a Defender creature attack
-/// (Defender is gone entirely, so there's nothing left to restrict) — but
-/// this is NOT the Assault Formation shape (see `IgnoreKeyword`'s
-/// own doc comment below): a card checking "has defender" would see this
-/// wall as no longer having it, which is wrong for the real card. Kept as a
-/// pure mechanical check of `RemoveKeyword` itself.
+// RemoveKeyword(Defender) lets a Defender attack because the keyword is gone. That is not the Assault Formation shape, since a card checking "has defender" would see it missing.
 #[test]
 fn remove_keyword_lets_a_printed_defender_creature_attack() {
     let p0 = PlayerId(0);
@@ -409,9 +347,7 @@ fn a_later_add_keyword_still_applies_after_an_earlier_remove_keyword() {
         timestamp: SequenceNo(0),
         ..self_only_keyword_effect(bear, EffectPrimitive::RemoveKeyword(KeywordSet::FLYING))
     });
-    // Later timestamp - e.g. a second effect resolving after the removal -
-    // should still stick on top, same as RemoveAllAbilities's own
-    // strip-then-regrant interaction.
+    // A later timestamp, such as a second effect resolving after the removal, still sticks on top.
     state.continuous_effects.push(ContinuousEffect {
         timestamp: SequenceNo(1),
         ..self_only_keyword_effect(bear, EffectPrimitive::AddKeyword(KeywordSet::FLYING))
@@ -441,17 +377,7 @@ fn a_later_remove_keyword_strips_an_earlier_add_keyword() {
     assert!(!effective.keywords.contains(KeywordSet::FLYING), "a later-timestamp removal strips an earlier grant");
 }
 
-// ---------------------------------------------------------------------
-// IgnoreKeyword (CR 613.1f, "as though it didn't have
-// [keyword]" text) - the real Assault Formation shape: "Walls you control
-// can attack as though they didn't have defender." Unlike RemoveKeyword,
-// this must NOT strip Defender itself - only the can't-attack restriction
-// it imposes.
-// ---------------------------------------------------------------------
-
-/// The real Assault Formation shape: a printed Defender wall with an
-/// `IgnoreKeyword(Defender)` static ability can attack - and,
-/// unlike the `RemoveKeyword` case above, still *has* Defender afterward.
+// The Assault Formation shape: a printed Defender with an IgnoreKeyword(Defender) static can attack and still has Defender.
 #[test]
 fn ignore_keyword_lets_a_printed_defender_creature_attack() {
     let p0 = PlayerId(0);
@@ -472,9 +398,7 @@ fn ignore_keyword_lets_a_printed_defender_creature_attack() {
     );
 }
 
-/// Without a matching `IgnoreKeyword` grant, a printed Defender
-/// creature still can't attack - the exemption has to actually name the
-/// keyword.
+// Without a matching IgnoreKeyword grant a printed Defender cannot attack, since the exemption must name the keyword.
 #[test]
 fn defender_creature_still_cannot_attack_without_a_matching_ignore_grant() {
     let p0 = PlayerId(0);
@@ -482,8 +406,7 @@ fn defender_creature_still_cannot_attack_without_a_matching_ignore_grant() {
     let attacker = ObjectId(0);
     let mut state = combat_state();
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Wall", 0, 4, KeywordSet::DEFENDER), p0, 0));
-    // Grants an exemption for a different keyword entirely - must not
-    // spuriously lift the Defender restriction.
+    // An exemption for a different keyword must not lift the Defender restriction.
     state.continuous_effects.push(self_only_keyword_effect(attacker, EffectPrimitive::IgnoreKeyword(KeywordSet::VIGILANCE)));
 
     let mut engine = Engine::new(state);
@@ -509,8 +432,7 @@ fn a_later_remove_all_abilities_clears_an_earlier_ignore_keyword() {
         timestamp: SequenceNo(2),
         ..self_only_keyword_effect(bear, EffectPrimitive::RemoveAllAbilities)
     });
-    // Defender re-granted after the strip, but the ignore-restriction grant
-    // is not - so the restriction should apply again.
+    // Defender is re-granted after the strip but the ignore grant is not, so the restriction applies again.
     state.continuous_effects.push(ContinuousEffect {
         timestamp: SequenceNo(3),
         ..self_only_keyword_effect(bear, EffectPrimitive::AddKeyword(KeywordSet::DEFENDER))
@@ -524,10 +446,6 @@ fn a_later_remove_all_abilities_clears_an_earlier_ignore_keyword() {
         "RemoveAllAbilities must clear ignored_keywords same as it clears keywords - it wasn't re-granted"
     );
 }
-
-// ---------------------------------------------------------------------
-// Flash (CR 702.8)
-// ---------------------------------------------------------------------
 
 fn hand_state_outside_main_phase(keywords: KeywordSet) -> (GameState, ObjectId) {
     let p0 = PlayerId(0);
@@ -573,10 +491,6 @@ fn non_flash_creature_rejected_outside_main_phase() {
         "without flash, a creature needs the sorcery-speed window, got {err:?}");
 }
 
-// ---------------------------------------------------------------------
-// Deathtouch (CR 702.2)
-// ---------------------------------------------------------------------
-
 #[test]
 fn deathtouch_source_kills_a_bigger_creature_with_one_damage() {
     let p0 = PlayerId(0);
@@ -596,10 +510,6 @@ fn deathtouch_source_kills_a_bigger_creature_with_one_damage() {
     assign_combat_damage(&mut engine, p0, Vec::new());
     assert!(engine.state().object(blocker).is_none(), "702.2b/c: any nonzero deathtouch damage is lethal");
 }
-
-// ---------------------------------------------------------------------
-// Indestructible (CR 702.12)
-// ---------------------------------------------------------------------
 
 #[test]
 fn indestructible_creature_survives_lethal_marked_damage() {
@@ -638,10 +548,6 @@ fn indestructible_creature_still_dies_to_zero_toughness() {
     );
 }
 
-// ---------------------------------------------------------------------
-// Lifelink (CR 702.15)
-// ---------------------------------------------------------------------
-
 #[test]
 fn lifelink_source_gains_its_controller_life_on_combat_damage() {
     let p0 = PlayerId(0);
@@ -660,10 +566,6 @@ fn lifelink_source_gains_its_controller_life_on_combat_damage() {
     assert_eq!(engine.state().player(p0).unwrap().life, 23, "702.15b: lifelink gains its controller life equal to damage dealt");
     assert_eq!(engine.state().player(p1).unwrap().life, 17);
 }
-
-// ---------------------------------------------------------------------
-// Wither (CR 702.80)
-// ---------------------------------------------------------------------
 
 #[test]
 fn wither_damage_becomes_counters_not_marked_damage() {
@@ -686,10 +588,6 @@ fn wither_damage_becomes_counters_not_marked_damage() {
     assert_eq!(blocker_obj.damage_marked, 0, "702.80a: wither damage isn't marked");
     assert_eq!(blocker_obj.counters.count(&CounterKind::MinusOneMinusOne), 3, "702.80a: wither damage becomes -1/-1 counters instead");
 }
-
-// ---------------------------------------------------------------------
-// Infect (CR 702.90)
-// ---------------------------------------------------------------------
 
 #[test]
 fn infect_damage_to_a_player_becomes_poison_counters() {
@@ -731,10 +629,6 @@ fn infect_damage_to_a_creature_becomes_minus_counters() {
     assert_eq!(blocker_obj.damage_marked, 0, "702.90c: infect damage to a creature isn't marked either");
     assert_eq!(blocker_obj.counters.count(&CounterKind::MinusOneMinusOne), 3);
 }
-
-// ---------------------------------------------------------------------
-// PTValue::net_with_counters
-// ---------------------------------------------------------------------
 
 #[test]
 fn net_with_counters_folds_plus_and_minus_counters() {

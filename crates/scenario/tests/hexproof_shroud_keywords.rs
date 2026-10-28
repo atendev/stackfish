@@ -1,5 +1,4 @@
-//! A scenario `keywords` list accepts `Hexproof` and `Shroud`, and an unknown name panics.
-//! CR 702.11, CR 702.18
+//! Scenario keywords list accepts Hexproof and Shroud; unknown names panic.
 
 use stackfish_scenario::{parse, run, AssertionOutcome, EntryOutcome, StepOutcome};
 
@@ -32,6 +31,7 @@ fn scenario_with_keywords(keywords: &str) -> String {
     )
 }
 
+// CR 702.11, 702.18
 #[test]
 fn hexproof_and_shroud_are_accepted_scenario_keywords() {
     let report = run(&parse(&scenario_with_keywords(r#"["Hexproof", "Shroud"]"#)));

@@ -1,19 +1,5 @@
-//! Phase 5 vertical slice: `AbilityEffect::Regenerate` — `Game.Ops.
-//! Regenerate()` (CR 701.19a), the first real creation path for a
-//! regeneration shield (the existing `phase5_regeneration.rs` coverage only
-//! ever constructs a `ReplacementEffect` directly in test fixtures - no
-//! spell/ability resolution ever created one). Also closes CR 701.19c: a
-//! target with `KeywordSet::CANT_BE_REGENERATED` gets no shield at all,
-//! checked at the moment the shield would be created - the resolving spell/
-//! ability still fully resolves regardless (CR 701.19c's own wording:
-//! activating/casting isn't precluded, only the shield fails to come into
-//! being).
-//!
-//! Same harness as `phase5_pump_effect.rs`: `CardDefinition.effect` set
-//! directly exercises the Rust-native fast path `ResolveStackTop` already
-//! takes for a recognized primitive, without needing the actual `Game.Ops.
-//! Regenerate` Lua binding invoked (same precedent every other
-//! `AbilityEffect` primitive's own test file already follows).
+//! CR 701.19a, 701.19c: `AbilityEffect::Regenerate` (`Game.Ops.Regenerate()`) is the first creation path for a regeneration shield. A target with `KeywordSet::CANT_BE_REGENERATED` gets no shield, and the spell or ability still fully resolves.
+//! `CardDefinition.effect` is set directly to take the Rust fast path in `ResolveStackTop`, as in phase5_pump_effect.rs.
 
 use std::collections::HashMap;
 
@@ -48,7 +34,6 @@ fn creature_definition(toughness: i32, keywords: KeywordSet) -> CardDefinition {
     }
 }
 
-/// "Test Regenerate: regenerate target creature."
 fn regenerate_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -132,12 +117,7 @@ fn regenerate_spell_creates_a_shield_that_saves_its_target_from_lethal_damage() 
     assert_eq!(engine.state().replacement_effects.len(), 1, "a shield was created");
     assert_eq!(engine.state().replacement_effects[0].source, target);
 
-    // Lethal damage arrives only now (e.g. from combat) - after the shield
-    // already exists, same real-game order CR 701.19a assumes (regenerate
-    // in response to damage, before the SBA pass that would otherwise kill
-    // it). Marking it any earlier would let the engine's own automatic SBA
-    // checks kill (or fizzle the still-unresolved spell against) the
-    // creature before this test ever gets to prove anything.
+    // Lethal damage arrives only after the shield exists, as in CR 701.19a, since marking it earlier lets the automatic SBA checks kill the creature first.
     engine.state_mut().object_mut(target).unwrap().damage_marked = 2;
 
     let outcome = check_state_based_actions(engine.state_mut(), &ScriptRuntime::new());
@@ -177,8 +157,7 @@ fn regenerate_spell_creates_no_shield_for_a_target_that_cant_be_regenerated() {
     pay_free_and_drain(&mut engine);
     let status = pass_both_and_drain(&mut engine, p0, p1);
 
-    // CR 701.19c: the spell still fully resolved (cast, resolved, stack
-    // empty) - only the shield itself failed to come into being.
+    // CR 701.19c: the spell still fully resolved, and only the shield failed to come into being.
     assert!(engine.state().stack.is_empty(), "the spell still resolved normally");
     assert!(
         matches!(status, StepStatus::AwaitingAction { player } if player == p0),
@@ -186,10 +165,7 @@ fn regenerate_spell_creates_no_shield_for_a_target_that_cant_be_regenerated() {
     );
     assert!(engine.state().replacement_effects.is_empty(), "no shield was created");
 
-    // Lethal damage arrives only now, same reasoning as the sibling test
-    // above - marking it in the initial state would let the engine's own
-    // automatic SBA checks resolve it before this test gets to prove
-    // anything about the (nonexistent) shield.
+    // Lethal damage arrives only now, for the same reason as the sibling test.
     engine.state_mut().object_mut(target).unwrap().damage_marked = 2;
 
     // Without a shield, the creature actually dies to its lethal damage.

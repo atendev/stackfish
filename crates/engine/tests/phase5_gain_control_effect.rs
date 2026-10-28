@@ -1,26 +1,6 @@
-//! Phase 5 vertical slice: `AbilityEffect::GainControl` — `Game.Ops.
-//! GainControl(duration)`, the "gain control of target creature until
-//! <duration>" shape (CR 108.4/613.1 layer 2, Threaten-style). Closes the
-//! gap `phase5/layer-engine-control-consumers`'s own UNRESOLVED note named:
-//! every real consumer of `layers::effective_controller` (combat,
-//! targeting, cost filters, `has_summoning_sickness`, `FilterSpec::matches`)
-//! already reads the *live* controller correctly, but nothing could create a
-//! `GainControl` effect - every existing test built one via a bare struct
-//! literal. Mirrors `AbilityEffect::Pump`'s own per-target `ContinuousEffect`
-//! construction exactly, just layer 2/`GainControl` instead of layer 7c/
-//! `ModifyPT`.
-//!
-//! Same harness as `phase5_pump_effect.rs`: `CardDefinition.effect` set
-//! directly exercises the Rust-native fast path `ResolveStackTop` already
-//! takes for a recognized primitive, without needing the actual `Game.Ops.
-//! GainControl` Lua binding invoked (same precedent every other
-//! `AbilityEffect` primitive's own test file already follows).
-//!
-//! Deliberately narrow, same as the primitive's own doc comment: only this
-//! resolving-spell/ability creation path exists. A static ability's own
-//! "you control enchanted creature" (Control Magic-style aura) needs real
-//! attach/enchant machinery this engine doesn't have yet - a separate,
-//! larger gap, not attempted here.
+//! CR 108.4, 613.1: `AbilityEffect::GainControl` (`Game.Ops.GainControl(duration)`) is a layer 2 `ContinuousEffect` built per target, like `Pump`, for "gain control of target creature until <duration>".
+//! `CardDefinition.effect` is set directly to take the Rust fast path in `ResolveStackTop`, as in phase5_pump_effect.rs.
+// TODO: a static "you control enchanted creature" ability (Control Magic) needs attach and enchant support for control effects
 
 use std::collections::HashMap;
 
@@ -55,7 +35,6 @@ fn creature_definition(definition_id: u64, name: &str, power: i32, toughness: i3
     }
 }
 
-/// "Test Threaten: Gain control of target creature until end of turn."
 fn threaten_definition(duration: EffectDuration) -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -119,9 +98,7 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-/// Passes priority for whichever player the engine is waiting on until the
-/// active player rotates - i.e. until Cleanup has actually run, regardless
-/// of exactly how many steps (combat, end step, ...) sit in between.
+// Passes priority until the active player rotates, that is, until Cleanup has run.
 fn advance_to_next_turn(engine: &mut Engine) {
     let starting_turn = engine.state().turn_number;
     loop {
@@ -177,10 +154,7 @@ fn threaten_spell_makes_the_caster_the_real_effective_controller() {
     assert_eq!(engine.state().continuous_effects.len(), 1);
     assert!(matches!(engine.state().continuous_effects[0].duration, EffectDuration::UntilEndOfTurn));
 
-    // Concrete proof, not just the query: p0 can now declare p1's original
-    // creature as an attacker - real combat legality, same shape
-    // phase5_control_change_consumers.rs's own end-to-end test uses for a
-    // hand-built ContinuousEffect.
+    // p0 can now declare p1's original creature as an attacker, which is real combat legality.
     pass_to_declare_attackers(&mut engine);
     let status = declare_attackers(&mut engine, p0, vec![(target, Target::Player(p1))]);
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "the new controller should legally declare it as an attacker, got {status:?}");

@@ -1,13 +1,4 @@
-//! Phase 5 vertical slice: `Game.CreateReplacementEffect` generalized beyond
-//! its original CR 701.19b-only scope (`phase5/static-regeneration`) to the
-//! other `EventFilter`/`ReplacementPayload` pairings `ReplacementEffect::
-//! matches`/`apply` already handled correctly in Rust - `DamageDealt`/
-//! `PreventDamage` (CR 615) and `WouldDie`/`ReplaceZoneDestination` (CR
-//! 614.13-style "instead" substitution) - proven end to end by
-//! `engine.rs`'s own `prevent_all_damage` unit test and
-//! `phase5_combat_damage_replacement.rs`, but with no Lua construction path
-//! until this slice. `RedirectDamage(Target)` stays unbound - see
-//! `ReplacementEffectBuilder`'s own doc comment (script.rs) for why.
+//! `Game.CreateReplacementEffect` for `DamageDealt` with `PreventDamage` (CR 615) and `WouldDie` with `ReplaceZoneDestination` (CR 614.13), proven end to end here. `RedirectDamage(Target)` stays unbound (see `ReplacementEffectBuilder` in script.rs).
 
 use std::collections::HashMap;
 
@@ -100,11 +91,6 @@ fn creature_definition(name: &str, power: i32, toughness: i32, script: &str) -> 
     }
 }
 
-/// A plain, unscripted creature - `run_card_script` never runs on it (this
-/// test file places objects directly onto the battlefield rather than
-/// driving them through `PlayLand`/`CastSpell`, so no ETB script hook fires
-/// for anyone regardless of `script_ref`), same `ByKey` convention
-/// `phase5_combat_damage_replacement.rs` already uses for its own attacker.
 fn vanilla_creature_definition(name: &str, power: i32, toughness: i32) -> CardDefinition {
     CardDefinition { script_ref: ScriptReference::ByKey(name.to_string()), ..creature_definition(name, power, toughness, "") }
 }
@@ -144,10 +130,6 @@ fn base_state() -> GameState {
         })
     }
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: run_card_script's self-registration mechanics.
-// ---------------------------------------------------------------------
 
 #[test]
 fn set_filter_damage_dealt_and_prevent_damage_registers_correctly() {
@@ -228,11 +210,6 @@ fn omitting_every_new_setter_still_defaults_to_would_die_regenerate_repeatable()
     ));
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: a Lua-registered effect actually changes real Engine
-// behavior, not just the queued struct's shape.
-// ---------------------------------------------------------------------
-
 fn drain(engine: &mut Engine) -> StepStatus {
     loop {
         match engine.step().status {
@@ -269,12 +246,7 @@ fn lua_registered_prevent_damage_stops_real_combat_damage_from_landing() {
     let shield_definition = creature_definition("Ward", 0, 1, PREVENT_DAMAGE_TO_YOU_ONE_SHOT);
     put_on_battlefield(&mut state, permanent(shield_source, shield_definition.clone(), p1));
 
-    // Self-registration (run_card_script) happens the same way PlayLand/
-    // CastSpell resolution already drives it for real - proven separately,
-    // see phase5_static_ability_self_registration.rs. A throwaway
-    // ScriptRuntime is enough here since ReplacementSpec::Primitive carries
-    // no runtime-bound handle - Engine::new below builds its own runtime for
-    // real gameplay afterward.
+    // A throwaway ScriptRuntime is enough, since ReplacementSpec::Primitive carries no runtime-bound handle. Self-registration is proven in phase5_static_ability_self_registration.rs.
     ScriptRuntime::new()
         .run_card_script(&mut state, &shield_definition, shield_source)
         .expect("script self-registers cleanly");
@@ -321,9 +293,7 @@ fn lua_registered_replace_zone_destination_exiles_instead_of_dying() {
         }
     };
 
-    // CR 400.7: a death mints a fresh ObjectId - old_id (bear) never
-    // remaps, same convention every other zone-changing move in this
-    // engine already uses (PlayLand/CastSpell/ResolveStackTop).
+    // CR 400.7: a death mints a fresh ObjectId, and old_id never remaps.
     let new_id = events
         .iter()
         .find_map(|e| match e.kind {

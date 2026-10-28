@@ -1,13 +1,4 @@
-//! Phase 5 vertical slice: upkeep trigger conditions (CR 502.1, backlog item
-//! 7a's fix + `ConditionPrimitive::BeginningOfYourUpkeep`/`BeginningOfEachUpkeep`,
-//! the concrete condition proving it). `AdvanceTurnStep` (engine.rs) now
-//! routes its events through the real `ReplacementCheck`->`CommitEvents`->
-//! `SbaLoop`->`CollectTriggers` pipeline instead of `log_events`, so a
-//! phase/step-boundary trigger can fire for the first time. Same
-//! struct-literal `GameState` construction pattern as
-//! `phase5_beginning_phase.rs`, which this file mirrors closely (its
-//! `no_priority_during_untap` test already proves one full pass-round from
-//! `PreGame` lands exactly on `Upkeep`).
+//! CR 502.1: `ConditionPrimitive::BeginningOfYourUpkeep` and `BeginningOfEachUpkeep`. `AdvanceTurnStep` routes its events through the real `CollectTriggers` pipeline, so a step-boundary trigger can fire. The construction mirrors phase5_beginning_phase.rs.
 
 
 use stackfish_engine::engine::{Engine, StepStatus};
@@ -39,8 +30,6 @@ fn creature_definition(name: &str) -> CardDefinition {
     }
 }
 
-/// Mirrors `phase5_beginning_phase::two_player_state` - starts at
-/// `Phase::PreGame`/`Step::Untap`, p0 active.
 fn two_player_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -80,10 +69,7 @@ fn beginning_of_your_upkeep_trigger_fires_and_resolves_for_its_controller() {
     });
 
     let mut engine = Engine::new(state);
-    // One full pass-round from PreGame lands exactly on Upkeep (Untap opens
-    // no priority window, per phase5_beginning_phase's own
-    // no_priority_during_untap test) - the trigger must already be
-    // collected and on the stack by the time priority opens there.
+    // One pass-round from PreGame lands on Upkeep (Untap opens no priority window), and the trigger is on the stack by then.
     let status = pass_both(&mut engine, p0, p1);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert_eq!(engine.state().phase, Phase::Beginning);
@@ -102,8 +88,7 @@ fn beginning_of_your_upkeep_trigger_does_not_fire_for_a_different_controller() {
     let p1 = PlayerId(1);
     let permanent = ObjectId(0);
     let mut state = two_player_state();
-    // Controlled by p1, but active_player (and so whose upkeep this is) is
-    // p0 - BeginningOfYourUpkeep must not fire for p1 here.
+    // Controlled by p1, but this is p0's upkeep, so BeginningOfYourUpkeep must not fire for p1.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
     state.abilities.push(RegisteredAbility {
@@ -133,8 +118,7 @@ fn beginning_of_each_upkeep_trigger_fires_regardless_of_whose_turn_it_is() {
     let p1 = PlayerId(1);
     let permanent = ObjectId(0);
     let mut state = two_player_state();
-    // Controlled by p1 while active_player is p0 - EachUpkeep must fire
-    // anyway, unlike BeginningOfYourUpkeep above.
+    // Controlled by p1 while p0 is active, so EachUpkeep fires anyway, unlike BeginningOfYourUpkeep.
     state.objects.insert(permanent, card_object(permanent, creature_definition("Bear"), p1, ZoneKind::Battlefield));
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(permanent);
     state.abilities.push(RegisteredAbility {

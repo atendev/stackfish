@@ -1,23 +1,5 @@
-//! Phase 5 vertical slice: CR 106.11 "spend this mana only to..." restricted
-//! mana, narrowed to the single most common real shape - a card-type filter
-//! on what the mana can be spent to *cast* (Mishra's Workshop: "Add
-//! {C}{C}{C}. Spend this mana only to cast artifact spells.").
-//!
-//! `ManaUnit::RestrictedColored(Color, CardTypeSet)`/`RestrictedColorless
-//! (CardTypeSet)` are new variants (not a field on the plain ones, same
-//! precedent `SnowColored`/`SnowColorless` already set) that live in
-//! `ManaPool::restricted`, a side-channel separate from the plain aggregate
-//! fields - those can't tell a restricted unit apart from an ordinary one of
-//! the same color. `PaymentPlan::validate` checks a declared restricted unit
-//! two ways: it must actually be present in the pool's `restricted` list,
-//! and the cost being paid must be eligible - casting a spell (the paying
-//! object's own `GameObject` sitting in the `Stack` zone, not an activated
-//! ability) of a card type the restriction names.
-//!
-//! No mana-ability/Lua wiring exercised here (`Game.Ops.AddRestrictedMana`
-//! is proven separately) - fixtures hand-seed `ManaPool.restricted` directly,
-//! same "fake pre-seeded floating mana" convention `phase5_cast_spell_
-//! payment.rs` already established for plain mana.
+//! CR 106.11: restricted mana ("spend this mana only to cast artifact spells", Mishra's Workshop). `ManaUnit::RestrictedColored` and `RestrictedColorless` live in the side-channel `ManaPool::restricted`.
+//! `PaymentPlan::validate` requires a declared restricted unit to be in that list and the cost to be a spell of an eligible card type. Fixtures seed `ManaPool.restricted` directly.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -76,8 +58,6 @@ fn cast(engine: &mut Engine, player: PlayerId, card: ObjectId) {
         .expect("player holds priority, spell is in hand, main phase, empty stack");
 }
 
-/// One artifact-only unit of restricted colorless mana, standing in for
-/// `Game.Ops.AddRestrictedMana("C", "Artifact")`'s real output.
 fn artifact_only_colorless() -> ManaUnit {
     ManaUnit::RestrictedColorless(CardTypeSet::ARTIFACT)
 }
@@ -159,8 +139,7 @@ fn ordinary_mana_in_the_same_pool_is_unaffected_by_a_restricted_unit() {
     let p0 = PlayerId(0);
     let card = ObjectId(0);
     let mana_cost = ManaCost { symbols: vec![ManaSymbol::Atom(AtomicManaSymbol::Generic(1))] };
-    // One ordinary colorless, plus a separate restricted colorless that
-    // shouldn't be usable (or needed) for this plain-colorless payment.
+    // One ordinary colorless, plus a restricted colorless that is not usable for this plain payment.
     let mut state =
         state_with_pool(ManaPool { colorless: 1, restricted: vec![artifact_only_colorless()], ..ManaPool::default() });
     state.objects.insert(card, card_object(card, spell_definition(mana_cost, CardTypeSet::CREATURE), p0, ZoneKind::Hand));
@@ -180,10 +159,8 @@ fn ordinary_mana_in_the_same_pool_is_unaffected_by_a_restricted_unit() {
     assert_eq!(pool.restricted.len(), 1, "the restricted unit was never touched");
 }
 
-/// CR 106.11's restriction only covers *casting* a spell of the named card
-/// type - an activated ability's cost is never eligible, even one belonging
-/// to an artifact permanent, since the permanent being activated isn't
-/// itself "a spell being cast."
+// CR 106.11
+// The restriction covers only casting a spell, so an activated ability's cost is never eligible, even for an artifact.
 #[test]
 fn restricted_mana_cannot_fund_an_activated_ability_cost() {
     let p0 = PlayerId(0);

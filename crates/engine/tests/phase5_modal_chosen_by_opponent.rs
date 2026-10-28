@@ -1,24 +1,6 @@
-//! Phase 5 vertical slice: CR 700.2e — "some spells and abilities specify
-//! that a player other than their controller chooses a mode for it." The
-//! other player does so "when the spell or ability's controller normally
-//! would do so" — i.e. as part of casting (CR 601.2b), before targets or
-//! payment.
-//!
-//! `PlayerActionKind::CastSpell` is a single-actor atomic command (87
-//! construction sites across this crate) that can't be restructured to
-//! accept a second player's input mid-action, so the choice is deferred to a
-//! new resolution-time pause instead: `ModeChoice::ExactlyChosenByOpponent`/
-//! `UpToChosenByOpponent` push the spell onto the stack with
-//! `StackObject::pending_mode_choice` set and `chosen_modes`/
-//! `target_requirement`/`effect` left as empty/`None` placeholders;
-//! `ResolveStackTop` peeks at the stack top (without popping) and pauses on
-//! `StepStatus::AwaitingModeChoice` instead of resolving; `Engine::
-//! submit_mode_choice` (answered by the other player) patches the real
-//! choice in and lets the very next `step()` resolve it for real.
-//!
-//! Narrowed on purpose (see `ModeChoice`'s own doc comment): every mode must
-//! have no target requirement and no CR 700.2h additional cost, and the game
-//! must have exactly two non-eliminated players.
+//! CR 700.2e: a player other than the controller chooses the mode. `CastSpell` is single-actor, so `ModeChoice::ExactlyChosenByOpponent` and `UpToChosenByOpponent` push the spell with `pending_mode_choice` set.
+//! `ResolveStackTop` then pauses on `AwaitingModeChoice`, and `submit_mode_choice` (answered by the other player) patches the choice in.
+// TODO: opponent-chosen modes with targets or additional costs, and games with more than two players (CR 700.2e)
 
 use std::collections::HashMap;
 
@@ -28,12 +10,6 @@ use stackfish_engine::engine::{Engine, ModeChoiceError, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
 
-/// "Test Chosen By Opponent: Choose one —
-///  * You gain 3 life.
-///  * You shuffle your library.
-///  Starting with your opponent, that player chooses a mode."
-/// Mode 1 is `Shuffle` because it needs no library contents or zone to
-/// exercise, and `is_modal_resolvable` accepts it.
 fn chosen_by_opponent_definition(mode_choice: ModeChoice) -> CardDefinition {
     CardDefinition {
         definition_id: 60,
@@ -75,8 +51,6 @@ fn any_target_requirement() -> TargetSpec {
     })
 }
 
-/// Same shape, but mode 1 illegally carries its own target requirement —
-/// used only by the cast-time-rejection test below.
 fn chosen_by_opponent_with_a_target_definition() -> CardDefinition {
     CardDefinition {
         modes: vec![
@@ -98,8 +72,7 @@ fn two_player_state() -> GameState {
     GameState {
         step: Step::PreCombatMain,
         last_active_turn_number: HashMap::from([(p0, 1), (p1, 1)]),
-        // Library included - mode 1's `Shuffle` effect needs each player's
-        // library zone to exist even when empty.
+        // The library zone must exist for mode 1's Shuffle effect, even when empty.
         ..base_two_player_state(zones(p0, p1, &[ZoneKind::Hand, ZoneKind::Battlefield, ZoneKind::Graveyard, ZoneKind::Library]))
     }
 }
@@ -148,8 +121,7 @@ fn casting_with_modes_supplied_by_the_caster_is_rejected() {
     state.zone_mut(ZoneKind::Hand, Some(p0)).unwrap().push_bottom(card);
 
     let mut engine = Engine::new(state);
-    // The caster can't supply the mode themselves - it's deferred to the
-    // other player.
+    // The caster cannot supply the mode, which is deferred to the other player.
     let err = try_cast_spell(&mut engine, p0, card, vec![0], Vec::new()).unwrap_err();
 
     assert!(matches!(err, ActionError::Rejected(Rejected::IllegalAction(_))));
@@ -237,8 +209,7 @@ fn the_other_players_chosen_mode_resolves_for_the_caster() {
     pay_free_and_drain(&mut engine);
     pass_both_and_drain(&mut engine, p0, p1);
 
-    // p1 (the other player) chooses mode 0 - GainLife(3) - even though p0 is
-    // the spell's own controller and the one who benefits.
+    // p1 chooses mode 0 (GainLife(3)) though p0 is the controller and benefits.
     engine.submit_mode_choice(vec![0]).expect("p1 chooses mode 0, within range, no duplicates");
     drain(&mut engine);
 

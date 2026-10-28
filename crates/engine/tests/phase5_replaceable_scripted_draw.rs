@@ -1,11 +1,4 @@
-//! Phase 5 vertical slice: `AbilityEffect::DrawCards(n)` is a real
-//! replacement-checked zone-change proposal now.
-//!
-//! Closes the last direct-mutation holdout among zone-change producers:
-//! SBA deaths, scripted Destroy/Sacrifice/Exile, Sacrifice/Discard cost
-//! payments, cleanup discard, and CR 504.1's turn-based draw were already
-//! replacement-checked; `Game.Ops.DrawCards(n)` was the sole remaining
-//! `Engine::draw_one_card` caller.
+//! `AbilityEffect::DrawCards(n)` is a replacement-checked zone-change proposal, the last direct-mutation caller of `Engine::draw_one_card`.
 
 use std::collections::HashMap;
 

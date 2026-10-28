@@ -1,15 +1,5 @@
-//! Phase 5 vertical slice: CR 702.79a Persist / CR 702.93a Undying —
-//! "When this permanent is put into a graveyard from the battlefield, if it
-//! had no [-1/-1 | +1/+1] counters on it, return it to the battlefield
-//! under its owner's control with a [-1/-1 | +1/+1] counter on it."
-//!
-//! Built directly on `phase5_dies_triggers.rs`'s own scaffolding - the
-//! trigger-collection half (`ConditionPrimitive::Dies`) is unchanged by
-//! this slice. What's new here: `InterveningIfPrimitive::
-//! HadNoCountersOfKind` (checked against the object as it was the moment
-//! it died, via `StackObject::source_lki`/`triggers::find_departed_lki`)
-//! and `AbilityEffect::ReturnSelfWithCounter` (the graveyard->battlefield
-//! mover in `engine/resolve/reanimation.rs`).
+//! CR 702.79a Persist and CR 702.93a Undying: when the permanent dies with no -1/-1 (+1/+1) counters it returns under its owner's control with one. `InterveningIfPrimitive::HadNoCountersOfKind` checks the object as it died (`source_lki`, `find_departed_lki`), and `AbilityEffect::ReturnSelfWithCounter` is the mover.
+//! Trigger collection is as in phase5_dies_triggers.rs.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::*;
@@ -79,9 +69,6 @@ fn pass(engine: &mut Engine, player: PlayerId) {
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
 }
 
-/// Runs the death + trigger resolution to completion (both players pass
-/// twice: once to let the Dies trigger get collected and pushed, once more
-/// to let it resolve) and returns the final `StepStatus`.
 fn run_death_and_resolution(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepStatus {
     pass(engine, p0);
     drain(engine);
@@ -95,8 +82,7 @@ fn persist_returns_with_a_minus_one_minus_one_counter_after_dying_with_none() {
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let mut state = base_state();
-    // Lethal damage already marked - PassPriority cascades into SbaLoop,
-    // which finds this creature dying via CR 704.5g.
+    // Lethal damage is already marked, so PassPriority cascades into SbaLoop and CR 704.5g kills the creature.
     put_on_battlefield(&mut state, creature(bear, p0, p0, 2, 2));
     state.abilities.push(persist_undying_ability(bear, CounterKind::MinusOneMinusOne));
 
@@ -136,17 +122,14 @@ fn persist_does_not_trigger_when_the_creature_already_had_a_minus_one_minus_one_
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let mut state = base_state();
-    // Base toughness 2, one -1/-1 counter already on it (effective
-    // toughness 1) - 1 damage is lethal this time.
+    // Base toughness 2 with one -1/-1 counter (effective 1), so 1 damage is lethal.
     put_on_battlefield(&mut state, creature_with_counter(bear, p0, 2, 1, CounterKind::MinusOneMinusOne));
     state.abilities.push(persist_undying_ability(bear, CounterKind::MinusOneMinusOne));
 
     let mut engine = Engine::new(state);
     let status = run_death_and_resolution(&mut engine, p0, p1);
 
-    // Only one PassPriority round was actually needed (no trigger to
-    // collect/resolve) - the second round is a harmless no-op pass, still
-    // ending on p0.
+    // One PassPriority round was needed with no trigger to resolve, so the second round is a harmless no-op ending on p0.
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty(), "CR 603.4: the intervening-if failed, so the ability never went on the stack at all");
     assert!(
@@ -182,8 +165,7 @@ fn undying_does_not_trigger_when_the_creature_already_had_a_plus_one_plus_one_co
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
     let mut state = base_state();
-    // Base toughness 2, one +1/+1 counter already on it (effective
-    // toughness 3) - 3 damage is lethal this time.
+    // Base toughness 2 with one +1/+1 counter (effective 3), so 3 damage is lethal.
     put_on_battlefield(&mut state, creature_with_counter(bear, p0, 2, 3, CounterKind::PlusOnePlusOne));
     state.abilities.push(persist_undying_ability(bear, CounterKind::PlusOnePlusOne));
 
@@ -228,8 +210,7 @@ fn persist_is_a_clean_no_op_if_the_card_left_the_graveyard_before_it_resolves() 
     drain(&mut engine);
     assert_eq!(engine.state().stack.len(), 1, "the Persist trigger is on the stack, not yet resolved");
 
-    // Simulate "exiled in response" - the graveyard object is gone before
-    // the trigger gets a chance to resolve.
+    // Simulates "exiled in response": the graveyard object is gone before the trigger resolves.
     let graveyard_id = engine
         .state()
         .zone(ZoneKind::Graveyard, Some(p0))

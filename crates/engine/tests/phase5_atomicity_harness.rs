@@ -1,7 +1,5 @@
-//! Meta-tests for the atomicity harness in `stackfish-testutil`. A harness
-//! that never fails proves nothing, so these check that it does fail when an
-//! input changes the engine, however small the change, and that it names
-//! what changed.
+//! Meta-tests for the atomicity harness in `stackfish-testutil`.
+//! A harness that never fails proves nothing, so these check that it fails on any engine change, however small, and names what changed.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -80,7 +78,7 @@ fn a_call_that_appends_to_the_ledger_fails() {
     assert!(message.contains("state.ledger"), "{message}");
 }
 
-/// The shape of the bugs the audit found: a call that mutates and then returns `Err`.
+// Mutates and then returns `Err`.
 #[test]
 fn a_mutate_then_err_call_fails_even_though_it_returns_err() {
     let mut engine = engine();

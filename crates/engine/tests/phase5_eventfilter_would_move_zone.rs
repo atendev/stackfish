@@ -1,23 +1,5 @@
-//! Phase 5 vertical slice: `EventFilter::WouldMoveZone` - a general
-//! from/to-wildcard sibling of `EventFilter::WouldDie` (hardcoded to
-//! Battlefield -> Graveyard). Lets a replacement effect match a zone-change
-//! shape `WouldDie` can't express at all - proven here with "if this would
-//! be exiled, put it into its owner's graveyard instead," a real capability
-//! (grave-recursion decks fighting exile-based hate) `WouldDie` literally
-//! cannot express since it's pinned to `to: Graveyard`.
-//!
-//! `Game.EventFilters.WouldMoveZone(fromName, toName)` is bound in Lua as a
-//! function (either name may be `nil` for "any zone") rather than a bare
-//! tagged value, since `EventFilterKind::WouldMoveZone` needs to carry its
-//! own `from`/`to` - `WouldDie`'s hardcoded shape needs no such parameters.
-//!
-//! Wildcard `from`/`to` matching is proven directly against `ReplacementEffect
-//! ::matches` in `types/effect.rs`'s own test module instead of end to end
-//! here - most zone-change producers in this engine (draw, cleanup discard,
-//! cost-payment sacrifice/discard) never call `apply_replacements` at all,
-//! only SBA deaths and the scripted Destroy/Sacrifice/Exile ops do, and all
-//! three are always Battlefield-sourced. See `EventFilter::WouldMoveZone`'s
-//! own doc comment for the honest reachability note.
+//! `EventFilter::WouldMoveZone` is a from/to-wildcard sibling of `WouldDie`, which is pinned to Battlefield to Graveyard. It matches "if this would be exiled, put it into its owner's graveyard instead".
+//! `Game.EventFilters.WouldMoveZone(fromName, toName)` is a Lua function, and either name may be `nil` for any zone. Wildcard matching is tested in `types/effect.rs`, since only SBA deaths and scripted Destroy, Sacrifice and Exile call `apply_replacements`.
 
 use std::collections::HashMap;
 
@@ -74,9 +56,6 @@ fn creature_definition(definition_id: u64, name: &str, script: &str) -> CardDefi
     }
 }
 
-/// "Test Exile: Exile target creature." - same fixture
-/// `phase5_script_ops_exile.rs` uses, duplicated per that file's own
-/// no-shared-fixtures-between-test-binaries convention.
 fn exile_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -209,8 +188,7 @@ fn lua_registered_would_move_zone_redirects_an_exile_attempt_to_the_graveyard_in
         "WouldMoveZone(Battlefield, Exile) + ReplaceZoneDestination(Graveyard) must have kept the \
          creature out of exile entirely"
     );
-    // 2, not 1 - the creature (redirected here) plus the Exile spell itself,
-    // which lands in its owner's graveyard normally after resolving.
+    // 2: the redirected creature plus the Exile spell, which lands in its owner's graveyard after resolving.
     assert_eq!(
         engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.len(),
         2,

@@ -1,15 +1,5 @@
-//! Phase 5 vertical slice: reanimation (CR 110.2a, 400.7, 400.4a, 614.12, 303.4f).
-//!
-//! `Game.Ops.ReturnToBattlefield(opts?)` returns each targeted card from a
-//! graveyard (or exile) to the battlefield, and
-//! `Game.Ops.ReturnAllToBattlefield(filter, zone?, opts?)` returns every
-//! matching card without targeting. Both go through
-//! `ScriptedZoneMoveKind::Reanimate`, so the entry is replacement-checked and
-//! gets the battlefield-entry treatment a resolving permanent spell gets.
-//!
-//! The graveyard object's `controller` is written temporarily so entry
-//! replacement filters see the entering player. Several tests check it is
-//! back to the owner on every path that does not enter the battlefield.
+//! CR 110.2a, 400.7, 400.4a, 614.12, 303.4f: `Game.Ops.ReturnToBattlefield` and `ReturnAllToBattlefield` return cards from a graveyard or exile through `ScriptedZoneMoveKind::Reanimate`, so entry is replacement-checked and gets the treatment a resolving permanent spell gets.
+//! The graveyard object's `controller` is written temporarily so entry replacement filters see the entering player, and several tests check it returns to the owner on every path that does not enter.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -78,8 +68,6 @@ end
 return s
 "#;
 
-// ---- fixtures ---------------------------------------------------------------
-
 struct Placed {
     id: u64,
     name: &'static str,
@@ -147,8 +135,6 @@ fn definition(p: &Placed) -> CardDefinition {
     }
 }
 
-/// A free instant `Test Spell` in P0's hand. `target` is the target filter
-/// (`None` for the untargeted forms).
 fn spell(effect: AbilityEffect, target: Option<TargetFilter>) -> CardDefinition {
     CardDefinition {
         effect: Some(effect),
@@ -202,7 +188,6 @@ fn return_all(zone: ZoneKind, controller: Option<FilterController>, control: Ent
     AbilityEffect::ReturnAllToBattlefield { filter: creature_effect_filter(controller), zone, control, tapped: false }
 }
 
-/// Targeted reanimation spell aimed at a creature card in a graveyard.
 fn engine_targeted(cards: Vec<Placed>, control: EntryControl, tapped: bool) -> Engine {
     engine_with(cards, Some(spell(return_to_battlefield(control, tapped), Some(creature_filter()))))
 }
@@ -264,8 +249,6 @@ fn life(engine: &Engine, player: PlayerId) -> i32 {
     engine.state().player(player).unwrap().life
 }
 
-/// "If a creature would enter the battlefield under an opponent's control,
-/// move it to `destination` instead", relative to `source`'s controller.
 fn ward_to(source: u64, destination: ZoneKind) -> ReplacementEffect {
     ReplacementEffect {
         source: ObjectId(source),
@@ -299,8 +282,6 @@ fn orb_enters_tapped() -> ReplacementEffect {
         consumption: ConsumptionPolicy::Repeatable,
     }
 }
-
-// ---- targeted: basics -------------------------------------------------------
 
 #[test]
 fn a_creature_card_returns_from_your_graveyard_to_the_battlefield() {
@@ -452,8 +433,6 @@ fn the_tapped_option_enters_the_permanent_tapped() {
     assert!(the(&engine, "Bear", ZoneKind::Battlefield).tapped);
 }
 
-// ---- targeted: replacement and entry modifiers ------------------------------
-
 #[test]
 fn an_external_enters_tapped_effect_applies() {
     let mut engine = engine_targeted(vec![bear(1, P0, ZoneKind::Graveyard), ward(WARD)], EntryControl::You, false);
@@ -497,8 +476,7 @@ fn an_entry_redirect_sends_the_card_to_exile_instead() {
 
 #[test]
 fn a_redirect_back_to_the_graveyard_leaves_the_controller_as_the_owner() {
-    // The card is P1's, reanimated under P0's control, so the ward sees an
-    // opponent's creature entering.
+    // The card is P1's and reanimated under P0's control, so the ward sees an opponent's creature entering.
     let mut engine = engine_targeted(vec![bear(1, P1, ZoneKind::Graveyard), ward(WARD)], EntryControl::You, false);
     engine.state_mut().replacement_effects.push(ward_to(WARD, ZoneKind::Graveyard));
     reanimate(&mut engine, 1);
@@ -511,9 +489,7 @@ fn a_redirect_back_to_the_graveyard_leaves_the_controller_as_the_owner() {
 
 #[test]
 fn the_entry_filter_sees_the_player_the_card_enters_under() {
-    // The ward is P1's and hits creatures entering under an opponent of P1.
-    // P1's own Bear enters under P0 with `You` (redirected) and under P1
-    // with `Owner` (untouched).
+    // The ward is P1's and hits creatures entering under an opponent of P1: P1's Bear enters under P0 with `You` (redirected) and under P1 with `Owner` (untouched).
     let mut you = engine_targeted(vec![bear(1, P1, ZoneKind::Graveyard), ward(WARD)], EntryControl::You, false);
     you.state_mut().replacement_effects.push(ward_to(WARD, ZoneKind::Exile));
     reanimate(&mut you, 1);
@@ -546,8 +522,6 @@ fn two_competing_redirects_pause_for_an_ordering_choice_and_resume() {
     assert_eq!(exiled.controller, exiled.owner, "the temporary controller is undone after the answered pause");
     assert_eq!(names_in(&engine, ZoneKind::Battlefield, None), vec!["Ward", "Ward"]);
 }
-
-// ---- targeted: triggers and scripts ----------------------------------------
 
 #[test]
 fn the_cards_own_enters_trigger_fires() {
@@ -596,8 +570,6 @@ fn a_graveyard_only_ability_does_not_follow_the_card_onto_the_battlefield() {
     assert!(engine.state().abilities.is_empty(), "the graveyard ability left with the old object");
 }
 
-// ---- targeted: Auras and Equipment ------------------------------------------
-
 fn aura(id: u64, owner: PlayerId) -> Placed {
     Placed { subtypes: &["Aura"], ..placed(id, "Aura", CardTypeSet::ENCHANTMENT, owner, ZoneKind::Graveyard) }
 }
@@ -628,7 +600,7 @@ fn an_aura_with_no_legal_host_stays_in_the_graveyard() {
 
 #[test]
 fn an_aura_with_several_legal_hosts_stays_in_the_graveyard_until_the_choice_exists() {
-    // TODO(CR 303.4f): the controller should choose; no entry-attach pause exists yet.
+    // TODO: the controller should choose, but no entry-attach pause exists yet (CR 303.4f)
     let mut engine = engine_for_aura(vec![aura(1, P0), bear(2, P0, ZoneKind::Battlefield), bear(3, P1, ZoneKind::Battlefield)]);
     reanimate(&mut engine, 1);
 
@@ -649,8 +621,6 @@ fn equipment_enters_unattached() {
     let sword = the(&engine, "Sword", ZoneKind::Battlefield);
     assert!(sword.attached_to.is_none(), "CR 303.4h-style: nothing attaches it");
 }
-
-// ---- ReturnAllToBattlefield -------------------------------------------------
 
 #[test]
 fn return_all_returns_every_matching_card_from_every_graveyard() {
@@ -783,8 +753,6 @@ fn return_all_runs_each_cards_enters_trigger() {
 
     assert_eq!(life(&engine, P0), before + 2, "both trigger under P0's control");
 }
-
-// ---- Lua --------------------------------------------------------------------
 
 fn build(source: &str) -> Result<Option<AbilityEffect>, String> {
     let runtime = ScriptRuntime::new();

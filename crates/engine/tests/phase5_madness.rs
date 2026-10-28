@@ -1,25 +1,5 @@
-//! Phase 5 vertical slice: CR 702.35 Madness.
-//!
-//! Two abilities: a static "if this card would be discarded, exile it
-//! instead" (already fully generic - `ReplacementPayload::
-//! ReplaceZoneDestination(Exile)` matched against `EventFilter::
-//! WouldMoveZone(Hand, Graveyard)`, the same "Leyline of the Void" pattern
-//! both real discard producers (cleanup hand-size discard and a cost-payment
-//! `Discard`) already route through), and a triggered "when this card is
-//! exiled this way, you may cast it by paying [cost] rather than its mana
-//! cost; if you don't, put it into your graveyard."
-//!
-//! New pieces: `GameEventKind::MadnessExiled`/`ConditionPrimitive::
-//! MadnessExiled` (a purpose-built marker, same shape `Cycled` already
-//! established, logged only when the winning redirect was this object's own
-//! - see `replacement::madness_marker_event`'s own doc comment), `AbilityEffect
-//! ::MadnessCastOrDiscard` (always pauses - `ProcessState::
-//! AwaitingMadnessChoice` - since the "yes" branch is a full nested cast),
-//! and `GameState::pending_timing_bypass` (a one-shot CR 601.3 timing waiver
-//! consumed by `commands::cast::execute_cast_spell`, since CR 702.35a lets a
-//! player cast the card as the triggered ability resolves, ignoring the
-//! normal sorcery-speed/priority rules that ability text would otherwise be
-//! bound by).
+//! CR 702.35 Madness: a replacement "if this card would be discarded, exile it instead" (`WouldMoveZone(Hand, Graveyard)`) and a trigger "when this card is exiled this way, you may cast it by paying [cost]".
+//! `MadnessExiled` marks the winning redirect, `MadnessCastOrDiscard` always pauses on `AwaitingMadnessChoice`, and `pending_timing_bypass` waives CR 601.3 timing once.
 
 use std::collections::HashMap;
 
@@ -27,14 +7,6 @@ use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
 
-/// "Test Madness Bolt" - a SORCERY (deliberately, to prove the timing
-/// bypass: sorcery-speed casting is normally illegal outside a main phase
-/// with an empty stack and priority, exactly the situation a madness cast
-/// happens in) with a bare `Madness {R}` alternative cost from exile. No
-/// target/effect - this slice only needs to prove the zone-move/pause
-/// machinery, not any particular resolution effect (same posture
-/// `phase5_flashback_alternative_costs.rs`'s own `bolt_definition` already
-/// takes).
 fn madness_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
@@ -96,11 +68,6 @@ fn filler_definition(definition_id: u64, name: &str) -> CardDefinition {
     }
 }
 
-/// "Test Discard Outlet: Discard a card: Draw a card." - the cost-payment
-/// discard producer (as opposed to cleanup hand-size discard), so Madness's
-/// redirect can be proven against both real discard producers this engine
-/// has, same dual-producer coverage `phase5_cycling_triggers.rs` established
-/// for `Cycled`.
 fn discard_outlet_definition(definition_id: u64) -> CardDefinition {
     CardDefinition {
         definition_id,
@@ -148,12 +115,7 @@ fn discard_outlet_ability(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-/// CR 702.35a's static half - "if this card would be discarded, exile it
-/// instead," self-registered on the card itself. Already fully generic
-/// engine machinery (`phase5/replaceable-cleanup-discard`/`phase5/
-/// replaceable-cost-zone-moves`) - this slice's only job is the marker event
-/// (`madness_marker_event`) that distinguishes this from any other exile-
-/// instead-of-discard effect.
+// CR 702.35a
 fn madness_redirect(source: ObjectId) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -177,8 +139,7 @@ fn madness_redirect(source: ObjectId) -> ReplacementEffect {
     }
 }
 
-/// CR 702.35a's triggered half - "when this card is exiled this way, you may
-/// cast it... if you don't, put it into your graveyard."
+// CR 702.35a
 fn madness_trigger(source: ObjectId) -> RegisteredAbility {
     RegisteredAbility {
         modes: Vec::new(),
@@ -195,9 +156,6 @@ fn madness_trigger(source: ObjectId) -> RegisteredAbility {
     }
 }
 
-/// End-step setup mirroring `phase5_cycling_triggers.rs`'s own
-/// `two_player_state` - a hand-size-over-the-limit p0 will hit
-/// `StepStatus::AwaitingDiscard` once both players pass End-step priority.
 fn two_player_state(pool: ManaPool) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -227,9 +185,6 @@ fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     panic!("expected a ZoneChange event in the ledger");
 }
 
-/// Drives a hand-size-8 p0 through both End-step passes to the cleanup
-/// discard, then discards `card` specifically, then drains once more so any
-/// resulting MadnessExiled trigger is already on the stack.
 fn discard_to_cleanup(engine: &mut Engine, p0: PlayerId, p1: PlayerId, card: ObjectId) -> StepStatus {
     let status = drain(engine);
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected p0 end-step priority, got {status:?}");
@@ -311,14 +266,7 @@ fn declining_puts_the_exiled_card_into_the_graveyard() {
     assert!(matches!(status, StepStatus::AwaitingAction { .. }), "got {status:?}");
 }
 
-/// The core new mechanism this slice adds: casting via madness happens *as*
-/// the triggered ability resolves (CR 702.35a), not as a later ordinary
-/// priority action - proven here with a SORCERY, cast during the End step
-/// (no main phase, and the trigger itself is mid-resolution) where an
-/// ordinary sorcery-speed cast would be illegal. Also proves `exile_on_
-/// leaving_stack: false` was the right call for Madness (unlike Flashback):
-/// once cast, the spell resolves into the graveyard normally, not back into
-/// exile.
+// A madness cast happens as the triggered ability resolves (CR 702.35a), so a sorcery cast during the End step is legal. Once cast it resolves into the graveyard and not exile.
 #[test]
 fn casting_via_madness_bypasses_sorcery_speed_timing_and_resolves_to_the_graveyard() {
     let p0 = PlayerId(0);
@@ -339,18 +287,14 @@ fn casting_via_madness_bypasses_sorcery_speed_timing_and_resolves_to_the_graveya
         other => panic!("expected AwaitingMadnessChoice, got {other:?}"),
     };
 
-    // Still the End step, non-empty pipeline context, no main phase - an
-    // ordinary CastSpell of a sorcery would be illegal here.
+    // Still the End step with no main phase, where an ordinary sorcery cast would be illegal.
     engine
         .submit_madness_cast(Vec::new(), Vec::new(), None)
         .expect("madness cast bypasses sorcery-speed timing");
     let status = drain(&mut engine);
     assert!(matches!(status, StepStatus::AwaitingPayment { .. }), "the madness {{R}} cost still needs paying, got {status:?}");
 
-    // Floated now, inside the cleanup step's own priority window, rather
-    // than seeded into the pre-cleanup End-step state above - CR 500.5
-    // empties the pool as End ends (`discard_to_cleanup` crosses that
-    // boundary), so mana seeded before it wouldn't survive to pay with here.
+    // Floated inside the cleanup priority window, since CR 500.5 empties the pool as End ends.
     engine.state_mut().player_mut(p0).unwrap().mana_pool.add_unit(ManaUnit::Colored(Color::Red));
     engine
         .submit_payment(PaymentPlan { payments: vec![CostPayment::Mana { units: vec![ManaUnit::Colored(Color::Red)], phyrexian_life: 0 }] })
@@ -367,11 +311,7 @@ fn casting_via_madness_bypasses_sorcery_speed_timing_and_resolves_to_the_graveya
     assert!(engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty());
 }
 
-/// While `AwaitingMadnessChoice` is pending, the engine isn't sitting in
-/// `ProcessState::PriorityWindow` - so an ordinary priority action (anything
-/// other than `decline_madness_cast`/`submit_madness_cast`) must be
-/// rejected, same "sub-decision mid-pipeline" stance every other
-/// `Awaiting*Choice` pause in this engine already takes.
+// While AwaitingMadnessChoice is pending, an ordinary priority action must be rejected.
 #[test]
 fn ordinary_priority_actions_are_rejected_while_awaiting_the_madness_choice() {
     let p0 = PlayerId(0);
@@ -393,12 +333,8 @@ fn ordinary_priority_actions_are_rejected_while_awaiting_the_madness_choice() {
     assert!(matches!(result, Err(ActionError::IllegalAction(_))), "expected rejection while mid-pipeline, got {result:?}");
 }
 
-/// CR 702.35a via the *other* real discard producer - a cost-payment
-/// `Discard`, not just the cleanup hand-size discard every other test above
-/// drives through. Proves `replacement::madness_marker_event` is hooked at
-/// both real commit sites (`engine::turn::continue_discard_moves` and
-/// `engine::payment::continue_cost_zone_moves`), same dual-producer coverage
-/// `phase5_cycling_triggers.rs` established for `Cycled`.
+// CR 702.35a
+// A cost-payment Discard, the other real discard producer, hooks `madness_marker_event` at both commit sites.
 #[test]
 fn a_cost_payment_discard_also_triggers_madness() {
     let p0 = PlayerId(0);

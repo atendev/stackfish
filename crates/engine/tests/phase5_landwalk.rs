@@ -1,22 +1,5 @@
-//! Phase 5 vertical slice: CR 702.14 Landwalk, named out of scope by
-//! `phase5_combat_evasion_keywords.rs` - unlike Fear/Intimidate/Shadow/
-//! Horsemanship (a plain `KeywordSet` bit compared attacker-vs-blocker),
-//! landwalk is parametrized by land subtype and checks the *defending
-//! player's own battlefield*, not the blocker's characteristics.
-//!
-//! Same shape as protection (`EffectiveCharacteristics::landwalk_subtypes`,
-//! a new layer 6 `EffectPrimitive::AddLandwalkSubtype`): no printed field on
-//! `CardDefinition`, always effect-granted - a card with printed Islandwalk
-//! self-registers an always-on static ability via its script, same as
-//! printed protection does. Enforcement lives in `commands::DeclareBlockers`
-//! alongside the other evasion keyword checks.
-//!
-//! CR 702.14a's card-type/supertype-combination forms ("artifact landwalk,"
-//! "nonbasic landwalk," "snow swampwalk") are real now too - a separate
-//! `EffectPrimitive::AddLandwalkQuality(LandwalkQuality)`/
-//! `EffectiveCharacteristics::landwalk_qualities`, checked alongside the
-//! plain subtype-only form rather than folded into it (see
-//! `LandwalkQuality`'s own doc comment for how its fields combine).
+//! CR 702.14 Landwalk: parametrized by land subtype and checked against the defending player's battlefield, enforced in `commands::DeclareBlockers`.
+//! It is always effect-granted through layer 6 `EffectPrimitive::AddLandwalkSubtype`, with no printed field. Card-type and supertype forms (CR 702.14a) use `AddLandwalkQuality`, checked alongside the subtype form.
 
 use stackfish_engine::engine::ActionError;
 use stackfish_engine::commands::Rejected;
@@ -74,10 +57,6 @@ fn land_definition(id: u64, name: &str, subtype: &str) -> CardDefinition {
     }
 }
 
-/// More flexible than `land_definition` above (fixed `Basic`/plain-Land) -
-/// lets the new `LandwalkQuality` tests build nonbasic lands, snow lands,
-/// and artifact lands without disturbing the existing subtype-only tests'
-/// own fixture.
 fn land_with(id: u64, name: &str, subtype: Option<&str>, supertypes: SupertypeSet, extra_card_types: CardTypeSet) -> CardDefinition {
     CardDefinition {
         definition_id: id,
@@ -103,8 +82,6 @@ fn land_with(id: u64, name: &str, subtype: Option<&str>, supertypes: SupertypeSe
     }
 }
 
-/// Directly-constructed CR 702.14a combination-form grant, same "stand in
-/// for the ETB-registered version" convention `islandwalk` above documents.
 fn landwalk_quality(source: ObjectId, quality: LandwalkQuality) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -127,11 +104,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Directly-constructed landwalk grant, standing in for the ETB-registered
-/// version - the Lua wiring itself (`Game.Effects.AddLandwalkSubtype`) is
-/// proven separately, same convention every other static-ability-adjacent
-/// test file in this repo uses (see `phase5_protection_from_color.rs`'s
-/// `protection_from_red`).
 fn islandwalk(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -144,10 +116,7 @@ fn islandwalk(source: ObjectId) -> ContinuousEffect {
     }
 }
 
-/// Same game-start defaults `stackfish_testutil::two_player_state` builds,
-/// but for a variable player count (this file's multiplayer test needs 3) -
-/// every field below is overridden, `two_player_state(Vec::new())` supplies
-/// only the shared boilerplate (rng, empty collections, ...).
+// A variable player count, since the multiplayer test needs 3.
 fn combat_state(players: Vec<PlayerId>) -> GameState {
     let last_active_turn_number = players.iter().enumerate().map(|(i, p)| (*p, if i == 0 { 1 } else { 0 })).collect();
     GameState {
@@ -196,10 +165,6 @@ fn assert_legal_block(status: Result<StepStatus, ActionError>) {
 fn assert_illegal_block(status: Result<StepStatus, ActionError>) {
     assert!(matches!(status, Err(ActionError::Rejected(Rejected::IllegalAction(_)))), "expected an illegal block, got {status:?}");
 }
-
-// ---------------------------------------------------------------------
-// Islandwalk (CR 702.14) - two players
-// ---------------------------------------------------------------------
 
 #[test]
 fn islandwalk_attacker_unblockable_when_defender_controls_an_island() {
@@ -261,10 +226,6 @@ fn non_landwalk_attacker_blockable_even_when_defender_controls_an_island() {
     assert_legal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
 
-// ---------------------------------------------------------------------
-// Islandwalk - multiplayer, checked against the actual defending player
-// ---------------------------------------------------------------------
-
 #[test]
 fn islandwalk_checks_only_the_defending_players_own_battlefield() {
     let p0 = PlayerId(0);
@@ -277,8 +238,7 @@ fn islandwalk_checks_only_the_defending_players_own_battlefield() {
     let mut state = combat_state(vec![p0, p1, p2]);
     put_on_battlefield(&mut state, permanent(attacker, creature_definition(1, "Kelpling", CardTypeSet::empty()), p0));
     put_on_battlefield(&mut state, permanent(blocker, creature_definition(2, "Bear", CardTypeSet::empty()), p1));
-    // p2 controls an Island but isn't the defending player this attack -
-    // p1 (the real defending player) controls no land at all.
+    // p2 controls an Island but is not the defending player, and p1 controls no land.
     put_on_battlefield(&mut state, permanent(bystander_island, land_definition(3, "Island", "Island"), p2));
     state.continuous_effects.push(islandwalk(attacker));
 
@@ -288,10 +248,7 @@ fn islandwalk_checks_only_the_defending_players_own_battlefield() {
     assert_legal_block(declare_blockers(&mut engine, p1, vec![(blocker, attacker)]));
 }
 
-// ---------------------------------------------------------------------
-// CR 702.14a combination forms
-// ---------------------------------------------------------------------
-
+// CR 702.14a
 #[test]
 fn artifact_landwalk_attacker_unblockable_when_defender_controls_an_artifact_land() {
     let p0 = PlayerId(0);

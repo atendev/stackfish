@@ -1,21 +1,5 @@
-//! Phase 5 vertical slice: CR 111.7/704.5d token cessation. Pulled from the
-//! "Known unresolved gaps" list rather than a numbered backlog item - the
-//! numbered backlog (1-17) closed several slices ago, leaving only item 16
-//! (planeswalkers/battles/DFCs/split/sagas, an explicit non-goal) unstarted.
-//!
-//! `sba::collect_ceasing_tokens`/`commit_token_cessation` are the new pieces:
-//! every SBA pass now starts by scanning every non-battlefield zone for
-//! `GameObject.is_token` and purging any it finds (no new `ObjectId` minted -
-//! this is disappearance, not a CR 400.7 zone move). Timing is the whole
-//! point of this slice: CR 111.7's own parenthetical says "applicable
-//! triggered abilities will trigger before the token ceases to exist" - a
-//! token that dies *this* pass isn't "in a zone other than the battlefield"
-//! until *after* this pass ends (CR 704.3's "simultaneous, based on the
-//! state as of this check"), so the scan running at the very top of
-//! `check_state_based_actions` (before this same pass's own
-//! `collect_dying_creatures`/`resolve_deaths` commit anything) naturally
-//! defers cessation to the *next* pass, for free - not a special case bolted
-//! on afterward.
+//! CR 111.7, 704.5d: `sba::collect_ceasing_tokens` and `commit_token_cessation` purge any `GameObject.is_token` found outside the battlefield, at the start of each SBA pass and with no new `ObjectId`.
+//! A token that dies this pass is not outside the battlefield until the pass ends (CR 704.3), so cessation naturally lands on the next pass and its triggers fire first.
 
 use std::collections::HashMap;
 
@@ -74,8 +58,7 @@ fn dies_ability(source: ObjectId) -> RegisteredAbility {
 fn base_state() -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // Exile is per-player here (unlike `zones`' shared-single default), so
-    // the two Exile entries are appended by hand.
+    // Exile is per-player here, so the two Exile entries are appended by hand.
     let mut zones = zones(p0, p1, &[ZoneKind::Battlefield, ZoneKind::Graveyard]);
     zones.push(Zone::new(ZoneKind::Exile, Some(p0)));
     zones.push(Zone::new(ZoneKind::Exile, Some(p1)));
@@ -110,10 +93,6 @@ fn progressed(outcome: SbaOutcome) -> Vec<GameEvent> {
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit-level: sba::check_state_based_actions
-// ---------------------------------------------------------------------
-
 #[test]
 fn a_token_that_just_died_does_not_cease_until_the_next_sba_pass() {
     let p0 = PlayerId(0);
@@ -121,8 +100,7 @@ fn a_token_that_just_died_does_not_cease_until_the_next_sba_pass() {
     let mut state = base_state();
     put_on_battlefield(&mut state, creature(bear, p0, 2, 2, true));
 
-    // Pass 1: CR 704.5g kills the token (lethal damage) - a real ZoneChange,
-    // new ObjectId minted, now sitting in the graveyard. Not ceased yet.
+    // Pass 1: CR 704.5g kills the token (a ZoneChange with a new ObjectId into the graveyard), and it has not ceased yet.
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
     let GameEventKind::ZoneChange { object: graveyard_id, to: ZoneKind::Graveyard, .. } = events[0].kind else {
@@ -134,8 +112,7 @@ fn a_token_that_just_died_does_not_cease_until_the_next_sba_pass() {
         "sitting in the graveyard, not yet purged"
     );
 
-    // Pass 2: now it's "a token in a zone other than the battlefield" as of
-    // the top of *this* check - CR 704.5d applies.
+    // Pass 2: it is now a token outside the battlefield as of this check, so CR 704.5d applies.
     let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0].kind, GameEventKind::TokenCeased { object } if object == graveyard_id));
@@ -159,9 +136,7 @@ fn a_non_token_creature_with_the_same_fate_never_ceases() {
         panic!("expected a plain death, got {:?}", events[0].kind);
     };
 
-    // Run the fixed point all the way out - a real (non-token) card must
-    // never be swept up by the new CR 704.5d check, regardless of how many
-    // more passes run.
+    // Running to a fixed point must never sweep up a real (non-token) card.
     loop {
         let events = progressed(check_state_based_actions(&mut state, &ScriptRuntime::new()));
         if events.is_empty() {
@@ -174,10 +149,7 @@ fn a_non_token_creature_with_the_same_fate_never_ceases() {
 
 #[test]
 fn a_token_already_sitting_in_exile_ceases_on_the_very_first_check() {
-    // Not graveyard-specific - CR 704.5d is "any zone other than the
-    // battlefield." This token was never on the battlefield this pass at
-    // all (placed directly in Exile by the fixture), so it's eligible from
-    // the very first check, unlike the "just died" case above.
+    // CR 704.5d covers any zone other than the battlefield. This token was placed in Exile directly, so it is eligible from the first check.
     let p0 = PlayerId(0);
     let relic = ObjectId(0);
     let mut state = base_state();
@@ -189,11 +161,6 @@ fn a_token_already_sitting_in_exile_ceases_on_the_very_first_check() {
     assert!(state.object(relic).is_none());
     assert!(state.zone(ZoneKind::Exile, Some(p0)).unwrap().contents.is_empty());
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline - a token's own Dies trigger still fires
-// (and resolves) despite the token ceasing a pass later.
-// ---------------------------------------------------------------------
 
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
@@ -223,8 +190,7 @@ fn a_dying_tokens_own_dies_trigger_still_fires_and_resolves_despite_later_ceasin
     assert!(engine.state().stack.is_empty(), "the triggered ability resolved");
     assert_eq!(engine.state().player(p0).unwrap().life, 21, "GainLife(1) applied - the trigger fired correctly");
 
-    // By now every SBA pass this pipeline run needed has already settled,
-    // including the token's own cessation one pass after its own death.
+    // Every SBA pass this run needed has settled, including the token's cessation one pass after its death.
     assert!(
         engine.state().zone(ZoneKind::Graveyard, Some(p0)).unwrap().contents.is_empty(),
         "the token itself is gone - it ceased to exist, not just died"

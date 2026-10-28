@@ -1,8 +1,4 @@
-//! Phase 5 vertical slice: paying `{C}`, hybrid, `{X}` and `{S}` costs. The
-//! engine already validated hybrid, Phyrexian and `{S}` plans in unit tests.
-//! This file runs them through `submit_action` and `submit_payment`, and
-//! covers the two pieces that were missing: the `{C}` cost symbol (CR 107.4c)
-//! and snow mana produced by a snow source (CR 106.3).
+//! Paying `{C}`, hybrid, `{X}` and `{S}` costs through `submit_action` and `submit_payment`, including the `{C}` cost symbol (CR 107.4c) and snow mana from a snow source (CR 106.3).
 
 use std::collections::{HashMap, VecDeque};
 

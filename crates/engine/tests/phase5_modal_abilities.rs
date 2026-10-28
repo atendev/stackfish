@@ -1,12 +1,5 @@
-//! Phase 5 vertical slice: source-bound effects as modes of a modal triggered
-//! ability. `SacrificeSelf`, `BecomeCopy`, `Attach` and the one-target-word
-//! `Fight`/`Bite` act on the ability's own source permanent, so a spell (whose
-//! source is the card on the stack) can't use them; a modal triggered ability
-//! (CR 603.3c, `RegisteredAbility::modes`) can. Also covers the trigger-path
-//! chosen-by-opponent case (`submit_trigger_mode_choice`) with pausing modes.
-//!
-//! There is no modal *activated* ability yet (`commands/activate.rs` has no
-//! modes), so every vehicle here is an upkeep trigger.
+//! A modal triggered ability (CR 603.3c, `RegisteredAbility::modes`) can use source-bound modes (`SacrificeSelf`, `BecomeCopy`, `Attach`, one-word `Fight` and `Bite`) that a spell cannot. It also covers the opponent-chosen path (`submit_trigger_mode_choice`) with pausing modes.
+// TODO: modal activated abilities (`commands/activate.rs` has no modes), so every vehicle here is an upkeep trigger
 
 use stackfish_engine::engine::{Engine, StepStatus, TriggerModeChoiceError};
 use stackfish_engine::replacement::ReplacementCandidate;
@@ -59,8 +52,6 @@ fn everything() -> EffectFilter {
     EffectFilter { controller: None, card_types: None, subtypes: None, excluded_subtypes: None, supertypes: None, excluded_supertypes: None, self_only: false }
 }
 
-/// "At the beginning of your upkeep, choose two - ..." with `source` as the
-/// permanent the effects act on.
 fn modal_upkeep(source: ObjectId, modes: Vec<SpellMode>, mode_choice: ModeChoice) -> RegisteredAbility {
     RegisteredAbility {
         modes,
@@ -77,8 +68,6 @@ fn modal_upkeep(source: ObjectId, modes: Vec<SpellMode>, mode_choice: ModeChoice
     }
 }
 
-/// A 3/3 `Reaper` (P0, the default source) and a 2/2 `Bear` (P1) on the
-/// battlefield, `library` cards on P0's library, and `ability` registered.
 fn engine_with(ability: impl FnOnce() -> RegisteredAbility, library: u64) -> Engine {
     let mut state = GameState {
         phase: Phase::PreGame,
@@ -105,8 +94,6 @@ fn pass_both(engine: &mut Engine) -> StepStatus {
     drain(engine)
 }
 
-/// Upkeep fires the trigger, `chosen` answers the mode choice, `targets`
-/// answers the combined target pause, and both players pass to resolve it.
 fn fire_and_resolve(engine: &mut Engine, chosen: Vec<u32>, targets: Vec<Target>) {
     let status = pass_both(engine);
     assert!(matches!(status, StepStatus::AwaitingTriggerModeChoice { .. }), "{status:?}");
@@ -137,8 +124,6 @@ fn damage_on(engine: &Engine, id: ObjectId) -> u32 {
     engine.state().object(id).map(|o| o.damage_marked).unwrap_or(0)
 }
 
-// ---- SacrificeSelf ---------------------------------------------------------
-
 #[test]
 fn a_sacrifice_self_mode_sacrifices_the_source_and_the_next_mode_runs() {
     let mut engine = engine_with(|| modal_upkeep(SOURCE, vec![mode(None, AbilityEffect::SacrificeSelf), mode(None, AbilityEffect::GainLife(3))], ModeChoice::Exactly(2)), 0);
@@ -168,8 +153,6 @@ fn a_sacrifice_self_mode_then_a_draw_mode_resolve_one_after_the_other() {
     assert_eq!(engine.state().zone(ZoneKind::Hand, Some(P0)).unwrap().contents.len(), 1);
     assert_resolved_cleanly(&engine);
 }
-
-// ---- Fight and Bite as a one-word mode ----------------------------------------
 
 #[test]
 fn a_fight_mode_makes_the_source_fight_its_own_target() {
@@ -206,8 +189,6 @@ fn a_fight_mode_followed_by_a_pausing_mode_commits_its_damage_first() {
     assert_resolved_cleanly(&engine);
 }
 
-// ---- BecomeCopy ------------------------------------------------------------
-
 #[test]
 fn a_become_copy_mode_makes_the_source_a_copy_of_its_target() {
     let mut engine = engine_with(
@@ -222,8 +203,6 @@ fn a_become_copy_mode_makes_the_source_a_copy_of_its_target() {
     assert!(engine.state().ledger.iter().any(|e| matches!(e.kind, GameEventKind::BecameCopy { object, copied } if object == SOURCE && copied == BEAR)));
     assert_resolved_cleanly(&engine);
 }
-
-// ---- Attach ----------------------------------------------------------------
 
 #[test]
 fn an_attach_mode_attaches_the_source_equipment_to_its_target() {
@@ -241,14 +220,10 @@ fn an_attach_mode_attaches_the_source_equipment_to_its_target() {
     assert_resolved_cleanly(&engine);
 }
 
-// ---- Chosen by the opponent (CR 700.2e), trigger path -------------------------
-
 fn chosen_by_opponent(modes: Vec<SpellMode>) -> impl FnOnce() -> RegisteredAbility {
     move || modal_upkeep(SOURCE, modes, ModeChoice::ExactlyChosenByOpponent(2))
 }
 
-/// Upkeep fires, the other player answers the mode choice, and the trivially
-/// satisfied target pause is answered.
 fn fire_chosen_by_opponent(engine: &mut Engine, chosen: Vec<u32>) -> StepStatus {
     let status = pass_both(engine);
     assert!(matches!(status, StepStatus::AwaitingTriggerModeChoice { .. }), "{status:?}");

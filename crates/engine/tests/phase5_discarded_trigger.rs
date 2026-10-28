@@ -1,18 +1,5 @@
-//! Phase 5 vertical slice: `ConditionPrimitive::Discarded` — "when this card
-//! is discarded" (the self-referential sibling `DiscardsCard`/
-//! `EachDiscardsCard` don't cover, since those are player-relative:
-//! "whenever you/a player discards *a* card", not "whenever *this* card is
-//! discarded"). Reuses the exact CR 603.10 look-back-in-time mechanism
-//! `Dies`/`LeavesBattlefield` already use for a battlefield departure,
-//! extended to a hand departure - `triggers.rs::collect_triggers`'s own
-//! departed-ability fallback loop needed `Discarded` added alongside
-//! `Dies | LeavesBattlefield` to actually reach it (see that loop's own
-//! comment).
-//!
-//! Both real discard sources already stash their departed `Triggered`
-//! abilities (closed by the earlier `DiscardsCard` fix) - this proves
-//! `Discarded` rides that same plumbing for both: a cost-payment `Discard`
-//! and the cleanup hand-size discard.
+//! CR 603.10: `ConditionPrimitive::Discarded` fires for "when this card is discarded", through the same look-back mechanism as `Dies`, extended to a hand departure in `collect_triggers`' departed-ability loop.
+//! Both discard sources stash departed `Triggered` abilities: a cost-payment `Discard` and the cleanup hand-size discard.
 
 use std::collections::HashMap;
 
@@ -49,9 +36,6 @@ fn permanent(id: ObjectId, definition: CardDefinition, owner: PlayerId) -> GameO
     GameObject { controlled_since_turn: 1, ..card_object(id, definition, owner, ZoneKind::Battlefield) }
 }
 
-/// A hand card that carries its own `Discarded` triggered ability - the
-/// self-referential shape this slice adds. `effect: GainLife(1)` is a
-/// convenient, easy-to-observe proof the trigger actually resolved.
 fn hand_card_with_discarded_trigger(id: ObjectId, owner: PlayerId) -> GameObject {
     GameObject {
         controlled_since_turn: 1,
@@ -183,10 +167,7 @@ fn discarded_trigger_fires_off_a_cost_payment_discard() {
     let status = drain(&mut engine);
 
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0), "expected priority reopened by the Discarded trigger, got {status:?}");
-    // 2, not 1: the activated ability itself (pushed on activation, CR
-    // 602.2b, before its cost was even paid) plus the Discarded trigger
-    // collected off paying that cost - proof the trigger was collected at
-    // all, not proof it's the only thing on the stack.
+    // 2: the activated ability (pushed on activation, CR 602.2b, before its cost was paid) plus the Discarded trigger collected off that payment.
     assert_eq!(engine.state().stack.len(), 2, "the activated ability plus the Discarded trigger it paid for");
 
     // Resolve both stack entries.

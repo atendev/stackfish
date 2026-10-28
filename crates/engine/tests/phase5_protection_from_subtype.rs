@@ -1,23 +1,5 @@
-//! Phase 5 vertical slice: CR 702.16's subtype quality ("protection from
-//! Zombies," "protection from Arcane"), extending `phase5/protection-from-color`/
-//! `phase5/protection-from-card-type`'s three enforcement sites (damage/
-//! targeting/blocking) to a third, independent quality axis -
-//! `EffectiveCharacteristics.protection_subtypes`, folded in the same
-//! layer-6 pass from a sibling `EffectPrimitive::AddProtectionSubtype`. Each
-//! enforcement site now checks "protected if the color, card-type, *or*
-//! subtype quality intersects the source's own characteristics" - this file
-//! only re-proves the subtype half; the color/card-type halves (and the
-//! OR-composition mechanics) are already covered by
-//! `phase5_protection_from_color.rs`/`phase5_protection_from_card_type.rs`.
-//!
-//! Unlike `ColorSet`/`CardTypeSet`, `Subtype` is an open-ended string, not a
-//! bitflag `Set` - `AddProtectionSubtype` carries one `Subtype` per
-//! primitive (CR 702.16g's "and" shorthand is already modeled as two
-//! separate registered static abilities).
-//!
-//! Same scoping as the earlier two slices: protection from a specific
-//! player or "from everything" stays unmodeled, and Enchant/Equip (CR
-//! 702.16b) is out of scope (no attach/enchant machinery exists).
+//! CR 702.16: the subtype quality ("protection from Zombies"), `EffectiveCharacteristics.protection_subtypes`, folded in layer 6 from `AddProtectionSubtype`, one `Subtype` per primitive (CR 702.16g is modeled as two registered static abilities).
+//! This file covers the subtype half, and the other qualities and the OR composition are in their own files.
 
 use std::collections::HashMap;
 
@@ -85,9 +67,6 @@ fn plain_creature(id: u64, name: &str, power: i32, toughness: i32) -> CardDefini
     vanilla_creature(id, name, power, toughness, Vec::new())
 }
 
-/// "Test Arcane Bolt: deals 2 damage to target creature," subtyped Arcane
-/// (a real CR 205.4g instant/sorcery subtype) so the targeting tests have a
-/// real spell-side subtype to check protection against.
 fn arcane_bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -118,8 +97,6 @@ fn arcane_bolt_definition() -> CardDefinition {
     }
 }
 
-/// A non-Arcane counterpart to `arcane_bolt_definition`, for the
-/// "protection doesn't block an unrelated subtype" control test.
 fn plain_bolt_definition() -> CardDefinition {
     CardDefinition { definition_id: 21, name: "Test Plain Bolt".to_string(), subtypes: Vec::new(), ..arcane_bolt_definition() }
 }
@@ -130,9 +107,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Directly-constructed protection, standing in for the ETB-registered
-/// version - the Lua wiring itself is proven separately, same convention
-/// every other static-ability-adjacent test file in this repo uses.
 fn protection_from_zombies(source: ObjectId) -> ContinuousEffect {
     ContinuousEffect {
         source,
@@ -251,10 +225,6 @@ fn pass_to_declare_blockers(engine: &mut Engine) {
     panic!("never reached DeclareBlockers - state.step = {:?}", engine.state().step);
 }
 
-// ---------------------------------------------------------------------
-// Lua wiring
-// ---------------------------------------------------------------------
-
 #[test]
 fn game_effects_add_protection_subtype_self_registers_and_applies() {
     let mut state = base_state();
@@ -282,10 +252,7 @@ fn game_effects_add_protection_subtype_self_registers_and_applies() {
     assert_eq!(effective.protection_subtypes, vec![Subtype("Zombie".to_string())]);
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16a: damage
-// ---------------------------------------------------------------------
-
+// CR 702.16a
 #[test]
 fn combat_damage_from_a_matching_subtype_is_prevented_by_protection() {
     let p0 = PlayerId(0);
@@ -332,10 +299,7 @@ fn combat_damage_from_a_non_matching_subtype_still_lands() {
     assert_eq!(ward.damage_marked, 3, "protection from Zombies doesn't stop a plain creature's damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16c: targeting
-// ---------------------------------------------------------------------
-
+// CR 702.16c
 #[test]
 fn casting_a_matching_subtype_spell_at_a_protected_target_is_rejected() {
     let mut state = base_state();
@@ -388,10 +352,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     cast_spell(&mut engine, p0, card, vec![Target::Object(target)]);
     pay_free_and_drain(&mut engine);
 
-    // CR 702.16c is rechecked by the same CR 608.2b mechanism as any other
-    // target legality change - granting protection mid-stack, after the
-    // spell already targeted this creature, makes the target illegal by
-    // resolution time.
+    // CR 702.16c: protection granted mid-stack makes the target illegal by resolution, through the CR 608.2b recheck.
     engine.state_mut().continuous_effects.push(protection_from_arcane(target));
 
     pass_both_and_drain(&mut engine, p0, p1).unwrap();
@@ -403,10 +364,7 @@ fn spell_fizzles_when_target_gains_protection_before_resolution() {
     assert_eq!(engine.state().object(target).unwrap().damage_marked, 0, "a fizzled spell deals no damage");
 }
 
-// ---------------------------------------------------------------------
-// CR 702.16d: blocking
-// ---------------------------------------------------------------------
-
+// CR 702.16d
 #[test]
 fn an_attacker_with_protection_cannot_be_blocked_by_a_matching_subtype_creature() {
     let p0 = PlayerId(0);
@@ -450,12 +408,6 @@ fn an_attacker_with_protection_can_still_be_blocked_by_a_non_matching_subtype_cr
         "a non-Zombie creature can still block an attacker with only protection from Zombies, got {status:?}"
     );
 }
-
-// ---------------------------------------------------------------------
-// RemoveAllAbilities consistency (CR 613.1f covers protection_subtypes too,
-// same as protection_colors/protection_card_types - see
-// phase5_lose_all_abilities.rs's own analogous test for the color half).
-// ---------------------------------------------------------------------
 
 #[test]
 fn remove_all_abilities_also_strips_a_granted_protection_subtype() {

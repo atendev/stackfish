@@ -1,17 +1,4 @@
-//! Phase 5 vertical slice: static ability self-registration (CR 604/611). A
-//! card's own Lua `register_abilities(c)` can now call `Game.CreateStaticAbility(c)`
-//! to attach a real `ContinuousEffect` to `GameState.continuous_effects` -
-//! mirrors `Game.CreateTriggeredAbility`'s builder/queued-registration
-//! mechanism exactly (`StaticAbilityBuilder` alongside
-//! `TriggeredAbilityBuilder` in script.rs), just producing a `ContinuousEffect`
-//! instead of a `RegisteredAbility`. Building one by hand (Rust struct
-//! literal / TOML `[cards.continuous_effect]`) remains fully supported and
-//! unaffected.
-//!
-//! Same self-registration call sites as the triggered-ability slice
-//! (`PlayLand`, `ResolveStackTop`'s permanent-entry branch) - no new call
-//! sites needed, since `ScriptRuntime::run_card_script` now drains both
-//! `pending_triggered` and `pending_static` in one pass.
+//! CR 604, 611: `Game.CreateStaticAbility(c)` in `register_abilities(c)` attaches a `ContinuousEffect` to `GameState.continuous_effects`, through the same queue-and-drain builder as `Game.CreateTriggeredAbility` (`pending_static` is drained with `pending_triggered`).
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::layers::effective_characteristics;
@@ -166,15 +153,9 @@ fn vanilla_bear_definition() -> CardDefinition {
     }
 }
 
-/// Mirrors `phase5_script_self_registration::two_player_state`.
 fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: ScriptRuntime::run_card_script's static self-registration
-// mechanics, without driving the whole Engine pipeline.
-// ---------------------------------------------------------------------
 
 #[test]
 fn run_card_script_self_registers_a_static_ability() {
@@ -337,24 +318,16 @@ fn run_card_script_can_register_multiple_static_abilities_from_one_script_call()
     assert!(state.continuous_effects.iter().all(|e| e.source == bear));
 }
 
-// ---------------------------------------------------------------------
-// SBA: a dying creature's self-registered static ability is purged, not
-// left dangling in state.continuous_effects (retire_object extension).
-// ---------------------------------------------------------------------
-
 #[test]
 fn dying_creatures_registered_static_ability_is_purged_by_sba() {
     let mut state = two_player_state();
     let bear = ObjectId(0);
     let mut object = card_object(bear, bear_definition(SELF_BUFF), PlayerId(0), ZoneKind::Battlefield);
-    // Base 2/2 + self ModifyPT(1,1) = effective toughness 3 - 2 damage isn't
-    // lethal *with* the effect applied, so seed 3 damage (lethal against the
-    // buffed 3 toughness) to force death without needing combat machinery.
+    // Base 2/2 plus self ModifyPT(1,1) is toughness 3, so 3 damage is lethal and forces death without combat.
     object.damage_marked = 3;
     state.objects.insert(bear, object);
     state.zone_mut(ZoneKind::Battlefield, None).unwrap().push_bottom(bear);
-    // Simulates the continuous effect this creature would have
-    // self-registered upon an earlier entrance to the battlefield.
+    // Simulates the effect the creature would have self-registered on an earlier battlefield entry.
     state.continuous_effects.push(ContinuousEffect {
         source: bear,
         layer: Layer::PowerToughnessModifying,
@@ -378,11 +351,6 @@ fn dying_creatures_registered_static_ability_is_purged_by_sba() {
          not left dangling"
     );
 }
-
-// ---------------------------------------------------------------------
-// End-to-end: real Engine pipeline, the self-registered static effect
-// actually changes effective_characteristics once the source resolves.
-// ---------------------------------------------------------------------
 
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
@@ -460,9 +428,7 @@ fn play_land_self_registering_anthem_buffs_other_creatures_you_control() {
     assert_eq!(effective.toughness, Some(3));
 }
 
-/// A land version of the anthem script, so `play_land_self_registering_anthem_buffs_other_creatures_you_control`
-/// can self-register via `PlayLand` (which only accepts `CardTypeSet::LAND`)
-/// rather than `CastSpell`.
+// A land version of the anthem script, so it can self-register through PlayLand, which accepts only CardTypeSet::LAND.
 fn bear_definition_as_land() -> CardDefinition {
     CardDefinition {
         oracle_text: "Creatures you control get +1/+1.".to_string(),

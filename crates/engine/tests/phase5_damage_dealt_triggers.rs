@@ -1,19 +1,5 @@
-//! Phase 5 vertical slice: damage-dealt trigger conditions (CR 603.2, first
-//! sub-slice of backlog item 7, "trigger system completeness"). Adds
-//! `ConditionPrimitive::DealsDamage`/`IsDealtDamage`, matched against a real
-//! `GameEventKind::DamageDealt` event - reachable without any pipeline
-//! changes because combat damage (`AssignCombatDamage`) already routes its
-//! `DamageDealt` events through the real `CommitEvents`->`SbaLoop`->
-//! `CollectTriggers` pipeline (see the `fix-replacement-bypasses` slice).
-//!
-//! Deliberately NOT covered here (see docs/implementation.md's backlog):
-//! phase/step-boundary conditions ("beginning of upkeep") - `AdvanceTurnStep`
-//! bypasses `CollectTriggers` entirely via `log_events`, a separate,
-//! undocumented-until-now gap; leaves-battlefield/dies conditions - blocked
-//! on the pre-existing "source no longer resolves" gap in `collect_triggers`;
-//! intervening-if legality (CR 603.4). CR 603.2h's "once each turn" cap is
-//! covered too now, but in its own file - see
-//! phase5_trigger_once_per_turn.rs.
+//! CR 603.2: `ConditionPrimitive::DealsDamage` and `IsDealtDamage`, matched against a real `GameEventKind::DamageDealt`, which combat damage already routes through `CollectTriggers`.
+//! The once-each-turn cap (CR 603.2h) is in phase5_trigger_once_per_turn.rs.
 
 use std::collections::HashMap;
 
@@ -39,7 +25,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
     state.objects.insert(id, object);
 }
 
-/// Mirrors `phase5_combat_damage::combat_damage_state`.
 fn combat_damage_state(combat: CombatState) -> GameState {
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
@@ -66,10 +51,6 @@ fn assign_combat_damage(
 fn pass(engine: &mut Engine, player: PlayerId) {
     engine.submit_action(PlayerAction { player, kind: PlayerActionKind::PassPriority }).unwrap();
 }
-
-// ---------------------------------------------------------------------
-// DealsDamage: the attacker's own "whenever this deals damage" ability.
-// ---------------------------------------------------------------------
 
 #[test]
 fn deals_damage_trigger_fires_when_the_attacker_connects() {
@@ -125,8 +106,7 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
         bands: Vec::new(), effect_blocked: Vec::new(), damage_assigned_this_step: false, pending_damage_splits: std::collections::HashMap::new(),
     });
     put_on_battlefield(&mut state, permanent(attacker, creature_definition("Bear", 3, 3), p0));
-    // Registered on a bystander that isn't attacking/blocking at all -
-    // never a `source` of any DamageDealt event this combat.
+    // Registered on a bystander that is not attacking or blocking, so it is never a source of a DamageDealt event.
     put_on_battlefield(&mut state, permanent(bystander, creature_definition("Sprout", 0, 1), p0));
     state.abilities.push(RegisteredAbility {
         modes: Vec::new(),
@@ -147,10 +127,6 @@ fn deals_damage_trigger_does_not_fire_for_a_creature_that_never_dealt_damage() {
     assert!(matches!(status, StepStatus::AwaitingAction { player } if player == p0));
     assert!(engine.state().stack.is_empty(), "the bystander's ability never matched a DamageDealt event");
 }
-
-// ---------------------------------------------------------------------
-// IsDealtDamage: the blocker's own "whenever this is dealt damage" ability.
-// ---------------------------------------------------------------------
 
 #[test]
 fn is_dealt_damage_trigger_fires_on_the_creature_taking_damage() {

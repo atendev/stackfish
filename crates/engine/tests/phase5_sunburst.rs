@@ -1,21 +1,5 @@
-//! Phase 5 vertical slice: CR 702.44 Sunburst - "this object enters with a
-//! +1/+1 counter (as a creature) or charge counter (otherwise) on it for
-//! each color of mana spent to cast it." Narrowed out of the broader
-//! "dynamic ETB counts" backlog item alongside Bloodthirst
-//! (`phase5_bloodthirst.rs`) and ahead of Devour/Amplify (still deferred -
-//! both need a genuine mid-ETB player choice, a new pause/resume
-//! `ProcessState`, unlike Sunburst's fully deterministic amount).
-//!
-//! Unlike every other `EntersWithCounters*` payload, `EntersWithCountersSunburst`
-//! carries no fields at all - both `kind` and `amount` are derived at apply
-//! time from `colors_spent`, a new parameter threaded onto
-//! `replacement::apply_enters_battlefield_modifiers` itself. The one real
-//! producer of a nonempty `colors_spent` is `ResolveStackTop`'s own
-//! resolve-a-spell-off-the-stack path, which reads `StackObject::costs_paid`
-//! (already recorded at payment time, CR 118.13a) via the new
-//! `cost::colors_spent` helper - `PlayLand`/`Search`'s battlefield-entry
-//! paths always pass `ColorSet::empty()`, which is exactly correct per CR
-//! 702.44b (no cast, no colors spent, no counters), not a placeholder.
+//! CR 702.44 Sunburst: the permanent enters with a +1/+1 counter (creature) or charge counter for each color of mana spent. `EntersWithCountersSunburst` derives kind and amount from `colors_spent`, which `ResolveStackTop` reads from `StackObject::costs_paid` through `cost::colors_spent`.
+//! `PlayLand` and `Search` pass an empty `ColorSet`, which is correct per CR 702.44b.
 
 use stackfish_engine::engine::Engine;
 use stackfish_engine::replacement;
@@ -93,10 +77,6 @@ fn sunburst_effect(source: ObjectId) -> ReplacementEffect {
     }
 }
 
-// ---------------------------------------------------------------------
-// cost::colors_spent - pure helper, unit level.
-// ---------------------------------------------------------------------
-
 #[test]
 fn colors_spent_dedups_repeated_colors_across_payments() {
     let payments = vec![
@@ -120,11 +100,6 @@ fn colors_spent_ignores_colorless_and_non_mana_payments() {
     ];
     assert_eq!(colors_spent(&payments), ColorSet::empty());
 }
-
-// ---------------------------------------------------------------------
-// apply_enters_battlefield_modifiers - unit level, direct driver-function
-// calls, same convention phase5_bloodthirst.rs's own unit tests use.
-// ---------------------------------------------------------------------
 
 #[test]
 fn creature_entrant_gets_a_plus_one_counter_per_distinct_color_spent() {
@@ -190,9 +165,7 @@ fn no_colored_mana_spent_grants_no_counters() {
 
 #[test]
 fn non_cast_entry_paths_always_pass_an_empty_color_set() {
-    // PlayLand/Search never have a cast to spend colors on - simulated here
-    // by calling the driver with ZoneKind::Hand (PlayLand's own `from`) and
-    // an empty ColorSet, same as those real call sites always pass.
+    // PlayLand and Search never have a cast to spend colors on, so the driver is called with ZoneKind::Hand and an empty ColorSet.
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let entrant = ObjectId(0);
@@ -204,11 +177,6 @@ fn non_cast_entry_paths_always_pass_an_empty_color_set() {
 
     assert!(events.is_empty());
 }
-
-// ---------------------------------------------------------------------
-// End to end: Lua self-registration + CastSpell resolution with a real
-// colored mana payment.
-// ---------------------------------------------------------------------
 
 const SUNBURST: &str = r#"
 local s = {}

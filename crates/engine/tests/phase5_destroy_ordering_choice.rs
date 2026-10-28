@@ -1,37 +1,7 @@
-//! Phase 5 vertical slice: CR 616.1 ordering choice for the scripted
-//! `Destroy`/`Sacrifice`/`Exile` ops. Pulled from the "Known unresolved gaps"
-//! list rather than a numbered backlog item - the numbered backlog (1-17)
-//! closed with the `phase5/regeneration` slice, leaving only item 16
-//! (explicit non-goal) unstarted.
-//!
-//! Found while scoping: all three ops loop over their legal targets
-//! independently, proposing+replacement-checking+inline-committing each
-//! target's own `ZoneChange` (a `ZoneChange` always describes an
-//! already-happened move, same "already happened" convention every scripted
-//! zone-move op here uses - see each arm's own doc comment). Before this
-//! slice, a target whose proposed event matched 2+ `ReplacementEffect`s hit
-//! `ReplacementOutcome::NeedsOrderingChoice` and the arm's own `{ .. }` catch
-//! silently did nothing - the target simply never moved, no pause, no
-//! player choice, unlike every SBA-driven death (which already paused
-//! correctly via `ReplacementResumeTarget::SbaDeath`). `Engine::
-//! continue_scripted_zone_move`/`commit_scripted_zone_move` fix this: the
-//! same per-target loop now returns a real `ProcessState::
-//! AwaitingReplacementChoice` (`ReplacementResumeTarget::ScriptedZoneMove`)
-//! the instant any target needs one, carrying the rest of that op's own
-//! target queue so the remaining *independent* targets still get processed
-//! once `submit_replacement_choice` answers.
-//!
-//! `Exile`'s own ordering-choice arm is fixed by the same refactor but isn't
-//! exercised end-to-end here: `EventFilter` only has two shapes today
-//! (`DamageDealt`, `WouldDie`), and `WouldDie` only ever matches a proposed
-//! `ZoneChange { from: Battlefield, to: Graveyard, .. }` (see `ReplacementEffect
-//! ::matches`) - a scripted Exile's own proposed `to: Exile` can never match
-//! either shape, so no fixture can currently construct 2 replacement effects
-//! that both match an Exile op's proposed event. Not a gap this slice
-//! introduces or needs to close (same standing "no Lua builder for
-//! replacement effects, only two `EventFilter` shapes" gap named in
-//! `docs/implementation.md`'s "Known unresolved gaps" list already) - noted
-//! here so the missing Exile-specific test isn't mistaken for an oversight.
+//! CR 616.1: scripted `Destroy`, `Sacrifice` and `Exile` ops pause on `AwaitingReplacementChoice` (`ReplacementResumeTarget::ScriptedZoneMove`) when a target's proposed event matches two or more replacement effects.
+//! The per-target loop carries the rest of the op's target queue, so the remaining independent targets still resolve once `submit_replacement_choice` answers.
+//! Exile has no end-to-end test: `EventFilter` has only `DamageDealt` and `WouldDie`, and a scripted Exile's `to: Exile` matches neither.
+// TODO: a Lua builder for replacement effects and more `EventFilter` shapes, so an Exile ordering choice can be tested
 
 use std::collections::HashMap;
 
@@ -65,11 +35,6 @@ fn creature_definition(definition_id: u64, name: &str, toughness: i32) -> CardDe
     }
 }
 
-/// A non-creature permanent standing in for "whatever grants this
-/// replacement effect" - distinct from the dying creature itself.
-/// `event_target_matches` requires a `ReplacementEffect::source` to actually
-/// resolve in `state.objects`, so this has to be a real object, not just an
-/// id (same fixture role `phase5_regeneration.rs`'s own `shield` plays).
 fn shield_definition(definition_id: u64, name: &str) -> CardDefinition {
     CardDefinition {
         definition_id,
@@ -108,14 +73,7 @@ fn regenerate_shield(source: ObjectId, consumption: ConsumptionPolicy) -> Replac
     }
 }
 
-/// "If a creature you control would die, exile it instead" - `self_only`
-/// picked per call site so the same helper can build both "this effect's own
-/// source dies" and "any creature its controller controls dies" shapes.
-/// `controller: Some(FilterController::You)` (relative to `source`'s own
-/// controller) rather than `None` - every fixture using this only ever wants
-/// it to intercept its own controller's creatures, not every creature on the
-/// battlefield (a multi-target test puts an unrelated opponent's creature on
-/// the battlefield too, which a `None` filter would incorrectly also catch).
+// `controller: Some(You)` keeps the effect to its controller's creatures, since a multi-target test also has an opponent's creature on the battlefield.
 fn exile_instead_effect(source: ObjectId, self_only: bool, consumption: ConsumptionPolicy) -> ReplacementEffect {
     ReplacementEffect {
         source,
@@ -132,7 +90,6 @@ fn exile_instead_effect(source: ObjectId, self_only: bool, consumption: Consumpt
     }
 }
 
-/// "Test Destroy: Destroy target creature."
 fn destroy_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 20,
@@ -163,7 +120,6 @@ fn destroy_spell_definition() -> CardDefinition {
     }
 }
 
-/// "Test Slay Two: Destroy two target creatures."
 fn slay_two_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 21,
@@ -194,7 +150,6 @@ fn slay_two_definition() -> CardDefinition {
     }
 }
 
-/// "Test Sacrifice: Sacrifice target creature."
 fn sacrifice_spell_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 22,
@@ -271,15 +226,9 @@ fn pass_both_and_drain(engine: &mut Engine, p0: PlayerId, p1: PlayerId) -> StepS
     drain(engine)
 }
 
-// ---------------------------------------------------------------------
-// Scripted Destroy - CR 616.1 pause/resume (previously a silent no-op).
-// ---------------------------------------------------------------------
-
 #[test]
 fn destroy_spell_with_two_matching_effects_pauses_instead_of_silently_no_oping() {
-    // The exact bug this slice fixes: before it, this cast would drain
-    // straight through to AwaitingAction with the bear untouched - no pause,
-    // no player choice, the proposed ZoneChange just vanished.
+    // The cast must pause for the ordering choice and not drain through to AwaitingAction with the bear untouched.
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
@@ -302,8 +251,7 @@ fn destroy_spell_with_two_matching_effects_pauses_instead_of_silently_no_oping()
     };
     assert_eq!(player, p0);
     assert_eq!(candidates.len(), 2);
-    // Nothing applied yet - the bear is still sitting on the battlefield
-    // undamaged, and both effects are still registered.
+    // Nothing applied yet: the bear is on the battlefield undamaged and both effects are still registered.
     assert_eq!(engine.state().object(bear).unwrap().zone, ZoneKind::Battlefield);
     assert_eq!(engine.state().replacement_effects.len(), 2);
 }
@@ -349,9 +297,7 @@ fn destroy_spell_choosing_the_regeneration_shield_saves_the_creature() {
 
 #[test]
 fn destroy_spell_choosing_the_other_effect_first_lets_it_win_instead() {
-    // Same fixture as above, opposite choice - proves the order genuinely
-    // determines the outcome rather than the regeneration shield always
-    // winning regardless of what's picked.
+    // Same fixture, opposite choice: the order determines the outcome, and the regeneration shield does not always win.
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
     let bear = ObjectId(0);
@@ -379,14 +325,7 @@ fn destroy_spell_choosing_the_other_effect_first_lets_it_win_instead() {
         !engine.state().zone(ZoneKind::Exile, None).unwrap().contents.is_empty(),
         "the exile-instead effect won this time - the bear should be in Exile, not the graveyard"
     );
-    // The exile effect (OneShot) was consumed by applying; the regeneration
-    // shield never got a chance to apply either - once the event's own `to`
-    // became Exile it stopped matching WouldDie's to:Graveyard shape at all,
-    // so it was excluded rather than removed by `apply_one_replacement`. But
-    // `phase5/static-regeneration`'s `retire_object` fix now purges it too:
-    // the shield was pinned (self_only) to the bear's own ObjectId, and that
-    // id just retired via CR 400.7 - an entry that can never match anything
-    // ever again is real garbage, not a harmless pileup, so it's gone.
+    // The exile effect was consumed. The shield no longer matches WouldDie once the destination is Exile, and `retire_object` purges it because its self_only id retired (CR 400.7).
     assert_eq!(
         engine.state().replacement_effects.len(),
         0,
@@ -394,11 +333,6 @@ fn destroy_spell_choosing_the_other_effect_first_lets_it_win_instead() {
          (bear's old, now-retired ObjectId) left the game"
     );
 }
-
-// ---------------------------------------------------------------------
-// Multi-target Destroy - proves the remaining independent targets in the
-// same op resume correctly after the paused target's choice is answered.
-// ---------------------------------------------------------------------
 
 #[test]
 fn destroy_two_target_spell_pauses_on_one_target_then_still_destroys_the_other_afterward() {
@@ -411,8 +345,7 @@ fn destroy_two_target_spell_pauses_on_one_target_then_still_destroys_the_other_a
     let mut state = base_state();
     put_on_battlefield(&mut state, card_object(bear, creature_definition(1, "Bear", 2), p0, ZoneKind::Battlefield));
     put_on_battlefield(&mut state, card_object(shield_obj, shield_definition(2, "Test Shield"), p0, ZoneKind::Battlefield));
-    // No replacement effects target this one at all - a plain, unshielded
-    // creature independent of the first target's own ordering choice.
+    // No replacement effects target this creature, independent of the first target's ordering choice.
     put_on_battlefield(&mut state, card_object(plain_bear, creature_definition(3, "Plain Bear", 2), p1, ZoneKind::Battlefield));
     put_in_hand(&mut state, card_object(slay_two, slay_two_definition(), p0, ZoneKind::Hand));
     state.replacement_effects.push(regenerate_shield(bear, ConsumptionPolicy::OneShot));
@@ -444,14 +377,6 @@ fn destroy_two_target_spell_pauses_on_one_target_then_still_destroys_the_other_a
     assert!(plain_bear_grave.contents.iter().any(|id| engine.state().object(*id).is_some()), "plain_bear landed in its owner's graveyard");
 }
 
-// ---------------------------------------------------------------------
-// Scripted Sacrifice - CR 616.1 pause/resume. Sacrifice is never
-// destruction (is_destroy: false always), so a regeneration shield can
-// never apply here (`ReplacementEffect::matches`'s own `is_destroy` guard) -
-// both matching effects instead are plain "exile it instead" shapes,
-// distinguished by which one gets consumed.
-// ---------------------------------------------------------------------
-
 #[test]
 fn sacrifice_spell_with_two_matching_effects_pauses_and_only_the_chosen_one_is_consumed() {
     let p0 = PlayerId(0);
@@ -463,9 +388,7 @@ fn sacrifice_spell_with_two_matching_effects_pauses_and_only_the_chosen_one_is_c
     put_on_battlefield(&mut state, card_object(bear, creature_definition(1, "Bear", 2), p0, ZoneKind::Battlefield));
     put_on_battlefield(&mut state, card_object(shield_obj, shield_definition(2, "Test Shield"), p0, ZoneKind::Battlefield));
     put_in_hand(&mut state, card_object(sac_spell, sacrifice_spell_definition(), p0, ZoneKind::Hand));
-    // self_only:true (sourced from the bear itself) and self_only:false
-    // (sourced from a separate permanent) - two distinct sources, both
-    // matching the same proposed ZoneChange.
+    // self_only:true (the bear itself) and self_only:false (a separate permanent) are two sources matching the same proposed ZoneChange.
     state.replacement_effects.push(exile_instead_effect(bear, true, ConsumptionPolicy::OneShot));
     state.replacement_effects.push(exile_instead_effect(shield_obj, false, ConsumptionPolicy::OneShot));
 

@@ -1,19 +1,6 @@
-//! Phase 5 vertical slice: backlog item 3a, script-backed continuous
-//! effects. `AffectedFilter::Script`/`EffectPayload::Script` (dead code since
-//! the layer-engine-cda slice split them out as their own follow-up) are now
-//! real: `layers::applicable_effects_in_layer` evaluates a `Script` affects-
-//! predicate via `ScriptRuntime::invoke_continuous_affects`
-//! (`function(object, source, controller) -> bool`), and
-//! `layers::resolve_primitive` decodes a `Script` effect payload via
-//! `ScriptRuntime::invoke_continuous_effect` (`function(source, controller)
-//! -> table`, the same "Lua asks, Rust decides" one-key-per-shape convention
-//! `invoke_operation` already established, generalized to `set_pt`/
-//! `modify_pt`/`add_keyword`/`add_card_type`/`add_color`/`switch_pt`).
-//!
-//! No `Game.*` state-query bindings exist yet (same limitation the CDA
-//! slice's tests already live with) - every script below decides purely from
-//! `object`/`source`/`controller` identity or a constant, never real board
-//! state.
+//! Script-backed continuous effects: `layers::applicable_effects_in_layer` evaluates a `Script` affects-predicate through `invoke_continuous_affects`, and `layers::resolve_primitive` decodes a `Script` payload through `invoke_continuous_effect`.
+//! Every script decides from `object`, `source` and `controller` identity or a constant.
+// TODO: Game.* state-query bindings for continuous-effect scripts
 
 use stackfish_engine::layers::effective_characteristics;
 use stackfish_engine::script::ScriptRuntime;
@@ -70,11 +57,6 @@ fn put_on_battlefield(state: &mut GameState, object: GameObject) {
 fn script_effect(source: ObjectId, layer: Layer, affected: AffectedFilter, effect: EffectPayload) -> ContinuousEffect {
     ContinuousEffect { source, layer, affected, effect, timestamp: SequenceNo(0), duration: EffectDuration::Permanent, condition: None }
 }
-
-// ---------------------------------------------------------------------
-// Unit-level: ScriptRuntime::invoke_continuous_affects/invoke_continuous_effect
-// directly, without going through the layer engine.
-// ---------------------------------------------------------------------
 
 #[test]
 fn affects_predicate_matches_only_the_identical_object() {
@@ -191,11 +173,6 @@ fn effect_erroring_script_is_an_error_not_a_panic() {
     assert!(result.is_err(), "a script error must not panic - caller (resolve_primitive) treats Err as None");
 }
 
-// ---------------------------------------------------------------------
-// Game.CreateStaticAbility builder: :SetAffected/:SetEffect now accept a
-// function, same two-shapes pattern :SetCondition/:SetOperation already use.
-// ---------------------------------------------------------------------
-
 const SCRIPT_AFFECTS_SELF_ONLY: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -251,12 +228,6 @@ fn run_card_script_self_registers_a_script_backed_effect_payload() {
     assert_eq!(state.continuous_effects.len(), 1);
     assert!(matches!(state.continuous_effects[0].effect, EffectPayload::Script(_)));
 }
-
-// ---------------------------------------------------------------------
-// Real consumer: effective_characteristics (and, transitively, sba.rs's
-// lethal-toughness check / combat damage) actually apply a script-backed
-// affects-predicate or effect payload, not just decode it in isolation.
-// ---------------------------------------------------------------------
 
 #[test]
 fn script_backed_affects_predicate_applies_only_to_the_matching_object() {
@@ -315,10 +286,7 @@ fn mismatched_layer_and_decoded_shape_is_skipped_not_applied() {
     put_on_battlefield(&mut state, creature(source, p0, 2, 2));
 
     let mut script_runtime = ScriptRuntime::new();
-    // Declared layer is PowerToughnessModifying, but the script decodes to
-    // AddKeyword - a real shape mismatch that validate_layer_effect_pairing
-    // could catch for a Primitive effect at :Register() time, but can't for
-    // Script (see validate_layer_effect_pairing's own doc comment).
+    // The declared layer is PowerToughnessModifying but the script decodes to AddKeyword. validate_layer_effect_pairing can catch that only for a Primitive effect at :Register() time.
     let handle = script_runtime
         .load_function("return function(source, controller) return { add_keyword = { \"Flying\" } } end")
         .unwrap();

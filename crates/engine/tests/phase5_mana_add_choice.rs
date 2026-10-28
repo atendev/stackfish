@@ -1,17 +1,5 @@
-//! Phase 5 vertical slice: backlog item 13, mana system completeness beyond
-//! the flat `AbilityEffect::AddMana(Vec<ManaUnit>)` shape.
-//!
-//! Two real gaps closed: (1) `Game.Ops.AddMana`/`Game.Ops.AddManaChoice`
-//! didn't exist at all - no card script could define a mana ability, only
-//! Rust test fixtures could (checked before writing any code - confirmed by
-//! grepping `script.rs` for `AddMana`, zero hits). (2) no player-chosen-color
-//! mechanism existed for "add one mana of any color" text - new
-//! `AbilityEffect::AddManaChoice { count, choices }`, with the actual choice
-//! carried on `PlayerActionKind::ActivateAbility::chosen_colors`, validated
-//! and applied by `commands.rs`'s `ActivateAbility` arm. "More than one fixed
-//! mana" (the backlog's other named case) turned out to already work - `Vec`
-//! already supports it - so this slice adds a test proving that instead of
-//! reimplementing anything.
+//! `Game.Ops.AddMana` and `AddManaChoice` let a card script define a mana ability, and `AbilityEffect::AddManaChoice { count, choices }` adds one mana of a player-chosen color.
+//! The choice rides on `ActivateAbility::chosen_colors`, validated and applied in `commands.rs`. More than one fixed mana already works through `Vec<ManaUnit>`.
 
 use std::collections::VecDeque;
 
@@ -30,9 +18,6 @@ fn permanent_object(id: ObjectId, definition: CardDefinition, owner: PlayerId) -
     card_object(id, definition, owner, ZoneKind::Battlefield)
 }
 
-/// One player, main phase, empty stack, a battlefield zone with a single
-/// permanent carrying whichever `effect` the caller supplies as its only
-/// registered ability.
 fn state_with_ability(source: ObjectId, controller: PlayerId, effect: AbilityEffect) -> GameState {
     let mut objects = std::collections::HashMap::new();
     objects.insert(source, permanent_object(source, land_definition(), controller));
@@ -87,10 +72,6 @@ fn try_activate(engine: &mut Engine, player: PlayerId, source: ObjectId, chosen_
     Ok(drain(engine))
 }
 
-// ---------------------------------------------------------------------
-// "More than one fixed mana" - already worked mechanically, now proven.
-// ---------------------------------------------------------------------
-
 #[test]
 fn fixed_mana_ability_can_add_more_than_one_unit() {
     let p0 = PlayerId(0);
@@ -105,10 +86,6 @@ fn fixed_mana_ability_can_add_more_than_one_unit() {
     activate(&mut engine, p0, source, Vec::new());
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.colorless, 2);
 }
-
-// ---------------------------------------------------------------------
-// AddManaChoice: the real new mechanism.
-// ---------------------------------------------------------------------
 
 #[test]
 fn add_mana_choice_adds_the_chosen_colors() {
@@ -169,10 +146,6 @@ fn chosen_colors_rejected_against_a_plain_fixed_mana_ability() {
     assert_eq!(engine.state().player(p0).unwrap().mana_pool.green, 0);
 }
 
-// ---------------------------------------------------------------------
-// Game.Ops.AddMana / Game.Ops.AddManaChoice - the Lua-facing bindings.
-// ---------------------------------------------------------------------
-
 #[test]
 fn game_ops_add_mana_decodes_a_fixed_unit_with_default_count() {
     let mut runtime = ScriptRuntime::new();
@@ -205,11 +178,6 @@ fn game_ops_add_mana_choice_decodes_count_and_colors() {
         Some(AbilityEffect::AddManaChoice { count: 1, choices }) if choices == ColorSet::all()
     ));
 }
-
-// ---------------------------------------------------------------------
-// Game.Ops.AddRestrictedMana - CR 106.11, "spend this mana only to cast
-// [card type] spells" (phase5/restricted-mana).
-// ---------------------------------------------------------------------
 
 #[test]
 fn game_ops_add_restricted_mana_decodes_a_fixed_colored_unit() {

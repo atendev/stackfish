@@ -1,8 +1,4 @@
-//! Runs every scenario file under `tests/scenarios/` (any depth) and fails
-//! the test if any assertion produced a wrong answer. See
-//! `docs/scenario_format.md` for the TOML schema and
-//! `stackfish_scenario::ScenarioReport::has_hard_failures` for what counts
-//! as a hard failure vs. an expected `not yet implemented`.
+//! Runs every scenario file under `tests/scenarios/` and fails if any assertion is wrong. See `docs/scenario_format.md` and `ScenarioReport::has_hard_failures` for what counts as a hard failure.
 
 use std::fs;
 use std::path::{Path, PathBuf};

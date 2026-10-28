@@ -1,17 +1,5 @@
-//! Phase 5 vertical slice: CR 603.6d/614.1c "how a permanent enters the
-//! battlefield" replacement effects - `ReplacementPayload::{EntersTapped,
-//! EntersWithCounters}`, paired with the already-real `EventFilter::
-//! WouldMoveZone(_, Battlefield)` shape. Covers both a card's own
-//! self-registered ability (CR 113.6h: functions before it's a real
-//! battlefield permanent) and an externally granted one (e.g. "lands your
-//! opponents control enter tapped"), applied by `replacement::
-//! apply_enters_battlefield_modifiers` - a narrow sibling of
-//! `apply_replacements` that mutates the just-created `GameObject` directly
-//! rather than rewriting the proposed `ZoneChange` event (see that
-//! function's own doc comment for why). Wired into the three real
-//! battlefield-entry producers: `PlayLand`, `CastSpell` resolution
-//! (`move_resolving_spell`), and `submit_search_choice`'s
-//! `SearchDestination::Battlefield` arm.
+//! CR 603.6d, 614.1c: how a permanent enters the battlefield, via `ReplacementPayload::{EntersTapped, EntersWithCounters}` on `EventFilter::WouldMoveZone(_, Battlefield)`.
+//! Covers a card's own registered ability (CR 113.6h) and an external grant, applied by `apply_enters_battlefield_modifiers` from `PlayLand`, `CastSpell` resolution and `submit_search_choice`.
 
 use stackfish_engine::engine::{Engine, StepStatus};
 use stackfish_engine::replacement;
@@ -43,10 +31,6 @@ end
 return s
 "#;
 
-/// Blood Moon-style external granter: "lands your opponents control enter
-/// tapped" - `controller = "opponent"` is relative to *this* source's own
-/// controller, checked via `event_target_matches` the same way every other
-/// `:SetAffected` filter already is.
 const OPPONENTS_LANDS_ENTER_TAPPED: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -59,11 +43,7 @@ end
 return s
 "#;
 
-/// `phase5/effect-filter-subtypes`: same shape as `OPPONENTS_LANDS_ENTER_TAPPED`
-/// above, but narrowed by subtype instead of card type - proves
-/// `ReplacementEffectBuilder::SetAffected` (which now delegates to the shared
-/// `decode_effect_filter_table`, see that function's own doc comment) reads
-/// `subtypes` correctly, not just `card_types`.
+// Narrowed by subtype, which checks that SetAffected reads `subtypes` through the shared decode_effect_filter_table.
 const OPPONENTS_SWAMPS_ENTER_TAPPED: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -76,11 +56,7 @@ end
 return s
 "#;
 
-/// `phase5/effect-filter-supertypes`: same shape as `OPPONENTS_SWAMPS_ENTER_TAPPED`
-/// above, but narrowed by supertype instead - proves `event_target_matches`
-/// (the layers-aware near-duplicate of `matches_effect_filter` used for this
-/// `WouldMoveZone` replacement path) reads `supertypes` correctly too, not
-/// just `card_types`/`subtypes`.
+// Narrowed by supertype, which checks that event_target_matches reads `supertypes`.
 const OPPONENTS_LEGENDARY_LANDS_ENTER_TAPPED: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -93,10 +69,8 @@ end
 return s
 "#;
 
-/// CR 603.6d/614.1c only mean something for a move landing on the
-/// battlefield - `to = "Graveyard"` must be rejected at `:Register()` time
-/// (`validate_replacement_filter_payload_pairing`), not silently accepted as
-/// an effect that can never match anything.
+// CR 603.6d, 614.1c
+// A move to the Graveyard must be rejected at :Register() time and not accepted as an effect that can never match.
 const MISMATCHED_ENTERS_TAPPED_FILTER: &str = r#"
 local s = {}
 function s.register_abilities(c)
@@ -176,9 +150,6 @@ fn two_player_state() -> GameState {
     base_two_player_state(hand_battlefield_graveyard_zones(PlayerId(0), PlayerId(1)))
 }
 
-/// Every fixture card in this file has an empty `mana_cost` - pays it via the
-/// explicit empty `PaymentPlan` CR 118.5a still requires, same helper
-/// `phase5_cast_spell.rs` already uses.
 fn pay_free_and_drain(engine: &mut Engine) -> StepStatus {
     let status = drain(engine);
     assert!(
@@ -197,10 +168,6 @@ fn last_zone_change(engine: &Engine) -> (ObjectId, ZoneKind, ZoneKind) {
     }
     panic!("expected at least one ZoneChange event in the ledger");
 }
-
-// ---------------------------------------------------------------------
-// Lua registration mechanics.
-// ---------------------------------------------------------------------
 
 #[test]
 fn set_filter_would_move_zone_battlefield_and_enters_tapped_registers_correctly() {
@@ -255,10 +222,6 @@ fn enters_tapped_payload_rejects_a_non_battlefield_destination_filter() {
     assert!(state.replacement_effects.is_empty(), "no partial effect should have been committed");
 }
 
-// ---------------------------------------------------------------------
-// End to end: PlayLand.
-// ---------------------------------------------------------------------
-
 #[test]
 fn play_land_self_registered_enters_tapped_makes_land_enter_tapped() {
     let mut state = two_player_state();
@@ -281,9 +244,7 @@ fn play_land_without_a_modifier_still_enters_untapped() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let card = ObjectId(0);
-    // ByKey - no script runs, same "plain unscripted card" convention
-    // phase5_replacement_effect_shapes.rs's own vanilla_creature_definition
-    // uses.
+    // ByKey, so no script runs, as with the vanilla definitions in phase5_replacement_effect_shapes.rs.
     let mut definition = land_definition("Plain Forest", "");
     definition.script_ref = ScriptReference::ByKey("plain_forest".to_string());
     state.objects.insert(card, card_object(card, definition, p0, ZoneKind::Hand));
@@ -302,10 +263,7 @@ fn externally_granted_enters_tapped_affects_an_opponents_land_via_play_land() {
     let mut state = two_player_state();
     let p0 = PlayerId(0);
     let p1 = PlayerId(1);
-    // The granter (p1's own permanent) is already on the battlefield before
-    // p0 plays their land - same "already registered ahead of the event it
-    // watches" shape phase5_replacement_effect_shapes.rs's own combat-damage
-    // shield tests use.
+    // The granter (p1's permanent) is on the battlefield before p0 plays their land, as with the combat-damage shield tests.
     let granter = ObjectId(0);
     let granter_definition = creature_definition("Tangle Wire Wannabe", OPPONENTS_LANDS_ENTER_TAPPED);
     state.objects.insert(granter, card_object(granter, granter_definition.clone(), p1, ZoneKind::Battlefield));
@@ -456,10 +414,6 @@ fn externally_granted_enters_tapped_leaves_a_non_matching_supertype_alone() {
     );
 }
 
-// ---------------------------------------------------------------------
-// End to end: CastSpell resolution (move_resolving_spell).
-// ---------------------------------------------------------------------
-
 #[test]
 fn cast_creature_resolution_self_registered_enters_with_counters() {
     let mut state = two_player_state();
@@ -510,10 +464,6 @@ fn cast_creature_resolution_self_registered_enters_with_counters() {
     );
 }
 
-// ---------------------------------------------------------------------
-// Consumption-policy bookkeeping (unit-level, direct driver-function call).
-// ---------------------------------------------------------------------
-
 #[test]
 fn limited_uses_enters_with_counters_is_consumed_after_first_entry() {
     let mut state = two_player_state();
@@ -529,11 +479,7 @@ fn limited_uses_enters_with_counters_is_consumed_after_first_entry() {
         consumption: ConsumptionPolicy::LimitedUses(1),
     });
 
-    // `apply_enters_battlefield_modifiers` only *proposes* a `CounterAdded`
-    // event for this payload (see its own doc comment) - it doesn't mutate
-    // `counters` itself, so a bare direct call like this one (no
-    // surrounding `CommitEvents` pipeline) only has the returned event to
-    // assert against, not `state.object(..).counters`.
+    // The payload only proposes a CounterAdded event and does not mutate counters, so a direct call asserts on the returned event.
     let entrant_a = ObjectId(1);
     state.objects.insert(entrant_a, card_object(entrant_a, creature_definition("A", ""), p0, ZoneKind::Battlefield));
     let runtime = ScriptRuntime::new();

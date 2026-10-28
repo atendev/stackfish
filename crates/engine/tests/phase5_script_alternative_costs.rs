@@ -1,45 +1,11 @@
-//! Phase 5 vertical slice: a card script's own declaration of CR 601.2b
-//! alternative costs (flashback/escape-style, `AlternativeCost::Replacement`)
-//! and CR 702.27a Buyback (`CardDefinition::buyback_cost`), via two new
-//! sibling functions to `s.register_abilities(c)`/`s.target_requirement()`/
-//! `s.operation()`: `s.alternative_costs()` and `s.buyback_cost()`.
-//!
-//! Both engine mechanisms (`AlternativeCost::Replacement`, `buyback_cost`,
-//! `PlayerActionKind::CastSpell::alternative_cost`/`pay_buyback`) already
-//! work end to end - proven by `phase5_flashback_alternative_costs.rs`,
-//! `phase5_escape.rs`, `phase5_buyback.rs`. This slice closes the "no way to
-//! declare either from a card script, only direct Rust/TOML construction"
-//! gap `docs/lua/not-available-yet.md` named - it adds no new engine
-//! mechanism, only a Lua-facing builder for what already exists.
-//!
-//! `alternative_costs()` returns an *array* of entry tables - a card can
-//! grant more than one alternative cost, already fully representable and
-//! selectable (`alternative_cost: Option<usize>` is an index into the
-//! `Vec`, not a single flag). Each entry's `costs` array reuses
-//! `Game.Costs.*` verbatim, decoded the same way
-//! `ActivatedAbilityBuilder::AddCost` accumulates a `CostSpec` - no new cost
-//! vocabulary. `buyback_cost()` returns a plain mana-cost string, parsed
-//! directly via `ManaCost::parse` (the same parser `Game.Costs.Mana(...)`
-//! itself calls) rather than routed through `Game.Costs.*`, since
-//! `CardDefinition.buyback_cost` is always a flat `ManaCost`.
-//!
-//! Not attempted (named TODOs, not silently narrowed): the TOML
-//! scenario-fixture format still has no field for either
-//! (`crates/scenario/src/lib.rs`'s own pre-existing TODOs on
-//! `alternative_costs`/`buyback_cost`/`alternative_cost`/`pay_buyback`) - a
-//! script-driven scenario fixture would need a
-//! `register_script_alternative_costs`/`register_script_buyback_cost`
-//! sibling to `register_script_target_requirement`/`register_script_operation`
-//! (`crates/scenario/src/lib.rs:1905,1927`), left for its own slice.
+//! CR 601.2b, 702.27a: a card script declares alternative costs and Buyback through `s.alternative_costs()` (an array of entry tables whose `costs` reuse `Game.Costs.*`) and `s.buyback_cost()` (a mana-cost string parsed by `ManaCost::parse`).
+//! The engine mechanisms exist and are covered in phase5_flashback_alternative_costs.rs, phase5_escape.rs and phase5_buyback.rs.
+// TODO: the TOML scenario fixture has no field for alternative costs or buyback, and needs `register_script_alternative_costs` and `register_script_buyback_cost` in `crates/scenario`
 
 use stackfish_engine::engine::{ActionError, Engine, StepStatus};
 use stackfish_engine::script::ScriptRuntime;
 use stackfish_engine::*;
 use stackfish_testutil::{card_object, drain, player_state, two_player_state as base_two_player_state, zones};
-
-// ---------------------------------------------------------------------
-// Decode-level: ScriptRuntime::build_alternative_costs / build_buyback_cost
-// ---------------------------------------------------------------------
 
 #[test]
 fn a_card_with_no_alternative_costs_function_returns_empty() {
@@ -214,12 +180,6 @@ fn buyback_cost_function_surfaces_a_real_parse_error() {
     runtime.build_buyback_cost(source).expect_err("a malformed mana-cost string must be a real error, not a silent None");
 }
 
-// ---------------------------------------------------------------------
-// End-to-end: a script-declared alternative cost / buyback cost actually
-// drives real casting through Engine, same outcome the direct-construction
-// fixtures (phase5_flashback_alternative_costs.rs, phase5_buyback.rs) prove.
-// ---------------------------------------------------------------------
-
 fn creature_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 2,
@@ -245,13 +205,7 @@ fn creature_definition() -> CardDefinition {
     }
 }
 
-/// `{1}{R}` instant, targets a creature, deals 3 damage - `alternative_costs`
-/// starts empty and is patched in from the script below, same
-/// `register_script_target_requirement`-style "build first, patch after"
-/// pattern `crates/scenario/src/lib.rs:1905` already establishes for the
-/// identical "the CardDefinition has to exist before an Engine does, but the
-/// script needs an Engine's ScriptRuntime to build against" ordering
-/// problem.
+// The CardDefinition must exist before an Engine, but the script needs the Engine's ScriptRuntime, so alternative_costs starts empty and is patched in.
 fn bolt_definition() -> CardDefinition {
     CardDefinition {
         definition_id: 1,
