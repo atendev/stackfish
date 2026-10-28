@@ -82,9 +82,7 @@ pub fn assert_unchanged_after<R>(engine: &mut Engine, context: &str, f: impl FnO
 }
 
 /// Submits `action` and asserts `submit_action` refuses it and changes nothing.
-/// Since ticket 035 every rejection happens there, never at `step()`, so a
-/// queued action fails the assertion. Returns the refusal for the caller to
-/// inspect.
+/// Rejection must happen at submit time, so an action that gets queued fails the assertion.
 pub fn assert_action_rejected(engine: &mut Engine, context: &str, action: PlayerAction) -> ActionError {
     let before = engine.snapshot();
     let rejected = match engine.submit_action(action) {

@@ -1,11 +1,8 @@
 use stackfish_engine::*;
 
-/// A fresh, untapped, unmodified `GameObject` wrapping `definition`, owned
-/// and controlled by `owner`, sitting in `zone`. Deliberately not built via
-/// `GameObject::new` — that constructor needs a `&GameState` (for
-/// `controlled_since_turn`) and derives `visibility` from `zone`, neither of
-/// which most fixtures want to fuss with; this helper always sets
-/// `controlled_since_turn: 0` and fully public `visibility`, in one place.
+/// A fresh `GameObject` for `definition`, owned and controlled by `owner`, in `zone`.
+/// Skips `GameObject::new` because that needs a `&GameState` and derives visibility from
+/// the zone; this always sets `controlled_since_turn: 0` and public visibility.
 pub fn card_object(id: ObjectId, definition: CardDefinition, owner: PlayerId, zone: ZoneKind) -> GameObject {
     GameObject {
         object_id: id,
