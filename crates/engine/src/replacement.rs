@@ -10,75 +10,37 @@ use crate::types::ids::{ObjectId, PlayerId, Target};
 use crate::types::mana::ColorSet;
 use crate::types::zone::ZoneKind;
 
-/// One CR 616.1 ordering-choice candidate. Two kinds can match the same
-/// event: a real registered `ReplacementEffect` (`Registered`, identified by
-/// its own `source`), or CR 702.16e protection's damage prevention
-/// (`Protection`, identified by the *protected object's own id* — protection
-/// isn't a `state.replacement_effects` entry at all, see `protection_prevents`'s
-/// own doc comment). Previously both were represented as a bare `ObjectId`,
-/// which silently collided whenever a protected object also had its own
-/// registered effect with itself as `source` matching the same event —
-/// `apply_replacements_from`'s candidate-list builder would then treat them
-/// as "the same candidate" and never offer the real 2-way choice, and
-/// `apply_one_replacement_or_protection`'s dispatch always resolved the
-/// collision toward the registered effect. This enum makes the two kinds
-/// distinguishable through the whole pause/resume pipeline
-/// (`ReplacementOutcome::NeedsOrderingChoice`, `ProcessState`/
-/// `StepStatus::AwaitingReplacementChoice`, `Engine::submit_replacement_choice`)
-/// so they can never be silently conflated again.
+/// One CR 616.1 ordering-choice candidate. `Registered` is identified by its
+/// effect's `source`; `Protection` (CR 702.16e) by the protected object's id,
+/// since protection is not in `state.replacement_effects`. Separate variants
+/// keep the two apart when they share an object id.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ReplacementCandidate {
     Registered(ObjectId),
     Protection(ObjectId),
 }
 
-/// What `apply_replacements` produced for one proposed event. Not just a
-/// `GameEventKind`: CR 616.1 has the *affected player* choose which
-/// replacement applies first when more than one matches the same event —
-/// a player decision, not something a pure transform can resolve on its
-/// own — so this type makes that case a value the caller (`engine.rs`)
-/// must handle rather than something `apply_replacements` could silently
-/// resolve "for" the player or panic on.
+/// What `apply_replacements` produced for one proposed event. CR 616.1 has the
+/// affected player choose the order, so that case is a value the caller handles.
 pub enum ReplacementOutcome {
-    /// Zero or exactly one `ReplacementEffect` matched (after however many
-    /// rewrite/re-match passes CR 616's stabilization requirement needed) —
-    /// this is the event's final form, ready for `CommitEvents`.
+    /// The event's final form, ready for `CommitEvents`.
     Resolved(GameEventKind),
-    /// More than one replacement/prevention effect matches `event` and
-    /// `affected_player` must choose which applies first (CR 616.1) before
-    /// resolution can continue. `candidates` are `ReplacementCandidate`
-    /// values, not bare `ObjectId`s — see that type's own doc comment for
-    /// why (a registered effect and protection can share the same
-    /// identifying object id without being the same candidate). The engine
-    /// must surface this as an actual pause — see `engine::ProcessState::
-    /// AwaitingReplacementChoice` — not fold it back into a synchronous
-    /// transform. `excluded` carries forward every effect already applied to
-    /// this same event earlier in this same resolution (see `apply_
-    /// replacements`'s own doc comment for why) — the caller must thread it
-    /// back into whatever continues this resolution after the choice is
-    /// made, not start a fresh empty exclusion set.
+    /// CR 616.1: `affected_player` must choose which of `candidates` applies first.
+    /// `excluded` holds the effects already applied to this event and must be
+    /// passed back when resolution resumes.
     NeedsOrderingChoice {
         affected_player: PlayerId,
         event: GameEventKind,
         candidates: Vec<ReplacementCandidate>,
         excluded: Vec<ReplacementCandidate>,
-        /// Carried forward so a resumed `apply_replacements_from` call (once
-        /// the player answers) rechecks the rewritten event with the same
-        /// "is this genuinely a destroy" meaning it started with — see
-        /// `ReplacementEffect::matches`'s own doc comment.
+        /// Carried so the resumed call rechecks with the same destroy meaning.
         is_destroy: bool,
     },
 }
 
-/// CR 616.1's "affected player" for a matched-more-than-once event — the
-/// permanent's controller if the event's affected slot is an object, the
-/// player directly if it's a player. Only ever called against an event
-/// `apply_replacements` already confirmed at least one `ReplacementEffect`
-/// matched, so the two constructible `EventFilter` shapes (`DamageDealt`,
-/// `WouldDie` -> `ZoneChange`) cover every real call; the fallback exists
-/// only so this stays a total function rather than something that could
-/// panic if a future `Script`-backed filter ever matches a different event
-/// shape.
+/// CR 616.1: the permanent's controller if the affected slot is an object,
+/// otherwise the player. The fallback keeps the function total for a shape it
+/// cannot construct.
 fn affected_player_for(event: &GameEventKind, state: &GameState, script_runtime: &ScriptRuntime) -> PlayerId {
     let fallback = || state.turn_order.first().copied().expect("a game always has players");
     match event {
@@ -88,9 +50,7 @@ fn affected_player_for(event: &GameEventKind, state: &GameState, script_runtime:
                 .object(*id)
                 .map(|_| crate::layers::effective_controller(state, script_runtime, *id))
                 .unwrap_or_else(fallback),
-            // Damage is never dealt to an ability - same defensive fallback
-            // this function's own doc comment already takes for a shape it
-            // can't actually construct.
+            // Damage is never dealt to an ability.
             Target::Ability(_) => fallback(),
         },
         GameEventKind::ZoneChange { object, .. } => state
@@ -101,14 +61,8 @@ fn affected_player_for(event: &GameEventKind, state: &GameState, script_runtime:
     }
 }
 
-/// Applies `source`'s `ReplacementEffect` to `event` (assumes `matches`
-/// already confirmed it applies) and consumes it per its `ConsumptionPolicy`
-/// (CR 614.13-style shields with a counter budget) — `OneShot`/an exhausted
-/// `LimitedUses` removes the entry from `state.replacement_effects`
-/// entirely, `LimitedUses(n)` with `n > 1` decrements in place, `Repeatable`
-/// is untouched. Returns `event` unchanged if `source` doesn't actually name
-/// a registered effect (shouldn't happen given the callers below, but this
-/// keeps the function total rather than panicking on a stale id).
+/// Applies `source`'s `ReplacementEffect` to `event` and consumes it per its
+/// `ConsumptionPolicy`. Returns `event` unchanged for a stale `source`.
 pub(crate) fn apply_one_replacement(
     state: &mut GameState,
     source: ObjectId,
@@ -120,15 +74,7 @@ pub(crate) fn apply_one_replacement(
     apply_replacement_at_index(state, idx, event)
 }
 
-/// Index-based real body of `apply_one_replacement` above — operates
-/// directly on `state.replacement_effects[idx]` rather than re-deriving the
-/// index from a `source: ObjectId`, which is only safe when `source`
-/// uniquely identifies one registered effect. `apply_enters_battlefield_
-/// modifiers`'s own loop is the one caller that can't assume that (a single
-/// re-registered source can now carry more than one matching
-/// battlefield-entry-modifier payload at once — see
-/// `is_battlefield_entry_modifier`'s own doc comment for the bug this
-/// closes), so it tracks real indices itself instead.
+/// Index-based body of `apply_one_replacement`, for callers where `source` is not unique.
 fn apply_replacement_at_index(state: &mut GameState, idx: usize, event: GameEventKind) -> GameEventKind {
     let rewritten = state.replacement_effects[idx].apply(event);
     match state.replacement_effects[idx].consumption {
@@ -147,26 +93,9 @@ fn apply_replacement_at_index(state: &mut GameState, idx: usize, event: GameEven
     rewritten
 }
 
-/// Dispatch for a chosen `ReplacementCandidate` out of `apply_replacements_from`'s
-/// `matching` list (either the loop's own single-match branch, or a resumed
-/// `NeedsOrderingChoice` pause via `Engine::submit_replacement_choice`) — a
-/// direct match on which kind was chosen, not an `ObjectId` lookup. CR
-/// 702.16e protection's damage prevention (`protection_prevents`) has no
-/// `state.replacement_effects` entry of its own to look up (it's a live
-/// characteristics query, not a registered effect — see that function's own
-/// doc comment for why); `ReplacementCandidate::Protection` zeroes the
-/// damage directly instead. Not rechecked against `protection_prevents`
-/// again here: exactly like `apply_one_replacement`'s own "trusts `matches`
-/// already confirmed this" contract, whoever built `matching` already
-/// established eligibility, and `Engine::submit_replacement_choice`
-/// independently validates `chosen` against `candidates` before this is ever
-/// called — a stale/invalid candidate can't reach this function at all.
-///
-/// `Registered` and `Protection` naming the *same* underlying object id no
-/// longer collide (previously both were a bare `ObjectId`, and the
-/// registered effect always won the dispatch when they shared an id — see
-/// `ReplacementCandidate`'s own doc comment for the bug this fixes) — each
-/// is now its own distinct variant, matched independently.
+/// Applies the chosen candidate. `Protection` zeroes the damage directly, since
+/// it has no registered entry. Eligibility is not rechecked: the caller built
+/// `matching`, and `Engine::submit_replacement_choice` validates `chosen`.
 pub(crate) fn apply_one_replacement_or_protection(
     state: &mut GameState,
     chosen: ReplacementCandidate,
@@ -183,37 +112,13 @@ pub(crate) fn apply_one_replacement_or_protection(
     }
 }
 
-/// CR 702.16a/615.1/616.1: whether protection prevents `event`'s damage —
-/// checked as an OR of all six protected qualities (color, card type,
-/// subtype, name, "everything," or a specific player), same as before. A
-/// *predicate*, not a mutation, unlike every other payload in this file:
-/// protection isn't a `state.replacement_effects` entry a card registers
-/// (`layers::effective_characteristics()`'s `protection_colors`/
-/// `protection_card_types`/`protection_subtypes`/`protection_names`/
-/// `protection_everything`/`protection_players` are a live characteristics
-/// query, re-derived every call, not a registered struct with a `source`
-/// field to look up) — so it can't sit in `state.replacement_effects`
-/// itself the way a real `ReplacementEffect` does. It still has to
-/// participate in the *same* CR 616.1 ordering-choice decision a registered
-/// effect does, though: `apply_replacements_from` folds this predicate's
-/// result into its own `matching` candidate list (identified by the
-/// protected object's own id, not a registered effect's source — see
-/// `apply_one_replacement_or_protection`'s own doc comment for how that's
-/// dispatched) rather than applying it unconditionally ahead of the loop
-/// the way this engine used to (CR 616.1e: protection's prevention has no
-/// fixed priority against another applicable replacement/prevention effect
-/// touching the same event — the affected player's choice is real and can
-/// produce a different outcome depending on order, e.g. a competing
-/// `RedirectDamage` moving the damage to an unprotected object *before*
-/// protection ever gets a chance to zero it).
+/// CR 702.16a: whether protection prevents `event`'s damage, across all six
+/// protected qualities. A predicate rather than a registered effect, because
+/// protection is a live characteristics query. `apply_replacements_from` folds
+/// the result into its candidate list so it joins the ordering choice (CR 616.1e).
 ///
-/// Returns the protected object's `ObjectId` if protection would zero
-/// `event`'s damage, `None` otherwise (non-`DamageDealt` event, a
-/// `Target::Player`, or an unresolvable source/target — none of these have
-/// protection to check). Re-evaluated fresh every loop iteration by the
-/// caller (not memoized), same "recheck against a possibly-`RedirectDamage`-
-/// changed target" reasoning the old unconditional `apply_protection` this
-/// replaces already had.
+/// Returns the protected object's id if protection zeroes the damage. It is
+/// re-evaluated each loop pass, since a redirect can change the target.
 fn protection_prevents(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -244,37 +149,11 @@ fn protection_prevents(
     protected.then_some(*target_id)
 }
 
-/// CR 111.8: a token that has already left the battlefield can't move to
-/// another zone (or back onto the battlefield) — "if such a token would
-/// change zones, it remains in its current zone instead." Hardcoded ahead
-/// of the registered-effects match (unlike protection above, this one still
-/// takes that stance — see its own "unreachable via real gameplay" note
-/// below for why the CR 616.1 ordering-choice exposure this pattern risks
-/// stays purely theoretical for this one, not worth the same fix yet) —
-/// this applies to every token unconditionally, not something a card
-/// grants. Checked against `state.object(object)`'s own
-/// *live* zone (not the proposal's own `from` field, though the two should
-/// always agree) — the token's identity/zone don't change until this event
-/// actually commits, so this is always the token's true current location.
+/// CR 111.8: a token that has left the battlefield stays in its current zone.
+/// It applies to every token, so it runs ahead of the registered effects. Only
+/// `to` is rewritten; the caller still commits a no-op `ZoneChange`.
 ///
-/// Only rewrites `to`, mirroring `ReplacementPayload::ReplaceZoneDestination`'s
-/// own shape — the caller still commits a real (no-op) `ZoneChange`, same as
-/// every other replacement-rewritten proposal. Doesn't touch the token's
-/// own CR 111.7 cessation (`sba::collect_ceasing_tokens`/
-/// `commit_token_cessation`, checked separately by state-based actions) —
-/// that still fires on the next SBA check regardless of whether this
-/// function blocked a second move in the meantime.
-///
-/// Unreachable via real gameplay today, same as several other CR-accurate
-/// but currently-unexercisable checks in this codebase (see e.g. CR
-/// 303.4f/h/i/k/m's own note): nothing in this engine can propose a
-/// `ZoneChange` whose `from` is anything but `Battlefield` for a token — no
-/// "return from graveyard"/"cast from graveyard" path applies to tokens
-/// (they aren't cards, so flashback-style alternative costs can't target
-/// one), and CR 111.7 removes a token from any non-battlefield zone before
-/// most engine code gets a second chance to move it. Proven correct via
-/// direct `apply_replacements` construction instead (see this file's own
-/// test module) rather than an end-to-end scenario.
+/// Unreachable in play today, so the tests call `apply_replacements` directly.
 fn apply_token_zone_lock(state: &GameState, event: GameEventKind) -> GameEventKind {
     let GameEventKind::ZoneChange { object, from, to, last_known_info } = event else {
         return event;
@@ -288,32 +167,11 @@ fn apply_token_zone_lock(state: &GameState, event: GameEventKind) -> GameEventKi
     GameEventKind::ZoneChange { object, from, to, last_known_info }
 }
 
-/// Is `spec` one of the "how a permanent enters" battlefield-entry-modifier
-/// payloads (`EntersTapped`, `EntersWithCounters` and its Bloodthirst/
-/// Sunburst/Devour/Amplify siblings, `EntersAsCopy`)? These are all
-/// deliberately excluded from `apply_replacements_from`'s own CR 616.1
-/// ordering-choice logic below — every one of them is either applied
-/// directly by `apply_enters_battlefield_modifiers` (which already
-/// documents *why* no ordering is needed: `EntersTapped` is idempotent,
-/// `EntersWithCounters`-family payloads are additive, so unlike a
-/// `ReplaceZoneDestination`-style rewrite, no ordering of multiple matches
-/// changes the final result) or by one of the dedicated `pending_*_choice`
-/// functions (Devour/Amplify/`EntersAsCopy`, which need their own real
-/// player choice, not a CR 616.1 ordering pick).
-///
-/// Bug this closes: `ReplacementEffect::matches` has no way to know a
-/// payload is meant to be handled exclusively by that other machinery — so
-/// once the entering object's own raw `ZoneChange` event reaches
-/// `ReplacementCheck`'s generic pass (as it always does, alongside whatever
-/// `apply_enters_battlefield_modifiers` already produced), it would
-/// independently re-match every one of these payloads *again*, and two or
-/// more matching the same event on the same source id — e.g. a single
-/// creature combining `EntersTapped` and `EntersWithCounters`, exactly CR
-/// 707.2's own Skyshroud Behemoth worked example — spuriously triggered a
-/// CR 616.1 ordering pause for two effects that were never supposed to be
-/// ordered against each other in the first place. Caught by a test giving a
-/// Clone-copied creature both at once (`phase5/clone-enters-as-copy`) — no
-/// prior test had ever combined the two on one permanent.
+/// Whether `spec` is a battlefield-entry modifier (tapped, the counters family,
+/// copy). These skip the CR 616.1 ordering choice: `apply_enters_battlefield_modifiers`
+/// applies the order-independent ones directly and the `pending_*_choice`
+/// functions handle the rest. Without the exclusion, a creature with both
+/// `EntersTapped` and `EntersWithCounters` raised a spurious ordering pause (CR 707.2).
 fn is_battlefield_entry_modifier(spec: &ReplacementSpec) -> bool {
     matches!(
         spec,
@@ -331,13 +189,9 @@ fn is_battlefield_entry_modifier(spec: &ReplacementSpec) -> bool {
     )
 }
 
-/// Rewrites/prevents `proposed` per CR 614/615/616, applying every matching
-/// `ReplacementEffect` in `state.replacement_effects` before the event is
-/// allowed to commit, re-checking after each rewrite in case the rewritten
-/// form matches a *different* replacement (CR 616.1's rewrite-stabilization
-/// requirement). Thin wrapper over `apply_replacements_from` starting with
-/// nothing excluded — the entry point every fresh event (one that hasn't
-/// been through any replacement checking yet) uses.
+/// CR 614, 615, 616: rewrites `proposed` by every matching replacement effect,
+/// rechecking after each rewrite until it stabilizes. The entry point, with
+/// nothing excluded.
 pub fn apply_replacements(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
@@ -347,20 +201,11 @@ pub fn apply_replacements(
     apply_replacements_from(state, script_runtime, proposed, is_destroy, Vec::new())
 }
 
-/// Real body of `apply_replacements` — separated out so `Engine::
-/// submit_replacement_choice` (engine.rs) can resume an in-progress
-/// resolution with the same `excluded` set a paused `NeedsOrderingChoice`
-/// already accumulated, rather than starting a fresh one.
+/// Body of `apply_replacements`, resumable with the `excluded` set from a paused
+/// `NeedsOrderingChoice`.
 ///
-/// CR 616.1: "an individual replacement effect can apply only once to a
-/// given event" — a `Repeatable`/multi-`LimitedUses` effect isn't excluded
-/// from being asked again about a *different* event later, but within one
-/// event's resolution it must never re-match its own (possibly unchanged)
-/// rewritten output, or the CR 616 stabilization loop never terminates
-/// (e.g. a damage-prevention effect that zeroes an already-zero amount
-/// would otherwise keep "matching" the same event forever). `excluded`
-/// tracks exactly that — every effect already applied to `event` earlier in
-/// this same resolution, appended to as each single match applies.
+/// CR 616.1: an effect applies only once to a given event, so `excluded` keeps a
+/// repeatable effect from rematching its own output and looping forever.
 pub(crate) fn apply_replacements_from(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
@@ -370,23 +215,15 @@ pub(crate) fn apply_replacements_from(
 ) -> ReplacementOutcome {
     let mut event = proposed;
     loop {
-        // CR 111.8: still hardcoded ahead of the match below - see
-        // apply_token_zone_lock's own doc comment for why this one keeps
-        // that stance while protection (below) no longer does.
+        // CR 111.8
         event = apply_token_zone_lock(state, event);
 
-        // CR 702.16a/616.1: protection's damage prevention now folds into
-        // `matching` as a real candidate (identified by the protected
-        // object's own id, wrapped so it's distinguishable from a registered
-        // effect sharing the same id - see `ReplacementCandidate`'s own doc
-        // comment) rather than applying unconditionally ahead of the loop -
-        // see `protection_prevents`'s own doc comment for why.
+        // CR 702.16a, 616.1: protection joins `matching` as a candidate.
         let protection_candidate = protection_prevents(state, script_runtime, &event)
             .map(ReplacementCandidate::Protection)
             .filter(|c| !excluded.contains(c));
 
         if state.replacement_effects.is_empty() && protection_candidate.is_none() {
-            // Genuinely nothing to match against - safe to resolve unchanged.
             return ReplacementOutcome::Resolved(event);
         }
         let mut matching: Vec<ReplacementCandidate> = state
@@ -400,24 +237,14 @@ pub(crate) fn apply_replacements_from(
             .map(|r| ReplacementCandidate::Registered(r.source))
             .collect();
         if let Some(candidate) = protection_candidate {
-            // `Registered(X)`/`Protection(X)` are distinct `ReplacementCandidate`
-            // values even when they share the same underlying object id, so
-            // this is always pushed as a genuine, separate candidate now -
-            // the fix for the collision `ReplacementCandidate`'s own doc
-            // comment names (previously this was skipped whenever `matching`
-            // already contained the bare `protected_id`, silently collapsing
-            // two different candidates into one and never offering the real
-            // CR 616.1 choice between them).
+            // `Registered(X)` and `Protection(X)` stay distinct even when they share an object id.
             matching.push(candidate);
         }
 
         match matching.as_slice() {
             [] => return ReplacementOutcome::Resolved(event),
             [only] => {
-                // Exactly one match - apply, exclude it from matching again
-                // against this same event, and re-check the rewritten form
-                // (CR 616's stabilization requirement) by looping rather
-                // than returning immediately.
+                // CR 616: apply the only match, then loop to recheck the rewritten form.
                 event = apply_one_replacement_or_protection(state, *only, event);
                 excluded.push(*only);
             }
@@ -435,64 +262,27 @@ pub(crate) fn apply_replacements_from(
     }
 }
 
-/// CR 603.6d/614.1c/113.6h: applies every registered `EntersTapped`/
-/// `EntersWithCounters` effect matching `object`'s own move from `from` onto
-/// the battlefield — the "how a permanent enters" replacement-effect family,
-/// covering both a card's own self-registered ability (CR 113.6h: functions
-/// as the object is entering, before it's a real battlefield permanent in
-/// the trigger-collection sense) and an externally granted one (e.g. "lands
-/// your opponents control enter tapped"). Deliberately not routed through
-/// `apply_replacements`/`apply_replacements_from`: those rewrite fields on
-/// the proposed `GameEventKind` itself, but neither payload has anything on
-/// `GameEventKind::ZoneChange` to rewrite (see `ReplacementPayload::
-/// EntersTapped`'s own doc comment).
+/// CR 614.1c, 113.6h: applies every registered `EntersTapped` and
+/// `EntersWithCounters` effect matching `object`'s move onto the battlefield,
+/// whether self-registered or granted. It bypasses `apply_replacements` because
+/// neither payload has a field on `ZoneChange` to rewrite.
 ///
-/// The two payloads apply differently, deliberately: `EntersTapped` mutates
-/// the already-constructed `GameObject` at `object` directly, right here
-/// (mirrors `SearchDestination::Battlefield { tapped }`'s own precedent —
-/// no dedicated event exists for "this became tapped," so there's nothing
-/// to push). `EntersWithCounters` does *not* mutate here — it only proposes
-/// a `GameEventKind::CounterAdded`, same "Rust decides by applying the
-/// event, not the proposer" split `AbilityEffect::Counters` already
-/// established (`ResolveStackTop` proposes, `CommitEvents` is what actually
-/// calls `counters.add`). The caller MUST push the returned events onto a
-/// path that reaches `CommitEvents` - mutating both here *and* relying on
-/// `CommitEvents`'s existing generic `CounterAdded` handler would double
-/// -apply the same counters.
+/// `EntersTapped` mutates the object directly. The counter payloads only propose
+/// `CounterAdded` events, which the caller must push down a path that reaches
+/// `CommitEvents`, or the counters apply twice.
 ///
-/// Called only after `object` is already inserted into `state.objects` *and*
-/// its own `run_card_script` pass has run (so a self-registered effect is
-/// already sitting in `state.replacement_effects` by the time this runs —
-/// see `docs/lua/card-script-basics.md`'s "Registration timing" note for why that
-/// ordering already holds at every real call site, without needing a
-/// propose-before-the-object-exists split the way `commit_zone_move`'s own
-/// callers need).
+/// Call it after `object` is in `state.objects` and its card script has run, so
+/// a self-registered effect is present.
 ///
-/// CR 616.1's ordering choice (`ReplacementOutcome::NeedsOrderingChoice`) is
-/// deliberately not invoked here even when multiple effects match the same
-/// entry: `EntersTapped` is idempotent and `EntersWithCounters` is additive,
-/// so unlike a `ReplaceZoneDestination`-style rewrite, no ordering of
-/// multiple matches ever changes the final result — every match just applies.
-/// TODO: if a future payload pairs with this same `WouldMoveZone(_,
-/// Battlefield)` filter and *isn't* order-independent, this function's
-/// "apply every match, no pause" stance stops being correct and needs a real
-/// ordering-choice pause of its own.
+/// The CR 616.1 ordering choice is skipped because the matched payloads are
+/// order-independent: `EntersTapped` is idempotent and counters are additive.
 ///
-/// Returns the `GameEventKind::CounterAdded` events produced (one per
-/// matching `EntersWithCounters` effect) for the caller to append to its own
-/// event list, same ledger-visibility convention `AbilityEffect::Counters`
-/// already established.
+/// Returns one `CounterAdded` per matching counter effect.
 ///
-/// `colors_spent` (CR 702.44, Sunburst): the distinct colors of mana spent
-/// to pay for `object`'s own cast, if any — sourced from `StackObject::
-/// costs_paid`, which only exists while a spell is still on the stack, so
-/// only the resolve-spell-from-stack call site can supply a real value.
-/// `ColorSet::empty()` at every other call site (`PlayLand`, `Search`) is
-/// exactly correct, not a placeholder — CR 702.44b already denies Sunburst's
-/// counters whenever the object isn't entering from the stack as a resolving
-/// spell, which an empty set naturally does too (indistinguishable from "no
-/// colored mana was spent," and both cases mean the same thing here: no
-/// counters).
+/// `colors_spent` (CR 702.44) is the distinct colors paid for the cast, known
+/// only when a spell resolves from the stack. The empty set elsewhere yields no
+/// Sunburst counters (CR 702.44b).
+// TODO: a payload on the same `WouldMoveZone` battlefield filter that is order-dependent needs its own ordering pause
 pub fn apply_enters_battlefield_modifiers(
     state: &mut GameState,
     script_runtime: &ScriptRuntime,
@@ -500,16 +290,9 @@ pub fn apply_enters_battlefield_modifiers(
     from: ZoneKind,
     colors_spent: ColorSet,
 ) -> Vec<GameEventKind> {
-    // `GameEventKind` isn't `Clone` - rebuilt fresh at each use site below
-    // instead of cloned once, same shape every time (`object`/`from` are
-    // both `Copy`, `last_known_info` is always `None` - this candidate is
-    // never actually committed, only matched against).
+    // Rebuilt per use because `GameEventKind` is not `Clone`; it is matched, never committed.
     let candidate = || GameEventKind::ZoneChange { object, from, to: ZoneKind::Battlefield, last_known_info: None };
-    // Real indices, not just `source` ids - a single re-registered source
-    // can carry more than one matching payload at once (e.g. a Clone-copied
-    // creature with both `EntersTapped` and `EntersWithCounters`, CR 707.2's
-    // own Skyshroud Behemoth example), and `source` alone can't distinguish
-    // between them for the re-lookup below.
+    // Indices, not source ids: one source can carry several matching payloads (CR 707.2).
     let matching: Vec<usize> = state
         .replacement_effects
         .iter()
@@ -532,8 +315,7 @@ pub fn apply_enters_battlefield_modifiers(
         .collect();
 
     let mut counter_events = Vec::new();
-    // Reverse order: a OneShot/LimitedUses(1) consumption's removal below
-    // never invalidates a not-yet-processed lower index this way.
+    // Reverse order so a removal never invalidates a lower index still to process.
     for idx in matching.into_iter().rev() {
         let payload = match &state.replacement_effects[idx].spec {
             ReplacementSpec::Primitive { payload, .. } => payload.clone(),
@@ -545,44 +327,24 @@ pub fn apply_enters_battlefield_modifiers(
                     obj.tapped = true;
                 }
             }
-            // Unlike `EntersTapped` above, this doesn't mutate `object`
-            // directly - it only proposes the event, same "Rust decides by
-            // applying the event, not the proposer" split `AbilityEffect::
-            // Counters` already established (`ResolveStackTop` pushes
-            // `CounterAdded`; `CommitEvents` is what actually calls
-            // `counters.add`). The caller MUST push this into its own
-            // event list on a path that reaches `CommitEvents` - mutating
-            // here too would double-apply once that generic handler runs.
+            // Only proposes the event; the caller commits it (see the doc comment).
             ReplacementPayload::EntersWithCounters { kind, amount } => {
                 counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
             }
-            // CR 702.54a: same event-proposal shape as `EntersWithCounters`
-            // above, gated on `opponent_damaged_this_turn` - `object` is
-            // already present in `state.objects` by this point (same
-            // "already-constructed GameObject" precondition every other
-            // arm here relies on), so its controller is read directly
-            // rather than threaded in as a parameter.
+            // CR 702.54a: gated on an opponent having been dealt damage this turn.
             ReplacementPayload::EntersWithCountersBloodthirst { kind, amount } => {
                 let controller = state.object(object).map(|o| o.controller);
                 if controller.is_some_and(|c| opponent_damaged_this_turn(state, c)) {
                     counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
                 }
             }
-            // CR 702.138c: same gated shape as Bloodthirst above, checked
-            // against `entered_via_escape` instead - already set on `object`
-            // by `Engine::move_resolving_spell` before this function ever
-            // runs (both real call sites invoke it after the entering
-            // permanent's own `GameObject` is already in `state.objects`).
+            // CR 702.138c: gated on `entered_via_escape`, already set on `object`.
             ReplacementPayload::EntersWithCountersEscape { kind, amount } => {
                 if state.object(object).is_some_and(|o| o.entered_via_escape) {
                     counter_events.push(GameEventKind::CounterAdded { object, kind, amount });
                 }
             }
-            // CR 702.44a/b: both `kind` and `amount` are derived here rather
-            // than carried by the payload - see `EntersWithCountersSunburst`'s
-            // own doc comment. `colors_spent.bits().count_ones()` is exactly
-            // "the number of colors" since `ColorSet` is a bitflag over the
-            // 5 WUBRG bits, one bit per color, never double-counted.
+            // CR 702.44a: kind and amount are derived here; `ColorSet` has one bit per color.
             ReplacementPayload::EntersWithCountersSunburst => {
                 let amount = colors_spent.bits().count_ones() as i32;
                 if amount > 0 {
@@ -599,56 +361,23 @@ pub fn apply_enters_battlefield_modifiers(
             }
             _ => continue,
         }
-        // CR 614.13/701.19b-style consumption bookkeeping (OneShot/
-        // LimitedUses removal, Repeatable untouched) - index-based, not
-        // `apply_one_replacement`'s own source-based lookup (see this
-        // loop's own `matching: Vec<usize>` comment for why); the rewritten
-        // event it returns is discarded, since neither payload here ever
-        // rewrites one.
+        // CR 614.13: consumption by index; the returned event is discarded since neither payload rewrites one.
         apply_replacement_at_index(state, idx, candidate());
     }
     counter_events
 }
 
-/// CR 702.82a (Devour): is `object` (already on the battlefield, `from`/
-/// `controller` describing how it got there — same call-site convention
-/// `apply_enters_battlefield_modifiers` uses) carrying a registered
-/// `EntersWithCountersDevour` effect that still needs its choice made?
-/// Checked *separately* from `apply_enters_battlefield_modifiers`'s own
-/// matching loop (which deliberately never touches this payload at all —
-/// see `EntersWithCountersDevour`'s own doc comment) since only a caller
-/// that can actually raise a Devour choice pause should ever call this.
-/// Two real producers do: `ResolveStackTop` (`ProcessState::
-/// AwaitingDevourChoice`, resumed by `Engine::submit_devour_choice`) and, as
-/// of `phase5/devour-amplify-search-entry`, `Search`'s own battlefield-entry
-/// loop (`ProcessState::AwaitingSearchDevourChoice`, resumed by
-/// `Engine::submit_search_devour_choice`) — `continue_search_battlefield_
-/// entry` calls this with `from: ZoneKind::Library` the same way
-/// `ResolveStackTop`'s own `continue_permanent_entry` calls it with
-/// `ZoneKind::Stack`, since nothing in this function's own signature is
-/// producer-specific. `PlayLand` (only ever moves lands, which can never
-/// have Devour) and `CreateToken` (realistically only reachable via
-/// `TokenSpec::CopyOf` copying a Devour creature — no real card in this
-/// engine's test corpus does that — narrowed out on purpose, same "no real
-/// producer reaches this" posture `aura-attach-choice`'s own dormant
-/// `AwaitingAttachChoice` already established) still never call this at
-/// all, so a Devour effect registered by either path silently grants no
-/// counters (falls through `apply_enters_battlefield_modifiers`'s own
-/// `_ => continue` arm) rather than erroring.
+/// CR 702.82a (Devour): the pending Devour choice for `object`, if it carries
+/// an `EntersWithCountersDevour` effect. Checked apart from
+/// `apply_enters_battlefield_modifiers`, which skips this payload, by callers
+/// that can raise a choice pause: `ResolveStackTop` and `Search`'s battlefield
+/// entry. `PlayLand` and `CreateToken` never call it, so a Devour effect there
+/// grants no counters.
 ///
-/// Returns `Some((per_creature, candidates))` — `candidates` is every
-/// creature `controller` currently controls on the battlefield, narrowed
-/// further to `quality` (CR 702.82c) if the registered effect has one (CR 701.17a:
-/// sacrificing is always a permanent's own controller's choice, never an
-/// arbitrary creature regardless of who controls it), `object` included
-/// (real Magic allows devouring the source itself, and this engine doesn't
-/// special-case it out — if chosen, the `CounterAdded` this produces later
-/// just silently finds no object left to add to, same "skip rather than
-/// guess" stance every other post-departure counter/effect lookup in this
-/// codebase already takes). `None` if no such effect is registered, or the
-/// creature-controlling player controls zero creatures at all (CR 702.82a's
-/// "any number," including zero, needs no choice to make — 0 counters is
-/// the only possible outcome either way).
+/// Returns `Some((per_creature, candidates))`: the creatures `controller`
+/// controls, narrowed to `quality` if set (CR 702.82c), `object` included.
+/// `None` if no such effect is registered or there is no candidate, since zero
+/// is a legal choice that needs no pause (CR 702.82a).
 pub fn pending_devour_choice(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -676,8 +405,7 @@ pub fn pending_devour_choice(
             if !effective.card_types.contains(CardTypeSet::CREATURE) {
                 return false;
             }
-            // CR 702.82c: "Devour [quality] N" narrows the sacrifice to
-            // permanents matching `quality` instead of any creature.
+            // CR 702.82c
             if let Some(quality) = &quality {
                 if !effective.subtypes.contains(quality) {
                     return false;
@@ -693,27 +421,13 @@ pub fn pending_devour_choice(
     Some((per_creature, candidates))
 }
 
-/// CR 702.38a (Amplify): is `object` (already on the battlefield, `from`/
-/// `controller` describing how it got there — same call-site convention
-/// `pending_devour_choice` above uses) carrying a registered
-/// `EntersWithCountersAmplify` effect that still needs its choice made?
-/// Same "checked separately from `apply_enters_battlefield_modifiers`, only
-/// a caller that can actually pause should call this" posture as
-/// `pending_devour_choice` — see `EntersWithCountersAmplify`'s own doc
-/// comment. Same two real producers as `pending_devour_choice` too, as of
-/// `phase5/devour-amplify-search-entry`: `ResolveStackTop` and `Search`'s
-/// own battlefield-entry loop (`ProcessState::AwaitingSearchAmplifyChoice`,
-/// resumed by `Engine::submit_search_amplify_choice`).
+/// CR 702.38a (Amplify): the pending Amplify choice for `object`, if it carries
+/// an `EntersWithCountersAmplify` effect. Same callers and separation as
+/// `pending_devour_choice`.
 ///
-/// Returns `Some((per_card, candidates))` — `candidates` is every card in
-/// `controller`'s hand whose `effective_characteristics` subtypes overlap
-/// `object`'s own (CR 702.38a "share a creature type with it" — approximated
-/// as raw subtype overlap, this engine has no separate "creature type"
-/// category, same imprecision `pending_devour_choice`'s siblings
-/// `landwalk_subtypes`/`bands_with_other_subtypes` already accept).
-/// `None` if no such effect is registered, or `object` has no subtypes to
-/// share, or nothing in hand shares one — CR 702.38a's "any number,"
-/// including zero, needs no choice to make either way.
+/// Returns `Some((per_card, candidates))`: the cards in `controller`'s hand that
+/// share a subtype with `object`, which approximates "creature type". `None`
+/// if no effect is registered, `object` has no subtypes, or nothing matches.
 pub fn pending_amplify_choice(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -753,27 +467,12 @@ pub fn pending_amplify_choice(
     Some((per_card, candidates))
 }
 
-/// CR 707.6/614.12a (Clone itself): is `object` (already on the battlefield,
-/// `from` describing how it got there — same call-site convention
-/// `pending_devour_choice`/`pending_amplify_choice` above use) carrying a
-/// registered `EntersAsCopy` effect that still needs its choice made? Same
-/// "checked separately from `apply_enters_battlefield_modifiers`, only the
-/// one call site that can actually pause should call this" posture as its
-/// siblings — see `EntersAsCopy`'s own doc comment.
+/// CR 707.6, 614.12a (Clone): the pending copy choice for `object`, if it
+/// carries an `EntersAsCopy` effect. Same separation as `pending_devour_choice`,
+/// with no `controller` since any creature on the battlefield qualifies.
 ///
-/// No `controller` parameter, unlike its siblings — Clone's own wording is
-/// "any creature on the battlefield," unrestricted by who controls it
-/// (unlike Devour's "creatures you control" or Amplify's "cards from your
-/// hand"), so there's nothing to filter candidates by.
-///
-/// Returns `Some((exceptions, candidates))` — `candidates` is every
-/// creature currently on the battlefield, `object` itself included (not
-/// special-cased away, same "don't guess past an unlikely legal choice"
-/// stance `pending_devour_choice`'s own self-sacrifice case already takes,
-/// even though copying oneself is a real but pointless legal choice).
-/// `None` if no such effect is registered, or there are no creatures on the
-/// battlefield at all to choose from — CR 707.6's "may," including
-/// declining, needs no choice to make either way.
+/// Returns `Some((exceptions, candidates))`: every creature on the battlefield,
+/// `object` included. `None` if no effect is registered or no creature exists.
 pub fn pending_copy_choice(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -806,17 +505,9 @@ pub fn pending_copy_choice(
     Some((exceptions, candidates))
 }
 
-/// CR 702.54a's condition: was any opponent of `controller` dealt damage
-/// this turn, by any source (combat or otherwise - real Bloodthirst
-/// rulings aren't restricted to combat damage). "This turn" is bounded by
-/// the most recent `GameEventKind::TurnStarted` in `state.ledger` (append-
-/// only, so its position is always the current turn's start); no
-/// `TurnStarted` yet (a fixture built mid-turn with no pregame history)
-/// scans from the beginning of the ledger instead of treating the
-/// condition as unknowable. Damage to an opponent's *permanents* doesn't
-/// count - only `GameEventKind::DamageDealt` whose `target` is
-/// `Target::Player`, matching the keyword's own "an opponent was dealt
-/// damage" wording (a player, not their creatures).
+/// CR 702.54a: whether an opponent of `controller` was dealt damage this turn,
+/// combat or not. The turn starts after the latest `TurnStarted` in the ledger,
+/// or at the ledger's start if there is none. Damage to permanents does not count.
 pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bool {
     let turn_start = state.ledger.iter().rposition(|e| matches!(e.kind, GameEventKind::TurnStarted { .. }));
     let scan_from = turn_start.map(|i| i + 1).unwrap_or(0);
@@ -825,28 +516,12 @@ pub fn opponent_damaged_this_turn(state: &GameState, controller: PlayerId) -> bo
         .any(|e| matches!(&e.kind, GameEventKind::DamageDealt { target: Target::Player(p), .. } if *p != controller))
 }
 
-/// CR 702.35a: builds the `GameEventKind::MadnessExiled` marker for a
-/// just-resolved discard `event`, if `object`'s own final destination
-/// (Exile) matches a madness-style redirect it has registered on itself
-/// (`source == object`, `WouldMoveZone(Hand, Graveyard) ->
-/// ReplaceZoneDestination(Exile)`) — `None` for every other zone-moving
-/// event, and for a card exiled by some other effect entirely. Must be
-/// called against the *post-replacement, pre-commit* `event`/`state` — once
-/// `commands::commit_zone_move` runs, `retire_object` purges this object's
-/// own `state.replacement_effects` entry (keyed by the now-departed hand
-/// id), so this would always read `None` afterward. Shared by `Engine::
-/// continue_discard_moves` (cleanup discard) and `Engine::
-/// continue_cost_zone_moves` (cost-payment discard) — both already have the
-/// resolved-but-uncommitted event in hand at exactly the right moment.
-///
-/// Narrowed: doesn't track *which* registered effect actually won CR
-/// 616.1's ordering choice when more than one exile-instead-of-discard
-/// effect could apply to the same card — re-derives eligibility from the
-/// final committed event instead, same posture `InterveningIfPrimitive::
-/// HadNoCountersOfKind` already takes (checked against the result, not
-/// threaded state). No real card in this engine's test corpus combines
-/// Madness with a second, independent "discard -> exile" effect on the same
-/// card, so this can't yet produce a wrong answer in practice.
+/// CR 702.35a: builds the `MadnessExiled` marker for a resolved discard whose
+/// exile destination matches a madness redirect registered on the card itself.
+/// Call it against the post-replacement, pre-commit `event`, because
+/// `retire_object` later purges the card's own replacement entry. Shared by the
+/// cleanup-discard and cost-payment discard paths.
+// TODO: track which exile-instead-of-discard effect won the CR 616.1 ordering choice when more than one applies
 pub fn madness_marker_event(state: &GameState, event: &GameEventKind) -> Option<GameEventKind> {
     let GameEventKind::ZoneChange { object, from: ZoneKind::Hand, to: ZoneKind::Exile, last_known_info: Some(lki) } =
         event
@@ -1035,7 +710,7 @@ mod tests {
             },
             consumption: ConsumptionPolicy::Repeatable,
         });
-        // Target is an Artifact, not a Creature - the filter doesn't match.
+        // The target is an Artifact, so the creature filter does not match.
         let event = GameEventKind::DamageDealt { source: ObjectId(1), target: Target::Object(effect_source), amount: 5, is_combat_damage: false };
         let ReplacementOutcome::Resolved(resolved) = apply_replacements(&mut state, &ScriptRuntime::new(), event, false) else {
             panic!("expected Resolved - filter doesn't match");
@@ -1139,17 +814,12 @@ mod tests {
             candidates.contains(&ReplacementCandidate::Registered(a))
                 && candidates.contains(&ReplacementCandidate::Registered(b))
         );
-        // Neither effect was consumed - the choice hasn't been made yet.
         assert_eq!(state.replacement_effects.len(), 2);
     }
 
     #[test]
     fn stabilizes_across_two_different_replacements() {
-        // Effect A: damage dealt to p1 gets redirected to p0.
-        // Effect B: damage dealt to p0 is prevented entirely.
-        // The original event only matches A - applying A produces a new
-        // event that only then matches B (CR 616's stabilization
-        // requirement: the rewritten form must be re-checked).
+        // CR 616.1: A redirects p1's damage to p0, and only that rewrite matches B.
         let p0 = PlayerId(0);
         let p1 = PlayerId(1);
         let source_a = ObjectId(0);
@@ -1187,12 +857,7 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // CR 111.8: a token that's already left the battlefield can't move
-    // again - no in-game producer can construct this scenario today (see
-    // apply_token_zone_lock's own doc comment), so these call
-    // apply_replacements directly rather than driving a full Engine.
-    // -----------------------------------------------------------------
+    // CR 111.8: no producer builds this state in play, so these call `apply_replacements` directly.
 
     #[test]
     fn token_zone_lock_blocks_a_second_move_for_an_already_departed_token() {
@@ -1242,7 +907,7 @@ mod tests {
     #[test]
     fn token_zone_lock_ignores_non_token_objects() {
         let id = ObjectId(0);
-        // Not a token (object()'s own default) - CR 111.8 is token-specific.
+        // CR 111.8: applies to tokens only.
         let card = GameObject { zone: ZoneKind::Graveyard, ..object(id, PlayerId(0), CardTypeSet::CREATURE) };
         let mut state = state_with(vec![card]);
         let event = GameEventKind::ZoneChange { object: id, from: ZoneKind::Graveyard, to: ZoneKind::Exile, last_known_info: None };

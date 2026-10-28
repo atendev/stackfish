@@ -9,67 +9,21 @@ use crate::types::game::GameState;
 use crate::types::ids::{ObjectId, PlayerId, SequenceNo};
 use crate::types::object::GameObject;
 
-/// The continuous-effect layer engine's query (CR 613): computes `object`'s
-/// live characteristics from its `CardDefinition` base values plus every
-/// applicable `ContinuousEffect` in `state.continuous_effects`, applied in
-/// layer order with timestamp ordering within each layer. Recomputed on
-/// every call rather than cached — see the no-mutable-cache rationale on
-/// `EffectiveCharacteristics` itself.
+/// CR 613: computes `object`'s live characteristics from its `CardDefinition`
+/// plus every applicable `ContinuousEffect`, in layer order and, within a layer,
+/// timestamp order. Recomputed on every call; nothing is cached.
 ///
-/// Layer 3 (`TextChanging`, CR 612.8 name-setting and CR 612.6's own
-/// "full text" `SetFullText` — see `FullTextOverride`'s own doc comment for
-/// what it does and doesn't cover), 4 (`TypeChanging`), 5 (`ColorChanging`),
-/// 6 (`AbilityAdding`), 7a (`PowerToughnessCDA`), 7b
-/// (`PowerToughnessSetting`), 7c (`PowerToughnessModifying`), and 7e
-/// (`PowerToughnessSwitching`) are applied — see `Layer`'s own doc comment
-/// for why the rest (copy/control) aren't built yet.
+/// Layers 3, 4, 5, 6, 7a, 7b, 7c and 7e are applied.
 ///
-/// `mana_cost`/`supertypes`/`subtypes` are mutable locals seeded from `def`
-/// up front (not read straight off `def` at the very end the way they used
-/// to be) — `SetFullText` needs to be able to override them mid-pass, the
-/// same way every other field this function tracks across its layer loops
-/// already works.
+/// CR 613.4c: `+1/+1` and `-1/-1` counters fold into the 7c pass, interleaved by
+/// timestamp with `ModifyPT` and `DoublePT`, so a counter added before a
+/// `SetPT` still counts (CR 613.5).
 ///
-/// Layer 7d/CR 613.4c's `+1/+1`/`-1/-1` counters are folded into the same
-/// 7c pass as `ModifyPT`/`DoublePT`, interleaved by timestamp against them
-/// (`CounterSet::batches`) — matching the CR's own literal text ("Effects
-/// *and counters* that modify power and/or toughness ... are applied" in
-/// the same sublayer) rather than pre-netting counters into the layer 7a
-/// base the way an earlier version of this function did. That earlier
-/// shape was a real bug, not just an approximation: CR 613.5's own Gray
-/// Ogre example shows a `+1/+1` counter added *before* a `SetPT`
-/// ("becomes 0/1") effect must still contribute *after* it — pre-netting
-/// baked the counter into a base that `SetPT`'s override then discarded
-/// outright, silently losing it. `resolve_base_pt` no longer touches
-/// counters at all (CDA/printed base only); see the 7c loop below for
-/// where they're read back in.
+/// CR 613.4d: 7e swaps after 7b and 7c settle, so a modify at a later timestamp
+/// than the switch still counts before it.
 ///
-/// 7e is applied as its own pass *after* 7b/7c have fully resolved, not
-/// timestamp-interleaved with them — this is what makes CR 613.4d's own
-/// worked example (a modify effect at a later timestamp than a switch still
-/// contributes to the *pre-switch* sum) fall out correctly for free: every
-/// `ModifyPT`/counter in 7c is summed into one number regardless of a 7e
-/// effect's relative timestamp, then 7e's swap(s) apply once each, in
-/// timestamp order, atop that already-settled result.
-///
-/// Layer 7a (characteristic-defining power/toughness, CR 613.4a) is
-/// resolved via `resolve_base_pt` below, *before* 7b/7c apply — a `SetPT`
-/// still overrides a CDA base, a `ModifyPT` still stacks on top of it, per
-/// CR 613.4a→b→c's real ordering. A `CharacteristicDefining` value with no
-/// script, or whose script errors, still resolves to `None` — same "skip
-/// rather than guess" stance every other unresolvable value in this engine
-/// already takes, kept infallible here rather than making this whole query
-/// (and every caller) return a `Result`.
-///
-/// `&ScriptRuntime` is threaded through for layer 7a (`resolve_base_pt`) and,
-/// as of the continuous-effects-script slice, also for `AffectedFilter::Script`
-/// (evaluated in `applicable_effects_in_layer`) and `EffectPayload::Script`
-/// (evaluated via `resolve_primitive` below, called from each per-layer loop)
-/// — see docs/implementation.md's continuous-effects-script slice notes for
-/// the calling convention (an affects-predicate takes `(object, source,
-/// controller) -> bool`; an effect-shape decode takes `(source, controller)
-/// -> table`, same argument shape `invoke_cda`/`invoke_operation` already
-/// use, decoding one of seven recognized keys into an `EffectPrimitive`).
+/// A missing or failing script yields `None` rather than a guess, which keeps
+/// the query infallible.
 pub fn effective_characteristics(
     state: &GameState,
     script_runtime: &ScriptRuntime,
@@ -78,41 +32,21 @@ pub fn effective_characteristics(
     let obj = state
         .object(object)
         .unwrap_or_else(|| panic!("effective_characteristics called with unknown ObjectId {object:?}"));
-    // CR 613.1a/707 (layer 1): a copy's copiable values come from the
-    // frozen `copiable_override` snapshot, not the object's own printed
-    // `definition`, when one is present - see `GameObject.copiable_override`'s
-    // own doc comment for why this is a stored snapshot rather than a layer
-    // 1 `ContinuousEffect` query like every layer below.
+    // CR 613.1a: a copy takes its copiable values from a stored snapshot, not a layer 1 effect.
     let def = obj.copiable_override.as_ref().unwrap_or(&obj.definition);
 
     let mut power = resolve_base_pt(def.power.as_ref(), state, script_runtime, object, obj.controller);
     let mut toughness = resolve_base_pt(def.toughness.as_ref(), state, script_runtime, object, obj.controller);
     let mut keywords = def.keywords;
     let mut card_types = def.card_types;
-    // CR 105.2a/202.2: color comes from color_indicator if set, otherwise
-    // the mana cost's own colored symbols - CardDefinition::colors() already
-    // implements exactly that split. Previously this read color_indicator
-    // alone (a stopgap from when CardDefinition::colors()/ManaCost::colors()
-    // were still todo!() stubs) - real color, printed mana cost symbols
-    // included, now derived correctly.
+    // CR 105.2a, 202.2: a color indicator if set, otherwise the mana cost symbols.
     let mut colors = def.colors();
-    // Mutable locals rather than read straight off `def` at the bottom of
-    // this function, as they used to be - CR 612.6's own SetFullText (below)
-    // needs to be able to override them, same as every other field this
-    // function tracks across its layer loops.
+    // Mutable so SetFullText (CR 612.6) can override them.
     let mut mana_cost = def.mana_cost.clone();
     let mut supertypes = def.supertypes;
     let mut subtypes = def.subtypes.clone();
 
-    // Layer 3: CR 612.8's SetName (override-wins-outright, same shape as
-    // layer 2's GainControl/layer 7b's SetPT - a later-timestamp SetName
-    // replaces an earlier one entirely, doesn't combine) and CR 612.6's
-    // SetFullText (Volrath's Shapeshifter) share this one ordered pass -
-    // both are Layer 3, so a later-timestamp SetFullText can still be
-    // overridden by an even-later plain SetName touching only `name`, per
-    // each primitive's own timestamp-ordered override semantics. See
-    // `FullTextOverride`'s own doc comment for exactly what SetFullText
-    // does and doesn't cover.
+    // Layer 3: CR 612.8 SetName and CR 612.6 SetFullText share one pass, and the later timestamp overrides.
     let mut name = def.name.clone();
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::TextChanging) {
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
@@ -134,15 +68,8 @@ pub fn effective_characteristics(
         }
     }
 
-    // Layer 4 (CR 613.1d): card-type/supertype/subtype changes all fold into
-    // this one timestamp-ordered pass, same "one layer, several primitives"
-    // shape layer 6 below already establishes. AddCardType/AddSupertype
-    // union in; AddSubtype appends only what's not already present;
-    // SetCardTypes overwrites `card_types` outright (CR 613.1a) - since this
-    // is one sequential loop over the running `card_types` value, a
-    // SetCardTypes after an earlier AddCardType wipes it, while an
-    // AddCardType after an earlier SetCardTypes stacks on top, both correct
-    // per CR 613.7's plain timestamp order with no extra bookkeeping needed.
+    // Layer 4 (CR 613.1d): type changes fold into one timestamp-ordered pass.
+    // A Set wipes earlier Adds and later Adds stack on top (CR 613.7).
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::TypeChanging) {
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
             Some(EffectPrimitive::AddCardType(added)) => card_types |= added,
@@ -159,8 +86,7 @@ pub fn effective_characteristics(
         }
     }
 
-    // Layer 5 (CR 613.1e): same shape as layer 4 above - AddColor unions in,
-    // SetColors overwrites outright (CR 613.1a).
+    // Layer 5 (CR 613.1e): same shape as layer 4.
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::ColorChanging) {
         match resolve_primitive(effect, state, script_runtime, obj.controller) {
             Some(EffectPrimitive::AddColor(added)) => colors |= added,
@@ -169,17 +95,8 @@ pub fn effective_characteristics(
         }
     }
 
-    // Layer 6 (CR 613.1f): additive (AddKeyword/AddProtectionColor/
-    // AddProtectionCardType/AddProtectionSubtype/AddProtectionName/
-    // AddProtectionEverything/AddProtectionPlayer) and removing
-    // (RemoveKeyword/RemoveAllAbilities) effects fold in the same CR 613.7
-    // timestamp order `applicable_effects_in_layer` already returns - a
-    // RemoveAllAbilities clears whatever's accumulated so far in all seven
-    // fields (protection is an ability too, CR 613.1f), a RemoveKeyword
-    // clears only its own named keyword(s), but either way a later-timestamp
-    // add-shape still applies on top of that, same as a real
-    // strip-then-regrant interaction (see RemoveAllAbilities's/
-    // RemoveKeyword's own doc comments).
+    // Layer 6 (CR 613.1f): additive and removing effects fold in timestamp order (CR 613.7).
+    // RemoveAllAbilities also clears protection, landwalk and banding grants.
     let mut ignored_keywords = KeywordSet::empty();
     let mut protection_colors = crate::ColorSet::empty();
     let mut protection_card_types = CardTypeSet::empty();
@@ -249,36 +166,14 @@ pub fn effective_characteristics(
             _ => {}
         }
     }
-    // CR 702.22b: "bands with other" is a special form of banding - if an
-    // effect causes a permanent to *lose* banding, it loses every "bands
-    // with other" ability too, even one that was never itself the target of
-    // a `RemoveKeyword`/`RemoveAllAbilities` effect. `RemoveAllAbilities`
-    // already clears both together above (it clears everything at once);
-    // this is the same cross-clear for the narrower `RemoveKeyword(BANDING)`
-    // case. Deliberately gated on `def.keywords` (this object's own
-    // printed-or-copied Banding, CR 702.22b's own precondition: banding
-    // must actually have been *lost*, not simply never present) rather than
-    // firing whenever the effective set merely lacks `BANDING` - every real
-    // "bands with other [quality]" card is also printed with Banding, but
-    // this engine models the two as independently effect-granted (no
-    // printed field for either backs "bands with other" - see
-    // `EffectPrimitive::AddBandsWithOther`'s own doc comment), so a
-    // permanent that only ever had an effect-granted "bands with other" and
-    // genuinely never had Banding at all (CR 702.22c's own second clause
-    // allows this - no real printed card does it, but it's not illegal) must
-    // not have that grant zeroed out here; only a printed-Banding creature
-    // whose Banding was subsequently stripped should lose it. Checked once
-    // here (not inside the loop) since only the *final* accumulated
-    // `keywords` value after every applicable effect has folded in - not
-    // any one intermediate step - determines whether Banding is still
-    // present.
+    // CR 702.22b: losing banding also loses every "bands with other" ability.
+    // Gated on the printed keyword so a granted "bands with other" on an object that never had banding survives.
     if def.keywords.contains(KeywordSet::BANDING) && !keywords.contains(KeywordSet::BANDING) {
         bands_with_other_subtypes = Vec::new();
         bands_with_other_supertypes = crate::types::card::SupertypeSet::empty();
     }
 
-    // Layer 7b: setting replaces whatever came before this layer entirely -
-    // later timestamp wins outright, it doesn't stack with an earlier SetPT.
+    // Layer 7b: the later timestamp overrides outright.
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSetting) {
         if let Some(EffectPrimitive::SetPT { power: p, toughness: t }) =
             resolve_primitive(effect, state, script_runtime, obj.controller)
@@ -288,20 +183,9 @@ pub fn effective_characteristics(
         }
     }
 
-    // Layer 7c: modifying is additive across every applicable effect
-    // (order doesn't change the sum for a plain add), and doubling (CR
-    // 613.8a-dependent on any modify touching the same field - see
-    // `applicable_effects_in_layer`'s ordering, which already places
-    // `ModifyPT` before a dependent `DoublePT`).
-    //
-    // CR 613.4c/121.3: `+1/+1`/`-1/-1` counters apply in this same sublayer,
-    // interleaved by timestamp against the real effects above rather than
-    // pre-netted into the layer 7a base (see this module's own doc comment
-    // for the CR 613.5 worked example this makes correct). A counter add
-    // has no CR 613.8a dependency of its own - only the real effects above
-    // can - so it's merged in purely by comparing timestamps against
-    // `applicable_effects_in_layer`'s already dependency-resolved order,
-    // not re-sorted into it.
+    // Layer 7c (CR 613.4c): modifying is additive, and `applicable_effects_in_layer`
+    // already orders `ModifyPT` before a dependent `DoublePT` (CR 613.8a).
+    // Counters merge in by timestamp against that order without being re-sorted into it.
     let modify_effects = applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessModifying);
     let mut counter_deltas: Vec<(SequenceNo, i32, i32)> = obj
         .counters
@@ -339,12 +223,7 @@ pub fn effective_characteristics(
     }
     apply_counters_up_to(&mut power, &mut toughness, &mut next_counter, SequenceNo(u64::MAX));
 
-    // Layer 7e (CR 613.4d): swaps power/toughness, applied once per matching
-    // effect in timestamp order after 7b/7c have fully settled (see this
-    // function's own doc comment for why that ordering matches the CR's
-    // worked example). Skipped if either side is still unresolved (e.g. no
-    // CDA/SetPT/printed base at all) - same "skip rather than guess" stance
-    // every other unresolvable value in this query already takes.
+    // Layer 7e (CR 613.4d): skipped when either side is unresolved.
     for effect in applicable_effects_in_layer(state, script_runtime, obj, Layer::PowerToughnessSwitching) {
         if matches!(resolve_primitive(effect, state, script_runtime, obj.controller), Some(EffectPrimitive::SwitchPT)) {
             if let (Some(p), Some(t)) = (power, toughness) {
@@ -380,16 +259,10 @@ pub fn effective_characteristics(
     }
 }
 
-/// CR 108.4/613.1 layer 2: `object`'s live controller — its plain
-/// `GameObject.controller` field (still the sole source of truth; nothing
-/// mutates it), overridden by the last (highest-timestamp) applicable
-/// `EffectPrimitive::GainControl` in `Layer::ControlChangingEffects`, same
-/// override-not-additive shape as `effective_characteristics`'s own 7b
-/// (`SetPT`) loop. Not yet consulted by any real gameplay site (combat,
-/// targeting, cost filters, `EffectFilter::applies_to`/`FilterSpec::matches`,
-/// `has_summoning_sickness` all still read `GameObject.controller` directly)
-/// — see docs/implementation.md's `phase5/layer-engine-control` slice notes
-/// for why that migration is a deliberate follow-up, not bundled here.
+/// CR 613.1b: `object`'s live controller, the last applicable `GainControl`
+/// in layer 2 over `GameObject.controller`.
+///
+// TODO: read the effective controller at the combat, targeting, cost-filter and summoning-sickness sites
 pub fn effective_controller(state: &GameState, script_runtime: &ScriptRuntime, object: ObjectId) -> PlayerId {
     let obj = state
         .object(object)
@@ -408,28 +281,14 @@ pub fn effective_controller(state: &GameState, script_runtime: &ScriptRuntime, o
 }
 
 /// Every `ContinuousEffect` in `layer` whose `affected` filter matches
-/// `object`, ordered per CR 613.7 (timestamp) and CR 613.8 (dependency
-/// overrides timestamp where it applies) — see `order_by_dependency`.
-/// Ordering here rather than at each call site keeps that contract in one
-/// place regardless of which layer's caller in `effective_characteristics`
-/// is walking it.
+/// `object`, ordered by timestamp (CR 613.7) with dependencies applied (CR 613.8).
 ///
-/// `AffectedFilter::Script` is evaluated here (not in
-/// `ContinuousEffect::applies_to`, which stays `Primitive`-only so
-/// `types/effect.rs` never needs to depend on `ScriptRuntime` — same
-/// separation `resolve_base_pt` already keeps for CDA). A script that errors
-/// resolves to "doesn't match" rather than guessed, same "skip rather than
-/// guess" stance every other unresolvable script value in this engine
-/// already takes.
+/// `AffectedFilter::Script` is evaluated here so `types/effect.rs` need not
+/// depend on `ScriptRuntime`. An erroring script means "does not match".
 ///
-/// CR 611.2c: `e.condition` (if set) is checked here too, before the
-/// affected-filter match — an effect whose condition doesn't currently hold
-/// contributes nothing this call, the same "recompute everything, no cache"
-/// shape as the rest of this query. "You" resolves to `source_obj.controller`
-/// (the raw field, not `layers::effective_controller`) — same Layer 2 gap
-/// `e.applies_to`'s own `FilterController` check already has one line below,
-/// and avoids this function recursing into `effective_controller` (which
-/// itself calls this function) to evaluate a condition.
+/// CR 611.2c: an effect whose condition does not hold drops out for this call.
+/// "You" is the source's raw controller, because `effective_controller` calls
+/// this function.
 fn applicable_effects_in_layer<'a>(
     state: &'a GameState,
     script_runtime: &ScriptRuntime,
@@ -441,24 +300,9 @@ fn applicable_effects_in_layer<'a>(
         .iter()
         .filter(|e| e.layer == layer)
         .filter(|e| {
-            // An effect whose own source has already left the battlefield
-            // (and has no remap - see commands::retire_object) can't resolve
-            // a controller to check `You`/`Opponent` against. Skip rather
-            // than guess, same stance collect_triggers already takes for a
-            // trigger whose source no longer resolves (CR 603.10 gap,
-            // flagged there too).
+            // A source that no longer resolves cannot supply a controller, so the effect is skipped.
             let Some(source_obj) = state.object(e.source) else { return false };
-            // A script error here still falls back to the same
-            // conservative "doesn't hold"/"doesn't apply" default as
-            // engine.rs/triggers.rs's own script call sites - but unlike
-            // those, it's never logged as a real ScriptError event
-            // (`phase5/script-error-surfacing`'s own deliberate, named
-            // exception): this function only has `&GameState`, called from
-            // the hot-path characteristic-query graph
-            // (`effective_characteristics`'s many callers, several times
-            // per engine step) - no `&mut Engine` to log through without
-            // threading error-reporting through that entire call graph, a
-            // much larger change than this slice's own scope.
+            // Script errors are not logged: this hot query path holds only `&GameState`.
             let condition_holds = match &e.condition {
                 None => true,
                 Some(InterveningIfSpec::Primitive(p)) => p.holds(state, source_obj.controller, e.source, None),
@@ -470,11 +314,7 @@ fn applicable_effects_in_layer<'a>(
                 return false;
             }
             match &e.affected {
-                // CR 303.4m: EnchantedOnly/EnchantedPlayerControls's real
-                // bodies both live on `applies_to` itself (`object`/
-                // `source_obj` are already full `&GameObject`s here, no
-                // extra lookup needed) - same treatment `Primitive` already
-                // gets.
+                // CR 303.4m
                 AffectedFilter::Primitive(_)
                 | AffectedFilter::EnchantedOnly
                 | AffectedFilter::EnchantedPlayerControls => e.applies_to(object, source_obj),
@@ -497,26 +337,10 @@ fn applicable_effects_in_layer<'a>(
     order_by_dependency(effects, state, script_runtime, object.controller)
 }
 
-/// CR 613.8's dependency system: within the single layer `applicable_effects_in_layer`
-/// already filtered down to, reorders effects so a dependent effect (CR
-/// 613.8a) applies after whatever it depends on (CR 613.8b), falling back to
-/// plain `timestamp` order for effects with no unresolved dependency and, per
-/// 613.8b's last sentence, for a dependency loop (detected as "no remaining
-/// effect is ever un-blocked" - see the `is_empty()` fallback below).
-///
-/// Only `depends_on` below can report a real dependency today (`DoublePT` on
-/// a same-field `ModifyPT`/`DoublePT` in layer 7c - see `EffectPrimitive::
-/// DoublePT`'s own doc comment for why no other primitive combination can);
-/// for every other layer/primitive pairing this produces the exact same
-/// order plain timestamp sorting would, since every candidate is
-/// immediately "ready" (CR 613.8c's re-evaluation is architecturally free
-/// here too - this whole query, and this reorder, is recomputed from
-/// scratch on every call, never cached). `state`/`script_runtime`/`controller`
-/// (the queried object's own controller, same value every other
-/// `resolve_primitive` call site in this file already passes) are threaded
-/// through to `depends_on` purely so it can resolve a `Script`-payload effect
-/// to its `EffectPrimitive` shape before comparing - see that function's own
-/// doc comment.
+/// CR 613.8: within one layer, a dependent effect applies after the effect it
+/// depends on, and otherwise timestamp order holds. A dependency loop falls
+/// back to timestamp order (CR 613.8b). Only `DoublePT` on a same-field modify
+/// can depend on another effect.
 fn order_by_dependency<'a>(
     mut remaining: Vec<&'a ContinuousEffect>,
     state: &GameState,
@@ -534,9 +358,7 @@ fn order_by_dependency<'a>(
             .collect();
 
         if ready.is_empty() {
-            // CR 613.8b: a dependency loop among everything still
-            // unresolved - ignore dependency for the rest and fall back to
-            // timestamp order.
+            // CR 613.8b: a dependency loop ignores dependency.
             remaining.sort_by_key(|e| e.timestamp);
             placed.extend(remaining);
             return placed;
@@ -549,24 +371,9 @@ fn order_by_dependency<'a>(
     placed
 }
 
-/// CR 613.8a: does `effect` depend on `other` (must apply after it)? Both
-/// arguments are already known to share a layer (the only caller,
-/// `order_by_dependency`, is always given a single layer's effects), so this
-/// only needs the "applying the other would change what this one does"
-/// clause - the CDA carve-out (613.8a clause c) is moot here since a CDA
-/// (layer 7a) is resolved inline via `resolve_base_pt`, never stored as a
-/// `ContinuousEffect`.
-///
-/// Resolves both sides through `resolve_primitive` first (the same helper
-/// every per-layer loop in `effective_characteristics` already uses) rather
-/// than pattern-matching `EffectPayload::Primitive` directly - this is what
-/// lets a `Script`-payload effect that decodes into a `DoublePT` shape
-/// participate in the one real dependency rule below exactly like a
-/// primitive `DoublePT` already does, in either direction (script depends on
-/// primitive, primitive depends on script, or script depends on script).
-/// A `Script` effect that errors, or resolves to any other shape, still
-/// reports no dependency - same "skip rather than guess" stance
-/// `resolve_primitive` itself already takes for an unresolvable value.
+/// CR 613.8a: does `effect` depend on `other`? Both share a layer. Script
+/// payloads resolve through `resolve_primitive` so they take part too, and an
+/// unresolvable one reports no dependency.
 fn depends_on(
     effect: &ContinuousEffect,
     other: &ContinuousEffect,
@@ -590,19 +397,9 @@ fn depends_on(
     }
 }
 
-/// Resolves a `ContinuousEffect`'s actual `EffectPrimitive` for this query —
-/// `Primitive` needs no further evaluation, `Script` invokes
-/// `ScriptRuntime::invoke_continuous_effect` (the "Lua asks, Rust decides"
-/// table-decode convention — see that function's own doc comment for the six
-/// recognized keys). A script that errors, or whose decoded shape doesn't
-/// match what the caller's own layer loop expects (checked by the caller,
-/// not here — see this slice's own UNRESOLVED note in
-/// docs/implementation.md), resolves to `None`, same "skip rather than
-/// guess" stance every other unresolvable value in this query already takes.
-/// The error itself is never logged - same deliberate, named exception
-/// `applicable_effects_in_layer`'s own script call sites already document
-/// (`phase5/script-error-surfacing`): this is the same hot-path, `&mut
-/// Engine`-less characteristic-query call graph.
+/// Resolves a `ContinuousEffect` to its `EffectPrimitive`, invoking the script
+/// for a `Script` payload. An erroring script yields `None` and is not logged,
+/// for the reason given on `applicable_effects_in_layer`.
 fn resolve_primitive(
     effect: &ContinuousEffect,
     state: &GameState,
@@ -612,11 +409,7 @@ fn resolve_primitive(
     match &effect.effect {
         EffectPayload::Primitive(p) => Some(p.clone()),
         EffectPayload::Script(handle) => {
-            // CR 303.4m: the enchanted permanent's id (if `effect.source` is
-            // attached to anything), passed through so a script computing a
-            // dynamic value can reference it directly - same "Rust computes,
-            // Lua consumes an id" convention `source`/`controller` already
-            // establish.
+            // CR 303.4m: the enchanted permanent's id is passed so a script can reference it.
             let enchanted = state.object(effect.source).and_then(|o| o.attached_to);
             script_runtime
                 .invoke_continuous_effect(*handle, state, effect.source, controller, enchanted)
@@ -626,16 +419,9 @@ fn resolve_primitive(
     }
 }
 
-/// CR 613.4a (layer 7a): resolves `value`'s base number - CDA/printed only,
-/// no counter involvement (see this module's own doc comment for why
-/// counters moved to the 7c fold instead). A `Fixed` value resolves to
-/// itself; a `CharacteristicDefining` with an `Inline` script gets that
-/// script invoked (`ScriptRuntime::invoke_cda`) for the base number. A
-/// script that errors, or a `ByKey` reference (not resolvable by this
-/// engine — see `ScriptRuntime::run_card_script`'s doc comment for the same
-/// stance), or a `CharacteristicDefining` with no script at all, resolves to
-/// `None` - same "skip rather than guess" stance every other unresolvable
-/// value in this engine already takes.
+/// CR 613.4a: resolves `value`'s base number from the printed value or a
+/// characteristic-defining script. Counters are not included; layer 7c adds them.
+/// A missing script, an erroring script or a `ByKey` reference yields `None`.
 fn resolve_base_pt(
     value: Option<&PTValue>,
     state: &GameState,
