@@ -5,3 +5,5 @@ data/
 .agent-state.md
 .claude/
 binary/
+__pycache__/
+*.py[cod]
