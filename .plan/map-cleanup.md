@@ -30,6 +30,7 @@ Bring the codebase up to the comment and organization rules in `CLAUDE.md`, repl
 - 048: Added local `#[cfg(test)]` coverage for pure helpers in `color_identity.rs` and `types/{zone,object,player,counter,card,mana,cost}.rs`. [closed/048-add-unit-tests-pure-helpers.md]
 - 049: Added `#[cfg(test)]` coverage for `layers.rs`, `commands/legality.rs` and `commands/combat/predicate.rs` with minimal state fixtures. Open gaps: `FilterSpec::matches`, `ReplacementEffect`, `ContinuousEffect` helpers and `script::decode`. [closed/049-add-unit-tests-stubbed-helpers.md]
 - 050: Audited `crates/engine/src/script/`. Every table decoder ignores unknown keys except `decode_entry_options`; strict validation touches about 12 call sites plus one helper. Operation results and effect shapes each have a tag and a raw-key spelling, three method names take different argument families, and several decoders swallow wrong-typed values. `cards/` is absent from this checkout, so no card script was read. [closed/050-audit-lua-api-surface.md]
+- 051: Audited the 25 active Lua scripts in the sibling `stackfish-db` database. Eleven basic-land scripts repeat the mana-ability builder, target tables repeat too little to hide, and Balance's custom counting is card-specific. [closed/051-audit-card-script-idioms.md]
 - Renumbering: open tickets from the Lua track onward moved up by one (old 049-059 are now 050-060) because 049 was used for the follow-up unit-test ticket.
 
 ## Tracks
@@ -64,7 +65,8 @@ Make the Lua surface area small, documented, and strict before scaling up card s
 
 - 050 Audit Lua API surface area, aliases, and silent table keys. Type research, AFK. Blocked by 040. Closed.
   - Inventory every `Game.*` constructor, builder method, and table decoder in `crates/engine/src/script/`. List duplicate ways to express the same ability, inconsistent parameter shapes, and every table decoder that ignores unknown keys.
-- 051 Audit `cards/scripts/` for idioms that belong in engine helpers. Type research, AFK.
+- 051 Audit `cards/scripts/` for idioms that belong in engine helpers. Type research, AFK. Closed.
+  - The complete `cards/scripts/` source is absent from this checkout; the audit used the 25 active scripts in `../stackfish-db/stackfish.db`.
   - Scan existing Lua scripts for multi-line workarounds, repeated filter tables, or boilerplate that a small Lua helper or engine primitive would replace.
 - 052 Decide on Lua API removals, canonical forms, and strict key validation. Type grilling, HITL. Blocked by 050 and 051.
   - Pick the single canonical spelling for each concept, decide which aliases to cut, and agree on how unknown table keys fail at load time.
@@ -86,9 +88,9 @@ Check module visibility, workspace hygiene, and developer tooling once the split
 
 Open and unblocked:
 
-- 051, 055, 056, 060
+- 052, 055, 056, 060
 
-Suggested order. Start with 051, but `cards/` is missing from this checkout, so check where the card scripts live first. The research tickets 055 and 056 and the grilling 060 can run in parallel.
+Suggested order. Start with 052. The research tickets 055 and 056 and the grilling 060 can run in parallel.
 
 ## Not yet specified
 
