@@ -31,6 +31,17 @@ Commits should be straight and to the point, but in readable and understandable 
 - Always use the unslop skill
 - If we are making changes to the Lua API, you need to check the game stub in the docs to make sure things are updated properly
 
+## Comments
+These rules cover Rust source and Rust tests.
+- Say why, not what. Skip a comment the code already shows.
+- Cite a rule as `// CR 704.5g`: the number only. Never quote or paraphrase rules text, and add no label after the number. `docs/comp_rules.md` has the text.
+- No history. Do not mention tickets, backlog items, phases, slices or branch names. Do not write "used to", "previously", "now", "new", "before X existed" or "see note N". If the reason still matters, state the reason.
+- Public items get a doc comment of two lines. Up to about five lines is fine for an invariant, a rule interaction or a trap. Private items get a comment only for a why the code cannot show.
+- A `//!` module doc is three lines or fewer. It says what the module owns and points to `DESIGN.md` for the rest.
+- Keep every `TODO`. The format is `// TODO: <what is missing>` on one line, with an optional CR citation at the end. A pass may trim the wording but never deletes a `TODO` or the rule it names.
+- A test comment is a single `// CR 704.5g` line naming the rule the test pins, plus a why line only when the setup is not obvious.
+- After a comment-only pass, run `python3 tools/comment_diff.py [paths]` and get exit code 0 before asking to commit. It compares the working tree with `HEAD`, ignores comments and whitespace, and fails on any code change or a lost `TODO`. Its tests run with `python3 -m unittest discover -s tools`.
+
 ## Notes
 Look in the docs folder for the following information:
 - [DESIGN.md](/docs/DESIGN.md) | Bigger design document that should be updated as new things are created.
