@@ -1,9 +1,5 @@
-//! The adapter's behavior without any Godot type, so tests can run it from any
-//! thread. `StackfishSession` in `lib.rs` is a thin wrapper over `Core`.
-//!
-//! A `Core` belongs to the thread that made it (decision 009). A call from any
-//! other thread fails without touching the Session. A panic inside the engine
-//! kills the instance, because the engine is left half-updated.
+//! Adapter behavior with no Godot types, so tests can drive it from any thread.
+//! A `Core` serves only its creating thread and dies on an engine panic. See `docs/DESIGN.md`.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -13,8 +9,7 @@ use stackfish_host::{CardSource, Session};
 
 static OFF_THREAD_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// How many `Core`s have been dropped on a thread other than their owner's. The
-/// smoke test reads it to learn where Godot runs the destructor.
+/// How many `Core`s were dropped on a thread other than their owner's.
 pub fn off_thread_drops() -> usize {
     OFF_THREAD_DROPS.load(Ordering::Relaxed)
 }
@@ -51,7 +46,7 @@ pub struct Core {
 }
 
 impl Default for Core {
-    /// The new `Core` belongs to the calling thread.
+    /// The `Core` belongs to the calling thread.
     fn default() -> Core {
         Core { owner: thread::current().id(), session: None, dead: false, last_failure: None }
     }
@@ -70,10 +65,8 @@ impl Core {
         thread::current().id() == self.owner
     }
 
-    /// Creates the Session from a `setup` request. `Ok` holds the `created`
-    /// response, or an error response when the setup was refused. A refused
-    /// setup leaves the instance without a Session, so `create` can be tried
-    /// again.
+    /// Creates the Session from a `setup` request. A refused setup returns the error
+    /// response and leaves no Session, so `create` can be retried.
     pub fn create(&mut self, request: &[u8], cards: &dyn CardSource) -> Result<Vec<u8>, Failure> {
         self.guard()?;
         if self.session.is_some() {
@@ -89,14 +82,12 @@ impl Core {
         }
     }
 
-    /// Passes one request to the Session and returns its response.
     pub fn handle(&mut self, request: &[u8]) -> Result<Vec<u8>, Failure> {
         self.run(|session| session.handle(request))
     }
 
-    /// The code of the failure behind the last empty return, or an empty
-    /// string if the last call worked. From a wrong thread it is always
-    /// `wrong_thread`, and the stored value stays untouched.
+    /// The code of the last failure, or an empty string if the last call worked. From a
+    /// wrong thread it is always `wrong_thread`, and the stored value stays untouched.
     pub fn last_error(&self) -> &'static str {
         if !self.on_owner_thread() {
             return Failure::WrongThread.code();
@@ -104,8 +95,6 @@ impl Core {
         self.last_failure.map_or("", Failure::code)
     }
 
-    /// Runs `call` against the Session under the thread check and the panic
-    /// guard.
     fn run(&mut self, call: impl FnOnce(&mut Session) -> Vec<u8>) -> Result<Vec<u8>, Failure> {
         self.guard()?;
         let Some(session) = self.session.as_mut() else {
@@ -117,8 +106,7 @@ impl Core {
         }
     }
 
-    /// Fails a call from the wrong thread without writing to `self`, and fails
-    /// every call once the engine has panicked.
+    // A wrong-thread call must not write to `self`, since another thread owns it.
     fn guard(&mut self) -> Result<(), Failure> {
         if !self.on_owner_thread() {
             return Err(Failure::WrongThread);
@@ -131,8 +119,7 @@ impl Core {
 
     fn die<T>(&mut self) -> Result<T, Failure> {
         self.dead = true;
-        // Drop the half-updated Session now. A panic in its own drop would
-        // escape here, so leak it instead.
+        // The Session is half-updated, and a panic in its drop would escape here, so leak it.
         std::mem::forget(self.session.take());
         self.fail(Failure::Panicked)
     }
